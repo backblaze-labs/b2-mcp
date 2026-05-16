@@ -3,11 +3,11 @@
 export interface B2Config {
   applicationKeyId: string;
   applicationKey: string;
-  /** Key ID for S3-compatible API calls. Defaults to applicationKeyId.
-   *  Set B2_S3_APPLICATION_KEY_ID to a non-master key to enable S3 tools. */
-  s3ApplicationKeyId: string;
-  /** Key secret for S3-compatible API calls. Defaults to applicationKey. */
-  s3ApplicationKey: string;
+  /** Application key ID for S3-compatible API calls. Defaults to applicationKeyId.
+   *  Set B2_APP_KEY_ID to a non-master application key to enable S3 tools. */
+  appKeyId: string;
+  /** Application key secret for S3-compatible API calls. Defaults to applicationKey. */
+  appKey: string;
   region: string;
   largeFileThreshold: number; // bytes
   partSize: number;           // bytes

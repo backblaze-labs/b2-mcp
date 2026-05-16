@@ -21,8 +21,8 @@ import { loadConfig, createServer } from "../../dist/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
-// S3-compatible API requires a non-master application key (set B2_S3_APPLICATION_KEY_ID).
-const HAS_S3_CREDS = !!(process.env.B2_S3_APPLICATION_KEY_ID && process.env.B2_S3_APPLICATION_KEY);
+// S3-compatible API requires a non-master application key (set B2_APP_KEY_ID).
+const HAS_S3_CREDS = !!(process.env.B2_APP_KEY_ID && process.env.B2_APP_KEY);
 const liveIt   = HAS_CREDS    ? test : test.skip;
 const liveS3It = HAS_S3_CREDS ? test : test.skip;
 
@@ -64,7 +64,7 @@ beforeAll(async () => {
   const config = HAS_CREDS
     ? loadConfig()
     : { applicationKeyId: "test", applicationKey: "test",
-        s3ApplicationKeyId: "test", s3ApplicationKey: "test",
+        appKeyId: "test", appKey: "test",
         region: "us-west-004", largeFileThreshold: 1e8, partSize: 1e8 };
   server = createServer(config);
 

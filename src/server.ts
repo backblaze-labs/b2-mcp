@@ -37,10 +37,10 @@ export function loadConfig(): B2Config {
     applicationKeyId: keyId,
     applicationKey: key,
     // S3-compatible API requires a non-master application key.
-    // Set B2_S3_APPLICATION_KEY_ID + B2_S3_APPLICATION_KEY to a non-master key.
+    // Set B2_APP_KEY_ID + B2_APP_KEY to a non-master application key.
     // Falls back to the master key when not set (S3 calls will fail with master key).
-    s3ApplicationKeyId: process.env.B2_S3_APPLICATION_KEY_ID ?? keyId,
-    s3ApplicationKey: process.env.B2_S3_APPLICATION_KEY ?? key,
+    appKeyId: process.env.B2_APP_KEY_ID ?? keyId,
+    appKey: process.env.B2_APP_KEY ?? key,
     region: process.env.B2_REGION ?? "us-west-004",
     largeFileThreshold: parseInt(process.env.B2_LARGE_FILE_THRESHOLD ?? String(100 * 1024 * 1024), 10),
     partSize: parseInt(process.env.B2_PART_SIZE ?? String(100 * 1024 * 1024), 10),
@@ -62,8 +62,8 @@ export function loadConfig(): B2Config {
  *                              presigned ×1, object-lock ×6, extras ×9)
  *   Total:          85 tools
  *
- * Note: S3 master application keys are not supported for S3-compatible API calls.
- * Create a regular (non-master) application key for S3 tool usage.
+ * Note: Master keys are not supported for S3-compatible API calls.
+ * Set B2_APP_KEY_ID / B2_APP_KEY to a non-master application key for S3 tool usage.
  */
 export function createServer(config: B2Config): McpServer {
   const server = new McpServer(

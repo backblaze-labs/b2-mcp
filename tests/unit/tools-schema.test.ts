@@ -45,7 +45,7 @@ let tools: Record<string, any>;
 let toolNames: string[];
 
 beforeAll(() => {
-  const config = { applicationKeyId: "test", applicationKey: "test", s3ApplicationKeyId: "test", s3ApplicationKey: "test", region: "us-west-004", largeFileThreshold: 1e8, partSize: 1e8 };
+  const config = { applicationKeyId: "test", applicationKey: "test", appKeyId: "test", appKey: "test", region: "us-west-004", largeFileThreshold: 1e8, partSize: 1e8 };
   server = createServer(config);
   tools = (server as any)._registeredTools ?? {};
   toolNames = Object.keys(tools).sort();

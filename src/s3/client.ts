@@ -14,8 +14,8 @@ export function createS3Client(config: B2Config): S3Client {
     endpoint,
     region: config.region,
     credentials: {
-      accessKeyId: config.s3ApplicationKeyId,
-      secretAccessKey: config.s3ApplicationKey,
+      accessKeyId: config.appKeyId,
+      secretAccessKey: config.appKey,
     },
     forcePathStyle: true, // Required for B2 S3-compatible API
   };

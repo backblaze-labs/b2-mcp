@@ -40,8 +40,8 @@ function parseResult(result: any) {
 const testConfig = {
   applicationKeyId: "test-key-id",
   applicationKey: "test-key-secret",
-  s3ApplicationKeyId: "test-s3-key-id",
-  s3ApplicationKey: "test-s3-key-secret",
+  appKeyId: "test-app-key-id",
+  appKey: "test-app-key-secret",
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,

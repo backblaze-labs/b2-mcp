@@ -22,10 +22,10 @@ Run a single test by name:
 npx jest --testNamePattern="should cache the token"
 ```
 
-Integration tests require env vars (master key for B2/Partner tools, non-master for S3 tools):
+Integration tests require env vars (master key for B2/Partner tools, application key for S3 tools):
 ```bash
 B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy \
-B2_S3_APPLICATION_KEY_ID=zzz B2_S3_APPLICATION_KEY=www \
+B2_APP_KEY_ID=zzz B2_APP_KEY=www \
 npm run test:integration
 ```
 
@@ -46,7 +46,7 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 **B2 native API** (`src/b2/`): Uses `B2Client` which wraps axios. All calls go through `B2Client.call()`, which injects the auth token and retries on 401 by calling `auth.invalidate()` then re-authorizing. The `apiPath` option switches between `b2api/v2` (default), `b2api/v3` (Partner API), and `api/backup/v1` (Backup/Computer API).
 
-**S3-compatible API** (`src/s3/`): Uses AWS SDK v3 `S3Client` configured to point at B2's S3 endpoint. Must use a **non-master application key** — B2 rejects master keys on the S3 endpoint. Configured via `B2_S3_APPLICATION_KEY_ID` / `B2_S3_APPLICATION_KEY`; falls back to master key if not set (S3 calls will fail in that case).
+**S3-compatible API** (`src/s3/`): Uses AWS SDK v3 `S3Client` configured to point at B2's S3 endpoint. Must use a **non-master application key** — B2 rejects master keys on the S3 endpoint. Configured via `B2_APP_KEY_ID` / `B2_APP_KEY`; falls back to master key if not set (S3 calls will fail in that case).
 
 ### Auth token lifecycle (`src/auth.ts`)
 `B2AuthManager` caches the token for 23 hours (B2 tokens are valid 24h). Concurrent `getAuth()` calls share a single in-flight authorize request (deduped via `inflightAuth` promise). On 401, `B2Client` calls `auth.invalidate()` before retrying so the next `getAuth()` re-authorizes.
@@ -73,28 +73,30 @@ Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — n
 
 Integration tests (`tests/integration/live.test.ts`) use two skip guards:
 - `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (master key tests)
-- `liveS3It` — skips when `B2_S3_APPLICATION_KEY_ID` is absent (S3 tests need non-master key)
+- `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key)
 
 ## Pending work: per-session credential injection
 
-The HTTP server (`src/http-server.ts`) currently loads one `B2Config` at startup, shared across all sessions. For a multi-user hosted deployment, it needs to be refactored so each SSE connection gets its own `B2Config` + `McpServer` instance, with credentials read from request headers (`X-B2-Key-Id`, `X-B2-Key`, `X-B2-S3-Key-Id`, `X-B2-S3-Key`). The `createServer(config)` function already accepts a config, so the refactor is isolated to `http-server.ts`.
+The HTTP server (`src/http-server.ts`) reads credentials per-connection from request headers. Each SSE connection gets its own `B2Config` + `McpServer` instance.
 
-Target Claude Desktop config for users after this change:
+Claude Desktop config:
 ```json
 {
   "mcpServers": {
     "backblaze-b2": {
       "url": "https://your-server.com/sse",
       "headers": {
-        "X-B2-Key-Id": "their-master-key-id",
-        "X-B2-Key": "their-master-key-secret",
-        "X-B2-S3-Key-Id": "their-s3-key-id",
-        "X-B2-S3-Key": "their-s3-key-secret"
+        "X-B2-Key-Id": "their-key-id",
+        "X-B2-Key": "their-key-secret",
+        "X-B2-App-Key-Id": "their-application-key-id",
+        "X-B2-App-Key": "their-application-key-secret"
       }
     }
   }
 }
 ```
+
+`X-B2-Key-Id` / `X-B2-Key` are required (master or application key — used for B2 native API calls). `X-B2-App-Key-Id` / `X-B2-App-Key` are optional non-master application key credentials for the S3-compatible API; if omitted, S3 tools will fail because B2 rejects master keys on the S3 endpoint.
 
 ## Deployment target
 

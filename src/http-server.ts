@@ -3,10 +3,10 @@
  * Backblaze B2 MCP Server — HTTP + SSE transport entry point.
  *
  * Credentials are read per-connection from request headers:
- *   X-B2-Key-Id       — B2 application key ID (master key)
- *   X-B2-Key          — B2 application key secret
- *   X-B2-S3-Key-Id    — non-master key ID for S3-compatible API (optional)
- *   X-B2-S3-Key       — non-master key secret for S3-compatible API (optional)
+ *   X-B2-Key-Id       — B2 key ID (master or application key)
+ *   X-B2-Key          — B2 key secret
+ *   X-B2-App-Key-Id   — non-master application key ID for S3-compatible API (optional)
+ *   X-B2-App-Key      — non-master application key secret for S3-compatible API (optional)
  *
  * The server listens on:
  *   GET  /sse      — SSE event stream for server-to-client messages
@@ -34,15 +34,15 @@ function configFromHeaders(req: http.IncomingMessage): B2Config | null {
   const keyId = req.headers["x-b2-key-id"];
   const key = req.headers["x-b2-key"];
   if (!keyId || !key || Array.isArray(keyId) || Array.isArray(key)) return null;
-  const s3KeyId = req.headers["x-b2-s3-key-id"];
-  const s3Key = req.headers["x-b2-s3-key"];
-  const resolvedS3KeyId = (!Array.isArray(s3KeyId) && s3KeyId) ? s3KeyId : keyId;
-  const resolvedS3Key = (!Array.isArray(s3Key) && s3Key) ? s3Key : key;
+  const appKeyId = req.headers["x-b2-app-key-id"];
+  const appKey = req.headers["x-b2-app-key"];
+  const resolvedAppKeyId = (!Array.isArray(appKeyId) && appKeyId) ? appKeyId : keyId;
+  const resolvedAppKey = (!Array.isArray(appKey) && appKey) ? appKey : key;
   return {
     applicationKeyId: keyId,
     applicationKey: key,
-    s3ApplicationKeyId: resolvedS3KeyId,
-    s3ApplicationKey: resolvedS3Key,
+    appKeyId: resolvedAppKeyId,
+    appKey: resolvedAppKey,
     region: "us-west-004",
     largeFileThreshold: 100 * 1024 * 1024,
     partSize: 100 * 1024 * 1024,
