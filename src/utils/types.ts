@@ -1,0 +1,169 @@
+// ── Shared Types ─────────────────────────────────────────────────────────────
+
+export interface B2Config {
+  applicationKeyId: string;
+  applicationKey: string;
+  /** Key ID for S3-compatible API calls. Defaults to applicationKeyId.
+   *  Set B2_S3_APPLICATION_KEY_ID to a non-master key to enable S3 tools. */
+  s3ApplicationKeyId: string;
+  /** Key secret for S3-compatible API calls. Defaults to applicationKey. */
+  s3ApplicationKey: string;
+  region: string;
+  largeFileThreshold: number; // bytes
+  partSize: number;           // bytes
+}
+
+export interface B2AuthResponse {
+  accountId: string;
+  authorizationToken: string;
+  apiUrl: string;
+  downloadUrl: string;
+  recommendedPartSize: number;
+  absoluteMinimumPartSize: number;
+  s3ApiUrl: string;
+}
+
+export interface B2Bucket {
+  accountId: string;
+  bucketId: string;
+  bucketName: string;
+  bucketType: string;
+  bucketInfo: Record<string, string>;
+  corsRules: B2CorsRule[];
+  lifecycleRules: B2LifecycleRule[];
+  revision: number;
+  options?: string[];
+}
+
+export interface B2CorsRule {
+  corsRuleName: string;
+  allowedOrigins: string[];
+  allowedHeaders: string[];
+  allowedOperations: string[];
+  exposeHeaders?: string[];
+  maxAgeSeconds: number;
+}
+
+export interface B2LifecycleRule {
+  fileNamePrefix: string;
+  daysFromHidingToDeleting?: number;
+  daysFromUploadingToHiding?: number;
+}
+
+export interface B2FileInfo {
+  fileId: string;
+  fileName: string;
+  accountId: string;
+  bucketId: string;
+  contentLength: number;
+  contentSha1: string;
+  contentMd5?: string;
+  contentType: string;
+  fileInfo: Record<string, string>;
+  action: "upload" | "hide" | "start" | "folder";
+  uploadTimestamp: number;
+  serverSideEncryption?: B2Encryption;
+}
+
+export interface B2Encryption {
+  mode: "none" | "SSE-B2" | "SSE-C";
+  algorithm?: string;
+}
+
+export interface B2FileList {
+  files: B2FileInfo[];
+  nextFileName?: string;
+  nextFileId?: string;
+}
+
+export interface B2LargeFileStart {
+  fileId: string;
+  fileName: string;
+  accountId: string;
+  bucketId: string;
+  contentType: string;
+  fileInfo: Record<string, string>;
+  uploadTimestamp: number;
+}
+
+export interface B2UploadPartUrl {
+  fileId: string;
+  uploadUrl: string;
+  authorizationToken: string;
+}
+
+export interface B2Part {
+  fileId: string;
+  partNumber: number;
+  contentLength: number;
+  contentSha1: string;
+  serverSideEncryption?: B2Encryption;
+}
+
+export interface B2ApplicationKey {
+  applicationKeyId: string;
+  keyName: string;
+  accountId: string;
+  bucketId?: string;
+  capabilities: string[];
+  expirationTimestamp?: number;
+  namePrefix?: string;
+  options?: string[];
+}
+
+export interface B2DownloadAuth {
+  bucketId: string;
+  fileNamePrefix: string;
+  authorizationToken: string;
+}
+
+export interface B2NotificationRule {
+  name: string;
+  eventTypes: string[];
+  targetConfiguration: {
+    targetType: string;
+    url: string;
+    hmacSha256SigningSecret?: string;
+    customHeaders?: Array<{ name: string; value: string }>;
+  };
+  isEnabled: boolean;
+  isSuspended?: boolean;
+  suspensionReason?: string;
+}
+
+export type B2Capability =
+  | "listKeys"
+  | "writeKeys"
+  | "deleteKeys"
+  | "listBuckets"
+  | "readBuckets"
+  | "writeBuckets"
+  | "deleteBuckets"
+  | "listFiles"
+  | "readFiles"
+  | "shareFiles"
+  | "writeFiles"
+  | "deleteFiles"
+  | "readBucketEncryption"
+  | "writeBucketEncryption"
+  | "readBucketRetentions"
+  | "writeBucketRetentions"
+  | "readFileRetentions"
+  | "writeFileRetentions"
+  | "bypassGovernance"
+  | "readBucketReplications"
+  | "writeBucketReplications"
+  | "readBucketNotifications"
+  | "writeBucketNotifications";
+
+export const ALL_CAPABILITIES: B2Capability[] = [
+  "listKeys", "writeKeys", "deleteKeys",
+  "listBuckets", "readBuckets", "writeBuckets", "deleteBuckets",
+  "listFiles", "readFiles", "shareFiles", "writeFiles", "deleteFiles",
+  "readBucketEncryption", "writeBucketEncryption",
+  "readBucketRetentions", "writeBucketRetentions",
+  "readFileRetentions", "writeFileRetentions",
+  "bypassGovernance",
+  "readBucketReplications", "writeBucketReplications",
+  "readBucketNotifications", "writeBucketNotifications",
+];
