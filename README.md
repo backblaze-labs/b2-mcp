@@ -78,15 +78,15 @@ Add to `.cursor/mcp.json` in your project root:
 
 ## Environment Variables
 
-| Variable                  | Required | Default                | Description                                                                 |
-| ------------------------- | -------- | ---------------------- | --------------------------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`   | ✅       | —                      | Application key ID (master or non-master). Used for B2 native + S3 API      |
-| `B2_APPLICATION_KEY`      | ✅       | —                      | Application key secret                                                      |
+| Variable                  | Required | Default                 | Description                                                                                                     |
+| ------------------------- | -------- | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `B2_APPLICATION_KEY_ID`   | ✅       | —                       | Application key ID (master or non-master). Used for B2 native + S3 API                                          |
+| `B2_APPLICATION_KEY`      | ✅       | —                       | Application key secret                                                                                          |
 | `B2_APP_KEY_ID`           | —        | falls back to the above | Non-master application key ID — only set when the primary key is a master key (S3 endpoint rejects master keys) |
-| `B2_APP_KEY`              | —        | falls back to the above | Non-master application key secret                                           |
-| `B2_REGION`               | —        | `us-west-004`          | B2 region for S3-compatible endpoint                                        |
-| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)    | File size above which multipart upload is used                              |
-| `B2_PART_SIZE`            | —        | `104857600` (100MB)    | Size of each multipart upload part                                          |
+| `B2_APP_KEY`              | —        | falls back to the above | Non-master application key secret                                                                               |
+| `B2_REGION`               | —        | `us-west-004`           | B2 region for S3-compatible endpoint                                                                            |
+| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)     | File size above which multipart upload is used                                                                  |
+| `B2_PART_SIZE`            | —        | `104857600` (100MB)     | Size of each multipart upload part                                                                              |
 
 ## Available Tools
 
