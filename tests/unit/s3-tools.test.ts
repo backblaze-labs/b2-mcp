@@ -4,7 +4,7 @@
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
-import { createServer } from "../../dist/server";
+import { createServer } from "../../src/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

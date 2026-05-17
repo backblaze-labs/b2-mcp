@@ -17,7 +17,7 @@
  * All live B2 API tests are skipped when credentials are absent.
  */
 
-import { loadConfig, createServer } from "../../dist/server";
+import { loadConfig, createServer } from "../../src/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);

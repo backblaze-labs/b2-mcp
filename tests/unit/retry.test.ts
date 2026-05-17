@@ -6,11 +6,11 @@
  * Max retries: 3 (4 total attempts).
  */
 
-import { withRetry } from "../../dist/utils/retry";
+import { withRetry } from "../../src/utils/retry";
 
 // Speed up tests — replace sleep with an immediate no-op
-jest.mock("../../dist/utils/retry", () => {
-  const actual = jest.requireActual("../../dist/utils/retry");
+jest.mock("../../src/utils/retry", () => {
+  const actual = jest.requireActual("../../src/utils/retry");
   return actual; // use real module; we mock setTimeout below
 });
 

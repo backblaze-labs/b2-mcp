@@ -14,7 +14,7 @@
  * neither "optional" nor "default".
  */
 
-import { createServer } from "../../dist/server";
+import { createServer } from "../../src/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // ── Zod-mini schema helpers ───────────────────────────────────────────────────
