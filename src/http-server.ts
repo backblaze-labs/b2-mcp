@@ -21,13 +21,18 @@ import { createServer } from "./server.js";
 import { B2Config } from "./utils/types.js";
 
 const DEFAULT_PORT = 3000;
+const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 
 function getPort(): number {
   const idx = process.argv.indexOf("--port");
-  if (idx !== -1 && process.argv[idx + 1]) {
-    return parseInt(process.argv[idx + 1], 10);
+  const raw = idx !== -1 && process.argv[idx + 1]
+    ? process.argv[idx + 1]
+    : process.env.PORT ?? String(DEFAULT_PORT);
+  const port = parseInt(raw, 10);
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid port: ${raw}`);
   }
-  return parseInt(process.env.PORT ?? String(DEFAULT_PORT), 10);
+  return port;
 }
 
 function configFromHeaders(req: http.IncomingMessage): B2Config | null {
@@ -96,11 +101,33 @@ async function main(): Promise<void> {
       }
 
       let body = "";
-      req.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      let bodyBytes = 0;
+      let aborted = false;
+      req.on("data", (chunk: Buffer) => {
+        if (aborted) return;
+        bodyBytes += chunk.length;
+        if (bodyBytes > MAX_BODY_BYTES) {
+          aborted = true;
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Request body too large" }));
+          req.destroy();
+          return;
+        }
+        body += chunk.toString();
+      });
       req.on("end", async () => {
+        if (aborted) return;
+        let parsed: unknown;
         try {
-          await session.transport.handlePostMessage(req, res, JSON.parse(body));
-        } catch (err) {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Invalid JSON body" }));
+          return;
+        }
+        try {
+          await session.transport.handlePostMessage(req, res, parsed);
+        } catch {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: "Internal server error" }));
         }
