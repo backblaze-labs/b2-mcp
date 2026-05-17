@@ -20,14 +20,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createServer } from "./server.js";
 import { B2Config } from "./utils/types.js";
 import { VERSION } from "./version.js";
+import { logger } from "./utils/logger.js";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PART_SIZE = 100 * 1024 * 1024;
 const DEFAULT_REGION = "us-west-004";
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;       // 1 minute
-const SHUTDOWN_DRAIN_MS = 10 * 1000;            // 10 seconds to drain on SIGTERM
+const IDLE_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
+const SHUTDOWN_DRAIN_MS = 10 * 1000; // 10 seconds to drain on SIGTERM
 
 interface Session {
   transport: SSEServerTransport;
@@ -37,9 +38,10 @@ interface Session {
 
 export function getPort(): number {
   const idx = process.argv.indexOf("--port");
-  const raw = idx !== -1 && process.argv[idx + 1]
-    ? process.argv[idx + 1]
-    : process.env.PORT ?? String(DEFAULT_PORT);
+  const raw =
+    idx !== -1 && process.argv[idx + 1]
+      ? process.argv[idx + 1]
+      : (process.env.PORT ?? String(DEFAULT_PORT));
   const port = parseInt(raw, 10);
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     throw new Error(`Invalid port: ${raw}`);
@@ -53,12 +55,12 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
   if (!keyId || !key || Array.isArray(keyId) || Array.isArray(key)) return null;
   const appKeyId = req.headers["x-b2-app-key-id"];
   const appKey = req.headers["x-b2-app-key"];
-  const resolvedAppKeyId = (!Array.isArray(appKeyId) && appKeyId) ? appKeyId : keyId;
-  const resolvedAppKey = (!Array.isArray(appKey) && appKey) ? appKey : key;
+  const resolvedAppKeyId = !Array.isArray(appKeyId) && appKeyId ? appKeyId : keyId;
+  const resolvedAppKey = !Array.isArray(appKey) && appKey ? appKey : key;
   const partSize = parseInt(process.env.B2_PART_SIZE ?? String(DEFAULT_PART_SIZE), 10);
   const largeFileThreshold = parseInt(
     process.env.B2_LARGE_FILE_THRESHOLD ?? String(DEFAULT_PART_SIZE),
-    10
+    10,
   );
   return {
     applicationKeyId: keyId,
@@ -66,7 +68,9 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
     appKeyId: resolvedAppKeyId,
     appKey: resolvedAppKey,
     region: process.env.B2_REGION ?? DEFAULT_REGION,
-    largeFileThreshold: Number.isFinite(largeFileThreshold) ? largeFileThreshold : DEFAULT_PART_SIZE,
+    largeFileThreshold: Number.isFinite(largeFileThreshold)
+      ? largeFileThreshold
+      : DEFAULT_PART_SIZE,
     partSize: Number.isFinite(partSize) ? partSize : DEFAULT_PART_SIZE,
   };
 }
@@ -90,7 +94,11 @@ async function main(): Promise<void> {
     for (const [id, s] of sessions) {
       if (s.lastActivity < cutoff) {
         sessions.delete(id);
-        try { s.transport.close(); } catch { /* ignore */ }
+        try {
+          s.transport.close();
+        } catch {
+          /* ignore */
+        }
       }
     }
   }, IDLE_SWEEP_INTERVAL_MS);
@@ -110,7 +118,11 @@ async function main(): Promise<void> {
       const config = configFromHeaders(req);
       if (!config) {
         res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Missing credentials: X-B2-Key-Id and X-B2-Key headers are required" }));
+        res.end(
+          JSON.stringify({
+            error: "Missing credentials: X-B2-Key-Id and X-B2-Key headers are required",
+          }),
+        );
         return;
       }
 
@@ -185,12 +197,14 @@ async function main(): Promise<void> {
     // Health check
     if (req.method === "GET" && url.pathname === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({
-        status: "ok",
-        server: "backblaze-b2-mcp",
-        version: VERSION,
-        activeSessions: sessions.size,
-      }));
+      res.end(
+        JSON.stringify({
+          status: "ok",
+          server: "backblaze-b2-mcp",
+          version: VERSION,
+          activeSessions: sessions.size,
+        }),
+      );
       return;
     }
 
@@ -199,30 +213,34 @@ async function main(): Promise<void> {
   });
 
   httpServer.listen(port, () => {
-    process.stderr.write(`Backblaze B2 MCP Server (HTTP) v${VERSION} listening on port ${port}\n`);
-    process.stderr.write(`  SSE endpoint: http://localhost:${port}/sse\n`);
-    process.stderr.write(`  Messages:     POST http://localhost:${port}/messages?sessionId=<id>\n`);
-    process.stderr.write(`  Health:       http://localhost:${port}/health\n`);
+    logger.info({ transport: "http", port }, "server.started");
   });
 
   // Graceful shutdown — stop accepting new connections, drain active SSE sessions, exit.
   function shutdown(signal: string): void {
     if (shuttingDown) return;
     shuttingDown = true;
-    process.stderr.write(`Received ${signal}, shutting down (drain ${SHUTDOWN_DRAIN_MS}ms)...\n`);
+    logger.info(
+      { signal, drainMs: SHUTDOWN_DRAIN_MS, activeSessions: sessions.size },
+      "server.shutdown",
+    );
     clearInterval(idleSweep);
     httpServer.close(() => {
-      process.stderr.write("HTTP server closed.\n");
+      logger.info("server.closed");
       process.exit(0);
     });
     // Close active SSE transports so http.close() can complete
     for (const [, s] of sessions) {
-      try { s.transport.close(); } catch { /* ignore */ }
+      try {
+        s.transport.close();
+      } catch {
+        /* ignore */
+      }
     }
     sessions.clear();
     // Hard exit if drain takes too long
     setTimeout(() => {
-      process.stderr.write("Drain timeout exceeded, forcing exit.\n");
+      logger.error("server.drainTimeout");
       process.exit(1);
     }, SHUTDOWN_DRAIN_MS).unref();
   }
@@ -234,7 +252,7 @@ async function main(): Promise<void> {
 // Only run main() when invoked directly (not when imported by tests)
 if (require.main === module) {
   main().catch((err) => {
-    process.stderr.write(`Fatal error: ${err instanceof Error ? err.message : String(err)}\n`);
+    logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
     process.exit(1);
   });
 }

@@ -13,16 +13,19 @@ npm run start:http     # HTTP+SSE transport — add --port 3000
 ```
 
 Run a single unit test file:
+
 ```bash
 npx jest tests/unit/auth.test.ts
 ```
 
 Run a single test by name:
+
 ```bash
 npx jest --testNamePattern="should cache the token"
 ```
 
 Integration tests require env vars (master key for B2/Partner tools, application key for S3 tools):
+
 ```bash
 B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy \
 B2_APP_KEY_ID=zzz B2_APP_KEY=www \
@@ -32,11 +35,14 @@ npm run test:integration
 ## Architecture
 
 ### Entry points
+
 - `src/index.ts` — stdio transport (Claude Desktop, local use)
 - `src/http-server.ts` — HTTP+SSE transport for hosted deployments. Reads B2 credentials per-connection from request headers (`X-B2-Key-Id`, `X-B2-Key`, optional `X-B2-App-Key-Id`, `X-B2-App-Key`); returns 401 without them. Each session gets its own `McpServer` + `B2Config` — no shared credential state. Sessions are tracked in `Map<sessionId, {transport, mcpServer, lastActivity}>` and swept after 30 minutes of inactivity. Handles `SIGTERM`/`SIGINT` for graceful drain on deploy.
 
 ### Tool registration flow
+
 `server.ts` exports two functions:
+
 - `loadConfig()` — reads env vars, validates required keys, returns `B2Config`
 - `createServer(config)` — instantiates `B2AuthManager`, `B2Client`, and `S3Client`, then calls all `register*Tools()` functions
 
@@ -49,10 +55,13 @@ Each register function receives the server + client(s) and calls `server.tool(na
 **S3-compatible API** (`src/s3/`): Uses AWS SDK v3 `S3Client` configured to point at B2's S3 endpoint. Must use a **non-master application key** — B2 rejects master keys on the S3 endpoint. Configured via `B2_APP_KEY_ID` / `B2_APP_KEY`; falls back to master key if not set (S3 calls will fail in that case).
 
 ### Auth token lifecycle (`src/auth.ts`)
+
 `B2AuthManager` caches the token for 23 hours (B2 tokens are valid 24h). Concurrent `getAuth()` calls share a single in-flight authorize request (deduped via `inflightAuth` promise). On 401, `B2Client` calls `auth.invalidate()` before retrying so the next `getAuth()` re-authorizes.
 
 ### File upload memory model
+
 `b2_upload_file` (in `src/b2/files.ts`) branches on source type:
+
 - **`filePath`**: streams from disk. Small files do two passes (streaming SHA1 hash, then `fs.createReadStream` to axios). Large files (> `largeFileThreshold`) call `uploadLargeFile` which reads one `partSize` chunk at a time — memory stays at O(partSize × concurrency), never O(fileSize).
 - **`content` (base64)**: already in memory from the MCP JSON payload; buffered as-is.
 
@@ -61,17 +70,21 @@ Each register function receives the server + client(s) and calls `server.tool(na
 `s3_put_object` follows the same pattern — `fs.createReadStream` + `ContentLength` from `fs.statSync` for file paths; AWS SDK v3 accepts the stream natively.
 
 ### Tool naming conventions
+
 - `b2_*` — B2 native API v2 tools, plus Partner API group/trial tools (use b2api/v3)
 - `bz_*` — Backblaze Backup/Computer API tools (use api/backup/v1)
 - `s3_*` — S3-compatible API tools via AWS SDK
 
 ### Retry logic (`src/utils/retry.ts`)
+
 `withRetry` wraps all `B2Client.call()` and `uploadToUrl()` calls. Retries up to 3 times with exponential backoff on HTTP 408, 429, 503, 504. Non-retryable errors (400, 401, 403, etc.) throw immediately.
 
 ### Test patterns
+
 Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tools-schema.test.ts` builds the full server with dummy credentials and validates all 85 tool schemas structurally.
 
 Integration tests (`tests/integration/live.test.ts`) use two skip guards:
+
 - `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (master key tests)
 - `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key)
 
@@ -80,6 +93,7 @@ Integration tests (`tests/integration/live.test.ts`) use two skip guards:
 The HTTP server (`src/http-server.ts`) reads credentials per-connection from request headers. Each SSE connection gets its own `B2Config` + `McpServer` instance.
 
 Claude Desktop config:
+
 ```json
 {
   "mcpServers": {

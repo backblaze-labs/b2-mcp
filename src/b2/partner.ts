@@ -15,21 +15,32 @@ import { toolJson, toolError } from "../utils/errors.js";
 export function registerPartnerTools(
   server: McpServer,
   client: B2Client,
-  auth: B2AuthManager
+  _auth: B2AuthManager,
 ): void {
-
   // ── b2_list_groups ──────────────────────────────────────────────────────────
   server.tool(
     "b2_list_groups",
     "List active Groups administered by a Group admin account. Returns up to 100 groups per call; use nextGroupId for pagination. Requires the account to be authorized for the Partner API.",
     {
-      adminAccountId: z.string()
+      adminAccountId: z
+        .string()
         .describe("The accountId of the Group admin. Must be authorized for the Partner API."),
-      groupName: z.string().optional()
+      groupName: z
+        .string()
+        .optional()
         .describe("Filter by Group name. Returns all Groups with this exact name."),
-      startGroupId: z.number().int().optional()
+      startGroupId: z
+        .number()
+        .int()
+        .optional()
         .describe("Pagination cursor — the groupId to begin listing from."),
-      maxGroupCount: z.number().int().min(1).max(100).optional().default(100)
+      maxGroupCount: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(100)
         .describe("Maximum number of Groups to return (1-100). Defaults to 100."),
     },
     async (args) => {
@@ -50,7 +61,7 @@ export function registerPartnerTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_create_group_member ──────────────────────────────────────────────────
@@ -58,14 +69,26 @@ export function registerPartnerTools(
     "b2_create_group_member",
     "Create a new Backblaze account and add it to a managed Group as a Group member. The email must not already exist as a Backblaze account. The Group must be a managed Group with Backblaze B2 enabled. Returns the new account's applicationKeyId, applicationKey, and member details — store the key immediately as it is only returned once. Limit: 5,000 members per Group.",
     {
-      adminAccountId: z.string()
+      adminAccountId: z
+        .string()
         .describe("The accountId of the Group admin. Must be authorized for the Partner API."),
-      groupId: z.string()
-        .describe("The Group ID to add the new account to. Must be a managed Group with B2 enabled."),
-      memberEmail: z.string().email()
-        .describe("Email address for the new Group member. Must not already be a Backblaze account."),
-      region: z.enum(["us-east", "us-west", "eu-central"]).optional()
-        .describe("Region for the new account's data. Defaults to the current default region if omitted."),
+      groupId: z
+        .string()
+        .describe(
+          "The Group ID to add the new account to. Must be a managed Group with B2 enabled.",
+        ),
+      memberEmail: z
+        .string()
+        .email()
+        .describe(
+          "Email address for the new Group member. Must not already be a Backblaze account.",
+        ),
+      region: z
+        .enum(["us-east", "us-west", "eu-central"])
+        .optional()
+        .describe(
+          "Region for the new account's data. Defaults to the current default region if omitted.",
+        ),
     },
     async (args) => {
       try {
@@ -83,7 +106,7 @@ export function registerPartnerTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_eject_group_member ───────────────────────────────────────────────────
@@ -91,14 +114,22 @@ export function registerPartnerTools(
     "b2_eject_group_member",
     "Eject a member from a Group. The member's Backblaze account is NOT deleted — it is removed from the Group and the member will need to reset their password on next login. Optionally change the member's email address during ejection. The ejected account cannot be re-added via API (only via the Group Management page).",
     {
-      adminAccountId: z.string()
+      adminAccountId: z
+        .string()
         .describe("The accountId of the Group admin. Must be authorized for the Partner API."),
-      groupId: z.string()
-        .describe("The Group ID from which to eject the member."),
-      memberAccountId: z.string()
-        .describe("The accountId of the Group member to eject. Must be a member of the specified Group."),
-      email: z.string().email().optional()
-        .describe("New email for the ejected account. If omitted, the existing email is kept. Must not already be a Backblaze account."),
+      groupId: z.string().describe("The Group ID from which to eject the member."),
+      memberAccountId: z
+        .string()
+        .describe(
+          "The accountId of the Group member to eject. Must be a member of the specified Group.",
+        ),
+      email: z
+        .string()
+        .email()
+        .optional()
+        .describe(
+          "New email for the ejected account. If omitted, the existing email is kept. Must not already be a Backblaze account.",
+        ),
     },
     async (args) => {
       try {
@@ -116,7 +147,7 @@ export function registerPartnerTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_list_group_members ───────────────────────────────────────────────────
@@ -124,13 +155,23 @@ export function registerPartnerTools(
     "b2_list_group_members",
     "List active (ACCEPTED) Group members for a specific Group. Returns up to 1,000 members per call; use nextEmail for pagination. Includes B2 storage stats per member.",
     {
-      adminAccountId: z.string()
+      adminAccountId: z
+        .string()
         .describe("The accountId of the Group admin. Must be authorized for the Partner API."),
-      groupId: z.string()
-        .describe("The groupId whose members to list."),
-      startEmail: z.string().optional()
-        .describe("Pagination cursor — the first member email to return. If no exact match, starts from the next email alphabetically."),
-      maxMemberCount: z.number().int().min(1).max(1000).optional().default(100)
+      groupId: z.string().describe("The groupId whose members to list."),
+      startEmail: z
+        .string()
+        .optional()
+        .describe(
+          "Pagination cursor — the first member email to return. If no exact match, starts from the next email alphabetically.",
+        ),
+      maxMemberCount: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .optional()
+        .default(100)
         .describe("Maximum number of members to return (1-1000). Defaults to 100."),
     },
     async (args) => {
@@ -151,7 +192,7 @@ export function registerPartnerTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_reserve_trial_create_account ────────────────────────────────────────
@@ -159,13 +200,25 @@ export function registerPartnerTools(
     "b2_reserve_trial_create_account",
     "Create a new Backblaze B2 account and start a B2 Reserve Trial. The trial gives the end user time-limited access to all B2 Reserve features. The new account receives an invitation email to reset their password and is immediately functional. Returns credentials and a pre-created bucket. The email must not already be a Backblaze account.",
     {
-      email: z.string().email()
+      email: z
+        .string()
+        .email()
         .describe("Email for the new B2 trial account. Must not already be a Backblaze account."),
-      term: z.number().int().min(7).max(30)
+      term: z
+        .number()
+        .int()
+        .min(7)
+        .max(30)
         .describe("Duration of the trial in days (7-30 inclusive)."),
-      storage: z.number().int().min(1).max(50)
+      storage: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
         .describe("Storage capacity for the trial in TB (1-50 inclusive)."),
-      region: z.enum(["us-east", "us-west", "eu-central"]).optional()
+      region: z
+        .enum(["us-east", "us-west", "eu-central"])
+        .optional()
         .describe("Region for the new account's data. Backblaze picks a region if not specified."),
     },
     async (args) => {
@@ -184,7 +237,7 @@ export function registerPartnerTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── bz_list_computers ───────────────────────────────────────────────────────
@@ -192,11 +245,22 @@ export function registerPartnerTools(
     "bz_list_computers",
     "List active computer backups for a Group member account. The account must be a member of a Group with Enterprise Controls enabled, and the caller must be a Group admin. Previously deleted or cancelled backups are not returned. Use nextComputerId for pagination.",
     {
-      accountId: z.string()
-        .describe("The accountId whose computer backups to list. Must be a member of a Group with Enterprise Controls enabled."),
-      startComputerId: z.string().optional()
+      accountId: z
+        .string()
+        .describe(
+          "The accountId whose computer backups to list. Must be a member of a Group with Enterprise Controls enabled.",
+        ),
+      startComputerId: z
+        .string()
+        .optional()
         .describe("Pagination cursor — the computerId to begin listing from."),
-      maxComputerCount: z.number().int().min(1).max(500).optional().default(100)
+      maxComputerCount: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .optional()
+        .default(100)
         .describe("Maximum number of computers to return (1-500). Defaults to 100."),
     },
     async (args) => {
@@ -216,7 +280,7 @@ export function registerPartnerTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── bz_delete_computer ──────────────────────────────────────────────────────
@@ -224,23 +288,29 @@ export function registerPartnerTools(
     "bz_delete_computer",
     "Delete a computer backup from a Group member account. The account must be a member of a Group with Enterprise Controls enabled, and the Group setting 'All Group admins can delete any Group member backups' must be enabled. This action is irreversible.",
     {
-      accountId: z.string()
-        .describe("The accountId to which the backup belongs. Must be a member of a Group with Enterprise Controls enabled."),
-      computerId: z.string()
-        .describe("The unique identifier of the computer backup to delete."),
+      accountId: z
+        .string()
+        .describe(
+          "The accountId to which the backup belongs. Must be a member of a Group with Enterprise Controls enabled.",
+        ),
+      computerId: z.string().describe("The unique identifier of the computer backup to delete."),
     },
     async (args) => {
       try {
-        const result = await client.call("bz_delete_computer", {
-          accountId: args.accountId,
-          computerId: args.computerId,
-        }, {
-          apiPath: "api/backup/v1",
-        });
+        const result = await client.call(
+          "bz_delete_computer",
+          {
+            accountId: args.accountId,
+            computerId: args.computerId,
+          },
+          {
+            apiPath: "api/backup/v1",
+          },
+        );
         return toolJson(result);
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 }

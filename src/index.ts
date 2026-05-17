@@ -22,6 +22,7 @@
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createServer, loadConfig } from "./server.js";
+import { logger } from "./utils/logger.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -30,10 +31,10 @@ async function main(): Promise<void> {
 
   await server.connect(transport);
 
-  process.stderr.write("Backblaze B2 MCP Server running on stdio\n");
+  logger.info({ transport: "stdio" }, "server.started");
 }
 
 main().catch((err) => {
-  process.stderr.write(`Fatal error: ${err instanceof Error ? err.message : String(err)}\n`);
+  logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
   process.exit(1);
 });

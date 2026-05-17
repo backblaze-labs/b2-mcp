@@ -22,13 +22,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
-const {
-  MCP_URL,
-  B2_KEY_ID,
-  B2_KEY,
-  B2_APP_KEY_ID,
-  B2_APP_KEY,
-} = process.env;
+const { MCP_URL, B2_KEY_ID, B2_KEY, B2_APP_KEY_ID, B2_APP_KEY } = process.env;
 
 if (!MCP_URL || !B2_KEY_ID || !B2_KEY) {
   console.error("Missing required env: MCP_URL, B2_KEY_ID, B2_KEY");
@@ -77,7 +71,13 @@ async function main() {
   try {
     const r = await client.callTool({ name: "b2_authorize_account", arguments: {} });
     const text = r.content?.[0]?.text ?? "";
-    const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
+    const parsed = (() => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    })();
     check("b2_authorize_account returns accountId", !!parsed?.accountId);
   } catch (e) {
     check("b2_authorize_account returns accountId", false, e.message);
@@ -87,7 +87,13 @@ async function main() {
   try {
     const r = await client.callTool({ name: "b2_list_buckets", arguments: {} });
     const text = r.content?.[0]?.text ?? "";
-    const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
+    const parsed = (() => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    })();
     check("b2_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
   } catch (e) {
     check("b2_list_buckets returns a buckets array", false, e.message);
@@ -98,7 +104,13 @@ async function main() {
     try {
       const r = await client.callTool({ name: "s3_list_buckets", arguments: {} });
       const text = r.content?.[0]?.text ?? "";
-      const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
+      const parsed = (() => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })();
       check("s3_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
     } catch (e) {
       check("s3_list_buckets returns a buckets array", false, e.message);

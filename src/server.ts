@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { B2Config } from "./utils/types.js";
 import { VERSION } from "./version.js";
+import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
@@ -28,9 +29,7 @@ export function loadConfig(): B2Config {
   const key = process.env.B2_APPLICATION_KEY;
 
   if (!keyId || !key) {
-    process.stderr.write(
-      "Error: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY environment variables are required.\n"
-    );
+    logger.fatal("config.missing: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required");
     process.exit(1);
   }
 
@@ -43,7 +42,10 @@ export function loadConfig(): B2Config {
     appKeyId: process.env.B2_APP_KEY_ID ?? keyId,
     appKey: process.env.B2_APP_KEY ?? key,
     region: process.env.B2_REGION ?? "us-west-004",
-    largeFileThreshold: parseInt(process.env.B2_LARGE_FILE_THRESHOLD ?? String(100 * 1024 * 1024), 10),
+    largeFileThreshold: parseInt(
+      process.env.B2_LARGE_FILE_THRESHOLD ?? String(100 * 1024 * 1024),
+      10,
+    ),
     partSize: parseInt(process.env.B2_PART_SIZE ?? String(100 * 1024 * 1024), 10),
   };
 }
@@ -94,7 +96,7 @@ export function createServer(config: B2Config): McpServer {
         "",
         "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.",
       ].join("\n"),
-    }
+    },
   );
 
   // Initialize clients
@@ -121,5 +123,65 @@ export function createServer(config: B2Config): McpServer {
   registerS3ObjectLockTools(server, s3Client);
   registerS3ExtraTools(server, s3Client);
 
+  wrapToolsWithAudit(server, config);
+
   return server;
+}
+
+/**
+ * Wrap every registered tool handler to emit an audit log entry on
+ * invocation: tool name, key-id prefix (not the full key), top-level
+ * arg keys, duration, and success/error. Argument *values* are not
+ * logged to avoid leaking file content, bucket data, etc.
+ */
+function wrapToolsWithAudit(server: McpServer, config: B2Config): void {
+  const tools = (server as any)._registeredTools as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  if (!tools) return;
+  const keyPrefix = config.applicationKeyId.slice(0, 8);
+
+  for (const name of Object.keys(tools)) {
+    const tool = tools[name];
+    const handlerKey: string | null =
+      typeof tool.callback === "function"
+        ? "callback"
+        : typeof tool.handler === "function"
+          ? "handler"
+          : typeof tool.execute === "function"
+            ? "execute"
+            : null;
+    if (!handlerKey) continue;
+
+    const original = tool[handlerKey] as (...args: any[]) => any;
+
+    tool[handlerKey] = async function (this: unknown, args: any, extra: any) {
+      const start = Date.now();
+      const argKeys =
+        args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+      try {
+        const result = await original.call(this, args, extra);
+        const durationMs = Date.now() - start;
+        const isError = result?.isError === true;
+        logger.info(
+          { tool: name, key: keyPrefix, argKeys, durationMs, error: isError },
+          "tool.call",
+        );
+        return result;
+      } catch (err) {
+        const durationMs = Date.now() - start;
+        logger.warn(
+          {
+            tool: name,
+            key: keyPrefix,
+            argKeys,
+            durationMs,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "tool.error",
+        );
+        throw err;
+      }
+    };
+  }
 }

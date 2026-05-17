@@ -58,7 +58,7 @@ function readFilePart(filePath: string, start: number, end: number): Promise<Buf
 export async function uploadLargeFile(
   client: B2Client,
   auth: B2AuthManager,
-  opts: LargeFileUploadOptions
+  opts: LargeFileUploadOptions,
 ): Promise<unknown> {
   const { bucketId, fileName, contentType, fileInfo, partSize } = opts;
   const concurrency = Math.max(1, opts.concurrency ?? 1);
@@ -100,7 +100,7 @@ export async function uploadLargeFile(
       // Each concurrent upload requires its own upload URL / auth token
       const uploadPartUrl = await client.call<{ uploadUrl: string; authorizationToken: string }>(
         "b2_get_upload_part_url",
-        { fileId }
+        { fileId },
       );
 
       await client.uploadToUrl(
@@ -111,7 +111,7 @@ export async function uploadLargeFile(
           "X-Bz-Part-Number": String(partNumber),
           "Content-Length": String(partBuffer.length),
           "X-Bz-Content-Sha1": sha1,
-        }
+        },
       );
 
       // Store at the correct index so finish receives hashes in part order
@@ -129,9 +129,8 @@ export async function uploadLargeFile(
 export function registerLargeFileTools(
   server: McpServer,
   client: B2Client,
-  auth: B2AuthManager
+  _auth: B2AuthManager,
 ): void {
-
   // ── b2_start_large_file ───────────────────────────────────────────────────
   server.tool(
     "b2_start_large_file",
@@ -140,13 +139,18 @@ export function registerLargeFileTools(
       bucketId: z.string().describe("The destination bucket ID."),
       fileName: z.string().describe("The name for the large file."),
       contentType: z.string().describe("MIME type of the file, or 'b2/x-auto'."),
-      fileInfo: z.record(z.string(), z.string()).optional().describe("Custom metadata key-value pairs."),
-      serverSideEncryption: z.object({
-        mode: z.enum(["SSE-B2", "SSE-C"]),
-        algorithm: z.string().optional(),
-        customerKey: z.string().optional(),
-        customerKeyMd5: z.string().optional(),
-      }).optional(),
+      fileInfo: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe("Custom metadata key-value pairs."),
+      serverSideEncryption: z
+        .object({
+          mode: z.enum(["SSE-B2", "SSE-C"]),
+          algorithm: z.string().optional(),
+          customerKey: z.string().optional(),
+          customerKeyMd5: z.string().optional(),
+        })
+        .optional(),
     },
     async (args) => {
       try {
@@ -163,7 +167,7 @@ export function registerLargeFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_get_upload_part_url ────────────────────────────────────────────────
@@ -180,7 +184,7 @@ export function registerLargeFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_upload_part ────────────────────────────────────────────────────────
@@ -190,7 +194,12 @@ export function registerLargeFileTools(
     {
       uploadUrl: z.string().describe("The upload URL from b2_get_upload_part_url."),
       uploadAuthToken: z.string().describe("The auth token from b2_get_upload_part_url."),
-      partNumber: z.number().int().min(1).max(10000).describe("The sequential part number (1-10000)."),
+      partNumber: z
+        .number()
+        .int()
+        .min(1)
+        .max(10000)
+        .describe("The sequential part number (1-10000)."),
       content: z.string().describe("Base64-encoded content for this part."),
     },
     async (args) => {
@@ -198,21 +207,16 @@ export function registerLargeFileTools(
         const buffer = Buffer.from(args.content, "base64");
         const sha1 = crypto.createHash("sha1").update(buffer).digest("hex");
 
-        const result = await client.uploadToUrl(
-          args.uploadUrl,
-          args.uploadAuthToken,
-          buffer,
-          {
-            "X-Bz-Part-Number": String(args.partNumber),
-            "Content-Length": String(buffer.length),
-            "X-Bz-Content-Sha1": sha1,
-          }
-        );
+        const result = await client.uploadToUrl(args.uploadUrl, args.uploadAuthToken, buffer, {
+          "X-Bz-Part-Number": String(args.partNumber),
+          "Content-Length": String(buffer.length),
+          "X-Bz-Content-Sha1": sha1,
+        });
         return toolJson(result);
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_finish_large_file ──────────────────────────────────────────────────
@@ -221,7 +225,9 @@ export function registerLargeFileTools(
     "Finalize a large file upload after all parts have been uploaded. Provide the SHA1 hashes of all parts in order.",
     {
       fileId: z.string().describe("The large file ID."),
-      partSha1Array: z.array(z.string()).describe("Array of SHA1 hashes for each uploaded part, in order."),
+      partSha1Array: z
+        .array(z.string())
+        .describe("Array of SHA1 hashes for each uploaded part, in order."),
     },
     async (args) => {
       try {
@@ -233,7 +239,7 @@ export function registerLargeFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_cancel_large_file ──────────────────────────────────────────────────
@@ -250,7 +256,7 @@ export function registerLargeFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_list_parts ─────────────────────────────────────────────────────────
@@ -259,7 +265,12 @@ export function registerLargeFileTools(
     "List the parts that have been successfully uploaded for an in-progress large file upload.",
     {
       fileId: z.string().describe("The large file ID."),
-      startPartNumber: z.number().int().min(1).optional().describe("Pagination cursor — start listing from this part number."),
+      startPartNumber: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Pagination cursor — start listing from this part number."),
       maxPartCount: z.number().int().min(1).max(1000).optional().default(100),
     },
     async (args) => {
@@ -275,7 +286,7 @@ export function registerLargeFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_list_unfinished_large_files ────────────────────────────────────────
@@ -284,7 +295,10 @@ export function registerLargeFileTools(
     "List large file uploads that have been started but not yet finished or cancelled. Useful for identifying and cleaning up incomplete uploads.",
     {
       bucketId: z.string().describe("The bucket ID to list unfinished uploads for."),
-      namePrefix: z.string().optional().describe("Only return files whose names start with this prefix."),
+      namePrefix: z
+        .string()
+        .optional()
+        .describe("Only return files whose names start with this prefix."),
       startFileId: z.string().optional().describe("Pagination cursor from a previous response."),
       maxFileCount: z.number().int().min(1).max(100).optional().default(100),
     },
@@ -302,7 +316,7 @@ export function registerLargeFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_copy_part ──────────────────────────────────────────────────────────
@@ -312,20 +326,32 @@ export function registerLargeFileTools(
     {
       sourceFileId: z.string().describe("The file ID of the source file to copy from."),
       largeFileId: z.string().describe("The in-progress large file ID to copy the part into."),
-      partNumber: z.number().int().min(1).max(10000).describe("The part number for this copied data."),
-      range: z.string().optional().describe("Byte range of the source file to copy, e.g. 'bytes=0-4999999'."),
-      sourceServerSideEncryption: z.object({
-        mode: z.enum(["SSE-C"]),
-        algorithm: z.string().optional(),
-        customerKey: z.string().optional(),
-        customerKeyMd5: z.string().optional(),
-      }).optional(),
-      destinationServerSideEncryption: z.object({
-        mode: z.enum(["SSE-B2", "SSE-C"]),
-        algorithm: z.string().optional(),
-        customerKey: z.string().optional(),
-        customerKeyMd5: z.string().optional(),
-      }).optional(),
+      partNumber: z
+        .number()
+        .int()
+        .min(1)
+        .max(10000)
+        .describe("The part number for this copied data."),
+      range: z
+        .string()
+        .optional()
+        .describe("Byte range of the source file to copy, e.g. 'bytes=0-4999999'."),
+      sourceServerSideEncryption: z
+        .object({
+          mode: z.enum(["SSE-C"]),
+          algorithm: z.string().optional(),
+          customerKey: z.string().optional(),
+          customerKeyMd5: z.string().optional(),
+        })
+        .optional(),
+      destinationServerSideEncryption: z
+        .object({
+          mode: z.enum(["SSE-B2", "SSE-C"]),
+          algorithm: z.string().optional(),
+          customerKey: z.string().optional(),
+          customerKeyMd5: z.string().optional(),
+        })
+        .optional(),
     },
     async (args) => {
       try {
@@ -335,14 +361,16 @@ export function registerLargeFileTools(
           partNumber: args.partNumber,
         };
         if (args.range) payload.range = args.range;
-        if (args.sourceServerSideEncryption) payload.sourceServerSideEncryption = args.sourceServerSideEncryption;
-        if (args.destinationServerSideEncryption) payload.destinationServerSideEncryption = args.destinationServerSideEncryption;
+        if (args.sourceServerSideEncryption)
+          payload.sourceServerSideEncryption = args.sourceServerSideEncryption;
+        if (args.destinationServerSideEncryption)
+          payload.destinationServerSideEncryption = args.destinationServerSideEncryption;
 
         const result = await client.call("b2_copy_part", payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 }

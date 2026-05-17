@@ -19,7 +19,11 @@ async function callTool(server: McpServer, name: string, args: Record<string, un
 function parseResult(result: any) {
   const text = result?.content?.[0]?.text;
   if (!text) return result;
-  try { return JSON.parse(text); } catch { return text; }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -57,7 +61,7 @@ describe("s3_list_buckets", () => {
         { Name: "my-bucket", CreationDate: new Date("2024-01-01") },
         { Name: "archive-bucket", CreationDate: new Date("2024-06-01") },
       ],
-      Owner: { ID: "owner-123", DisplayName: "TestOwner" }
+      Owner: { ID: "owner-123", DisplayName: "TestOwner" },
     });
   });
 
@@ -82,7 +86,9 @@ describe("s3_create_bucket", () => {
   });
 
   it("returns the bucket location", async () => {
-    const result = parseResult(await callTool(server, "s3_create_bucket", { bucket: "test-new-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_create_bucket", { bucket: "test-new-bucket" }),
+    );
     expect(result.location).toBe("/test-new-bucket");
   });
 
@@ -115,7 +121,10 @@ describe("s3_head_bucket", () => {
   });
 
   it("returns isError for a missing bucket", async () => {
-    sendSpy.mockRejectedValue({ name: "NoSuchBucket", message: "The specified bucket does not exist" });
+    sendSpy.mockRejectedValue({
+      name: "NoSuchBucket",
+      message: "The specified bucket does not exist",
+    });
     const result = await callTool(server, "s3_head_bucket", { bucket: "missing-bucket" });
     expect(result.isError).toBe(true);
   });
@@ -129,7 +138,9 @@ describe("s3_get_bucket_versioning", () => {
   });
 
   it("returns versioning status", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_versioning", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_versioning", { bucket: "my-bucket" }),
+    );
     expect(result.status).toBe("Enabled");
   });
 });
@@ -139,7 +150,8 @@ describe("s3_get_bucket_versioning", () => {
 describe("s3_put_bucket_versioning", () => {
   it("enables versioning and returns success", async () => {
     const result = await callTool(server, "s3_put_bucket_versioning", {
-      bucket: "my-bucket", status: "Enabled"
+      bucket: "my-bucket",
+      status: "Enabled",
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -152,14 +164,14 @@ describe("s3_put_bucket_versioning", () => {
 describe("s3_get_bucket_cors", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
-      CORSRules: [
-        { AllowedOrigins: ["https://example.com"], AllowedMethods: ["GET", "PUT"] }
-      ]
+      CORSRules: [{ AllowedOrigins: ["https://example.com"], AllowedMethods: ["GET", "PUT"] }],
     });
   });
 
   it("returns CORS rules array", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_cors", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_cors", { bucket: "my-bucket" }),
+    );
     expect(result.corsRules).toHaveLength(1);
     expect(result.corsRules[0].AllowedMethods).toContain("GET");
   });
@@ -170,7 +182,10 @@ describe("s3_get_bucket_cors", () => {
 describe("s3_put_bucket_cors", () => {
   it("sends CORS rules and returns success", async () => {
     const rules = [{ allowedOrigins: ["*"], allowedMethods: ["GET"] }];
-    const result = await callTool(server, "s3_put_bucket_cors", { bucket: "my-bucket", corsRules: rules });
+    const result = await callTool(server, "s3_put_bucket_cors", {
+      bucket: "my-bucket",
+      corsRules: rules,
+    });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
     expect(cmd.input.CORSConfiguration.CORSRules).toHaveLength(1);
@@ -192,12 +207,14 @@ describe("s3_delete_bucket_cors", () => {
 describe("s3_get_bucket_lifecycle", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
-      Rules: [{ ID: "expire-old", Status: "Enabled", Expiration: { Days: 90 } }]
+      Rules: [{ ID: "expire-old", Status: "Enabled", Expiration: { Days: 90 } }],
     });
   });
 
   it("returns lifecycle rules", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_lifecycle", { bucket: "my-bucket" }),
+    );
     expect(result.rules).toHaveLength(1);
     expect(result.rules[0].ID).toBe("expire-old");
   });
@@ -209,12 +226,14 @@ describe("s3_get_bucket_acl", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
       Owner: { ID: "owner-123", DisplayName: "TestOwner" },
-      Grants: [{ Permission: "FULL_CONTROL", Grantee: { Type: "CanonicalUser", ID: "owner-123" } }]
+      Grants: [{ Permission: "FULL_CONTROL", Grantee: { Type: "CanonicalUser", ID: "owner-123" } }],
     });
   });
 
   it("returns owner and grants", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_acl", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_acl", { bucket: "my-bucket" }),
+    );
     expect(result.owner.DisplayName).toBe("TestOwner");
     expect(result.grants).toHaveLength(1);
     expect(result.grants[0].Permission).toBe("FULL_CONTROL");
@@ -227,7 +246,10 @@ describe("s3_put_object", () => {
   it("uploads base64 content and returns success", async () => {
     const content = Buffer.from("hello world").toString("base64");
     const result = await callTool(server, "s3_put_object", {
-      bucket: "my-bucket", key: "hello.txt", content, contentType: "text/plain"
+      bucket: "my-bucket",
+      key: "hello.txt",
+      content,
+      contentType: "text/plain",
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("hello.txt");
@@ -238,7 +260,10 @@ describe("s3_put_object", () => {
   });
 
   it("returns isError when neither filePath nor content provided", async () => {
-    const result = await callTool(server, "s3_put_object", { bucket: "my-bucket", key: "file.txt" });
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "my-bucket",
+      key: "file.txt",
+    });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("filePath or content");
   });
@@ -255,12 +280,14 @@ describe("s3_get_object", () => {
       ETag: '"abc123"',
       Body: {
         transformToByteArray: async () => new Uint8Array(bodyBytes),
-      }
+      },
     });
   });
 
   it("returns base64-encoded content and metadata", async () => {
-    const result = parseResult(await callTool(server, "s3_get_object", { bucket: "my-bucket", key: "hello.txt" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_object", { bucket: "my-bucket", key: "hello.txt" }),
+    );
     expect(result.contentType).toBe("text/plain");
     expect(result.encoding).toBe("base64");
     expect(result.etag).toBe('"abc123"');
@@ -274,7 +301,10 @@ describe("s3_get_object", () => {
 
 describe("s3_delete_object", () => {
   it("returns a success message with the key", async () => {
-    const result = await callTool(server, "s3_delete_object", { bucket: "my-bucket", key: "old-file.txt" });
+    const result = await callTool(server, "s3_delete_object", {
+      bucket: "my-bucket",
+      key: "old-file.txt",
+    });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("old-file.txt");
     expect(result.content[0].text).toContain("my-bucket");
@@ -287,15 +317,17 @@ describe("s3_delete_objects", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
       Deleted: [{ Key: "file1.txt" }, { Key: "file2.txt" }],
-      Errors: []
+      Errors: [],
     });
   });
 
   it("returns deleted and errors arrays", async () => {
-    const result = parseResult(await callTool(server, "s3_delete_objects", {
-      bucket: "my-bucket",
-      objects: [{ key: "file1.txt" }, { key: "file2.txt" }]
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_delete_objects", {
+        bucket: "my-bucket",
+        objects: [{ key: "file1.txt" }, { key: "file2.txt" }],
+      }),
+    );
     expect(result.deleted).toHaveLength(2);
     expect(result.errors).toHaveLength(0);
   });
@@ -310,12 +342,14 @@ describe("s3_head_object", () => {
       ContentLength: 204800,
       ETag: '"def456"',
       LastModified: new Date("2024-03-15"),
-      Metadata: { author: "Kevin" }
+      Metadata: { author: "Kevin" },
     });
   });
 
   it("returns object metadata without content", async () => {
-    const result = parseResult(await callTool(server, "s3_head_object", { bucket: "my-bucket", key: "photo.jpg" }));
+    const result = parseResult(
+      await callTool(server, "s3_head_object", { bucket: "my-bucket", key: "photo.jpg" }),
+    );
     expect(result.contentType).toBe("image/jpeg");
     expect(result.contentLength).toBe(204800);
     expect(result.metadata.author).toBe("Kevin");
@@ -328,8 +362,10 @@ describe("s3_head_object", () => {
 describe("s3_copy_object", () => {
   it("copies object and returns success", async () => {
     const result = await callTool(server, "s3_copy_object", {
-      sourceBucket: "src-bucket", sourceKey: "original.jpg",
-      destinationBucket: "dst-bucket", destinationKey: "copy.jpg"
+      sourceBucket: "src-bucket",
+      sourceKey: "original.jpg",
+      destinationBucket: "dst-bucket",
+      destinationKey: "copy.jpg",
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("copy.jpg");
@@ -350,12 +386,14 @@ describe("s3_list_objects_v2", () => {
       ],
       CommonPrefixes: [],
       IsTruncated: false,
-      KeyCount: 2
+      KeyCount: 2,
     });
   });
 
   it("returns objects array", async () => {
-    const result = parseResult(await callTool(server, "s3_list_objects_v2", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_list_objects_v2", { bucket: "my-bucket" }),
+    );
     expect(result.objects).toHaveLength(2);
     expect(result.objects[0].Key).toBe("photos/a.jpg");
     expect(result.keyCount).toBe(2);
@@ -378,12 +416,14 @@ describe("s3_list_object_versions", () => {
         { Key: "doc.pdf", VersionId: "v0", IsLatest: false },
       ],
       DeleteMarkers: [],
-      IsTruncated: false
+      IsTruncated: false,
     });
   });
 
   it("returns versions and delete markers", async () => {
-    const result = parseResult(await callTool(server, "s3_list_object_versions", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_list_object_versions", { bucket: "my-bucket" }),
+    );
     expect(result.versions).toHaveLength(2);
     expect(result.deleteMarkers).toHaveLength(0);
     expect(result.versions[0].IsLatest).toBe(true);
@@ -396,14 +436,22 @@ describe("s3_get_object_acl", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
       Owner: { ID: "owner-123" },
-      Grants: [{ Permission: "READ", Grantee: { Type: "Group", URI: "http://acs.amazonaws.com/groups/global/AllUsers" } }]
+      Grants: [
+        {
+          Permission: "READ",
+          Grantee: { Type: "Group", URI: "http://acs.amazonaws.com/groups/global/AllUsers" },
+        },
+      ],
     });
   });
 
   it("returns owner and grants for the object", async () => {
-    const result = parseResult(await callTool(server, "s3_get_object_acl", {
-      bucket: "my-bucket", key: "public-photo.jpg"
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_get_object_acl", {
+        bucket: "my-bucket",
+        key: "public-photo.jpg",
+      }),
+    );
     expect(result.grants[0].Permission).toBe("READ");
     expect(result.owner.ID).toBe("owner-123");
   });
@@ -414,7 +462,9 @@ describe("s3_get_object_acl", () => {
 describe("s3_put_object_acl", () => {
   it("sends ACL and returns success", async () => {
     const result = await callTool(server, "s3_put_object_acl", {
-      bucket: "my-bucket", key: "file.txt", acl: "public-read"
+      bucket: "my-bucket",
+      key: "file.txt",
+      acl: "public-read",
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("public-read");
@@ -430,14 +480,18 @@ describe("s3_create_multipart_upload", () => {
     sendSpy.mockResolvedValue({
       UploadId: "upload-abc-123",
       Bucket: "my-bucket",
-      Key: "large-video.mp4"
+      Key: "large-video.mp4",
     });
   });
 
   it("returns uploadId, bucket, and key", async () => {
-    const result = parseResult(await callTool(server, "s3_create_multipart_upload", {
-      bucket: "my-bucket", key: "large-video.mp4", contentType: "video/mp4"
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_create_multipart_upload", {
+        bucket: "my-bucket",
+        key: "large-video.mp4",
+        contentType: "video/mp4",
+      }),
+    );
     expect(result.uploadId).toBe("upload-abc-123");
     expect(result.bucket).toBe("my-bucket");
     expect(result.key).toBe("large-video.mp4");
@@ -452,7 +506,7 @@ describe("s3_complete_multipart_upload", () => {
       Location: "https://s3.us-west-004.backblazeb2.com/my-bucket/large-video.mp4",
       Bucket: "my-bucket",
       Key: "large-video.mp4",
-      ETag: '"etag-final"'
+      ETag: '"etag-final"',
     });
   });
 
@@ -461,10 +515,14 @@ describe("s3_complete_multipart_upload", () => {
       { partNumber: 1, etag: '"part1-etag"' },
       { partNumber: 2, etag: '"part2-etag"' },
     ];
-    const result = parseResult(await callTool(server, "s3_complete_multipart_upload", {
-      bucket: "my-bucket", key: "large-video.mp4",
-      uploadId: "upload-abc-123", parts
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_complete_multipart_upload", {
+        bucket: "my-bucket",
+        key: "large-video.mp4",
+        uploadId: "upload-abc-123",
+        parts,
+      }),
+    );
     expect(result.key).toBe("large-video.mp4");
     expect(result.etag).toBe('"etag-final"');
   });
@@ -472,8 +530,10 @@ describe("s3_complete_multipart_upload", () => {
   it("passes parts with correct casing", async () => {
     const parts = [{ partNumber: 1, etag: '"p1"' }];
     await callTool(server, "s3_complete_multipart_upload", {
-      bucket: "my-bucket", key: "file.bin",
-      uploadId: "upload-xyz", parts
+      bucket: "my-bucket",
+      key: "file.bin",
+      uploadId: "upload-xyz",
+      parts,
     });
     const cmd = sendSpy.mock.calls[0][0];
     const sentParts = cmd.input.MultipartUpload.Parts;
@@ -487,7 +547,9 @@ describe("s3_complete_multipart_upload", () => {
 describe("s3_abort_multipart_upload", () => {
   it("aborts the upload and returns success", async () => {
     const result = await callTool(server, "s3_abort_multipart_upload", {
-      bucket: "my-bucket", key: "large-file.bin", uploadId: "upload-abc-123"
+      bucket: "my-bucket",
+      key: "large-file.bin",
+      uploadId: "upload-abc-123",
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("upload-abc-123");
@@ -505,12 +567,14 @@ describe("s3_list_multipart_uploads", () => {
         { UploadId: "up-001", Key: "video.mp4", Initiated: new Date() },
         { UploadId: "up-002", Key: "backup.tar.gz", Initiated: new Date() },
       ],
-      IsTruncated: false
+      IsTruncated: false,
     });
   });
 
   it("returns list of in-progress uploads", async () => {
-    const result = parseResult(await callTool(server, "s3_list_multipart_uploads", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_list_multipart_uploads", { bucket: "my-bucket" }),
+    );
     expect(result.uploads).toHaveLength(2);
     expect(result.uploads[0].UploadId).toBe("up-001");
   });
@@ -526,14 +590,18 @@ describe("s3_list_parts", () => {
         { PartNumber: 2, Size: 3145728, ETag: '"part2"' },
       ],
       IsTruncated: false,
-      StorageClass: "STANDARD"
+      StorageClass: "STANDARD",
     });
   });
 
   it("returns uploaded parts for a multipart upload", async () => {
-    const result = parseResult(await callTool(server, "s3_list_parts", {
-      bucket: "my-bucket", key: "video.mp4", uploadId: "upload-abc-123"
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_list_parts", {
+        bucket: "my-bucket",
+        key: "video.mp4",
+        uploadId: "upload-abc-123",
+      }),
+    );
     expect(result.parts).toHaveLength(2);
     expect(result.parts[0].PartNumber).toBe(1);
     expect(result.parts[1].ETag).toBe('"part2"');
@@ -546,9 +614,14 @@ describe("s3_get_presigned_url", () => {
   it("returns a presigned URL string for GET", async () => {
     // getSignedUrl is imported from @aws-sdk/s3-request-presigner — mock it
     // The tool may return a URL; we just check it doesn't error
-    const result = parseResult(await callTool(server, "s3_get_presigned_url", {
-      bucket: "my-bucket", key: "photo.jpg", operation: "get", expiresIn: 3600
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "get",
+        expiresIn: 3600,
+      }),
+    );
     // Result is either a URL string or an object with a url field
     const hasUrl = typeof result === "string" || typeof result?.url === "string";
     expect(hasUrl).toBe(true);
@@ -562,13 +635,15 @@ describe("s3_get_object_lock_configuration", () => {
     sendSpy.mockResolvedValue({
       ObjectLockConfiguration: {
         ObjectLockEnabled: "Enabled",
-        Rule: { DefaultRetention: { Mode: "GOVERNANCE", Days: 30 } }
-      }
+        Rule: { DefaultRetention: { Mode: "GOVERNANCE", Days: 30 } },
+      },
     });
   });
 
   it("returns object lock configuration", async () => {
-    const result = parseResult(await callTool(server, "s3_get_object_lock_configuration", { bucket: "locked-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_object_lock_configuration", { bucket: "locked-bucket" }),
+    );
     // Response shape: { objectLockConfiguration: { ObjectLockEnabled, Rule } }
     expect(result.objectLockConfiguration.ObjectLockEnabled).toBe("Enabled");
     expect(result.objectLockConfiguration.Rule.DefaultRetention.Mode).toBe("GOVERNANCE");
@@ -583,7 +658,7 @@ describe("s3_put_object_lock_configuration", () => {
       bucket: "locked-bucket",
       objectLockEnabled: "Enabled",
       defaultRetentionMode: "GOVERNANCE",
-      defaultRetentionDays: 30
+      defaultRetentionDays: 30,
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -599,9 +674,12 @@ describe("s3_get_object_legal_hold", () => {
   });
 
   it("returns legal hold status", async () => {
-    const result = parseResult(await callTool(server, "s3_get_object_legal_hold", {
-      bucket: "my-bucket", key: "important-doc.pdf"
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_get_object_legal_hold", {
+        bucket: "my-bucket",
+        key: "important-doc.pdf",
+      }),
+    );
     expect(result.legalHold.Status).toBe("ON");
   });
 });
@@ -611,7 +689,9 @@ describe("s3_get_object_legal_hold", () => {
 describe("s3_put_object_legal_hold", () => {
   it("sets legal hold ON and returns success", async () => {
     const result = await callTool(server, "s3_put_object_legal_hold", {
-      bucket: "my-bucket", key: "doc.pdf", status: "ON"
+      bucket: "my-bucket",
+      key: "doc.pdf",
+      status: "ON",
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -624,14 +704,17 @@ describe("s3_put_object_legal_hold", () => {
 describe("s3_get_object_retention", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
-      Retention: { Mode: "COMPLIANCE", RetainUntilDate: new Date("2025-12-31") }
+      Retention: { Mode: "COMPLIANCE", RetainUntilDate: new Date("2025-12-31") },
     });
   });
 
   it("returns retention mode and date", async () => {
-    const result = parseResult(await callTool(server, "s3_get_object_retention", {
-      bucket: "my-bucket", key: "audit-log.txt"
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_get_object_retention", {
+        bucket: "my-bucket",
+        key: "audit-log.txt",
+      }),
+    );
     expect(result.retention.Mode).toBe("COMPLIANCE");
   });
 });
@@ -641,8 +724,10 @@ describe("s3_get_object_retention", () => {
 describe("s3_put_object_retention", () => {
   it("sets retention and returns success", async () => {
     const result = await callTool(server, "s3_put_object_retention", {
-      bucket: "my-bucket", key: "doc.pdf",
-      mode: "GOVERNANCE", retainUntilDate: "2026-12-31T00:00:00Z"
+      bucket: "my-bucket",
+      key: "doc.pdf",
+      mode: "GOVERNANCE",
+      retainUntilDate: "2026-12-31T00:00:00Z",
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -658,7 +743,9 @@ describe("s3_get_bucket_location", () => {
   });
 
   it("returns the bucket location constraint", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_location", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_location", { bucket: "my-bucket" }),
+    );
     expect(result.locationConstraint).toBe("us-west-004");
   });
 });
@@ -669,15 +756,20 @@ describe("s3_get_bucket_encryption", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
       ServerSideEncryptionConfiguration: {
-        Rules: [{ ApplyServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } }]
-      }
+        Rules: [{ ApplyServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" } }],
+      },
     });
   });
 
   it("returns encryption configuration", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_encryption", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_encryption", { bucket: "my-bucket" }),
+    );
     // Response shape: { serverSideEncryptionConfiguration: { Rules: [...] } }
-    expect(result.serverSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault.SSEAlgorithm).toBe("AES256");
+    expect(
+      result.serverSideEncryptionConfiguration.Rules[0].ApplyServerSideEncryptionByDefault
+        .SSEAlgorithm,
+    ).toBe("AES256");
   });
 });
 
@@ -686,7 +778,8 @@ describe("s3_get_bucket_encryption", () => {
 describe("s3_put_bucket_encryption", () => {
   it("applies AES256 encryption and returns success", async () => {
     const result = await callTool(server, "s3_put_bucket_encryption", {
-      bucket: "my-bucket", sseAlgorithm: "AES256"
+      bucket: "my-bucket",
+      sseAlgorithm: "AES256",
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -710,12 +803,14 @@ describe("s3_delete_bucket_encryption", () => {
 describe("s3_get_bucket_logging", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
-      LoggingEnabled: { TargetBucket: "logs-bucket", TargetPrefix: "access-logs/" }
+      LoggingEnabled: { TargetBucket: "logs-bucket", TargetPrefix: "access-logs/" },
     });
   });
 
   it("returns logging configuration", async () => {
-    const result = parseResult(await callTool(server, "s3_get_bucket_logging", { bucket: "my-bucket" }));
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_logging", { bucket: "my-bucket" }),
+    );
     expect(result.loggingEnabled.TargetBucket).toBe("logs-bucket");
     expect(result.loggingEnabled.TargetPrefix).toBe("access-logs/");
   });
@@ -728,7 +823,7 @@ describe("s3_put_bucket_logging", () => {
     const result = await callTool(server, "s3_put_bucket_logging", {
       bucket: "my-bucket",
       targetBucket: "logs-bucket",
-      targetPrefix: "access/"
+      targetPrefix: "access/",
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -755,7 +850,7 @@ describe("s3_list_objects", () => {
       CommonPrefixes: [],
       IsTruncated: false,
       Marker: "",
-      NextMarker: null
+      NextMarker: null,
     });
   });
 
@@ -771,17 +866,21 @@ describe("s3_list_objects", () => {
 describe("s3_upload_part_copy", () => {
   beforeEach(() => {
     sendSpy.mockResolvedValue({
-      CopyPartResult: { ETag: '"part-etag"', LastModified: new Date() }
+      CopyPartResult: { ETag: '"part-etag"', LastModified: new Date() },
     });
   });
 
   it("copies a part and returns ETag", async () => {
     // Tool uses copySource (combined "bucket/key" string), not separate sourceBucket/sourceKey
-    const result = parseResult(await callTool(server, "s3_upload_part_copy", {
-      bucket: "dst-bucket", key: "assembled.bin",
-      uploadId: "upload-xyz", partNumber: 1,
-      copySource: "src-bucket/chunk.bin"
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_upload_part_copy", {
+        bucket: "dst-bucket",
+        key: "assembled.bin",
+        uploadId: "upload-xyz",
+        partNumber: 1,
+        copySource: "src-bucket/chunk.bin",
+      }),
+    );
     // Response shape: { partNumber, etag, lastModified }
     expect(result.etag).toBe('"part-etag"');
     const cmd = sendSpy.mock.calls[0][0];
@@ -796,7 +895,8 @@ describe("s3_upload_part_copy", () => {
 describe("s3_put_bucket_acl", () => {
   it("sets bucket ACL and returns success", async () => {
     const result = await callTool(server, "s3_put_bucket_acl", {
-      bucket: "my-bucket", acl: "public-read"
+      bucket: "my-bucket",
+      acl: "public-read",
     });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("public-read");
@@ -811,14 +911,17 @@ describe("s3_put_bucket_acl", () => {
 
 describe("s3_put_bucket_lifecycle", () => {
   it("sends lifecycle rules and returns success", async () => {
-    const rules = [{
-      id: "expire-after-90-days",
-      status: "Enabled",
-      filter: { prefix: "logs/" },
-      expiration: { days: 90 }
-    }];
+    const rules = [
+      {
+        id: "expire-after-90-days",
+        status: "Enabled",
+        filter: { prefix: "logs/" },
+        expiration: { days: 90 },
+      },
+    ];
     const result = await callTool(server, "s3_put_bucket_lifecycle", {
-      bucket: "my-bucket", rules
+      bucket: "my-bucket",
+      rules,
     });
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
@@ -828,7 +931,9 @@ describe("s3_put_bucket_lifecycle", () => {
   });
 
   it("maps filter prefix correctly", async () => {
-    const rules = [{ id: "rule1", status: "Enabled", filter: { prefix: "archive/" }, expiration: { days: 365 } }];
+    const rules = [
+      { id: "rule1", status: "Enabled", filter: { prefix: "archive/" }, expiration: { days: 365 } },
+    ];
     await callTool(server, "s3_put_bucket_lifecycle", { bucket: "my-bucket", rules });
     const cmd = sendSpy.mock.calls[0][0];
     expect(cmd.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("archive/");
@@ -844,10 +949,15 @@ describe("s3_upload_part", () => {
 
   it("returns partNumber and ETag after uploading", async () => {
     const content = Buffer.alloc(16).toString("base64");
-    const result = parseResult(await callTool(server, "s3_upload_part", {
-      bucket: "my-bucket", key: "video.mp4",
-      uploadId: "upload-abc", partNumber: 1, content
-    }));
+    const result = parseResult(
+      await callTool(server, "s3_upload_part", {
+        bucket: "my-bucket",
+        key: "video.mp4",
+        uploadId: "upload-abc",
+        partNumber: 1,
+        content,
+      }),
+    );
     expect(result.partNumber).toBe(1);
     expect(result.etag).toBe('"part-etag-001"');
   });
@@ -855,8 +965,11 @@ describe("s3_upload_part", () => {
   it("decodes base64 content and sends correct part number", async () => {
     const content = Buffer.from("part data").toString("base64");
     await callTool(server, "s3_upload_part", {
-      bucket: "my-bucket", key: "file.bin",
-      uploadId: "upload-xyz", partNumber: 3, content
+      bucket: "my-bucket",
+      key: "file.bin",
+      uploadId: "upload-xyz",
+      partNumber: 3,
+      content,
     });
     const cmd = sendSpy.mock.calls[0][0];
     expect(cmd.input.PartNumber).toBe(3);
@@ -869,20 +982,33 @@ describe("s3_upload_part", () => {
 
 describe("S3 Error propagation", () => {
   it("s3_list_buckets returns isError on auth failure", async () => {
-    sendSpy.mockRejectedValue({ name: "InvalidClientTokenId", message: "The security token included in the request is invalid." });
+    sendSpy.mockRejectedValue({
+      name: "InvalidClientTokenId",
+      message: "The security token included in the request is invalid.",
+    });
     const result = await callTool(server, "s3_list_buckets");
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("invalid");
   });
 
   it("s3_head_object returns isError for NoSuchKey", async () => {
-    sendSpy.mockRejectedValue({ name: "NotFound", message: "Not Found", $metadata: { httpStatusCode: 404 } });
-    const result = await callTool(server, "s3_head_object", { bucket: "my-bucket", key: "missing.txt" });
+    sendSpy.mockRejectedValue({
+      name: "NotFound",
+      message: "Not Found",
+      $metadata: { httpStatusCode: 404 },
+    });
+    const result = await callTool(server, "s3_head_object", {
+      bucket: "my-bucket",
+      key: "missing.txt",
+    });
     expect(result.isError).toBe(true);
   });
 
   it("s3_get_bucket_versioning returns isError on NoSuchBucket", async () => {
-    sendSpy.mockRejectedValue({ name: "NoSuchBucket", message: "The specified bucket does not exist" });
+    sendSpy.mockRejectedValue({
+      name: "NoSuchBucket",
+      message: "The specified bucket does not exist",
+    });
     const result = await callTool(server, "s3_get_bucket_versioning", { bucket: "ghost-bucket" });
     expect(result.isError).toBe(true);
     // The error handler formats the message, not the error name

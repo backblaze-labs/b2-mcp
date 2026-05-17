@@ -1,4 +1,10 @@
-import { parseB2Error, formatB2Error, toolError, toolSuccess, toolJson } from "../../src/utils/errors";
+import {
+  parseB2Error,
+  formatB2Error,
+  toolError,
+  toolSuccess,
+  toolJson,
+} from "../../src/utils/errors";
 
 describe("parseB2Error", () => {
   it("should parse axios-style error with response body", () => {

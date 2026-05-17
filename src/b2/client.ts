@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
+import axios, { AxiosRequestConfig } from "axios";
 import { Readable } from "stream";
 import { B2AuthManager } from "../auth.js";
 import { withRetry } from "../utils/retry.js";
@@ -28,7 +28,7 @@ export class B2Client {
       apiPath?: string;
       /** Query string parameters for GET requests. */
       params?: Record<string, unknown>;
-    } = {}
+    } = {},
   ): Promise<T> {
     return withRetry(async () => {
       const authData = await this.auth.getAuth();
@@ -66,7 +66,7 @@ export class B2Client {
     uploadUrl: string,
     uploadAuthToken: string,
     body: Buffer | Uint8Array | Readable,
-    headers: Record<string, string>
+    headers: Record<string, string>,
   ): Promise<T> {
     return withRetry(async () => {
       const response = await axios.post<T>(uploadUrl, body, {
@@ -84,7 +84,11 @@ export class B2Client {
   /**
    * Download a file as a buffer using the B2 download URL.
    */
-  async download(url: string, authToken?: string, range?: string): Promise<{ data: Buffer; contentType: string; contentLength: number }> {
+  async download(
+    url: string,
+    authToken?: string,
+    range?: string,
+  ): Promise<{ data: Buffer; contentType: string; contentLength: number }> {
     return withRetry(async () => {
       const authData = await this.auth.getAuth();
       const headers: Record<string, string> = {
@@ -100,8 +104,8 @@ export class B2Client {
 
       return {
         data: Buffer.from(response.data as ArrayBuffer),
-        contentType: response.headers["content-type"] as string ?? "application/octet-stream",
-        contentLength: parseInt(response.headers["content-length"] as string ?? "0", 10),
+        contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
+        contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
       };
     });
   }

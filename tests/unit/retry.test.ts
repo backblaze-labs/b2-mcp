@@ -15,9 +15,15 @@ jest.mock("../../src/utils/retry", () => {
 });
 
 // Suppress actual sleep delays by mocking timers
-beforeAll(() => { jest.useFakeTimers(); });
-afterAll(() => { jest.useRealTimers(); });
-afterEach(() => { jest.clearAllTimers(); });
+beforeAll(() => {
+  jest.useFakeTimers();
+});
+afterAll(() => {
+  jest.useRealTimers();
+});
+afterEach(() => {
+  jest.clearAllTimers();
+});
 
 /** Helper: advance all pending timers to bypass sleep() calls */
 async function flushRetries() {
@@ -45,9 +51,7 @@ describe("withRetry — success path", () => {
   });
 
   it("succeeds on the second attempt after a retryable failure", async () => {
-    const fn = jest.fn()
-      .mockRejectedValueOnce(httpError(429))
-      .mockResolvedValueOnce("recovered");
+    const fn = jest.fn().mockRejectedValueOnce(httpError(429)).mockResolvedValueOnce("recovered");
 
     const promise = withRetry(fn);
     await flushRetries();
@@ -58,7 +62,8 @@ describe("withRetry — success path", () => {
   });
 
   it("succeeds on the third attempt after two retryable failures", async () => {
-    const fn = jest.fn()
+    const fn = jest
+      .fn()
       .mockRejectedValueOnce(httpError(503))
       .mockRejectedValueOnce(httpError(503))
       .mockResolvedValueOnce("third-time");
@@ -76,9 +81,7 @@ describe("withRetry — success path", () => {
 
 describe("withRetry — retries on transient status codes", () => {
   test.each([408, 429, 503, 504])("retries on HTTP %d", async (status) => {
-    const fn = jest.fn()
-      .mockRejectedValueOnce(httpError(status))
-      .mockResolvedValueOnce("ok");
+    const fn = jest.fn().mockRejectedValueOnce(httpError(status)).mockResolvedValueOnce("ok");
 
     const promise = withRetry(fn);
     await flushRetries();
@@ -155,7 +158,9 @@ describe("withRetry — exhausts retries and throws", () => {
     const promise = withRetry(fn);
     await flushRetries();
     let caught: any;
-    await promise.catch(e => { caught = e; });
+    await promise.catch((e) => {
+      caught = e;
+    });
 
     expect(caught.response.status).toBe(429); // last error thrown
   });

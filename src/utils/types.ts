@@ -10,7 +10,7 @@ export interface B2Config {
   appKey: string;
   region: string;
   largeFileThreshold: number; // bytes
-  partSize: number;           // bytes
+  partSize: number; // bytes
 }
 
 export interface B2AuthResponse {
@@ -157,13 +157,27 @@ export type B2Capability =
   | "writeBucketNotifications";
 
 export const ALL_CAPABILITIES: B2Capability[] = [
-  "listKeys", "writeKeys", "deleteKeys",
-  "listBuckets", "readBuckets", "writeBuckets", "deleteBuckets",
-  "listFiles", "readFiles", "shareFiles", "writeFiles", "deleteFiles",
-  "readBucketEncryption", "writeBucketEncryption",
-  "readBucketRetentions", "writeBucketRetentions",
-  "readFileRetentions", "writeFileRetentions",
+  "listKeys",
+  "writeKeys",
+  "deleteKeys",
+  "listBuckets",
+  "readBuckets",
+  "writeBuckets",
+  "deleteBuckets",
+  "listFiles",
+  "readFiles",
+  "shareFiles",
+  "writeFiles",
+  "deleteFiles",
+  "readBucketEncryption",
+  "writeBucketEncryption",
+  "readBucketRetentions",
+  "writeBucketRetentions",
+  "readFileRetentions",
+  "writeFileRetentions",
   "bypassGovernance",
-  "readBucketReplications", "writeBucketReplications",
-  "readBucketNotifications", "writeBucketNotifications",
+  "readBucketReplications",
+  "writeBucketReplications",
+  "readBucketNotifications",
+  "writeBucketNotifications",
 ];

@@ -7,10 +7,7 @@ const RETRYABLE_STATUS_CODES = new Set([408, 429, 503, 504]);
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 
-export async function withRetry<T>(
-  fn: () => Promise<T>,
-  retries = MAX_RETRIES
-): Promise<T> {
+export async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {

@@ -18,7 +18,6 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
  * compliance mode cannot be shortened or overridden.
  */
 export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void {
-
   // ── s3_get_object_legal_hold ───────────────────────────────────────────────
   server.tool(
     "s3_get_object_legal_hold",
@@ -30,14 +29,18 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
     },
     async (args) => {
       try {
-        const result = await s3.send(new GetObjectLegalHoldCommand({
-          Bucket: args.bucket,
-          Key: args.key,
-          VersionId: args.versionId,
-        }));
+        const result = await s3.send(
+          new GetObjectLegalHoldCommand({
+            Bucket: args.bucket,
+            Key: args.key,
+            VersionId: args.versionId,
+          }),
+        );
         return toolJson({ legalHold: result.LegalHold });
-      } catch (err) { return toolError(err); }
-    }
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // ── s3_put_object_legal_hold ──────────────────────────────────────────────
@@ -52,15 +55,19 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
     },
     async (args) => {
       try {
-        await s3.send(new PutObjectLegalHoldCommand({
-          Bucket: args.bucket,
-          Key: args.key,
-          VersionId: args.versionId,
-          LegalHold: { Status: args.status },
-        }));
+        await s3.send(
+          new PutObjectLegalHoldCommand({
+            Bucket: args.bucket,
+            Key: args.key,
+            VersionId: args.versionId,
+            LegalHold: { Status: args.status },
+          }),
+        );
         return toolSuccess(`Legal hold set to '${args.status}' for '${args.key}'.`);
-      } catch (err) { return toolError(err); }
-    }
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // ── s3_get_object_retention ───────────────────────────────────────────────
@@ -74,14 +81,18 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
     },
     async (args) => {
       try {
-        const result = await s3.send(new GetObjectRetentionCommand({
-          Bucket: args.bucket,
-          Key: args.key,
-          VersionId: args.versionId,
-        }));
+        const result = await s3.send(
+          new GetObjectRetentionCommand({
+            Bucket: args.bucket,
+            Key: args.key,
+            VersionId: args.versionId,
+          }),
+        );
         return toolJson({ retention: result.Retention });
-      } catch (err) { return toolError(err); }
-    }
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // ── s3_put_object_retention ───────────────────────────────────────────────
@@ -92,25 +103,38 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),
       mode: z.enum(["GOVERNANCE", "COMPLIANCE"]).describe("Retention mode."),
-      retainUntilDate: z.string().describe("ISO 8601 date-time string for the retain-until date, e.g. '2027-01-01T00:00:00Z'."),
+      retainUntilDate: z
+        .string()
+        .describe(
+          "ISO 8601 date-time string for the retain-until date, e.g. '2027-01-01T00:00:00Z'.",
+        ),
       versionId: z.string().optional().describe("Specific version of the object."),
-      bypassGovernanceRetention: z.boolean().optional().describe("If true, allows overriding existing governance-mode retention."),
+      bypassGovernanceRetention: z
+        .boolean()
+        .optional()
+        .describe("If true, allows overriding existing governance-mode retention."),
     },
     async (args) => {
       try {
-        await s3.send(new PutObjectRetentionCommand({
-          Bucket: args.bucket,
-          Key: args.key,
-          VersionId: args.versionId,
-          BypassGovernanceRetention: args.bypassGovernanceRetention,
-          Retention: {
-            Mode: args.mode,
-            RetainUntilDate: new Date(args.retainUntilDate),
-          },
-        }));
-        return toolSuccess(`Retention (${args.mode} until ${args.retainUntilDate}) applied to '${args.key}'.`);
-      } catch (err) { return toolError(err); }
-    }
+        await s3.send(
+          new PutObjectRetentionCommand({
+            Bucket: args.bucket,
+            Key: args.key,
+            VersionId: args.versionId,
+            BypassGovernanceRetention: args.bypassGovernanceRetention,
+            Retention: {
+              Mode: args.mode,
+              RetainUntilDate: new Date(args.retainUntilDate),
+            },
+          }),
+        );
+        return toolSuccess(
+          `Retention (${args.mode} until ${args.retainUntilDate}) applied to '${args.key}'.`,
+        );
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // ── s3_get_object_lock_configuration ─────────────────────────────────────
@@ -122,12 +146,16 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
     },
     async (args) => {
       try {
-        const result = await s3.send(new GetObjectLockConfigurationCommand({
-          Bucket: args.bucket,
-        }));
+        const result = await s3.send(
+          new GetObjectLockConfigurationCommand({
+            Bucket: args.bucket,
+          }),
+        );
         return toolJson({ objectLockConfiguration: result.ObjectLockConfiguration });
-      } catch (err) { return toolError(err); }
-    }
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // ── s3_put_object_lock_configuration ─────────────────────────────────────
@@ -136,32 +164,53 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
     "Enable Object Lock on an existing B2 bucket or set a default retention rule via the S3-compatible API. To enable Object Lock on an existing bucket, include the x-amz-bucket-object-lock-enabled header (set via SDK options). Note: Object Lock cannot be disabled once enabled.",
     {
       bucket: z.string().describe("The bucket name."),
-      objectLockEnabled: z.enum(["Enabled"]).optional().describe("Set to 'Enabled' to enable Object Lock on the bucket."),
-      defaultRetentionMode: z.enum(["GOVERNANCE", "COMPLIANCE"]).optional().describe("Default retention mode for objects in the bucket."),
-      defaultRetentionDays: z.number().int().min(1).optional().describe("Default retention period in days."),
-      defaultRetentionYears: z.number().int().min(1).optional().describe("Default retention period in years (alternative to days)."),
+      objectLockEnabled: z
+        .enum(["Enabled"])
+        .optional()
+        .describe("Set to 'Enabled' to enable Object Lock on the bucket."),
+      defaultRetentionMode: z
+        .enum(["GOVERNANCE", "COMPLIANCE"])
+        .optional()
+        .describe("Default retention mode for objects in the bucket."),
+      defaultRetentionDays: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Default retention period in days."),
+      defaultRetentionYears: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Default retention period in years (alternative to days)."),
     },
     async (args) => {
       try {
-        const rule = (args.defaultRetentionMode && (args.defaultRetentionDays || args.defaultRetentionYears))
-          ? {
-              DefaultRetention: {
-                Mode: args.defaultRetentionMode,
-                ...(args.defaultRetentionDays ? { Days: args.defaultRetentionDays } : {}),
-                ...(args.defaultRetentionYears ? { Years: args.defaultRetentionYears } : {}),
+        const rule =
+          args.defaultRetentionMode && (args.defaultRetentionDays || args.defaultRetentionYears)
+            ? {
+                DefaultRetention: {
+                  Mode: args.defaultRetentionMode,
+                  ...(args.defaultRetentionDays ? { Days: args.defaultRetentionDays } : {}),
+                  ...(args.defaultRetentionYears ? { Years: args.defaultRetentionYears } : {}),
+                },
               }
-            }
-          : undefined;
+            : undefined;
 
-        await s3.send(new PutObjectLockConfigurationCommand({
-          Bucket: args.bucket,
-          ObjectLockConfiguration: {
-            ObjectLockEnabled: args.objectLockEnabled,
-            Rule: rule,
-          },
-        }));
+        await s3.send(
+          new PutObjectLockConfigurationCommand({
+            Bucket: args.bucket,
+            ObjectLockConfiguration: {
+              ObjectLockEnabled: args.objectLockEnabled,
+              Rule: rule,
+            },
+          }),
+        );
         return toolSuccess(`Object Lock configuration updated for bucket '${args.bucket}'.`);
-      } catch (err) { return toolError(err); }
-    }
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 }

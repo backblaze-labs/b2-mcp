@@ -65,7 +65,7 @@ describe("configFromHeaders", () => {
 
   it("respects B2_REGION, B2_PART_SIZE, B2_LARGE_FILE_THRESHOLD env vars", () => {
     process.env.B2_REGION = "eu-central-003";
-    process.env.B2_PART_SIZE = "52428800";       // 50 MB
+    process.env.B2_PART_SIZE = "52428800"; // 50 MB
     process.env.B2_LARGE_FILE_THRESHOLD = "10485760"; // 10 MB
     const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
     const config = configFromHeaders(req)!;

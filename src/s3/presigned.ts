@@ -13,18 +13,31 @@ import { toolError, toolJson } from "../utils/errors.js";
  * omitted for this reason.
  */
 export function registerS3PresignedTools(server: McpServer, s3: S3Client): void {
-
   server.tool(
     "s3_get_presigned_url",
     "Generate a presigned URL for a B2 object via the S3-compatible API. Presigned URLs grant temporary, credential-free access to a specific object. Supports GetObject (download) or PutObject (upload). Note: Browser-based POST uploads (presigned POST) are NOT supported by Backblaze B2 — use PutObject presigned URLs instead.",
     {
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),
-      operation: z.enum(["GetObject", "PutObject"]).describe("The operation the URL allows: GetObject to download, PutObject to upload."),
-      expiresIn: z.number().int().min(1).max(604800).optional().default(3600)
+      operation: z
+        .enum(["GetObject", "PutObject"])
+        .describe("The operation the URL allows: GetObject to download, PutObject to upload."),
+      expiresIn: z
+        .number()
+        .int()
+        .min(1)
+        .max(604800)
+        .optional()
+        .default(3600)
         .describe("URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days)."),
-      versionId: z.string().optional().describe("For GetObject: the specific version ID to target."),
-      contentType: z.string().optional().describe("For PutObject: restrict the upload to this content type."),
+      versionId: z
+        .string()
+        .optional()
+        .describe("For GetObject: the specific version ID to target."),
+      contentType: z
+        .string()
+        .optional()
+        .describe("For PutObject: restrict the upload to this content type."),
     },
     async (args) => {
       try {
@@ -50,7 +63,9 @@ export function registerS3PresignedTools(server: McpServer, s3: S3Client): void 
           expiresIn: args.expiresIn ?? 3600,
           expiresAt: new Date(Date.now() + (args.expiresIn ?? 3600) * 1000).toISOString(),
         });
-      } catch (err) { return toolError(err); }
-    }
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 }

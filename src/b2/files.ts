@@ -1,12 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
-import { pipeline } from "stream/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
-import { B2Config, B2FileInfo } from "../utils/types.js";
+import { B2Config } from "../utils/types.js";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { uploadLargeFile } from "./large-files.js";
 
@@ -28,20 +27,38 @@ export function registerFileTools(
   server: McpServer,
   client: B2Client,
   auth: B2AuthManager,
-  config: B2Config
+  config: B2Config,
 ): void {
-
   // ── b2_list_file_names ────────────────────────────────────────────────────
   server.tool(
     "b2_list_file_names",
     "List file names in a B2 bucket. Supports prefix filtering, pagination, and delimiter-based pseudo-directory listings (use '/' as delimiter to list like a folder tree).",
     {
       bucketId: z.string().describe("The ID of the bucket to list files in."),
-      prefix: z.string().optional().describe("Only return files whose names start with this prefix."),
-      delimiter: z.string().optional().describe("Use '/' to group files by folder. Files with the delimiter in their name after the prefix are returned as a folder entry."),
-      maxFileCount: z.number().int().min(1).max(10000).optional().default(1000)
+      prefix: z
+        .string()
+        .optional()
+        .describe("Only return files whose names start with this prefix."),
+      delimiter: z
+        .string()
+        .optional()
+        .describe(
+          "Use '/' to group files by folder. Files with the delimiter in their name after the prefix are returned as a folder entry.",
+        ),
+      maxFileCount: z
+        .number()
+        .int()
+        .min(1)
+        .max(10000)
+        .optional()
+        .default(1000)
         .describe("Maximum number of files to return (1-10000). Defaults to 1000."),
-      startFileName: z.string().optional().describe("Pagination cursor — the first file name to return (from a previous response's nextFileName)."),
+      startFileName: z
+        .string()
+        .optional()
+        .describe(
+          "Pagination cursor — the first file name to return (from a previous response's nextFileName).",
+        ),
     },
     async (args) => {
       try {
@@ -58,7 +75,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_list_file_versions ─────────────────────────────────────────────────
@@ -67,11 +84,20 @@ export function registerFileTools(
     "List all versions of files in a B2 bucket, including hidden markers. Useful for managing versioned files and recovering deleted content.",
     {
       bucketId: z.string().describe("The ID of the bucket."),
-      prefix: z.string().optional().describe("Only return files whose names start with this prefix."),
+      prefix: z
+        .string()
+        .optional()
+        .describe("Only return files whose names start with this prefix."),
       delimiter: z.string().optional().describe("Use '/' to group by folder."),
       maxFileCount: z.number().int().min(1).max(10000).optional().default(1000),
-      startFileName: z.string().optional().describe("Pagination cursor — file name from a previous response's nextFileName."),
-      startFileId: z.string().optional().describe("Pagination cursor — file ID from a previous response's nextFileId."),
+      startFileName: z
+        .string()
+        .optional()
+        .describe("Pagination cursor — file name from a previous response's nextFileName."),
+      startFileId: z
+        .string()
+        .optional()
+        .describe("Pagination cursor — file ID from a previous response's nextFileId."),
     },
     async (args) => {
       try {
@@ -89,7 +115,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_get_file_info ──────────────────────────────────────────────────────
@@ -106,7 +132,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_upload_file ────────────────────────────────────────────────────────
@@ -115,20 +141,43 @@ export function registerFileTools(
     "Upload a file to a B2 bucket. Provide either a local file path or base64-encoded content. Files larger than the large-file threshold are automatically uploaded via multipart upload.",
     {
       bucketId: z.string().describe("The destination bucket ID."),
-      fileName: z.string().describe("The name for the file in B2. Use forward slashes for folder-like organization, e.g. 'backups/2026/data.tar.gz'."),
+      fileName: z
+        .string()
+        .describe(
+          "The name for the file in B2. Use forward slashes for folder-like organization, e.g. 'backups/2026/data.tar.gz'.",
+        ),
       filePath: z.string().optional().describe("Absolute path to a local file to upload."),
-      content: z.string().optional().describe("Base64-encoded file content (use for small files or text content)."),
-      contentType: z.string().optional().default("b2/x-auto")
+      content: z
+        .string()
+        .optional()
+        .describe("Base64-encoded file content (use for small files or text content)."),
+      contentType: z
+        .string()
+        .optional()
+        .default("b2/x-auto")
         .describe("MIME type of the file. Use 'b2/x-auto' to let B2 detect it automatically."),
-      fileInfo: z.record(z.string(), z.string()).optional().describe("Up to 10 custom metadata key-value pairs to store with the file."),
-      concurrency: z.number().int().min(1).max(10).optional().default(1)
-        .describe("Number of parts to upload in parallel for large files (>threshold). 1 = sequential (default), up to 10 for maximum throughput. Has no effect on small files uploaded as a single request."),
-      serverSideEncryption: z.object({
-        mode: z.enum(["SSE-B2", "SSE-C"]),
-        algorithm: z.string().optional(),
-        customerKey: z.string().optional().describe("Base64-encoded key for SSE-C."),
-        customerKeyMd5: z.string().optional(),
-      }).optional(),
+      fileInfo: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe("Up to 10 custom metadata key-value pairs to store with the file."),
+      concurrency: z
+        .number()
+        .int()
+        .min(1)
+        .max(10)
+        .optional()
+        .default(1)
+        .describe(
+          "Number of parts to upload in parallel for large files (>threshold). 1 = sequential (default), up to 10 for maximum throughput. Has no effect on small files uploaded as a single request.",
+        ),
+      serverSideEncryption: z
+        .object({
+          mode: z.enum(["SSE-B2", "SSE-C"]),
+          algorithm: z.string().optional(),
+          customerKey: z.string().optional().describe("Base64-encoded key for SSE-C."),
+          customerKeyMd5: z.string().optional(),
+        })
+        .optional(),
     },
     async (args) => {
       try {
@@ -160,10 +209,10 @@ export function registerFileTools(
           // Small file: two streaming passes — hash then upload
           // Memory: O(stream chunk size), not O(file size)
           const sha1 = await computeFileSha1(args.filePath);
-          const uploadUrlData = await client.call<{ uploadUrl: string; authorizationToken: string }>(
-            "b2_get_upload_url",
-            { bucketId: args.bucketId }
-          );
+          const uploadUrlData = await client.call<{
+            uploadUrl: string;
+            authorizationToken: string;
+          }>("b2_get_upload_url", { bucketId: args.bucketId });
 
           const headers: Record<string, string> = {
             "X-Bz-File-Name": encodeURIComponent(args.fileName),
@@ -180,15 +229,17 @@ export function registerFileTools(
             const sse = args.serverSideEncryption;
             headers["X-Bz-Server-Side-Encryption"] = sse.mode;
             if (sse.algorithm) headers["X-Bz-Server-Side-Encryption-Algorithm"] = sse.algorithm;
-            if (sse.customerKey) headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
-            if (sse.customerKeyMd5) headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
+            if (sse.customerKey)
+              headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
+            if (sse.customerKeyMd5)
+              headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
           }
 
           const result = await client.uploadToUrl(
             uploadUrlData.uploadUrl,
             uploadUrlData.authorizationToken,
             fs.createReadStream(args.filePath),
-            headers
+            headers,
           );
           return toolJson(result);
         }
@@ -216,7 +267,7 @@ export function registerFileTools(
         const sha1 = crypto.createHash("sha1").update(buffer).digest("hex");
         const uploadUrlData = await client.call<{ uploadUrl: string; authorizationToken: string }>(
           "b2_get_upload_url",
-          { bucketId: args.bucketId }
+          { bucketId: args.bucketId },
         );
 
         const headers: Record<string, string> = {
@@ -234,21 +285,23 @@ export function registerFileTools(
           const sse = args.serverSideEncryption;
           headers["X-Bz-Server-Side-Encryption"] = sse.mode;
           if (sse.algorithm) headers["X-Bz-Server-Side-Encryption-Algorithm"] = sse.algorithm;
-          if (sse.customerKey) headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
-          if (sse.customerKeyMd5) headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
+          if (sse.customerKey)
+            headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
+          if (sse.customerKeyMd5)
+            headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
         }
 
         const result = await client.uploadToUrl(
           uploadUrlData.uploadUrl,
           uploadUrlData.authorizationToken,
           buffer,
-          headers
+          headers,
         );
         return toolJson(result);
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_download_file_by_name ──────────────────────────────────────────────
@@ -258,8 +311,16 @@ export function registerFileTools(
     {
       bucketName: z.string().describe("The name of the bucket containing the file."),
       fileName: z.string().describe("The name of the file to download."),
-      range: z.string().optional().describe("Optional byte range to download, e.g. 'bytes=0-1048575' for the first 1MB."),
-      saveToPath: z.string().optional().describe("If provided, save the downloaded file to this local path instead of returning content."),
+      range: z
+        .string()
+        .optional()
+        .describe("Optional byte range to download, e.g. 'bytes=0-1048575' for the first 1MB."),
+      saveToPath: z
+        .string()
+        .optional()
+        .describe(
+          "If provided, save the downloaded file to this local path instead of returning content.",
+        ),
     },
     async (args) => {
       try {
@@ -267,12 +328,18 @@ export function registerFileTools(
         const encodedName = args.fileName.split("/").map(encodeURIComponent).join("/");
         const url = `${authData.downloadUrl}/file/${encodeURIComponent(args.bucketName)}/${encodedName}`;
 
-        const { data, contentType, contentLength } = await client.download(url, undefined, args.range);
+        const { data, contentType, contentLength } = await client.download(
+          url,
+          undefined,
+          args.range,
+        );
 
         if (args.saveToPath) {
           fs.mkdirSync(path.dirname(args.saveToPath), { recursive: true });
           fs.writeFileSync(args.saveToPath, data);
-          return toolSuccess(`File saved to ${args.saveToPath} (${contentLength} bytes, ${contentType})`);
+          return toolSuccess(
+            `File saved to ${args.saveToPath} (${contentLength} bytes, ${contentType})`,
+          );
         }
 
         return toolJson({
@@ -285,7 +352,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_download_file_by_id ────────────────────────────────────────────────
@@ -302,12 +369,18 @@ export function registerFileTools(
         const authData = await auth.getAuth();
         const url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${args.fileId}`;
 
-        const { data, contentType, contentLength } = await client.download(url, undefined, args.range);
+        const { data, contentType, contentLength } = await client.download(
+          url,
+          undefined,
+          args.range,
+        );
 
         if (args.saveToPath) {
           fs.mkdirSync(path.dirname(args.saveToPath), { recursive: true });
           fs.writeFileSync(args.saveToPath, data);
-          return toolSuccess(`File saved to ${args.saveToPath} (${contentLength} bytes, ${contentType})`);
+          return toolSuccess(
+            `File saved to ${args.saveToPath} (${contentLength} bytes, ${contentType})`,
+          );
         }
 
         return toolJson({
@@ -320,7 +393,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_delete_file_version ────────────────────────────────────────────────
@@ -330,7 +403,12 @@ export function registerFileTools(
     {
       fileName: z.string().describe("The name of the file to delete."),
       fileId: z.string().describe("The B2 file ID of the specific version to delete."),
-      bypassGovernance: z.boolean().optional().describe("If true, bypass governance-mode file lock. Requires bypassGovernance capability."),
+      bypassGovernance: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, bypass governance-mode file lock. Requires bypassGovernance capability.",
+        ),
     },
     async (args) => {
       try {
@@ -345,7 +423,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_hide_file ──────────────────────────────────────────────────────────
@@ -366,7 +444,7 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_get_upload_url ─────────────────────────────────────────────────────
@@ -378,15 +456,16 @@ export function registerFileTools(
     },
     async (args) => {
       try {
-        const result = await client.call<{ uploadUrl: string; authorizationToken: string; bucketId: string }>(
-          "b2_get_upload_url",
-          { bucketId: args.bucketId }
-        );
+        const result = await client.call<{
+          uploadUrl: string;
+          authorizationToken: string;
+          bucketId: string;
+        }>("b2_get_upload_url", { bucketId: args.bucketId });
         return toolJson(result);
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 
   // ── b2_copy_file ──────────────────────────────────────────────────────────
@@ -396,24 +475,43 @@ export function registerFileTools(
     {
       sourceFileId: z.string().describe("The file ID of the source file to copy."),
       fileName: z.string().describe("The name for the new copy of the file."),
-      destinationBucketId: z.string().optional().describe("The destination bucket ID. Defaults to the source bucket."),
+      destinationBucketId: z
+        .string()
+        .optional()
+        .describe("The destination bucket ID. Defaults to the source bucket."),
       range: z.string().optional().describe("Copy only a byte range, e.g. 'bytes=0-1048575'."),
-      metadataDirective: z.enum(["COPY", "REPLACE"]).optional().default("COPY")
-        .describe("COPY preserves source metadata; REPLACE uses the provided contentType and fileInfo."),
-      contentType: z.string().optional().describe("New content type (only used when metadataDirective is REPLACE)."),
-      fileInfo: z.record(z.string(), z.string()).optional().describe("New file info (only used when metadataDirective is REPLACE)."),
-      serverSideEncryption: z.object({
-        mode: z.enum(["SSE-B2", "SSE-C"]),
-        algorithm: z.string().optional(),
-        customerKey: z.string().optional(),
-        customerKeyMd5: z.string().optional(),
-      }).optional(),
-      sourceServerSideEncryption: z.object({
-        mode: z.enum(["SSE-C"]),
-        algorithm: z.string().optional(),
-        customerKey: z.string().optional(),
-        customerKeyMd5: z.string().optional(),
-      }).optional().describe("SSE-C parameters for the source file, if it was encrypted with a customer key."),
+      metadataDirective: z
+        .enum(["COPY", "REPLACE"])
+        .optional()
+        .default("COPY")
+        .describe(
+          "COPY preserves source metadata; REPLACE uses the provided contentType and fileInfo.",
+        ),
+      contentType: z
+        .string()
+        .optional()
+        .describe("New content type (only used when metadataDirective is REPLACE)."),
+      fileInfo: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe("New file info (only used when metadataDirective is REPLACE)."),
+      serverSideEncryption: z
+        .object({
+          mode: z.enum(["SSE-B2", "SSE-C"]),
+          algorithm: z.string().optional(),
+          customerKey: z.string().optional(),
+          customerKeyMd5: z.string().optional(),
+        })
+        .optional(),
+      sourceServerSideEncryption: z
+        .object({
+          mode: z.enum(["SSE-C"]),
+          algorithm: z.string().optional(),
+          customerKey: z.string().optional(),
+          customerKeyMd5: z.string().optional(),
+        })
+        .optional()
+        .describe("SSE-C parameters for the source file, if it was encrypted with a customer key."),
     },
     async (args) => {
       try {
@@ -422,8 +520,14 @@ export function registerFileTools(
           fileName: args.fileName,
           metadataDirective: args.metadataDirective ?? "COPY",
         };
-        const optional = ["destinationBucketId", "range", "contentType", "fileInfo",
-          "serverSideEncryption", "sourceServerSideEncryption"] as const;
+        const optional = [
+          "destinationBucketId",
+          "range",
+          "contentType",
+          "fileInfo",
+          "serverSideEncryption",
+          "sourceServerSideEncryption",
+        ] as const;
         for (const key of optional) {
           if (args[key] !== undefined) payload[key] = args[key];
         }
@@ -433,6 +537,6 @@ export function registerFileTools(
       } catch (err) {
         return toolError(err);
       }
-    }
+    },
   );
 }

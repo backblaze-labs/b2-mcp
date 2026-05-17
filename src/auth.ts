@@ -80,7 +80,7 @@ export class B2AuthManager {
 
   private async authorize(): Promise<B2AuthResponse> {
     const credentials = Buffer.from(
-      `${this.config.applicationKeyId}:${this.config.applicationKey}`
+      `${this.config.applicationKeyId}:${this.config.applicationKey}`,
     ).toString("base64");
 
     const response = await axios.get<B2V3AuthResponse>(AUTH_URL, {

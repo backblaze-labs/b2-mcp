@@ -278,10 +278,10 @@ Claude Desktop config:
     "backblaze-b2": {
       "url": "https://mcp.your-domain.example/sse",
       "headers": {
-        "X-B2-Key-Id":     "your-master-key-id",
-        "X-B2-Key":        "your-master-key-secret",
+        "X-B2-Key-Id": "your-master-key-id",
+        "X-B2-Key": "your-master-key-secret",
         "X-B2-App-Key-Id": "your-non-master-key-id",
-        "X-B2-App-Key":    "your-non-master-key-secret"
+        "X-B2-App-Key": "your-non-master-key-secret"
       }
     }
   }

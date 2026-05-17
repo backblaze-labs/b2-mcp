@@ -1,5 +1,3 @@
-import { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-
 export interface B2ApiError {
   status: number;
   code: string;
@@ -44,7 +42,10 @@ export function formatB2Error(err: unknown): string {
 /**
  * Return a structured MCP error content block for tool error responses.
  */
-export function toolError(err: unknown): { isError: true; content: Array<{ type: "text"; text: string }> } {
+export function toolError(err: unknown): {
+  isError: true;
+  content: Array<{ type: "text"; text: string }>;
+} {
   return {
     isError: true,
     content: [{ type: "text", text: formatB2Error(err) }],

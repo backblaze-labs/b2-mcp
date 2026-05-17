@@ -27,6 +27,7 @@ Security Advisories.
 ## Scope
 
 In scope:
+
 - Authentication, authorization, or credential-handling flaws in the MCP
   server itself
 - Code execution, SSRF, or denial-of-service vulnerabilities reachable via
@@ -35,6 +36,7 @@ In scope:
   unauthorized callers
 
 Out of scope:
+
 - Vulnerabilities in the Backblaze B2 service itself — report those to
   Backblaze directly
 - Self-hosted deployment misconfigurations (missing TLS, weak nginx config,
