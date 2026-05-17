@@ -6,7 +6,7 @@
  * Max retries: 3 (4 total attempts).
  */
 
-import { withRetry } from "../../src/utils/retry";
+import { withRetry, _resetRetryBudget, _consumeRetryToken } from "../../src/utils/retry";
 
 // Speed up tests — replace sleep with an immediate no-op
 jest.mock("../../src/utils/retry", () => {
@@ -23,6 +23,10 @@ afterAll(() => {
 });
 afterEach(() => {
   jest.clearAllTimers();
+});
+
+beforeEach(() => {
+  _resetRetryBudget();
 });
 
 /** Helper: advance all pending timers to bypass sleep() calls */
@@ -187,5 +191,30 @@ describe("withRetry — custom retry count", () => {
     await expect(promise).rejects.toBeDefined();
 
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── Global retry budget ──────────────────────────────────────────────────────
+
+describe("withRetry — global retry budget", () => {
+  it("starts with a full budget of 100 tokens", () => {
+    _resetRetryBudget();
+    for (let i = 0; i < 100; i++) {
+      expect(_consumeRetryToken()).toBe(true);
+    }
+    // 101st synchronous consume (no time advancement) should fail.
+    expect(_consumeRetryToken()).toBe(false);
+  });
+
+  it("refills tokens over wall-clock time", async () => {
+    _resetRetryBudget();
+    for (let i = 0; i < 100; i++) _consumeRetryToken();
+    expect(_consumeRetryToken()).toBe(false);
+    // Use real timers for the wait — fake timers won't advance Date.now().
+    jest.useRealTimers();
+    await new Promise((r) => setTimeout(r, 150));
+    jest.useFakeTimers();
+    // After ~150ms, at 10 tokens/sec refill, ~1 token should be available.
+    expect(_consumeRetryToken()).toBe(true);
   });
 });

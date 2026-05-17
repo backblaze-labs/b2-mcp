@@ -21,6 +21,7 @@ import { createServer } from "./server.js";
 import { B2Config } from "./utils/types.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
+import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 
 const DEFAULT_PORT = 3000;
 const DEFAULT_PART_SIZE = 100 * 1024 * 1024;
@@ -34,6 +35,8 @@ interface Session {
   transport: SSEServerTransport;
   mcpServer: McpServer;
   lastActivity: number;
+  /** Rate-limiter key — the 8-char prefix of the X-B2-Key-Id used to connect. */
+  rateKey: string;
 }
 
 export function getPort(): number {
@@ -90,7 +93,8 @@ async function main(): Promise<void> {
   // Sweep idle sessions periodically — protects against stuck connections
   // that never fired res.on("close").
   const idleSweep = setInterval(() => {
-    const cutoff = Date.now() - SESSION_IDLE_TIMEOUT_MS;
+    const now = Date.now();
+    const cutoff = now - SESSION_IDLE_TIMEOUT_MS;
     for (const [id, s] of sessions) {
       if (s.lastActivity < cutoff) {
         sessions.delete(id);
@@ -101,6 +105,7 @@ async function main(): Promise<void> {
         }
       }
     }
+    sweepIdleBuckets(now);
   }, IDLE_SWEEP_INTERVAL_MS);
   idleSweep.unref();
 
@@ -132,6 +137,7 @@ async function main(): Promise<void> {
         transport,
         mcpServer,
         lastActivity: Date.now(),
+        rateKey: config.applicationKeyId.slice(0, 8),
       });
 
       res.on("close", () => {
@@ -155,6 +161,12 @@ async function main(): Promise<void> {
       if (!session) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Session not found" }));
+        return;
+      }
+
+      if (!allowRequest(session.rateKey)) {
+        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
+        res.end(JSON.stringify({ error: "Rate limit exceeded" }));
         return;
       }
 

@@ -2,6 +2,7 @@ import axios, { AxiosRequestConfig } from "axios";
 import { Readable } from "stream";
 import { B2AuthManager } from "../auth.js";
 import { withRetry } from "../utils/retry.js";
+import { withCircuit } from "../utils/circuit-breaker.js";
 
 /**
  * B2Client wraps the B2 native REST API.
@@ -30,30 +31,32 @@ export class B2Client {
       params?: Record<string, unknown>;
     } = {},
   ): Promise<T> {
-    return withRetry(async () => {
-      const authData = await this.auth.getAuth();
-      const baseUrl = options.useDownloadUrl ? authData.downloadUrl : authData.apiUrl;
-      const apiPath = options.apiPath ?? "b2api/v2";
-      const url = `${baseUrl}/${apiPath}/${path}`;
+    return withRetry(() =>
+      withCircuit(async () => {
+        const authData = await this.auth.getAuth();
+        const baseUrl = options.useDownloadUrl ? authData.downloadUrl : authData.apiUrl;
+        const apiPath = options.apiPath ?? "b2api/v2";
+        const url = `${baseUrl}/${apiPath}/${path}`;
 
-      try {
-        const config: AxiosRequestConfig = {
-          method: options.method ?? (data !== undefined ? "POST" : "GET"),
-          url,
-          headers: { Authorization: authData.authorizationToken },
-          ...(data !== undefined && { data }),
-          ...(options.params !== undefined && { params: options.params }),
-        };
-        const response = await axios(config);
-        return response.data as T;
-      } catch (err: unknown) {
-        // On 401, invalidate and let retry logic handle re-auth
-        if (isStatus(err, 401)) {
-          this.auth.invalidate();
+        try {
+          const config: AxiosRequestConfig = {
+            method: options.method ?? (data !== undefined ? "POST" : "GET"),
+            url,
+            headers: { Authorization: authData.authorizationToken },
+            ...(data !== undefined && { data }),
+            ...(options.params !== undefined && { params: options.params }),
+          };
+          const response = await axios(config);
+          return response.data as T;
+        } catch (err: unknown) {
+          // On 401, invalidate and let retry logic handle re-auth
+          if (isStatus(err, 401)) {
+            this.auth.invalidate();
+          }
+          throw err;
         }
-        throw err;
-      }
-    });
+      }),
+    );
   }
 
   /**
@@ -68,17 +71,19 @@ export class B2Client {
     body: Buffer | Uint8Array | Readable,
     headers: Record<string, string>,
   ): Promise<T> {
-    return withRetry(async () => {
-      const response = await axios.post<T>(uploadUrl, body, {
-        headers: {
-          Authorization: uploadAuthToken,
-          ...headers,
-        },
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-      });
-      return response.data;
-    });
+    return withRetry(() =>
+      withCircuit(async () => {
+        const response = await axios.post<T>(uploadUrl, body, {
+          headers: {
+            Authorization: uploadAuthToken,
+            ...headers,
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+        });
+        return response.data;
+      }),
+    );
   }
 
   /**
@@ -89,25 +94,27 @@ export class B2Client {
     authToken?: string,
     range?: string,
   ): Promise<{ data: Buffer; contentType: string; contentLength: number }> {
-    return withRetry(async () => {
-      const authData = await this.auth.getAuth();
-      const headers: Record<string, string> = {
-        Authorization: authToken ?? authData.authorizationToken,
-      };
-      if (range) headers["Range"] = range;
+    return withRetry(() =>
+      withCircuit(async () => {
+        const authData = await this.auth.getAuth();
+        const headers: Record<string, string> = {
+          Authorization: authToken ?? authData.authorizationToken,
+        };
+        if (range) headers["Range"] = range;
 
-      const response = await axios.get(url, {
-        headers,
-        responseType: "arraybuffer",
-        maxContentLength: Infinity,
-      });
+        const response = await axios.get(url, {
+          headers,
+          responseType: "arraybuffer",
+          maxContentLength: Infinity,
+        });
 
-      return {
-        data: Buffer.from(response.data as ArrayBuffer),
-        contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
-        contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
-      };
-    });
+        return {
+          data: Buffer.from(response.data as ArrayBuffer),
+          contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
+          contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
+        };
+      }),
+    );
   }
 }
 
