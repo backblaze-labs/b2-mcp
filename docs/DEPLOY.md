@@ -270,7 +270,43 @@ For a single host this is optional, but useful at scale:
 
 ## Step 9 — Connect a client
 
-Claude Desktop config:
+### Claude Desktop (macOS / Windows)
+
+Claude Desktop's `claude_desktop_config.json` only accepts **stdio** entries (`command` + `args`). To reach a hosted SSE server, use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge — it runs as a local stdio process and proxies to your hosted endpoint:
+
+```json
+{
+  "mcpServers": {
+    "backblaze-b2": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.your-domain.example/sse",
+        "--header",
+        "X-B2-Key-Id:your-application-key-id",
+        "--header",
+        "X-B2-Key:your-application-key-secret"
+      ]
+    }
+  }
+}
+```
+
+Add the additional headers only when `X-B2-Key-Id` is a **master** key (the S3 endpoint rejects master keys, so S3 tools need a separate non-master key in that case):
+
+```
+        "--header", "X-B2-App-Key-Id:your-non-master-key-id",
+        "--header", "X-B2-App-Key:your-non-master-key-secret"
+```
+
+A single application key works for both the B2 native API and the S3-compatible API; the master key is only required for Partner API, `bz_*` Computer Backup tools, and account-level key management.
+
+Quit Claude Desktop fully (`Cmd+Q` on macOS) and relaunch — the entry should load on next startup.
+
+### Claude.ai web / Pro / Max Custom Connectors
+
+For the Claude.ai web app and the Custom Connector UI in Claude Desktop Pro/Max, the URL + headers shape is the correct format:
 
 ```json
 {
@@ -286,7 +322,7 @@ Claude Desktop config:
 }
 ```
 
-A single application key works for both the B2 native API and the S3-compatible API. Only set the additional `X-B2-App-Key-Id` / `X-B2-App-Key` headers when `X-B2-Key-Id` is a **master** key — the S3 endpoint rejects master keys, so a non-master key is required for S3 tools in that case (and the master key is only needed for Partner API, `bz_*` Computer Backup tools, and account-level key management).
+Do **not** put this shape in `claude_desktop_config.json` — Claude Desktop will reject it as "not a valid MCP server configuration" and skip the entry.
 
 ## Capacity planning
 

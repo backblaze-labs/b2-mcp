@@ -96,21 +96,10 @@ Integration tests (`tests/integration/live.test.ts`) use two skip guards:
 
 The HTTP server (`src/http-server.ts`) reads credentials per-connection from request headers. Each SSE connection gets its own `B2Config` + `McpServer` instance.
 
-Claude Desktop config (typical — a single application key):
+Client config notes:
 
-```json
-{
-  "mcpServers": {
-    "backblaze-b2": {
-      "url": "https://your-server.com/sse",
-      "headers": {
-        "X-B2-Key-Id": "their-key-id",
-        "X-B2-Key": "their-key-secret"
-      }
-    }
-  }
-}
-```
+- **Claude Desktop** (`claude_desktop_config.json`) only accepts stdio entries. To connect to a hosted SSE server, use the `mcp-remote` bridge as a local stdio shim (`command: "npx"`, `args: ["-y", "mcp-remote", "<url>", "--header", "X-B2-Key-Id:…", "--header", "X-B2-Key:…"]`). The URL + headers shape is rejected by Claude Desktop with "not a valid MCP server configuration."
+- **Claude.ai web / Pro / Max Custom Connectors** accept the URL + headers shape directly: `{ url, headers: { "X-B2-Key-Id": "…", "X-B2-Key": "…" } }`.
 
 `X-B2-Key-Id` / `X-B2-Key` are required (any application key — used for B2 native API calls, and also the S3 client unless overridden). `X-B2-App-Key-Id` / `X-B2-App-Key` are optional non-master application key credentials for the S3-compatible API; they only need to be set when `X-B2-Key-Id` is a **master** key, because B2 rejects master keys on the S3 endpoint. Master keys are only required for Partner API, `bz_*` Computer Backup tools, and account-level key management.
 
