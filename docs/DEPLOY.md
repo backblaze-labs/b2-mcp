@@ -310,3 +310,19 @@ sudo systemctl restart b2-mcp
 
 The `SIGTERM` handler drains active sessions before exiting (10 second cap),
 so an in-flight request will not be cut mid-response.
+
+## Smoke test
+
+After every deploy, run the included end-to-end smoke test against the
+live server. It connects via SSE, lists tools, and exercises one tool
+per credential scope.
+
+```bash
+MCP_URL=https://mcp.your-domain.example/sse \
+B2_KEY_ID=...  B2_KEY=... \
+B2_APP_KEY_ID=...  B2_APP_KEY=... \
+npm run smoke
+```
+
+`B2_APP_KEY_ID` / `B2_APP_KEY` are optional — if absent the S3 check is
+skipped. Exit code 0 = pass, 1 = at least one check failed.
