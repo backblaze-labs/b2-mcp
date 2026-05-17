@@ -326,3 +326,20 @@ npm run smoke
 
 `B2_APP_KEY_ID` / `B2_APP_KEY` are optional — if absent the S3 check is
 skipped. Exit code 0 = pass, 1 = at least one check failed.
+
+### CI smoke runs
+
+The same script also runs automatically via `.github/workflows/smoke.yml`:
+
+- After every `release.published` event (so a `gh release create` triggers it)
+- Every 6 hours as a heartbeat
+- On manual `workflow_dispatch` from the Actions tab
+
+It depends on these repo-level secrets and variable:
+
+- `vars.MCP_URL` — full SSE endpoint (e.g. `https://mcp.example.com/sse`)
+- `secrets.B2_KEY_ID`, `secrets.B2_KEY`
+- `secrets.B2_APP_KEY_ID`, `secrets.B2_APP_KEY`
+
+The workflow is gated to the canonical repo (`if: github.repository == ...`)
+so personal mirrors don't fire failing runs.
