@@ -37,29 +37,23 @@ Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.jso
 {
   "mcpServers": {
     "backblaze-b2": {
-      "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
-      "env": {
-        "B2_APPLICATION_KEY_ID": "your-master-key-id",
-        "B2_APPLICATION_KEY": "your-master-key-secret",
-        "B2_APP_KEY_ID": "your-application-key-id",
-        "B2_APP_KEY": "your-application-key-secret",
-        "B2_REGION": "us-west-004"
+      "url": "https://mcp.backblazedemos.xyz/sse",
+      "headers": {
+        "X-B2-Key-Id":     "your-master-key-id",
+        "X-B2-Key":        "your-master-key-secret",
+        "X-B2-App-Key-Id": "your-non-master-key-id",
+        "X-B2-App-Key":    "your-non-master-key-secret"
       }
     }
   }
 }
 ```
 
-Replace `/ABSOLUTE/PATH/TO/b2-mcp-server` with the actual path where you unzipped the folder, e.g. `/Users/yourname/Downloads/b2-mcp-server`.
-
 Restart Claude Desktop — you should see the B2 tools available in Claude.
 
 > **Two key types:** Backblaze requires different keys for different APIs.
-> - `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` — your **master key** (used for B2 native API and Partner API)
-> - `B2_APP_KEY_ID` / `B2_APP_KEY` — a **non-master application key** (required for S3-compatible endpoints; master keys are rejected by the S3 API)
->
-> If you only have a master key, omit `B2_APP_KEY_ID` / `B2_APP_KEY` — S3 tools will be skipped automatically.
+> - `X-B2-Key-Id` / `X-B2-Key` — your **master key** (used for B2 native API and Partner API)
+> - `X-B2-App-Key-Id` / `X-B2-App-Key` — a **non-master application key** (required for S3-compatible endpoints; master keys are rejected by the S3 API)
 
 ### Cursor / VS Code
 
