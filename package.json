@@ -26,13 +26,11 @@
   "author": "Backblaze",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.24.0",
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-presigned-post": "^3.1041.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.7.0",
-    "form-data": "^4.0.0"
+    "axios": "^1.7.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.0",

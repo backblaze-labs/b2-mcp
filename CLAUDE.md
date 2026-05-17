@@ -33,7 +33,7 @@ npm run test:integration
 
 ### Entry points
 - `src/index.ts` — stdio transport (Claude Desktop, local use)
-- `src/http-server.ts` — HTTP+SSE transport for hosted deployments. Maintains a `Map<sessionId, SSEServerTransport>` for concurrent sessions. **Has no authentication** — add auth before exposing publicly.
+- `src/http-server.ts` — HTTP+SSE transport for hosted deployments. Reads B2 credentials per-connection from request headers (`X-B2-Key-Id`, `X-B2-Key`, optional `X-B2-App-Key-Id`, `X-B2-App-Key`); returns 401 without them. Each session gets its own `McpServer` + `B2Config` — no shared credential state. Sessions are tracked in `Map<sessionId, {transport, mcpServer, lastActivity}>` and swept after 30 minutes of inactivity. Handles `SIGTERM`/`SIGINT` for graceful drain on deploy.
 
 ### Tool registration flow
 `server.ts` exports two functions:

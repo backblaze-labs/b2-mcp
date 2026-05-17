@@ -220,11 +220,17 @@ npm test
 B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy npm run test:integration
 ```
 
+## Hosted Deployment
+
+For multi-user / hosted deployments using the HTTP+SSE transport, see
+[`docs/DEPLOY.md`](docs/DEPLOY.md) — a step-by-step guide covering nginx,
+Let's Encrypt, hardened systemd, fail2ban, and AWS-specific monitoring.
+
 ## Security Recommendations
 
 - **Use scoped application keys** — create a key with only the capabilities needed for your workflow
 - **Scope to a single bucket** when possible using the `bucketId` parameter in `b2_create_key`
-- **In hosted mode**, add HTTP-layer authentication in front of the server — it has no built-in auth
+- **In HTTP+SSE mode**, the server reads B2 credentials from per-request headers, but provides no caller authentication — front it with a proxy that authenticates the *caller* (Cloudflare Access, an internal SSO proxy, mTLS, etc.) before exposing to untrusted users
 - **Never commit credentials** — always use environment variables or a secrets manager
 
 ## License
