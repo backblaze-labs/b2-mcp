@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Bump `axios` from 1.16.0 to 1.16.1 (patch).
+- Bump `@aws-sdk/client-s3`, `@aws-sdk/s3-presigned-post`, and
+  `@aws-sdk/s3-request-presigner` from 3.1041.0 to 3.1048.0.
+- Bump `actions/setup-node` to v6 and `actions/checkout` to v6 in the CI
+  workflow.
+
+### Removed
+- CodeQL workflow (`.github/workflows/codeql.yml`). GitHub Advanced
+  Security is not available for private repos on the free plan; the
+  workflow failed with configuration errors on every run. Re-add if the
+  repo visibility or plan changes.
+
+### Internal
+- Dependabot `dev-dependencies` group restricted to `minor` and `patch`
+  updates. Major bumps (TypeScript 5→6, Jest 29→30) broke the build and
+  will be handled manually.
+
 ## [1.2.0] - 2026-05-16
 
 ### Added
