@@ -40,10 +40,8 @@ Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.jso
       "command": "node",
       "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
       "env": {
-        "B2_APPLICATION_KEY_ID": "your-master-key-id",
-        "B2_APPLICATION_KEY": "your-master-key-secret",
-        "B2_APP_KEY_ID": "your-non-master-key-id",
-        "B2_APP_KEY": "your-non-master-key-secret"
+        "B2_APPLICATION_KEY_ID": "your-application-key-id",
+        "B2_APPLICATION_KEY": "your-application-key-secret"
       }
     }
   }
@@ -54,12 +52,9 @@ Replace `/ABSOLUTE/PATH/TO/b2-mcp-server` with the actual path where you cloned 
 
 Restart Claude Desktop — you should see the B2 tools available in Claude.
 
-> **Two key types:** Backblaze requires different keys for different APIs.
+> **A single application key is enough for most users.** Create one in the B2 Console under **Application Keys** and use it for `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`. It will work for both the B2 native API and the S3-compatible API.
 >
-> - `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` — your **master key** (used for B2 native API and Partner API)
-> - `B2_APP_KEY_ID` / `B2_APP_KEY` — a **non-master application key** (required for S3-compatible endpoints; master keys are rejected by the S3 API)
->
-> If you only have a master key, omit `B2_APP_KEY_ID` / `B2_APP_KEY` — S3 tools will be skipped automatically.
+> **When you need a master key:** only the [Partner API](#partner-api-requires-master-key), the Backblaze Computer Backup tools (`bz_*`), and account-level key management (`b2_create_key`, `b2_list_keys`, `b2_delete_key`) require the master application key. If you use those, set `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` to the master key, then **also** set `B2_APP_KEY_ID` / `B2_APP_KEY` to a non-master application key — B2's S3 endpoint rejects master keys, so S3 tools need a separate key in that setup.
 
 ### Cursor / VS Code
 
@@ -73,8 +68,8 @@ Add to `.cursor/mcp.json` in your project root:
       "command": "node",
       "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
       "env": {
-        "B2_APPLICATION_KEY_ID": "your-master-key-id",
-        "B2_APPLICATION_KEY": "your-master-key-secret"
+        "B2_APPLICATION_KEY_ID": "your-application-key-id",
+        "B2_APPLICATION_KEY": "your-application-key-secret"
       }
     }
   }
@@ -83,15 +78,15 @@ Add to `.cursor/mcp.json` in your project root:
 
 ## Environment Variables
 
-| Variable                  | Required | Default                  | Description                                             |
-| ------------------------- | -------- | ------------------------ | ------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`   | ✅       | —                        | Master key ID (B2 native + Partner API)                 |
-| `B2_APPLICATION_KEY`      | ✅       | —                        | Master key secret                                       |
-| `B2_APP_KEY_ID`           | —        | falls back to master key | Non-master application key ID for S3-compatible API     |
-| `B2_APP_KEY`              | —        | falls back to master key | Non-master application key secret for S3-compatible API |
-| `B2_REGION`               | —        | `us-west-004`            | B2 region for S3-compatible endpoint                    |
-| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)      | File size above which multipart upload is used          |
-| `B2_PART_SIZE`            | —        | `104857600` (100MB)      | Size of each multipart upload part                      |
+| Variable                  | Required | Default                | Description                                                                 |
+| ------------------------- | -------- | ---------------------- | --------------------------------------------------------------------------- |
+| `B2_APPLICATION_KEY_ID`   | ✅       | —                      | Application key ID (master or non-master). Used for B2 native + S3 API      |
+| `B2_APPLICATION_KEY`      | ✅       | —                      | Application key secret                                                      |
+| `B2_APP_KEY_ID`           | —        | falls back to the above | Non-master application key ID — only set when the primary key is a master key (S3 endpoint rejects master keys) |
+| `B2_APP_KEY`              | —        | falls back to the above | Non-master application key secret                                           |
+| `B2_REGION`               | —        | `us-west-004`          | B2 region for S3-compatible endpoint                                        |
+| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)    | File size above which multipart upload is used                              |
+| `B2_PART_SIZE`            | —        | `104857600` (100MB)    | Size of each multipart upload part                                          |
 
 ## Available Tools
 

@@ -24,11 +24,15 @@ Run a single test by name:
 npx jest --testNamePattern="should cache the token"
 ```
 
-Integration tests require env vars (master key for B2/Partner tools, application key for S3 tools):
+Integration tests require env vars. A single application key works for both B2 native and S3 tools. A master key is only needed if you also want to exercise Partner API, `bz_*`, or account-level key-management tests — in that case set `B2_APP_KEY_ID` / `B2_APP_KEY` to a non-master key for S3 (master keys are rejected by the S3 endpoint):
 
 ```bash
-B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy \
-B2_APP_KEY_ID=zzz B2_APP_KEY=www \
+# Most users — one application key:
+B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy npm run test:integration
+
+# Master-key flows (Partner API, bz_*, key management) + S3:
+B2_APPLICATION_KEY_ID=master_id B2_APPLICATION_KEY=master_secret \
+B2_APP_KEY_ID=appkey_id B2_APP_KEY=appkey_secret \
 npm run test:integration
 ```
 
@@ -52,7 +56,7 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 **B2 native API** (`src/b2/`): Uses `B2Client` which wraps axios. All calls go through `B2Client.call()`, which injects the auth token and retries on 401 by calling `auth.invalidate()` then re-authorizing. The `apiPath` option switches between `b2api/v2` (default), `b2api/v3` (Partner API), and `api/backup/v1` (Backup/Computer API).
 
-**S3-compatible API** (`src/s3/`): Uses AWS SDK v3 `S3Client` configured to point at B2's S3 endpoint. Must use a **non-master application key** — B2 rejects master keys on the S3 endpoint. Configured via `B2_APP_KEY_ID` / `B2_APP_KEY`; falls back to master key if not set (S3 calls will fail in that case).
+**S3-compatible API** (`src/s3/`): Uses AWS SDK v3 `S3Client` configured to point at B2's S3 endpoint. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted. By default the S3 client uses `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` — which works as long as that's a non-master key. If the primary credential is a master key, set `B2_APP_KEY_ID` / `B2_APP_KEY` to a non-master application key so the S3 client can authenticate.
 
 ### Auth token lifecycle (`src/auth.ts`)
 
@@ -85,14 +89,14 @@ Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — n
 
 Integration tests (`tests/integration/live.test.ts`) use two skip guards:
 
-- `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (master key tests)
-- `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key)
+- `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (general B2 + Partner/master-only tests use this credential)
+- `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key, which is only required when the primary key is a master key)
 
 ## Pending work: per-session credential injection
 
 The HTTP server (`src/http-server.ts`) reads credentials per-connection from request headers. Each SSE connection gets its own `B2Config` + `McpServer` instance.
 
-Claude Desktop config:
+Claude Desktop config (typical — a single application key):
 
 ```json
 {
@@ -101,16 +105,14 @@ Claude Desktop config:
       "url": "https://your-server.com/sse",
       "headers": {
         "X-B2-Key-Id": "their-key-id",
-        "X-B2-Key": "their-key-secret",
-        "X-B2-App-Key-Id": "their-application-key-id",
-        "X-B2-App-Key": "their-application-key-secret"
+        "X-B2-Key": "their-key-secret"
       }
     }
   }
 }
 ```
 
-`X-B2-Key-Id` / `X-B2-Key` are required (master or application key — used for B2 native API calls). `X-B2-App-Key-Id` / `X-B2-App-Key` are optional non-master application key credentials for the S3-compatible API; if omitted, S3 tools will fail because B2 rejects master keys on the S3 endpoint.
+`X-B2-Key-Id` / `X-B2-Key` are required (any application key — used for B2 native API calls, and also the S3 client unless overridden). `X-B2-App-Key-Id` / `X-B2-App-Key` are optional non-master application key credentials for the S3-compatible API; they only need to be set when `X-B2-Key-Id` is a **master** key, because B2 rejects master keys on the S3 endpoint. Master keys are only required for Partner API, `bz_*` Computer Backup tools, and account-level key management.
 
 ## Deployment target
 

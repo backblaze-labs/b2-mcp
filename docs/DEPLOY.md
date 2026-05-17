@@ -278,15 +278,15 @@ Claude Desktop config:
     "backblaze-b2": {
       "url": "https://mcp.your-domain.example/sse",
       "headers": {
-        "X-B2-Key-Id": "your-master-key-id",
-        "X-B2-Key": "your-master-key-secret",
-        "X-B2-App-Key-Id": "your-non-master-key-id",
-        "X-B2-App-Key": "your-non-master-key-secret"
+        "X-B2-Key-Id": "your-application-key-id",
+        "X-B2-Key": "your-application-key-secret"
       }
     }
   }
 }
 ```
+
+A single application key works for both the B2 native API and the S3-compatible API. Only set the additional `X-B2-App-Key-Id` / `X-B2-App-Key` headers when `X-B2-Key-Id` is a **master** key — the S3 endpoint rejects master keys, so a non-master key is required for S3 tools in that case (and the master key is only needed for Partner API, `bz_*` Computer Backup tools, and account-level key management).
 
 ## Capacity planning
 

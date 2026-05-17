@@ -36,9 +36,11 @@ export function loadConfig(): B2Config {
   return {
     applicationKeyId: keyId,
     applicationKey: key,
-    // S3-compatible API requires a non-master application key.
-    // Set B2_APP_KEY_ID + B2_APP_KEY to a non-master application key.
-    // Falls back to the master key when not set (S3 calls will fail with master key).
+    // S3-compatible API: B2 rejects master keys on the S3 endpoint but
+    // accepts ordinary application keys. By default we reuse the primary
+    // credential — that's fine when it's a non-master key. Set B2_APP_KEY_ID
+    // / B2_APP_KEY to override with a non-master key when the primary is a
+    // master key (needed for Partner API + S3 in the same process).
     appKeyId: process.env.B2_APP_KEY_ID ?? keyId,
     appKey: process.env.B2_APP_KEY ?? key,
     region: process.env.B2_REGION ?? "us-west-004",
@@ -65,8 +67,10 @@ export function loadConfig(): B2Config {
  *                              presigned ×1, object-lock ×6, extras ×9)
  *   Total:          85 tools
  *
- * Note: Master keys are not supported for S3-compatible API calls.
- * Set B2_APP_KEY_ID / B2_APP_KEY to a non-master application key for S3 tool usage.
+ * Note: B2's S3 endpoint rejects master keys. If B2_APPLICATION_KEY_ID is
+ * a master key (only needed for Partner API, bz_*, and key-management tools),
+ * also set B2_APP_KEY_ID / B2_APP_KEY to a non-master application key for S3.
+ * For typical users, a single non-master application key works for everything.
  */
 export function createServer(config: B2Config): McpServer {
   const server = new McpServer(
