@@ -42,8 +42,8 @@ Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.jso
       "env": {
         "B2_APPLICATION_KEY_ID": "your-master-key-id",
         "B2_APPLICATION_KEY": "your-master-key-secret",
-        "B2_S3_APPLICATION_KEY_ID": "your-s3-key-id",
-        "B2_S3_APPLICATION_KEY": "your-s3-key-secret",
+        "B2_APP_KEY_ID": "your-application-key-id",
+        "B2_APP_KEY": "your-application-key-secret",
         "B2_REGION": "us-west-004"
       }
     }
@@ -57,9 +57,9 @@ Restart Claude Desktop — you should see the B2 tools available in Claude.
 
 > **Two key types:** Backblaze requires different keys for different APIs.
 > - `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` — your **master key** (used for B2 native API and Partner API)
-> - `B2_S3_APPLICATION_KEY_ID` / `B2_S3_APPLICATION_KEY` — a **non-master application key** (required for S3-compatible endpoints; master keys are rejected by the S3 API)
+> - `B2_APP_KEY_ID` / `B2_APP_KEY` — a **non-master application key** (required for S3-compatible endpoints; master keys are rejected by the S3 API)
 >
-> If you only have a master key, omit the `B2_S3_*` vars — S3 tools will be skipped automatically.
+> If you only have a master key, omit `B2_APP_KEY_ID` / `B2_APP_KEY` — S3 tools will be skipped automatically.
 
 ### Cursor / VS Code
 
@@ -87,8 +87,8 @@ Add to `.cursor/mcp.json` in your project root:
 |---|---|---|---|
 | `B2_APPLICATION_KEY_ID` | ✅ | — | Master key ID (B2 native + Partner API) |
 | `B2_APPLICATION_KEY` | ✅ | — | Master key secret |
-| `B2_S3_APPLICATION_KEY_ID` | — | falls back to master key | Non-master application key ID for S3-compatible API |
-| `B2_S3_APPLICATION_KEY` | — | falls back to master key | Non-master application key secret for S3-compatible API |
+| `B2_APP_KEY_ID` | — | falls back to master key | Non-master application key ID for S3-compatible API |
+| `B2_APP_KEY` | — | falls back to master key | Non-master application key secret for S3-compatible API |
 | `B2_REGION` | — | `us-west-004` | B2 region for S3-compatible endpoint |
 | `B2_LARGE_FILE_THRESHOLD` | — | `104857600` (100MB) | File size above which multipart upload is used |
 | `B2_PART_SIZE` | — | `104857600` (100MB) | Size of each multipart upload part |
