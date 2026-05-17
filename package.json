@@ -1,6 +1,6 @@
 {
   "name": "@backblaze/b2-mcp-server",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "MCP server for Backblaze B2 — full B2 native API + S3-compatible API coverage",
   "main": "dist/index.js",
   "bin": {
@@ -55,6 +55,9 @@
     "testEnvironment": "node",
     "testMatch": [
       "**/tests/**/*.test.ts"
-    ]
+    ],
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    }
   }
 }

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { B2Config } from "./utils/types.js";
+import { VERSION } from "./version.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
@@ -69,7 +70,7 @@ export function createServer(config: B2Config): McpServer {
   const server = new McpServer(
     {
       name: "backblaze-b2",
-      version: "1.1.0",
+      version: VERSION,
     },
     {
       instructions: [

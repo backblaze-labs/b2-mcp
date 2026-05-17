@@ -19,11 +19,23 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createServer } from "./server.js";
 import { B2Config } from "./utils/types.js";
+import { VERSION } from "./version.js";
 
 const DEFAULT_PORT = 3000;
+const DEFAULT_PART_SIZE = 100 * 1024 * 1024;
+const DEFAULT_REGION = "us-west-004";
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
+const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;       // 1 minute
+const SHUTDOWN_DRAIN_MS = 10 * 1000;            // 10 seconds to drain on SIGTERM
 
-function getPort(): number {
+interface Session {
+  transport: SSEServerTransport;
+  mcpServer: McpServer;
+  lastActivity: number;
+}
+
+export function getPort(): number {
   const idx = process.argv.indexOf("--port");
   const raw = idx !== -1 && process.argv[idx + 1]
     ? process.argv[idx + 1]
@@ -35,7 +47,7 @@ function getPort(): number {
   return port;
 }
 
-function configFromHeaders(req: http.IncomingMessage): B2Config | null {
+export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
   const keyId = req.headers["x-b2-key-id"];
   const key = req.headers["x-b2-key"];
   if (!keyId || !key || Array.isArray(keyId) || Array.isArray(key)) return null;
@@ -43,25 +55,55 @@ function configFromHeaders(req: http.IncomingMessage): B2Config | null {
   const appKey = req.headers["x-b2-app-key"];
   const resolvedAppKeyId = (!Array.isArray(appKeyId) && appKeyId) ? appKeyId : keyId;
   const resolvedAppKey = (!Array.isArray(appKey) && appKey) ? appKey : key;
+  const partSize = parseInt(process.env.B2_PART_SIZE ?? String(DEFAULT_PART_SIZE), 10);
+  const largeFileThreshold = parseInt(
+    process.env.B2_LARGE_FILE_THRESHOLD ?? String(DEFAULT_PART_SIZE),
+    10
+  );
   return {
     applicationKeyId: keyId,
     applicationKey: key,
     appKeyId: resolvedAppKeyId,
     appKey: resolvedAppKey,
-    region: "us-west-004",
-    largeFileThreshold: 100 * 1024 * 1024,
-    partSize: 100 * 1024 * 1024,
+    region: process.env.B2_REGION ?? DEFAULT_REGION,
+    largeFileThreshold: Number.isFinite(largeFileThreshold) ? largeFileThreshold : DEFAULT_PART_SIZE,
+    partSize: Number.isFinite(partSize) ? partSize : DEFAULT_PART_SIZE,
   };
 }
 
 async function main(): Promise<void> {
   const port = getPort();
 
-  // Map of sessionId → { transport, mcpServer } for active connections
-  const sessions = new Map<string, { transport: SSEServerTransport; mcpServer: McpServer }>();
+  // Map of sessionId → session record with last-activity timestamp
+  const sessions = new Map<string, Session>();
+  let shuttingDown = false;
+
+  function touch(sessionId: string): void {
+    const s = sessions.get(sessionId);
+    if (s) s.lastActivity = Date.now();
+  }
+
+  // Sweep idle sessions periodically — protects against stuck connections
+  // that never fired res.on("close").
+  const idleSweep = setInterval(() => {
+    const cutoff = Date.now() - SESSION_IDLE_TIMEOUT_MS;
+    for (const [id, s] of sessions) {
+      if (s.lastActivity < cutoff) {
+        sessions.delete(id);
+        try { s.transport.close(); } catch { /* ignore */ }
+      }
+    }
+  }, IDLE_SWEEP_INTERVAL_MS);
+  idleSweep.unref();
 
   const httpServer = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://localhost:${port}`);
+
+    if (shuttingDown) {
+      res.writeHead(503, { "Content-Type": "application/json", Connection: "close" });
+      res.end(JSON.stringify({ error: "Server is shutting down" }));
+      return;
+    }
 
     // SSE connection endpoint — each connection gets its own server instance
     if (req.method === "GET" && url.pathname === "/sse") {
@@ -74,7 +116,11 @@ async function main(): Promise<void> {
 
       const mcpServer = createServer(config);
       const transport = new SSEServerTransport("/messages", res);
-      sessions.set(transport.sessionId, { transport, mcpServer });
+      sessions.set(transport.sessionId, {
+        transport,
+        mcpServer,
+        lastActivity: Date.now(),
+      });
 
       res.on("close", () => {
         sessions.delete(transport.sessionId);
@@ -126,6 +172,7 @@ async function main(): Promise<void> {
           return;
         }
         try {
+          touch(sessionId);
           await session.transport.handlePostMessage(req, res, parsed);
         } catch {
           res.writeHead(500, { "Content-Type": "application/json" });
@@ -141,7 +188,7 @@ async function main(): Promise<void> {
       res.end(JSON.stringify({
         status: "ok",
         server: "backblaze-b2-mcp",
-        version: "1.0.0",
+        version: VERSION,
         activeSessions: sessions.size,
       }));
       return;
@@ -152,14 +199,42 @@ async function main(): Promise<void> {
   });
 
   httpServer.listen(port, () => {
-    process.stderr.write(`Backblaze B2 MCP Server (HTTP) listening on port ${port}\n`);
+    process.stderr.write(`Backblaze B2 MCP Server (HTTP) v${VERSION} listening on port ${port}\n`);
     process.stderr.write(`  SSE endpoint: http://localhost:${port}/sse\n`);
     process.stderr.write(`  Messages:     POST http://localhost:${port}/messages?sessionId=<id>\n`);
     process.stderr.write(`  Health:       http://localhost:${port}/health\n`);
   });
+
+  // Graceful shutdown — stop accepting new connections, drain active SSE sessions, exit.
+  function shutdown(signal: string): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    process.stderr.write(`Received ${signal}, shutting down (drain ${SHUTDOWN_DRAIN_MS}ms)...\n`);
+    clearInterval(idleSweep);
+    httpServer.close(() => {
+      process.stderr.write("HTTP server closed.\n");
+      process.exit(0);
+    });
+    // Close active SSE transports so http.close() can complete
+    for (const [, s] of sessions) {
+      try { s.transport.close(); } catch { /* ignore */ }
+    }
+    sessions.clear();
+    // Hard exit if drain takes too long
+    setTimeout(() => {
+      process.stderr.write("Drain timeout exceeded, forcing exit.\n");
+      process.exit(1);
+    }, SHUTDOWN_DRAIN_MS).unref();
+  }
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
-main().catch((err) => {
-  process.stderr.write(`Fatal error: ${err instanceof Error ? err.message : String(err)}\n`);
-  process.exit(1);
-});
+// Only run main() when invoked directly (not when imported by tests)
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write(`Fatal error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  });
+}
