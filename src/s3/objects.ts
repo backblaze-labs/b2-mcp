@@ -15,9 +15,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { resolveLocalPath } from "../utils/fs-guard.js";
+import { B2Config } from "../utils/types.js";
 
-export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
+export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_put_object",
     "Upload an object to a B2 bucket via the S3-compatible API. Provide either base64-encoded content or a local file path.",
@@ -49,11 +53,14 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
         // filePath: stream from disk — AWS SDK v3 accepts ReadStream natively.
         // Pass ContentLength so the SDK can set the header without buffering.
         // content (base64): already in memory from the MCP JSON payload.
-        const body = args.filePath
-          ? fs.createReadStream(args.filePath)
+        const safePath = args.filePath
+          ? resolveLocalPath(config, args.filePath, "read")
+          : undefined;
+        const body = safePath
+          ? fs.createReadStream(safePath)
           : Buffer.from(args.content!, "base64");
 
-        const contentLength = args.filePath ? fs.statSync(args.filePath).size : undefined;
+        const contentLength = safePath ? fs.statSync(safePath).size : undefined;
 
         await s3.send(
           new PutObjectCommand({
@@ -97,14 +104,22 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
           }),
         );
 
+        // Stream straight to disk for saveToPath — no full-object buffering.
+        if (args.saveToPath) {
+          const safePath = resolveLocalPath(config, args.saveToPath, "write");
+          fs.mkdirSync(path.dirname(safePath), { recursive: true });
+          const writeStream = fs.createWriteStream(safePath);
+          try {
+            await pipeline(result.Body as Readable, writeStream);
+          } catch (e) {
+            await fs.promises.unlink(safePath).catch(() => {});
+            throw e;
+          }
+          return toolSuccess(`Object saved to ${safePath} (${result.ContentLength ?? "?"} bytes)`);
+        }
+
         const bodyBytes = await result.Body!.transformToByteArray();
         const buffer = Buffer.from(bodyBytes);
-
-        if (args.saveToPath) {
-          fs.mkdirSync(path.dirname(args.saveToPath), { recursive: true });
-          fs.writeFileSync(args.saveToPath, buffer);
-          return toolSuccess(`Object saved to ${args.saveToPath} (${buffer.length} bytes)`);
-        }
 
         return toolJson({
           key: args.key,

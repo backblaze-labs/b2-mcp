@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-06-05
+
+### Security
+- **Filesystem sandbox** (`src/utils/fs-guard.ts`): `filePath` / `saveToPath`
+  on the B2 and S3 tools are now policy-gated. Disabled by default on the
+  HTTP transport (a remote caller can no longer read or write arbitrary host
+  files, e.g. exfiltrate `/proc/self/environ`); enabled only with
+  `B2_ALLOW_LOCAL_FILES=true` + a `B2_FILE_ROOT` sandbox, with symlink-aware
+  containment checks. Stdio keeps disk access on by default (trusted local
+  user), sandboxable via `B2_FILE_ROOT`.
+- **HTTP hardening**: total and per-key session caps (`B2_MAX_SESSIONS`,
+  `B2_MAX_SESSIONS_PER_KEY`) to bound memory/FD use; rate-limit key is now a
+  SHA-256 hash of the full key id instead of an 8-char prefix (no cross-tenant
+  collisions); optional DNS-rebinding protection via `B2_ALLOWED_HOSTS` /
+  `B2_ALLOWED_ORIGINS`; SSE-C customer keys added to log redaction.
+- `fileId` is now URL-encoded in download URLs; `fileInfo` keys are validated
+  against header injection.
+
+### Fixed
+- **Large-file uploads** now cancel the started large file on any part failure
+  (`b2_cancel_large_file`) instead of leaving an orphaned unfinished file, and
+  reject up front when a file would exceed B2's 10,000-part limit. Server-side
+  encryption settings are now forwarded to large-file uploads.
+- **401 handling**: a request that 401s now re-authorizes and retries once
+  (previously it invalidated the token but surfaced the error without retrying).
+- **Downloads** to `saveToPath` stream straight to disk instead of buffering the
+  whole object in memory; in-memory (base64) downloads are bounded to 100 MB.
+- **Circuit breaker**: long-running uploads/downloads use a no-timeout breaker
+  so a slow large-part transfer is no longer aborted and counted as a failure.
+- **HTTP sessions** now close their `McpServer` (not just the transport) on
+  disconnect/idle sweep, preventing instance leaks under reconnect churn.
+- 413 responses are delivered cleanly instead of resetting the socket mid-flush.
+
+### Internal
+- `main()` split into a testable `buildHttpServer()` factory; audit wrapper,
+  upload header-parity, `parseIntEnv`, the filesystem sandbox, large-file abort,
+  and the HTTP request paths now have unit tests (342 → 378 tests).
+- New env vars: `B2_FILE_ROOT`, `B2_ALLOW_LOCAL_FILES`, `B2_MAX_SESSIONS`,
+  `B2_MAX_SESSIONS_PER_KEY`, `B2_ALLOWED_HOSTS`, `B2_ALLOWED_ORIGINS`.
+
 ## [1.2.1] - 2026-05-16
 
 ### Changed

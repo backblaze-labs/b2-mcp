@@ -87,14 +87,31 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tools-schema.test.ts` builds the full server with dummy credentials and validates all 85 tool schemas structurally.
 
-Integration tests (`tests/integration/live.test.ts`) use two skip guards:
+Integration tests (`tests/integration/live.test.ts`) use these skip guards:
 
 - `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (general B2 + Partner/master-only tests use this credential)
 - `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key, which is only required when the primary key is a master key)
+- `partnerIt` — skips unless `B2_PARTNER_LIVE=1` **and** the primary key is a master key on a Partner-API-entitled account. Runs the read-only Groups flow (`b2_list_groups → b2_list_group_members`); bails gracefully if the account isn't entitled.
+- The mutating Groups test (`create_group_member → eject`) is additionally gated on `B2_PARTNER_MUTATE=1` + `B2_PARTNER_TEST_EMAIL`, and skipped by default — `b2_create_group_member` creates a **real, non-deletable** Backblaze account that eject does not remove, so it must never run in CI.
 
-## Pending work: per-session credential injection
+To run the Partner Groups test, the primary key must be a **master** key (Partner endpoints reject non-master keys); set `B2_APP_KEY_ID`/`B2_APP_KEY` to a non-master key so S3 tests still work in the same run:
 
-The HTTP server (`src/http-server.ts`) reads credentials per-connection from request headers. Each SSE connection gets its own `B2Config` + `McpServer` instance.
+```bash
+B2_APPLICATION_KEY_ID=master_id B2_APPLICATION_KEY=master_secret \
+B2_APP_KEY_ID=appkey_id B2_APP_KEY=appkey_secret \
+B2_PARTNER_LIVE=1 npm run test:integration
+```
+
+## HTTP transport: per-session credentials & hardening
+
+The HTTP server (`src/http-server.ts`) reads credentials per-connection from request headers. Each SSE connection gets its own `B2Config` + `McpServer` instance, torn down (transport **and** server) on disconnect or idle sweep.
+
+Because this transport is internet-facing, it is hardened by default:
+
+- **Local filesystem access is OFF.** `filePath` / `saveToPath` are rejected unless an operator sets `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox/dir` — and even then every path is confined (symlinks resolved) to that root via `src/utils/fs-guard.ts`. Remote callers should use base64 `content` instead. On the stdio transport disk access is on by default (trusted local user); set `B2_FILE_ROOT` to sandbox it or `B2_ALLOW_LOCAL_FILES=false` to disable.
+- **Session caps:** `B2_MAX_SESSIONS` (default 1000) total and `B2_MAX_SESSIONS_PER_KEY` (default 20) per credential, returning 503 / 429 over the cap.
+- **Rate limiting** keys on a SHA-256 hash of the full key id (not a prefix), so distinct tenants can't collide.
+- **DNS-rebinding protection:** set `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS` (comma-separated) to enable Host/Origin validation on the SSE transport.
 
 Client config notes:
 

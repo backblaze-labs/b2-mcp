@@ -49,6 +49,8 @@ const testConfig = {
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,
+  allowLocalFiles: true,
+  fileRoot: null,
 };
 
 // v3 auth response shape — flattened by B2AuthManager.authorize()

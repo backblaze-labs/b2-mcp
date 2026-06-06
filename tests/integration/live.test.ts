@@ -17,6 +17,10 @@
  * All live B2 API tests are skipped when credentials are absent.
  */
 
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import * as crypto from "crypto";
 import { loadConfig, createServer } from "../../src/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -52,6 +56,14 @@ function isError(result: any): boolean {
   return result?.isError === true;
 }
 
+// A bucket safe to write throwaway test objects into. Excludes snapshot buckets
+// and Backblaze-managed system buckets (e.g. b2-reports-*, b2-snapshots-*),
+// which application keys can read but not write.
+function isUserWritableBucket(name: string): boolean {
+  const n = name.toLowerCase();
+  return !n.includes("snapshot") && !n.startsWith("b2-reports") && !n.startsWith("b2-snapshots");
+}
+
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 let server: McpServer;
@@ -75,6 +87,8 @@ beforeAll(async () => {
         region: "us-west-004",
         largeFileThreshold: 1e8,
         partSize: 1e8,
+        allowLocalFiles: true,
+        fileRoot: null,
       };
   server = createServer(config);
 
@@ -84,9 +98,7 @@ beforeAll(async () => {
   const b2Buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
   if (b2Buckets?.buckets?.length) {
     firstBucketId = b2Buckets.buckets[0].bucketId;
-    const writableB2 = b2Buckets.buckets.find(
-      (b: any) => !b.bucketName.toLowerCase().includes("snapshot"),
-    );
+    const writableB2 = b2Buckets.buckets.find((b: any) => isUserWritableBucket(b.bucketName));
     if (writableB2) writableBucketId = writableB2.bucketId;
   }
 
@@ -95,9 +107,7 @@ beforeAll(async () => {
     const s3Buckets = parseResult(await callTool(server, "s3_list_buckets", {}));
     if (s3Buckets?.buckets?.length) {
       firstBucketName = s3Buckets.buckets[0].Name;
-      const writableS3 = s3Buckets.buckets.find(
-        (b: any) => !b.Name.toLowerCase().includes("snapshot"),
-      );
+      const writableS3 = s3Buckets.buckets.find((b: any) => isUserWritableBucket(b.Name));
       if (writableS3) writableBucketName = writableS3.Name;
 
       const objects = parseResult(
@@ -652,6 +662,110 @@ describe("S3 Write cycle (upload → head → download → delete)", () => {
   });
 });
 
+// ── Streaming downloads & multipart upload (1.3.0 changed paths) ──────────────
+//
+// Validates the paths refactored/added in this release against real B2:
+//   - b2_upload_file multipart path (start → parts → finish)
+//   - streaming saveToPath downloads (no full-file buffering)
+//   - S3 saveToPath streaming to disk
+// All artifacts are deleted in a finally block.
+
+describe("Streaming downloads & multipart (1.3.0)", () => {
+  liveS3It(
+    "s3_get_object saveToPath streams bytes to disk",
+    async () => {
+      if (!writableBucketName) {
+        console.log("  No writable S3 bucket — skip");
+        return;
+      }
+      const key = `mcp-s3-savepath-${Date.now()}.bin`;
+      const payload = crypto.randomBytes(64 * 1024); // 64 KB
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-s3-dl-"));
+      const dest = path.join(tmpDir, "out.bin");
+
+      const put = await callTool(server, "s3_put_object", {
+        bucket: writableBucketName,
+        key,
+        content: payload.toString("base64"),
+        contentType: "application/octet-stream",
+      });
+      if (isError(put)) {
+        console.log("  s3_put_object error:", put?.content?.[0]?.text?.slice(0, 120));
+      }
+      expect(isError(put)).toBe(false);
+
+      try {
+        const get = await callTool(server, "s3_get_object", {
+          bucket: writableBucketName,
+          key,
+          saveToPath: dest,
+        });
+        expect(isError(get)).toBe(false);
+        const onDisk = fs.readFileSync(dest);
+        expect(onDisk.length).toBe(payload.length);
+        expect(onDisk.equals(payload)).toBe(true);
+        console.log("  S3 saveToPath round-trip OK:", onDisk.length, "bytes");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        await callTool(server, "s3_delete_object", { bucket: writableBucketName, key });
+      }
+    },
+    30_000,
+  );
+
+  liveIt(
+    "b2 multipart upload + streaming saveToPath download round-trip",
+    async () => {
+      if (!writableBucketId) {
+        console.log("  No writable B2 bucket — skip");
+        return;
+      }
+
+      // Size parts at B2's minimum so a modest payload still produces 3 parts,
+      // exercising the real multipart path (start → upload_part ×3 → finish).
+      const authData = parseResult(await callTool(server, "b2_authorize_account", {}));
+      const PART = Math.max(5_000_000, authData.absoluteMinimumPartSize ?? 5_000_000);
+      const bigServer = createServer({ ...loadConfig(), largeFileThreshold: PART, partSize: PART });
+
+      const payload = crypto.randomBytes(PART * 2 + 1024); // → 3 parts
+      const sha1 = crypto.createHash("sha1").update(payload).digest("hex");
+      const fileName = `mcp-b2-multipart-${Date.now()}.bin`;
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mp-"));
+      const dest = path.join(tmpDir, "out.bin");
+
+      const upload = parseResult(
+        await callTool(bigServer, "b2_upload_file", {
+          bucketId: writableBucketId,
+          fileName,
+          content: payload.toString("base64"),
+          contentType: "application/octet-stream",
+        }),
+      );
+      expect(upload).toHaveProperty("fileId");
+      expect(upload.contentLength).toBe(payload.length);
+      const fileId = upload.fileId;
+      console.log("  Multipart uploaded:", fileName, `(${upload.contentLength} bytes)`);
+
+      try {
+        // Stream the file back to disk via the by-id download path (no buffering).
+        const dl = await callTool(bigServer, "b2_download_file_by_id", {
+          fileId,
+          saveToPath: dest,
+        });
+        expect(isError(dl)).toBe(false);
+        const onDisk = fs.readFileSync(dest);
+        expect(onDisk.length).toBe(payload.length);
+        expect(crypto.createHash("sha1").update(onDisk).digest("hex")).toBe(sha1);
+        console.log("  Streamed download OK, sha1 matches:", onDisk.length, "bytes");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        await callTool(bigServer, "b2_delete_file_version", { fileId, fileName });
+      }
+    },
+    60_000,
+  ); // real multi-MB multipart round-trip
+});
+
 // ── Partner API ───────────────────────────────────────────────────────────────
 //
 // These tests require a Partner API-enabled master key. They are safe read-only
@@ -719,6 +833,96 @@ describe("Partner API — bz_list_computers", () => {
       console.log("  Computers:", data.computers.length);
     }
   });
+});
+
+// ── Partner API — Groups provisioning (gated) ─────────────────────────────────
+//
+// These hit the real Groups endpoints and need a MASTER application key on a
+// Partner-API-entitled account. Opt in with B2_PARTNER_LIVE=1. The read-only
+// flow is safe; the mutating flow is double-gated (see the warning below)
+// because it creates a real, non-deletable Backblaze account.
+
+const HAS_PARTNER = HAS_CREDS && process.env.B2_PARTNER_LIVE === "1";
+const partnerIt = HAS_PARTNER ? test : test.skip;
+
+describe("Partner API — Groups (gated: B2_PARTNER_LIVE=1)", () => {
+  partnerIt("read-only: list_groups → list_group_members", async () => {
+    const auth = parseResult(await callTool(server, "b2_authorize_account", {}));
+    const adminAccountId = auth.accountId;
+
+    const groupsResult = await callTool(server, "b2_list_groups", { adminAccountId });
+    if (isError(groupsResult)) {
+      // Flag set but the account isn't Partner-entitled (or key isn't master):
+      // surface it and bail rather than failing the suite.
+      console.log("  Not Partner-entitled:", groupsResult?.content?.[0]?.text?.slice(0, 100));
+      return;
+    }
+    const groups = parseResult(groupsResult);
+    expect(Array.isArray(groups.groups)).toBe(true);
+    console.log("  Groups:", groups.groups.length);
+    if (!groups.groups.length) {
+      console.log("  No managed groups to inspect — done");
+      return;
+    }
+
+    const groupId = groups.groups[0].groupId;
+    const members = parseResult(
+      await callTool(server, "b2_list_group_members", { adminAccountId, groupId }),
+    );
+    expect(members).toHaveProperty("members");
+    console.log("  Members in group", groupId, ":", members.members?.length ?? 0);
+  });
+
+  // ⚠️  MUTATING — creates a REAL Backblaze account that eject does NOT delete
+  // (and which cannot be re-added via API). Triple-gated so it never runs by
+  // accident: needs B2_PARTNER_LIVE=1, B2_PARTNER_MUTATE=1, and a unique
+  // B2_PARTNER_TEST_EMAIL that is not already a Backblaze account.
+  const HAS_MUTATE =
+    HAS_PARTNER && process.env.B2_PARTNER_MUTATE === "1" && !!process.env.B2_PARTNER_TEST_EMAIL;
+  const mutateIt = HAS_MUTATE ? test : test.skip;
+
+  mutateIt(
+    "mutating: create_group_member → list → eject (leaves a real account)",
+    async () => {
+      const auth = parseResult(await callTool(server, "b2_authorize_account", {}));
+      const adminAccountId = auth.accountId;
+      const groups = parseResult(await callTool(server, "b2_list_groups", { adminAccountId }));
+      const groupId = groups.groups?.[0]?.groupId;
+      if (!groupId) {
+        console.log("  No managed group available — skip");
+        return;
+      }
+
+      const memberEmail = process.env.B2_PARTNER_TEST_EMAIL!;
+      const created = parseResult(
+        await callTool(server, "b2_create_group_member", { adminAccountId, groupId, memberEmail }),
+      );
+      // The new account's credentials are returned exactly once.
+      expect(created).toHaveProperty("applicationKeyId");
+      const memberAccountId = created.accountId ?? created.member?.accountId;
+      console.log("  Created member account:", memberAccountId);
+
+      try {
+        const members = parseResult(
+          await callTool(server, "b2_list_group_members", {
+            adminAccountId,
+            groupId,
+            maxMemberCount: 1000,
+          }),
+        );
+        expect(members.members?.some((m: any) => m.accountId === memberAccountId)).toBe(true);
+      } finally {
+        const ejected = await callTool(server, "b2_eject_group_member", {
+          adminAccountId,
+          groupId,
+          memberAccountId,
+        });
+        expect(isError(ejected)).toBe(false);
+        console.log("  Ejected (account persists, cannot be re-added via API)");
+      }
+    },
+    60_000,
+  );
 });
 
 // ── Error handling ────────────────────────────────────────────────────────────

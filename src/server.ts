@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { B2Config } from "./utils/types.js";
+import { parseIntEnv } from "./utils/config.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
@@ -44,28 +45,26 @@ export function loadConfig(): B2Config {
     appKeyId: process.env.B2_APP_KEY_ID ?? keyId,
     appKey: process.env.B2_APP_KEY ?? key,
     region: process.env.B2_REGION ?? "us-west-004",
-    largeFileThreshold: parseInt(
-      process.env.B2_LARGE_FILE_THRESHOLD ?? String(100 * 1024 * 1024),
-      10,
-    ),
-    partSize: parseInt(process.env.B2_PART_SIZE ?? String(100 * 1024 * 1024), 10),
+    largeFileThreshold: parseIntEnv(process.env.B2_LARGE_FILE_THRESHOLD, 100 * 1024 * 1024),
+    partSize: parseIntEnv(process.env.B2_PART_SIZE, 100 * 1024 * 1024),
+    // Local stdio is a trusted single-user process, so disk access is on by
+    // default. Set B2_ALLOW_LOCAL_FILES=false to disable, or B2_FILE_ROOT to
+    // confine all file paths to one directory.
+    allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
+    fileRoot: process.env.B2_FILE_ROOT ?? null,
   };
 }
 
 /**
  * Create and configure the MCP server with all B2 tools registered.
  *
- * Tool counts:
- *   B2 Native API:  33 tools (buckets ×6, files ×10, large-files ×8,
- *                              download-urls ×3, keys ×3, object-lock ×2,
- *                              auth ×1)
- *   Partner API:     7 tools (b2_list_groups, b2_create_group_member,
- *                              b2_eject_group_member, b2_list_group_members,
- *                              b2_reserve_trial_create_account,
- *                              bz_list_computers, bz_delete_computer)
- *   S3-Compatible:  45 tools (buckets ×13, objects ×10, multipart ×6,
- *                              presigned ×1, object-lock ×6, extras ×9)
- *   Total:          85 tools
+ * Tools are grouped into three families, each registered by the register*Tools
+ * functions below: B2 Native API (buckets, files, large files, download URLs,
+ * keys, object lock, auth), Partner API (groups + Computer Backup `bz_*`), and
+ * S3-Compatible (buckets, objects, multipart, presigned URLs, object lock,
+ * extras). The exact tool count is asserted in tests/unit/tools-schema.test.ts
+ * and logged at startup ("server.ready") rather than tracked here, so this
+ * comment can't drift out of date.
  *
  * Note: B2's S3 endpoint rejects master keys. If B2_APPLICATION_KEY_ID is
  * a master key (only needed for Partner API, bz_*, and key-management tools),
@@ -121,15 +120,34 @@ export function createServer(config: B2Config): McpServer {
 
   // ── S3-Compatible API tools ─────────────────────────────────────────────
   registerS3BucketTools(server, s3Client);
-  registerS3ObjectTools(server, s3Client);
+  registerS3ObjectTools(server, s3Client, config);
   registerS3MultipartTools(server, s3Client);
   registerS3PresignedTools(server, s3Client);
   registerS3ObjectLockTools(server, s3Client);
   registerS3ExtraTools(server, s3Client);
 
-  wrapToolsWithAudit(server, config);
+  const toolCount = wrapToolsWithAudit(server, config);
+  logger.info({ toolCount, version: VERSION }, "server.ready");
 
   return server;
+}
+
+/** Shape of an entry in the MCP SDK's internal tool registry (the subset we touch). */
+interface RegisteredTool {
+  callback?: (...args: any[]) => any;
+  handler?: (...args: any[]) => any;
+  execute?: (...args: any[]) => any;
+}
+
+/**
+ * Access the MCP SDK's private tool registry. This is the ONE place that
+ * depends on an SDK internal (`McpServer._registeredTools`) — isolated here so
+ * a future SDK rename surfaces in a single spot. Returns null if the internal
+ * is absent (e.g. the SDK changed), letting the caller log and degrade.
+ */
+export function getRegisteredTools(server: McpServer): Record<string, RegisteredTool> | null {
+  const tools = (server as any)._registeredTools as Record<string, RegisteredTool> | undefined;
+  return tools ?? null;
 }
 
 /**
@@ -137,17 +155,26 @@ export function createServer(config: B2Config): McpServer {
  * invocation: tool name, key-id prefix (not the full key), top-level
  * arg keys, duration, and success/error. Argument *values* are not
  * logged to avoid leaking file content, bucket data, etc.
+ *
+ * Returns the number of tools successfully wrapped. If the SDK internal is
+ * missing, audit logging is skipped but a warning is logged so the degradation
+ * is visible rather than silent.
  */
-function wrapToolsWithAudit(server: McpServer, config: B2Config): void {
-  const tools = (server as any)._registeredTools as
-    | Record<string, Record<string, unknown>>
-    | undefined;
-  if (!tools) return;
+export function wrapToolsWithAudit(server: McpServer, config: B2Config): number {
+  const tools = getRegisteredTools(server);
+  if (!tools) {
+    logger.warn(
+      { reason: "registry-missing" },
+      "audit.wrap.skipped: MCP SDK tool registry not found — audit logging disabled",
+    );
+    return 0;
+  }
   const keyPrefix = config.applicationKeyId.slice(0, 8);
+  let wrapped = 0;
 
   for (const name of Object.keys(tools)) {
     const tool = tools[name];
-    const handlerKey: string | null =
+    const handlerKey: keyof RegisteredTool | null =
       typeof tool.callback === "function"
         ? "callback"
         : typeof tool.handler === "function"
@@ -155,7 +182,10 @@ function wrapToolsWithAudit(server: McpServer, config: B2Config): void {
           : typeof tool.execute === "function"
             ? "execute"
             : null;
-    if (!handlerKey) continue;
+    if (!handlerKey) {
+      logger.warn({ tool: name }, "audit.wrap.skipped: no recognizable handler key on tool");
+      continue;
+    }
 
     const original = tool[handlerKey] as (...args: any[]) => any;
 
@@ -187,5 +217,7 @@ function wrapToolsWithAudit(server: McpServer, config: B2Config): void {
         throw err;
       }
     };
+    wrapped++;
   }
+  return wrapped;
 }
