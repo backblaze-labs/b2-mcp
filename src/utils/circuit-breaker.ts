@@ -47,6 +47,30 @@ breaker.on("halfOpen", () => logger.info("circuit.halfOpen"));
 breaker.on("close", () => logger.info("circuit.close"));
 
 /**
+ * Circuit breaker for long-running data transfers (uploads / large downloads).
+ *
+ * Identical failure-tripping behaviour to the default breaker, but with the
+ * per-call timeout DISABLED. A 100 MB part on a slow uplink legitimately takes
+ * far longer than the default 60s; timing it out would abort a healthy upload,
+ * surface a non-retryable error, and unfairly push the breaker toward open.
+ * Transfer health is governed by axios timeouts and the retry layer instead.
+ */
+const longBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
+  timeout: false,
+  errorThresholdPercentage: 50,
+  resetTimeout: 30_000,
+  rollingCountTimeout: 10_000,
+  rollingCountBuckets: 10,
+  volumeThreshold: 10,
+  errorFilter: isClientError,
+  name: "b2-transfer",
+});
+
+longBreaker.on("open", () => logger.warn("circuit.transfer.open"));
+longBreaker.on("halfOpen", () => logger.info("circuit.transfer.halfOpen"));
+longBreaker.on("close", () => logger.info("circuit.transfer.close"));
+
+/**
  * Run `fn` through the circuit breaker. When the breaker is open, this
  * throws an `EOPENBREAKER` error immediately without invoking `fn`.
  */
@@ -54,4 +78,13 @@ export async function withCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return breaker.fire(fn as () => Promise<unknown>) as Promise<T>;
 }
 
+/**
+ * Like withCircuit, but for long-running transfers — no per-call timeout.
+ * Use for uploads and large file downloads, never for quick metadata calls.
+ */
+export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
+  return longBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+}
+
 export const circuitBreaker = breaker;
+export const transferCircuitBreaker = longBreaker;

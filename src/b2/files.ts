@@ -1,13 +1,18 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { Readable } from "stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { resolveLocalPath } from "../utils/fs-guard.js";
 import { uploadLargeFile } from "./large-files.js";
+
+/** B2 file-info keys must be simple tokens — reject anything that could inject a header. */
+const VALID_FILE_INFO_KEY = /^[A-Za-z0-9-]+$/;
 
 /**
  * Compute the SHA1 hash of a file without loading it fully into memory.
@@ -21,6 +26,79 @@ function computeFileSha1(filePath: string): Promise<string> {
     stream.on("end", () => resolve(hash.digest("hex")));
     stream.on("error", reject);
   });
+}
+
+interface ServerSideEncryption {
+  mode: string;
+  algorithm?: string;
+  customerKey?: string;
+  customerKeyMd5?: string;
+}
+
+interface UploadHeaderOptions {
+  fileName: string;
+  contentType: string;
+  contentLength: number;
+  sha1: string;
+  fileInfo?: Record<string, string>;
+  serverSideEncryption?: ServerSideEncryption;
+}
+
+/**
+ * Build the X-Bz-* request headers for a single-request (small file) upload.
+ * Shared by both the filePath and base64-content branches of b2_upload_file
+ * so the header/SSE logic lives in exactly one place.
+ */
+function buildUploadHeaders(opts: UploadHeaderOptions): Record<string, string> {
+  const headers: Record<string, string> = {
+    "X-Bz-File-Name": encodeURIComponent(opts.fileName),
+    "Content-Type": opts.contentType,
+    "Content-Length": String(opts.contentLength),
+    "X-Bz-Content-Sha1": opts.sha1,
+  };
+  if (opts.fileInfo) {
+    for (const [key, value] of Object.entries(opts.fileInfo)) {
+      if (!VALID_FILE_INFO_KEY.test(key)) {
+        throw new Error(
+          `Invalid fileInfo key '${key}': only letters, digits, and hyphens are allowed.`,
+        );
+      }
+      headers[`X-Bz-Info-${key}`] = encodeURIComponent(value);
+    }
+  }
+  if (opts.serverSideEncryption) {
+    const sse = opts.serverSideEncryption;
+    headers["X-Bz-Server-Side-Encryption"] = sse.mode;
+    if (sse.algorithm) headers["X-Bz-Server-Side-Encryption-Algorithm"] = sse.algorithm;
+    if (sse.customerKey) headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
+    if (sse.customerKeyMd5)
+      headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
+  }
+  return headers;
+}
+
+/**
+ * Upload a small file in a single request: fetch a fresh upload URL, then POST
+ * the body (a stream for filePath uploads, a Buffer for base64 content) with
+ * the computed headers. Returns the raw B2 upload response.
+ */
+async function uploadSmallFile(
+  client: B2Client,
+  bucketId: string,
+  body: Readable | Buffer,
+  headerOpts: UploadHeaderOptions,
+): Promise<unknown> {
+  const uploadUrlData = await client.call<{
+    uploadUrl: string;
+    authorizationToken: string;
+  }>("b2_get_upload_url", { bucketId });
+
+  return client.uploadToUrl(
+    uploadUrlData.uploadUrl,
+    uploadUrlData.authorizationToken,
+    body,
+    buildUploadHeaders(headerOpts),
+  );
 }
 
 export function registerFileTools(
@@ -189,57 +267,40 @@ export function registerFileTools(
 
         // ── filePath path: stream from disk, never buffer the whole file ────────
         if (args.filePath) {
-          const fileSize = fs.statSync(args.filePath).size;
+          const safePath = resolveLocalPath(config, args.filePath, "read");
+          const fileSize = fs.statSync(safePath).size;
 
           if (fileSize > config.largeFileThreshold) {
             // Large file: workers each read one partSize chunk at a time
             const result = await uploadLargeFile(client, auth, {
               bucketId: args.bucketId,
               fileName: args.fileName,
-              filePath: args.filePath,
+              filePath: safePath,
               fileSize,
               contentType,
               fileInfo: args.fileInfo,
               partSize: config.partSize,
               concurrency: args.concurrency ?? 1,
+              serverSideEncryption: args.serverSideEncryption,
             });
             return toolJson(result);
           }
 
           // Small file: two streaming passes — hash then upload
           // Memory: O(stream chunk size), not O(file size)
-          const sha1 = await computeFileSha1(args.filePath);
-          const uploadUrlData = await client.call<{
-            uploadUrl: string;
-            authorizationToken: string;
-          }>("b2_get_upload_url", { bucketId: args.bucketId });
-
-          const headers: Record<string, string> = {
-            "X-Bz-File-Name": encodeURIComponent(args.fileName),
-            "Content-Type": contentType,
-            "Content-Length": String(fileSize),
-            "X-Bz-Content-Sha1": sha1,
-          };
-          if (args.fileInfo) {
-            for (const [key, value] of Object.entries(args.fileInfo)) {
-              headers[`X-Bz-Info-${key}`] = encodeURIComponent(value);
-            }
-          }
-          if (args.serverSideEncryption) {
-            const sse = args.serverSideEncryption;
-            headers["X-Bz-Server-Side-Encryption"] = sse.mode;
-            if (sse.algorithm) headers["X-Bz-Server-Side-Encryption-Algorithm"] = sse.algorithm;
-            if (sse.customerKey)
-              headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
-            if (sse.customerKeyMd5)
-              headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
-          }
-
-          const result = await client.uploadToUrl(
-            uploadUrlData.uploadUrl,
-            uploadUrlData.authorizationToken,
-            fs.createReadStream(args.filePath),
-            headers,
+          const sha1 = await computeFileSha1(safePath);
+          const result = await uploadSmallFile(
+            client,
+            args.bucketId,
+            fs.createReadStream(safePath),
+            {
+              fileName: args.fileName,
+              contentType,
+              contentLength: fileSize,
+              sha1,
+              fileInfo: args.fileInfo,
+              serverSideEncryption: args.serverSideEncryption,
+            },
           );
           return toolJson(result);
         }
@@ -260,43 +321,20 @@ export function registerFileTools(
             fileInfo: args.fileInfo,
             partSize: config.partSize,
             concurrency: args.concurrency ?? 1,
+            serverSideEncryption: args.serverSideEncryption,
           });
           return toolJson(result);
         }
 
         const sha1 = crypto.createHash("sha1").update(buffer).digest("hex");
-        const uploadUrlData = await client.call<{ uploadUrl: string; authorizationToken: string }>(
-          "b2_get_upload_url",
-          { bucketId: args.bucketId },
-        );
-
-        const headers: Record<string, string> = {
-          "X-Bz-File-Name": encodeURIComponent(args.fileName),
-          "Content-Type": contentType,
-          "Content-Length": String(fileSize),
-          "X-Bz-Content-Sha1": sha1,
-        };
-        if (args.fileInfo) {
-          for (const [key, value] of Object.entries(args.fileInfo)) {
-            headers[`X-Bz-Info-${key}`] = encodeURIComponent(value);
-          }
-        }
-        if (args.serverSideEncryption) {
-          const sse = args.serverSideEncryption;
-          headers["X-Bz-Server-Side-Encryption"] = sse.mode;
-          if (sse.algorithm) headers["X-Bz-Server-Side-Encryption-Algorithm"] = sse.algorithm;
-          if (sse.customerKey)
-            headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
-          if (sse.customerKeyMd5)
-            headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
-        }
-
-        const result = await client.uploadToUrl(
-          uploadUrlData.uploadUrl,
-          uploadUrlData.authorizationToken,
-          buffer,
-          headers,
-        );
+        const result = await uploadSmallFile(client, args.bucketId, buffer, {
+          fileName: args.fileName,
+          contentType,
+          contentLength: fileSize,
+          sha1,
+          fileInfo: args.fileInfo,
+          serverSideEncryption: args.serverSideEncryption,
+        });
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -328,19 +366,24 @@ export function registerFileTools(
         const encodedName = args.fileName.split("/").map(encodeURIComponent).join("/");
         const url = `${authData.downloadUrl}/file/${encodeURIComponent(args.bucketName)}/${encodedName}`;
 
+        // Stream straight to disk for saveToPath — no full-file buffering.
+        if (args.saveToPath) {
+          const safePath = resolveLocalPath(config, args.saveToPath, "write");
+          fs.mkdirSync(path.dirname(safePath), { recursive: true });
+          const { contentType, contentLength } = await client.downloadToFile(
+            url,
+            safePath,
+            undefined,
+            args.range,
+          );
+          return toolSuccess(`File saved to ${safePath} (${contentLength} bytes, ${contentType})`);
+        }
+
         const { data, contentType, contentLength } = await client.download(
           url,
           undefined,
           args.range,
         );
-
-        if (args.saveToPath) {
-          fs.mkdirSync(path.dirname(args.saveToPath), { recursive: true });
-          fs.writeFileSync(args.saveToPath, data);
-          return toolSuccess(
-            `File saved to ${args.saveToPath} (${contentLength} bytes, ${contentType})`,
-          );
-        }
 
         return toolJson({
           fileName: args.fileName,
@@ -367,21 +410,26 @@ export function registerFileTools(
     async (args) => {
       try {
         const authData = await auth.getAuth();
-        const url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${args.fileId}`;
+        const url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${encodeURIComponent(args.fileId)}`;
+
+        // Stream straight to disk for saveToPath — no full-file buffering.
+        if (args.saveToPath) {
+          const safePath = resolveLocalPath(config, args.saveToPath, "write");
+          fs.mkdirSync(path.dirname(safePath), { recursive: true });
+          const { contentType, contentLength } = await client.downloadToFile(
+            url,
+            safePath,
+            undefined,
+            args.range,
+          );
+          return toolSuccess(`File saved to ${safePath} (${contentLength} bytes, ${contentType})`);
+        }
 
         const { data, contentType, contentLength } = await client.download(
           url,
           undefined,
           args.range,
         );
-
-        if (args.saveToPath) {
-          fs.mkdirSync(path.dirname(args.saveToPath), { recursive: true });
-          fs.writeFileSync(args.saveToPath, data);
-          return toolSuccess(
-            `File saved to ${args.saveToPath} (${contentLength} bytes, ${contentType})`,
-          );
-        }
 
         return toolJson({
           fileId: args.fileId,

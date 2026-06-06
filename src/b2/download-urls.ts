@@ -110,7 +110,7 @@ export function registerDownloadUrlTools(
     async (args) => {
       try {
         const authData = await auth.getAuth();
-        let url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${args.fileId}`;
+        let url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${encodeURIComponent(args.fileId)}`;
 
         if (args.authorizationToken) {
           url += `&Authorization=${encodeURIComponent(args.authorizationToken)}`;

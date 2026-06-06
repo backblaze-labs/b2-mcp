@@ -16,6 +16,8 @@ const mockConfig: B2Config = {
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,
+  allowLocalFiles: true,
+  fileRoot: null,
 };
 
 // v3 b2_authorize_account response shape — auth manager flattens this internally

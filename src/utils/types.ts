@@ -11,6 +11,19 @@ export interface B2Config {
   region: string;
   largeFileThreshold: number; // bytes
   partSize: number; // bytes
+  /**
+   * Whether tools may read/write local filesystem paths (filePath / saveToPath).
+   * Enabled by default for the local stdio transport; disabled by default for
+   * the internet-facing HTTP transport, where a remote caller has no business
+   * referencing server-local paths (they should use base64 `content`).
+   */
+  allowLocalFiles: boolean;
+  /**
+   * If set, every local file path must resolve inside this directory (a sandbox
+   * root, symlinks included). null means unrestricted — only safe for a trusted
+   * single-user stdio process. Set via B2_FILE_ROOT.
+   */
+  fileRoot: string | null;
 }
 
 export interface B2AuthResponse {

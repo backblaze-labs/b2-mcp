@@ -1,5 +1,9 @@
 import axios from "axios";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
+import { withRetry } from "./utils/retry.js";
+
+/** Timeout for the authorize_account request. */
+const AUTH_TIMEOUT_MS = 30_000;
 
 // v3 is required: Partner API (Groups) and Backup API endpoints reject v2 tokens.
 const AUTH_URL = "https://api.backblazeb2.com/b2api/v3/b2_authorize_account";
@@ -83,9 +87,12 @@ export class B2AuthManager {
       `${this.config.applicationKeyId}:${this.config.applicationKey}`,
     ).toString("base64");
 
-    const response = await axios.get<B2V3AuthResponse>(AUTH_URL, {
-      headers: { Authorization: `Basic ${credentials}` },
-    });
+    const response = await withRetry(() =>
+      axios.get<B2V3AuthResponse>(AUTH_URL, {
+        headers: { Authorization: `Basic ${credentials}` },
+        timeout: AUTH_TIMEOUT_MS,
+      }),
+    );
 
     const v3 = response.data;
     this.cachedAuth = {

@@ -36,6 +36,8 @@ const testConfig = {
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,
+  allowLocalFiles: true,
+  fileRoot: null,
 };
 
 let server: McpServer;
