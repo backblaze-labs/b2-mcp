@@ -11,3 +11,7 @@ coverage/
 .vscode/
 .claude/settings.local.json
 probe-output/
+
+# Internal-only docs — never ship in a public/open-sourced repo
+docs/STRATEGY-*.md
+docs/internal/
