@@ -32,6 +32,60 @@ describe("parseB2Error", () => {
     expect(parsed.code).toBe("internal_error");
     expect(parsed.message).toBe("something went wrong");
   });
+
+  // AWS SDK v3 (S3) errors carry status in $metadata, not response.status —
+  // these must classify by their true code, not collapse to 500/internal_error.
+  it("classifies an AWS SDK 404 (NoSuchKey) as 404 with its real code + requestId", () => {
+    const err = {
+      name: "NoSuchKey",
+      message: "The specified key does not exist.",
+      $metadata: { httpStatusCode: 404, requestId: "req-abc-123", extendedRequestId: "ext-xyz" },
+    };
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(404);
+    expect(parsed.code).toBe("NoSuchKey");
+    expect(parsed.requestId).toBe("req-abc-123");
+    expect(parsed.extendedRequestId).toBe("ext-xyz");
+  });
+
+  it("classifies an AWS SDK 403 (Forbidden) as 403", () => {
+    const err = { name: "Forbidden", message: "Forbidden", $metadata: { httpStatusCode: 403 } };
+    expect(parseB2Error(err).status).toBe(403);
+    expect(parseB2Error(err).code).toBe("Forbidden");
+  });
+
+  it("classifies a genuine AWS SDK 500 (UnknownError) as 500 — the ticket case", () => {
+    const err = {
+      name: "UnknownError",
+      message: "UnknownError",
+      $metadata: { httpStatusCode: 500, requestId: "req-500-1" },
+    };
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(500);
+    expect(parsed.code).toBe("UnknownError");
+    expect(parsed.requestId).toBe("req-500-1");
+  });
+
+  it("prefers err.Code over err.name when both are present", () => {
+    const err = {
+      Code: "NoSuchBucket",
+      name: "NoSuchBucketException",
+      message: "no bucket",
+      $metadata: { httpStatusCode: 404 },
+    };
+    expect(parseB2Error(err).code).toBe("NoSuchBucket");
+  });
+
+  it("captures a requestId from axios response headers (B2 native)", () => {
+    const err = {
+      response: {
+        status: 500,
+        data: { code: "internal_error", message: "boom" },
+        headers: { "x-bz-request-id": "bz-req-9" },
+      },
+    };
+    expect(parseB2Error(err).requestId).toBe("bz-req-9");
+  });
 });
 
 describe("formatB2Error", () => {
@@ -46,6 +100,15 @@ describe("formatB2Error", () => {
     expect(formatted).toContain("file_not_present");
     expect(formatted).toContain("404");
     expect(formatted).toContain("No file with the given name.");
+  });
+
+  it("appends the requestId when present (for support tickets)", () => {
+    const err = {
+      name: "UnknownError",
+      message: "UnknownError",
+      $metadata: { httpStatusCode: 500, requestId: "req-500-1" },
+    };
+    expect(formatB2Error(err)).toContain("requestId: req-500-1");
   });
 });
 

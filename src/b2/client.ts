@@ -125,17 +125,23 @@ export class B2Client {
         };
         if (range) headers["Range"] = range;
 
-        const response = await axios.get(url, {
-          headers,
-          responseType: "arraybuffer",
-          maxContentLength: MAX_BUFFER_DOWNLOAD_BYTES,
-        });
+        try {
+          const response = await axios.get(url, {
+            headers,
+            responseType: "arraybuffer",
+            maxContentLength: MAX_BUFFER_DOWNLOAD_BYTES,
+          });
 
-        return {
-          data: Buffer.from(response.data as ArrayBuffer),
-          contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
-          contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
-        };
+          return {
+            data: Buffer.from(response.data as ArrayBuffer),
+            contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
+            contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
+          };
+        } catch (err) {
+          // Error responses also arrive as arraybuffer; decode the body so the
+          // real B2 code/message surface instead of "unknown_error".
+          throw decodeBinaryErrorBody(err);
+        }
       }),
     );
   }
@@ -193,4 +199,25 @@ function isStatus(err: unknown, status: number): boolean {
     }
   }
   return false;
+}
+
+/**
+ * When a download requested `responseType: "arraybuffer"`, an error response
+ * body also arrives as raw bytes — so `err.response.data.code` is a Buffer, not
+ * the B2 error JSON. Decode it in place so parseB2Error can read the real
+ * code/message (otherwise it falls back to "unknown_error"). Returns the same error.
+ */
+export function decodeBinaryErrorBody(err: unknown): unknown {
+  if (typeof err === "object" && err !== null) {
+    const e = err as { response?: { data?: unknown } };
+    const data = e.response?.data;
+    if (data instanceof ArrayBuffer || Buffer.isBuffer(data)) {
+      try {
+        e.response!.data = JSON.parse(Buffer.from(data as ArrayBuffer).toString("utf8"));
+      } catch {
+        /* not JSON — leave the raw body as-is */
+      }
+    }
+  }
+  return err;
 }
