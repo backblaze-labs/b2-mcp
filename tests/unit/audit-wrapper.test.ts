@@ -73,6 +73,30 @@ describe("wrapToolsWithAudit", () => {
     );
   });
 
+  it("enriches the tool.call event with code/status/requestId on a structured error", async () => {
+    const original = jest.fn().mockResolvedValue({
+      isError: true,
+      content: [
+        { type: "text", text: "B2 Error [NoSuchKey] (HTTP 404): missing (requestId: req-7)" },
+      ],
+    });
+    const tool: Record<string, unknown> = { callback: original };
+    const server = { _registeredTools: { s3_get_object: tool } } as unknown as McpServer;
+    wrapToolsWithAudit(server, cfg);
+
+    await (tool.callback as (...a: unknown[]) => Promise<unknown>)({ bucket: "b", key: "k" }, {});
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: "s3_get_object",
+        error: true,
+        code: "NoSuchKey",
+        status: 404,
+        requestId: "req-7",
+      }),
+      "tool.call",
+    );
+  });
+
   it("logs tool.error and rethrows when the handler throws", async () => {
     const original = jest.fn().mockRejectedValue(new Error("boom"));
     const tool: Record<string, unknown> = { callback: original };

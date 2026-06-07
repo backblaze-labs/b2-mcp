@@ -72,6 +72,21 @@ export function parseB2Error(err: unknown): B2ApiError {
 }
 
 /**
+ * Parse a formatB2Error() string back into its parts. Used by the audit layer
+ * to record error code/status/requestId from a tool's error response (the tool
+ * surface only carries the formatted text). Returns null if the text isn't a
+ * formatted B2 error.
+ */
+export function parseErrorText(
+  text: string | undefined,
+): { code: string; status: number; requestId?: string } | null {
+  if (!text) return null;
+  const m = text.match(/^B2 Error \[(.+?)\] \(HTTP (\d+)\): [\s\S]*?(?: \(requestId: (.+?)\))?$/);
+  if (!m) return null;
+  return { code: m[1], status: Number(m[2]), requestId: m[3] };
+}
+
+/**
  * Format a B2 error into a human-readable string for MCP tool responses.
  * Includes the provider requestId when available — the field a Backblaze
  * support ticket needs to trace a server-side failure.

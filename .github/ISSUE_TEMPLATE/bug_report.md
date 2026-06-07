@@ -18,6 +18,10 @@ labels: bug
 
 **Actual behavior**
 
+<!-- If a tool returned an error, paste the full error line. It looks like:
+     B2 Error [NoSuchKey] (HTTP 404): ... (requestId: abc123)
+     The code/status and especially the requestId let us (and Backblaze) trace it. -->
+
 **Environment**
 
 - Server version (`/health` endpoint or `package.json`):

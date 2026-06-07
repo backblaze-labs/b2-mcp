@@ -24,6 +24,8 @@ export interface B2Config {
    * single-user stdio process. Set via B2_FILE_ROOT.
    */
   fileRoot: string | null;
+  /** Which transport launched this server — surfaced in the outbound User-Agent. */
+  transport?: "stdio" | "http";
 }
 
 export interface B2AuthResponse {

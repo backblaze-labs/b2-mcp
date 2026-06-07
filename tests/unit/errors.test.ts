@@ -1,6 +1,7 @@
 import {
   parseB2Error,
   formatB2Error,
+  parseErrorText,
   toolError,
   toolSuccess,
   toolJson,
@@ -109,6 +110,31 @@ describe("formatB2Error", () => {
       $metadata: { httpStatusCode: 500, requestId: "req-500-1" },
     };
     expect(formatB2Error(err)).toContain("requestId: req-500-1");
+  });
+});
+
+describe("parseErrorText (round-trips formatB2Error for the audit layer)", () => {
+  it("extracts code, status, and requestId", () => {
+    const text = formatB2Error({
+      name: "NoSuchKey",
+      message: "missing",
+      $metadata: { httpStatusCode: 404, requestId: "req-9" },
+    });
+    expect(parseErrorText(text)).toEqual({ code: "NoSuchKey", status: 404, requestId: "req-9" });
+  });
+
+  it("works without a requestId", () => {
+    const text = "B2 Error [bad_request] (HTTP 400): nope";
+    expect(parseErrorText(text)).toEqual({
+      code: "bad_request",
+      status: 400,
+      requestId: undefined,
+    });
+  });
+
+  it("returns null for non-error / undefined text", () => {
+    expect(parseErrorText(undefined)).toBeNull();
+    expect(parseErrorText("some success text")).toBeNull();
   });
 });
 

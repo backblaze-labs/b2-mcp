@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-07
+
+### Added
+- **Local telemetry foundation (no phone-home).** Each tool call's audit event
+  now carries the classified error `code`/`status`/`requestId` (argument *names*
+  and duration only — never values, credentials, bucket/file names, or PII), so
+  operators can mine failing/slow tools from their own logs.
+- **Outbound User-Agent for traffic attribution.** B2-native requests send
+  `backblaze-b2-mcp/<version> (<transport>) axios/<v> Node.js/<v>` (the original
+  axios/Node stack is preserved, not clobbered); S3 requests append the product
+  token to the AWS SDK User-Agent. No credentials or per-user identifiers.
+  Optional `B2_MCP_UA_SUFFIX` to tag a deployment.
+- README "Logging & telemetry" section stating explicitly that nothing phones
+  home and documenting exactly what is logged/sent. Enhanced issue templates to
+  capture the affected API surface and the error `requestId`.
+
 ## [1.3.0] - 2026-06-05
 
 ### Security

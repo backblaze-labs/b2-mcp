@@ -89,6 +89,16 @@ Add to `.cursor/mcp.json` in your project root:
 | `B2_REGION`               | —        | `us-west-004`           | B2 region for S3-compatible endpoint                                                                            |
 | `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)     | File size above which multipart upload is used                                                                  |
 | `B2_PART_SIZE`            | —        | `104857600` (100MB)     | Size of each multipart upload part                                                                              |
+| `B2_MCP_UA_SUFFIX`        | —        | —                       | Optional token appended to the outbound User-Agent (e.g. to tag a deployment)                                   |
+
+> Security/hardening vars (`B2_FILE_ROOT`, `B2_ALLOW_LOCAL_FILES`, `B2_MAX_SESSIONS`, `B2_ALLOWED_HOSTS`/`B2_ALLOWED_ORIGINS`) are documented in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+## Logging & telemetry
+
+This server does **not** phone home — there is no analytics endpoint and nothing is sent to Backblaze or any third party beyond your own B2 API calls. Specifically:
+
+- **Local audit log.** Each tool call emits a structured line to **stderr** (captured by journald/your log pipeline): tool name, a truncated key prefix, the argument **key names only** (never values), duration, and — on error — the classified `code`/`status`/`requestId`. It never logs credentials, argument values, bucket names, or file contents. Mine these locally to spot failing/slow tools.
+- **Outbound User-Agent.** B2 API requests carry a `User-Agent` like `backblaze-b2-mcp/<version> (<transport>) axios/<v> Node.js/<v>` (S3 requests append the same product token to the AWS SDK's User-Agent). This lets B2 attribute traffic to the MCP server. It contains **no credentials or per-user identifiers** — only product, version, and transport. Append your own token with `B2_MCP_UA_SUFFIX`.
 
 ## Available Tools
 
