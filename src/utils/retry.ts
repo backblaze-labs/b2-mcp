@@ -93,6 +93,11 @@ function getStatusCode(err: unknown): number | null {
       const resp = e.response as Record<string, unknown>;
       if (typeof resp.status === "number") return resp.status;
     }
+    // AWS SDK v3 (S3) errors carry the status in $metadata.
+    if (e.$metadata && typeof e.$metadata === "object") {
+      const meta = e.$metadata as Record<string, unknown>;
+      if (typeof meta.httpStatusCode === "number") return meta.httpStatusCode;
+    }
     if (typeof e.status === "number") return e.status;
   }
   return null;

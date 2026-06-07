@@ -941,6 +941,9 @@ describe("Error handling", () => {
       bucket: "this-bucket-does-not-exist-xyz-99999",
     });
     expect(isError(result)).toBe(true);
+    // S3 errors must classify by their real code, not collapse to internal_error.
+    expect(result.content[0].text).not.toContain("internal_error");
+    console.log("  Missing-bucket error:", result.content[0].text.slice(0, 100));
   });
 
   liveS3It("s3_get_object: structured error for non-existent key", async () => {
@@ -950,6 +953,8 @@ describe("Error handling", () => {
       key: "this-key-definitely-does-not-exist-mcp-test.xyz",
     });
     expect(isError(result)).toBe(true);
+    // Previously mislabeled as "internal_error (HTTP 500)"; now the real S3 code surfaces.
+    expect(result.content[0].text).not.toContain("internal_error");
     console.log("  NoSuchKey error:", result.content[0].text.slice(0, 100));
   });
 

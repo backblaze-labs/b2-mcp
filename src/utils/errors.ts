@@ -2,15 +2,54 @@ export interface B2ApiError {
   status: number;
   code: string;
   message: string;
+  /** Provider request id (B2 native header or AWS SDK $metadata) — for support tickets. */
+  requestId?: string;
+  /** AWS SDK extended request id, when present. */
+  extendedRequestId?: string;
+}
+
+/** Pull a request id out of axios response headers (B2 native / S3 proxy variants). */
+function headerRequestId(headers: unknown): string | undefined {
+  if (typeof headers !== "object" || headers === null) return undefined;
+  const h = headers as Record<string, unknown>;
+  const id = h["x-bz-request-id"] ?? h["x-amz-request-id"] ?? h["x-amz-id-2"] ?? h["x-request-id"];
+  return typeof id === "string" ? id : undefined;
 }
 
 /**
  * Parse an error from a B2 API call and return a structured error object.
+ *
+ * Handles both error shapes used in this codebase:
+ *   - B2 native (axios): `err.response.status` + `err.response.data.{code,message}`
+ *   - S3 / AWS SDK v3:   `err.$metadata.httpStatusCode` + `err.name`/`err.Code`,
+ *     with the trace id in `err.$metadata.requestId`.
+ *
+ * Reading the AWS SDK shape is what lets us tell a genuine Backblaze 5xx apart
+ * from a 4xx (e.g. NoSuchKey) and surface the requestId support needs.
  */
 export function parseB2Error(err: unknown): B2ApiError {
-  // Axios-style error with a response body
   if (typeof err === "object" && err !== null) {
     const e = err as Record<string, unknown>;
+
+    // AWS SDK v3 error (S3 tools) — has a $metadata object.
+    if (e.$metadata && typeof e.$metadata === "object") {
+      const meta = e.$metadata as Record<string, unknown>;
+      const status = typeof meta.httpStatusCode === "number" ? meta.httpStatusCode : 500;
+      const code =
+        (typeof e.Code === "string" && e.Code) ||
+        (typeof e.name === "string" && e.name) ||
+        "unknown_error";
+      return {
+        status,
+        code,
+        message: typeof e.message === "string" ? e.message : "An unknown error occurred",
+        requestId: typeof meta.requestId === "string" ? meta.requestId : undefined,
+        extendedRequestId:
+          typeof meta.extendedRequestId === "string" ? meta.extendedRequestId : undefined,
+      };
+    }
+
+    // Axios-style error with a response body (B2 native API).
     if (e.response && typeof e.response === "object") {
       const resp = e.response as Record<string, unknown>;
       const data = (resp.data ?? {}) as Record<string, unknown>;
@@ -18,6 +57,7 @@ export function parseB2Error(err: unknown): B2ApiError {
         status: (resp.status as number) ?? 500,
         code: (data.code as string) ?? "unknown_error",
         message: (data.message as string) ?? "An unknown error occurred",
+        requestId: headerRequestId(resp.headers),
       };
     }
     // Already a parsed B2 error
@@ -33,10 +73,13 @@ export function parseB2Error(err: unknown): B2ApiError {
 
 /**
  * Format a B2 error into a human-readable string for MCP tool responses.
+ * Includes the provider requestId when available — the field a Backblaze
+ * support ticket needs to trace a server-side failure.
  */
 export function formatB2Error(err: unknown): string {
   const parsed = parseB2Error(err);
-  return `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${parsed.message}`;
+  const base = `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${parsed.message}`;
+  return parsed.requestId ? `${base} (requestId: ${parsed.requestId})` : base;
 }
 
 /**

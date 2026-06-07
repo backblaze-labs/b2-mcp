@@ -44,6 +44,11 @@ function httpError(status: number) {
   return { response: { status, data: { code: "test_error", message: `HTTP ${status}` } } };
 }
 
+/** Make an AWS SDK v3 (S3) error with the status in $metadata */
+function awsError(status: number) {
+  return { name: "TestError", message: `HTTP ${status}`, $metadata: { httpStatusCode: status } };
+}
+
 // ── Successful calls ──────────────────────────────────────────────────────────
 
 describe("withRetry — success path", () => {
@@ -92,6 +97,26 @@ describe("withRetry — retries on transient status codes", () => {
     await promise;
 
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ── AWS SDK ($metadata) status codes ──────────────────────────────────────────
+
+describe("withRetry — reads AWS SDK $metadata status", () => {
+  it("retries a transient S3 503 (status from $metadata)", async () => {
+    const fn = jest.fn().mockRejectedValueOnce(awsError(503)).mockResolvedValueOnce("ok");
+    const promise = withRetry(fn);
+    await flushRetries();
+    await promise;
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry an S3 404 (status from $metadata)", async () => {
+    const fn = jest.fn().mockRejectedValue(awsError(404));
+    const promise = withRetry(fn);
+    await flushRetries();
+    await expect(promise).rejects.toMatchObject({ $metadata: { httpStatusCode: 404 } });
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 

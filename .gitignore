@@ -10,3 +10,4 @@ coverage/
 .idea/
 .vscode/
 .claude/settings.local.json
+probe-output/

@@ -8,8 +8,9 @@ import { logger } from "./logger.js";
  */
 export function isClientError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
-  const e = err as { response?: { status?: number } };
-  const status = e.response?.status;
+  const e = err as { response?: { status?: number }; $metadata?: { httpStatusCode?: number } };
+  // B2 native (axios) status, or AWS SDK v3 (S3) status from $metadata.
+  const status = e.response?.status ?? e.$metadata?.httpStatusCode;
   if (typeof status !== "number") return false;
   // 408 (timeout) and 429 (rate limit) DO count as B2 trouble.
   if (status === 408 || status === 429) return false;

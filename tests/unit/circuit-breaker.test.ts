@@ -39,6 +39,15 @@ describe("circuit-breaker", () => {
     expect(isClientError(null)).toBe(false);
   });
 
+  it("classifies AWS SDK (S3) errors by $metadata.httpStatusCode", () => {
+    // 4xx → filtered out (client error); 5xx/408/429 → counted as B2 trouble.
+    expect(isClientError({ $metadata: { httpStatusCode: 404 } })).toBe(true);
+    expect(isClientError({ $metadata: { httpStatusCode: 403 } })).toBe(true);
+    expect(isClientError({ $metadata: { httpStatusCode: 500 } })).toBe(false);
+    expect(isClientError({ $metadata: { httpStatusCode: 503 } })).toBe(false);
+    expect(isClientError({ $metadata: { httpStatusCode: 429 } })).toBe(false);
+  });
+
   it("fails fast when open", async () => {
     circuitBreaker.open();
     await expect(withCircuit(async () => 1)).rejects.toThrow(/breaker/i);
