@@ -93,6 +93,7 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
     // unrestricted over HTTP).
     allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES === "true" && !!process.env.B2_FILE_ROOT,
     fileRoot: process.env.B2_FILE_ROOT ?? null,
+    transport: "http",
   };
 }
 

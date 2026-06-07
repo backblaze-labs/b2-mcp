@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
+import { buildUserAgent } from "./utils/user-agent.js";
+import { parseErrorText } from "./utils/errors.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
@@ -52,6 +54,7 @@ export function loadConfig(): B2Config {
     // confine all file paths to one directory.
     allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
     fileRoot: process.env.B2_FILE_ROOT ?? null,
+    transport: "stdio",
   };
 }
 
@@ -104,7 +107,7 @@ export function createServer(config: B2Config): McpServer {
 
   // Initialize clients
   const auth = new B2AuthManager(config);
-  const b2Client = new B2Client(auth);
+  const b2Client = new B2Client(auth, buildUserAgent(config));
   const s3Client = createS3Client(config);
 
   // ── B2 Native API tools ─────────────────────────────────────────────────
@@ -197,8 +200,23 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
         const result = await original.call(this, args, extra);
         const durationMs = Date.now() - start;
         const isError = result?.isError === true;
+        // When the tool returned a structured error, surface the classified
+        // code/status/requestId in the audit event — this is the local metrics
+        // stream operators mine for failing/slow tools (no values, no PII).
+        const errInfo = isError ? parseErrorText(result?.content?.[0]?.text) : null;
         logger.info(
-          { tool: name, key: keyPrefix, argKeys, durationMs, error: isError },
+          {
+            tool: name,
+            key: keyPrefix,
+            argKeys,
+            durationMs,
+            error: isError,
+            ...(errInfo && {
+              code: errInfo.code,
+              status: errInfo.status,
+              ...(errInfo.requestId && { requestId: errInfo.requestId }),
+            }),
+          },
           "tool.call",
         );
         return result;

@@ -1,6 +1,7 @@
 import axios from "axios";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { withRetry } from "./utils/retry.js";
+import { buildUserAgent } from "./utils/user-agent.js";
 
 /** Timeout for the authorize_account request. */
 const AUTH_TIMEOUT_MS = 30_000;
@@ -89,7 +90,10 @@ export class B2AuthManager {
 
     const response = await withRetry(() =>
       axios.get<B2V3AuthResponse>(AUTH_URL, {
-        headers: { Authorization: `Basic ${credentials}` },
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "User-Agent": buildUserAgent(this.config),
+        },
         timeout: AUTH_TIMEOUT_MS,
       }),
     );

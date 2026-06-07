@@ -21,9 +21,11 @@ const MAX_BUFFER_DOWNLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
  */
 export class B2Client {
   private auth: B2AuthManager;
+  private userAgent: string;
 
-  constructor(auth: B2AuthManager) {
+  constructor(auth: B2AuthManager, userAgent = "backblaze-b2-mcp") {
     this.auth = auth;
+    this.userAgent = userAgent;
   }
 
   /**
@@ -59,7 +61,10 @@ export class B2Client {
             const config: AxiosRequestConfig = {
               method: options.method ?? (data !== undefined ? "POST" : "GET"),
               url,
-              headers: { Authorization: authData.authorizationToken },
+              headers: {
+                Authorization: authData.authorizationToken,
+                "User-Agent": this.userAgent,
+              },
               timeout: API_TIMEOUT_MS,
               ...(data !== undefined && { data }),
               ...(options.params !== undefined && { params: options.params }),
@@ -95,6 +100,7 @@ export class B2Client {
         const response = await axios.post<T>(uploadUrl, body, {
           headers: {
             Authorization: uploadAuthToken,
+            "User-Agent": this.userAgent,
             ...headers,
           },
           maxBodyLength: Infinity,
@@ -122,6 +128,7 @@ export class B2Client {
         const authData = await this.auth.getAuth();
         const headers: Record<string, string> = {
           Authorization: authToken ?? authData.authorizationToken,
+          "User-Agent": this.userAgent,
         };
         if (range) headers["Range"] = range;
 
@@ -163,6 +170,7 @@ export class B2Client {
         const authData = await this.auth.getAuth();
         const headers: Record<string, string> = {
           Authorization: authToken ?? authData.authorizationToken,
+          "User-Agent": this.userAgent,
         };
         if (range) headers["Range"] = range;
 
