@@ -29,6 +29,8 @@ npm run build
 
 > **Note:** The `dist/` folder is excluded from the zip — you must run `npm run build` once before connecting Claude.
 
+> **Using a different client?** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Claude Desktop, Claude.ai, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, and hosted (SSE) clients — plus a compatibility matrix.
+
 ### 2. Connect Claude Desktop
 
 Open (or create) `~/Library/Application Support/Claude/claude_desktop_config.json` and add:
