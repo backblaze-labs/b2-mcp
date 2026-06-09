@@ -188,3 +188,100 @@ describe("Contract: notification rules objectNamePrefix", () => {
     30_000,
   );
 });
+
+// ── b2_copy_file destination encryption field name ────────────────────────────
+describe("Contract: b2_copy_file destination SSE", () => {
+  liveIt(
+    "copies with destinationServerSideEncryption (B2 rejects the old 'serverSideEncryption' name)",
+    async () => {
+      if (!writableBucketId) {
+        console.log("  No writable bucket; skipping.");
+        return;
+      }
+      let origId = "";
+      let copyId = "";
+      try {
+        const up = parseResult(
+          await callTool(server, "b2_upload_file", {
+            bucketId: writableBucketId,
+            fileName: "__contract/copy-src.txt",
+            content: Buffer.from("copy-sse").toString("base64"),
+            contentType: "text/plain",
+          }),
+        );
+        expect(isError(up)).toBe(false);
+        origId = up.fileId;
+
+        const copy = await callTool(server, "b2_copy_file", {
+          sourceFileId: origId,
+          fileName: "__contract/copy-dst.txt",
+          destinationServerSideEncryption: { mode: "SSE-B2", algorithm: "AES256" },
+        });
+        // Regression guard: the old 'serverSideEncryption' name returns
+        // 400 "unknown field ... B2CopyFileRequest: serverSideEncryption".
+        expect(isError(copy)).toBe(false);
+        const copied = parseResult(copy);
+        copyId = copied.fileId;
+        expect(
+          copied.serverSideEncryption?.mode ?? copied.serverSideEncryption?.algorithm,
+        ).toBeTruthy();
+      } finally {
+        if (copyId)
+          await callTool(server, "b2_delete_file_version", {
+            fileName: "__contract/copy-dst.txt",
+            fileId: copyId,
+          });
+        if (origId)
+          await callTool(server, "b2_delete_file_version", {
+            fileName: "__contract/copy-src.txt",
+            fileId: origId,
+          });
+      }
+    },
+    60_000,
+  );
+});
+
+// ── b2_update_bucket Object Lock retrofit + defaultRetention ───────────────────
+describe("Contract: b2_update_bucket Object Lock retrofit", () => {
+  liveIt(
+    "enables Object Lock on an existing bucket and sets defaultRetention via b2_update_bucket",
+    async () => {
+      const bucketName = `mcp-contract-retrofit-${Date.now().toString(36)}`;
+      let bucketId = "";
+      try {
+        const created = parseResult(
+          await callTool(server, "b2_create_bucket", { bucketName, bucketType: "allPrivate" }),
+        );
+        if (isError(created)) {
+          console.log("  Could not create bucket; skipping:", errText(created));
+          return;
+        }
+        bucketId = created.bucketId;
+        expect(created.fileLockConfiguration?.value?.isFileLockEnabled).toBe(false);
+
+        // Retrofit: enable Object Lock on the EXISTING bucket (native API allows this).
+        const enabled = await callTool(server, "b2_update_bucket", {
+          bucketId,
+          fileLockEnabled: true,
+        });
+        expect(isError(enabled)).toBe(false);
+        expect(parseResult(enabled).fileLockConfiguration?.value?.isFileLockEnabled).toBe(true);
+
+        // Set the bucket default retention and confirm it took.
+        const retained = await callTool(server, "b2_update_bucket", {
+          bucketId,
+          defaultRetention: { mode: "governance", period: { duration: 7, unit: "days" } },
+        });
+        expect(isError(retained)).toBe(false);
+        const back = parseResult(await callTool(server, "b2_list_buckets", { bucketId })).buckets[0]
+          .fileLockConfiguration?.value?.defaultRetention;
+        expect(back?.mode).toBe("governance");
+        expect(back?.period).toEqual({ duration: 7, unit: "days" });
+      } finally {
+        if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
+      }
+    },
+    90_000,
+  );
+});

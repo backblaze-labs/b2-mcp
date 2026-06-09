@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.5] - 2026-06-09
+
+### Fixed
+- `b2_copy_file` sent the destination encryption settings under the wrong field
+  name `serverSideEncryption`, which B2 rejects outright
+  (`400 unknown field … B2CopyFileRequest: serverSideEncryption`) — so an
+  encrypted copy failed entirely. Renamed to the documented
+  `destinationServerSideEncryption`. Verified live.
+- `s3_upload_part_copy` declared a `copySourceVersionId` argument but never
+  applied it, silently copying the *current* version. It is now folded into
+  `CopySource` as `?versionId=…` (matching `s3_copy_object`).
+
+### Added
+- `b2_update_bucket` now supports `fileLockEnabled` and `defaultRetention`.
+  B2's **native** API allows enabling Object Lock on an **existing** bucket
+  (unlike the S3 `PutObjectLockConfiguration` path, which only enables it at
+  creation) — verified live, including reading the default retention back. The
+  `b2_create_bucket` description that wrongly claimed Object Lock could *only*
+  be enabled at creation has been corrected.
+
 ## [1.4.4] - 2026-06-09
 
 ### Changed

@@ -890,6 +890,19 @@ describe("s3_upload_part_copy", () => {
     expect(cmd.input.UploadId).toBe("upload-xyz");
     expect(cmd.input.CopySource).toBe("src-bucket/chunk.bin");
   });
+
+  it("folds copySourceVersionId into CopySource (was previously dropped)", async () => {
+    await callTool(server, "s3_upload_part_copy", {
+      bucket: "dst-bucket",
+      key: "assembled.bin",
+      uploadId: "upload-xyz",
+      partNumber: 1,
+      copySource: "src-bucket/chunk.bin",
+      copySourceVersionId: "ver-42",
+    });
+    const cmd = sendSpy.mock.calls[0][0];
+    expect(cmd.input.CopySource).toBe("src-bucket/chunk.bin?versionId=ver-42");
+  });
 });
 
 // ── s3_put_bucket_acl ─────────────────────────────────────────────────────────
