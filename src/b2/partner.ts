@@ -84,7 +84,7 @@ export function registerPartnerTools(
           "Email address for the new Group member. Must not already be a Backblaze account.",
         ),
       region: z
-        .enum(["us-east", "us-west", "eu-central"])
+        .enum(["us-east", "us-west", "eu-central", "ca-east"])
         .optional()
         .describe(
           "Region for the new account's data. Defaults to the current default region if omitted.",
@@ -217,7 +217,7 @@ export function registerPartnerTools(
         .max(50)
         .describe("Storage capacity for the trial in TB (1-50 inclusive)."),
       region: z
-        .enum(["us-east", "us-west", "eu-central"])
+        .enum(["us-east", "us-west", "eu-central", "ca-east"])
         .optional()
         .describe("Region for the new account's data. Backblaze picks a region if not specified."),
     },
