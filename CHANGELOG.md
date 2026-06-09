@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-06-09
+
+### Fixed
+- Partner API region enum was missing `ca-east` (Canada East / Toronto). A real
+  MCP client provisioning a tenant in `ca-east` via `b2_create_group_member` or
+  `b2_reserve_trial_create_account` was rejected at schema validation before the
+  request reached B2. The complete region set is now
+  `us-east`, `us-west`, `eu-central`, `ca-east`. Verified against Backblaze's
+  data-regions documentation.
+
 ## [1.4.0] - 2026-06-07
 
 ### Added
