@@ -38,6 +38,8 @@ function makeConfig(over: Partial<B2Config> = {}): B2Config {
     applicationKey: "s",
     appKeyId: "k",
     appKey: "s",
+    masterKeyId: "s",
+    masterKey: "s",
     region: "us-west-004",
     largeFileThreshold: 100 * 1024 * 1024,
     partSize: 100 * 1024 * 1024,

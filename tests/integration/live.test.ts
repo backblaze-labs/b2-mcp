@@ -84,6 +84,8 @@ beforeAll(async () => {
         applicationKey: "test",
         appKeyId: "test",
         appKey: "test",
+        masterKeyId: "test",
+        masterKey: "test",
         region: "us-west-004",
         largeFileThreshold: 1e8,
         partSize: 1e8,

@@ -198,6 +198,45 @@ describe("configFromHeaders — filesystem policy", () => {
   });
 });
 
+describe("configFromHeaders — credential model", () => {
+  it("application key drives native+S3; master falls back to it when unset", () => {
+    const cfg = configFromHeaders({
+      headers: { "x-b2-key-id": "app-id", "x-b2-key": "app-secret" },
+    });
+    expect(cfg?.applicationKeyId).toBe("app-id");
+    expect(cfg?.appKeyId).toBe("app-id"); // S3 uses the application key
+    expect(cfg?.masterKeyId).toBe("app-id"); // master falls back to the application key
+    expect(cfg?.masterKey).toBe("app-secret");
+  });
+
+  it("uses X-B2-Master-Key-* for the master credential when provided", () => {
+    const cfg = configFromHeaders({
+      headers: {
+        "x-b2-key-id": "app-id",
+        "x-b2-key": "app-secret",
+        "x-b2-master-key-id": "master-id",
+        "x-b2-master-key": "master-secret",
+      },
+    });
+    expect(cfg?.applicationKeyId).toBe("app-id"); // workhorse stays the app key
+    expect(cfg?.masterKeyId).toBe("master-id"); // Partner/bz_* use the master key
+    expect(cfg?.masterKey).toBe("master-secret");
+  });
+
+  it("still honors the deprecated X-B2-App-Key-* S3 override", () => {
+    const cfg = configFromHeaders({
+      headers: {
+        "x-b2-key-id": "master-id",
+        "x-b2-key": "master-secret",
+        "x-b2-app-key-id": "s3-id",
+        "x-b2-app-key": "s3-secret",
+      },
+    });
+    expect(cfg?.appKeyId).toBe("s3-id"); // legacy: S3 signs with the non-master override
+    expect(cfg?.applicationKeyId).toBe("master-id");
+  });
+});
+
 describe("deriveRateKey", () => {
   it("is deterministic and distinct per key id", () => {
     expect(deriveRateKey("abc")).toBe(deriveRateKey("abc"));

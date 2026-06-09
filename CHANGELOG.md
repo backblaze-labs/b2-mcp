@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-09
+
+### Changed
+- **Credential model: application key first, master key optional.** The
+  application key (`B2_APPLICATION_KEY_ID`/`KEY`, `X-B2-Key-*`) is now the single
+  workhorse for the B2 native API, S3, **and** key management — a non-master key
+  covers everything except the Partner API and `bz_*` Computer Backup. Those two
+  families use an optional, separately-labeled master key
+  (`B2_MASTER_KEY_ID`/`KEY`, `X-B2-Master-Key-*`), routed to them internally and
+  falling back to the application key when unset. So the common case is one key
+  with no S3 second-key dance, and the powerful master key is loaded only by the
+  handful of admin tools.
+- Corrected the docs: key management (`b2_create_key`/`list_keys`/`delete_key`)
+  needs the `writeKeys`/`listKeys`/`deleteKeys` capabilities, **not** a master
+  key (verified live — a non-master key created and deleted a key). The README
+  and CLAUDE.md previously overstated this.
+
+### Deprecated
+- `B2_APP_KEY_ID`/`B2_APP_KEY` and `X-B2-App-Key-*` — the legacy non-master S3
+  override that existed only because the primary slot could hold a master key.
+  The model is now reversed; these still work for one release (with a
+  deprecation warning). Use a non-master application key as the primary and
+  `B2_MASTER_KEY_*` for Partner/`bz_*`.
+
 ## [1.4.5] - 2026-06-09
 
 ### Fixed

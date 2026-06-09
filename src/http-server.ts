@@ -3,10 +3,12 @@
  * Backblaze B2 MCP Server — HTTP + SSE transport entry point.
  *
  * Credentials are read per-connection from request headers:
- *   X-B2-Key-Id       — B2 key ID (master or application key)
- *   X-B2-Key          — B2 key secret
- *   X-B2-App-Key-Id   — non-master application key ID for S3-compatible API (optional)
- *   X-B2-App-Key      — non-master application key secret for S3-compatible API (optional)
+ *   X-B2-Key-Id          — application key ID (the workhorse: native + S3 + key mgmt)
+ *   X-B2-Key             — application key secret
+ *   X-B2-Master-Key-Id   — master key ID, ONLY for Partner API + bz_* tools (optional)
+ *   X-B2-Master-Key      — master key secret (optional)
+ *   X-B2-App-Key-Id      — DEPRECATED non-master S3 override for legacy master-primary setups
+ *   X-B2-App-Key         — DEPRECATED (see above)
  *
  * The server listens on:
  *   GET  /sse      — SSE event stream for server-to-client messages
@@ -79,11 +81,19 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
   const appKey = req.headers["x-b2-app-key"];
   const resolvedAppKeyId = !Array.isArray(appKeyId) && appKeyId ? appKeyId : keyId;
   const resolvedAppKey = !Array.isArray(appKey) && appKey ? appKey : key;
+  // Optional master key — used only by the Partner API and bz_* tools. Falls
+  // back to the application key, so a single key remains a complete config.
+  const masterKeyId = req.headers["x-b2-master-key-id"];
+  const masterKey = req.headers["x-b2-master-key"];
+  const resolvedMasterKeyId = !Array.isArray(masterKeyId) && masterKeyId ? masterKeyId : keyId;
+  const resolvedMasterKey = !Array.isArray(masterKey) && masterKey ? masterKey : key;
   return {
     applicationKeyId: keyId,
     applicationKey: key,
     appKeyId: resolvedAppKeyId,
     appKey: resolvedAppKey,
+    masterKeyId: resolvedMasterKeyId,
+    masterKey: resolvedMasterKey,
     region: process.env.B2_REGION ?? DEFAULT_REGION,
     largeFileThreshold: parseIntEnv(process.env.B2_LARGE_FILE_THRESHOLD, DEFAULT_PART_SIZE),
     partSize: parseIntEnv(process.env.B2_PART_SIZE, DEFAULT_PART_SIZE),
