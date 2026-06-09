@@ -8,6 +8,7 @@ import axios from "axios";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import * as crypto from "crypto";
 import { createServer } from "../../src/server";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { B2Config } from "../../src/utils/types";
@@ -160,5 +161,64 @@ describe("standalone large-file tools", () => {
   it("b2_list_parts forwards startPartNumber", async () => {
     const result = await callTool(server, "b2_list_parts", { fileId: "lf1", startPartNumber: 5 });
     expect(result.isError).toBeFalsy();
+  });
+});
+
+describe("large-file concurrency (out-of-order completion)", () => {
+  it("assembles partSha1Array in part order even when parts finish out of order", async () => {
+    // 4 distinct 50-byte parts (each filled with its index), partSize 50,
+    // concurrency 4. Make low part numbers finish LAST so the workers complete
+    // in reverse — the SHA1 array must still come out in ascending part order.
+    const buf = Buffer.alloc(200);
+    for (let i = 0; i < 4; i++) buf.fill(i, i * 50, (i + 1) * 50);
+    const expectedSha1 = [0, 1, 2, 3].map((i) =>
+      crypto
+        .createHash("sha1")
+        .update(buf.subarray(i * 50, (i + 1) * 50))
+        .digest("hex"),
+    );
+
+    mockedAxios.post = jest.fn().mockImplementation((_url: string, _data: unknown, cfg: any) => {
+      const partNumber = Number(cfg?.headers?.["X-Bz-Part-Number"] ?? 1);
+      // part 1 waits longest, part 4 returns first → reverse completion order
+      return new Promise((resolve) =>
+        setTimeout(() => resolve({ data: { partNumber } }), (5 - partNumber) * 15),
+      );
+    });
+
+    const server = createServer(makeConfig({ largeFileThreshold: 10, partSize: 50 }));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-conc-"));
+    const file = path.join(dir, "multi.bin");
+    fs.writeFileSync(file, buf);
+    try {
+      const result = parse(
+        await callTool(server, "b2_upload_file", {
+          bucketId: "b",
+          fileName: "multi.bin",
+          filePath: file,
+          concurrency: 4,
+        }),
+      );
+      expect(result.fileId).toBe("lf1");
+      const finish = mockedAxios.mock.calls
+        .map((c) => c[0] as { url?: string; data?: { partSha1Array?: string[] } })
+        .find((c) => (c.url ?? "").includes("b2_finish_large_file"));
+      expect(finish?.data?.partSha1Array).toEqual(expectedSha1); // correct order despite reverse completion
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("filesystem policy through a tool", () => {
+  it("b2_upload_file rejects a filePath when local file access is disabled", async () => {
+    const server = createServer(makeConfig({ allowLocalFiles: false }));
+    const result = await callTool(server, "b2_upload_file", {
+      bucketId: "b",
+      fileName: "x.txt",
+      filePath: "/etc/passwd",
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/file access|not allowed|disabled|sandbox/i);
   });
 });

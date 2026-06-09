@@ -285,3 +285,64 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
     90_000,
   );
 });
+
+// ── b2_hide_file write shape ──────────────────────────────────────────────────
+describe("Contract: b2_hide_file", () => {
+  liveIt(
+    "hides a file: { bucketId, fileName } is accepted, the name reads as gone, a hide marker appears",
+    async () => {
+      if (!writableBucketId) {
+        console.log("  No writable bucket; skipping.");
+        return;
+      }
+      const fileName = "__contract/hide-me.txt";
+      let uploadId = "";
+      let hideId = "";
+      try {
+        const up = parseResult(
+          await callTool(server, "b2_upload_file", {
+            bucketId: writableBucketId,
+            fileName,
+            content: Buffer.from("hide-test").toString("base64"),
+            contentType: "text/plain",
+          }),
+        );
+        expect(isError(up)).toBe(false);
+        uploadId = up.fileId;
+
+        const hidden = await callTool(server, "b2_hide_file", {
+          bucketId: writableBucketId,
+          fileName,
+        });
+        expect(isError(hidden)).toBe(false);
+        const hideMarker = parseResult(hidden);
+        expect(hideMarker.action).toBe("hide");
+        hideId = hideMarker.fileId;
+
+        // The visible listing no longer shows the name...
+        const names = parseResult(
+          await callTool(server, "b2_list_file_names", {
+            bucketId: writableBucketId,
+            prefix: fileName,
+          }),
+        );
+        expect((names.files ?? []).some((f: any) => f.fileName === fileName)).toBe(false);
+
+        // ...but a hide marker exists in the version history.
+        const versions = parseResult(
+          await callTool(server, "b2_list_file_versions", {
+            bucketId: writableBucketId,
+            startFileName: fileName,
+            maxFileCount: 5,
+          }),
+        );
+        expect((versions.files ?? []).some((f: any) => f.action === "hide")).toBe(true);
+      } finally {
+        if (hideId) await callTool(server, "b2_delete_file_version", { fileName, fileId: hideId });
+        if (uploadId)
+          await callTool(server, "b2_delete_file_version", { fileName, fileId: uploadId });
+      }
+    },
+    60_000,
+  );
+});
