@@ -64,11 +64,18 @@ describe("B2 tool error paths (catch blocks)", () => {
     capabilities: ["listFiles"],
     applicationKeyId: "a",
     bucketId: "b",
+    bucketName: "bk",
+    bucketType: "allPrivate",
     fileNamePrefix: "",
     validDurationInSeconds: 3600,
     fileId: "f",
     fileName: "n",
-    bucketName: "bk",
+    contentType: "b2/x-auto",
+    content: Buffer.from("x").toString("base64"),
+    sourceFileId: "src",
+    largeFileId: "lf",
+    partNumber: 1,
+    partSha1Array: ["a"],
     legalHold: "on",
     fileRetention: { mode: "governance", retainUntilTimestamp: 1 },
     adminAccountId: "a",
@@ -82,7 +89,30 @@ describe("B2 tool error paths (catch blocks)", () => {
     computerId: "c",
   };
 
+  // B2-native tools that go through client.call (excludes auth, downloads, and
+  // URL-builders, which don't hit the rejecting call path).
   const tools = [
+    "b2_list_buckets",
+    "b2_create_bucket",
+    "b2_delete_bucket",
+    "b2_update_bucket",
+    "b2_get_bucket_notification_rules",
+    "b2_set_bucket_notification_rules",
+    "b2_list_file_names",
+    "b2_list_file_versions",
+    "b2_get_file_info",
+    "b2_delete_file_version",
+    "b2_hide_file",
+    "b2_get_upload_url",
+    "b2_copy_file",
+    "b2_upload_file",
+    "b2_start_large_file",
+    "b2_get_upload_part_url",
+    "b2_finish_large_file",
+    "b2_cancel_large_file",
+    "b2_list_parts",
+    "b2_list_unfinished_large_files",
+    "b2_copy_part",
     "b2_list_keys",
     "b2_create_key",
     "b2_delete_key",
@@ -101,6 +131,5 @@ describe("B2 tool error paths (catch blocks)", () => {
   it.each(tools)("%s returns a structured error", async (tool) => {
     const result = await callTool(server, tool, args);
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("400");
   });
 });

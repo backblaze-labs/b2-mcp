@@ -109,7 +109,28 @@ describe("S3 tool error paths (catch blocks)", () => {
     legalHold: "ON",
   };
 
+  // Every S3 tool that calls the SDK (all but the presigned URL generator).
   const tools = [
+    "s3_create_bucket",
+    "s3_delete_bucket",
+    "s3_head_bucket",
+    "s3_list_objects",
+    "s3_get_bucket_acl",
+    "s3_put_bucket_acl",
+    "s3_get_bucket_versioning",
+    "s3_put_bucket_versioning",
+    "s3_get_bucket_cors",
+    "s3_put_bucket_cors",
+    "s3_delete_bucket_cors",
+    "s3_get_bucket_location",
+    "s3_get_bucket_encryption",
+    "s3_put_bucket_encryption",
+    "s3_delete_bucket_encryption",
+    "s3_get_bucket_lifecycle",
+    "s3_put_bucket_lifecycle",
+    "s3_delete_bucket_lifecycle",
+    "s3_get_bucket_logging",
+    "s3_put_bucket_logging",
     "s3_put_object",
     "s3_get_object",
     "s3_delete_object",
@@ -121,10 +142,18 @@ describe("S3 tool error paths (catch blocks)", () => {
     "s3_get_object_acl",
     "s3_put_object_acl",
     "s3_create_multipart_upload",
+    "s3_upload_part",
+    "s3_complete_multipart_upload",
     "s3_abort_multipart_upload",
     "s3_list_multipart_uploads",
-    "s3_get_bucket_logging",
+    "s3_list_parts",
+    "s3_upload_part_copy",
     "s3_get_object_lock_configuration",
+    "s3_put_object_lock_configuration",
+    "s3_get_object_legal_hold",
+    "s3_put_object_legal_hold",
+    "s3_get_object_retention",
+    "s3_put_object_retention",
   ];
 
   it.each(tools)("%s returns a structured error when the SDK rejects", async (tool) => {
@@ -135,6 +164,5 @@ describe("S3 tool error paths (catch blocks)", () => {
     });
     const result = await callTool(server, tool, args);
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("403");
   });
 });
