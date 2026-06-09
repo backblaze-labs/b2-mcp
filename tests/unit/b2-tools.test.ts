@@ -111,6 +111,33 @@ describe("b2_authorize_account", () => {
   });
 });
 
+// ── B2Client 401 re-auth (core resilience path) ───────────────────────────────
+
+describe("B2Client 401 re-auth-and-retry", () => {
+  it("re-authorizes and retries exactly once on a 401, then succeeds", async () => {
+    // Authorize succeeds every time; the first API call 401s (token expired
+    // between our 23h cache and B2's 24h lifetime), the retry succeeds.
+    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
+    mockedAxios
+      .mockRejectedValueOnce({ response: { status: 401 }, isAxiosError: true })
+      .mockResolvedValueOnce({ data: { buckets: [] } });
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+    expect(result.buckets).toEqual([]); // recovered silently
+    expect(mockedAxios).toHaveBeenCalledTimes(2); // original + one retry
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2); // re-authorized after invalidate
+  });
+
+  it("does not retry more than once — a second 401 surfaces the error", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
+    mockedAxios.mockRejectedValue({ response: { status: 401 }, isAxiosError: true });
+
+    const result = await callTool(server, "b2_list_buckets", {});
+    expect(result.isError).toBe(true);
+    expect(mockedAxios).toHaveBeenCalledTimes(2); // original + exactly one retry, then throws
+  });
+});
+
 // ── b2_list_buckets ───────────────────────────────────────────────────────────
 
 describe("b2_list_buckets", () => {
@@ -293,7 +320,7 @@ describe("b2_hide_file", () => {
     }),
   );
 
-  it("returns the hide marker file info", async () => {
+  it("returns the hide marker and sends { bucketId, fileName } to the API", async () => {
     const result = parseResult(
       await callTool(server, "b2_hide_file", {
         bucketId: "bucket-001",
@@ -302,6 +329,11 @@ describe("b2_hide_file", () => {
     );
     expect(result.action).toBe("hide");
     expect(result.fileName).toBe("photo.jpg");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ bucketId: "bucket-001", fileName: "photo.jpg" }),
+      }),
+    );
   });
 });
 
@@ -378,15 +410,30 @@ describe("b2_create_key", () => {
     }),
   );
 
-  it("returns the new key info including keyId", async () => {
+  it("returns the new key info and forwards accountId + scope to the API", async () => {
     const result = parseResult(
       await callTool(server, "b2_create_key", {
         keyName: "test-key",
         capabilities: ["readFiles", "writeFiles"],
+        bucketId: "bucket-001",
+        namePrefix: "incoming/",
+        validDurationInSeconds: 3600,
       }),
     );
     expect(result.keyName).toBe("test-key");
     expect(result.applicationKeyId).toBe("key-123");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accountId: "test-account-123",
+          keyName: "test-key",
+          capabilities: ["readFiles", "writeFiles"],
+          bucketId: "bucket-001",
+          namePrefix: "incoming/",
+          validDurationInSeconds: 3600,
+        }),
+      }),
+    );
   });
 });
 
@@ -504,11 +551,14 @@ describe("b2_list_unfinished_large_files", () => {
 describe("b2_delete_key", () => {
   beforeEach(() => setupMocks({ applicationKeyId: "key-ro", keyName: "readonly" }));
 
-  it("returns deleted key info", async () => {
+  it("returns deleted key info and sends applicationKeyId to the API", async () => {
     const result = parseResult(
       await callTool(server, "b2_delete_key", { applicationKeyId: "key-ro" }),
     );
     expect(result.applicationKeyId).toBe("key-ro");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ applicationKeyId: "key-ro" }) }),
+    );
   });
 });
 
@@ -760,6 +810,19 @@ describe("b2_upload_file", () => {
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("filePath or content");
+  });
+
+  it("rejects a fileInfo key with header-injection characters", async () => {
+    const result = await callTool(server, "b2_upload_file", {
+      bucketId: "bucket-001",
+      fileName: "hello.txt",
+      content: Buffer.from("x").toString("base64"),
+      // X-Bz-Info-* header name — must be [A-Za-z0-9-]; a space/newline could
+      // smuggle a second header. The guard must reject it.
+      fileInfo: { "bad key\r\nX-Evil": "1" },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/fileInfo|invalid|header/i);
   });
 });
 
