@@ -617,10 +617,11 @@ describe("b2_set_bucket_notification_rules", () => {
     }),
   );
 
-  it("sends rules and returns the updated configuration", async () => {
+  it("forwards an explicit objectNamePrefix and returns the updated configuration", async () => {
     const rules = [
       {
         name: "on-delete",
+        objectNamePrefix: "incoming/",
         eventTypes: ["b2:ObjectDeleted:*"],
         isEnabled: true,
         targetConfiguration: { targetType: "webhook", url: "https://example.com/hook" },
@@ -636,6 +637,28 @@ describe("b2_set_bucket_notification_rules", () => {
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ bucketId: "bucket-001", eventNotificationRules: rules }),
+      }),
+    );
+  });
+
+  it("injects objectNamePrefix='' when a rule omits it (B2 requires the field)", async () => {
+    const rules = [
+      {
+        name: "on-create",
+        eventTypes: ["b2:ObjectCreated:*"],
+        isEnabled: true,
+        targetConfiguration: { targetType: "webhook", url: "https://example.com/hook" },
+      },
+    ];
+    await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "bucket-001",
+      eventNotificationRules: rules,
+    });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventNotificationRules: [expect.objectContaining({ objectNamePrefix: "" })],
+        }),
       }),
     );
   });

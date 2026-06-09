@@ -243,6 +243,13 @@ export function registerBucketTools(
       eventNotificationRules: z.array(
         z.object({
           name: z.string().describe("A name for this notification rule."),
+          objectNamePrefix: z
+            .string()
+            .optional()
+            .default("")
+            .describe(
+              "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
+            ),
           eventTypes: z
             .array(z.string())
             .describe(
@@ -265,7 +272,12 @@ export function registerBucketTools(
       try {
         const result = await client.call("b2_set_bucket_notification_rules", {
           bucketId: args.bucketId,
-          eventNotificationRules: args.eventNotificationRules,
+          // B2 requires objectNamePrefix on every rule; default to "" (matches
+          // all objects) when a caller omits it, regardless of Zod default.
+          eventNotificationRules: args.eventNotificationRules.map((rule) => ({
+            ...rule,
+            objectNamePrefix: rule.objectNamePrefix ?? "",
+          })),
         });
         return toolJson(result);
       } catch (err) {
