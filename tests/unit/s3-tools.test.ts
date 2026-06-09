@@ -299,6 +299,19 @@ describe("s3_get_object", () => {
     const decoded = Buffer.from(result.content, "base64").toString();
     expect(decoded).toBe("file content here");
   });
+
+  it("rejects an oversized in-memory download (DoS guard) and never buffers it", async () => {
+    const transform = jest.fn(async () => new Uint8Array(0));
+    sendSpy.mockResolvedValue({
+      ContentType: "application/octet-stream",
+      ContentLength: 200 * 1024 * 1024, // 200 MB — over the 100 MB cap
+      Body: { transformToByteArray: transform },
+    });
+    const result = await callTool(server, "s3_get_object", { bucket: "my-bucket", key: "big.bin" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/saveToPath|in-memory/i);
+    expect(transform).not.toHaveBeenCalled(); // rejected before buffering
+  });
 });
 
 // ── s3_delete_object ──────────────────────────────────────────────────────────
@@ -657,7 +670,7 @@ describe("s3_get_object_lock_configuration", () => {
 // ── s3_put_object_lock_configuration ─────────────────────────────────────────
 
 describe("s3_put_object_lock_configuration", () => {
-  it("applies lock configuration and returns success", async () => {
+  it("applies lock configuration and sends the bucket-object-lock Token when enabling", async () => {
     const result = await callTool(server, "s3_put_object_lock_configuration", {
       bucket: "locked-bucket",
       objectLockEnabled: "Enabled",
@@ -667,6 +680,18 @@ describe("s3_put_object_lock_configuration", () => {
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
     expect(cmd.input.ObjectLockConfiguration.ObjectLockEnabled).toBe("Enabled");
+    // B2 rejects enabling Object Lock on an existing bucket without this token.
+    expect(cmd.input.Token).toBe("1");
+  });
+
+  it("omits the Token when only setting default retention (not enabling lock)", async () => {
+    await callTool(server, "s3_put_object_lock_configuration", {
+      bucket: "locked-bucket",
+      defaultRetentionMode: "COMPLIANCE",
+      defaultRetentionYears: 1,
+    });
+    const cmd = sendSpy.mock.calls[0][0];
+    expect(cmd.input.Token).toBeUndefined();
   });
 });
 

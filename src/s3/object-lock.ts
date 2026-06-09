@@ -161,7 +161,7 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
   // ── s3_put_object_lock_configuration ─────────────────────────────────────
   server.tool(
     "s3_put_object_lock_configuration",
-    "Enable Object Lock on an existing B2 bucket or set a default retention rule via the S3-compatible API. To enable Object Lock on an existing bucket, include the x-amz-bucket-object-lock-enabled header (set via SDK options). Note: Object Lock cannot be disabled once enabled.",
+    "Enable Object Lock on an existing B2 bucket and/or set a default retention rule via the S3-compatible API. Enabling Object Lock on an existing bucket requires the bucket-object-lock token, which this tool sends automatically. Object Lock cannot be disabled once enabled. (You can also enable it natively with b2_create_bucket / b2_update_bucket fileLockEnabled.)",
     {
       bucket: z.string().describe("The bucket name."),
       objectLockEnabled: z
@@ -205,6 +205,10 @@ export function registerS3ObjectLockTools(server: McpServer, s3: S3Client): void
               ObjectLockEnabled: args.objectLockEnabled,
               Rule: rule,
             },
+            // B2 requires the bucket-object-lock token (value "1") to turn on
+            // Object Lock for an existing bucket; without it B2 returns
+            // 400 "Object Lock configuration cannot be enabled on existing buckets".
+            ...(args.objectLockEnabled === "Enabled" ? { Token: "1" } : {}),
           }),
         );
         return toolSuccess(`Object Lock configuration updated for bucket '${args.bucket}'.`);

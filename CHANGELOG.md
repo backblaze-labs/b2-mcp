@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-06-09
+
+### Fixed
+- `s3_put_object_lock_configuration` could not enable Object Lock on an existing
+  bucket — it omitted B2's required bucket-object-lock token, so B2 returned
+  `400 cannot be enabled on existing buckets`. It now sends the token (`"1"`)
+  automatically when enabling. Verified live. (The native
+  `b2_create_bucket`/`b2_update_bucket` `fileLockEnabled` is the other path.)
+- `s3_put_object` and `s3_create_multipart_upload` offered `aws:kms` (SSE-KMS)
+  in their `serverSideEncryption` enum; B2 does not support SSE-KMS, so the
+  option misled callers. Restricted to `AES256` (SSE-B2).
+
+### Security
+- `s3_get_object` now caps the in-memory (no `saveToPath`) download at 100 MB by
+  checking `ContentLength` before buffering — matching the B2-native download
+  cap — so a multi-GB GET can no longer OOM the host. Use `saveToPath` or a
+  Range request for larger objects.
+- Logger redaction extended to cover S3 credentials (`accessKeyId` /
+  `secretAccessKey`), the master key, and upload tokens/URLs (`uploadAuthToken`,
+  `uploadUrl`), closing a latent gap in the "log objects safely" guarantee.
+
+### Changed
+- `s3_get_bucket_logging` / `s3_put_bucket_logging` descriptions now state
+  plainly that Backblaze does not provide working S3 server access logging (the
+  call is accepted but produces no log objects) — use this server's audit log or
+  B2 event notifications instead.
+
 ## [1.5.0] - 2026-06-09
 
 ### Changed
