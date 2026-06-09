@@ -37,6 +37,8 @@ const config: B2Config = {
   applicationKey: "s",
   appKeyId: "k",
   appKey: "s",
+  masterKeyId: "s",
+  masterKey: "s",
   region: "us-west-004",
   largeFileThreshold: 1e8,
   partSize: 1e8,

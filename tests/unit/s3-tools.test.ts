@@ -33,6 +33,8 @@ const testConfig = {
   applicationKey: "test-key-secret",
   appKeyId: "test-app-key-id",
   appKey: "test-app-key-secret",
+  masterKeyId: "test-app-key-secret",
+  masterKey: "test-app-key-secret",
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,

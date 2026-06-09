@@ -54,9 +54,11 @@ Replace `/ABSOLUTE/PATH/TO/b2-mcp-server` with the actual path where you cloned 
 
 Restart Claude Desktop — you should see the B2 tools available in Claude.
 
-> **A single application key is enough for most users.** Create one in the B2 Console under **Application Keys** and use it for `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`. It will work for both the B2 native API and the S3-compatible API.
+> **A single application key is enough for almost everything.** Create one in the B2 Console under **Application Keys** and use it for `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`. A non-master key works for the B2 native API, the S3-compatible API, **and** key management (`b2_create_key` / `b2_list_keys` / `b2_delete_key`, which just need the `writeKeys` / `listKeys` / `deleteKeys` capabilities — not a master key).
 >
-> **When you need a master key:** only the [Partner API](#partner-api-requires-master-key), the Backblaze Computer Backup tools (`bz_*`), and account-level key management (`b2_create_key`, `b2_list_keys`, `b2_delete_key`) require the master application key. If you use those, set `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` to the master key, then **also** set `B2_APP_KEY_ID` / `B2_APP_KEY` to a non-master application key — B2's S3 endpoint rejects master keys, so S3 tools need a separate key in that setup.
+> **When you need a master key (optional):** only the [Partner API](#partner-api-requires-master-key) and the Backblaze Computer Backup tools (`bz_*`) require a master application key. Set `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` for those — the master key is used **only** by those tools, while everything else keeps using your application key. (B2's S3 endpoint rejects master keys, which is exactly why the application key, not the master key, is the primary credential.)
+>
+> _Deprecated:_ `B2_APP_KEY_ID` / `B2_APP_KEY` was the old way to supply a separate non-master S3 key when the primary key was a master key. The model is now reversed — make the application key your non-master workhorse and use `B2_MASTER_KEY_*` only for Partner/`bz_*`. The old variables still work for one release.
 
 ### Cursor / VS Code
 
@@ -80,16 +82,18 @@ Add to `.cursor/mcp.json` in your project root:
 
 ## Environment Variables
 
-| Variable                  | Required | Default                 | Description                                                                                                     |
-| ------------------------- | -------- | ----------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`   | ✅       | —                       | Application key ID (master or non-master). Used for B2 native + S3 API                                          |
-| `B2_APPLICATION_KEY`      | ✅       | —                       | Application key secret                                                                                          |
-| `B2_APP_KEY_ID`           | —        | falls back to the above | Non-master application key ID — only set when the primary key is a master key (S3 endpoint rejects master keys) |
-| `B2_APP_KEY`              | —        | falls back to the above | Non-master application key secret                                                                               |
-| `B2_REGION`               | —        | `us-west-004`           | B2 region for S3-compatible endpoint                                                                            |
-| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)     | File size above which multipart upload is used                                                                  |
-| `B2_PART_SIZE`            | —        | `104857600` (100MB)     | Size of each multipart upload part                                                                              |
-| `B2_MCP_UA_SUFFIX`        | —        | —                       | Optional token appended to the outbound User-Agent (e.g. to tag a deployment)                                   |
+| Variable                  | Required | Default               | Description                                                                                                 |
+| ------------------------- | -------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `B2_APPLICATION_KEY_ID`   | ✅       | —                     | Application key ID (non-master). The workhorse: B2 native + S3 + key management                             |
+| `B2_APPLICATION_KEY`      | ✅       | —                     | Application key secret                                                                                      |
+| `B2_MASTER_KEY_ID`        | —        | falls back to app key | Master key ID — used **only** by the Partner API and `bz_*` Computer Backup tools                           |
+| `B2_MASTER_KEY`           | —        | falls back to app key | Master key secret                                                                                           |
+| `B2_APP_KEY_ID`           | —        | _deprecated_          | Legacy non-master S3 override (only for setups whose primary key is a master key). Prefer `B2_MASTER_KEY_*` |
+| `B2_APP_KEY`              | —        | _deprecated_          | Legacy non-master S3 override secret                                                                        |
+| `B2_REGION`               | —        | `us-west-004`         | B2 region for S3-compatible endpoint                                                                        |
+| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)   | File size above which multipart upload is used                                                              |
+| `B2_PART_SIZE`            | —        | `104857600` (100MB)   | Size of each multipart upload part                                                                          |
+| `B2_MCP_UA_SUFFIX`        | —        | —                     | Optional token appended to the outbound User-Agent (e.g. to tag a deployment)                               |
 
 > Security/hardening vars (`B2_FILE_ROOT`, `B2_ALLOW_LOCAL_FILES`, `B2_MAX_SESSIONS`, `B2_ALLOWED_HOSTS`/`B2_ALLOWED_ORIGINS`) are documented in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 

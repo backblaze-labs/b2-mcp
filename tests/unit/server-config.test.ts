@@ -127,4 +127,37 @@ describe("loadConfig — valid env vars", () => {
     expect(config.applicationKeyId).toBe("key-id-123");
     expect(config.applicationKey).toBe("key-secret-abc");
   });
+
+  describe("master key resolution", () => {
+    afterEach(() => {
+      delete process.env.B2_MASTER_KEY_ID;
+      delete process.env.B2_MASTER_KEY;
+    });
+
+    it("defaults masterKeyId to the application key when B2_MASTER_KEY is unset", async () => {
+      delete process.env.B2_MASTER_KEY_ID;
+      delete process.env.B2_MASTER_KEY;
+      const config = await loadConfig();
+      expect(config.masterKeyId).toBe("key-id-123");
+      expect(config.masterKey).toBe("key-secret-abc");
+    });
+
+    it("uses B2_MASTER_KEY_ID/B2_MASTER_KEY when both are set (Partner/bz_* only)", async () => {
+      process.env.B2_MASTER_KEY_ID = "master-id";
+      process.env.B2_MASTER_KEY = "master-secret";
+      const config = await loadConfig();
+      expect(config.masterKeyId).toBe("master-id");
+      expect(config.masterKey).toBe("master-secret");
+      // The application key stays the workhorse for everything else.
+      expect(config.applicationKeyId).toBe("key-id-123");
+    });
+
+    it("ignores a partial master key (only one half set) and falls back to the application key", async () => {
+      process.env.B2_MASTER_KEY_ID = "master-id";
+      delete process.env.B2_MASTER_KEY;
+      const config = await loadConfig();
+      expect(config.masterKeyId).toBe("key-id-123");
+      expect(config.masterKey).toBe("key-secret-abc");
+    });
+  });
 });

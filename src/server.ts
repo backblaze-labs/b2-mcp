@@ -36,16 +36,35 @@ export function loadConfig(): B2Config {
     process.exit(1);
   }
 
+  // Optional master key — only the Partner API and bz_* tools need it. Falls
+  // back to the application key so a single non-master key is a complete config
+  // for everything else. Require both halves or neither.
+  const masterId = process.env.B2_MASTER_KEY_ID;
+  const masterKey = process.env.B2_MASTER_KEY;
+  if (!!masterId !== !!masterKey) {
+    logger.warn(
+      "config: B2_MASTER_KEY_ID and B2_MASTER_KEY must both be set; ignoring the partial master key and using the application key for Partner/bz_* tools",
+    );
+  }
+  // B2_APP_KEY was the old way to supply a non-master S3 key when the primary
+  // was a master key. The current model is the reverse — make the application
+  // key the (non-master) workhorse and set B2_MASTER_KEY only for Partner/bz_*.
+  if (process.env.B2_APP_KEY_ID) {
+    logger.warn(
+      "config: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Set B2_APPLICATION_KEY_ID to a non-master application key (it handles the S3 API too) and use B2_MASTER_KEY_ID/B2_MASTER_KEY only for Partner/bz_* tools.",
+    );
+  }
+
   return {
     applicationKeyId: keyId,
     applicationKey: key,
-    // S3-compatible API: B2 rejects master keys on the S3 endpoint but
-    // accepts ordinary application keys. By default we reuse the primary
-    // credential — that's fine when it's a non-master key. Set B2_APP_KEY_ID
-    // / B2_APP_KEY to override with a non-master key when the primary is a
-    // master key (needed for Partner API + S3 in the same process).
+    // S3-compatible API: B2 rejects master keys on the S3 endpoint but accepts
+    // ordinary application keys, so this should be the application key. The
+    // deprecated B2_APP_KEY override remains only for legacy master-primary setups.
     appKeyId: process.env.B2_APP_KEY_ID ?? keyId,
     appKey: process.env.B2_APP_KEY ?? key,
+    masterKeyId: (masterId && masterKey ? masterId : undefined) ?? keyId,
+    masterKey: (masterId && masterKey ? masterKey : undefined) ?? key,
     region: process.env.B2_REGION ?? "us-west-004",
     largeFileThreshold: parseIntEnv(process.env.B2_LARGE_FILE_THRESHOLD, 100 * 1024 * 1024),
     partSize: parseIntEnv(process.env.B2_PART_SIZE, 100 * 1024 * 1024),
@@ -69,10 +88,13 @@ export function loadConfig(): B2Config {
  * and logged at startup ("server.ready") rather than tracked here, so this
  * comment can't drift out of date.
  *
- * Note: B2's S3 endpoint rejects master keys. If B2_APPLICATION_KEY_ID is
- * a master key (only needed for Partner API, bz_*, and key-management tools),
- * also set B2_APP_KEY_ID / B2_APP_KEY to a non-master application key for S3.
- * For typical users, a single non-master application key works for everything.
+ * Credential model: B2_APPLICATION_KEY_ID/KEY is the application key — the
+ * workhorse for the B2 native API, S3, and key management. A single non-master
+ * key works for everything except the Partner API and bz_* Computer Backup,
+ * which need a master key — set B2_MASTER_KEY_ID/KEY for those (optional). The
+ * master key is used only by those tools; everything else uses the application
+ * key. (B2's S3 endpoint rejects master keys, which is exactly why the
+ * application key, not the master key, is the primary credential.)
  */
 export function createServer(config: B2Config): McpServer {
   const server = new McpServer(
@@ -105,10 +127,25 @@ export function createServer(config: B2Config): McpServer {
     },
   );
 
-  // Initialize clients
+  // Initialize clients. The application (workhorse) key drives the B2 native
+  // API, S3, and key management. The Partner API and bz_* tools use the master
+  // key; when no distinct master key is configured they fall back to the same
+  // application-key client, so a single non-master key needs no extra wiring.
   const auth = new B2AuthManager(config);
   const b2Client = new B2Client(auth, buildUserAgent(config));
   const s3Client = createS3Client(config);
+
+  const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
+  const masterAuth = masterIsDistinct
+    ? new B2AuthManager({
+        ...config,
+        applicationKeyId: config.masterKeyId,
+        applicationKey: config.masterKey,
+      })
+    : auth;
+  const masterClient = masterIsDistinct
+    ? new B2Client(masterAuth, buildUserAgent(config))
+    : b2Client;
 
   // ── B2 Native API tools ─────────────────────────────────────────────────
   registerBucketTools(server, b2Client, auth);
@@ -118,8 +155,8 @@ export function createServer(config: B2Config): McpServer {
   registerKeyTools(server, b2Client, auth);
   registerObjectLockTools(server, b2Client);
 
-  // ── Partner API tools ───────────────────────────────────────────────────
-  registerPartnerTools(server, b2Client, auth);
+  // ── Partner API tools (master key) ──────────────────────────────────────
+  registerPartnerTools(server, masterClient, masterAuth);
 
   // ── S3-Compatible API tools ─────────────────────────────────────────────
   registerS3BucketTools(server, s3Client);
