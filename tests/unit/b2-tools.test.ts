@@ -174,7 +174,7 @@ describe("b2_create_bucket", () => {
     );
   });
 
-  it("forwards fileLockEnabled when set (Object Lock can only be enabled at creation)", async () => {
+  it("forwards fileLockEnabled when set (Object Lock enabled at creation)", async () => {
     await callTool(server, "b2_create_bucket", {
       bucketName: "locked-bucket",
       bucketType: "allPrivate",
@@ -324,6 +324,19 @@ describe("b2_copy_file", () => {
     );
     expect(result.fileId).toBe("copy-001");
     expect(result.fileName).toBe("photo-copy.jpg");
+  });
+
+  it("forwards destination SSE under B2's field name 'destinationServerSideEncryption'", async () => {
+    await callTool(server, "b2_copy_file", {
+      sourceFileId: "file-001",
+      fileName: "photo-copy.jpg",
+      destinationServerSideEncryption: { mode: "SSE-B2" },
+    });
+    const data = (mockedAxios.mock.calls[0][0] as unknown as { data: Record<string, unknown> })
+      .data;
+    // B2 rejects 'serverSideEncryption' on b2_copy_file with 400 unknown field.
+    expect(data).toHaveProperty("destinationServerSideEncryption", { mode: "SSE-B2" });
+    expect(data).not.toHaveProperty("serverSideEncryption");
   });
 });
 
@@ -598,6 +611,21 @@ describe("b2_update_bucket", () => {
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ bucketType: "allPrivate" }) }),
+    );
+  });
+
+  it("enables Object Lock on an existing bucket (B2 native allows the retrofit)", async () => {
+    await callTool(server, "b2_update_bucket", { bucketId: "bucket-001", fileLockEnabled: true });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ fileLockEnabled: true }) }),
+    );
+  });
+
+  it("forwards defaultRetention with the flat { mode, period } shape", async () => {
+    const defaultRetention = { mode: "governance", period: { duration: 7, unit: "days" } };
+    await callTool(server, "b2_update_bucket", { bucketId: "bucket-001", defaultRetention });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ defaultRetention }) }),
     );
   });
 });

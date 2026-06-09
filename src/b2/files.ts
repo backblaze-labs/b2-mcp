@@ -543,14 +543,18 @@ export function registerFileTools(
         .record(z.string(), z.string())
         .optional()
         .describe("New file info (only used when metadataDirective is REPLACE)."),
-      serverSideEncryption: z
+      destinationServerSideEncryption: z
         .object({
           mode: z.enum(["SSE-B2", "SSE-C"]),
           algorithm: z.string().optional(),
           customerKey: z.string().optional(),
           customerKeyMd5: z.string().optional(),
         })
-        .optional(),
+        .optional()
+        .describe(
+          "Server-side encryption for the destination copy. B2's b2_copy_file request names " +
+            "this field 'destinationServerSideEncryption' (not 'serverSideEncryption').",
+        ),
       sourceServerSideEncryption: z
         .object({
           mode: z.enum(["SSE-C"]),
@@ -573,7 +577,7 @@ export function registerFileTools(
           "range",
           "contentType",
           "fileInfo",
-          "serverSideEncryption",
+          "destinationServerSideEncryption",
           "sourceServerSideEncryption",
         ] as const;
         for (const key of optional) {

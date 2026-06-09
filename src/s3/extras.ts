@@ -246,13 +246,18 @@ export function registerS3ExtraTools(server: McpServer, s3: S3Client): void {
     },
     async (args) => {
       try {
+        // Fold the source version into CopySource (same form as s3_copy_object); without
+        // this the declared copySourceVersionId was silently dropped and the live version copied.
+        const copySource = args.copySourceVersionId
+          ? `${args.copySource}?versionId=${args.copySourceVersionId}`
+          : args.copySource;
         const result = await s3.send(
           new UploadPartCopyCommand({
             Bucket: args.bucket,
             Key: args.key,
             UploadId: args.uploadId,
             PartNumber: args.partNumber,
-            CopySource: args.copySource,
+            CopySource: copySource,
             CopySourceRange: args.copySourceRange,
           }),
         );

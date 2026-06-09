@@ -1,6 +1,6 @@
 {
   "name": "@backblaze/b2-mcp-server",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "description": "MCP server for Backblaze B2 — full B2 native API + S3-compatible API coverage",
   "main": "dist/index.js",
   "bin": {

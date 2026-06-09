@@ -84,8 +84,8 @@ export function registerBucketTools(
         .boolean()
         .optional()
         .describe(
-          "Enable Object Lock (file lock) on the bucket. Can only be set at creation — B2 " +
-            "rejects enabling Object Lock on an existing bucket. Must be true before any " +
+          "Enable Object Lock (file lock) on the bucket at creation. (Object Lock can also be " +
+            "enabled later on an existing bucket via b2_update_bucket.) Must be true before any " +
             "retention or legal hold can be applied to files in this bucket.",
         ),
     },
@@ -192,6 +192,35 @@ export function registerBucketTools(
             .optional(),
         })
         .optional(),
+      fileLockEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          "Enable Object Lock on the bucket. Unlike S3's PutObjectLockConfiguration (which only " +
+            "enables lock at bucket creation), the B2 native API allows enabling Object Lock on an " +
+            "existing bucket here. Requires the writeBucketRetentions capability.",
+        ),
+      defaultRetention: z
+        .object({
+          mode: z
+            .enum(["governance", "compliance"])
+            .nullable()
+            .describe("Retention mode applied to new objects. null clears the default."),
+          period: z
+            .object({
+              duration: z.number().int().positive(),
+              unit: z.enum(["days", "years"]),
+            })
+            .nullable()
+            .describe(
+              "Retention period, e.g. { duration: 7, unit: 'days' }. null clears the default.",
+            ),
+        })
+        .optional()
+        .describe(
+          "Default Object Lock retention for newly uploaded objects. Requires Object Lock enabled " +
+            "on the bucket. Send { mode: null, period: null } to clear.",
+        ),
       ifRevisionIs: z
         .number()
         .optional()
@@ -211,6 +240,8 @@ export function registerBucketTools(
           "lifecycleRules",
           "defaultServerSideEncryption",
           "replicationConfiguration",
+          "fileLockEnabled",
+          "defaultRetention",
           "ifRevisionIs",
         ] as const;
         for (const key of optional) {
