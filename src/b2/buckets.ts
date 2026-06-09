@@ -80,6 +80,14 @@ export function registerBucketTools(
         })
         .optional()
         .describe("Default server-side encryption for new files in this bucket."),
+      fileLockEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          "Enable Object Lock (file lock) on the bucket. Can only be set at creation — B2 " +
+            "rejects enabling Object Lock on an existing bucket. Must be true before any " +
+            "retention or legal hold can be applied to files in this bucket.",
+        ),
     },
     async (args) => {
       try {
@@ -94,6 +102,7 @@ export function registerBucketTools(
         if (args.lifecycleRules) payload.lifecycleRules = args.lifecycleRules;
         if (args.defaultServerSideEncryption)
           payload.defaultServerSideEncryption = args.defaultServerSideEncryption;
+        if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
 
         const result = await client.call("b2_create_bucket", payload);
         return toolJson(result);

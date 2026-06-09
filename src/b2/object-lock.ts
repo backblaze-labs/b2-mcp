@@ -19,13 +19,11 @@ export function registerObjectLockTools(server: McpServer, client: B2Client): vo
         .string()
         .describe("The name of the file (required by the B2 API alongside fileId)."),
       legalHold: z
-        .object({
-          isClientAuthorizedToRead: z
-            .boolean()
-            .describe("Whether the current key can read the legal hold status."),
-          value: z.enum(["on", "off"]).describe("'on' to apply a legal hold; 'off' to remove it."),
-        })
-        .describe("The legal hold configuration to apply."),
+        .enum(["on", "off"])
+        .describe(
+          "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare " +
+            "string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns.",
+        ),
     },
     async (args) => {
       try {
@@ -52,29 +50,24 @@ export function registerObjectLockTools(server: McpServer, client: B2Client): vo
         .describe("The name of the file (required by the B2 API alongside fileId)."),
       fileRetention: z
         .object({
-          isClientAuthorizedToRead: z
-            .boolean()
-            .describe("Whether the current key can read the retention status."),
-          value: z
-            .object({
-              mode: z
-                .enum(["governance", "compliance"])
-                .nullable()
-                .describe(
-                  "Retention mode. null clears the retention policy (governance mode only with bypassGovernance).",
-                ),
-              retainUntilTimestamp: z
-                .number()
-                .nullable()
-                .describe(
-                  "Unix timestamp (ms) until which the file is retained. null when mode is null.",
-                ),
-            })
+          mode: z
+            .enum(["governance", "compliance"])
+            .nullable()
             .describe(
-              "Retention policy to apply, or {mode: null, retainUntilTimestamp: null} to clear.",
+              "Retention mode. null clears the retention policy (governance mode only, with bypassGovernance).",
+            ),
+          retainUntilTimestamp: z
+            .number()
+            .nullable()
+            .describe(
+              "Unix timestamp (ms) until which the file is retained. null when mode is null.",
             ),
         })
-        .describe("The file retention configuration."),
+        .describe(
+          "Retention policy to apply, or { mode: null, retainUntilTimestamp: null } to clear. " +
+            "This is the flat shape B2's write API expects — do NOT include the read-only " +
+            "isClientAuthorizedToRead/value wrapper that b2_get_file_info returns.",
+        ),
       bypassGovernance: z
         .boolean()
         .optional()
