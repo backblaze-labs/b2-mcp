@@ -36,7 +36,10 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
         .optional()
         .describe("Custom metadata key-value pairs."),
       acl: z.enum(["private", "public-read"]).optional().describe("Canned ACL for the object."),
-      serverSideEncryption: z.enum(["aws:kms", "AES256"]).optional(),
+      serverSideEncryption: z
+        .enum(["AES256"])
+        .optional()
+        .describe("Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS."),
       storageClass: z
         .string()
         .optional()
@@ -118,6 +121,19 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
           return toolSuccess(`Object saved to ${safePath} (${result.ContentLength ?? "?"} bytes)`);
         }
 
+        // Bound the in-memory path (parity with the 100 MB B2-native download
+        // cap). Without saveToPath the whole object is buffered + base64-copied,
+        // so a multi-GB object would OOM the process. ContentLength is the
+        // server's declared size; reject before buffering and point to saveToPath.
+        const MAX_INMEMORY_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+        if ((result.ContentLength ?? 0) > MAX_INMEMORY_DOWNLOAD_BYTES) {
+          return toolError(
+            new Error(
+              `Object is ${result.ContentLength} bytes, over the ${MAX_INMEMORY_DOWNLOAD_BYTES}-byte in-memory download limit. ` +
+                `Use saveToPath to stream it to disk, or a Range request to fetch it in chunks.`,
+            ),
+          );
+        }
         const bodyBytes = await result.Body!.transformToByteArray();
         const buffer = Buffer.from(bodyBytes);
 

@@ -24,7 +24,10 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client): void 
         .optional()
         .describe("Custom metadata for the object."),
       acl: z.enum(["private", "public-read"]).optional(),
-      serverSideEncryption: z.enum(["aws:kms", "AES256"]).optional(),
+      serverSideEncryption: z
+        .enum(["AES256"])
+        .optional()
+        .describe("Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS."),
     },
     async (args) => {
       try {
