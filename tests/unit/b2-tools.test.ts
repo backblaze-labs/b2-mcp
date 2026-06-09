@@ -173,6 +173,29 @@ describe("b2_create_bucket", () => {
       }),
     );
   });
+
+  it("forwards fileLockEnabled when set (Object Lock can only be enabled at creation)", async () => {
+    await callTool(server, "b2_create_bucket", {
+      bucketName: "locked-bucket",
+      bucketType: "allPrivate",
+      fileLockEnabled: true,
+    });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ fileLockEnabled: true }),
+      }),
+    );
+  });
+
+  it("omits fileLockEnabled when not provided", async () => {
+    await callTool(server, "b2_create_bucket", {
+      bucketName: "plain-bucket",
+      bucketType: "allPrivate",
+    });
+    const data = (mockedAxios.mock.calls[0][0] as unknown as { data: Record<string, unknown> })
+      .data;
+    expect(data).not.toHaveProperty("fileLockEnabled");
+  });
 });
 
 // ── b2_delete_bucket ──────────────────────────────────────────────────────────
@@ -994,7 +1017,7 @@ describe("b2_update_file_legal_hold", () => {
     setupMocks({
       fileId: "file-001",
       fileName: "doc.pdf",
-      legalHold: { isClientAuthorizedToRead: true, value: "on" },
+      legalHold: "on",
     }),
   );
 
@@ -1003,23 +1026,21 @@ describe("b2_update_file_legal_hold", () => {
       await callTool(server, "b2_update_file_legal_hold", {
         fileId: "file-001",
         fileName: "doc.pdf",
-        legalHold: { isClientAuthorizedToRead: true, value: "on" },
+        legalHold: "on",
       }),
     );
-    expect(result.legalHold.value).toBe("on");
+    expect(result.legalHold).toBe("on");
   });
 
-  it("passes legalHold payload to the API", async () => {
+  it("forwards legalHold to the API as a bare string (B2 write-API shape)", async () => {
     await callTool(server, "b2_update_file_legal_hold", {
       fileId: "file-001",
       fileName: "doc.pdf",
-      legalHold: { isClientAuthorizedToRead: true, value: "off" },
+      legalHold: "off",
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          legalHold: expect.objectContaining({ value: "off" }),
-        }),
+        data: expect.objectContaining({ legalHold: "off" }),
       }),
     );
   });
@@ -1428,39 +1449,53 @@ describe("b2_update_file_retention", () => {
     setupMocks({
       fileId: "file-001",
       fileName: "audit.log",
-      fileRetention: {
-        isClientAuthorizedToRead: true,
-        value: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
-      },
+      fileRetention: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
     }),
   );
 
-  it("returns the updated file retention info", async () => {
+  it("forwards a flat fileRetention to the API (B2 write-API shape, no read-only wrapper)", async () => {
     const result = parseResult(
       await callTool(server, "b2_update_file_retention", {
         fileId: "file-001",
         fileName: "audit.log",
-        fileRetention: {
-          isClientAuthorizedToRead: true,
-          value: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
-        },
+        fileRetention: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
       }),
     );
-    expect(result.fileRetention.value.mode).toBe("compliance");
+    expect(result.fileRetention.mode).toBe("compliance");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fileRetention: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
+        }),
+      }),
+    );
   });
 
   it("passes bypassGovernance when set to true", async () => {
     await callTool(server, "b2_update_file_retention", {
       fileId: "file-001",
       fileName: "doc.pdf",
-      fileRetention: {
-        isClientAuthorizedToRead: true,
-        value: { mode: "governance", retainUntilTimestamp: retentionTimestamp },
-      },
+      fileRetention: { mode: "governance", retainUntilTimestamp: retentionTimestamp },
       bypassGovernance: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ bypassGovernance: true }) }),
+    );
+  });
+
+  it("clears retention with mode: null", async () => {
+    await callTool(server, "b2_update_file_retention", {
+      fileId: "file-001",
+      fileName: "doc.pdf",
+      fileRetention: { mode: null, retainUntilTimestamp: null },
+      bypassGovernance: true,
+    });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fileRetention: { mode: null, retainUntilTimestamp: null },
+        }),
+      }),
     );
   });
 });

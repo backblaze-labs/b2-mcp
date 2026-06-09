@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-06-09
+
+### Fixed
+- **Object Lock was completely non-functional.** Two write tools modeled the
+  *response* shape as the *request* body, so B2 rejected every call:
+  - `b2_update_file_retention` sent `fileRetention: { isClientAuthorizedToRead,
+    value: { mode, retainUntilTimestamp } }` → `400 unknown field … isClientAuthorizedToRead`.
+    The request schema is now the flat `fileRetention: { mode, retainUntilTimestamp }`
+    that B2's write API expects.
+  - `b2_update_file_legal_hold` sent `legalHold: { isClientAuthorizedToRead, value }`
+    → now the bare `"on"`/`"off"` string B2 expects.
+  Both caught by live testing; the mocked unit tests had asserted the broken shape.
+
+### Added
+- **`fileLockEnabled` on `b2_create_bucket`.** Object Lock can only be enabled at
+  bucket creation — B2 rejects enabling it on an existing bucket
+  (`put_object_lock_configuration` → `400 cannot be enabled on existing buckets`).
+  Without this parameter there was no way to create a lock-enabled bucket through
+  the server, so the retention/legal-hold tools (even once fixed) had no usable
+  target. Object Lock immutability now works end-to-end.
+
 ## [1.4.2] - 2026-06-08
 
 ### Fixed
