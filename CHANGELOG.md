@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.4] - 2026-06-09
+
+### Changed
+- `b2_authorize_account` now calls Backblaze's current **v4** endpoint
+  (`/b2api/v4/b2_authorize_account`, April 2025) instead of v3. Verified live
+  that a v4 token is accepted at the `b2api/v2` and `b2api/v3` endpoint paths,
+  so the B2 native API plus the Partner (Groups) and Backup APIs all continue
+  to work. v4 restructured the `allowed` field for Multi-Bucket Application
+  Keys (`allowed.buckets[]`); we only consume `apiInfo.storageApi`, which is
+  unchanged from v3, so the bump is transparent to every tool.
+
 ## [1.4.3] - 2026-06-09
 
 ### Fixed

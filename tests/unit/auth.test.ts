@@ -20,7 +20,7 @@ const mockConfig: B2Config = {
   fileRoot: null,
 };
 
-// v3 b2_authorize_account response shape — auth manager flattens this internally
+// v4 b2_authorize_account response shape (apiInfo.storageApi) — auth manager flattens this internally
 const mockAuthResponse = {
   accountId: "test-account-id",
   authorizationToken: "test-auth-token",
