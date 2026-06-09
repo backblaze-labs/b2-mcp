@@ -24,7 +24,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createServer, loadConfig } from "./server.js";
 import { logger } from "./utils/logger.js";
 
-async function main(): Promise<void> {
+export async function startStdio(): Promise<void> {
   const config = loadConfig();
   const server = createServer(config);
   const transport = new StdioServerTransport();
@@ -34,7 +34,10 @@ async function main(): Promise<void> {
   logger.info({ transport: "stdio" }, "server.started");
 }
 
-main().catch((err) => {
-  logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
-  process.exit(1);
-});
+// Only run when invoked directly (not when imported by tests).
+if (require.main === module) {
+  startStdio().catch((err) => {
+    logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
+    process.exit(1);
+  });
+}

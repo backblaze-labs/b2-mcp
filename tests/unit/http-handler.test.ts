@@ -152,6 +152,27 @@ describe("HTTP handler", () => {
     const res = await request(port, "GET", "/sse", { headers: creds });
     expect(res.status).toBe(429);
   });
+
+  it("creates a session on GET /sse with valid credentials", async () => {
+    // Establishes a real SSE connection (createServer → transport → connect),
+    // then tears it down. Covers the /sse success path.
+    const status = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, method: "GET", path: "/sse", headers: creds },
+        (res) => {
+          resolve(res.statusCode ?? 0);
+          res.destroy();
+          req.destroy();
+        },
+      );
+      req.on("error", () => undefined);
+      const t = setTimeout(() => reject(new Error("sse timeout")), 3000);
+      t.unref();
+      req.end();
+    });
+    expect(status).toBe(200);
+    expect(handle.sessions.size).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe("configFromHeaders — filesystem policy", () => {
