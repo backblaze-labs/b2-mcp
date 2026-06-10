@@ -189,7 +189,6 @@ This server does **not** phone home — there is no analytics endpoint and nothi
 | `s3_list_multipart_uploads`    | List in-progress uploads  |
 | `s3_list_parts`                | List uploaded parts       |
 | `s3_get_presigned_url`         | Generate presigned URL    |
-| `s3_get_presigned_post`        | Generate presigned POST   |
 
 ## Example Usage with Claude
 

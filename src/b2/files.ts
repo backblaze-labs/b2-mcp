@@ -8,6 +8,7 @@ import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { assignDefined } from "../utils/payload.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import { uploadLargeFile } from "./large-files.js";
 
@@ -572,17 +573,14 @@ export function registerFileTools(
           fileName: args.fileName,
           metadataDirective: args.metadataDirective ?? "COPY",
         };
-        const optional = [
+        assignDefined(payload, args, [
           "destinationBucketId",
           "range",
           "contentType",
           "fileInfo",
           "destinationServerSideEncryption",
           "sourceServerSideEncryption",
-        ] as const;
-        for (const key of optional) {
-          if (args[key] !== undefined) payload[key] = args[key];
-        }
+        ]);
 
         const result = await client.call("b2_copy_file", payload);
         return toolJson(result);

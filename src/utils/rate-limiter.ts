@@ -3,8 +3,9 @@
  *
  * Nginx already rate-limits by IP. This is the second tier: a misbehaving
  * key (runaway client loop) gets throttled even when its IP is fine. The
- * key is the X-B2-Key-Id prefix that was used to establish the session;
- * we look it up from the session record.
+ * rate key is a SHA-256 hash of the full X-B2-Key-Id (see deriveRateKey in
+ * http-server.ts) — not a prefix, so distinct tenants can't collide. We look
+ * it up from the session record.
  *
  * Defaults: 60 requests/sec sustained, burst capacity 120. Override via
  * B2_MCP_RATE_LIMIT_RPS and B2_MCP_RATE_LIMIT_BURST env vars.

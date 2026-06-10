@@ -3,6 +3,7 @@ import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import { assignDefined } from "../utils/payload.js";
 
 export function registerBucketTools(
   server: McpServer,
@@ -233,7 +234,7 @@ export function registerBucketTools(
           accountId: authData.accountId,
           bucketId: args.bucketId,
         };
-        const optional = [
+        assignDefined(payload, args, [
           "bucketType",
           "bucketInfo",
           "corsRules",
@@ -243,10 +244,7 @@ export function registerBucketTools(
           "fileLockEnabled",
           "defaultRetention",
           "ifRevisionIs",
-        ] as const;
-        for (const key of optional) {
-          if (args[key] !== undefined) payload[key] = args[key];
-        }
+        ]);
         const result = await client.call("b2_update_bucket", payload);
         return toolJson(result);
       } catch (err) {
