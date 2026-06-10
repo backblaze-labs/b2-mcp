@@ -69,11 +69,20 @@ function buildUploadHeaders(opts: UploadHeaderOptions): Record<string, string> {
   }
   if (opts.serverSideEncryption) {
     const sse = opts.serverSideEncryption;
-    headers["X-Bz-Server-Side-Encryption"] = sse.mode;
-    if (sse.algorithm) headers["X-Bz-Server-Side-Encryption-Algorithm"] = sse.algorithm;
-    if (sse.customerKey) headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
-    if (sse.customerKeyMd5)
-      headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
+    if (sse.mode === "SSE-C") {
+      // SSE-C (customer-managed): the three customer headers, and the plain
+      // X-Bz-Server-Side-Encryption header must NOT be present. B2 names the
+      // algorithm header "...-Customer-Algorithm" (value AES256), distinct from
+      // the SSE-B2 header. Verified against backblaze.com b2-upload-file + live.
+      headers["X-Bz-Server-Side-Encryption-Customer-Algorithm"] = sse.algorithm ?? "AES256";
+      if (sse.customerKey) headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
+      if (sse.customerKeyMd5)
+        headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
+    } else {
+      // SSE-B2 (Backblaze-managed): the only valid value is the algorithm
+      // AES256 — NOT the literal "SSE-B2".
+      headers["X-Bz-Server-Side-Encryption"] = sse.algorithm ?? "AES256";
+    }
   }
   return headers;
 }
