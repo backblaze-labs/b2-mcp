@@ -138,8 +138,25 @@ describe("b2_upload_file header parity", () => {
     expect(h["Content-Length"]).toBe(String(bytes.length));
     expect(h["X-Bz-File-Name"]).toBe(encodeURIComponent("name with spaces.txt"));
     expect(h["X-Bz-Info-foo"]).toBe(encodeURIComponent("bar baz"));
-    expect(h["X-Bz-Server-Side-Encryption"]).toBe("SSE-C");
+    // SSE-C: the customer headers, and NO plain X-Bz-Server-Side-Encryption
+    // header (B2 rejects the request if both are present).
+    expect(h["X-Bz-Server-Side-Encryption-Customer-Algorithm"]).toBe("AES256");
     expect(h["X-Bz-Server-Side-Encryption-Customer-Key"]).toBe(sse.customerKey);
+    expect(h["X-Bz-Server-Side-Encryption-Customer-Key-Md5"]).toBe(sse.customerKeyMd5);
+    expect(h["X-Bz-Server-Side-Encryption"]).toBeUndefined();
+  });
+
+  it("SSE-B2 sets X-Bz-Server-Side-Encryption to AES256 (not the literal 'SSE-B2')", async () => {
+    await callTool(server, "b2_upload_file", {
+      bucketId: "b",
+      fileName: "f.txt",
+      content: bytes.toString("base64"),
+      contentType: "text/plain",
+      serverSideEncryption: { mode: "SSE-B2" },
+    });
+    const h = lastPostHeaders();
+    expect(h["X-Bz-Server-Side-Encryption"]).toBe("AES256");
+    expect(h["X-Bz-Server-Side-Encryption-Customer-Algorithm"]).toBeUndefined();
   });
 
   it("rejects a fileInfo key that could inject a header", async () => {

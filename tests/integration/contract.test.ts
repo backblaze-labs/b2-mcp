@@ -346,3 +346,52 @@ describe("Contract: b2_hide_file", () => {
     60_000,
   );
 });
+
+// ── b2_upload_file server-side encryption headers ─────────────────────────────
+describe("Contract: b2_upload_file SSE headers", () => {
+  liveIt(
+    "uploads with SSE-B2 and SSE-C (the correct B2 header scheme, not mode-as-value)",
+    async () => {
+      if (!writableBucketId) {
+        console.log("  No writable bucket; skipping.");
+        return;
+      }
+      const ids: Array<[string, string]> = [];
+      try {
+        // SSE-B2: header value must be AES256, not "SSE-B2".
+        const b2 = await callTool(server, "b2_upload_file", {
+          bucketId: writableBucketId,
+          fileName: "__contract/sse-b2.txt",
+          content: Buffer.from("sse-b2").toString("base64"),
+          serverSideEncryption: { mode: "SSE-B2" },
+        });
+        expect(isError(b2)).toBe(false);
+        const b2j = parseResult(b2);
+        expect(b2j.serverSideEncryption?.mode).toBe("SSE-B2");
+        ids.push([b2j.fileName, b2j.fileId]);
+
+        // SSE-C: customer headers, no plain mode header (B2 rejects both together).
+        const crypto = await import("crypto");
+        const key = crypto.randomBytes(32);
+        const c = await callTool(server, "b2_upload_file", {
+          bucketId: writableBucketId,
+          fileName: "__contract/sse-c.txt",
+          content: Buffer.from("sse-c").toString("base64"),
+          serverSideEncryption: {
+            mode: "SSE-C",
+            customerKey: key.toString("base64"),
+            customerKeyMd5: crypto.createHash("md5").update(key).digest("base64"),
+          },
+        });
+        expect(isError(c)).toBe(false);
+        const cj = parseResult(c);
+        expect(cj.serverSideEncryption?.mode).toBe("SSE-C");
+        ids.push([cj.fileName, cj.fileId]);
+      } finally {
+        for (const [fileName, fileId] of ids)
+          await callTool(server, "b2_delete_file_version", { fileName, fileId });
+      }
+    },
+    60_000,
+  );
+});
