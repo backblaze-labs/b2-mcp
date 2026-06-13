@@ -46,9 +46,13 @@ const testConfig = {
   applicationKey: "test-key-secret",
   appKeyId: "test-app-key-id",
   appKey: "test-app-key-secret",
+  masterKeyId: "test-app-key-secret",
+  masterKey: "test-app-key-secret",
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,
+  allowLocalFiles: true,
+  fileRoot: null,
 };
 
 // v3 auth response shape — flattened by B2AuthManager.authorize()
@@ -104,6 +108,33 @@ describe("b2_authorize_account", () => {
         headers: expect.objectContaining({ Authorization: expect.stringMatching(/^Basic /) }),
       }),
     );
+  });
+});
+
+// ── B2Client 401 re-auth (core resilience path) ───────────────────────────────
+
+describe("B2Client 401 re-auth-and-retry", () => {
+  it("re-authorizes and retries exactly once on a 401, then succeeds", async () => {
+    // Authorize succeeds every time; the first API call 401s (token expired
+    // between our 23h cache and B2's 24h lifetime), the retry succeeds.
+    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
+    mockedAxios
+      .mockRejectedValueOnce({ response: { status: 401 }, isAxiosError: true })
+      .mockResolvedValueOnce({ data: { buckets: [] } });
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+    expect(result.buckets).toEqual([]); // recovered silently
+    expect(mockedAxios).toHaveBeenCalledTimes(2); // original + one retry
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2); // re-authorized after invalidate
+  });
+
+  it("does not retry more than once — a second 401 surfaces the error", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
+    mockedAxios.mockRejectedValue({ response: { status: 401 }, isAxiosError: true });
+
+    const result = await callTool(server, "b2_list_buckets", {});
+    expect(result.isError).toBe(true);
+    expect(mockedAxios).toHaveBeenCalledTimes(2); // original + exactly one retry, then throws
   });
 });
 
@@ -170,6 +201,29 @@ describe("b2_create_bucket", () => {
         data: expect.objectContaining({ bucketName: "my-bucket", bucketType: "allPublic" }),
       }),
     );
+  });
+
+  it("forwards fileLockEnabled when set (Object Lock enabled at creation)", async () => {
+    await callTool(server, "b2_create_bucket", {
+      bucketName: "locked-bucket",
+      bucketType: "allPrivate",
+      fileLockEnabled: true,
+    });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ fileLockEnabled: true }),
+      }),
+    );
+  });
+
+  it("omits fileLockEnabled when not provided", async () => {
+    await callTool(server, "b2_create_bucket", {
+      bucketName: "plain-bucket",
+      bucketType: "allPrivate",
+    });
+    const data = (mockedAxios.mock.calls[0][0] as unknown as { data: Record<string, unknown> })
+      .data;
+    expect(data).not.toHaveProperty("fileLockEnabled");
   });
 });
 
@@ -266,7 +320,7 @@ describe("b2_hide_file", () => {
     }),
   );
 
-  it("returns the hide marker file info", async () => {
+  it("returns the hide marker and sends { bucketId, fileName } to the API", async () => {
     const result = parseResult(
       await callTool(server, "b2_hide_file", {
         bucketId: "bucket-001",
@@ -275,6 +329,11 @@ describe("b2_hide_file", () => {
     );
     expect(result.action).toBe("hide");
     expect(result.fileName).toBe("photo.jpg");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ bucketId: "bucket-001", fileName: "photo.jpg" }),
+      }),
+    );
   });
 });
 
@@ -299,6 +358,19 @@ describe("b2_copy_file", () => {
     );
     expect(result.fileId).toBe("copy-001");
     expect(result.fileName).toBe("photo-copy.jpg");
+  });
+
+  it("forwards destination SSE under B2's field name 'destinationServerSideEncryption'", async () => {
+    await callTool(server, "b2_copy_file", {
+      sourceFileId: "file-001",
+      fileName: "photo-copy.jpg",
+      destinationServerSideEncryption: { mode: "SSE-B2" },
+    });
+    const data = (mockedAxios.mock.calls[0][0] as unknown as { data: Record<string, unknown> })
+      .data;
+    // B2 rejects 'serverSideEncryption' on b2_copy_file with 400 unknown field.
+    expect(data).toHaveProperty("destinationServerSideEncryption", { mode: "SSE-B2" });
+    expect(data).not.toHaveProperty("serverSideEncryption");
   });
 });
 
@@ -338,15 +410,30 @@ describe("b2_create_key", () => {
     }),
   );
 
-  it("returns the new key info including keyId", async () => {
+  it("returns the new key info and forwards accountId + scope to the API", async () => {
     const result = parseResult(
       await callTool(server, "b2_create_key", {
         keyName: "test-key",
         capabilities: ["readFiles", "writeFiles"],
+        bucketId: "bucket-001",
+        namePrefix: "incoming/",
+        validDurationInSeconds: 3600,
       }),
     );
     expect(result.keyName).toBe("test-key");
     expect(result.applicationKeyId).toBe("key-123");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accountId: "test-account-123",
+          keyName: "test-key",
+          capabilities: ["readFiles", "writeFiles"],
+          bucketId: "bucket-001",
+          namePrefix: "incoming/",
+          validDurationInSeconds: 3600,
+        }),
+      }),
+    );
   });
 });
 
@@ -464,11 +551,14 @@ describe("b2_list_unfinished_large_files", () => {
 describe("b2_delete_key", () => {
   beforeEach(() => setupMocks({ applicationKeyId: "key-ro", keyName: "readonly" }));
 
-  it("returns deleted key info", async () => {
+  it("returns deleted key info and sends applicationKeyId to the API", async () => {
     const result = parseResult(
       await callTool(server, "b2_delete_key", { applicationKeyId: "key-ro" }),
     );
     expect(result.applicationKeyId).toBe("key-ro");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ applicationKeyId: "key-ro" }) }),
+    );
   });
 });
 
@@ -575,6 +665,21 @@ describe("b2_update_bucket", () => {
       expect.objectContaining({ data: expect.objectContaining({ bucketType: "allPrivate" }) }),
     );
   });
+
+  it("enables Object Lock on an existing bucket (B2 native allows the retrofit)", async () => {
+    await callTool(server, "b2_update_bucket", { bucketId: "bucket-001", fileLockEnabled: true });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ fileLockEnabled: true }) }),
+    );
+  });
+
+  it("forwards defaultRetention with the flat { mode, period } shape", async () => {
+    const defaultRetention = { mode: "governance", period: { duration: 7, unit: "days" } };
+    await callTool(server, "b2_update_bucket", { bucketId: "bucket-001", defaultRetention });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ defaultRetention }) }),
+    );
+  });
 });
 
 // ── b2_get_bucket_notification_rules ─────────────────────────────────────────
@@ -615,10 +720,11 @@ describe("b2_set_bucket_notification_rules", () => {
     }),
   );
 
-  it("sends rules and returns the updated configuration", async () => {
+  it("forwards an explicit objectNamePrefix and returns the updated configuration", async () => {
     const rules = [
       {
         name: "on-delete",
+        objectNamePrefix: "incoming/",
         eventTypes: ["b2:ObjectDeleted:*"],
         isEnabled: true,
         targetConfiguration: { targetType: "webhook", url: "https://example.com/hook" },
@@ -634,6 +740,28 @@ describe("b2_set_bucket_notification_rules", () => {
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ bucketId: "bucket-001", eventNotificationRules: rules }),
+      }),
+    );
+  });
+
+  it("injects objectNamePrefix='' when a rule omits it (B2 requires the field)", async () => {
+    const rules = [
+      {
+        name: "on-create",
+        eventTypes: ["b2:ObjectCreated:*"],
+        isEnabled: true,
+        targetConfiguration: { targetType: "webhook", url: "https://example.com/hook" },
+      },
+    ];
+    await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "bucket-001",
+      eventNotificationRules: rules,
+    });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventNotificationRules: [expect.objectContaining({ objectNamePrefix: "" })],
+        }),
       }),
     );
   });
@@ -682,6 +810,19 @@ describe("b2_upload_file", () => {
     });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("filePath or content");
+  });
+
+  it("rejects a fileInfo key with header-injection characters", async () => {
+    const result = await callTool(server, "b2_upload_file", {
+      bucketId: "bucket-001",
+      fileName: "hello.txt",
+      content: Buffer.from("x").toString("base64"),
+      // X-Bz-Info-* header name — must be [A-Za-z0-9-]; a space/newline could
+      // smuggle a second header. The guard must reject it.
+      fileInfo: { "bad key\r\nX-Evil": "1" },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/fileInfo|invalid|header/i);
   });
 });
 
@@ -969,7 +1110,7 @@ describe("b2_update_file_legal_hold", () => {
     setupMocks({
       fileId: "file-001",
       fileName: "doc.pdf",
-      legalHold: { isClientAuthorizedToRead: true, value: "on" },
+      legalHold: "on",
     }),
   );
 
@@ -978,23 +1119,21 @@ describe("b2_update_file_legal_hold", () => {
       await callTool(server, "b2_update_file_legal_hold", {
         fileId: "file-001",
         fileName: "doc.pdf",
-        legalHold: { isClientAuthorizedToRead: true, value: "on" },
+        legalHold: "on",
       }),
     );
-    expect(result.legalHold.value).toBe("on");
+    expect(result.legalHold).toBe("on");
   });
 
-  it("passes legalHold payload to the API", async () => {
+  it("forwards legalHold to the API as a bare string (B2 write-API shape)", async () => {
     await callTool(server, "b2_update_file_legal_hold", {
       fileId: "file-001",
       fileName: "doc.pdf",
-      legalHold: { isClientAuthorizedToRead: true, value: "off" },
+      legalHold: "off",
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          legalHold: expect.objectContaining({ value: "off" }),
-        }),
+        data: expect.objectContaining({ legalHold: "off" }),
       }),
     );
   });
@@ -1403,39 +1542,53 @@ describe("b2_update_file_retention", () => {
     setupMocks({
       fileId: "file-001",
       fileName: "audit.log",
-      fileRetention: {
-        isClientAuthorizedToRead: true,
-        value: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
-      },
+      fileRetention: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
     }),
   );
 
-  it("returns the updated file retention info", async () => {
+  it("forwards a flat fileRetention to the API (B2 write-API shape, no read-only wrapper)", async () => {
     const result = parseResult(
       await callTool(server, "b2_update_file_retention", {
         fileId: "file-001",
         fileName: "audit.log",
-        fileRetention: {
-          isClientAuthorizedToRead: true,
-          value: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
-        },
+        fileRetention: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
       }),
     );
-    expect(result.fileRetention.value.mode).toBe("compliance");
+    expect(result.fileRetention.mode).toBe("compliance");
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fileRetention: { mode: "compliance", retainUntilTimestamp: retentionTimestamp },
+        }),
+      }),
+    );
   });
 
   it("passes bypassGovernance when set to true", async () => {
     await callTool(server, "b2_update_file_retention", {
       fileId: "file-001",
       fileName: "doc.pdf",
-      fileRetention: {
-        isClientAuthorizedToRead: true,
-        value: { mode: "governance", retainUntilTimestamp: retentionTimestamp },
-      },
+      fileRetention: { mode: "governance", retainUntilTimestamp: retentionTimestamp },
       bypassGovernance: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ bypassGovernance: true }) }),
+    );
+  });
+
+  it("clears retention with mode: null", async () => {
+    await callTool(server, "b2_update_file_retention", {
+      fileId: "file-001",
+      fileName: "doc.pdf",
+      fileRetention: { mode: null, retainUntilTimestamp: null },
+      bypassGovernance: true,
+    });
+    expect(mockedAxios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          fileRetention: { mode: null, retainUntilTimestamp: null },
+        }),
+      }),
     );
   });
 });

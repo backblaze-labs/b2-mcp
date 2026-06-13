@@ -3,6 +3,7 @@ import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import { assignDefined } from "../utils/payload.js";
 
 export function registerDownloadUrlTools(
   server: McpServer,
@@ -45,17 +46,14 @@ export function registerDownloadUrlTools(
           fileNamePrefix: args.fileNamePrefix,
           validDurationInSeconds: args.validDurationInSeconds,
         };
-        const optional = [
+        assignDefined(payload, args, [
           "b2ContentDisposition",
           "b2ContentLanguage",
           "b2Expires",
           "b2CacheControl",
           "b2ContentEncoding",
           "b2ContentType",
-        ] as const;
-        for (const key of optional) {
-          if (args[key] !== undefined) payload[key] = args[key];
-        }
+        ]);
 
         const result = await client.call("b2_get_download_authorization", payload);
         return toolJson(result);
@@ -110,7 +108,7 @@ export function registerDownloadUrlTools(
     async (args) => {
       try {
         const authData = await auth.getAuth();
-        let url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${args.fileId}`;
+        let url = `${authData.downloadUrl}/b2api/v2/b2_download_file_by_id?fileId=${encodeURIComponent(args.fileId)}`;
 
         if (args.authorizationToken) {
           url += `&Authorization=${encodeURIComponent(args.authorizationToken)}`;

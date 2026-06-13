@@ -112,7 +112,7 @@ export function registerS3ExtraTools(server: McpServer, s3: S3Client): void {
   // ── s3_get_bucket_logging ─────────────────────────────────────────────────
   server.tool(
     "s3_get_bucket_logging",
-    "Get the access logging configuration for a B2 bucket via the S3-compatible API. Requires the readBucketLogging capability on the application key.",
+    "Get the S3 access-logging configuration for a B2 bucket. NOTE: Backblaze does not currently provide working S3 server access logging — this returns an empty config and no access logs are produced. For audit trails use this server's own audit log or B2 event notifications instead.",
     {
       bucket: z.string().describe("The bucket name."),
     },
@@ -129,7 +129,7 @@ export function registerS3ExtraTools(server: McpServer, s3: S3Client): void {
   // ── s3_put_bucket_logging ─────────────────────────────────────────────────
   server.tool(
     "s3_put_bucket_logging",
-    "Enable or disable access logging for a B2 bucket via the S3-compatible API. Log files are stored as objects in a target bucket. Requires the writeBucketLogging capability on the application key.",
+    "Set the S3 access-logging configuration for a B2 bucket. WARNING: Backblaze does not currently provide working S3 server access logging. B2's S3 endpoint ACCEPTS this call but produces NO log objects — do not rely on it for audit trails. Use this server's audit log or B2 event notifications instead.",
     {
       bucket: z.string().describe("The source bucket to enable logging for."),
       targetBucket: z
@@ -246,13 +246,18 @@ export function registerS3ExtraTools(server: McpServer, s3: S3Client): void {
     },
     async (args) => {
       try {
+        // Fold the source version into CopySource (same form as s3_copy_object); without
+        // this the declared copySourceVersionId was silently dropped and the live version copied.
+        const copySource = args.copySourceVersionId
+          ? `${args.copySource}?versionId=${args.copySourceVersionId}`
+          : args.copySource;
         const result = await s3.send(
           new UploadPartCopyCommand({
             Bucket: args.bucket,
             Key: args.key,
             UploadId: args.uploadId,
             PartNumber: args.partNumber,
-            CopySource: args.copySource,
+            CopySource: copySource,
             CopySourceRange: args.copySourceRange,
           }),
         );

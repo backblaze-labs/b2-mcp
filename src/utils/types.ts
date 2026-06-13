@@ -1,16 +1,40 @@
 // ── Shared Types ─────────────────────────────────────────────────────────────
 
 export interface B2Config {
+  /** The application key — the workhorse credential. Used for the B2 native API,
+   *  the S3-compatible API, and key management. A non-master key is all most
+   *  users need; it works for everything except the Partner API and `bz_*`. */
   applicationKeyId: string;
   applicationKey: string;
-  /** Application key ID for S3-compatible API calls. Defaults to applicationKeyId.
-   *  Set B2_APP_KEY_ID to a non-master application key to enable S3 tools. */
+  /** Credential the S3-compatible client signs with. Defaults to the application
+   *  key (which is what should be used). The deprecated B2_APP_KEY_ID override
+   *  remains only for legacy setups whose application key is a master key (B2's
+   *  S3 endpoint rejects master keys). */
   appKeyId: string;
-  /** Application key secret for S3-compatible API calls. Defaults to applicationKey. */
   appKey: string;
+  /** Optional master application key, used ONLY by the Partner API and `bz_*`
+   *  Computer Backup tools. Falls back to the application key when unset, so a
+   *  single non-master key remains a complete config for everything else. */
+  masterKeyId: string;
+  masterKey: string;
   region: string;
   largeFileThreshold: number; // bytes
   partSize: number; // bytes
+  /**
+   * Whether tools may read/write local filesystem paths (filePath / saveToPath).
+   * Enabled by default for the local stdio transport; disabled by default for
+   * the internet-facing HTTP transport, where a remote caller has no business
+   * referencing server-local paths (they should use base64 `content`).
+   */
+  allowLocalFiles: boolean;
+  /**
+   * If set, every local file path must resolve inside this directory (a sandbox
+   * root, symlinks included). null means unrestricted — only safe for a trusted
+   * single-user stdio process. Set via B2_FILE_ROOT.
+   */
+  fileRoot: string | null;
+  /** Which transport launched this server — surfaced in the outbound User-Agent. */
+  transport?: "stdio" | "http";
 }
 
 export interface B2AuthResponse {

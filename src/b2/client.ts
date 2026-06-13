@@ -1,8 +1,19 @@
 import axios, { AxiosRequestConfig } from "axios";
+import * as fs from "fs";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { B2AuthManager } from "../auth.js";
 import { withRetry } from "../utils/retry.js";
-import { withCircuit } from "../utils/circuit-breaker.js";
+import { withCircuit, withLongCircuit } from "../utils/circuit-breaker.js";
+
+/** Timeout for ordinary (non-transfer) B2 API requests. */
+const API_TIMEOUT_MS = 30_000;
+/**
+ * Max bytes to buffer for an in-memory (base64-returning) download. Larger
+ * objects must use saveToPath, which streams to disk. Prevents a single
+ * download from OOM-ing the process on a memory-constrained host.
+ */
+const MAX_BUFFER_DOWNLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
 
 /**
  * B2Client wraps the B2 native REST API.
@@ -10,9 +21,11 @@ import { withCircuit } from "../utils/circuit-breaker.js";
  */
 export class B2Client {
   private auth: B2AuthManager;
+  private userAgent: string;
 
-  constructor(auth: B2AuthManager) {
+  constructor(auth: B2AuthManager, userAgent = "backblaze-b2-mcp") {
     this.auth = auth;
+    this.userAgent = userAgent;
   }
 
   /**
@@ -33,27 +46,38 @@ export class B2Client {
   ): Promise<T> {
     return withRetry(() =>
       withCircuit(async () => {
-        const authData = await this.auth.getAuth();
-        const baseUrl = options.useDownloadUrl ? authData.downloadUrl : authData.apiUrl;
         const apiPath = options.apiPath ?? "b2api/v2";
-        const url = `${baseUrl}/${apiPath}/${path}`;
 
-        try {
-          const config: AxiosRequestConfig = {
-            method: options.method ?? (data !== undefined ? "POST" : "GET"),
-            url,
-            headers: { Authorization: authData.authorizationToken },
-            ...(data !== undefined && { data }),
-            ...(options.params !== undefined && { params: options.params }),
-          };
-          const response = await axios(config);
-          return response.data as T;
-        } catch (err: unknown) {
-          // On 401, invalidate and let retry logic handle re-auth
-          if (isStatus(err, 401)) {
-            this.auth.invalidate();
+        // Try once; on 401, invalidate the cached token, re-authorize, and
+        // retry exactly once. A token can expire between our 23h cache window
+        // and B2's real 24h lifetime — that single retry recovers silently
+        // instead of surfacing a spurious auth error to the caller.
+        for (let attempt = 0; ; attempt++) {
+          const authData = await this.auth.getAuth();
+          const baseUrl = options.useDownloadUrl ? authData.downloadUrl : authData.apiUrl;
+          const url = `${baseUrl}/${apiPath}/${path}`;
+
+          try {
+            const config: AxiosRequestConfig = {
+              method: options.method ?? (data !== undefined ? "POST" : "GET"),
+              url,
+              headers: {
+                Authorization: authData.authorizationToken,
+                "User-Agent": this.userAgent,
+              },
+              timeout: API_TIMEOUT_MS,
+              ...(data !== undefined && { data }),
+              ...(options.params !== undefined && { params: options.params }),
+            };
+            const response = await axios(config);
+            return response.data as T;
+          } catch (err: unknown) {
+            if (isStatus(err, 401)) {
+              this.auth.invalidate();
+              if (attempt === 0) continue; // re-auth and retry once
+            }
+            throw err;
           }
-          throw err;
         }
       }),
     );
@@ -72,10 +96,11 @@ export class B2Client {
     headers: Record<string, string>,
   ): Promise<T> {
     return withRetry(() =>
-      withCircuit(async () => {
+      withLongCircuit(async () => {
         const response = await axios.post<T>(uploadUrl, body, {
           headers: {
             Authorization: uploadAuthToken,
+            "User-Agent": this.userAgent,
             ...headers,
           },
           maxBodyLength: Infinity,
@@ -87,7 +112,11 @@ export class B2Client {
   }
 
   /**
-   * Download a file as a buffer using the B2 download URL.
+   * Download a file into memory as a buffer using the B2 download URL.
+   *
+   * Bounded to MAX_BUFFER_DOWNLOAD_BYTES so a huge object can't OOM the
+   * process — axios rejects oversized responses. For large files, callers
+   * should stream to disk via downloadToFile instead.
    */
   async download(
     url: string,
@@ -95,26 +124,77 @@ export class B2Client {
     range?: string,
   ): Promise<{ data: Buffer; contentType: string; contentLength: number }> {
     return withRetry(() =>
-      withCircuit(async () => {
+      withLongCircuit(async () => {
         const authData = await this.auth.getAuth();
         const headers: Record<string, string> = {
           Authorization: authToken ?? authData.authorizationToken,
+          "User-Agent": this.userAgent,
         };
         if (range) headers["Range"] = range;
 
-        const response = await axios.get(url, {
+        try {
+          const response = await axios.get(url, {
+            headers,
+            responseType: "arraybuffer",
+            maxContentLength: MAX_BUFFER_DOWNLOAD_BYTES,
+          });
+
+          return {
+            data: Buffer.from(response.data as ArrayBuffer),
+            contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
+            contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
+          };
+        } catch (err) {
+          // Error responses also arrive as arraybuffer; decode the body so the
+          // real B2 code/message surface instead of "unknown_error".
+          throw decodeBinaryErrorBody(err);
+        }
+      }),
+    );
+  }
+
+  /**
+   * Stream a file from the B2 download URL directly to a local path without
+   * buffering the whole object in memory — O(stream chunk) regardless of file
+   * size. The destination path must already be validated by the caller. On a
+   * mid-stream error the partial file is removed.
+   */
+  async downloadToFile(
+    url: string,
+    destPath: string,
+    authToken?: string,
+    range?: string,
+  ): Promise<{ contentType: string; contentLength: number }> {
+    const { response, contentType, contentLength } = await withRetry(() =>
+      withLongCircuit(async () => {
+        const authData = await this.auth.getAuth();
+        const headers: Record<string, string> = {
+          Authorization: authToken ?? authData.authorizationToken,
+          "User-Agent": this.userAgent,
+        };
+        if (range) headers["Range"] = range;
+
+        const resp = await axios.get(url, {
           headers,
-          responseType: "arraybuffer",
+          responseType: "stream",
           maxContentLength: Infinity,
         });
-
         return {
-          data: Buffer.from(response.data as ArrayBuffer),
-          contentType: (response.headers["content-type"] as string) ?? "application/octet-stream",
-          contentLength: parseInt((response.headers["content-length"] as string) ?? "0", 10),
+          response: resp,
+          contentType: (resp.headers["content-type"] as string) ?? "application/octet-stream",
+          contentLength: parseInt((resp.headers["content-length"] as string) ?? "0", 10),
         };
       }),
     );
+
+    try {
+      await pipeline(response.data as Readable, fs.createWriteStream(destPath));
+    } catch (err) {
+      await fs.promises.unlink(destPath).catch(() => {});
+      throw err;
+    }
+
+    return { contentType, contentLength };
   }
 }
 
@@ -127,4 +207,25 @@ function isStatus(err: unknown, status: number): boolean {
     }
   }
   return false;
+}
+
+/**
+ * When a download requested `responseType: "arraybuffer"`, an error response
+ * body also arrives as raw bytes — so `err.response.data.code` is a Buffer, not
+ * the B2 error JSON. Decode it in place so parseB2Error can read the real
+ * code/message (otherwise it falls back to "unknown_error"). Returns the same error.
+ */
+export function decodeBinaryErrorBody(err: unknown): unknown {
+  if (typeof err === "object" && err !== null) {
+    const e = err as { response?: { data?: unknown } };
+    const data = e.response?.data;
+    if (data instanceof ArrayBuffer || Buffer.isBuffer(data)) {
+      try {
+        e.response!.data = JSON.parse(Buffer.from(data as ArrayBuffer).toString("utf8"));
+      } catch {
+        /* not JSON — leave the raw body as-is */
+      }
+    }
+  }
+  return err;
 }

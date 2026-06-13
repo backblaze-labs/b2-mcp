@@ -3,6 +3,7 @@ import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import { assignDefined } from "../utils/payload.js";
 
 export function registerBucketTools(
   server: McpServer,
@@ -40,7 +41,7 @@ export function registerBucketTools(
   // ── b2_create_bucket ──────────────────────────────────────────────────────
   server.tool(
     "b2_create_bucket",
-    "Create a new B2 bucket. Bucket names must be globally unique, 6-50 characters, and contain only letters, digits, and hyphens.",
+    "Create a new B2 bucket. Bucket names must be globally unique, 6-63 characters, and contain letters, digits, hyphens, and periods (names are not case-sensitive and cannot start with 'b2-').",
     {
       bucketName: z.string().describe("The name for the new bucket. Must be globally unique."),
       bucketType: z
@@ -69,6 +70,7 @@ export function registerBucketTools(
             fileNamePrefix: z.string(),
             daysFromHidingToDeleting: z.number().optional(),
             daysFromUploadingToHiding: z.number().optional(),
+            daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
           }),
         )
         .optional()
@@ -80,6 +82,14 @@ export function registerBucketTools(
         })
         .optional()
         .describe("Default server-side encryption for new files in this bucket."),
+      fileLockEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          "Enable Object Lock (file lock) on the bucket at creation. (Object Lock can also be " +
+            "enabled later on an existing bucket via b2_update_bucket.) Must be true before any " +
+            "retention or legal hold can be applied to files in this bucket.",
+        ),
     },
     async (args) => {
       try {
@@ -92,8 +102,17 @@ export function registerBucketTools(
         if (args.bucketInfo) payload.bucketInfo = args.bucketInfo;
         if (args.corsRules) payload.corsRules = args.corsRules;
         if (args.lifecycleRules) payload.lifecycleRules = args.lifecycleRules;
-        if (args.defaultServerSideEncryption)
-          payload.defaultServerSideEncryption = args.defaultServerSideEncryption;
+        if (args.defaultServerSideEncryption) {
+          // B2's native API requires algorithm "AES256" with SSE-B2; default it so
+          // callers can pass just { mode: "SSE-B2" }.
+          const sse = { ...args.defaultServerSideEncryption } as {
+            mode: string;
+            algorithm?: string;
+          };
+          if (sse.mode === "SSE-B2" && !sse.algorithm) sse.algorithm = "AES256";
+          payload.defaultServerSideEncryption = sse;
+        }
+        if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
 
         const result = await client.call("b2_create_bucket", payload);
         return toolJson(result);
@@ -150,6 +169,7 @@ export function registerBucketTools(
             fileNamePrefix: z.string(),
             daysFromHidingToDeleting: z.number().optional(),
             daysFromUploadingToHiding: z.number().optional(),
+            daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
           }),
         )
         .optional(),
@@ -183,6 +203,35 @@ export function registerBucketTools(
             .optional(),
         })
         .optional(),
+      fileLockEnabled: z
+        .boolean()
+        .optional()
+        .describe(
+          "Enable Object Lock on the bucket. Unlike S3's PutObjectLockConfiguration (which only " +
+            "enables lock at bucket creation), the B2 native API allows enabling Object Lock on an " +
+            "existing bucket here. Requires the writeBucketRetentions capability.",
+        ),
+      defaultRetention: z
+        .object({
+          mode: z
+            .enum(["governance", "compliance"])
+            .nullable()
+            .describe("Retention mode applied to new objects. null clears the default."),
+          period: z
+            .object({
+              duration: z.number().int().positive(),
+              unit: z.enum(["days", "years"]),
+            })
+            .nullable()
+            .describe(
+              "Retention period, e.g. { duration: 7, unit: 'days' }. null clears the default.",
+            ),
+        })
+        .optional()
+        .describe(
+          "Default Object Lock retention for newly uploaded objects. Requires Object Lock enabled " +
+            "on the bucket. Send { mode: null, period: null } to clear.",
+        ),
       ifRevisionIs: z
         .number()
         .optional()
@@ -195,18 +244,22 @@ export function registerBucketTools(
           accountId: authData.accountId,
           bucketId: args.bucketId,
         };
-        const optional = [
+        assignDefined(payload, args, [
           "bucketType",
           "bucketInfo",
           "corsRules",
           "lifecycleRules",
           "defaultServerSideEncryption",
           "replicationConfiguration",
+          "fileLockEnabled",
+          "defaultRetention",
           "ifRevisionIs",
-        ] as const;
-        for (const key of optional) {
-          if (args[key] !== undefined) payload[key] = args[key];
-        }
+        ]);
+        // Default SSE-B2 algorithm (B2 requires "AES256" with SSE-B2).
+        const upSse = payload.defaultServerSideEncryption as
+          | { mode?: string; algorithm?: string }
+          | undefined;
+        if (upSse && upSse.mode === "SSE-B2" && !upSse.algorithm) upSse.algorithm = "AES256";
         const result = await client.call("b2_update_bucket", payload);
         return toolJson(result);
       } catch (err) {
@@ -243,6 +296,13 @@ export function registerBucketTools(
       eventNotificationRules: z.array(
         z.object({
           name: z.string().describe("A name for this notification rule."),
+          objectNamePrefix: z
+            .string()
+            .optional()
+            .default("")
+            .describe(
+              "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
+            ),
           eventTypes: z
             .array(z.string())
             .describe(
@@ -265,7 +325,12 @@ export function registerBucketTools(
       try {
         const result = await client.call("b2_set_bucket_notification_rules", {
           bucketId: args.bucketId,
-          eventNotificationRules: args.eventNotificationRules,
+          // B2 requires objectNamePrefix on every rule; default to "" (matches
+          // all objects) when a caller omits it, regardless of Zod default.
+          eventNotificationRules: args.eventNotificationRules.map((rule) => ({
+            ...rule,
+            objectNamePrefix: rule.objectNamePrefix ?? "",
+          })),
         });
         return toolJson(result);
       } catch (err) {

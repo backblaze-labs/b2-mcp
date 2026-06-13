@@ -1,10 +1,21 @@
 import axios from "axios";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
+import { withRetry } from "./utils/retry.js";
+import { buildUserAgent } from "./utils/user-agent.js";
 
-// v3 is required: Partner API (Groups) and Backup API endpoints reject v2 tokens.
-const AUTH_URL = "https://api.backblazeb2.com/b2api/v3/b2_authorize_account";
+/** Timeout for the authorize_account request. */
+const AUTH_TIMEOUT_MS = 30_000;
 
-interface B2V3AuthResponse {
+// v4 is Backblaze's current authorize_account (April 2025). A v4 token is accepted
+// at the v2 and v3 endpoint paths the tools use (verified live: a v4 token succeeds
+// on b2api/v2 and b2api/v3 calls), so this covers the B2 native API plus the Partner
+// (Groups) and Backup APIs. v2 must NOT be used — Partner/Backup endpoints reject v2
+// tokens. v4 also restructured the `allowed` field for Multi-Bucket Application Keys
+// (`allowed.buckets[]` instead of a single bucketId/bucketName); we only consume
+// `apiInfo.storageApi`, which is unchanged from v3, so that restructure is transparent.
+const AUTH_URL = "https://api.backblazeb2.com/b2api/v4/b2_authorize_account";
+
+interface B2AuthorizeResponse {
   accountId: string;
   authorizationToken: string;
   apiInfo: {
@@ -83,19 +94,25 @@ export class B2AuthManager {
       `${this.config.applicationKeyId}:${this.config.applicationKey}`,
     ).toString("base64");
 
-    const response = await axios.get<B2V3AuthResponse>(AUTH_URL, {
-      headers: { Authorization: `Basic ${credentials}` },
-    });
+    const response = await withRetry(() =>
+      axios.get<B2AuthorizeResponse>(AUTH_URL, {
+        headers: {
+          Authorization: `Basic ${credentials}`,
+          "User-Agent": buildUserAgent(this.config),
+        },
+        timeout: AUTH_TIMEOUT_MS,
+      }),
+    );
 
-    const v3 = response.data;
+    const data = response.data;
     this.cachedAuth = {
-      accountId: v3.accountId,
-      authorizationToken: v3.authorizationToken,
-      apiUrl: v3.apiInfo.storageApi.apiUrl,
-      downloadUrl: v3.apiInfo.storageApi.downloadUrl,
-      s3ApiUrl: v3.apiInfo.storageApi.s3ApiUrl,
-      recommendedPartSize: v3.apiInfo.storageApi.recommendedPartSize,
-      absoluteMinimumPartSize: v3.apiInfo.storageApi.absoluteMinimumPartSize,
+      accountId: data.accountId,
+      authorizationToken: data.authorizationToken,
+      apiUrl: data.apiInfo.storageApi.apiUrl,
+      downloadUrl: data.apiInfo.storageApi.downloadUrl,
+      s3ApiUrl: data.apiInfo.storageApi.s3ApiUrl,
+      recommendedPartSize: data.apiInfo.storageApi.recommendedPartSize,
+      absoluteMinimumPartSize: data.apiInfo.storageApi.absoluteMinimumPartSize,
     };
     this.authTime = Date.now();
     return this.cachedAuth;

@@ -1,6 +1,6 @@
 {
   "name": "@backblaze/b2-mcp-server",
-  "version": "1.2.1",
+  "version": "1.6.0",
   "description": "MCP server for Backblaze B2 — full B2 native API + S3-compatible API coverage",
   "main": "dist/index.js",
   "bin": {
@@ -13,7 +13,9 @@
     "dev": "ts-node src/index.ts",
     "test": "NODE_ENV=test jest --testPathPattern=tests/unit",
     "test:integration": "NODE_ENV=test jest --testPathPattern=tests/integration",
+    "test:contract": "NODE_ENV=test jest --testPathPattern=tests/integration/contract",
     "smoke": "node scripts/smoke-test.mjs",
+    "probe:500": "npm run build && node scripts/probe-b2-500s.mjs",
     "lint": "eslint src tests",
     "lint:fix": "eslint src tests --fix",
     "format": "prettier --write .",
@@ -58,7 +60,10 @@
   },
   "files": [
     "dist/**/*",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "LICENSE"
   ],
   "jest": {
     "preset": "ts-jest",

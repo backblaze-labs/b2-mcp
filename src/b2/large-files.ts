@@ -23,6 +23,30 @@ interface LargeFileUploadOptions {
   partSize: number;
   /** Number of parts to upload concurrently. Defaults to 1 (sequential). */
   concurrency?: number;
+  /** Optional server-side encryption applied at start and on each part (SSE-C). */
+  serverSideEncryption?: {
+    mode: string;
+    algorithm?: string;
+    customerKey?: string;
+    customerKeyMd5?: string;
+  };
+}
+
+/** B2's hard limit on the number of parts in a single large file. */
+const MAX_PARTS = 10000;
+
+/** SSE-C request headers for a part upload, or {} for SSE-B2 / no encryption. */
+function ssePartHeaders(
+  sse: LargeFileUploadOptions["serverSideEncryption"],
+): Record<string, string> {
+  if (!sse || sse.mode !== "SSE-C") return {};
+  const headers: Record<string, string> = {
+    "X-Bz-Server-Side-Encryption-Customer-Algorithm": sse.algorithm ?? "AES256",
+  };
+  if (sse.customerKey) headers["X-Bz-Server-Side-Encryption-Customer-Key"] = sse.customerKey;
+  if (sse.customerKeyMd5)
+    headers["X-Bz-Server-Side-Encryption-Customer-Key-Md5"] = sse.customerKeyMd5;
+  return headers;
 }
 
 /**
@@ -69,61 +93,82 @@ export async function uploadLargeFile(
 
   const totalSize = opts.buffer ? opts.buffer.length : opts.fileSize!;
 
+  // Guard the part count up front — B2 rejects > MAX_PARTS, and finding out
+  // only at finish time (after uploading thousands of parts) wastes work and
+  // leaves an orphaned large file. Fail fast before starting.
+  const numParts = Math.ceil(totalSize / partSize);
+  if (numParts > MAX_PARTS) {
+    throw new Error(
+      `File requires ${numParts} parts, exceeding B2's limit of ${MAX_PARTS}. ` +
+        `Increase B2_PART_SIZE (current part size: ${partSize} bytes).`,
+    );
+  }
+
   // 1. Start the large file
   const startPayload: Record<string, unknown> = { bucketId, fileName, contentType };
   if (fileInfo) startPayload.fileInfo = fileInfo;
+  if (opts.serverSideEncryption) startPayload.serverSideEncryption = opts.serverSideEncryption;
 
   const startResult = await client.call<{ fileId: string }>("b2_start_large_file", startPayload);
   const fileId = startResult.fileId;
 
-  // 2. Upload parts — workers drain a shared queue of zero-based part indices
-  const numParts = Math.ceil(totalSize / partSize);
-  const partSha1Array: string[] = new Array(numParts);
-  const queue: number[] = Array.from({ length: numParts }, (_, i) => i);
+  // Once the file is started, any failure must cancel it — otherwise the
+  // unfinished large file lingers in B2, consuming storage until swept.
+  try {
+    // 2. Upload parts — workers drain a shared queue of zero-based part indices
+    const partSha1Array: string[] = new Array(numParts);
+    const queue: number[] = Array.from({ length: numParts }, (_, i) => i);
+    const ssePart = ssePartHeaders(opts.serverSideEncryption);
 
-  async function worker(): Promise<void> {
-    while (true) {
-      const i = queue.shift();
-      if (i === undefined) break;
+    async function worker(): Promise<void> {
+      while (true) {
+        const i = queue.shift();
+        if (i === undefined) break;
 
-      const partNumber = i + 1;
-      const start = i * partSize;
-      const end = Math.min(start + partSize, totalSize);
+        const partNumber = i + 1;
+        const start = i * partSize;
+        const end = Math.min(start + partSize, totalSize);
 
-      // Load just this part — either slice an in-memory buffer or read from disk
-      const partBuffer = opts.buffer
-        ? opts.buffer.subarray(start, end)
-        : await readFilePart(opts.filePath!, start, end);
+        // Load just this part — either slice an in-memory buffer or read from disk
+        const partBuffer = opts.buffer
+          ? opts.buffer.subarray(start, end)
+          : await readFilePart(opts.filePath!, start, end);
 
-      const sha1 = crypto.createHash("sha1").update(partBuffer).digest("hex");
+        const sha1 = crypto.createHash("sha1").update(partBuffer).digest("hex");
 
-      // Each concurrent upload requires its own upload URL / auth token
-      const uploadPartUrl = await client.call<{ uploadUrl: string; authorizationToken: string }>(
-        "b2_get_upload_part_url",
-        { fileId },
-      );
+        // Each concurrent upload requires its own upload URL / auth token
+        const uploadPartUrl = await client.call<{ uploadUrl: string; authorizationToken: string }>(
+          "b2_get_upload_part_url",
+          { fileId },
+        );
 
-      await client.uploadToUrl(
-        uploadPartUrl.uploadUrl,
-        uploadPartUrl.authorizationToken,
-        partBuffer,
-        {
-          "X-Bz-Part-Number": String(partNumber),
-          "Content-Length": String(partBuffer.length),
-          "X-Bz-Content-Sha1": sha1,
-        },
-      );
+        await client.uploadToUrl(
+          uploadPartUrl.uploadUrl,
+          uploadPartUrl.authorizationToken,
+          partBuffer,
+          {
+            "X-Bz-Part-Number": String(partNumber),
+            "Content-Length": String(partBuffer.length),
+            "X-Bz-Content-Sha1": sha1,
+            ...ssePart,
+          },
+        );
 
-      // Store at the correct index so finish receives hashes in part order
-      partSha1Array[i] = sha1;
+        // Store at the correct index so finish receives hashes in part order
+        partSha1Array[i] = sha1;
+      }
     }
+
+    // Spin up `concurrency` workers; they all drain from the shared queue
+    await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+    // 3. Finish the large file
+    return await client.call("b2_finish_large_file", { fileId, partSha1Array });
+  } catch (err) {
+    // Best-effort cancel; swallow cancel errors so the original is what surfaces.
+    await client.call("b2_cancel_large_file", { fileId }).catch(() => {});
+    throw err;
   }
-
-  // Spin up `concurrency` workers; they all drain from the shared queue
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-
-  // 3. Finish the large file
-  return client.call("b2_finish_large_file", { fileId, partSha1Array });
 }
 
 export function registerLargeFileTools(

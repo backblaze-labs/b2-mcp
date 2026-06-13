@@ -50,9 +50,13 @@ beforeAll(() => {
     applicationKey: "test",
     appKeyId: "test",
     appKey: "test",
+    masterKeyId: "test",
+    masterKey: "test",
     region: "us-west-004",
     largeFileThreshold: 1e8,
     partSize: 1e8,
+    allowLocalFiles: true,
+    fileRoot: null,
   };
   server = createServer(config);
   tools = (server as any)._registeredTools ?? {};

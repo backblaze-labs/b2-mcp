@@ -7,7 +7,12 @@ import { toolJson, toolError } from "../utils/errors.js";
 /**
  * Partner API tools — Group management, trial account provisioning, and
  * computer backup management. These endpoints require the admin account to
- * be authorized for the Partner API.
+ * be authorized for the Partner API and a MASTER application key.
+ *
+ * `client` here is the master-key B2Client wired up in createServer (it falls
+ * back to the application-key client when no distinct master key is set). These
+ * are the only tools that use the master key; everything else uses the
+ * application key.
  *
  * Group endpoints use /b2api/v3/
  * Backup (bz_*) endpoints use /api/backup/v1/
@@ -84,7 +89,7 @@ export function registerPartnerTools(
           "Email address for the new Group member. Must not already be a Backblaze account.",
         ),
       region: z
-        .enum(["us-east", "us-west", "eu-central"])
+        .enum(["us-east", "us-west", "eu-central", "ca-east"])
         .optional()
         .describe(
           "Region for the new account's data. Defaults to the current default region if omitted.",
@@ -217,7 +222,7 @@ export function registerPartnerTools(
         .max(50)
         .describe("Storage capacity for the trial in TB (1-50 inclusive)."),
       region: z
-        .enum(["us-east", "us-west", "eu-central"])
+        .enum(["us-east", "us-west", "eu-central", "ca-east"])
         .optional()
         .describe("Region for the new account's data. Backblaze picks a region if not specified."),
     },

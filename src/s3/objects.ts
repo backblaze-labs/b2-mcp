@@ -15,9 +15,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { resolveLocalPath } from "../utils/fs-guard.js";
+import { B2Config } from "../utils/types.js";
 
-export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
+export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_put_object",
     "Upload an object to a B2 bucket via the S3-compatible API. Provide either base64-encoded content or a local file path.",
@@ -32,7 +36,10 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
         .optional()
         .describe("Custom metadata key-value pairs."),
       acl: z.enum(["private", "public-read"]).optional().describe("Canned ACL for the object."),
-      serverSideEncryption: z.enum(["aws:kms", "AES256"]).optional(),
+      serverSideEncryption: z
+        .enum(["AES256"])
+        .optional()
+        .describe("Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS."),
       storageClass: z
         .string()
         .optional()
@@ -49,11 +56,14 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
         // filePath: stream from disk — AWS SDK v3 accepts ReadStream natively.
         // Pass ContentLength so the SDK can set the header without buffering.
         // content (base64): already in memory from the MCP JSON payload.
-        const body = args.filePath
-          ? fs.createReadStream(args.filePath)
+        const safePath = args.filePath
+          ? resolveLocalPath(config, args.filePath, "read")
+          : undefined;
+        const body = safePath
+          ? fs.createReadStream(safePath)
           : Buffer.from(args.content!, "base64");
 
-        const contentLength = args.filePath ? fs.statSync(args.filePath).size : undefined;
+        const contentLength = safePath ? fs.statSync(safePath).size : undefined;
 
         await s3.send(
           new PutObjectCommand({
@@ -97,14 +107,35 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client): void {
           }),
         );
 
+        // Stream straight to disk for saveToPath — no full-object buffering.
+        if (args.saveToPath) {
+          const safePath = resolveLocalPath(config, args.saveToPath, "write");
+          fs.mkdirSync(path.dirname(safePath), { recursive: true });
+          const writeStream = fs.createWriteStream(safePath);
+          try {
+            await pipeline(result.Body as Readable, writeStream);
+          } catch (e) {
+            await fs.promises.unlink(safePath).catch(() => {});
+            throw e;
+          }
+          return toolSuccess(`Object saved to ${safePath} (${result.ContentLength ?? "?"} bytes)`);
+        }
+
+        // Bound the in-memory path (parity with the 100 MB B2-native download
+        // cap). Without saveToPath the whole object is buffered + base64-copied,
+        // so a multi-GB object would OOM the process. ContentLength is the
+        // server's declared size; reject before buffering and point to saveToPath.
+        const MAX_INMEMORY_DOWNLOAD_BYTES = 100 * 1024 * 1024;
+        if ((result.ContentLength ?? 0) > MAX_INMEMORY_DOWNLOAD_BYTES) {
+          return toolError(
+            new Error(
+              `Object is ${result.ContentLength} bytes, over the ${MAX_INMEMORY_DOWNLOAD_BYTES}-byte in-memory download limit. ` +
+                `Use saveToPath to stream it to disk, or a Range request to fetch it in chunks.`,
+            ),
+          );
+        }
         const bodyBytes = await result.Body!.transformToByteArray();
         const buffer = Buffer.from(bodyBytes);
-
-        if (args.saveToPath) {
-          fs.mkdirSync(path.dirname(args.saveToPath), { recursive: true });
-          fs.writeFileSync(args.saveToPath, buffer);
-          return toolSuccess(`Object saved to ${args.saveToPath} (${buffer.length} bytes)`);
-        }
 
         return toolJson({
           key: args.key,

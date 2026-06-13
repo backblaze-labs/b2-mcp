@@ -33,9 +33,13 @@ const testConfig = {
   applicationKey: "test-key-secret",
   appKeyId: "test-app-key-id",
   appKey: "test-app-key-secret",
+  masterKeyId: "test-app-key-secret",
+  masterKey: "test-app-key-secret",
   region: "us-west-004",
   largeFileThreshold: 100 * 1024 * 1024,
   partSize: 100 * 1024 * 1024,
+  allowLocalFiles: true,
+  fileRoot: null,
 };
 
 let server: McpServer;
@@ -294,6 +298,19 @@ describe("s3_get_object", () => {
     // Decode and verify content
     const decoded = Buffer.from(result.content, "base64").toString();
     expect(decoded).toBe("file content here");
+  });
+
+  it("rejects an oversized in-memory download (DoS guard) and never buffers it", async () => {
+    const transform = jest.fn(async () => new Uint8Array(0));
+    sendSpy.mockResolvedValue({
+      ContentType: "application/octet-stream",
+      ContentLength: 200 * 1024 * 1024, // 200 MB — over the 100 MB cap
+      Body: { transformToByteArray: transform },
+    });
+    const result = await callTool(server, "s3_get_object", { bucket: "my-bucket", key: "big.bin" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/saveToPath|in-memory/i);
+    expect(transform).not.toHaveBeenCalled(); // rejected before buffering
   });
 });
 
@@ -653,7 +670,7 @@ describe("s3_get_object_lock_configuration", () => {
 // ── s3_put_object_lock_configuration ─────────────────────────────────────────
 
 describe("s3_put_object_lock_configuration", () => {
-  it("applies lock configuration and returns success", async () => {
+  it("applies lock configuration and sends the bucket-object-lock Token when enabling", async () => {
     const result = await callTool(server, "s3_put_object_lock_configuration", {
       bucket: "locked-bucket",
       objectLockEnabled: "Enabled",
@@ -663,6 +680,18 @@ describe("s3_put_object_lock_configuration", () => {
     expect(result.isError).toBeFalsy();
     const cmd = sendSpy.mock.calls[0][0];
     expect(cmd.input.ObjectLockConfiguration.ObjectLockEnabled).toBe("Enabled");
+    // B2 rejects enabling Object Lock on an existing bucket without this token.
+    expect(cmd.input.Token).toBe("1");
+  });
+
+  it("omits the Token when only setting default retention (not enabling lock)", async () => {
+    await callTool(server, "s3_put_object_lock_configuration", {
+      bucket: "locked-bucket",
+      defaultRetentionMode: "COMPLIANCE",
+      defaultRetentionYears: 1,
+    });
+    const cmd = sendSpy.mock.calls[0][0];
+    expect(cmd.input.Token).toBeUndefined();
   });
 });
 
@@ -887,6 +916,19 @@ describe("s3_upload_part_copy", () => {
     expect(cmd.input.PartNumber).toBe(1);
     expect(cmd.input.UploadId).toBe("upload-xyz");
     expect(cmd.input.CopySource).toBe("src-bucket/chunk.bin");
+  });
+
+  it("folds copySourceVersionId into CopySource (was previously dropped)", async () => {
+    await callTool(server, "s3_upload_part_copy", {
+      bucket: "dst-bucket",
+      key: "assembled.bin",
+      uploadId: "upload-xyz",
+      partNumber: 1,
+      copySource: "src-bucket/chunk.bin",
+      copySourceVersionId: "ver-42",
+    });
+    const cmd = sendSpy.mock.calls[0][0];
+    expect(cmd.input.CopySource).toBe("src-bucket/chunk.bin?versionId=ver-42");
   });
 });
 
