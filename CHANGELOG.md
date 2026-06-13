@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-06-13
+
+Discovery: the server's `initialize` instructions now point clients at the
+companion **Backblaze B2 Skills pack** (workload playbooks + primitives) and
+explain that skills are installed client-side, not delivered by the server. No
+tool or schema changes — instructions text only, fully backward-compatible.
+
 ## [1.6.0] - 2026-06-13
 
 Tool-surface alignment with B2's current REST API. All changes are
