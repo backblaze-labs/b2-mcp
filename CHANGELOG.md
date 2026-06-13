@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-13
+
+Tool-surface alignment with B2's current REST API. All changes are
+**backward-compatible** — existing callers are unaffected. Verified against live
+B2 by the new `Contract: v4 tool-surface alignment` integration test.
+
+### Added
+- **Multi-bucket application keys (`b2_create_key` `bucketIds[]`).** New optional
+  `bucketIds` array scopes a key to multiple buckets via the B2 **v4** endpoint.
+  Single-bucket `bucketId` (v2) is unchanged and still supported.
+- **`lifecycleRules.daysFromStartingToCancelingUnfinishedLargeFiles`** is now
+  accepted on `b2_create_bucket` / `b2_update_bucket`, so the native auto-cancel
+  rule for unfinished large files can be configured through the tool.
+
+### Changed
+- **`b2_create_key` `validDurationInSeconds`** cap raised from 30 days
+  (`2,592,000`) to just under B2's documented limit of < 1000 days.
+- **`defaultServerSideEncryption` now defaults `algorithm: "AES256"`** when `mode`
+  is `SSE-B2`. Previously `{ mode: "SSE-B2" }` was forwarded as-is and **rejected
+  by B2 with HTTP 400**; an explicit `algorithm` is still honored.
+- **`b2_create_bucket` description** corrected from "6-50 characters … letters,
+  digits, and hyphens" to B2's real rule (6-63 chars; letters, digits, hyphens,
+  and periods; not case-sensitive; cannot start with `b2-`).
+
 ## [1.5.3] - 2026-06-09
 
 ### Fixed

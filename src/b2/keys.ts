@@ -23,15 +23,23 @@ export function registerKeyTools(server: McpServer, client: B2Client, auth: B2Au
         .number()
         .int()
         .min(1)
-        .max(2592000)
+        .max(86399999)
         .optional()
         .describe(
-          "How long this key is valid (1 second to 30 days). Omit for a key that does not expire.",
+          "How long this key is valid (1 second up to just under 1000 days; B2's documented max is < 1000 days). Omit for a key that does not expire.",
         ),
       bucketId: z
         .string()
         .optional()
-        .describe("Restrict this key to a single bucket. Omit to grant access to all buckets."),
+        .describe(
+          "Restrict this key to a single bucket (B2 v2). Omit to grant access to all buckets. For multiple buckets, use bucketIds instead.",
+        ),
+      bucketIds: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "Restrict this key to these bucket IDs (B2 v4 multi-bucket application keys). When set, the key is created via the v4 API and this takes precedence over bucketId.",
+        ),
       namePrefix: z
         .string()
         .optional()
@@ -49,8 +57,16 @@ export function registerKeyTools(server: McpServer, client: B2Client, auth: B2Au
         };
         if (args.validDurationInSeconds)
           payload.validDurationInSeconds = args.validDurationInSeconds;
-        if (args.bucketId) payload.bucketId = args.bucketId;
         if (args.namePrefix) payload.namePrefix = args.namePrefix;
+
+        // Multi-bucket keys are a B2 v4 feature; create via the v4 endpoint when
+        // bucketIds is supplied. Single-bucket bucketId stays on v2 for back-compat.
+        if (args.bucketIds && args.bucketIds.length > 0) {
+          payload.bucketIds = args.bucketIds;
+          const v4 = await client.call("b2_create_key", payload, { apiPath: "b2api/v4" });
+          return toolJson(v4);
+        }
+        if (args.bucketId) payload.bucketId = args.bucketId;
 
         const result = await client.call("b2_create_key", payload);
         return toolJson(result);

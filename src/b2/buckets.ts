@@ -41,7 +41,7 @@ export function registerBucketTools(
   // ── b2_create_bucket ──────────────────────────────────────────────────────
   server.tool(
     "b2_create_bucket",
-    "Create a new B2 bucket. Bucket names must be globally unique, 6-50 characters, and contain only letters, digits, and hyphens.",
+    "Create a new B2 bucket. Bucket names must be globally unique, 6-63 characters, and contain letters, digits, hyphens, and periods (names are not case-sensitive and cannot start with 'b2-').",
     {
       bucketName: z.string().describe("The name for the new bucket. Must be globally unique."),
       bucketType: z
@@ -70,6 +70,7 @@ export function registerBucketTools(
             fileNamePrefix: z.string(),
             daysFromHidingToDeleting: z.number().optional(),
             daysFromUploadingToHiding: z.number().optional(),
+            daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
           }),
         )
         .optional()
@@ -101,8 +102,16 @@ export function registerBucketTools(
         if (args.bucketInfo) payload.bucketInfo = args.bucketInfo;
         if (args.corsRules) payload.corsRules = args.corsRules;
         if (args.lifecycleRules) payload.lifecycleRules = args.lifecycleRules;
-        if (args.defaultServerSideEncryption)
-          payload.defaultServerSideEncryption = args.defaultServerSideEncryption;
+        if (args.defaultServerSideEncryption) {
+          // B2's native API requires algorithm "AES256" with SSE-B2; default it so
+          // callers can pass just { mode: "SSE-B2" }.
+          const sse = { ...args.defaultServerSideEncryption } as {
+            mode: string;
+            algorithm?: string;
+          };
+          if (sse.mode === "SSE-B2" && !sse.algorithm) sse.algorithm = "AES256";
+          payload.defaultServerSideEncryption = sse;
+        }
         if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
 
         const result = await client.call("b2_create_bucket", payload);
@@ -160,6 +169,7 @@ export function registerBucketTools(
             fileNamePrefix: z.string(),
             daysFromHidingToDeleting: z.number().optional(),
             daysFromUploadingToHiding: z.number().optional(),
+            daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
           }),
         )
         .optional(),
@@ -245,6 +255,11 @@ export function registerBucketTools(
           "defaultRetention",
           "ifRevisionIs",
         ]);
+        // Default SSE-B2 algorithm (B2 requires "AES256" with SSE-B2).
+        const upSse = payload.defaultServerSideEncryption as
+          | { mode?: string; algorithm?: string }
+          | undefined;
+        if (upSse && upSse.mode === "SSE-B2" && !upSse.algorithm) upSse.algorithm = "AES256";
         const result = await client.call("b2_update_bucket", payload);
         return toolJson(result);
       } catch (err) {
