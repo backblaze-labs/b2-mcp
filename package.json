@@ -33,9 +33,9 @@
   "author": "Backblaze",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1048.0",
-    "@aws-sdk/s3-presigned-post": "^3.1048.0",
-    "@aws-sdk/s3-request-presigner": "^3.1048.0",
+    "@aws-sdk/client-s3": "^3.1068.0",
+    "@aws-sdk/s3-presigned-post": "^3.1068.0",
+    "@aws-sdk/s3-request-presigner": "^3.1068.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.16.1",
     "opossum": "^9.0.0",
