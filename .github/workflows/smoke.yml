@@ -1,0 +1,37 @@
+name: Smoke
+
+# Runs an end-to-end smoke test against the live server.
+# Triggers:
+#   - workflow_dispatch:  manual trigger from the Actions tab
+#   - release.published:  after a tagged release is published
+#   - schedule:           every 6 hours as a heartbeat
+#
+# Gated to the canonical org repo so personal mirrors don't fire
+# failing runs (they don't have the credentials set as secrets).
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  schedule:
+    - cron: "0 */6 * * *"
+
+jobs:
+  smoke:
+    if: github.repository == 'backblaze-b2-samples/b2-mcp-server'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run smoke
+        env:
+          MCP_URL: ${{ vars.MCP_URL }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_KEY: ${{ secrets.B2_KEY }}
+          B2_APP_KEY_ID: ${{ secrets.B2_APP_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}

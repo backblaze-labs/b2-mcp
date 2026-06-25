@@ -1,0 +1,124 @@
+/**
+ * Unit tests for the destructive-operation gate (src/utils/destructive-gate.ts).
+ * Pure logic — no network or mocks needed.
+ */
+import {
+  checkDestructive,
+  getDestructivePolicy,
+  isDestructiveTool,
+} from "../../src/utils/destructive-gate";
+import { B2Config, DestructivePolicy } from "../../src/utils/types";
+
+// Only `destructivePolicy` is read by the gate; cast a partial config.
+const cfg = (destructivePolicy?: DestructivePolicy): B2Config =>
+  ({ destructivePolicy } as unknown as B2Config);
+
+describe("destructive-gate", () => {
+  describe("isDestructiveTool", () => {
+    it("flags exactly the destructive tools", () => {
+      for (const t of [
+        "b2_delete_bucket",
+        "s3_delete_object",
+        "s3_delete_objects",
+        "b2_delete_key",
+        "s3_abort_multipart_upload",
+        "b2_eject_group_member",
+        "b2_update_bucket",
+      ]) {
+        expect(isDestructiveTool(t)).toBe(true);
+      }
+    });
+
+    it("does not flag read/safe tools", () => {
+      for (const t of ["b2_list_buckets", "s3_head_object", "s3_put_object", "b2_create_key"]) {
+        expect(isDestructiveTool(t)).toBe(false);
+      }
+    });
+  });
+
+  describe("getDestructivePolicy", () => {
+    it("defaults to confirm (incl. for unknown values)", () => {
+      expect(getDestructivePolicy(cfg(undefined))).toBe("confirm");
+      expect(getDestructivePolicy(cfg("garbage" as unknown as DestructivePolicy))).toBe("confirm");
+    });
+
+    it("honors allow and block", () => {
+      expect(getDestructivePolicy(cfg("allow"))).toBe("allow");
+      expect(getDestructivePolicy(cfg("block"))).toBe("block");
+    });
+  });
+
+  describe("confirm policy (default)", () => {
+    it("blocks a destructive call without confirm", () => {
+      const r = checkDestructive("b2_delete_bucket", { bucketId: "b" }, cfg());
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/confirm/i);
+    });
+
+    it("allows a destructive call with confirm:true", () => {
+      const r = checkDestructive("b2_delete_bucket", { bucketId: "b", confirm: true }, cfg());
+      expect(r.ok).toBe(true);
+    });
+  });
+
+  describe("block policy", () => {
+    it("refuses even with confirm:true", () => {
+      const r = checkDestructive(
+        "b2_delete_key",
+        { applicationKeyId: "k", confirm: true },
+        cfg("block"),
+      );
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/blocked/i);
+    });
+  });
+
+  describe("allow policy", () => {
+    it("permits a destructive call without confirm", () => {
+      const r = checkDestructive("s3_delete_object", { bucket: "b", key: "k" }, cfg("allow"));
+      expect(r.ok).toBe(true);
+    });
+  });
+
+  describe("non-destructive tools always pass", () => {
+    it("a read tool is never gated", () => {
+      expect(checkDestructive("b2_list_buckets", {}, cfg()).ok).toBe(true);
+    });
+  });
+
+  describe("b2_update_bucket is gated only when the change is destructive", () => {
+    it("gates a flip to allPublic", () => {
+      expect(
+        checkDestructive("b2_update_bucket", { bucketId: "b", bucketType: "allPublic" }, cfg()).ok,
+      ).toBe(false);
+    });
+
+    it("gates disabling Object Lock", () => {
+      expect(
+        checkDestructive("b2_update_bucket", { bucketId: "b", fileLockEnabled: false }, cfg()).ok,
+      ).toBe(false);
+    });
+
+    it("gates clearing the default retention", () => {
+      expect(
+        checkDestructive(
+          "b2_update_bucket",
+          { bucketId: "b", defaultRetention: { mode: null, period: null } },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("does NOT gate benign updates (allPrivate, enabling lock, CORS)", () => {
+      expect(
+        checkDestructive("b2_update_bucket", { bucketId: "b", bucketType: "allPrivate" }, cfg()).ok,
+      ).toBe(true);
+      expect(
+        checkDestructive("b2_update_bucket", { bucketId: "b", fileLockEnabled: true }, cfg()).ok,
+      ).toBe(true);
+      expect(checkDestructive("b2_update_bucket", { bucketId: "b", corsRules: [] }, cfg()).ok).toBe(
+        true,
+      );
+    });
+  });
+});

@@ -1,0 +1,146 @@
+/**
+ * Unit tests for the retained S3-compatible tool handlers.
+ * Mocks S3Client.prototype.send so no real network calls are made.
+ *
+ * Only 4 S3 tools are kept (those with no native b2_* equivalent):
+ *   s3_head_bucket, s3_put_bucket_lifecycle, s3_get_bucket_location,
+ *   s3_get_presigned_url. Error-path coverage for the SDK-calling ones lives in
+ *   s3-coverage.test.ts.
+ */
+
+import { S3Client } from "@aws-sdk/client-s3";
+import { createServer } from "../../src/server";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
+  const tool = (server as any)._registeredTools?.[name];
+  if (!tool) throw new Error(`Tool not found: ${name}`);
+  const handler = tool.handler ?? tool.callback ?? tool.execute;
+  return handler(args, {} as any);
+}
+
+function parseResult(result: any) {
+  const text = result?.content?.[0]?.text;
+  if (!text) return result;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+// ── Fixtures ──────────────────────────────────────────────────────────────────
+
+const testConfig = {
+  applicationKeyId: "test-key-id",
+  applicationKey: "test-key-secret",
+  appKeyId: "test-app-key-id",
+  appKey: "test-app-key-secret",
+  masterKeyId: "test-app-key-secret",
+  masterKey: "test-app-key-secret",
+  region: "us-west-004",
+  allowLocalFiles: true,
+  fileRoot: null,
+};
+
+let server: McpServer;
+// Use a loose type to avoid TypeScript overload resolution issues with S3Client.send
+let sendSpy: jest.SpyInstance;
+
+beforeEach(() => {
+  server = createServer(testConfig);
+  // S3Client.prototype.send is a generic overloaded method; cast to bypass TS strictness
+  sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
+
+// ── s3_head_bucket ────────────────────────────────────────────────────────────
+
+describe("s3_head_bucket", () => {
+  it("returns success for an existing bucket", async () => {
+    sendSpy.mockResolvedValue({});
+    const result = await callTool(server, "s3_head_bucket", { bucket: "existing-bucket" });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("existing-bucket");
+  });
+
+  it("returns isError for a missing bucket", async () => {
+    sendSpy.mockRejectedValue({
+      name: "NoSuchBucket",
+      message: "The specified bucket does not exist",
+    });
+    const result = await callTool(server, "s3_head_bucket", { bucket: "missing-bucket" });
+    expect(result.isError).toBe(true);
+  });
+});
+
+// ── s3_put_bucket_lifecycle ───────────────────────────────────────────────────
+
+describe("s3_put_bucket_lifecycle", () => {
+  it("sends lifecycle rules and returns success", async () => {
+    const rules = [
+      {
+        id: "expire-after-90-days",
+        status: "Enabled",
+        filter: { prefix: "logs/" },
+        expiration: { days: 90 },
+      },
+    ];
+    const result = await callTool(server, "s3_put_bucket_lifecycle", {
+      bucket: "my-bucket",
+      rules,
+    });
+    expect(result.isError).toBeFalsy();
+    const cmd = sendSpy.mock.calls[0][0];
+    expect(cmd.input.LifecycleConfiguration.Rules[0].ID).toBe("expire-after-90-days");
+    expect(cmd.input.LifecycleConfiguration.Rules[0].Status).toBe("Enabled");
+    expect(cmd.input.LifecycleConfiguration.Rules[0].Expiration.Days).toBe(90);
+  });
+
+  it("maps filter prefix correctly", async () => {
+    const rules = [
+      { id: "rule1", status: "Enabled", filter: { prefix: "archive/" }, expiration: { days: 365 } },
+    ];
+    await callTool(server, "s3_put_bucket_lifecycle", { bucket: "my-bucket", rules });
+    const cmd = sendSpy.mock.calls[0][0];
+    expect(cmd.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("archive/");
+  });
+});
+
+// ── s3_get_bucket_location ────────────────────────────────────────────────────
+
+describe("s3_get_bucket_location", () => {
+  beforeEach(() => {
+    sendSpy.mockResolvedValue({ LocationConstraint: "us-west-004" });
+  });
+
+  it("returns the bucket location constraint", async () => {
+    const result = parseResult(
+      await callTool(server, "s3_get_bucket_location", { bucket: "my-bucket" }),
+    );
+    expect(result.locationConstraint).toBe("us-west-004");
+  });
+});
+
+// ── s3_get_presigned_url ──────────────────────────────────────────────────────
+
+describe("s3_get_presigned_url", () => {
+  it("returns a presigned URL string for GET", async () => {
+    const result = parseResult(
+      await callTool(server, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "get",
+        expiresIn: 3600,
+      }),
+    );
+    // Result is either a URL string or an object with a url field
+    const hasUrl = typeof result === "string" || typeof result?.url === "string";
+    expect(hasUrl).toBe(true);
+  });
+});

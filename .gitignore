@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+.env
+.env.local
+.env.*.local
+.idea/
+.vscode/
+.claude/settings.local.json
+probe-output/
+
+# Internal-only docs — never ship in a public/open-sourced repo
+docs/STRATEGY-*.md
+docs/internal/

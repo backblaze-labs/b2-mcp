@@ -1,0 +1,47 @@
+name: Contract
+
+# Live request-shape contract tests (tests/integration/contract.test.ts).
+#
+# Mocked unit tests cannot catch a tool that sends the wrong payload SHAPE to B2 —
+# two real bugs shipped that way (notification objectNamePrefix; Object Lock
+# retention/legal-hold response-shaped requests) and were only caught by hand.
+# These drive the real B2 write API so a shape regression fails CI instead.
+#
+# Triggers:
+#   - workflow_dispatch:  manual trigger from the Actions tab
+#   - release.published:  before a tagged release goes out
+#   - schedule:           every 6 hours as a heartbeat
+# Deliberately NOT on every PR: each run creates + deletes a real Object-Lock
+# bucket, and per-PR churn against the demo account isn't worth it.
+#
+# Gated to the canonical org repo so personal mirrors don't fire failing runs
+# (they don't have the credentials set as secrets).
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  schedule:
+    - cron: "30 */6 * * *"
+
+jobs:
+  contract:
+    if: github.repository == 'backblaze-b2-samples/b2-mcp-server'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:contract
+        env:
+          # The contract tests read B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY;
+          # map the repo's existing smoke-test secrets onto them.
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_KEY }}
+          B2_APP_KEY_ID: ${{ secrets.B2_APP_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
