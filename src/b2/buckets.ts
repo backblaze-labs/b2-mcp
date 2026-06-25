@@ -44,6 +44,11 @@ function validateWebhookUrl(raw: string): string | null {
   if (u.protocol !== "https:") return "must use https://";
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost")) return "must not target localhost";
+  // Reject non-standard numeric IP encodings that bypass the dotted-quad check
+  // below: decimal (2130706433), hex (0x7f000001), and octal (0177.0.0.1).
+  if (/^0x[0-9a-f]+$/.test(host) || /^[0-9]+$/.test(host) || /^0[0-7]+(\.|$)/.test(host)) {
+    return "must not target a numeric IP address";
+  }
   const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (m) {
     const a = Number(m[1]);
@@ -59,8 +64,8 @@ function validateWebhookUrl(raw: string): string | null {
       return "must not target a private/loopback/link-local address";
     }
   }
-  if (host === "::1" || /^(fc|fd|fe80)/.test(host)) {
-    return "must not target a private/loopback IPv6 address";
+  if (host === "::1" || host.startsWith("::ffff:") || /^(fc|fd|fe80)/.test(host)) {
+    return "must not target a private/loopback or IPv4-mapped IPv6 address";
   }
   return null;
 }

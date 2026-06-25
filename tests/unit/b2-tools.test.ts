@@ -954,6 +954,23 @@ describe("b2 notification-rules webhook hardening", () => {
     expect(res.content[0].text).toMatch(/private|loopback|link-local|localhost/i);
   });
 
+  it("rejects SSRF-bypass URL forms (decimal/hex/octal numeric IPs + IPv4-mapped IPv6)", async () => {
+    for (const url of [
+      "https://2130706433/hook", // decimal → normalizes to 127.0.0.1
+      "https://0x7f000001/hook", // hex → 127.0.0.1
+      "https://0177.0.0.1/hook", // octal → 127.0.0.1
+      "https://[::ffff:127.0.0.1]/hook", // IPv4-mapped IPv6
+    ]) {
+      setupMocks({});
+      const res = await callTool(server, "b2_set_bucket_notification_rules", {
+        bucketId: "b",
+        eventNotificationRules: [ruleWith(url)],
+      });
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text).toMatch(/private|loopback|numeric|IPv6/i);
+    }
+  });
+
   it("accepts a valid public HTTPS webhook URL", async () => {
     setupMocks({ eventNotificationRules: [] });
     const res = await callTool(server, "b2_set_bucket_notification_rules", {

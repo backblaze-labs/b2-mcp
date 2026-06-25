@@ -40,7 +40,7 @@
     "@aws-sdk/s3-presigned-post": "^3.1048.0",
     "@aws-sdk/s3-request-presigner": "^3.1048.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "axios": "^1.16.1",
+    "axios": "^1.18.1",
     "opossum": "^9.0.0",
     "pino": "^10.3.1"
   },
@@ -77,5 +77,9 @@
     "moduleNameMapper": {
       "^(\\.{1,2}/.*)\\.js$": "$1"
     }
+  },
+  "overrides": {
+    "hono": "^4.12.27",
+    "form-data": "^4.0.6"
   }
 }
