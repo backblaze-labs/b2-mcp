@@ -46,103 +46,15 @@ let writableBucketId = "";
 
 beforeAll(async () => {
   if (!HAS_CREDS) return;
-  server = createServer(loadConfig());
+  // Integration tests create AND clean up real resources, so disable the
+  // destructive-op gate here (it is unit-tested separately).
+  server = createServer({ ...loadConfig(), destructivePolicy: "allow" });
   const buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
   const w = (buckets?.buckets ?? []).find((b: any) => isUserWritableBucket(b.bucketName));
   if (w) writableBucketId = w.bucketId;
 });
 
 // ── Object Lock write-shape contract ──────────────────────────────────────────
-describe("Contract: Object Lock write shapes", () => {
-  liveIt(
-    "create fileLockEnabled bucket → governance retention → legal hold → immutability, all with B2's request shapes",
-    async () => {
-      const bucketName = `mcp-contract-lock-${Date.now().toString(36)}`;
-      let bucketId = "";
-      let fileId = "";
-      try {
-        // create with fileLockEnabled — the only way to a lock-enabled bucket
-        const created = parseResult(
-          await callTool(server, "b2_create_bucket", {
-            bucketName,
-            bucketType: "allPrivate",
-            fileLockEnabled: true,
-          }),
-        );
-        if (isError(created)) {
-          // Account may not be entitled for Object Lock — skip rather than fail.
-          console.log("  Object Lock not available on this account; skipping:", errText(created));
-          return;
-        }
-        bucketId = created.bucketId;
-        expect(created.fileLockConfiguration?.value?.isFileLockEnabled).toBe(true);
-
-        const up = parseResult(
-          await callTool(server, "b2_upload_file", {
-            bucketId,
-            fileName: "locked.txt",
-            content: Buffer.from("immutable").toString("base64"),
-            contentType: "text/plain",
-          }),
-        );
-        expect(isError(up)).toBe(false);
-        fileId = up.fileId;
-
-        // CONTRACT: flat fileRetention { mode, retainUntilTimestamp }, no read-only wrapper.
-        const setR = await callTool(server, "b2_update_file_retention", {
-          fileId,
-          fileName: "locked.txt",
-          fileRetention: { mode: "governance", retainUntilTimestamp: Date.now() + 120_000 },
-        });
-        expect(isError(setR)).toBe(false); // would fail with "unknown field isClientAuthorizedToRead" on regression
-
-        const info = parseResult(await callTool(server, "b2_get_file_info", { fileId }));
-        expect(info.fileRetention?.value?.mode).toBe("governance");
-
-        // Immutability: delete without bypass must be rejected.
-        const delNo = await callTool(server, "b2_delete_file_version", {
-          fileName: "locked.txt",
-          fileId,
-        });
-        expect(isError(delNo)).toBe(true);
-
-        // CONTRACT: legalHold is the bare "on"/"off" string.
-        const lhOn = await callTool(server, "b2_update_file_legal_hold", {
-          fileId,
-          fileName: "locked.txt",
-          legalHold: "on",
-        });
-        expect(isError(lhOn)).toBe(false);
-        const info2 = parseResult(await callTool(server, "b2_get_file_info", { fileId }));
-        expect(info2.legalHold?.value).toBe("on");
-        await callTool(server, "b2_update_file_legal_hold", {
-          fileId,
-          fileName: "locked.txt",
-          legalHold: "off",
-        });
-      } finally {
-        // Self-clean: clear governance retention (with bypass), delete the version, delete the bucket.
-        if (fileId) {
-          await callTool(server, "b2_update_file_retention", {
-            fileId,
-            fileName: "locked.txt",
-            bypassGovernance: true,
-            fileRetention: { mode: null, retainUntilTimestamp: null },
-          });
-          await callTool(server, "b2_delete_file_version", {
-            fileName: "locked.txt",
-            fileId,
-            bypassGovernance: true,
-          });
-        }
-        if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
-      }
-    },
-    90_000,
-  );
-});
-
-// ── Notification rules write-shape contract ───────────────────────────────────
 describe("Contract: notification rules objectNamePrefix", () => {
   liveIt(
     "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
@@ -189,60 +101,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
   );
 });
 
-// ── b2_copy_file destination encryption field name ────────────────────────────
-describe("Contract: b2_copy_file destination SSE", () => {
-  liveIt(
-    "copies with destinationServerSideEncryption (B2 rejects the old 'serverSideEncryption' name)",
-    async () => {
-      if (!writableBucketId) {
-        console.log("  No writable bucket; skipping.");
-        return;
-      }
-      let origId = "";
-      let copyId = "";
-      try {
-        const up = parseResult(
-          await callTool(server, "b2_upload_file", {
-            bucketId: writableBucketId,
-            fileName: "__contract/copy-src.txt",
-            content: Buffer.from("copy-sse").toString("base64"),
-            contentType: "text/plain",
-          }),
-        );
-        expect(isError(up)).toBe(false);
-        origId = up.fileId;
-
-        const copy = await callTool(server, "b2_copy_file", {
-          sourceFileId: origId,
-          fileName: "__contract/copy-dst.txt",
-          destinationServerSideEncryption: { mode: "SSE-B2", algorithm: "AES256" },
-        });
-        // Regression guard: the old 'serverSideEncryption' name returns
-        // 400 "unknown field ... B2CopyFileRequest: serverSideEncryption".
-        expect(isError(copy)).toBe(false);
-        const copied = parseResult(copy);
-        copyId = copied.fileId;
-        expect(
-          copied.serverSideEncryption?.mode ?? copied.serverSideEncryption?.algorithm,
-        ).toBeTruthy();
-      } finally {
-        if (copyId)
-          await callTool(server, "b2_delete_file_version", {
-            fileName: "__contract/copy-dst.txt",
-            fileId: copyId,
-          });
-        if (origId)
-          await callTool(server, "b2_delete_file_version", {
-            fileName: "__contract/copy-src.txt",
-            fileId: origId,
-          });
-      }
-    },
-    60_000,
-  );
-});
-
-// ── b2_update_bucket Object Lock retrofit + defaultRetention ───────────────────
+// ── b2_update_bucket Object Lock retrofit ─────────────────────────────────────
 describe("Contract: b2_update_bucket Object Lock retrofit", () => {
   liveIt(
     "enables Object Lock on an existing bucket and sets defaultRetention via b2_update_bucket",
@@ -286,117 +145,7 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
   );
 });
 
-// ── b2_hide_file write shape ──────────────────────────────────────────────────
-describe("Contract: b2_hide_file", () => {
-  liveIt(
-    "hides a file: { bucketId, fileName } is accepted, the name reads as gone, a hide marker appears",
-    async () => {
-      if (!writableBucketId) {
-        console.log("  No writable bucket; skipping.");
-        return;
-      }
-      const fileName = "__contract/hide-me.txt";
-      let uploadId = "";
-      let hideId = "";
-      try {
-        const up = parseResult(
-          await callTool(server, "b2_upload_file", {
-            bucketId: writableBucketId,
-            fileName,
-            content: Buffer.from("hide-test").toString("base64"),
-            contentType: "text/plain",
-          }),
-        );
-        expect(isError(up)).toBe(false);
-        uploadId = up.fileId;
-
-        const hidden = await callTool(server, "b2_hide_file", {
-          bucketId: writableBucketId,
-          fileName,
-        });
-        expect(isError(hidden)).toBe(false);
-        const hideMarker = parseResult(hidden);
-        expect(hideMarker.action).toBe("hide");
-        hideId = hideMarker.fileId;
-
-        // The visible listing no longer shows the name...
-        const names = parseResult(
-          await callTool(server, "b2_list_file_names", {
-            bucketId: writableBucketId,
-            prefix: fileName,
-          }),
-        );
-        expect((names.files ?? []).some((f: any) => f.fileName === fileName)).toBe(false);
-
-        // ...but a hide marker exists in the version history.
-        const versions = parseResult(
-          await callTool(server, "b2_list_file_versions", {
-            bucketId: writableBucketId,
-            startFileName: fileName,
-            maxFileCount: 5,
-          }),
-        );
-        expect((versions.files ?? []).some((f: any) => f.action === "hide")).toBe(true);
-      } finally {
-        if (hideId) await callTool(server, "b2_delete_file_version", { fileName, fileId: hideId });
-        if (uploadId)
-          await callTool(server, "b2_delete_file_version", { fileName, fileId: uploadId });
-      }
-    },
-    60_000,
-  );
-});
-
-// ── b2_upload_file server-side encryption headers ─────────────────────────────
-describe("Contract: b2_upload_file SSE headers", () => {
-  liveIt(
-    "uploads with SSE-B2 and SSE-C (the correct B2 header scheme, not mode-as-value)",
-    async () => {
-      if (!writableBucketId) {
-        console.log("  No writable bucket; skipping.");
-        return;
-      }
-      const ids: Array<[string, string]> = [];
-      try {
-        // SSE-B2: header value must be AES256, not "SSE-B2".
-        const b2 = await callTool(server, "b2_upload_file", {
-          bucketId: writableBucketId,
-          fileName: "__contract/sse-b2.txt",
-          content: Buffer.from("sse-b2").toString("base64"),
-          serverSideEncryption: { mode: "SSE-B2" },
-        });
-        expect(isError(b2)).toBe(false);
-        const b2j = parseResult(b2);
-        expect(b2j.serverSideEncryption?.mode).toBe("SSE-B2");
-        ids.push([b2j.fileName, b2j.fileId]);
-
-        // SSE-C: customer headers, no plain mode header (B2 rejects both together).
-        const crypto = await import("crypto");
-        const key = crypto.randomBytes(32);
-        const c = await callTool(server, "b2_upload_file", {
-          bucketId: writableBucketId,
-          fileName: "__contract/sse-c.txt",
-          content: Buffer.from("sse-c").toString("base64"),
-          serverSideEncryption: {
-            mode: "SSE-C",
-            customerKey: key.toString("base64"),
-            customerKeyMd5: crypto.createHash("md5").update(key).digest("base64"),
-          },
-        });
-        expect(isError(c)).toBe(false);
-        const cj = parseResult(c);
-        expect(cj.serverSideEncryption?.mode).toBe("SSE-C");
-        ids.push([cj.fileName, cj.fileId]);
-      } finally {
-        for (const [fileName, fileId] of ids)
-          await callTool(server, "b2_delete_file_version", { fileName, fileId });
-      }
-    },
-    60_000,
-  );
-});
-
-// ── Path-B v4 tool-surface alignment (write-shape contract) ───────────────────
+// ── v4 tool-surface alignment ─────────────────────────────────────────────────
 describe("Contract: v4 tool-surface alignment", () => {
   liveIt(
     "SSE-B2 default, lifecycle cancel-unfinished field, v4 bucketIds key, and >30d key duration use B2-accepted shapes",

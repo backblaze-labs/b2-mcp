@@ -5,6 +5,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-06-24
+
+**BREAKING — S3-first tool-surface reset (pre-release baseline).** The surface was
+reduced from **85 → 36 tools** and reorganized around a clean split: **object
+data operations run on the S3-compatible API; buckets, application keys,
+Partner/Groups provisioning, Object Lock, and event notifications stay native.**
+The S3 data plane is the forward-compatible surface; the native control plane is
+kept because S3 cannot create application keys, provision tenants, set
+notification rules, or retrofit Object Lock. 36 tools = **17 native + 19 S3**.
+Not yet released, so this is a hard baseline reset with no deprecation path.
+Rationale and the adversarial-review record are in
+[`docs/tool-surface-trim-decision-record.md`](docs/tool-surface-trim-decision-record.md).
+
+### Removed
+- **All `bz_*` Computer Backup tools** — out of scope (endpoint backup is a
+  different product from B2 cloud storage).
+- **Native data-plane tools and their files** (`src/b2/files.ts`,
+  `src/b2/large-files.ts`, `src/b2/download-urls.ts`): `b2_upload_file`,
+  `b2_download_file_by_name`/`_by_id`, `b2_list_file_names`,
+  `b2_list_file_versions`, `b2_get_file_info`, `b2_copy_file`, `b2_hide_file`,
+  `b2_delete_file_version`, the native large-file flow (`b2_start_large_file`,
+  `b2_get_upload_part_url`, `b2_upload_part`, `b2_finish_large_file`,
+  `b2_cancel_large_file`, `b2_list_parts`, `b2_list_unfinished_large_files`,
+  `b2_copy_part`), and the native download tools (`b2_get_download_authorization`,
+  `b2_get_download_url_for_file`, `b2_get_download_url_for_file_id`). All replaced
+  by S3 equivalents.
+
+### Data plane (19 S3 tools)
+Object operations now run on the S3-compatible API: `s3_put_object`,
+`s3_get_object`, `s3_delete_object`, `s3_delete_objects`, `s3_head_object`,
+`s3_copy_object`, `s3_list_objects_v2`, `s3_list_object_versions`; multipart
+(`s3_create_multipart_upload`, `s3_upload_part`, `s3_complete_multipart_upload`,
+`s3_abort_multipart_upload`, `s3_list_parts`, `s3_list_multipart_uploads`,
+`s3_upload_part_copy`); plus `s3_get_presigned_url`, `s3_head_bucket`,
+`s3_get_bucket_location`, `s3_put_bucket_lifecycle`.
+
+### Control plane (17 native tools)
+`b2_authorize_account`; buckets (`b2_list_buckets`, `b2_create_bucket`,
+`b2_delete_bucket`, `b2_update_bucket`); notifications
+(`b2_get`/`set_bucket_notification_rules`); keys (`b2_create_key`, `b2_list_keys`,
+`b2_delete_key`); Partner/Groups (`b2_reserve_trial_create_account`,
+`b2_create_group_member`, `b2_eject_group_member`, `b2_list_group_members`,
+`b2_list_groups`); Object Lock (`b2_update_file_retention`,
+`b2_update_file_legal_hold`). These have no S3 equivalent.
+
+### Security
+- **`b2_create_key` lockdown** (`src/b2/keys.ts`, all transports). A minted key
+  is a durable credential the model sees once; to bound a prompt-injected agent
+  the server now **rejects by default**: (a) keys granting key-management
+  capabilities (`listKeys`/`writeKeys`/`deleteKeys` — a self-perpetuating
+  backdoor), and (b) unscoped keys holding write/delete capabilities (forces a
+  `bucketId`/`bucketIds` scope). Optional `B2_MAX_KEY_DURATION_SECONDS` enforces a
+  maximum validity and forbids non-expiring keys. Overrides:
+  `B2_ALLOW_KEY_MGMT_GRANTS=true`, `B2_ALLOW_UNSCOPED_KEYS=true`. Existing callers
+  that minted broad/unscoped/non-expiring keys will now be rejected unless these
+  are set.
+- **Destructive-operation gate** (`src/utils/destructive-gate.ts`, all transports).
+  Irreversible/high-impact tools — `s3_delete_object`, `s3_delete_objects`,
+  `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`,
+  `b2_eject_group_member`, and `b2_update_bucket` *only* when it makes a bucket
+  public or disables/clears Object Lock — now require confirmation. Policy via `B2_DESTRUCTIVE_POLICY`: `confirm`
+  (default) requires the call to pass `confirm: true` (else refused, and the call
+  never reaches B2); `block` refuses outright; `allow` disables the gate. Enforced
+  server-side so it holds for MCP clients without the skills layer; each gated tool
+  gains an optional `confirm` boolean. (Defense-in-depth — pair with `block` or
+  host consent for untrusted contexts.)
+
+### Changed
+- Master key (`B2_MASTER_KEY_*` / `X-B2-Master-Key-*`) is now used **only** by the
+  Partner API.
+- Companion **Skills pack**: skills updated to use the S3 data-plane tools for
+  object operations while keeping native tools for buckets, keys, provisioning,
+  Object Lock, and notifications. `scripts/known_tools.txt`, `manifest.json`, and
+  the tool catalog regenerated to the 36-tool surface.
+
+### Verification
+- Gate: `npm run build` + `npm run typecheck` (compiles src **and** tests via
+  `tsconfig.typecheck.json`) + `npm test` (unit) + skills `validate_pack.py`. The
+  runtime tool count is asserted at **36 (17 `b2_`, 19 `s3_`, 0 `bz_`)** in
+  `tests/unit/tools-schema.test.ts`.
+- B2's S3 endpoint **rejects master keys** — a non-master application key is
+  required for the (now primary) S3 data plane; a master key returns
+  `InvalidAccessKeyId: Malformed Access Key Id`.
+
 ## [1.6.1] - 2026-06-13
 
 Discovery: the server's `initialize` instructions now point clients at the

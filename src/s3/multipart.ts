@@ -6,12 +6,15 @@ import {
   AbortMultipartUploadCommand,
   ListMultipartUploadsCommand,
   ListPartsCommand,
+  UploadPartCopyCommand,
 } from "@aws-sdk/client-s3";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { B2Config } from "../utils/types.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 
-export function registerS3MultipartTools(server: McpServer, s3: S3Client): void {
+export function registerS3MultipartTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_create_multipart_upload",
     "Initiate an S3-compatible multipart upload for a large file in B2. Returns an UploadId to use with s3_upload_part.",
@@ -129,9 +132,17 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client): void 
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),
       uploadId: z.string().describe("The UploadId to abort."),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("s3_abort_multipart_upload", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         await s3.send(
           new AbortMultipartUploadCommand({
             Bucket: args.bucket,
@@ -209,6 +220,58 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client): void 
           parts: result.Parts ?? [],
           isTruncated: result.IsTruncated,
           nextPartNumberMarker: result.NextPartNumberMarker,
+        });
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.tool(
+    "s3_upload_part_copy",
+    "Copy a part from an existing B2 object into an in-progress S3-compatible multipart upload. Use this to efficiently assemble large objects from existing parts without re-uploading data.",
+    {
+      bucket: z.string().describe("The destination bucket name."),
+      key: z.string().describe("The destination object key."),
+      uploadId: z.string().describe("The UploadId from s3_create_multipart_upload."),
+      partNumber: z.number().int().min(1).max(10000).describe("The part number (1–10000)."),
+      copySource: z
+        .string()
+        .describe(
+          "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key.",
+        ),
+      copySourceRange: z
+        .string()
+        .optional()
+        .describe(
+          "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB.",
+        ),
+      copySourceVersionId: z
+        .string()
+        .optional()
+        .describe("Version ID of the source object to copy from."),
+    },
+    async (args) => {
+      try {
+        // Fold the source version into CopySource (same form as s3_copy_object); without
+        // this the declared copySourceVersionId was silently dropped and the live version copied.
+        const copySource = args.copySourceVersionId
+          ? `${args.copySource}?versionId=${args.copySourceVersionId}`
+          : args.copySource;
+        const result = await s3.send(
+          new UploadPartCopyCommand({
+            Bucket: args.bucket,
+            Key: args.key,
+            UploadId: args.uploadId,
+            PartNumber: args.partNumber,
+            CopySource: copySource,
+            CopySourceRange: args.copySourceRange,
+          }),
+        );
+        return toolJson({
+          partNumber: args.partNumber,
+          etag: result.CopyPartResult?.ETag,
+          lastModified: result.CopyPartResult?.LastModified,
         });
       } catch (err) {
         return toolError(err);

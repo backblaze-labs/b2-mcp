@@ -1,81 +1,23 @@
 import {
   S3Client,
-  ListBucketsCommand,
-  CreateBucketCommand,
-  DeleteBucketCommand,
   HeadBucketCommand,
-  GetBucketVersioningCommand,
-  PutBucketVersioningCommand,
-  GetBucketCorsCommand,
-  PutBucketCorsCommand,
-  DeleteBucketCorsCommand,
-  GetBucketLifecycleConfigurationCommand,
   PutBucketLifecycleConfigurationCommand,
-  GetBucketAclCommand,
-  PutBucketAclCommand,
 } from "@aws-sdk/client-s3";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { toolError, toolSuccess } from "../utils/errors.js";
 
+// S3-compatible bucket tools are intentionally minimal: anything with a native
+// b2_* equivalent has been removed to keep the tool surface small. Only the two
+// tools below are kept because they cover capabilities with no native analogue:
+//   - s3_head_bucket          — S3-surface reachability probe (used by the
+//                               bucket/S3-compatibility validator skill)
+//   - s3_put_bucket_lifecycle — S3 AbortIncompleteMultipartUpload, which the
+//                               native lifecycle API does not express
 export function registerS3BucketTools(server: McpServer, s3: S3Client): void {
   server.tool(
-    "s3_list_buckets",
-    "List all B2 buckets via the S3-compatible API. Returns bucket names and creation dates.",
-    {},
-    async () => {
-      try {
-        const result = await s3.send(new ListBucketsCommand({}));
-        return toolJson({ buckets: result.Buckets ?? [], owner: result.Owner });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_create_bucket",
-    "Create a new B2 bucket via the S3-compatible API.",
-    {
-      bucket: z.string().describe("The bucket name to create."),
-      acl: z
-        .enum(["private", "public-read"])
-        .optional()
-        .describe("Canned ACL. 'private' (default) or 'public-read'."),
-    },
-    async (args) => {
-      try {
-        const cmd = new CreateBucketCommand({
-          Bucket: args.bucket,
-          ACL: args.acl,
-        });
-        const result = await s3.send(cmd);
-        return toolJson({ location: result.Location });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_delete_bucket",
-    "Delete an empty B2 bucket via the S3-compatible API.",
-    {
-      bucket: z.string().describe("The bucket name to delete."),
-    },
-    async (args) => {
-      try {
-        await s3.send(new DeleteBucketCommand({ Bucket: args.bucket }));
-        return toolSuccess(`Bucket '${args.bucket}' deleted successfully.`);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
     "s3_head_bucket",
-    "Check whether a B2 bucket exists and is accessible with the current credentials.",
+    "Check whether a B2 bucket exists and is reachable on the S3-compatible endpoint with the current credentials. Use this to validate S3-surface reachability (the native b2_list_buckets confirms existence but not S3 reachability).",
     {
       bucket: z.string().describe("The bucket name to check."),
     },
@@ -90,138 +32,8 @@ export function registerS3BucketTools(server: McpServer, s3: S3Client): void {
   );
 
   server.tool(
-    "s3_get_bucket_versioning",
-    "Get the versioning state of a B2 bucket (Enabled, Suspended, or not configured).",
-    {
-      bucket: z.string().describe("The bucket name."),
-    },
-    async (args) => {
-      try {
-        const result = await s3.send(new GetBucketVersioningCommand({ Bucket: args.bucket }));
-        return toolJson({ status: result.Status ?? "NotConfigured", mfaDelete: result.MFADelete });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_put_bucket_versioning",
-    "Enable or suspend versioning on a B2 bucket.",
-    {
-      bucket: z.string().describe("The bucket name."),
-      status: z.enum(["Enabled", "Suspended"]).describe("The versioning status to set."),
-    },
-    async (args) => {
-      try {
-        await s3.send(
-          new PutBucketVersioningCommand({
-            Bucket: args.bucket,
-            VersioningConfiguration: { Status: args.status },
-          }),
-        );
-        return toolSuccess(`Versioning set to '${args.status}' for bucket '${args.bucket}'.`);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_get_bucket_cors",
-    "Get the CORS configuration for a B2 bucket.",
-    {
-      bucket: z.string().describe("The bucket name."),
-    },
-    async (args) => {
-      try {
-        const result = await s3.send(new GetBucketCorsCommand({ Bucket: args.bucket }));
-        return toolJson({ corsRules: result.CORSRules ?? [] });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_put_bucket_cors",
-    "Set the CORS configuration for a B2 bucket, allowing browser-based cross-origin requests.",
-    {
-      bucket: z.string().describe("The bucket name."),
-      corsRules: z
-        .array(
-          z.object({
-            allowedHeaders: z.array(z.string()).optional(),
-            allowedMethods: z.array(z.string()).describe("HTTP methods, e.g. ['GET', 'PUT']."),
-            allowedOrigins: z
-              .array(z.string())
-              .describe("Allowed origins, e.g. ['https://example.com'] or ['*']."),
-            exposeHeaders: z.array(z.string()).optional(),
-            maxAgeSeconds: z.number().optional(),
-          }),
-        )
-        .describe("Array of CORS rules."),
-    },
-    async (args) => {
-      try {
-        await s3.send(
-          new PutBucketCorsCommand({
-            Bucket: args.bucket,
-            CORSConfiguration: {
-              CORSRules: args.corsRules.map((r) => ({
-                AllowedHeaders: r.allowedHeaders,
-                AllowedMethods: r.allowedMethods,
-                AllowedOrigins: r.allowedOrigins,
-                ExposeHeaders: r.exposeHeaders,
-                MaxAgeSeconds: r.maxAgeSeconds,
-              })),
-            },
-          }),
-        );
-        return toolSuccess(`CORS rules updated for bucket '${args.bucket}'.`);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_delete_bucket_cors",
-    "Remove all CORS rules from a B2 bucket.",
-    {
-      bucket: z.string().describe("The bucket name."),
-    },
-    async (args) => {
-      try {
-        await s3.send(new DeleteBucketCorsCommand({ Bucket: args.bucket }));
-        return toolSuccess(`CORS rules removed from bucket '${args.bucket}'.`);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_get_bucket_lifecycle",
-    "Get the lifecycle configuration for a B2 bucket.",
-    {
-      bucket: z.string().describe("The bucket name."),
-    },
-    async (args) => {
-      try {
-        const result = await s3.send(
-          new GetBucketLifecycleConfigurationCommand({ Bucket: args.bucket }),
-        );
-        return toolJson({ rules: result.Rules ?? [] });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
     "s3_put_bucket_lifecycle",
-    "Set lifecycle rules for a B2 bucket via the S3-compatible API. Supported actions: object expiration (Expiration), noncurrent version expiration (NoncurrentVersionExpiration), and aborting incomplete multipart uploads (AbortIncompleteMultipartUpload). Note: Transition and NoncurrentVersionTransition rules (moving objects to different storage classes) are NOT supported by Backblaze B2.",
+    "Set lifecycle rules for a B2 bucket via the S3-compatible API. Kept primarily for AbortIncompleteMultipartUpload, which cancels incomplete S3-multipart uploads — a capability the native lifecycle API does not express. Also supports object expiration (Expiration) and noncurrent version expiration (NoncurrentVersionExpiration). Note: Transition / storage-class rules are NOT supported by Backblaze B2.",
     {
       bucket: z.string().describe("The bucket name."),
       rules: z.array(
@@ -293,41 +105,6 @@ export function registerS3BucketTools(server: McpServer, s3: S3Client): void {
           }),
         );
         return toolSuccess(`Lifecycle rules updated for bucket '${args.bucket}'.`);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_get_bucket_acl",
-    "Get the access control list (ACL) for a B2 bucket.",
-    {
-      bucket: z.string().describe("The bucket name."),
-    },
-    async (args) => {
-      try {
-        const result = await s3.send(new GetBucketAclCommand({ Bucket: args.bucket }));
-        return toolJson({ owner: result.Owner, grants: result.Grants ?? [] });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_put_bucket_acl",
-    "Set the canned ACL for a B2 bucket via the S3-compatible API. B2 supports only 'private' and 'public-read' ACLs. All objects in the bucket inherit this ACL.",
-    {
-      bucket: z.string().describe("The bucket name."),
-      acl: z
-        .enum(["private", "public-read"])
-        .describe("The canned ACL to apply. B2 only supports 'private' and 'public-read'."),
-    },
-    async (args) => {
-      try {
-        await s3.send(new PutBucketAclCommand({ Bucket: args.bucket, ACL: args.acl }));
-        return toolSuccess(`ACL '${args.acl}' applied to bucket '${args.bucket}'.`);
       } catch (err) {
         return toolError(err);
       }

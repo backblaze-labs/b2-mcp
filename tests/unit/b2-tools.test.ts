@@ -49,8 +49,6 @@ const testConfig = {
   masterKeyId: "test-app-key-secret",
   masterKey: "test-app-key-secret",
   region: "us-west-004",
-  largeFileThreshold: 100 * 1024 * 1024,
-  partSize: 100 * 1024 * 1024,
   allowLocalFiles: true,
   fileRoot: null,
 };
@@ -233,168 +231,24 @@ describe("b2_delete_bucket", () => {
   beforeEach(() => setupMocks({ bucketId: "bucket-001", bucketName: "my-bucket" }));
 
   it("returns success message with bucketId", async () => {
-    const result = await callTool(server, "b2_delete_bucket", { bucketId: "bucket-001" });
+    const result = await callTool(server, "b2_delete_bucket", {
+      bucketId: "bucket-001",
+      confirm: true,
+    });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("bucket-001");
   });
-});
 
-// ── b2_list_file_names ────────────────────────────────────────────────────────
-
-describe("b2_list_file_names", () => {
-  const mockFiles = {
-    files: [
-      {
-        fileId: "file-001",
-        fileName: "photo.jpg",
-        contentLength: 102400,
-        contentType: "image/jpeg",
-      },
-      {
-        fileId: "file-002",
-        fileName: "doc.pdf",
-        contentLength: 51200,
-        contentType: "application/pdf",
-      },
-    ],
-    nextFileName: null,
-  };
-
-  beforeEach(() => setupMocks(mockFiles));
-
-  it("returns files array with expected shape", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_list_file_names", { bucketId: "bucket-001" }),
-    );
-    expect(result.files).toHaveLength(2);
-    expect(result.files[0].fileName).toBe("photo.jpg");
-    expect(result.files[1].contentType).toBe("application/pdf");
-  });
-
-  it("passes maxFileCount to the API", async () => {
-    await callTool(server, "b2_list_file_names", { bucketId: "bucket-001", maxFileCount: 25 });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ maxFileCount: 25 }) }),
-    );
-  });
-
-  it("passes prefix filter when provided", async () => {
-    await callTool(server, "b2_list_file_names", { bucketId: "bucket-001", prefix: "photos/" });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ prefix: "photos/" }) }),
-    );
-  });
-});
-
-// ── b2_get_file_info ──────────────────────────────────────────────────────────
-
-describe("b2_get_file_info", () => {
-  const mockFileInfo = {
-    fileId: "file-001",
-    fileName: "photo.jpg",
-    contentLength: 102400,
-    contentType: "image/jpeg",
-    fileInfo: { author: "Kevin" },
-    uploadTimestamp: 1700000000000,
-  };
-
-  beforeEach(() => setupMocks(mockFileInfo));
-
-  it("returns file metadata", async () => {
-    const result = parseResult(await callTool(server, "b2_get_file_info", { fileId: "file-001" }));
-    expect(result.fileId).toBe("file-001");
-    expect(result.fileName).toBe("photo.jpg");
-    expect(result.contentLength).toBe(102400);
-  });
-});
-
-// ── b2_hide_file ──────────────────────────────────────────────────────────────
-
-describe("b2_hide_file", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "hide-marker-001",
-      fileName: "photo.jpg",
-      action: "hide",
-      uploadTimestamp: Date.now(),
-    }),
-  );
-
-  it("returns the hide marker and sends { bucketId, fileName } to the API", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_hide_file", {
-        bucketId: "bucket-001",
-        fileName: "photo.jpg",
-      }),
-    );
-    expect(result.action).toBe("hide");
-    expect(result.fileName).toBe("photo.jpg");
-    expect(mockedAxios).toHaveBeenCalledWith(
+  it("is blocked without confirm under the default policy (gate is wired into the handler)", async () => {
+    const result = await callTool(server, "b2_delete_bucket", { bucketId: "bucket-001" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/confirm/i);
+    // The destructive call must NOT have reached the B2 API.
+    expect(mockedAxios).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ bucketId: "bucket-001", fileName: "photo.jpg" }),
+        url: expect.stringContaining("b2_delete_bucket"),
       }),
     );
-  });
-});
-
-// ── b2_copy_file ──────────────────────────────────────────────────────────────
-
-describe("b2_copy_file", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "copy-001",
-      fileName: "photo-copy.jpg",
-      contentLength: 102400,
-      action: "copy",
-    }),
-  );
-
-  it("returns copied file info", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_copy_file", {
-        sourceFileId: "file-001",
-        fileName: "photo-copy.jpg",
-      }),
-    );
-    expect(result.fileId).toBe("copy-001");
-    expect(result.fileName).toBe("photo-copy.jpg");
-  });
-
-  it("forwards destination SSE under B2's field name 'destinationServerSideEncryption'", async () => {
-    await callTool(server, "b2_copy_file", {
-      sourceFileId: "file-001",
-      fileName: "photo-copy.jpg",
-      destinationServerSideEncryption: { mode: "SSE-B2" },
-    });
-    const data = (mockedAxios.mock.calls[0][0] as unknown as { data: Record<string, unknown> })
-      .data;
-    // B2 rejects 'serverSideEncryption' on b2_copy_file with 400 unknown field.
-    expect(data).toHaveProperty("destinationServerSideEncryption", { mode: "SSE-B2" });
-    expect(data).not.toHaveProperty("serverSideEncryption");
-  });
-});
-
-// ── b2_list_file_versions ─────────────────────────────────────────────────────
-
-describe("b2_list_file_versions", () => {
-  beforeEach(() =>
-    setupMocks({
-      files: [
-        { fileId: "v1", fileName: "doc.pdf", action: "upload" },
-        { fileId: "v2", fileName: "doc.pdf", action: "hide" },
-      ],
-      nextFileId: null,
-      nextFileName: null,
-    }),
-  );
-
-  it("returns version history with action types", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_list_file_versions", { bucketId: "bucket-001" }),
-    );
-    expect(result.files).toHaveLength(2);
-    expect(result.files[0].action).toBe("upload");
-    expect(result.files[1].action).toBe("hide");
   });
 });
 
@@ -435,6 +289,59 @@ describe("b2_create_key", () => {
       }),
     );
   });
+
+  it("rejects a key that grants key-management capabilities by default", async () => {
+    const result = await callTool(server, "b2_create_key", {
+      keyName: "backdoor-key",
+      capabilities: ["readFiles", "writeKeys"],
+      bucketId: "bucket-001",
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/key-management capabilities/i);
+  });
+
+  it("rejects an unscoped key with write capabilities by default", async () => {
+    const result = await callTool(server, "b2_create_key", {
+      keyName: "broad-key",
+      capabilities: ["writeFiles"],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/unscoped key/i);
+  });
+
+  it("allows key-management grants when B2_ALLOW_KEY_MGMT_GRANTS is enabled", async () => {
+    const permissive = createServer({ ...testConfig, allowKeyMgmtGrants: true });
+    const result = parseResult(
+      await callTool(permissive, "b2_create_key", {
+        keyName: "admin-key",
+        capabilities: ["writeKeys"],
+        bucketId: "bucket-001",
+        validDurationInSeconds: 3600,
+      }),
+    );
+    expect(result.keyName).toBe("test-key");
+    expect(result.isError).toBeUndefined();
+  });
+
+  it("enforces a max key duration and forbids non-expiring keys when capped", async () => {
+    const capped = createServer({ ...testConfig, maxKeyDurationSeconds: 3600 });
+    const tooLong = await callTool(capped, "b2_create_key", {
+      keyName: "long-key",
+      capabilities: ["readFiles"],
+      bucketId: "bucket-001",
+      validDurationInSeconds: 100000,
+    });
+    expect(tooLong.isError).toBe(true);
+    expect(tooLong.content[0].text).toMatch(/exceeds the server cap/i);
+
+    const nonExpiring = await callTool(capped, "b2_create_key", {
+      keyName: "forever-key",
+      capabilities: ["readFiles"],
+      bucketId: "bucket-001",
+    });
+    expect(nonExpiring.isError).toBe(true);
+    expect(nonExpiring.content[0].text).toMatch(/requires application keys to expire/i);
+  });
 });
 
 // ── b2_list_keys ──────────────────────────────────────────────────────────────
@@ -457,95 +364,6 @@ describe("b2_list_keys", () => {
   });
 });
 
-// ── b2_get_download_authorization ────────────────────────────────────────────
-
-describe("b2_get_download_authorization", () => {
-  beforeEach(() =>
-    setupMocks({
-      bucketId: "bucket-001",
-      fileNamePrefix: "photos/",
-      authorizationToken: "download-token-xyz",
-    }),
-  );
-
-  it("returns an authorization token", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_get_download_authorization", {
-        bucketId: "bucket-001",
-        fileNamePrefix: "photos/",
-        validDurationInSeconds: 3600,
-      }),
-    );
-    expect(result.authorizationToken).toBe("download-token-xyz");
-    expect(result.bucketId).toBe("bucket-001");
-  });
-});
-
-// ── b2_start_large_file ───────────────────────────────────────────────────────
-
-describe("b2_start_large_file", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "large-file-001",
-      fileName: "large-video.mp4",
-      accountId: "test-account-123",
-      bucketId: "bucket-001",
-      contentType: "video/mp4",
-    }),
-  );
-
-  it("returns the new large file ID and metadata", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_start_large_file", {
-        bucketId: "bucket-001",
-        fileName: "large-video.mp4",
-        contentType: "video/mp4",
-      }),
-    );
-    expect(result.fileId).toBe("large-file-001");
-    expect(result.fileName).toBe("large-video.mp4");
-  });
-});
-
-// ── b2_cancel_large_file ──────────────────────────────────────────────────────
-
-describe("b2_cancel_large_file", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "large-file-001",
-      fileName: "large-video.mp4",
-      accountId: "test-account-123",
-      bucketId: "bucket-001",
-    }),
-  );
-
-  it("returns cancelled file info", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_cancel_large_file", { fileId: "large-file-001" }),
-    );
-    expect(result.fileId).toBe("large-file-001");
-  });
-});
-
-// ── b2_list_unfinished_large_files ────────────────────────────────────────────
-
-describe("b2_list_unfinished_large_files", () => {
-  beforeEach(() =>
-    setupMocks({
-      files: [{ fileId: "large-001", fileName: "video.mp4", contentType: "video/mp4" }],
-      nextFileId: null,
-    }),
-  );
-
-  it("returns list of unfinished uploads", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_list_unfinished_large_files", { bucketId: "bucket-001" }),
-    );
-    expect(result.files).toHaveLength(1);
-    expect(result.files[0].fileName).toBe("video.mp4");
-  });
-});
-
 // ── b2_delete_key ─────────────────────────────────────────────────────────────
 
 describe("b2_delete_key", () => {
@@ -553,45 +371,12 @@ describe("b2_delete_key", () => {
 
   it("returns deleted key info and sends applicationKeyId to the API", async () => {
     const result = parseResult(
-      await callTool(server, "b2_delete_key", { applicationKeyId: "key-ro" }),
+      await callTool(server, "b2_delete_key", { applicationKeyId: "key-ro", confirm: true }),
     );
     expect(result.applicationKeyId).toBe("key-ro");
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ applicationKeyId: "key-ro" }) }),
     );
-  });
-});
-
-// ── b2_delete_file_version ────────────────────────────────────────────────────
-
-describe("b2_delete_file_version", () => {
-  beforeEach(() => setupMocks({ fileId: "file-001", fileName: "photo.jpg" }));
-
-  it("returns deleted file info", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_delete_file_version", {
-        fileId: "file-001",
-        fileName: "photo.jpg",
-      }),
-    );
-    expect(result.fileId).toBe("file-001");
-  });
-});
-
-// ── b2_get_download_url_for_file ──────────────────────────────────────────────
-
-describe("b2_get_download_url_for_file", () => {
-  it("returns a download URL string", async () => {
-    // This tool builds the URL from auth data — no extra API call needed
-    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-    const result = parseResult(
-      await callTool(server, "b2_get_download_url_for_file", {
-        bucketName: "my-bucket",
-        fileName: "photo.jpg",
-      }),
-    );
-    const url = typeof result === "string" ? result : (result?.url ?? result?.downloadUrl);
-    expect(url).toContain("photo.jpg");
   });
 });
 
@@ -611,23 +396,25 @@ describe("Error propagation", () => {
     expect(result.content[0].text).toContain("unauthorized");
   });
 
-  it("b2_get_file_info returns isError for bad_request", async () => {
+  it("b2_list_keys returns isError for bad_request", async () => {
     mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
     mockedAxios.mockRejectedValue({
       response: {
         status: 400,
-        data: { status: 400, code: "bad_request", message: "Bad file ID." },
+        data: { status: 400, code: "bad_request", message: "Bad request." },
       },
     } as any);
-    const result = await callTool(server, "b2_get_file_info", { fileId: "bad" });
+    const result = await callTool(server, "b2_list_keys", {});
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("400");
   });
 
-  it("b2_list_file_names returns isError on network error", async () => {
+  it("b2_get_bucket_notification_rules returns isError on network error", async () => {
     mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
     mockedAxios.mockRejectedValue(new Error("Network timeout") as any);
-    const result = await callTool(server, "b2_list_file_names", { bucketId: "bucket-001" });
+    const result = await callTool(server, "b2_get_bucket_notification_rules", {
+      bucketId: "bucket-001",
+    });
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Network timeout");
   });
@@ -650,6 +437,7 @@ describe("b2_update_bucket", () => {
       await callTool(server, "b2_update_bucket", {
         bucketId: "bucket-001",
         bucketType: "allPublic",
+        confirm: true,
       }),
     );
     expect(result.bucketId).toBe("bucket-001");
@@ -764,342 +552,6 @@ describe("b2_set_bucket_notification_rules", () => {
         }),
       }),
     );
-  });
-});
-
-// ── b2_upload_file ────────────────────────────────────────────────────────────
-
-describe("b2_upload_file", () => {
-  const uploadUrlResponse = {
-    uploadUrl: "https://pod-001.backblaze.com/b2api/v2/b2_upload_file/bucket-001/upload",
-    authorizationToken: "upload-token-abc",
-    bucketId: "bucket-001",
-  };
-  const uploadedFileInfo = {
-    fileId: "file-uploaded-001",
-    fileName: "hello.txt",
-    contentLength: 11,
-    contentType: "text/plain",
-    uploadTimestamp: Date.now(),
-  };
-
-  beforeEach(() => {
-    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-    // First axios(config) call → get_upload_url; second POST call → file info
-    mockedAxios.mockResolvedValueOnce({ data: uploadUrlResponse } as any);
-    (mockedAxios as any).post = jest.fn().mockResolvedValue({ data: uploadedFileInfo });
-  });
-
-  it("uploads base64 content and returns file info", async () => {
-    const content = Buffer.from("hello world").toString("base64");
-    const result = parseResult(
-      await callTool(server, "b2_upload_file", {
-        bucketId: "bucket-001",
-        fileName: "hello.txt",
-        content,
-      }),
-    );
-    expect(result.fileId).toBe("file-uploaded-001");
-    expect(result.fileName).toBe("hello.txt");
-  });
-
-  it("returns isError when neither filePath nor content is provided", async () => {
-    const result = await callTool(server, "b2_upload_file", {
-      bucketId: "bucket-001",
-      fileName: "hello.txt",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("filePath or content");
-  });
-
-  it("rejects a fileInfo key with header-injection characters", async () => {
-    const result = await callTool(server, "b2_upload_file", {
-      bucketId: "bucket-001",
-      fileName: "hello.txt",
-      content: Buffer.from("x").toString("base64"),
-      // X-Bz-Info-* header name — must be [A-Za-z0-9-]; a space/newline could
-      // smuggle a second header. The guard must reject it.
-      fileInfo: { "bad key\r\nX-Evil": "1" },
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/fileInfo|invalid|header/i);
-  });
-});
-
-// ── b2_download_file_by_id ────────────────────────────────────────────────────
-
-describe("b2_download_file_by_id", () => {
-  const fileContent = Buffer.from("file content here");
-
-  beforeEach(() => {
-    mockedAxios.get = jest
-      .fn()
-      .mockResolvedValueOnce({ data: mockAuthData }) // auth call
-      .mockResolvedValueOnce({
-        // download call
-        data: fileContent,
-        headers: { "content-type": "text/plain", "content-length": String(fileContent.length) },
-      });
-  });
-
-  it("returns base64-encoded content with metadata", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_download_file_by_id", { fileId: "file-001" }),
-    );
-    expect(result.fileId).toBe("file-001");
-    expect(result.encoding).toBe("base64");
-    expect(result.contentType).toBe("text/plain");
-    const decoded = Buffer.from(result.content, "base64").toString();
-    expect(decoded).toBe("file content here");
-  });
-});
-
-// ── b2_download_file_by_name ──────────────────────────────────────────────────
-
-describe("b2_download_file_by_name", () => {
-  const fileContent = Buffer.from("named file content");
-
-  beforeEach(() => {
-    mockedAxios.get = jest
-      .fn()
-      .mockResolvedValueOnce({ data: mockAuthData })
-      .mockResolvedValueOnce({
-        data: fileContent,
-        headers: { "content-type": "image/jpeg", "content-length": String(fileContent.length) },
-      });
-  });
-
-  it("returns base64-encoded content with the file name", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_download_file_by_name", {
-        bucketName: "my-bucket",
-        fileName: "photo.jpg",
-      }),
-    );
-    expect(result.fileName).toBe("photo.jpg");
-    expect(result.encoding).toBe("base64");
-    expect(result.contentType).toBe("image/jpeg");
-  });
-
-  it("builds the correct download URL from auth data", async () => {
-    await callTool(server, "b2_download_file_by_name", {
-      bucketName: "my-bucket",
-      fileName: "docs/report.pdf",
-    });
-    const downloadCallUrl = (mockedAxios.get as jest.Mock).mock.calls[1][0];
-    expect(downloadCallUrl).toContain("f005.backblazeb2.com");
-    expect(downloadCallUrl).toContain("my-bucket");
-    expect(downloadCallUrl).toContain("docs");
-  });
-});
-
-// ── b2_get_upload_url ─────────────────────────────────────────────────────────
-
-describe("b2_get_upload_url", () => {
-  beforeEach(() =>
-    setupMocks({
-      uploadUrl: "https://pod-001.backblaze.com/b2api/v2/b2_upload_file/bucket-001/upload",
-      authorizationToken: "upload-token-abc",
-      bucketId: "bucket-001",
-    }),
-  );
-
-  it("returns uploadUrl, authorizationToken, and bucketId", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_get_upload_url", { bucketId: "bucket-001" }),
-    );
-    expect(result.uploadUrl).toContain("backblaze.com");
-    expect(result.authorizationToken).toBe("upload-token-abc");
-    expect(result.bucketId).toBe("bucket-001");
-  });
-});
-
-// ── b2_get_upload_part_url ────────────────────────────────────────────────────
-
-describe("b2_get_upload_part_url", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "large-file-001",
-      uploadUrl: "https://pod-001.backblaze.com/b2api/v2/b2_upload_part",
-      authorizationToken: "part-upload-token-xyz",
-    }),
-  );
-
-  it("returns uploadUrl and token for the given fileId", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_get_upload_part_url", {
-        fileId: "large-file-001",
-      }),
-    );
-    expect(result.fileId).toBe("large-file-001");
-    expect(result.authorizationToken).toBe("part-upload-token-xyz");
-    expect(result.uploadUrl).toBeDefined();
-  });
-});
-
-// ── b2_upload_part ────────────────────────────────────────────────────────────
-
-describe("b2_upload_part", () => {
-  const partInfo = {
-    fileId: "large-file-001",
-    partNumber: 1,
-    contentLength: 5242880,
-    contentSha1: "abc123",
-  };
-
-  beforeEach(() => {
-    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-    (mockedAxios as any).post = jest.fn().mockResolvedValue({ data: partInfo });
-  });
-
-  it("returns part info after uploading", async () => {
-    const content = Buffer.alloc(16).toString("base64"); // small content for test
-    const result = parseResult(
-      await callTool(server, "b2_upload_part", {
-        uploadUrl: "https://pod-001.backblaze.com/b2api/v2/b2_upload_part",
-        uploadAuthToken: "part-token",
-        partNumber: 1,
-        content,
-      }),
-    );
-    expect(result.partNumber).toBe(1);
-  });
-
-  it("sends the part number and SHA1 header", async () => {
-    const content = Buffer.alloc(16).toString("base64");
-    await callTool(server, "b2_upload_part", {
-      uploadUrl: "https://pod-001.backblaze.com/upload",
-      uploadAuthToken: "part-token",
-      partNumber: 2,
-      content,
-    });
-    const postCall = (mockedAxios as any).post.mock.calls[0];
-    expect(postCall[2].headers["X-Bz-Part-Number"]).toBe("2");
-    expect(postCall[2].headers["X-Bz-Content-Sha1"]).toMatch(/^[a-f0-9]{40}$/);
-  });
-});
-
-// ── b2_copy_part ──────────────────────────────────────────────────────────────
-
-describe("b2_copy_part", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "large-file-001",
-      partNumber: 1,
-      contentLength: 5242880,
-      contentSha1: "def456",
-    }),
-  );
-
-  it("returns copied part info", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_copy_part", {
-        sourceFileId: "file-001",
-        largeFileId: "large-file-001",
-        partNumber: 1,
-      }),
-    );
-    expect(result.partNumber).toBe(1);
-    expect(result.fileId).toBe("large-file-001");
-  });
-
-  it("passes sourceFileId and partNumber to the API", async () => {
-    await callTool(server, "b2_copy_part", {
-      sourceFileId: "file-src",
-      largeFileId: "large-001",
-      partNumber: 3,
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ sourceFileId: "file-src", partNumber: 3 }),
-      }),
-    );
-  });
-});
-
-// ── b2_finish_large_file ──────────────────────────────────────────────────────
-
-describe("b2_finish_large_file", () => {
-  beforeEach(() =>
-    setupMocks({
-      fileId: "large-file-001",
-      fileName: "big-backup.tar.gz",
-      contentLength: 15728640,
-      contentType: "application/gzip",
-      contentSha1: "none",
-    }),
-  );
-
-  it("returns the completed file info", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_finish_large_file", {
-        fileId: "large-file-001",
-        partSha1Array: ["sha1-part1", "sha1-part2", "sha1-part3"],
-      }),
-    );
-    expect(result.fileId).toBe("large-file-001");
-    expect(result.fileName).toBe("big-backup.tar.gz");
-  });
-
-  it("passes partSha1Array to the API", async () => {
-    const sha1s = ["aaa", "bbb"];
-    await callTool(server, "b2_finish_large_file", {
-      fileId: "large-file-001",
-      partSha1Array: sha1s,
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ partSha1Array: sha1s }) }),
-    );
-  });
-});
-
-// ── b2_list_parts ─────────────────────────────────────────────────────────────
-
-describe("b2_list_parts", () => {
-  beforeEach(() =>
-    setupMocks({
-      parts: [
-        { partNumber: 1, contentLength: 10485760, contentSha1: "sha1a" },
-        { partNumber: 2, contentLength: 5242880, contentSha1: "sha1b" },
-      ],
-      nextPartNumber: null,
-    }),
-  );
-
-  it("returns uploaded parts for a large file", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_list_parts", { fileId: "large-file-001" }),
-    );
-    expect(result.parts).toHaveLength(2);
-    expect(result.parts[0].partNumber).toBe(1);
-    expect(result.parts[1].contentSha1).toBe("sha1b");
-  });
-});
-
-// ── b2_get_download_url_for_file_id ───────────────────────────────────────────
-
-describe("b2_get_download_url_for_file_id", () => {
-  it("returns a download URL containing the fileId", async () => {
-    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-    const result = parseResult(
-      await callTool(server, "b2_get_download_url_for_file_id", {
-        fileId: "file-abc-123",
-      }),
-    );
-    const url = typeof result === "string" ? result : (result?.url ?? result?.downloadUrl);
-    expect(url).toContain("file-abc-123");
-  });
-
-  it("appends authorization token when provided", async () => {
-    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-    const result = parseResult(
-      await callTool(server, "b2_get_download_url_for_file_id", {
-        fileId: "file-abc-123",
-        authorizationToken: "dl-token-xyz",
-      }),
-    );
-    const url = typeof result === "string" ? result : (result?.url ?? result?.downloadUrl);
-    expect(url).toContain("dl-token-xyz");
   });
 });
 
@@ -1268,6 +720,7 @@ describe("b2_eject_group_member", () => {
         adminAccountId: "test-account-123",
         groupId: "254",
         memberAccountId: "member-account-xyz",
+        confirm: true,
       }),
     );
     expect(result.accountId).toBe("member-account-xyz");
@@ -1279,6 +732,7 @@ describe("b2_eject_group_member", () => {
       adminAccountId: "test-account-123",
       groupId: "254",
       memberAccountId: "member-xyz",
+      confirm: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ url: expect.stringContaining("b2api/v3") }),
@@ -1291,6 +745,7 @@ describe("b2_eject_group_member", () => {
       groupId: "254",
       memberAccountId: "member-xyz",
       email: "new@example.com",
+      confirm: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ email: "new@example.com" }) }),
@@ -1407,130 +862,6 @@ describe("b2_reserve_trial_create_account", () => {
         }),
       }),
     );
-  });
-});
-
-describe("bz_list_computers", () => {
-  const mockComputers = {
-    nextComputerId: null,
-    computers: [
-      {
-        computerId: "aab0a1acc4e2",
-        computerName: "johnsmith_2024_09_24",
-        lastFileUploadedTimestamp: 1727276780000,
-      },
-      {
-        computerId: "2ed0514c3452",
-        computerName: "johnsmith_2024_09_25",
-        lastFileUploadedTimestamp: 1727285088000,
-      },
-    ],
-  };
-
-  beforeEach(() => setupMocks(mockComputers));
-
-  it("returns computers array", async () => {
-    const result = parseResult(
-      await callTool(server, "bz_list_computers", {
-        accountId: "test-account-123",
-      }),
-    );
-    expect(result.computers).toHaveLength(2);
-    expect(result.computers[0].computerName).toBe("johnsmith_2024_09_24");
-  });
-
-  it("uses api/backup/v1 path (not b2api/v2)", async () => {
-    await callTool(server, "bz_list_computers", { accountId: "test-account-123" });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ url: expect.stringContaining("api/backup/v1") }),
-    );
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ url: expect.not.stringContaining("b2api/v2") }),
-    );
-  });
-
-  it("sends accountId as a query param (GET request)", async () => {
-    await callTool(server, "bz_list_computers", { accountId: "test-account-123" });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({
-        method: "GET",
-        params: expect.objectContaining({ accountId: "test-account-123" }),
-      }),
-    );
-  });
-
-  it("forwards startComputerId pagination cursor when provided", async () => {
-    await callTool(server, "bz_list_computers", {
-      accountId: "test-account-123",
-      startComputerId: "aab0a1acc4e2",
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({
-        params: expect.objectContaining({ startComputerId: "aab0a1acc4e2" }),
-      }),
-    );
-  });
-});
-
-describe("bz_delete_computer", () => {
-  const mockDeleted = {
-    computerId: "aab0a1acc4e2",
-    computerName: "johnsmith_2024_09_24",
-    lastFileUploadedTimestamp: 1727276780000,
-  };
-
-  beforeEach(() => setupMocks(mockDeleted));
-
-  it("returns deleted computer info", async () => {
-    const result = parseResult(
-      await callTool(server, "bz_delete_computer", {
-        accountId: "test-account-123",
-        computerId: "aab0a1acc4e2",
-      }),
-    );
-    expect(result.computerId).toBe("aab0a1acc4e2");
-    expect(result.computerName).toBe("johnsmith_2024_09_24");
-  });
-
-  it("uses api/backup/v1 path in the request URL", async () => {
-    await callTool(server, "bz_delete_computer", {
-      accountId: "test-account-123",
-      computerId: "aab0a1acc4e2",
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ url: expect.stringContaining("api/backup/v1") }),
-    );
-  });
-
-  it("sends accountId and computerId in the POST body", async () => {
-    await callTool(server, "bz_delete_computer", {
-      accountId: "test-account-123",
-      computerId: "aab0a1acc4e2",
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          accountId: "test-account-123",
-          computerId: "aab0a1acc4e2",
-        }),
-      }),
-    );
-  });
-
-  it("returns isError on structured API error", async () => {
-    mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-    mockedAxios.mockRejectedValue({
-      response: {
-        status: 400,
-        data: { status: 400, code: "invalid_computer_id", message: "Computer not found." },
-      },
-    } as any);
-    const result = await callTool(server, "bz_delete_computer", {
-      accountId: "test-account-123",
-      computerId: "bad-id",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("invalid_computer_id");
   });
 });
 

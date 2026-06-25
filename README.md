@@ -1,15 +1,15 @@
 # Backblaze B2 MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). Exposes the full B2 native API v2 and S3-compatible API as MCP tools, allowing any MCP-compatible AI model (Claude, GPT-4o, Gemini, etc.) to manage B2 storage through natural language.
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). Exposes a B2 **native control plane** (buckets, application keys, Partner/Groups provisioning, Object Lock, event notifications) plus the **S3-compatible API for all object data operations** (upload/download/copy/list/delete, multipart, presigned URLs) as MCP tools, allowing any MCP-compatible AI model (Claude, GPT-4o, Gemini, etc.) to manage B2 storage through natural language. **36 tools** — 17 native + 19 S3.
 
 ## Features
 
-- **Full B2 native API coverage** — buckets, files, large-file multipart, download URLs, application keys, notification rules
-- **Full S3-compatible API coverage** — objects, versioning, CORS, lifecycle, ACL, presigned URLs, multipart uploads
-- **Automatic large file handling** — files above the threshold are automatically uploaded via multipart
+- **Native control plane** — buckets, application keys, Partner/Groups provisioning, Object Lock (retention + legal hold), and event-notification rules via the B2 native API (S3 has no equivalent for these)
+- **S3-compatible data plane** — all object operations (put/get/copy/delete/list), multipart upload, and presigned URLs go through B2's S3-compatible API for forward-compatibility
+- **Large files via S3 multipart** — uploads larger than a single PUT use the standard S3 multipart flow (create → upload parts → complete)
 - **Auth token caching** — minimize authorize_account calls with automatic token refresh
 - **Retry logic** — exponential backoff on rate limits and transient errors
-- **Dual transport** — stdio for local use (Claude Desktop, Cursor) or HTTP+SSE for hosted deployments
+- **Dual transport** — stdio for local use (Claude Desktop, Cursor) or Streamable HTTP for hosted deployments
 
 ## Quick Start
 
@@ -29,7 +29,7 @@ npm run build
 
 > **Note:** The `dist/` folder is excluded from the zip — you must run `npm run build` once before connecting Claude.
 
-> **Using a different client?** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Claude Desktop, Claude.ai, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, and hosted (SSE) clients — plus a compatibility matrix.
+> **Using a different client?** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Claude Desktop, Claude.ai, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, and hosted (Streamable HTTP) clients — plus a compatibility matrix.
 
 ### 2. Connect Claude Desktop
 
@@ -56,9 +56,9 @@ Restart Claude Desktop — you should see the B2 tools available in Claude.
 
 > **A single application key is enough for almost everything.** Create one in the B2 Console under **Application Keys** and use it for `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`. A non-master key works for the B2 native API, the S3-compatible API, **and** key management (`b2_create_key` / `b2_list_keys` / `b2_delete_key`, which just need the `writeKeys` / `listKeys` / `deleteKeys` capabilities — not a master key).
 >
-> **When you need a master key (optional):** only the [Partner API](#partner-api-requires-master-key) and the Backblaze Computer Backup tools (`bz_*`) require a master application key. Set `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` for those — the master key is used **only** by those tools, while everything else keeps using your application key. (B2's S3 endpoint rejects master keys, which is exactly why the application key, not the master key, is the primary credential.)
+> **When you need a master key (optional):** only the [Partner API](#partner-api-requires-master-key) requires a master application key. Set `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` for it — the master key is used **only** by those tools, while everything else keeps using your application key. (B2's S3 endpoint rejects master keys, which is exactly why the application key, not the master key, is the primary credential.)
 >
-> _Deprecated:_ `B2_APP_KEY_ID` / `B2_APP_KEY` was the old way to supply a separate non-master S3 key when the primary key was a master key. The model is now reversed — make the application key your non-master workhorse and use `B2_MASTER_KEY_*` only for Partner/`bz_*`. The old variables still work for one release.
+> _Deprecated:_ `B2_APP_KEY_ID` / `B2_APP_KEY` was the old way to supply a separate non-master S3 key when the primary key was a master key. The model is now reversed — make the application key your non-master workhorse and use `B2_MASTER_KEY_*` only for the Partner API. The old variables still work for one release.
 
 ### Cursor / VS Code
 
@@ -86,13 +86,11 @@ Add to `.cursor/mcp.json` in your project root:
 | ------------------------- | -------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `B2_APPLICATION_KEY_ID`   | ✅       | —                     | Application key ID (non-master). The workhorse: B2 native + S3 + key management                             |
 | `B2_APPLICATION_KEY`      | ✅       | —                     | Application key secret                                                                                      |
-| `B2_MASTER_KEY_ID`        | —        | falls back to app key | Master key ID — used **only** by the Partner API and `bz_*` Computer Backup tools                           |
+| `B2_MASTER_KEY_ID`        | —        | falls back to app key | Master key ID — used **only** by the Partner API tools                                                      |
 | `B2_MASTER_KEY`           | —        | falls back to app key | Master key secret                                                                                           |
 | `B2_APP_KEY_ID`           | —        | _deprecated_          | Legacy non-master S3 override (only for setups whose primary key is a master key). Prefer `B2_MASTER_KEY_*` |
 | `B2_APP_KEY`              | —        | _deprecated_          | Legacy non-master S3 override secret                                                                        |
 | `B2_REGION`               | —        | `us-west-004`         | B2 region for S3-compatible endpoint                                                                        |
-| `B2_LARGE_FILE_THRESHOLD` | —        | `104857600` (100MB)   | File size above which multipart upload is used                                                              |
-| `B2_PART_SIZE`            | —        | `104857600` (100MB)   | Size of each multipart upload part                                                                          |
 | `B2_MCP_UA_SUFFIX`        | —        | —                     | Optional token appended to the outbound User-Agent (e.g. to tag a deployment)                               |
 
 > Security/hardening vars (`B2_FILE_ROOT`, `B2_ALLOW_LOCAL_FILES`, `B2_MAX_SESSIONS`, `B2_ALLOWED_HOSTS`/`B2_ALLOWED_ORIGINS`) are documented in [`docs/DEPLOY.md`](docs/DEPLOY.md).
@@ -106,42 +104,24 @@ This server does **not** phone home — there is no analytics endpoint and nothi
 
 ## Available Tools
 
-### B2 Native API
+**36 tools — 17 native + 19 S3.** Design split: **object data operations run on the S3-compatible API**; **buckets, application keys, Partner/Groups provisioning, Object Lock, and event notifications stay native** (the S3 API has no equivalent for them, or native is far more compact). Destructive tools (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`, `b2_eject_group_member`, and public/lock-weakening `b2_update_bucket`) require `confirm: true` under the default destructive policy.
 
-| Tool                               | Description                                    |
-| ---------------------------------- | ---------------------------------------------- |
-| `b2_authorize_account`             | Verify credentials and return account info     |
-| `b2_list_buckets`                  | List buckets with optional filters             |
-| `b2_create_bucket`                 | Create a new bucket                            |
-| `b2_delete_bucket`                 | Delete an empty bucket                         |
-| `b2_update_bucket`                 | Update bucket settings, CORS, lifecycle        |
-| `b2_get_bucket_notification_rules` | Get webhook notification rules                 |
-| `b2_set_bucket_notification_rules` | Set webhook notification rules                 |
-| `b2_list_file_names`               | List files with prefix/delimiter support       |
-| `b2_list_file_versions`            | List all file versions                         |
-| `b2_get_file_info`                 | Get file metadata                              |
-| `b2_upload_file`                   | Upload a file (auto-multipart for large files) |
-| `b2_download_file_by_name`         | Download by bucket + file name                 |
-| `b2_download_file_by_id`           | Download by file ID                            |
-| `b2_delete_file_version`           | Delete a file version                          |
-| `b2_hide_file`                     | Hide a file (versioning)                       |
-| `b2_copy_file`                     | Copy a file within B2                          |
-| `b2_start_large_file`              | Start a large file upload session              |
-| `b2_get_upload_part_url`           | Get URL for a part upload                      |
-| `b2_upload_part`                   | Upload a single part                           |
-| `b2_finish_large_file`             | Finalize a large file upload                   |
-| `b2_cancel_large_file`             | Cancel a large file upload                     |
-| `b2_list_parts`                    | List uploaded parts                            |
-| `b2_list_unfinished_large_files`   | List incomplete large file uploads             |
-| `b2_copy_part`                     | Server-side copy of a part                     |
-| `b2_get_download_authorization`    | Generate download auth token                   |
-| `b2_get_download_url_for_file`     | Construct download URL by name                 |
-| `b2_get_download_url_for_file_id`  | Construct download URL by ID                   |
-| `b2_create_key`                    | Create an application key                      |
-| `b2_list_keys`                     | List application keys                          |
-| `b2_delete_key`                    | Delete an application key                      |
-| `b2_update_file_legal_hold`        | Set or clear legal hold on a file              |
-| `b2_update_file_retention`         | Set or clear file retention policy             |
+### B2 Native API — control plane
+
+| Tool                               | Description                                                          |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `b2_authorize_account`             | Verify credentials and return account info                          |
+| `b2_list_buckets`                  | List buckets with optional filters                                  |
+| `b2_create_bucket`                 | Create a new bucket                                                  |
+| `b2_delete_bucket`                 | Delete an empty bucket                                               |
+| `b2_update_bucket`                 | Update bucket type, CORS, lifecycle, encryption, replication, Object Lock |
+| `b2_get_bucket_notification_rules` | Get webhook notification rules                                       |
+| `b2_set_bucket_notification_rules` | Set webhook notification rules                                       |
+| `b2_create_key`                    | Create a (scoped) application key                                    |
+| `b2_list_keys`                     | List application keys                                                |
+| `b2_delete_key`                    | Delete an application key                                            |
+| `b2_update_file_legal_hold`        | Set or clear legal hold on an object                                 |
+| `b2_update_file_retention`         | Set or clear retention on an object                                  |
 
 ### Partner API (requires master key)
 
@@ -152,43 +132,32 @@ This server does **not** phone home — there is no analytics endpoint and nothi
 | `b2_eject_group_member`           | Remove an account from a partner group         |
 | `b2_list_group_members`           | List members of a partner group                |
 | `b2_reserve_trial_create_account` | Create a trial account reservation             |
-| `bz_list_computers`               | List computers registered for Backblaze backup |
-| `bz_delete_computer`              | Delete a computer from Backblaze backup        |
 
-### S3-Compatible API
+### S3-Compatible API — object data plane
 
-| Tool                           | Description               |
-| ------------------------------ | ------------------------- |
-| `s3_list_buckets`              | List buckets              |
-| `s3_create_bucket`             | Create a bucket           |
-| `s3_delete_bucket`             | Delete a bucket           |
-| `s3_head_bucket`               | Check bucket existence    |
-| `s3_get_bucket_versioning`     | Get versioning state      |
-| `s3_put_bucket_versioning`     | Enable/suspend versioning |
-| `s3_get_bucket_cors`           | Get CORS config           |
-| `s3_put_bucket_cors`           | Set CORS config           |
-| `s3_delete_bucket_cors`        | Remove CORS config        |
-| `s3_get_bucket_lifecycle`      | Get lifecycle rules       |
-| `s3_put_bucket_lifecycle`      | Set lifecycle rules       |
-| `s3_get_bucket_acl`            | Get bucket ACL            |
-| `s3_put_bucket_acl`            | Set bucket ACL            |
-| `s3_put_object`                | Upload an object          |
-| `s3_get_object`                | Download an object        |
-| `s3_delete_object`             | Delete an object          |
-| `s3_delete_objects`            | Batch delete objects      |
-| `s3_head_object`               | Get object metadata       |
-| `s3_copy_object`               | Copy an object            |
-| `s3_list_objects_v2`           | List objects (V2)         |
-| `s3_list_object_versions`      | List object versions      |
-| `s3_get_object_acl`            | Get object ACL            |
-| `s3_put_object_acl`            | Set object ACL            |
-| `s3_create_multipart_upload`   | Start multipart upload    |
-| `s3_upload_part`               | Upload a part             |
-| `s3_complete_multipart_upload` | Finalize multipart upload |
-| `s3_abort_multipart_upload`    | Abort multipart upload    |
-| `s3_list_multipart_uploads`    | List in-progress uploads  |
-| `s3_list_parts`                | List uploaded parts       |
-| `s3_get_presigned_url`         | Generate presigned URL    |
+All object data movement runs here. Application keys, provisioning, and notifications are **not** on this surface — they're native (above).
+
+| Tool                          | Description                                                       |
+| ----------------------------- | ---------------------------------------------------------------- |
+| `s3_put_object`               | Upload an object                                                  |
+| `s3_get_object`               | Download an object                                                |
+| `s3_delete_object`            | Delete an object (or a specific version)                          |
+| `s3_delete_objects`           | Bulk-delete objects                                              |
+| `s3_head_object`              | Get object metadata                                              |
+| `s3_copy_object`              | Server-side copy an object                                       |
+| `s3_list_objects_v2`          | List objects by prefix                                          |
+| `s3_list_object_versions`     | List object versions                                            |
+| `s3_create_multipart_upload`  | Start a multipart upload                                        |
+| `s3_upload_part`              | Upload one part                                                  |
+| `s3_complete_multipart_upload`| Finalize a multipart upload                                     |
+| `s3_abort_multipart_upload`   | Abort a multipart upload (discards uploaded parts)              |
+| `s3_list_parts`               | List uploaded parts of a multipart upload                      |
+| `s3_list_multipart_uploads`   | List in-progress multipart uploads                             |
+| `s3_upload_part_copy`         | Copy a part server-side (for large server-side copies)         |
+| `s3_get_presigned_url`        | Generate an S3 presigned PUT/GET URL (browser/CORS handoff)     |
+| `s3_head_bucket`              | Check a bucket exists and is reachable on the S3 endpoint       |
+| `s3_get_bucket_location`      | Get a bucket's region / location constraint                     |
+| `s3_put_bucket_lifecycle`     | Set lifecycle rules, incl. `AbortIncompleteMultipartUpload`     |
 
 ## Example Usage with Claude
 
@@ -233,7 +202,7 @@ B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy npm run test:integration
 
 ## Hosted Deployment
 
-For multi-user / hosted deployments using the HTTP+SSE transport, see
+For multi-user / hosted deployments using the Streamable HTTP transport, see
 [`docs/DEPLOY.md`](docs/DEPLOY.md) — a step-by-step guide covering nginx,
 Let's Encrypt, hardened systemd, fail2ban, and AWS-specific monitoring.
 
@@ -241,7 +210,7 @@ Let's Encrypt, hardened systemd, fail2ban, and AWS-specific monitoring.
 
 - **Use scoped application keys** — create a key with only the capabilities needed for your workflow
 - **Scope to a single bucket** when possible using the `bucketId` parameter in `b2_create_key`
-- **In HTTP+SSE mode**, the server reads B2 credentials from per-request headers, but provides no caller authentication — front it with a proxy that authenticates the _caller_ (Cloudflare Access, an internal SSO proxy, mTLS, etc.) before exposing to untrusted users
+- **In Streamable HTTP mode**, the server reads B2 credentials from per-session headers (sent on the initialize request to `/mcp`), but provides no caller authentication — front it with a proxy that authenticates the _caller_ (Cloudflare Access, an internal SSO proxy, mTLS, etc.) before exposing to untrusted users
 - **Never commit credentials** — always use environment variables or a secrets manager
 
 ## License

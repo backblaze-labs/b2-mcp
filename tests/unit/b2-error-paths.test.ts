@@ -36,8 +36,6 @@ const config: B2Config = {
   masterKeyId: "s",
   masterKey: "s",
   region: "us-west-004",
-  largeFileThreshold: 1e8,
-  partSize: 1e8,
   allowLocalFiles: true,
   fileRoot: null,
 };
@@ -89,6 +87,7 @@ describe("B2 tool error paths (catch blocks)", () => {
     storage: 1,
     accountId: "a",
     computerId: "c",
+    confirm: true, // satisfy the destructive-op gate so the API error path is exercised
   };
 
   // B2-native tools that go through client.call (excludes auth, downloads, and
@@ -100,25 +99,9 @@ describe("B2 tool error paths (catch blocks)", () => {
     "b2_update_bucket",
     "b2_get_bucket_notification_rules",
     "b2_set_bucket_notification_rules",
-    "b2_list_file_names",
-    "b2_list_file_versions",
-    "b2_get_file_info",
-    "b2_delete_file_version",
-    "b2_hide_file",
-    "b2_get_upload_url",
-    "b2_copy_file",
-    "b2_upload_file",
-    "b2_start_large_file",
-    "b2_get_upload_part_url",
-    "b2_finish_large_file",
-    "b2_cancel_large_file",
-    "b2_list_parts",
-    "b2_list_unfinished_large_files",
-    "b2_copy_part",
     "b2_list_keys",
     "b2_create_key",
     "b2_delete_key",
-    "b2_get_download_authorization",
     "b2_update_file_legal_hold",
     "b2_update_file_retention",
     "b2_list_groups",
@@ -126,8 +109,6 @@ describe("B2 tool error paths (catch blocks)", () => {
     "b2_eject_group_member",
     "b2_list_group_members",
     "b2_reserve_trial_create_account",
-    "bz_list_computers",
-    "bz_delete_computer",
   ];
 
   it.each(tools)("%s returns a structured error", async (tool) => {

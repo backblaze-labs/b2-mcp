@@ -2,14 +2,40 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
-import { ALL_CAPABILITIES } from "../utils/types.js";
+import { ALL_CAPABILITIES, B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 
-export function registerKeyTools(server: McpServer, client: B2Client, auth: B2AuthManager): void {
+// Capabilities that let a minted key create or revoke OTHER keys. Granting these
+// to an agent-minted key is a privilege-escalation backdoor (the new key can
+// perpetuate itself or lock out automation), so they are blocked by default.
+const KEY_MGMT_CAPS = ["listKeys", "writeKeys", "deleteKeys"];
+
+// Capabilities that mutate or destroy data / bucket config. A key holding any of
+// these should be scoped to a bucket; an unscoped one is account-wide write power.
+const DATA_WRITE_CAPS = [
+  "writeBuckets",
+  "deleteBuckets",
+  "writeFiles",
+  "deleteFiles",
+  "writeBucketEncryption",
+  "writeBucketRetentions",
+  "writeFileRetentions",
+  "bypassGovernance",
+  "writeBucketReplications",
+  "writeBucketNotifications",
+];
+
+export function registerKeyTools(
+  server: McpServer,
+  client: B2Client,
+  auth: B2AuthManager,
+  config: B2Config,
+): void {
   // ── b2_create_key ─────────────────────────────────────────────────────────
   server.tool(
     "b2_create_key",
-    "Create a new B2 application key with specified capabilities. Keys can be scoped to a single bucket and/or file name prefix for least-privilege access. The application key secret is only returned once — store it immediately.",
+    "Create a new B2 application key with specified capabilities. Keys can be scoped to a single bucket and/or file name prefix for least-privilege access. The application key secret is only returned once — store it immediately. For safety, the server blocks minting keys with key-management capabilities (listKeys/writeKeys/deleteKeys) and unscoped write keys by default, and can enforce a maximum validity; see B2_ALLOW_KEY_MGMT_GRANTS, B2_ALLOW_UNSCOPED_KEYS, and B2_MAX_KEY_DURATION_SECONDS.",
     {
       capabilities: z
         .array(z.string())
@@ -49,6 +75,59 @@ export function registerKeyTools(server: McpServer, client: B2Client, auth: B2Au
     },
     async (args) => {
       try {
+        // ── Trust-boundary lockdown ─────────────────────────────────────────
+        // A minted key is a durable credential the model sees once. Bound what a
+        // (possibly prompt-injected) agent can mint. Overridable via env config.
+        const requested = args.capabilities ?? [];
+
+        if (!config.allowKeyMgmtGrants) {
+          const offending = requested.filter((c) => KEY_MGMT_CAPS.includes(c));
+          if (offending.length > 0) {
+            return toolError(
+              new Error(
+                `Refusing to mint a key with key-management capabilities (${offending.join(", ")}): ` +
+                  `such a key could create or revoke other keys — a privilege-escalation backdoor. ` +
+                  `Set B2_ALLOW_KEY_MGMT_GRANTS=true to override.`,
+              ),
+            );
+          }
+        }
+
+        const isScoped = !!args.bucketId || (args.bucketIds?.length ?? 0) > 0;
+        if (!config.allowUnscopedKeys && !isScoped) {
+          const writeCaps = requested.filter((c) => DATA_WRITE_CAPS.includes(c));
+          if (writeCaps.length > 0) {
+            return toolError(
+              new Error(
+                `Refusing to mint an unscoped key with write/delete capabilities (${writeCaps.join(", ")}): ` +
+                  `scope it to a bucket via bucketId or bucketIds for least privilege. ` +
+                  `Set B2_ALLOW_UNSCOPED_KEYS=true to override.`,
+              ),
+            );
+          }
+        }
+
+        const cap = config.maxKeyDurationSeconds;
+        if (cap != null) {
+          if (!args.validDurationInSeconds) {
+            return toolError(
+              new Error(
+                `This server requires application keys to expire (B2_MAX_KEY_DURATION_SECONDS=${cap}). ` +
+                  `Set validDurationInSeconds (max ${cap}).`,
+              ),
+            );
+          }
+          if (args.validDurationInSeconds > cap) {
+            return toolError(
+              new Error(
+                `validDurationInSeconds ${args.validDurationInSeconds} exceeds the server cap of ${cap} ` +
+                  `seconds (B2_MAX_KEY_DURATION_SECONDS). Lower it or raise the cap.`,
+              ),
+            );
+          }
+        }
+        // ────────────────────────────────────────────────────────────────────
+
         const authData = await auth.getAuth();
         const payload: Record<string, unknown> = {
           accountId: authData.accountId,
@@ -117,9 +196,17 @@ export function registerKeyTools(server: McpServer, client: B2Client, auth: B2Au
     "Permanently delete a B2 application key. This action is irreversible. Any system using the deleted key will lose access immediately.",
     {
       applicationKeyId: z.string().describe("The ID of the application key to delete."),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_delete_key", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const result = await client.call("b2_delete_key", {
           applicationKeyId: args.applicationKeyId,
         });

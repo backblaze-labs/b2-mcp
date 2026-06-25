@@ -2,13 +2,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
+import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { assignDefined } from "../utils/payload.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 
 export function registerBucketTools(
   server: McpServer,
   client: B2Client,
   auth: B2AuthManager,
+  config: B2Config,
 ): void {
   // ── b2_list_buckets ───────────────────────────────────────────────────────
   server.tool(
@@ -128,9 +131,17 @@ export function registerBucketTools(
     "Delete a B2 bucket. The bucket must be empty — all files and file versions must be deleted first.",
     {
       bucketId: z.string().describe("The ID of the bucket to delete."),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_delete_bucket", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const authData = await auth.getAuth();
         const result = await client.call("b2_delete_bucket", {
           accountId: authData.accountId,
@@ -236,9 +247,17 @@ export function registerBucketTools(
         .number()
         .optional()
         .describe("Conditional update — only update if the bucket revision matches this value."),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm a destructive change (making the bucket public, or disabling/clearing Object Lock). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_update_bucket", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const authData = await auth.getAuth();
         const payload: Record<string, unknown> = {
           accountId: authData.accountId,

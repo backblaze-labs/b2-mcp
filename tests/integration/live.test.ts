@@ -29,6 +29,10 @@ const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICA
 const HAS_S3_CREDS = !!(process.env.B2_APP_KEY_ID && process.env.B2_APP_KEY);
 const liveIt = HAS_CREDS ? test : test.skip;
 const liveS3It = HAS_S3_CREDS ? test : test.skip;
+// Partner/Groups API requires B2_PARTNER_LIVE=1 and a master key on a
+// Partner-entitled account. Gated off by default so a normal live run skips it.
+const HAS_PARTNER = HAS_CREDS && process.env.B2_PARTNER_LIVE === "1";
+const partnerIt = HAS_PARTNER ? test : test.skip;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -69,10 +73,8 @@ function isUserWritableBucket(name: string): boolean {
 let server: McpServer;
 
 // Populated during test run for use by later tests
-let firstBucketName: string; // S3 bucket name (from s3_list_buckets)
+let firstBucketName: string; // bucket name (derived from b2_list_buckets)
 let firstBucketId: string; // B2 bucket ID (from b2_list_buckets)
-let firstObjectKey: string; // Key of an object in firstBucketName
-let firstFileId: string; // B2 file ID from b2_list_file_names
 let writableBucketName: string; // First non-snapshot S3 bucket (safe for writes)
 let writableBucketId: string; // First non-snapshot B2 bucket ID (safe for writes)
 
@@ -87,12 +89,12 @@ beforeAll(async () => {
         masterKeyId: "test",
         masterKey: "test",
         region: "us-west-004",
-        largeFileThreshold: 1e8,
-        partSize: 1e8,
         allowLocalFiles: true,
         fileRoot: null,
       };
-  server = createServer(config);
+  // Integration tests legitimately create AND clean up real resources, so disable
+  // the destructive-op gate here (it is unit-tested separately).
+  server = createServer({ ...config, destructivePolicy: "allow" });
 
   if (!HAS_CREDS) return;
 
@@ -104,77 +106,57 @@ beforeAll(async () => {
     if (writableB2) writableBucketId = writableB2.bucketId;
   }
 
-  // S3 discovery only runs when a non-master S3 key is available
-  if (HAS_S3_CREDS) {
-    const s3Buckets = parseResult(await callTool(server, "s3_list_buckets", {}));
-    if (s3Buckets?.buckets?.length) {
-      firstBucketName = s3Buckets.buckets[0].Name;
-      const writableS3 = s3Buckets.buckets.find((b: any) => isUserWritableBucket(b.Name));
-      if (writableS3) writableBucketName = writableS3.Name;
-
-      const objects = parseResult(
-        await callTool(server, "s3_list_objects_v2", { bucket: firstBucketName, maxKeys: 1 }),
-      );
-      if (objects?.objects?.length) {
-        firstObjectKey = objects.objects[0].Key;
-      }
-    }
+  // The retained S3 tools reuse the natively-discovered bucket (the S3 listing
+  // tools were removed as duplicates of the native API).
+  if (HAS_S3_CREDS && b2Buckets?.buckets?.length) {
+    firstBucketName = b2Buckets.buckets[0].bucketName;
+    const writableS3 = b2Buckets.buckets.find((b: any) => isUserWritableBucket(b.bucketName));
+    if (writableS3) writableBucketName = writableS3.bucketName;
   }
 
-  const b2Files = firstBucketId
-    ? parseResult(
-        await callTool(server, "b2_list_file_names", { bucketId: firstBucketId, maxFileCount: 1 }),
-      )
-    : null;
-  if (b2Files?.files?.length) {
-    firstFileId = b2Files.files[0].fileId;
-  }
 });
 
 // ── Protocol layer (no credentials needed) ────────────────────────────────────
 
 describe("Protocol layer", () => {
-  it("registers 85 tools total", () => {
+  it("registers 36 tools total", () => {
     const count = Object.keys((server as any)._registeredTools ?? {}).length;
-    expect(count).toBe(85);
+    expect(count).toBe(36);
   });
 
-  it("has 38 B2 native + Partner b2_ tools", () => {
+  it("has 17 B2 native + Partner b2_ tools", () => {
     const tools = Object.keys((server as any)._registeredTools ?? {});
-    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(38);
+    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(17);
   });
 
-  it("has 2 bz_ backup tools", () => {
+  it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
     const tools = Object.keys((server as any)._registeredTools ?? {});
-    expect(tools.filter((t) => t.startsWith("bz_")).length).toBe(2);
+    expect(tools.filter((t) => t.startsWith("bz_")).length).toBe(0);
   });
 
-  it("has 45 S3-compatible tools (s3_ prefix)", () => {
+  it("has 19 S3-compatible data-plane tools (s3_ prefix)", () => {
     const tools = Object.keys((server as any)._registeredTools ?? {});
-    expect(tools.filter((t) => t.startsWith("s3_")).length).toBe(45);
+    expect(tools.filter((t) => t.startsWith("s3_")).length).toBe(19);
   });
 
   it("includes all expected landmark tools", () => {
     const tools = new Set(Object.keys((server as any)._registeredTools ?? {}));
     for (const name of [
       "b2_authorize_account",
-      "b2_upload_file",
-      "b2_list_buckets",
-      "b2_start_large_file",
-      "b2_update_file_legal_hold",
       "s3_put_object",
-      "s3_get_object",
+      "b2_list_buckets",
+      "s3_create_multipart_upload",
+      "b2_update_file_legal_hold",
+      "s3_head_bucket",
+      "s3_put_bucket_lifecycle",
+      "s3_get_bucket_location",
       "s3_get_presigned_url",
-      "s3_get_object_lock_configuration",
-      "s3_upload_part_copy",
       // Partner API tools
       "b2_list_groups",
       "b2_create_group_member",
       "b2_eject_group_member",
       "b2_list_group_members",
       "b2_reserve_trial_create_account",
-      "bz_list_computers",
-      "bz_delete_computer",
     ]) {
       expect(tools.has(name)).toBe(true);
     }
@@ -215,89 +197,6 @@ describe("B2 Bucket tools", () => {
 
 // ── B2 Native API — Files ─────────────────────────────────────────────────────
 
-describe("B2 File tools", () => {
-  liveIt("b2_list_file_names returns files from first bucket", async () => {
-    if (!firstBucketId) {
-      console.log("  No bucket — skip");
-      return;
-    }
-    const result = parseResult(
-      await callTool(server, "b2_list_file_names", { bucketId: firstBucketId, maxFileCount: 5 }),
-    );
-    expect(result).toHaveProperty("files");
-    console.log("  Files:", result.files.length, "(up to 5)");
-  });
-
-  liveIt("b2_list_file_versions returns version history", async () => {
-    if (!firstBucketId) return;
-    const result = parseResult(
-      await callTool(server, "b2_list_file_versions", { bucketId: firstBucketId, maxFileCount: 5 }),
-    );
-    expect(result).toHaveProperty("files");
-    console.log("  Versions:", result.files.length);
-  });
-
-  liveIt("b2_get_file_info returns metadata for a real file", async () => {
-    if (!firstFileId) {
-      console.log("  No file ID — skip");
-      return;
-    }
-    const result = parseResult(await callTool(server, "b2_get_file_info", { fileId: firstFileId }));
-    expect(result).toHaveProperty("fileId");
-    expect(result).toHaveProperty("fileName");
-    console.log("  File:", result.fileName, `(${result.contentLength} bytes)`);
-  });
-
-  liveIt("b2_get_file_info returns structured error for bad file ID", async () => {
-    const result = await callTool(server, "b2_get_file_info", {
-      fileId: "4_bad_id_000000000000000000000000000",
-    });
-    expect(isError(result)).toBe(true);
-    console.log("  Error:", result?.content?.[0]?.text?.slice(0, 100));
-  });
-
-  liveIt("b2_get_download_url_for_file returns a URL", async () => {
-    if (!firstBucketId) return;
-    const files = parseResult(
-      await callTool(server, "b2_list_file_names", { bucketId: firstBucketId, maxFileCount: 1 }),
-    );
-    if (!files?.files?.length) return;
-    const { fileName } = files.files[0];
-    const b2Buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
-    const bucketName = b2Buckets.buckets[0].bucketName;
-    const result = parseResult(
-      await callTool(server, "b2_get_download_url_for_file", { bucketName, fileName }),
-    );
-    expect(result).toHaveProperty("url");
-    expect(result.url).toMatch(/^https:\/\//);
-    console.log("  Download URL:", result.url.slice(0, 70) + "...");
-  });
-
-  liveIt("b2_get_download_url_for_file_id returns a URL", async () => {
-    if (!firstFileId) return;
-    const result = parseResult(
-      await callTool(server, "b2_get_download_url_for_file_id", { fileId: firstFileId }),
-    );
-    expect(result).toHaveProperty("url");
-    expect(result.url).toMatch(/^https:\/\//);
-  });
-
-  liveIt("b2_get_download_authorization returns an auth token", async () => {
-    if (!firstBucketId) return;
-    const result = parseResult(
-      await callTool(server, "b2_get_download_authorization", {
-        bucketId: firstBucketId,
-        fileNamePrefix: "",
-        validDurationInSeconds: 3600,
-      }),
-    );
-    expect(result).toHaveProperty("authorizationToken");
-    console.log("  Token length:", result.authorizationToken?.length);
-  });
-});
-
-// ── B2 Native API — Keys ──────────────────────────────────────────────────────
-
 describe("B2 Key tools", () => {
   liveIt("b2_list_keys returns application keys", async () => {
     const result = parseResult(await callTool(server, "b2_list_keys", {}));
@@ -318,83 +217,12 @@ describe("B2 Key tools", () => {
 
 // ── B2 Native API — Large Files ───────────────────────────────────────────────
 
-describe("B2 Large File tools", () => {
-  liveIt("b2_list_unfinished_large_files returns in-progress uploads", async () => {
-    if (!firstBucketId) return;
-    const result = parseResult(
-      await callTool(server, "b2_list_unfinished_large_files", { bucketId: firstBucketId }),
-    );
-    expect(result).toHaveProperty("files");
-    console.log("  Unfinished large files:", result.files.length);
-  });
-});
-
-// ── S3-Compatible API — Buckets ───────────────────────────────────────────────
-
 describe("S3 Bucket tools", () => {
-  liveS3It("s3_list_buckets returns a buckets array", async () => {
-    const result = parseResult(await callTool(server, "s3_list_buckets", {}));
-    expect(result).toHaveProperty("buckets");
-    console.log("  S3 bucket count:", result.buckets.length);
-  });
-
   liveS3It("s3_head_bucket confirms first bucket is accessible", async () => {
     if (!firstBucketName) return;
     const result = await callTool(server, "s3_head_bucket", { bucket: firstBucketName });
     expect(isError(result)).toBe(false);
     console.log("  HeadBucket OK:", firstBucketName);
-  });
-
-  liveS3It("s3_get_bucket_versioning returns versioning status", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_get_bucket_versioning", { bucket: firstBucketName }),
-    );
-    expect(result).toHaveProperty("status");
-    console.log("  Versioning:", result.status);
-  });
-
-  liveS3It("s3_get_bucket_cors returns CORS rules (may be empty)", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_get_bucket_cors", { bucket: firstBucketName }),
-    );
-    // Either returns corsRules array or an error (no CORS configured)
-    const hasCors = !isError(
-      await callTool(server, "s3_get_bucket_cors", { bucket: firstBucketName }),
-    );
-    if (hasCors) {
-      expect(result).toHaveProperty("corsRules");
-      console.log("  CORS rules:", result.corsRules.length);
-    } else {
-      console.log("  No CORS configured (expected)");
-    }
-  });
-
-  liveS3It("s3_get_bucket_lifecycle returns lifecycle rules (may be empty)", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_get_bucket_lifecycle", { bucket: firstBucketName }),
-    );
-    const ok = !isError(
-      await callTool(server, "s3_get_bucket_lifecycle", { bucket: firstBucketName }),
-    );
-    if (ok) {
-      expect(result).toHaveProperty("rules");
-      console.log("  Lifecycle rules:", result.rules.length);
-    } else {
-      console.log("  No lifecycle rules (expected)");
-    }
-  });
-
-  liveS3It("s3_get_bucket_acl returns owner and grants", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_get_bucket_acl", { bucket: firstBucketName }),
-    );
-    expect(result).toHaveProperty("owner");
-    expect(result).toHaveProperty("grants");
-    console.log("  ACL owner:", result.owner?.DisplayName, "grants:", result.grants.length);
   });
 
   liveS3It("s3_get_bucket_location returns region", async () => {
@@ -404,30 +232,6 @@ describe("S3 Bucket tools", () => {
     );
     expect(result).toHaveProperty("locationConstraint");
     console.log("  Location:", result.locationConstraint);
-  });
-
-  liveS3It("s3_get_bucket_encryption returns encryption config or error", async () => {
-    if (!firstBucketName) return;
-    const raw = await callTool(server, "s3_get_bucket_encryption", { bucket: firstBucketName });
-    if (!isError(raw)) {
-      const result = parseResult(raw);
-      expect(result).toHaveProperty("serverSideEncryptionConfiguration");
-      console.log("  Encryption configured");
-    } else {
-      console.log("  No default encryption (expected)");
-    }
-  });
-
-  liveS3It("s3_get_bucket_logging returns logging config or empty", async () => {
-    if (!firstBucketName) return;
-    const raw = await callTool(server, "s3_get_bucket_logging", { bucket: firstBucketName });
-    if (!isError(raw)) {
-      const result = parseResult(raw);
-      expect(result).toHaveProperty("loggingEnabled");
-      console.log("  Logging enabled:", result.loggingEnabled !== null);
-    } else {
-      console.log("  Logging not accessible");
-    }
   });
 
   liveS3It("s3_head_bucket returns error for non-existent bucket", async () => {
@@ -441,89 +245,13 @@ describe("S3 Bucket tools", () => {
 
 // ── S3-Compatible API — Objects ───────────────────────────────────────────────
 
-describe("S3 Object tools", () => {
-  liveS3It("s3_list_objects_v2 lists objects from first bucket", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_list_objects_v2", { bucket: firstBucketName, maxKeys: 5 }),
-    );
-    expect(result).toHaveProperty("objects");
-    console.log("  Objects (up to 5):", result.keyCount);
-  });
-
-  liveS3It("s3_list_objects (v1) lists objects from first bucket", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_list_objects", { bucket: firstBucketName, maxKeys: 5 }),
-    );
-    expect(result).toHaveProperty("objects");
-    console.log("  Objects v1 (up to 5):", result.keyCount);
-  });
-
-  liveS3It("s3_list_object_versions returns version list", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_list_object_versions", { bucket: firstBucketName, maxKeys: 5 }),
-    );
-    expect(result).toHaveProperty("versions");
-    console.log(
-      "  Versions:",
-      result.versions.length,
-      "delete markers:",
-      result.deleteMarkers.length,
-    );
-  });
-
-  liveS3It("s3_head_object returns metadata for a real object", async () => {
-    if (!firstBucketName || !firstObjectKey) {
-      console.log("  No object — skip");
-      return;
-    }
-    const result = parseResult(
-      await callTool(server, "s3_head_object", { bucket: firstBucketName, key: firstObjectKey }),
-    );
-    expect(result).toHaveProperty("contentLength");
-    expect(result).toHaveProperty("contentType");
-    console.log(
-      "  Object:",
-      firstObjectKey,
-      `(${result.contentLength} bytes, ${result.contentType})`,
-    );
-  });
-
-  liveS3It("s3_get_object_acl returns object ACL", async () => {
-    if (!firstBucketName || !firstObjectKey) return;
-    const result = parseResult(
-      await callTool(server, "s3_get_object_acl", { bucket: firstBucketName, key: firstObjectKey }),
-    );
-    expect(result).toHaveProperty("owner");
-    console.log("  Object ACL owner:", result.owner?.DisplayName);
-  });
-
-  liveS3It("s3_list_objects_v2 with prefix filter works", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_list_objects_v2", {
-        bucket: firstBucketName,
-        prefix: "",
-        delimiter: "/",
-        maxKeys: 10,
-      }),
-    );
-    expect(result).toHaveProperty("objects");
-    console.log("  Top-level items:", result.keyCount, "prefixes:", result.commonPrefixes.length);
-  });
-});
-
-// ── S3-Compatible API — Presigned URLs ────────────────────────────────────────
-
 describe("S3 Presigned URL", () => {
   liveS3It("s3_get_presigned_url generates a GET URL", async () => {
-    if (!firstBucketName || !firstObjectKey) return;
+    if (!firstBucketName) return;
     const result = parseResult(
       await callTool(server, "s3_get_presigned_url", {
         bucket: firstBucketName,
-        key: firstObjectKey,
+        key: "mcp-presign-probe.txt",
         method: "GET",
         expiresIn: 3600,
       }),
@@ -550,229 +278,6 @@ describe("S3 Presigned URL", () => {
 });
 
 // ── S3-Compatible API — Multipart ─────────────────────────────────────────────
-
-describe("S3 Multipart tools", () => {
-  liveS3It("s3_list_multipart_uploads returns in-progress uploads", async () => {
-    if (!firstBucketName) return;
-    const result = parseResult(
-      await callTool(server, "s3_list_multipart_uploads", { bucket: firstBucketName }),
-    );
-    expect(result).toHaveProperty("uploads");
-    console.log("  In-progress multipart uploads:", result.uploads.length);
-  });
-});
-
-// ── S3-Compatible API — Object Lock ──────────────────────────────────────────
-
-describe("S3 Object Lock tools", () => {
-  liveS3It("s3_get_object_lock_configuration returns config or error", async () => {
-    if (!firstBucketName) return;
-    const raw = await callTool(server, "s3_get_object_lock_configuration", {
-      bucket: firstBucketName,
-    });
-    // Object lock may not be enabled — either a config or a structured error is valid
-    if (!isError(raw)) {
-      const result = parseResult(raw);
-      console.log("  Object lock enabled on", firstBucketName);
-      expect(result).toHaveProperty("objectLockConfiguration");
-    } else {
-      console.log("  Object lock not enabled (expected for most buckets)");
-    }
-  });
-});
-
-// ── Write cycle test (upload → head → download → delete) ─────────────────────
-
-describe("S3 Write cycle (upload → head → download → delete)", () => {
-  const testKey = `mcp-integration-test-${Date.now()}.txt`;
-  const testContent = Buffer.from("Hello from B2 MCP integration test!").toString("base64");
-
-  liveS3It("can upload, inspect, and delete a small object", async () => {
-    if (!writableBucketName) {
-      console.log("  No writable bucket — skip");
-      return;
-    }
-    console.log("  Using writable bucket:", writableBucketName);
-
-    // Upload
-    const putResult = await callTool(server, "s3_put_object", {
-      bucket: writableBucketName,
-      key: testKey,
-      content: testContent,
-      contentType: "text/plain",
-    });
-    expect(isError(putResult)).toBe(false);
-    console.log("  Uploaded:", testKey);
-
-    // Head
-    const headResult = parseResult(
-      await callTool(server, "s3_head_object", { bucket: writableBucketName, key: testKey }),
-    );
-    expect(headResult).toHaveProperty("contentLength");
-    expect(headResult.contentType).toContain("text/plain");
-    console.log("  HeadObject OK:", headResult.contentLength, "bytes");
-
-    // Download
-    const getResult = parseResult(
-      await callTool(server, "s3_get_object", { bucket: writableBucketName, key: testKey }),
-    );
-    expect(getResult).toHaveProperty("content");
-    const decoded = Buffer.from(getResult.content, "base64").toString("utf-8");
-    expect(decoded).toBe("Hello from B2 MCP integration test!");
-    console.log("  Downloaded and verified content");
-
-    // Delete
-    const delResult = await callTool(server, "s3_delete_object", {
-      bucket: writableBucketName,
-      key: testKey,
-    });
-    expect(isError(delResult)).toBe(false);
-    console.log("  Deleted:", testKey);
-  });
-
-  liveIt("can upload via B2 native API and retrieve file info", async () => {
-    if (!writableBucketId) {
-      console.log("  No writable bucket ID — skip");
-      return;
-    }
-    console.log("  Using writable bucket ID:", writableBucketId);
-
-    const fileName = `mcp-b2-test-${Date.now()}.txt`;
-    const uploadResult = parseResult(
-      await callTool(server, "b2_upload_file", {
-        bucketId: writableBucketId,
-        fileName,
-        content: testContent,
-        contentType: "text/plain",
-      }),
-    );
-    expect(uploadResult).toHaveProperty("fileId");
-    const fileId = uploadResult.fileId;
-    console.log("  B2 uploaded:", fileName, "fileId:", fileId);
-
-    // Get file info
-    const infoResult = parseResult(await callTool(server, "b2_get_file_info", { fileId }));
-    expect(infoResult.fileName).toBe(fileName);
-    console.log("  File info OK:", infoResult.contentLength, "bytes");
-
-    // Delete
-    const delResult = parseResult(
-      await callTool(server, "b2_delete_file_version", { fileId, fileName }),
-    );
-    expect(delResult).toHaveProperty("fileId");
-    console.log("  B2 deleted:", fileName);
-  });
-});
-
-// ── Streaming downloads & multipart upload (1.3.0 changed paths) ──────────────
-//
-// Validates the paths refactored/added in this release against real B2:
-//   - b2_upload_file multipart path (start → parts → finish)
-//   - streaming saveToPath downloads (no full-file buffering)
-//   - S3 saveToPath streaming to disk
-// All artifacts are deleted in a finally block.
-
-describe("Streaming downloads & multipart (1.3.0)", () => {
-  liveS3It(
-    "s3_get_object saveToPath streams bytes to disk",
-    async () => {
-      if (!writableBucketName) {
-        console.log("  No writable S3 bucket — skip");
-        return;
-      }
-      const key = `mcp-s3-savepath-${Date.now()}.bin`;
-      const payload = crypto.randomBytes(64 * 1024); // 64 KB
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-s3-dl-"));
-      const dest = path.join(tmpDir, "out.bin");
-
-      const put = await callTool(server, "s3_put_object", {
-        bucket: writableBucketName,
-        key,
-        content: payload.toString("base64"),
-        contentType: "application/octet-stream",
-      });
-      if (isError(put)) {
-        console.log("  s3_put_object error:", put?.content?.[0]?.text?.slice(0, 120));
-      }
-      expect(isError(put)).toBe(false);
-
-      try {
-        const get = await callTool(server, "s3_get_object", {
-          bucket: writableBucketName,
-          key,
-          saveToPath: dest,
-        });
-        expect(isError(get)).toBe(false);
-        const onDisk = fs.readFileSync(dest);
-        expect(onDisk.length).toBe(payload.length);
-        expect(onDisk.equals(payload)).toBe(true);
-        console.log("  S3 saveToPath round-trip OK:", onDisk.length, "bytes");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-        await callTool(server, "s3_delete_object", { bucket: writableBucketName, key });
-      }
-    },
-    30_000,
-  );
-
-  liveIt(
-    "b2 multipart upload + streaming saveToPath download round-trip",
-    async () => {
-      if (!writableBucketId) {
-        console.log("  No writable B2 bucket — skip");
-        return;
-      }
-
-      // Size parts at B2's minimum so a modest payload still produces 3 parts,
-      // exercising the real multipart path (start → upload_part ×3 → finish).
-      const authData = parseResult(await callTool(server, "b2_authorize_account", {}));
-      const PART = Math.max(5_000_000, authData.absoluteMinimumPartSize ?? 5_000_000);
-      const bigServer = createServer({ ...loadConfig(), largeFileThreshold: PART, partSize: PART });
-
-      const payload = crypto.randomBytes(PART * 2 + 1024); // → 3 parts
-      const sha1 = crypto.createHash("sha1").update(payload).digest("hex");
-      const fileName = `mcp-b2-multipart-${Date.now()}.bin`;
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mp-"));
-      const dest = path.join(tmpDir, "out.bin");
-
-      const upload = parseResult(
-        await callTool(bigServer, "b2_upload_file", {
-          bucketId: writableBucketId,
-          fileName,
-          content: payload.toString("base64"),
-          contentType: "application/octet-stream",
-        }),
-      );
-      expect(upload).toHaveProperty("fileId");
-      expect(upload.contentLength).toBe(payload.length);
-      const fileId = upload.fileId;
-      console.log("  Multipart uploaded:", fileName, `(${upload.contentLength} bytes)`);
-
-      try {
-        // Stream the file back to disk via the by-id download path (no buffering).
-        const dl = await callTool(bigServer, "b2_download_file_by_id", {
-          fileId,
-          saveToPath: dest,
-        });
-        expect(isError(dl)).toBe(false);
-        const onDisk = fs.readFileSync(dest);
-        expect(onDisk.length).toBe(payload.length);
-        expect(crypto.createHash("sha1").update(onDisk).digest("hex")).toBe(sha1);
-        console.log("  Streamed download OK, sha1 matches:", onDisk.length, "bytes");
-      } finally {
-        fs.rmSync(tmpDir, { recursive: true, force: true });
-        await callTool(bigServer, "b2_delete_file_version", { fileId, fileName });
-      }
-    },
-    60_000,
-  ); // real multi-MB multipart round-trip
-});
-
-// ── Partner API ───────────────────────────────────────────────────────────────
-//
-// These tests require a Partner API-enabled master key. They are safe read-only
-// calls. If the account is not a Partner admin, the API returns a structured
-// 401/unauthorized — the test accepts that as valid (the HTTP round-trip worked).
 
 describe("Partner API — b2_list_groups", () => {
   liveIt("returns groups array or structured unauthorized error", async () => {
@@ -818,34 +323,6 @@ describe("Partner API — b2_list_group_members", () => {
     console.log("  Error (expected):", text.slice(0, 100));
   });
 });
-
-describe("Partner API — bz_list_computers", () => {
-  liveIt("returns structured error for non-Enterprise account", async () => {
-    const authData = parseResult(await callTool(server, "b2_authorize_account", {}));
-    const result = await callTool(server, "bz_list_computers", {
-      accountId: authData.accountId,
-    });
-    // A standard account without Enterprise Controls returns a structured error
-    if (isError(result)) {
-      console.log("  Error (expected for non-Enterprise):", result.content[0].text.slice(0, 100));
-      expect(result.content[0].text).toBeTruthy();
-    } else {
-      const data = parseResult(result);
-      expect(data).toHaveProperty("computers");
-      console.log("  Computers:", data.computers.length);
-    }
-  });
-});
-
-// ── Partner API — Groups provisioning (gated) ─────────────────────────────────
-//
-// These hit the real Groups endpoints and need a MASTER application key on a
-// Partner-API-entitled account. Opt in with B2_PARTNER_LIVE=1. The read-only
-// flow is safe; the mutating flow is double-gated (see the warning below)
-// because it creates a real, non-deletable Backblaze account.
-
-const HAS_PARTNER = HAS_CREDS && process.env.B2_PARTNER_LIVE === "1";
-const partnerIt = HAS_PARTNER ? test : test.skip;
 
 describe("Partner API — Groups (gated: B2_PARTNER_LIVE=1)", () => {
   partnerIt("read-only: list_groups → list_group_members", async () => {
@@ -930,12 +407,14 @@ describe("Partner API — Groups (gated: B2_PARTNER_LIVE=1)", () => {
 // ── Error handling ────────────────────────────────────────────────────────────
 
 describe("Error handling", () => {
-  liveIt("b2_get_file_info: structured error for bad file ID", async () => {
-    const result = await callTool(server, "b2_get_file_info", {
-      fileId: "4_bad_id_000000000000000000000000000",
+  liveS3It("s3_head_object: structured error for a missing object", async () => {
+    if (!writableBucketName) return;
+    const result = await callTool(server, "s3_head_object", {
+      bucket: writableBucketName,
+      key: "mcp-does-not-exist-xyz-99999",
     });
     expect(isError(result)).toBe(true);
-    expect(result.content[0].text).toContain("400");
+    expect(result.content[0].text).not.toContain("internal_error");
   });
 
   liveS3It("s3_head_bucket: structured error for non-existent bucket", async () => {
@@ -948,20 +427,10 @@ describe("Error handling", () => {
     console.log("  Missing-bucket error:", result.content[0].text.slice(0, 100));
   });
 
-  liveS3It("s3_get_object: structured error for non-existent key", async () => {
-    if (!firstBucketName) return;
-    const result = await callTool(server, "s3_get_object", {
-      bucket: firstBucketName,
-      key: "this-key-definitely-does-not-exist-mcp-test.xyz",
+  liveS3It("s3_list_objects_v2: structured error for a non-existent bucket", async () => {
+    const result = await callTool(server, "s3_list_objects_v2", {
+      bucket: "this-bucket-does-not-exist-xyz-99999",
     });
-    expect(isError(result)).toBe(true);
-    // Previously mislabeled as "internal_error (HTTP 500)"; now the real S3 code surfaces.
-    expect(result.content[0].text).not.toContain("internal_error");
-    console.log("  NoSuchKey error:", result.content[0].text.slice(0, 100));
-  });
-
-  liveIt("b2_list_file_names: structured error for bad bucket ID", async () => {
-    const result = await callTool(server, "b2_list_file_names", { bucketId: "bad_bucket_id_000" });
     expect(isError(result)).toBe(true);
   });
 });

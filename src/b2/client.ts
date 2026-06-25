@@ -38,7 +38,7 @@ export class B2Client {
     options: {
       method?: "GET" | "POST";
       useDownloadUrl?: boolean;
-      /** Override the API path prefix. Defaults to "b2api/v2". Use "b2api/v3" for Partner API endpoints or "api/backup/v1" for Backup API endpoints. */
+      /** Override the API path prefix. Defaults to "b2api/v2". Use "b2api/v3" for Partner API endpoints. */
       apiPath?: string;
       /** Query string parameters for GET requests. */
       params?: Record<string, unknown>;

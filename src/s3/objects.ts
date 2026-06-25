@@ -8,8 +8,6 @@ import {
   CopyObjectCommand,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
-  GetObjectAclCommand,
-  PutObjectAclCommand,
 } from "@aws-sdk/client-s3";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -20,6 +18,10 @@ import { pipeline } from "stream/promises";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import { B2Config } from "../utils/types.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+
+const CONFIRM_DESC =
+  "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
 
 export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
@@ -161,9 +163,12 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key to delete."),
       versionId: z.string().optional().describe("Version ID of the specific version to delete."),
+      confirm: z.boolean().optional().describe(CONFIRM_DESC),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("s3_delete_object", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         await s3.send(
           new DeleteObjectCommand({
             Bucket: args.bucket,
@@ -197,9 +202,12 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
         .optional()
         .default(true)
         .describe("If true, only return errors (not successes) in the response."),
+      confirm: z.boolean().optional().describe(CONFIRM_DESC),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("s3_delete_objects", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const result = await s3.send(
           new DeleteObjectsCommand({
             Bucket: args.bucket,
@@ -391,57 +399,4 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
-    "s3_get_object_acl",
-    "Get the ACL for a B2 object via the S3-compatible API. Note: B2 does not support independent object-level ACLs — objects inherit their parent bucket's ACL. This call reflects the bucket-level ACL.",
-    {
-      bucket: z.string().describe("The bucket name."),
-      key: z.string().describe("The object key."),
-      versionId: z.string().optional(),
-    },
-    async (args) => {
-      try {
-        const result = await s3.send(
-          new GetObjectAclCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            VersionId: args.versionId,
-          }),
-        );
-        return toolJson({ owner: result.Owner, grants: result.Grants ?? [] });
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
-
-  server.tool(
-    "s3_put_object_acl",
-    "Set the canned ACL for a B2 object via the S3-compatible API. Important B2 limitation: objects must have the same ACL as their parent bucket. Setting an object ACL that differs from its bucket will return a 403 Forbidden error. Only 'private' and 'public-read' are supported.",
-    {
-      bucket: z.string().describe("The bucket name."),
-      key: z.string().describe("The object key."),
-      acl: z
-        .enum(["private", "public-read"])
-        .describe(
-          "The canned ACL to apply. Must match the parent bucket's ACL — B2 does not support object-level ACLs that differ from the bucket.",
-        ),
-      versionId: z.string().optional(),
-    },
-    async (args) => {
-      try {
-        await s3.send(
-          new PutObjectAclCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            ACL: args.acl,
-            VersionId: args.versionId,
-          }),
-        );
-        return toolSuccess(`ACL '${args.acl}' applied to '${args.key}'.`);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
 }

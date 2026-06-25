@@ -10,9 +10,6 @@ import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
 
 import { registerBucketTools } from "./b2/buckets.js";
-import { registerFileTools } from "./b2/files.js";
-import { registerLargeFileTools } from "./b2/large-files.js";
-import { registerDownloadUrlTools } from "./b2/download-urls.js";
 import { registerKeyTools } from "./b2/keys.js";
 import { registerObjectLockTools } from "./b2/object-lock.js";
 import { registerPartnerTools } from "./b2/partner.js";
@@ -21,7 +18,6 @@ import { registerS3BucketTools } from "./s3/buckets.js";
 import { registerS3ObjectTools } from "./s3/objects.js";
 import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
-import { registerS3ObjectLockTools } from "./s3/object-lock.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
 
 /**
@@ -36,22 +32,22 @@ export function loadConfig(): B2Config {
     process.exit(1);
   }
 
-  // Optional master key — only the Partner API and bz_* tools need it. Falls
+  // Optional master key — only the Partner API tools need it. Falls
   // back to the application key so a single non-master key is a complete config
   // for everything else. Require both halves or neither.
   const masterId = process.env.B2_MASTER_KEY_ID;
   const masterKey = process.env.B2_MASTER_KEY;
   if (!!masterId !== !!masterKey) {
     logger.warn(
-      "config: B2_MASTER_KEY_ID and B2_MASTER_KEY must both be set; ignoring the partial master key and using the application key for Partner/bz_* tools",
+      "config: B2_MASTER_KEY_ID and B2_MASTER_KEY must both be set; ignoring the partial master key and using the application key for Partner API tools",
     );
   }
   // B2_APP_KEY was the old way to supply a non-master S3 key when the primary
   // was a master key. The current model is the reverse — make the application
-  // key the (non-master) workhorse and set B2_MASTER_KEY only for Partner/bz_*.
+  // key the (non-master) workhorse and set B2_MASTER_KEY only for the Partner API.
   if (process.env.B2_APP_KEY_ID) {
     logger.warn(
-      "config: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Set B2_APPLICATION_KEY_ID to a non-master application key (it handles the S3 API too) and use B2_MASTER_KEY_ID/B2_MASTER_KEY only for Partner/bz_* tools.",
+      "config: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Set B2_APPLICATION_KEY_ID to a non-master application key (it handles the S3 API too) and use B2_MASTER_KEY_ID/B2_MASTER_KEY only for Partner API tools.",
     );
   }
 
@@ -66,13 +62,22 @@ export function loadConfig(): B2Config {
     masterKeyId: (masterId && masterKey ? masterId : undefined) ?? keyId,
     masterKey: (masterId && masterKey ? masterKey : undefined) ?? key,
     region: process.env.B2_REGION ?? "us-west-004",
-    largeFileThreshold: parseIntEnv(process.env.B2_LARGE_FILE_THRESHOLD, 100 * 1024 * 1024),
-    partSize: parseIntEnv(process.env.B2_PART_SIZE, 100 * 1024 * 1024),
     // Local stdio is a trusted single-user process, so disk access is on by
     // default. Set B2_ALLOW_LOCAL_FILES=false to disable, or B2_FILE_ROOT to
     // confine all file paths to one directory.
     allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
     fileRoot: process.env.B2_FILE_ROOT ?? null,
+    // b2_create_key lockdown (see B2Config). Opt-in overrides; safe by default.
+    maxKeyDurationSeconds: process.env.B2_MAX_KEY_DURATION_SECONDS
+      ? parseIntEnv(process.env.B2_MAX_KEY_DURATION_SECONDS, 0)
+      : null,
+    allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
+    allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
+    destructivePolicy:
+      process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
+      process.env.B2_DESTRUCTIVE_POLICY === "block"
+        ? process.env.B2_DESTRUCTIVE_POLICY
+        : "confirm",
     transport: "stdio",
   };
 }
@@ -82,7 +87,7 @@ export function loadConfig(): B2Config {
  *
  * Tools are grouped into three families, each registered by the register*Tools
  * functions below: B2 Native API (buckets, files, large files, download URLs,
- * keys, object lock, auth), Partner API (groups + Computer Backup `bz_*`), and
+ * keys, object lock, auth), Partner API (groups + trial provisioning), and
  * S3-Compatible (buckets, objects, multipart, presigned URLs, object lock,
  * extras). The exact tool count is asserted in tests/unit/tools-schema.test.ts
  * and logged at startup ("server.ready") rather than tracked here, so this
@@ -90,7 +95,7 @@ export function loadConfig(): B2Config {
  *
  * Credential model: B2_APPLICATION_KEY_ID/KEY is the application key — the
  * workhorse for the B2 native API, S3, and key management. A single non-master
- * key works for everything except the Partner API and bz_* Computer Backup,
+ * key works for everything except the Partner API,
  * which need a master key — set B2_MASTER_KEY_ID/KEY for those (optional). The
  * master key is used only by those tools; everything else uses the application
  * key. (B2's S3 endpoint rejects master keys, which is exactly why the
@@ -131,7 +136,7 @@ export function createServer(config: B2Config): McpServer {
   );
 
   // Initialize clients. The application (workhorse) key drives the B2 native
-  // API, S3, and key management. The Partner API and bz_* tools use the master
+  // API, S3, and key management. The Partner API tools use the master
   // key; when no distinct master key is configured they fall back to the same
   // application-key client, so a single non-master key needs no extra wiring.
   const auth = new B2AuthManager(config);
@@ -150,23 +155,19 @@ export function createServer(config: B2Config): McpServer {
     ? new B2Client(masterAuth, buildUserAgent(config))
     : b2Client;
 
-  // ── B2 Native API tools ─────────────────────────────────────────────────
-  registerBucketTools(server, b2Client, auth);
-  registerFileTools(server, b2Client, auth, config);
-  registerLargeFileTools(server, b2Client, auth);
-  registerDownloadUrlTools(server, b2Client, auth);
-  registerKeyTools(server, b2Client, auth);
+  // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
+  registerBucketTools(server, b2Client, auth, config);
+  registerKeyTools(server, b2Client, auth, config);
   registerObjectLockTools(server, b2Client);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
-  registerPartnerTools(server, masterClient, masterAuth);
+  registerPartnerTools(server, masterClient, masterAuth, config);
 
-  // ── S3-Compatible API tools ─────────────────────────────────────────────
+  // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
   registerS3BucketTools(server, s3Client);
   registerS3ObjectTools(server, s3Client, config);
-  registerS3MultipartTools(server, s3Client);
+  registerS3MultipartTools(server, s3Client, config);
   registerS3PresignedTools(server, s3Client);
-  registerS3ObjectLockTools(server, s3Client);
   registerS3ExtraTools(server, s3Client);
 
   const toolCount = wrapToolsWithAudit(server, config);

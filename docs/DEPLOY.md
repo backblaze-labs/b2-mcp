@@ -1,6 +1,6 @@
 # Self-hosting the B2 MCP server
 
-This guide walks through deploying the HTTP+SSE transport behind nginx with
+This guide walks through deploying the Streamable HTTP transport behind nginx with
 Let's Encrypt TLS on AWS EC2. The same recipe works on any Linux VM — only
 the AWS-specific steps differ.
 
@@ -12,7 +12,7 @@ README's Quick Start instead — none of this is required.
 ```
 Client (Claude Desktop)
     │
-    │ HTTPS / SSE  (request includes X-B2-* headers)
+    │ HTTPS  POST/GET/DELETE /mcp  (initialize POST includes X-B2-* headers)
     ▼
 nginx :443  ──TLS termination, rate limits, ACL, security headers──┐
     │                                                              │
@@ -25,8 +25,10 @@ node :3000  ── per-session McpServer, credentials in memory only ──┘
 api.backblazeb2.com / s3.<region>.backblazeb2.com
 ```
 
-Each SSE connection creates its own `McpServer` instance with its own
-`B2Config`. Credentials live only inside that session.
+Each session (opened by an `initialize` POST to `/mcp`) creates its own
+`McpServer` instance with its own `B2Config`. Credentials live only inside that
+session. This is the MCP **Streamable HTTP** transport (spec 2025-03-26), which
+replaced the now-deprecated HTTP+SSE transport.
 
 ## Prerequisites
 
@@ -148,7 +150,6 @@ sudo systemctl start nginx
 `/etc/nginx/conf.d/b2-mcp.conf`:
 
 ```nginx
-limit_req_zone $binary_remote_addr zone=mcp_sse:10m rate=10r/m;
 limit_req_zone $binary_remote_addr zone=mcp_msg:10m rate=120r/m;
 limit_conn_zone $binary_remote_addr zone=mcp_conn:10m;
 
@@ -178,25 +179,21 @@ server {
 
     access_log /var/log/nginx/access.log mcp_safe;
 
-    location = /sse {
-        limit_req zone=mcp_sse burst=5 nodelay;
+    # Streamable HTTP: one endpoint handles POST (JSON-RPC, incl. initialize),
+    # GET (long-lived server->client stream), and DELETE (terminate session).
+    location = /mcp {
+        limit_req zone=mcp_msg burst=30 nodelay;
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
+        client_max_body_size 1m;
+        # The GET stream is long-lived; disable buffering so events flush promptly.
         proxy_buffering off;
         proxy_cache off;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
         chunked_transfer_encoding off;
-    }
-
-    location = /messages {
-        limit_req zone=mcp_msg burst=30 nodelay;
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        client_max_body_size 1m;
     }
 
     location = /health {
@@ -272,7 +269,7 @@ For a single host this is optional, but useful at scale:
 
 ### Claude Desktop (macOS / Windows)
 
-Claude Desktop's `claude_desktop_config.json` only accepts **stdio** entries (`command` + `args`). To reach a hosted SSE server, use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge — it runs as a local stdio process and proxies to your hosted endpoint:
+Claude Desktop's `claude_desktop_config.json` only accepts **stdio** entries (`command` + `args`). To reach a hosted Streamable HTTP server, use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge — it runs as a local stdio process and proxies to your hosted endpoint:
 
 ```json
 {
@@ -282,7 +279,7 @@ Claude Desktop's `claude_desktop_config.json` only accepts **stdio** entries (`c
       "args": [
         "-y",
         "mcp-remote",
-        "https://mcp.your-domain.example/sse",
+        "https://mcp.your-domain.example/mcp",
         "--header",
         "X-B2-Key-Id:your-application-key-id",
         "--header",
@@ -312,7 +309,7 @@ For the Claude.ai web app and the Custom Connector UI in Claude Desktop Pro/Max,
 {
   "mcpServers": {
     "backblaze-b2": {
-      "url": "https://mcp.your-domain.example/sse",
+      "url": "https://mcp.your-domain.example/mcp",
       "headers": {
         "X-B2-Key-Id": "your-application-key-id",
         "X-B2-Key": "your-application-key-secret"
@@ -331,7 +328,7 @@ The server is stateless apart from in-memory session records. A 2 vCPU /
 ~50–100 MB per active large-file upload (one `partSize` chunk per worker).
 
 For larger deployments, run multiple instances behind an ALB with sticky
-sessions — each SSE connection must reach the same backend that created
+sessions — each session's requests must reach the same backend that created
 it (the session ID is in-memory).
 
 ## Updates
@@ -350,11 +347,11 @@ so an in-flight request will not be cut mid-response.
 ## Smoke test
 
 After every deploy, run the included end-to-end smoke test against the
-live server. It connects via SSE, lists tools, and exercises one tool
-per credential scope.
+live server. It connects via Streamable HTTP, lists tools, and exercises one
+tool per credential scope.
 
 ```bash
-MCP_URL=https://mcp.your-domain.example/sse \
+MCP_URL=https://mcp.your-domain.example/mcp \
 B2_KEY_ID=...  B2_KEY=... \
 B2_APP_KEY_ID=...  B2_APP_KEY=... \
 npm run smoke
@@ -373,7 +370,7 @@ The same script also runs automatically via `.github/workflows/smoke.yml`:
 
 It depends on these repo-level secrets and variable:
 
-- `vars.MCP_URL` — full SSE endpoint (e.g. `https://mcp.example.com/sse`)
+- `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
 - `secrets.B2_KEY_ID`, `secrets.B2_KEY`
 - `secrets.B2_APP_KEY_ID`, `secrets.B2_APP_KEY`
 

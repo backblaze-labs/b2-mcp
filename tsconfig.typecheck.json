@@ -1,0 +1,16 @@
+{
+  // Type-check ONLY config: compiles src + tests (the build tsconfig excludes
+  // tests, so `npm run build` never caught compile errors in test files —
+  // notably integration tests, which otherwise only compile when run with live
+  // credentials). Emits nothing; used by the `typecheck` / `pretest` gate.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

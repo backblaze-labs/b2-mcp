@@ -1,5 +1,5 @@
 /**
- * Per-key token-bucket rate limiter for /messages requests.
+ * Per-key token-bucket rate limiter for /mcp requests.
  *
  * Nginx already rate-limits by IP. This is the second tier: a misbehaving
  * key (runaway client loop) gets throttled even when its IP is fine. The

@@ -1,24 +1,29 @@
 #!/usr/bin/env node
 /**
- * Backblaze B2 MCP Server — HTTP + SSE transport entry point.
+ * Backblaze B2 MCP Server — Streamable HTTP transport entry point.
  *
- * Credentials are read per-connection from request headers:
+ * Implements the MCP **Streamable HTTP** transport (spec 2025-03-26), which
+ * replaced the now-deprecated HTTP+SSE transport. A single endpoint handles all
+ * traffic:
+ *   POST   /mcp   — client→server JSON-RPC (the `initialize` request opens a
+ *                   session; the response carries the `Mcp-Session-Id`)
+ *   GET    /mcp   — opens the server→client stream for an existing session
+ *   DELETE /mcp   — terminates a session
+ *   GET    /health
+ *
+ * Credentials are read per-connection from the headers on the `initialize` POST
+ * (the transport then binds them to that session for its lifetime):
  *   X-B2-Key-Id          — application key ID (the workhorse: native + S3 + key mgmt)
  *   X-B2-Key             — application key secret
- *   X-B2-Master-Key-Id   — master key ID, ONLY for Partner API + bz_* tools (optional)
+ *   X-B2-Master-Key-Id   — master key ID, ONLY for Partner API tools (optional)
  *   X-B2-Master-Key      — master key secret (optional)
  *   X-B2-App-Key-Id      — DEPRECATED non-master S3 override for legacy master-primary setups
  *   X-B2-App-Key         — DEPRECATED (see above)
- *
- * The server listens on:
- *   GET  /sse      — SSE event stream for server-to-client messages
- *   POST /messages — MCP message endpoint
- *   GET  /health   — health check
  */
 
 import * as http from "http";
 import * as crypto from "crypto";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createServer } from "./server.js";
 import { B2Config } from "./utils/types.js";
@@ -28,7 +33,6 @@ import { logger } from "./utils/logger.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 
 const DEFAULT_PORT = 3000;
-const DEFAULT_PART_SIZE = 100 * 1024 * 1024;
 const DEFAULT_REGION = "us-west-004";
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
@@ -47,8 +51,34 @@ function csvEnv(name: string): string[] {
 const ALLOWED_HOSTS = csvEnv("B2_ALLOWED_HOSTS");
 const ALLOWED_ORIGINS = csvEnv("B2_ALLOWED_ORIGINS");
 
+/**
+ * DNS-rebinding protection. Validate Host / Origin against the configured
+ * allowlists (the transport's own host/origin options are deprecated in favor of
+ * external validation, so we do it here). Returns true when the request is allowed.
+ */
+function hostOriginAllowed(req: { headers: http.IncomingHttpHeaders }): boolean {
+  if (ALLOWED_HOSTS.length > 0) {
+    const host = Array.isArray(req.headers.host) ? "" : (req.headers.host ?? "");
+    if (!ALLOWED_HOSTS.includes(host)) return false;
+  }
+  if (ALLOWED_ORIGINS.length > 0) {
+    const origin = Array.isArray(req.headers.origin) ? "" : (req.headers.origin ?? "");
+    // Only enforce when an Origin header is present (non-browser clients omit it).
+    if (origin && !ALLOWED_ORIGINS.includes(origin)) return false;
+  }
+  return true;
+}
+
+/** True if the parsed JSON-RPC payload is (or contains) an `initialize` request. */
+function isInitialize(body: unknown): boolean {
+  const msgs = Array.isArray(body) ? body : [body];
+  return msgs.some(
+    (m) => !!m && typeof m === "object" && (m as { method?: unknown }).method === "initialize",
+  );
+}
+
 interface Session {
-  transport: SSEServerTransport;
+  transport: StreamableHTTPServerTransport;
   mcpServer: McpServer;
   lastActivity: number;
   /** Rate-limiter key — a hash of the X-B2-Key-Id used to connect (not a prefix). */
@@ -81,7 +111,7 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
   const appKey = req.headers["x-b2-app-key"];
   const resolvedAppKeyId = !Array.isArray(appKeyId) && appKeyId ? appKeyId : keyId;
   const resolvedAppKey = !Array.isArray(appKey) && appKey ? appKey : key;
-  // Optional master key — used only by the Partner API and bz_* tools. Falls
+  // Optional master key — used only by the Partner API tools. Falls
   // back to the application key, so a single key remains a complete config.
   const masterKeyId = req.headers["x-b2-master-key-id"];
   const masterKey = req.headers["x-b2-master-key"];
@@ -95,16 +125,35 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
     masterKeyId: resolvedMasterKeyId,
     masterKey: resolvedMasterKey,
     region: process.env.B2_REGION ?? DEFAULT_REGION,
-    largeFileThreshold: parseIntEnv(process.env.B2_LARGE_FILE_THRESHOLD, DEFAULT_PART_SIZE),
-    partSize: parseIntEnv(process.env.B2_PART_SIZE, DEFAULT_PART_SIZE),
     // Local disk access is OFF by default on the internet-facing transport — a
     // remote caller must not reference server-local paths (use base64 content).
     // An operator may opt in, but ONLY confined to a sandbox root (never
     // unrestricted over HTTP).
     allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES === "true" && !!process.env.B2_FILE_ROOT,
     fileRoot: process.env.B2_FILE_ROOT ?? null,
+    // b2_create_key lockdown (see B2Config). Operator policy from env; safe by default.
+    maxKeyDurationSeconds: process.env.B2_MAX_KEY_DURATION_SECONDS
+      ? parseIntEnv(process.env.B2_MAX_KEY_DURATION_SECONDS, 0)
+      : null,
+    allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
+    allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
+    destructivePolicy:
+      process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
+      process.env.B2_DESTRUCTIVE_POLICY === "block"
+        ? process.env.B2_DESTRUCTIVE_POLICY
+        : "confirm",
     transport: "http",
   };
+}
+
+function sessionIdHeader(req: http.IncomingMessage): string | undefined {
+  const v = req.headers["mcp-session-id"];
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function writeJson(res: http.ServerResponse, status: number, body: unknown, headers = {}): void {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers });
+  res.end(JSON.stringify(body));
 }
 
 export interface HttpServerHandle {
@@ -121,7 +170,7 @@ export interface HttpServerHandle {
  * ephemeral port. main() wires in getPort(), listen(), and graceful shutdown.
  */
 export function buildHttpServer(): HttpServerHandle {
-  // Map of sessionId → session record with last-activity timestamp
+  // Map of Mcp-Session-Id → session record with last-activity timestamp
   const sessions = new Map<string, Session>();
   let shuttingDown = false;
 
@@ -131,13 +180,13 @@ export function buildHttpServer(): HttpServerHandle {
   }
 
   // Fully tear down a session: close the transport AND the McpServer (which
-  // holds ~85 registered tools + auth/clients) so neither leaks on disconnect.
+  // holds its registered tools + auth/clients) so neither leaks on disconnect.
   function closeSession(sessionId: string): void {
     const s = sessions.get(sessionId);
     if (!s) return;
     sessions.delete(sessionId);
     try {
-      s.transport.close();
+      void s.transport.close();
     } catch {
       /* ignore */
     }
@@ -149,7 +198,7 @@ export function buildHttpServer(): HttpServerHandle {
   }
 
   // Sweep idle sessions periodically — protects against stuck connections
-  // that never fired res.on("close").
+  // that never fired transport.onclose.
   const idleSweep = setInterval(() => {
     const now = Date.now();
     const cutoff = now - SESSION_IDLE_TIMEOUT_MS;
@@ -162,144 +211,183 @@ export function buildHttpServer(): HttpServerHandle {
   }, IDLE_SWEEP_INTERVAL_MS);
   idleSweep.unref();
 
-  const httpServer = http.createServer(async (req, res) => {
-    // Base origin is only used to parse relative URLs; the port is irrelevant.
-    const url = new URL(req.url ?? "/", "http://localhost");
-
-    if (shuttingDown) {
-      res.writeHead(503, { "Content-Type": "application/json", Connection: "close" });
-      res.end(JSON.stringify({ error: "Server is shutting down" }));
-      return;
-    }
-
-    // SSE connection endpoint — each connection gets its own server instance
-    if (req.method === "GET" && url.pathname === "/sse") {
-      const config = configFromHeaders(req);
-      if (!config) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            error: "Missing credentials: X-B2-Key-Id and X-B2-Key headers are required",
-          }),
-        );
-        return;
-      }
-
-      const rateKey = deriveRateKey(config.applicationKeyId);
-
-      // Bound resource use: cap total sessions and per-credential sessions so a
-      // flood of /sse connections can't exhaust memory / file descriptors.
-      if (sessions.size >= MAX_SESSIONS) {
-        res.writeHead(503, { "Content-Type": "application/json", "Retry-After": "5" });
-        res.end(JSON.stringify({ error: "Server at capacity, try again later" }));
-        return;
-      }
-      let perKey = 0;
-      for (const s of sessions.values()) if (s.rateKey === rateKey) perKey++;
-      if (perKey >= MAX_SESSIONS_PER_KEY) {
-        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "5" });
-        res.end(JSON.stringify({ error: "Too many concurrent sessions for this key" }));
-        return;
-      }
-
-      const mcpServer = createServer(config);
-      const transport = new SSEServerTransport("/messages", res, {
-        enableDnsRebindingProtection: ALLOWED_HOSTS.length > 0 || ALLOWED_ORIGINS.length > 0,
-        allowedHosts: ALLOWED_HOSTS,
-        allowedOrigins: ALLOWED_ORIGINS,
-      });
-      sessions.set(transport.sessionId, {
-        transport,
-        mcpServer,
-        lastActivity: Date.now(),
-        rateKey,
-      });
-
-      res.on("close", () => {
-        closeSession(transport.sessionId);
-      });
-
-      await mcpServer.connect(transport);
-      return;
-    }
-
-    // Message endpoint
-    if (req.method === "POST" && url.pathname === "/messages") {
-      const sessionId = url.searchParams.get("sessionId");
-      if (!sessionId) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Missing sessionId parameter" }));
-        return;
-      }
-
-      const session = sessions.get(sessionId);
-      if (!session) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Session not found" }));
-        return;
-      }
-
-      if (!allowRequest(session.rateKey)) {
-        res.writeHead(429, { "Content-Type": "application/json", "Retry-After": "1" });
-        res.end(JSON.stringify({ error: "Rate limit exceeded" }));
-        return;
-      }
-
+  // Read the request body with a hard size cap. Resolves with the raw string,
+  // or null if the cap was exceeded (in which case a 413 has been sent).
+  function readCappedBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<string | null> {
+    return new Promise((resolve) => {
       let body = "";
-      let bodyBytes = 0;
+      let bytes = 0;
       let aborted = false;
       req.on("data", (chunk: Buffer) => {
         if (aborted) return;
-        bodyBytes += chunk.length;
-        if (bodyBytes > MAX_BODY_BYTES) {
+        bytes += chunk.length;
+        if (bytes > MAX_BODY_BYTES) {
           aborted = true;
-          // Respond 413 but keep reading-and-discarding the rest of the body so
-          // the response is delivered cleanly (resetting the socket mid-upload
-          // would deny the client the 413). A well-behaved client stops sending
-          // as soon as it sees the response.
-          res.writeHead(413, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Request body too large" }));
+          writeJson(res, 413, { error: "Request body too large" });
+          resolve(null);
           return;
         }
         body += chunk.toString();
       });
-      req.on("end", async () => {
-        if (aborted) return;
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(body);
-        } catch {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Invalid JSON body" }));
-          return;
+      req.on("end", () => {
+        if (!aborted) resolve(body);
+      });
+      req.on("error", () => {
+        if (!aborted) {
+          aborted = true;
+          resolve(null);
         }
-        try {
-          touch(sessionId);
-          await session.transport.handlePostMessage(req, res, parsed);
-        } catch {
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Internal server error" }));
-        }
+      });
+    });
+  }
+
+  const httpServer = http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+
+    if (shuttingDown) {
+      writeJson(res, 503, { error: "Server is shutting down" }, { Connection: "close" });
+      return;
+    }
+
+    // Health check — no auth, no session.
+    if (req.method === "GET" && url.pathname === "/health") {
+      writeJson(res, 200, {
+        status: "ok",
+        server: "backblaze-b2-mcp",
+        version: VERSION,
+        activeSessions: sessions.size,
       });
       return;
     }
 
-    // Health check
-    if (req.method === "GET" && url.pathname === "/health") {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          status: "ok",
-          server: "backblaze-b2-mcp",
-          version: VERSION,
-          activeSessions: sessions.size,
-        }),
-      );
+    if (url.pathname !== "/mcp") {
+      writeJson(res, 404, { error: "Not found" });
       return;
     }
 
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Not found" }));
+    // DNS-rebinding protection on the MCP endpoint.
+    if (!hostOriginAllowed(req)) {
+      writeJson(res, 403, { error: "Host/Origin not allowed" });
+      return;
+    }
+
+    // ── Existing-session requests (POST follow-ups, GET stream, DELETE) ──────
+    // POST with a session id, and all GET/DELETE, route to the live transport.
+    const sessionId = sessionIdHeader(req);
+
+    if (req.method === "GET" || req.method === "DELETE") {
+      if (!sessionId || !sessions.has(sessionId)) {
+        writeJson(res, 404, { error: "Session not found" });
+        return;
+      }
+      const session = sessions.get(sessionId)!;
+      if (!allowRequest(session.rateKey)) {
+        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+        return;
+      }
+      touch(sessionId);
+      try {
+        await session.transport.handleRequest(req, res);
+      } catch {
+        if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
+      }
+      return;
+    }
+
+    if (req.method !== "POST") {
+      writeJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    // POST — read + parse the JSON-RPC body (size-capped).
+    const raw = await readCappedBody(req, res);
+    if (raw === null) return; // 413 already sent
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      writeJson(res, 400, { error: "Invalid JSON body" });
+      return;
+    }
+
+    // Follow-up POST on an established session.
+    if (sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        writeJson(res, 404, { error: "Session not found" });
+        return;
+      }
+      if (!allowRequest(session.rateKey)) {
+        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+        return;
+      }
+      touch(sessionId);
+      try {
+        await session.transport.handleRequest(req, res, parsed);
+      } catch {
+        if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
+      }
+      return;
+    }
+
+    // New session — must be an `initialize` request carrying credentials.
+    if (!isInitialize(parsed)) {
+      writeJson(res, 400, {
+        error: "Missing Mcp-Session-Id header (and request is not an initialize)",
+      });
+      return;
+    }
+
+    const config = configFromHeaders(req);
+    if (!config) {
+      writeJson(res, 401, {
+        error: "Missing credentials: X-B2-Key-Id and X-B2-Key headers are required",
+      });
+      return;
+    }
+
+    const rateKey = deriveRateKey(config.applicationKeyId);
+    if (!allowRequest(rateKey)) {
+      writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+      return;
+    }
+    // Bound resource use: cap total and per-credential concurrent sessions.
+    if (sessions.size >= MAX_SESSIONS) {
+      writeJson(res, 503, { error: "Server at capacity, try again later" }, { "Retry-After": "5" });
+      return;
+    }
+    let perKey = 0;
+    for (const s of sessions.values()) if (s.rateKey === rateKey) perKey++;
+    if (perKey >= MAX_SESSIONS_PER_KEY) {
+      writeJson(res, 429, { error: "Too many concurrent sessions for this key" }, { "Retry-After": "5" });
+      return;
+    }
+
+    const mcpServer = createServer(config);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      onsessioninitialized: (sid) => {
+        sessions.set(sid, { transport, mcpServer, lastActivity: Date.now(), rateKey });
+      },
+    });
+    // When the transport closes (DELETE, client disconnect), drop the session.
+    transport.onclose = () => {
+      const sid = transport.sessionId;
+      if (sid) closeSession(sid);
+    };
+
+    try {
+      await mcpServer.connect(transport);
+      await transport.handleRequest(req, res, parsed);
+    } catch {
+      if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
+      try {
+        void transport.close();
+        void mcpServer.close();
+      } catch {
+        /* ignore */
+      }
+    }
   });
 
   function drain(): void {
@@ -322,7 +410,7 @@ async function main(): Promise<void> {
     logger.info({ transport: "http", port }, "server.started");
   });
 
-  // Graceful shutdown — stop accepting new connections, drain active SSE sessions, exit.
+  // Graceful shutdown — stop accepting new connections, drain active sessions, exit.
   let shuttingDown = false;
   function shutdown(signal: string): void {
     if (shuttingDown) return;

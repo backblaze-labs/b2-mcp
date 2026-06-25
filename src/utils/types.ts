@@ -1,9 +1,12 @@
 // ── Shared Types ─────────────────────────────────────────────────────────────
 
+/** Policy for the destructive-operation gate (see utils/destructive-gate.ts). */
+export type DestructivePolicy = "allow" | "confirm" | "block";
+
 export interface B2Config {
   /** The application key — the workhorse credential. Used for the B2 native API,
    *  the S3-compatible API, and key management. A non-master key is all most
-   *  users need; it works for everything except the Partner API and `bz_*`. */
+   *  users need; it works for everything except the Partner API. */
   applicationKeyId: string;
   applicationKey: string;
   /** Credential the S3-compatible client signs with. Defaults to the application
@@ -12,14 +15,12 @@ export interface B2Config {
    *  S3 endpoint rejects master keys). */
   appKeyId: string;
   appKey: string;
-  /** Optional master application key, used ONLY by the Partner API and `bz_*`
-   *  Computer Backup tools. Falls back to the application key when unset, so a
+  /** Optional master application key, used ONLY by the Partner API
+   *  tools. Falls back to the application key when unset, so a
    *  single non-master key remains a complete config for everything else. */
   masterKeyId: string;
   masterKey: string;
   region: string;
-  largeFileThreshold: number; // bytes
-  partSize: number; // bytes
   /**
    * Whether tools may read/write local filesystem paths (filePath / saveToPath).
    * Enabled by default for the local stdio transport; disabled by default for
@@ -33,6 +34,29 @@ export interface B2Config {
    * single-user stdio process. Set via B2_FILE_ROOT.
    */
   fileRoot: string | null;
+  /**
+   * b2_create_key trust-boundary lockdown. A minted key is a durable credential
+   * the model sees once; these bound what a (possibly prompt-injected) agent can
+   * mint. All optional — undefined means the safe default shown.
+   */
+  /** Max validDurationInSeconds b2_create_key may grant. null = no cap (default).
+   *  When set, b2_create_key rejects non-expiring keys and keys above the cap.
+   *  Set via B2_MAX_KEY_DURATION_SECONDS. */
+  maxKeyDurationSeconds?: number | null;
+  /** Allow b2_create_key to grant key-management capabilities
+   *  (listKeys/writeKeys/deleteKeys). Default false — such a key could mint or
+   *  revoke other keys, a privilege-escalation backdoor. Set via
+   *  B2_ALLOW_KEY_MGMT_GRANTS=true. */
+  allowKeyMgmtGrants?: boolean;
+  /** Allow b2_create_key to mint a key with write/delete capabilities but no
+   *  bucket scope. Default false — forces least privilege. Set via
+   *  B2_ALLOW_UNSCOPED_KEYS=true. */
+  allowUnscopedKeys?: boolean;
+  /** Gate policy for destructive/irreversible tools (delete bucket/file-version/
+   *  key, cancel large file, eject group member, make-public / weaken-lock via
+   *  b2_update_bucket). "confirm" (default) requires confirm:true; "block" refuses;
+   *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY. */
+  destructivePolicy?: DestructivePolicy;
   /** Which transport launched this server — surfaced in the outbound User-Agent. */
   transport?: "stdio" | "http";
 }

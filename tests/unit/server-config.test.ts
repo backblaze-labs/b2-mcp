@@ -3,8 +3,7 @@
  *
  * Verifies that:
  *   - Required env vars B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are enforced
- *   - Optional vars B2_REGION, B2_LARGE_FILE_THRESHOLD, B2_PART_SIZE have correct defaults
- *   - parseInt is applied correctly to numeric env vars
+ *   - Optional var B2_REGION has the correct default
  */
 
 // We need to control process.env and mock process.exit to test loadConfig
@@ -83,30 +82,6 @@ describe("loadConfig — valid env vars", () => {
     process.env.B2_REGION = "eu-central-003";
     const config = await loadConfig();
     expect(config.region).toBe("eu-central-003");
-  });
-
-  it("defaults largeFileThreshold to 100MB when not set", async () => {
-    delete process.env.B2_LARGE_FILE_THRESHOLD;
-    const config = await loadConfig();
-    expect(config.largeFileThreshold).toBe(100 * 1024 * 1024);
-  });
-
-  it("parses B2_LARGE_FILE_THRESHOLD as an integer", async () => {
-    process.env.B2_LARGE_FILE_THRESHOLD = "52428800"; // 50MB
-    const config = await loadConfig();
-    expect(config.largeFileThreshold).toBe(52428800);
-  });
-
-  it("defaults partSize to 100MB when not set", async () => {
-    delete process.env.B2_PART_SIZE;
-    const config = await loadConfig();
-    expect(config.partSize).toBe(100 * 1024 * 1024);
-  });
-
-  it("parses B2_PART_SIZE as an integer", async () => {
-    process.env.B2_PART_SIZE = "10485760"; // 10MB
-    const config = await loadConfig();
-    expect(config.partSize).toBe(10485760);
   });
 
   it("defaults appKeyId to applicationKeyId when B2_APP_KEY_ID is not set", async () => {

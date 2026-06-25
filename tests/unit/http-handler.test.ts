@@ -83,7 +83,7 @@ function postLargeBody(port: number, pathname: string): Promise<number> {
 // Minimal stand-in for a Session — enough for cap checks and teardown.
 function fakeSession(rateKey: string): any {
   return {
-    transport: { close() {}, sessionId: "x", async handlePostMessage() {} },
+    transport: { close() {}, sessionId: "x", async handleRequest() {} },
     mcpServer: { async close() {} },
     lastActivity: Date.now(),
     rateKey,
@@ -105,10 +105,17 @@ afterEach(async () => {
 });
 
 const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
+const JSON_HEADERS = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+const INIT = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "initialize",
+  params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+});
 
-describe("HTTP handler", () => {
-  it("returns 401 on /sse without credentials", async () => {
-    const res = await request(port, "GET", "/sse");
+describe("HTTP handler (Streamable HTTP)", () => {
+  it("returns 401 on POST /mcp initialize without credentials", async () => {
+    const res = await request(port, "POST", "/mcp", { headers: JSON_HEADERS, body: INIT });
     expect(res.status).toBe(401);
     expect(res.body).toMatch(/credentials/i);
   });
@@ -124,41 +131,45 @@ describe("HTTP handler", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 400 on /messages without a sessionId", async () => {
-    const res = await request(port, "POST", "/messages", { body: "{}" });
+  it("returns 400 on POST /mcp with no session when the request is not an initialize", async () => {
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    });
     expect(res.status).toBe(400);
   });
 
-  it("returns 404 on /messages for an unknown session", async () => {
-    const res = await request(port, "POST", "/messages?sessionId=ghost", { body: "{}" });
+  it("returns 404 on GET /mcp for an unknown session", async () => {
+    const res = await request(port, "GET", "/mcp", { headers: { "mcp-session-id": "ghost" } });
     expect(res.status).toBe(404);
   });
 
   it("returns 413 when the request body exceeds the cap", async () => {
-    handle.sessions.set("seed", fakeSession("rk"));
-    const status = await postLargeBody(port, "/messages?sessionId=seed");
+    // The body cap fires during read, before session routing, on any POST /mcp.
+    const status = await postLargeBody(port, "/mcp");
     expect(status).toBe(413);
   });
 
   it("returns 503 when total session capacity is reached", async () => {
     for (let i = 0; i < 1000; i++) handle.sessions.set(`s${i}`, fakeSession(`rk${i}`));
-    const res = await request(port, "GET", "/sse", { headers: creds });
+    const res = await request(port, "POST", "/mcp", { headers: { ...creds, ...JSON_HEADERS }, body: INIT });
     expect(res.status).toBe(503);
   });
 
   it("returns 429 when per-key session capacity is reached", async () => {
     const rk = deriveRateKey("key-abc");
     for (let i = 0; i < 20; i++) handle.sessions.set(`k${i}`, fakeSession(rk));
-    const res = await request(port, "GET", "/sse", { headers: creds });
+    const res = await request(port, "POST", "/mcp", { headers: { ...creds, ...JSON_HEADERS }, body: INIT });
     expect(res.status).toBe(429);
   });
 
-  it("creates a session on GET /sse with valid credentials", async () => {
-    // Establishes a real SSE connection (createServer → transport → connect),
-    // then tears it down. Covers the /sse success path.
+  it("creates a session on POST /mcp initialize with valid credentials", async () => {
+    // Drive a real initialize handshake (createServer → transport → connect). The
+    // init response may be an open SSE stream, so resolve on response headers
+    // (which already carry Mcp-Session-Id) and tear down.
     const status = await new Promise<number>((resolve, reject) => {
       const req = http.request(
-        { host: "127.0.0.1", port, method: "GET", path: "/sse", headers: creds },
+        { host: "127.0.0.1", port, method: "POST", path: "/mcp", headers: { ...creds, ...JSON_HEADERS } },
         (res) => {
           resolve(res.statusCode ?? 0);
           res.destroy();
@@ -166,11 +177,13 @@ describe("HTTP handler", () => {
         },
       );
       req.on("error", () => undefined);
-      const t = setTimeout(() => reject(new Error("sse timeout")), 3000);
+      const t = setTimeout(() => reject(new Error("init timeout")), 3000);
       t.unref();
+      req.write(INIT);
       req.end();
     });
     expect(status).toBe(200);
+    await new Promise((r) => setTimeout(r, 50)); // let onsessioninitialized fire
     expect(handle.sessions.size).toBeGreaterThanOrEqual(1);
   });
 });

@@ -3,7 +3,7 @@
 This server speaks the Model Context Protocol over **two transports**:
 
 - **stdio** — the server runs as a local subprocess of the client. Used by desktop apps and IDE extensions (Claude Desktop, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose…).
-- **HTTP + SSE** — the server runs as a hosted endpoint behind a URL. Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
+- **Streamable HTTP** — the server runs as a hosted endpoint behind a URL (single `/mcp` endpoint; the MCP Streamable HTTP transport, spec 2025-03-26, which replaced the deprecated HTTP+SSE transport). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
 
 > **The one thing that matters:** every stdio client runs the _same_ command —
 > `node /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js` with two env vars. Only the
@@ -13,7 +13,7 @@ This server speaks the Model Context Protocol over **two transports**:
 
 ## Compatibility at a glance
 
-| Client                    | Local (stdio) |     Hosted (HTTP+SSE)      | Config location                                   |
+| Client                    | Local (stdio) | Hosted (Streamable HTTP)   | Config location                                   |
 | ------------------------- | :-----------: | :------------------------: | ------------------------------------------------- |
 | Claude Desktop            |      ✅       | ✅ via `mcp-remote` bridge | `claude_desktop_config.json`                      |
 | Claude.ai web / Pro / Max |       —       |      ✅ URL + headers      | Custom Connectors UI                              |
@@ -202,9 +202,9 @@ Point it at `node /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js` with the two en
 
 ---
 
-## B. Hosted (HTTP + SSE)
+## B. Hosted (Streamable HTTP)
 
-For a server deployed per [`DEPLOY.md`](DEPLOY.md). Credentials travel in request **headers**, not env vars.
+For a server deployed per [`DEPLOY.md`](DEPLOY.md). The hosted endpoint is `https://<host>/mcp` (Streamable HTTP; SSE was the legacy transport, deprecated in MCP 2025-03-26). Credentials travel in request **headers** on the initialize request, not env vars.
 
 ### Claude Desktop → hosted server (`mcp-remote` bridge)
 
@@ -218,7 +218,7 @@ Claude Desktop only accepts stdio entries, so use the [`mcp-remote`](https://www
       "args": [
         "-y",
         "mcp-remote",
-        "https://mcp.your-domain.example/sse",
+        "https://mcp.your-domain.example/mcp",
         "--header",
         "X-B2-Key-Id:your-key-id",
         "--header",
@@ -235,7 +235,7 @@ These accept the URL + headers shape directly:
 
 ```json
 {
-  "url": "https://mcp.your-domain.example/sse",
+  "url": "https://mcp.your-domain.example/mcp",
   "headers": {
     "X-B2-Key-Id": "your-key-id",
     "X-B2-Key": "your-key-secret"
@@ -243,9 +243,9 @@ These accept the URL + headers shape directly:
 }
 ```
 
-### Any SSE-capable client
+### Any Streamable-HTTP-capable client
 
-Point it at `https://<host>/sse` and send the `X-B2-Key-Id` / `X-B2-Key` headers. If your primary key is a **master** key, also send `X-B2-App-Key-Id` / `X-B2-App-Key` (a non-master key) — B2's S3 endpoint rejects master keys.
+Point it at `https://<host>/mcp` and send the `X-B2-Key-Id` / `X-B2-Key` headers. If your primary key is a **master** key, also send `X-B2-App-Key-Id` / `X-B2-App-Key` (a non-master key) — B2's S3 endpoint rejects master keys.
 
 ---
 

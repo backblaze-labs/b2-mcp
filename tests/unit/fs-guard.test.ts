@@ -18,8 +18,6 @@ const baseConfig: B2Config = {
   masterKeyId: "s",
   masterKey: "s",
   region: "us-west-004",
-  largeFileThreshold: 1e8,
-  partSize: 1e8,
   allowLocalFiles: true,
   fileRoot: null,
 };
