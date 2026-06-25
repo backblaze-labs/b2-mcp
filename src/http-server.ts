@@ -52,19 +52,26 @@ const ALLOWED_HOSTS = csvEnv("B2_ALLOWED_HOSTS");
 const ALLOWED_ORIGINS = csvEnv("B2_ALLOWED_ORIGINS");
 
 /**
- * DNS-rebinding protection. Validate Host / Origin against the configured
- * allowlists (the transport's own host/origin options are deprecated in favor of
- * external validation, so we do it here). Returns true when the request is allowed.
+ * DNS-rebinding protection. Validates Host / Origin against the configured
+ * allowlists (the SDK transport's own options are deprecated in favor of external
+ * validation). SECURE DEFAULT: with NO allowlist configured, only localhost is
+ * accepted — an internet-facing HTTP deployment MUST set B2_ALLOWED_HOSTS (a
+ * reverse proxy enforcing server_name is a good additional backstop). Non-browser
+ * clients (mcp-remote, curl) send no Origin and connect by host, so an allowlisted
+ * host is sufficient for them.
  */
 function hostOriginAllowed(req: { headers: http.IncomingHttpHeaders }): boolean {
-  if (ALLOWED_HOSTS.length > 0) {
-    const host = Array.isArray(req.headers.host) ? "" : (req.headers.host ?? "");
-    if (!ALLOWED_HOSTS.includes(host)) return false;
-  }
-  if (ALLOWED_ORIGINS.length > 0) {
-    const origin = Array.isArray(req.headers.origin) ? "" : (req.headers.origin ?? "");
-    // Only enforce when an Origin header is present (non-browser clients omit it).
-    if (origin && !ALLOWED_ORIGINS.includes(origin)) return false;
+  const host = Array.isArray(req.headers.host) ? "" : (req.headers.host ?? "");
+  const origin = Array.isArray(req.headers.origin) ? "" : (req.headers.origin ?? "");
+
+  // Configured allowlists take precedence (strict).
+  if (ALLOWED_HOSTS.length > 0 && !ALLOWED_HOSTS.includes(host)) return false;
+  if (ALLOWED_ORIGINS.length > 0 && origin && !ALLOWED_ORIGINS.includes(origin)) return false;
+
+  // Secure default: nothing configured → accept only localhost.
+  if (ALLOWED_HOSTS.length === 0 && ALLOWED_ORIGINS.length === 0) {
+    const hostname = host.replace(/:\d+$/, ""); // strip :port
+    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
   }
   return true;
 }

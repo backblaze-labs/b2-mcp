@@ -7,6 +7,64 @@ import { toolJson, toolError } from "../utils/errors.js";
 import { assignDefined } from "../utils/payload.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
+/**
+ * Redact webhook secrets from a notification-rules API response before it reaches
+ * the model — B2 echoes back hmacSha256SigningSecret and custom-header values on
+ * get/set, and a prompt-injected model should not be able to read them.
+ */
+function redactNotificationSecrets(result: unknown): unknown {
+  const r = result as { eventNotificationRules?: Array<Record<string, unknown>> } | null;
+  if (!r || !Array.isArray(r.eventNotificationRules)) return result;
+  for (const rule of r.eventNotificationRules) {
+    const tc = rule?.targetConfiguration as
+      | { hmacSha256SigningSecret?: unknown; customHeaders?: Array<{ value?: unknown }> }
+      | undefined;
+    if (!tc || typeof tc !== "object") continue;
+    if (tc.hmacSha256SigningSecret) tc.hmacSha256SigningSecret = "[redacted]";
+    if (Array.isArray(tc.customHeaders)) {
+      tc.customHeaders = tc.customHeaders.map((h) =>
+        h && typeof h === "object" ? { ...h, value: "[redacted]" } : h,
+      );
+    }
+  }
+  return result;
+}
+
+/**
+ * Server-side webhook URL guard (defense-in-depth): require HTTPS and reject
+ * internal/SSRF targets. Returns a reason string if invalid, or null if OK.
+ */
+function validateWebhookUrl(raw: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return "is not a valid URL";
+  }
+  if (u.protocol !== "https:") return "must use https://";
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost")) return "must not target localhost";
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (
+      a === 0 ||
+      a === 127 ||
+      a === 10 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    ) {
+      return "must not target a private/loopback/link-local address";
+    }
+  }
+  if (host === "::1" || /^(fc|fd|fe80)/.test(host)) {
+    return "must not target a private/loopback IPv6 address";
+  }
+  return null;
+}
+
 export function registerBucketTools(
   server: McpServer,
   client: B2Client,
@@ -299,7 +357,7 @@ export function registerBucketTools(
         const result = await client.call("b2_get_bucket_notification_rules", {
           bucketId: args.bucketId,
         });
-        return toolJson(result);
+        return toolJson(redactNotificationSecrets(result));
       } catch (err) {
         return toolError(err);
       }
@@ -342,6 +400,14 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
+        for (const rule of args.eventNotificationRules) {
+          const reason = validateWebhookUrl(rule.targetConfiguration.url);
+          if (reason) {
+            return toolError(
+              new Error(`Webhook URL ${JSON.stringify(rule.targetConfiguration.url)} ${reason}.`),
+            );
+          }
+        }
         const result = await client.call("b2_set_bucket_notification_rules", {
           bucketId: args.bucketId,
           // B2 requires objectNamePrefix on every rule; default to "" (matches
@@ -351,7 +417,7 @@ export function registerBucketTools(
             objectNamePrefix: rule.objectNamePrefix ?? "",
           })),
         });
-        return toolJson(result);
+        return toolJson(redactNotificationSecrets(result));
       } catch (err) {
         return toolError(err);
       }

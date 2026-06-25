@@ -923,3 +923,69 @@ describe("b2_update_file_retention", () => {
     );
   });
 });
+
+// ── webhook notification-rules hardening ───────────────────────────────────────
+
+describe("b2 notification-rules webhook hardening", () => {
+  const ruleWith = (url: string) => ({
+    name: "r",
+    eventTypes: ["b2:ObjectCreated:*"],
+    isEnabled: true,
+    targetConfiguration: { targetType: "webhook" as const, url },
+  });
+
+  it("rejects a non-HTTPS webhook URL", async () => {
+    setupMocks({});
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "b",
+      eventNotificationRules: [ruleWith("http://example.com/hook")],
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/https/i);
+  });
+
+  it("rejects an internal/SSRF webhook URL", async () => {
+    setupMocks({});
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "b",
+      eventNotificationRules: [ruleWith("https://169.254.169.254/latest/meta-data")],
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/private|loopback|link-local|localhost/i);
+  });
+
+  it("accepts a valid public HTTPS webhook URL", async () => {
+    setupMocks({ eventNotificationRules: [] });
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "b",
+      eventNotificationRules: [ruleWith("https://hooks.example.com/b2")],
+    });
+    expect(res.isError).toBeFalsy();
+  });
+
+  it("redacts hmacSha256SigningSecret + custom-header values in get responses", async () => {
+    setupMocks({
+      eventNotificationRules: [
+        {
+          name: "r",
+          eventTypes: ["b2:ObjectCreated:*"],
+          isEnabled: true,
+          targetConfiguration: {
+            targetType: "webhook",
+            url: "https://example.com/hook",
+            hmacSha256SigningSecret: "supersecret",
+            customHeaders: [{ name: "X-Auth", value: "token123" }],
+          },
+        },
+      ],
+    });
+    const res = parseResult(
+      await callTool(server, "b2_get_bucket_notification_rules", { bucketId: "b" }),
+    );
+    const tc = res.eventNotificationRules[0].targetConfiguration;
+    expect(tc.hmacSha256SigningSecret).toBe("[redacted]");
+    expect(tc.customHeaders[0].value).toBe("[redacted]");
+    expect(JSON.stringify(res)).not.toContain("supersecret");
+    expect(JSON.stringify(res)).not.toContain("token123");
+  });
+});

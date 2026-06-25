@@ -7,7 +7,8 @@
     "b2-mcp-server": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "start": "node dist/index.js",
     "start:http": "node dist/http-server.js",

@@ -131,6 +131,13 @@ describe("HTTP handler (Streamable HTTP)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("rejects a non-localhost Host on /mcp when no allowlist is configured (DNS-rebinding default)", async () => {
+    // No B2_ALLOWED_HOSTS/ORIGINS set in the test env → secure default: localhost only.
+    const res = await request(port, "GET", "/mcp", { headers: { host: "evil.example" } });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatch(/host\/origin/i);
+  });
+
   it("returns 400 on POST /mcp with no session when the request is not an initialize", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
