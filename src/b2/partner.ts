@@ -74,7 +74,7 @@ export function registerPartnerTools(
   // ── b2_create_group_member ──────────────────────────────────────────────────
   server.tool(
     "b2_create_group_member",
-    "Create a new Backblaze account and add it to a managed Group as a Group member. The email must not already exist as a Backblaze account. The Group must be a managed Group with Backblaze B2 enabled. Returns the new account's applicationKeyId, applicationKey, and member details — store the key immediately as it is only returned once. Limit: 5,000 members per Group.",
+    "Create a new Backblaze account and add it to a managed (B2-enabled) Group. Email must not already be a Backblaze account. Returns the new account's applicationKeyId + applicationKey (returned ONCE — store it). Max 5,000 members/Group.",
     {
       adminAccountId: z
         .string()
@@ -119,7 +119,7 @@ export function registerPartnerTools(
   // ── b2_eject_group_member ───────────────────────────────────────────────────
   server.tool(
     "b2_eject_group_member",
-    "Eject a member from a Group. The member's Backblaze account is NOT deleted — it is removed from the Group and the member will need to reset their password on next login. Optionally change the member's email address during ejection. The ejected account cannot be re-added via API (only via the Group Management page).",
+    "Eject a member from a Group. The account is NOT deleted — just removed (the member resets their password on next login). Optionally change their email on eject. Cannot be re-added via API (only the Group Management page).",
     {
       adminAccountId: z
         .string()
@@ -213,7 +213,7 @@ export function registerPartnerTools(
   // ── b2_reserve_trial_create_account ────────────────────────────────────────
   server.tool(
     "b2_reserve_trial_create_account",
-    "Create a new Backblaze B2 account and start a B2 Reserve Trial. The trial gives the end user time-limited access to all B2 Reserve features. The new account receives an invitation email to reset their password and is immediately functional. Returns credentials and a pre-created bucket. The email must not already be a Backblaze account.",
+    "Create a new Backblaze B2 account on a time-limited B2 Reserve Trial. The account gets a password-reset invite email and is immediately functional. Returns credentials and a pre-created bucket. Email must not already be a Backblaze account.",
     {
       email: z
         .string()
