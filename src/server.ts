@@ -13,6 +13,7 @@ import { registerBucketTools } from "./b2/buckets.js";
 import { registerKeyTools } from "./b2/keys.js";
 import { registerObjectLockTools } from "./b2/object-lock.js";
 import { registerPartnerTools } from "./b2/partner.js";
+import { registerInsightTools } from "./b2/insights.js";
 
 import { registerS3BucketTools } from "./s3/buckets.js";
 import { registerS3ObjectTools } from "./s3/objects.js";
@@ -169,6 +170,11 @@ export function createServer(config: B2Config): McpServer {
   registerS3MultipartTools(server, s3Client, config);
   registerS3PresignedTools(server, s3Client);
   registerS3ExtraTools(server, s3Client);
+
+  // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────
+  // Phase 1 reads the daily usage-report CSVs (native bucket lookup + S3 get);
+  // Phase 2 is live per-bucket S3 listing.
+  registerInsightTools(server, b2Client, s3Client, auth);
 
   const toolCount = wrapToolsWithAudit(server, config);
   logger.info({ toolCount, version: VERSION }, "server.ready");

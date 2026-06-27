@@ -64,8 +64,8 @@ beforeAll(() => {
 // ── Inventory ─────────────────────────────────────────────────────────────────
 
 describe("Tool inventory", () => {
-  it("registers exactly 36 tools", () => {
-    expect(toolNames.length).toBe(36);
+  it("registers exactly 40 tools", () => {
+    expect(toolNames.length).toBe(40);
   });
 
   it("has no duplicate tool names", () => {
@@ -80,8 +80,8 @@ describe("Tool inventory", () => {
     expect(invalid).toEqual([]);
   });
 
-  it("has 17 B2 native + Partner b2_ tools (control plane)", () => {
-    expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(17);
+  it("has 21 B2 native + Partner + insight b2_ tools (control plane)", () => {
+    expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(21);
   });
 
   it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
