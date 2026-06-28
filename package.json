@@ -41,7 +41,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1048.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "axios": "^1.18.1",
-    "opossum": "^9.0.0",
+    "opossum": "^10.0.0",
     "pino": "^10.3.1"
   },
   "devDependencies": {
