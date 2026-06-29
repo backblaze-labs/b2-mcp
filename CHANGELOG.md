@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.1.0] - 2026-06-28
 
 ### Security
+- **The internet-facing HTTP transport now defaults to `B2_DESTRUCTIVE_POLICY=block`**
+  (safe-by-default), while stdio keeps `confirm` (trusted local user). `confirm`
+  is satisfiable by a prompt-injected model, so a hosted server now refuses
+  destructive operations unless an operator explicitly opts down to `confirm`
+  (paired with host consent) or `allow`. Set per-transport in `configFromHeaders`
+  / `loadConfig`; covered by unit tests.
 - **Destructive-operation gate coverage expanded from 7 to 12 tools** to close
   protection-removal and irreversible-action gaps found in an adversarial review.
   Newly gated: `b2_update_file_retention` (when clearing retention or using

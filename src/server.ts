@@ -74,6 +74,9 @@ export function loadConfig(): B2Config {
       : null,
     allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
     allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
+    // stdio is a trusted local single-user session, so it defaults to `confirm`.
+    // The internet-facing HTTP transport defaults to `block` instead — see
+    // configFromHeaders in http-server.ts.
     destructivePolicy:
       process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
       process.env.B2_DESTRUCTIVE_POLICY === "block"

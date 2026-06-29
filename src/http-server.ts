@@ -144,11 +144,18 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
       : null,
     allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
     allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
+    // Internet-facing transport is safe-by-default: destructive operations are
+    // BLOCKED unless the operator explicitly opts down. `confirm` is satisfiable
+    // by a prompt-injected model, so it is not the default for a hosted server;
+    // an operator who needs destructive ops sets B2_DESTRUCTIVE_POLICY=confirm
+    // (paired with host consent) or =allow. stdio defaults to confirm (trusted
+    // local user) — see loadConfig in server.ts.
     destructivePolicy:
       process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
-      process.env.B2_DESTRUCTIVE_POLICY === "block"
+      process.env.B2_DESTRUCTIVE_POLICY === "block" ||
+      process.env.B2_DESTRUCTIVE_POLICY === "confirm"
         ? process.env.B2_DESTRUCTIVE_POLICY
-        : "confirm",
+        : "block",
     transport: "http",
   };
 }
