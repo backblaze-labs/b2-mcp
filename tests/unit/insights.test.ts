@@ -4,9 +4,68 @@ import {
   mapRow,
   computeAccountGrowth,
   computeEgressLeaders,
+  computeSnapshotGrowth,
+  periodStartDate,
   selectUsageKeys,
   ReportRow,
 } from "../../src/b2/insights.js";
+
+const GB = 1e9;
+function row(accountId: string, storedGb: number): ReportRow {
+  return {
+    accountId,
+    _date: "2026-06-28",
+    storageBytes: storedGb * GB,
+    egressBytes: 0,
+    uploadBytes: 0,
+    classCTxn: 0,
+  };
+}
+
+describe("insights — periodStartDate", () => {
+  const jun28 = new Date(Date.UTC(2026, 5, 28));
+  it("month/quarter/year back from a date", () => {
+    expect(periodStartDate("month", jun28)).toBe("2026-05-28");
+    expect(periodStartDate("quarter", jun28)).toBe("2026-03-28");
+    expect(periodStartDate("year", jun28)).toBe("2025-06-28");
+  });
+  it("clamps the day for short target months (no overflow)", () => {
+    // Mar 31 minus a month is Feb, which has fewer days → clamp, not roll into March
+    expect(periodStartDate("month", new Date(Date.UTC(2026, 2, 31)))).toBe("2026-02-28");
+    expect(periodStartDate("month", new Date(Date.UTC(2024, 2, 31)))).toBe("2024-02-29"); // leap
+  });
+  it("crosses the year boundary for quarter", () => {
+    expect(periodStartDate("quarter", new Date(Date.UTC(2026, 0, 15)))).toBe("2025-10-15");
+  });
+});
+
+describe("insights — computeSnapshotGrowth", () => {
+  it("computes growth, shrink, new accounts, and sums regions per account", () => {
+    // 'a' appears twice in the THEN snapshot (two region files) → summed to 100 GB
+    const then = [row("a", 60), row("a", 40), row("b", 50), row("d", 20)];
+    const now = [row("a", 150), row("b", 50), row("c", 10)]; // c new, d gone
+    const out = computeSnapshotGrowth(then, now);
+
+    const a = out.find((x) => x.accountId === "a")!;
+    expect(a.firstBytes).toBe(100 * GB);
+    expect(a.lastBytes).toBe(150 * GB);
+    expect(a.growthBytes).toBe(50 * GB);
+    expect(a.growthPct).toBe(50);
+
+    const c = out.find((x) => x.accountId === "c")!;
+    expect(c.isNew).toBe(true);
+    expect(c.firstBytes).toBe(0);
+    expect(c.growthPct).toBeNull(); // no baseline
+
+    const d = out.find((x) => x.accountId === "d")!;
+    expect(d.lastBytes).toBe(0);
+    expect(d.growthBytes).toBe(-20 * GB);
+    expect(d.growthPct).toBe(-100);
+
+    // sorted by growthBytes desc: a (+50), c (+10), b (0), d (-20)
+    expect(out.map((x) => x.accountId)).toEqual(["a", "c", "b", "d"]);
+  });
+});
 
 describe("insights — selectUsageKeys", () => {
   it("keeps the usage.account file and drops the usage.audit mirror (no double-count)", () => {
@@ -147,5 +206,60 @@ describe("insights — computeEgressLeaders", () => {
     const out = computeEgressLeaders(rows, "bucket");
     expect(out[0].egress).toBe(40);
     expect(out[0].bucketName).toBe("ba");
+  });
+});
+
+// ── Snapshot listing/selection (fake S3 — proves the perf-critical path) ──────
+import { latestSnapshotDate, loadDayRows } from "../../src/b2/insights.js";
+
+// Minimal S3 stand-in: returns ListObjectsV2 pages by Prefix/StartAfter and a
+// GetObject body. Lets us verify date selection and per-day loading without a network.
+function fakeS3(objectsByDay: Record<string, string[]>, csvByKey: Record<string, string> = {}) {
+  const allKeys = Object.entries(objectsByDay).flatMap(([d, names]) => names.map((n) => `${d}/${n}`));
+  return {
+    send: async (cmd: any) => {
+      const input = cmd.input ?? {};
+      if ("Key" in input && !("Prefix" in input) && !("StartAfter" in input) && !("ContinuationToken" in input)) {
+        return { Body: { transformToString: async () => csvByKey[input.Key] ?? "" } };
+      }
+      let keys = allKeys.slice().sort();
+      if (input.Prefix) keys = keys.filter((k) => k.startsWith(input.Prefix));
+      if (input.StartAfter) keys = keys.filter((k) => k > input.StartAfter);
+      if (input.MaxKeys) keys = keys.slice(0, input.MaxKeys);
+      return { Contents: keys.map((Key) => ({ Key })), IsTruncated: false };
+    },
+  } as any;
+}
+
+describe("insights — snapshot selection (fake S3)", () => {
+  it("latestSnapshotDate returns the most recent day present", async () => {
+    const s3 = fakeS3({
+      "2026-06-20": ["usage.account-a.us-west.csv"],
+      "2026-06-27": ["usage.account-a.us-west.csv"],
+    });
+    const today = new Date(Date.UTC(2026, 5, 28));
+    expect((await latestSnapshotDate(s3, "b2-reports-x", today)).date).toBe("2026-06-27");
+  });
+
+  it("loadDayRows loads only the requested day and sums its region files", async () => {
+    const csv =
+      "account_id,date,stored_gb\n" + "a,2026-05-28,60\n";
+    const csv2 =
+      "account_id,date,stored_gb\n" + "a,2026-05-28,40\n";
+    const s3 = fakeS3(
+      {
+        "2026-05-28": ["usage.account-a.us-west.csv", "usage.account-a.eu-central.csv"],
+        "2026-06-27": ["usage.account-a.us-west.csv"], // must NOT be loaded
+      },
+      {
+        "2026-05-28/usage.account-a.us-west.csv": csv,
+        "2026-05-28/usage.account-a.eu-central.csv": csv2,
+      },
+    );
+    const rows = await loadDayRows(s3, "b2-reports-x", "2026-05-28");
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r._date === "2026-05-28")).toBe(true);
+    // two region rows for account a → 60 + 40 GB stored
+    expect(rows.reduce((s, r) => s + (r.storageBytes ?? 0), 0)).toBe(100 * GB);
   });
 });
