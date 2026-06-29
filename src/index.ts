@@ -21,12 +21,14 @@
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createServer, loadConfig } from "./server.js";
+import { createServer, fetchCapabilities, loadConfig } from "./server.js";
 import { logger } from "./utils/logger.js";
 
 export async function startStdio(): Promise<void> {
   const config = loadConfig();
-  const server = createServer(config);
+  // Right-size the surface to the key's capabilities (null → full surface).
+  const capabilities = await fetchCapabilities(config);
+  const server = createServer(config, capabilities);
   const transport = new StdioServerTransport();
 
   await server.connect(transport);

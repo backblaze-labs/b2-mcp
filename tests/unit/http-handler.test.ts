@@ -94,6 +94,18 @@ function fakeSession(rateKey: string): any {
 let handle: HttpServerHandle;
 let port: number;
 
+// These tests exercise transport mechanics, not capability filtering. Force
+// full-surface registration so session creation never reaches the network to
+// fetch the key's capabilities (which would be a real authorize call).
+const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
+beforeAll(() => {
+  process.env.B2_REGISTER_ALL_TOOLS = "true";
+});
+afterAll(() => {
+  if (savedRegisterAll === undefined) delete process.env.B2_REGISTER_ALL_TOOLS;
+  else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
+});
+
 beforeEach(async () => {
   handle = buildHttpServer();
   await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));

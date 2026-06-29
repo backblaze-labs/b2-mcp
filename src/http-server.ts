@@ -25,7 +25,7 @@ import * as http from "http";
 import * as crypto from "crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createServer } from "./server.js";
+import { createServer, fetchCapabilities } from "./server.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { VERSION } from "./version.js";
@@ -377,7 +377,10 @@ export function buildHttpServer(): HttpServerHandle {
       return;
     }
 
-    const mcpServer = createServer(config);
+    // Right-size this session's tool surface to the connected key's
+    // capabilities (null → full surface; never blocks session creation).
+    const capabilities = await fetchCapabilities(config);
+    const mcpServer = createServer(config, capabilities);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (sid) => {
