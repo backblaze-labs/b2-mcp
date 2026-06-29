@@ -8,6 +8,7 @@ import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
+import { isToolEnabled } from "./utils/tool-capabilities.js";
 
 import { registerBucketTools } from "./b2/buckets.js";
 import { registerKeyTools } from "./b2/keys.js";
@@ -105,7 +106,15 @@ export function loadConfig(): B2Config {
  * key. (B2's S3 endpoint rejects master keys, which is exactly why the
  * application key, not the master key, is the primary credential.)
  */
-export function createServer(config: B2Config): McpServer {
+/**
+ * Build the MCP server. When `capabilities` is a non-null array, registration is
+ * capability-aware: only tools the key can use (per src/utils/tool-capabilities)
+ * are registered, and Partner tools register only with a distinct master key.
+ * When `capabilities` is null/undefined (the default, and all unit tests), the
+ * full surface is registered — no behavior change. The entry points fetch the
+ * key's capabilities (see fetchCapabilities) and pass them in.
+ */
+export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
   const server = new McpServer(
     {
       name: "backblaze-b2",
@@ -139,6 +148,22 @@ export function createServer(config: B2Config): McpServer {
     },
   );
 
+  // Capability-aware registration: when capabilities are supplied, wrap
+  // server.tool so a tool is only registered if the key can use it. Tools not in
+  // the capability map (b2_authorize_account, Partner tools) are always allowed
+  // through here; Partner tools are additionally gated on a master key below.
+  // Filter only when we actually have a non-empty capability list. An empty
+  // array is treated as "unknown" → full surface (defensive belt-and-suspenders
+  // with fetchCapabilities, so the surface can never collapse to one tool).
+  const filterActive = Array.isArray(capabilities) && capabilities.length > 0;
+  if (filterActive) {
+    const capsSet = new Set(capabilities);
+    const originalTool = server.tool.bind(server);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (server as any).tool = (name: string, ...rest: any[]) =>
+      isToolEnabled(name, capsSet) ? (originalTool as any)(name, ...rest) : undefined;
+  }
+
   // Initialize clients. The application (workhorse) key drives the B2 native
   // API, S3, and key management. The Partner API tools use the master
   // key; when no distinct master key is configured they fall back to the same
@@ -165,7 +190,13 @@ export function createServer(config: B2Config): McpServer {
   registerObjectLockTools(server, b2Client, config);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
-  registerPartnerTools(server, masterClient, masterAuth, config);
+  // Partner tools need a master key + Partner-API entitlement, not a standard
+  // capability. Under capability-aware registration, only surface them when a
+  // distinct master key is configured; otherwise (and in full-surface mode) keep
+  // the prior behavior of always registering them.
+  if (!filterActive || masterIsDistinct) {
+    registerPartnerTools(server, masterClient, masterAuth, config);
+  }
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
   registerS3BucketTools(server, s3Client, config);
@@ -183,6 +214,32 @@ export function createServer(config: B2Config): McpServer {
   logger.info({ toolCount, version: VERSION }, "server.ready");
 
   return server;
+}
+
+/**
+ * One-shot authorize to read the key's capabilities for capability-aware
+ * registration. Returns the capability list, or null if it can't be determined
+ * (auth failure or B2_REGISTER_ALL_TOOLS=true) — callers treat null as
+ * "register the full surface", so a transient auth hiccup never yields an empty
+ * server. Set B2_REGISTER_ALL_TOOLS=true to skip this and always register all.
+ */
+export async function fetchCapabilities(config: B2Config): Promise<string[] | null> {
+  if (process.env.B2_REGISTER_ALL_TOOLS === "true") return null;
+  try {
+    const auth = new B2AuthManager(config);
+    const info = await auth.getAuth();
+    // Empty/unknown capabilities → null → full surface. NEVER filter to nothing:
+    // an empty list almost always means we couldn't read them, not a key that
+    // can do nothing, and stripping the surface to just b2_authorize_account is
+    // a far worse failure than showing a tool the key can't use.
+    return info.capabilities && info.capabilities.length ? info.capabilities : null;
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "capability fetch failed; registering full tool surface",
+    );
+    return null;
+  }
 }
 
 /** Shape of an entry in the MCP SDK's internal tool registry (the subset we touch). */

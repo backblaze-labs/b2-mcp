@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-28
+
+### Added
+- **Capability-aware tool registration.** At session start the server reads the
+  connected key's `allowed.capabilities` (from `b2_authorize_account`) and
+  registers only the tools that key can actually use — the surface auto-right-
+  sizes to the credential. A read-only key never sees write/delete/admin tools;
+  a full-capability key gets the full surface (unchanged). This is a layer below
+  the destructive gate (the key decides what is *possible*; the gate decides what
+  is *permitted*). Measured context: full surface ~9,719 tokens; a read-only key
+  ~2,867 (−71%). Map lives in `src/utils/tool-capabilities.ts`. Partner/Groups
+  tools register only when a distinct master key is configured. Escape hatch:
+  `B2_REGISTER_ALL_TOOLS=true` registers the full surface regardless. A failed or
+  unavailable capability lookup falls back to the full surface, so a transient
+  auth hiccup never yields an empty server.
+
 ## [2.1.0] - 2026-06-28
 
 ### Security

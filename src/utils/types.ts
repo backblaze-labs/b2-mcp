@@ -69,6 +69,9 @@ export interface B2AuthResponse {
   recommendedPartSize: number;
   absoluteMinimumPartSize: number;
   s3ApiUrl: string;
+  /** Capabilities granted to this key (from the v4 authorize `allowed` object).
+   *  Drives capability-aware tool registration. Empty array if unknown. */
+  capabilities: string[];
 }
 
 export interface B2Bucket {

@@ -25,6 +25,9 @@ interface B2AuthorizeResponse {
       s3ApiUrl: string;
       recommendedPartSize: number;
       absoluteMinimumPartSize: number;
+      // v4: the key's capabilities live at apiInfo.storageApi.allowed.capabilities
+      // (verified against the b2_authorize_account v4 response spec).
+      allowed?: { capabilities?: string[] };
     };
   };
 }
@@ -113,6 +116,7 @@ export class B2AuthManager {
       s3ApiUrl: data.apiInfo.storageApi.s3ApiUrl,
       recommendedPartSize: data.apiInfo.storageApi.recommendedPartSize,
       absoluteMinimumPartSize: data.apiInfo.storageApi.absoluteMinimumPartSize,
+      capabilities: data.apiInfo.storageApi.allowed?.capabilities ?? [],
     };
     this.authTime = Date.now();
     return this.cachedAuth;
