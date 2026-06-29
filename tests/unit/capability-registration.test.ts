@@ -47,6 +47,14 @@ describe("capability-aware registration", () => {
     expect(toolNames(null).length).toBe(40);
   });
 
+  it("EMPTY capabilities → full surface, never collapses to one tool (regression)", () => {
+    // The bug that shipped to the box: empty caps wrongly filtered everything,
+    // leaving only b2_authorize_account. Empty must mean 'unknown' → full surface.
+    const names = toolNames([]);
+    expect(names.length).toBe(40);
+    expect(names).toContain("b2_usage_growth");
+  });
+
   it("read-only key drops every write/delete/admin tool", () => {
     const names = toolNames(["listBuckets", "listFiles", "readFiles", "listKeys"]);
     // present
@@ -94,21 +102,29 @@ describe("fetchCapabilities", () => {
     delete process.env.B2_REGISTER_ALL_TOOLS;
   });
 
-  it("returns the key's capabilities from the authorize response", async () => {
-    jest.spyOn(axios, "get").mockResolvedValue({
-      data: {
-        accountId: "a",
-        authorizationToken: "t",
-        apiInfo: {
-          storageApi: {
-            apiUrl: "u", downloadUrl: "d", s3ApiUrl: "s",
-            recommendedPartSize: 1, absoluteMinimumPartSize: 1,
-          },
+  // v4 puts capabilities at apiInfo.storageApi.allowed.capabilities.
+  const authData = (caps?: string[]) => ({
+    data: {
+      accountId: "a",
+      authorizationToken: "t",
+      apiInfo: {
+        storageApi: {
+          apiUrl: "u", downloadUrl: "d", s3ApiUrl: "s",
+          recommendedPartSize: 1, absoluteMinimumPartSize: 1,
+          ...(caps ? { allowed: { capabilities: caps } } : {}),
         },
-        allowed: { capabilities: ["readFiles", "listBuckets"] },
       },
-    } as never);
+    },
+  });
+
+  it("returns the key's capabilities from apiInfo.storageApi.allowed", async () => {
+    jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles", "listBuckets"]) as never);
     expect(await fetchCapabilities(baseConfig)).toEqual(["readFiles", "listBuckets"]);
+  });
+
+  it("returns null (→ full surface) when capabilities are empty or absent", async () => {
+    jest.spyOn(axios, "get").mockResolvedValue(authData(undefined) as never);
+    expect(await fetchCapabilities(baseConfig)).toBeNull();
   });
 
   it("returns null on auth failure so callers fall back to the full surface", async () => {

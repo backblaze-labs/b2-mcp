@@ -152,7 +152,10 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // server.tool so a tool is only registered if the key can use it. Tools not in
   // the capability map (b2_authorize_account, Partner tools) are always allowed
   // through here; Partner tools are additionally gated on a master key below.
-  const filterActive = Array.isArray(capabilities);
+  // Filter only when we actually have a non-empty capability list. An empty
+  // array is treated as "unknown" → full surface (defensive belt-and-suspenders
+  // with fetchCapabilities, so the surface can never collapse to one tool).
+  const filterActive = Array.isArray(capabilities) && capabilities.length > 0;
   if (filterActive) {
     const capsSet = new Set(capabilities);
     const originalTool = server.tool.bind(server);
@@ -225,7 +228,11 @@ export async function fetchCapabilities(config: B2Config): Promise<string[] | nu
   try {
     const auth = new B2AuthManager(config);
     const info = await auth.getAuth();
-    return info.capabilities ?? [];
+    // Empty/unknown capabilities → null → full surface. NEVER filter to nothing:
+    // an empty list almost always means we couldn't read them, not a key that
+    // can do nothing, and stripping the surface to just b2_authorize_account is
+    // a far worse failure than showing a tool the key can't use.
+    return info.capabilities && info.capabilities.length ? info.capabilities : null;
   } catch (err) {
     logger.warn(
       { err: err instanceof Error ? err.message : String(err) },

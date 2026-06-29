@@ -25,12 +25,11 @@ interface B2AuthorizeResponse {
       s3ApiUrl: string;
       recommendedPartSize: number;
       absoluteMinimumPartSize: number;
-      // v4 surfaces the key's capabilities here under `allowed`.
-      capabilities?: string[];
+      // v4: the key's capabilities live at apiInfo.storageApi.allowed.capabilities
+      // (verified against the b2_authorize_account v4 response spec).
+      allowed?: { capabilities?: string[] };
     };
   };
-  // Some response shapes also place `allowed` at the top level; read both.
-  allowed?: { capabilities?: string[] };
 }
 // Token lifetime is 24h but we refresh after 23h to be safe
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
@@ -117,8 +116,7 @@ export class B2AuthManager {
       s3ApiUrl: data.apiInfo.storageApi.s3ApiUrl,
       recommendedPartSize: data.apiInfo.storageApi.recommendedPartSize,
       absoluteMinimumPartSize: data.apiInfo.storageApi.absoluteMinimumPartSize,
-      // v4 places the key's capabilities under the top-level `allowed` object.
-      capabilities: data.allowed?.capabilities ?? data.apiInfo.storageApi.capabilities ?? [],
+      capabilities: data.apiInfo.storageApi.allowed?.capabilities ?? [],
     };
     this.authTime = Date.now();
     return this.cachedAuth;
