@@ -251,7 +251,10 @@ async function loadReportRows(
   try {
     do {
       const page = await s3.send(
-        new ListObjectsV2Command({ Bucket: bucketName, ContinuationToken: token }),
+        // StartAfter skips every key before the window (keys are date-prefixed
+        // and sort lexically), so a long-lived report bucket isn't fully scanned.
+        // StartAfter applies to the first page only; ContinuationToken drives the rest.
+        new ListObjectsV2Command({ Bucket: bucketName, StartAfter: sinceDate, ContinuationToken: token }),
       );
       for (const o of page.Contents ?? []) {
         const k = o.Key ?? "";
@@ -294,6 +297,175 @@ function startOfMonthUTC(): string {
 
 const gb = (bytes: number | null) => (bytes == null ? null : Math.round((bytes / GB) * 1000) / 1000);
 
+// ── Snapshot growth (point-in-time stored_gb at two dates) ──────────────────
+// Per Backblaze's Usage Report spec, stored_gb is "bytes stored in gigabytes
+// (at the end of the day)" — a point-in-time snapshot — so growth is the
+// difference between the latest snapshot and the snapshot one period earlier.
+// We fetch ONLY those two boundary days (Prefix/StartAfter-scoped listings),
+// never the whole report bucket.
+
+type Period = "month" | "quarter" | "year";
+
+/** Date one period before `from` (UTC), day-clamped for short months
+ *  (e.g. Mar 31 minus one month → Feb 28/29, not Mar 3). */
+export function periodStartDate(period: Period, from: Date): string {
+  const y = from.getUTCFullYear();
+  const m = from.getUTCMonth();
+  const day = from.getUTCDate();
+  let ty = y;
+  let tm = m;
+  if (period === "month") tm = m - 1;
+  else if (period === "quarter") tm = m - 3;
+  else ty = y - 1;
+  const target = new Date(Date.UTC(ty, tm, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+function snapshotDateOf(key: string): string | null {
+  const m = key.match(/^(\d{4}-\d{2}-\d{2})\//);
+  return m ? m[1] : null;
+}
+
+function is404(e: unknown): boolean {
+  const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return err.name === "NoSuchBucket" || err.$metadata?.httpStatusCode === 404;
+}
+
+/** Date of the nearest available daily snapshot at or after `target`.
+ *  `{ bucketMissing: true }` ⇒ reports bucket absent (not enabled). */
+async function nearestSnapshotDate(
+  s3: S3Client,
+  bucketName: string,
+  target: string,
+): Promise<{ date: string | null; bucketMissing: boolean }> {
+  try {
+    const page = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucketName, StartAfter: target, MaxKeys: 1 }),
+    );
+    return { date: snapshotDateOf(page.Contents?.[0]?.Key ?? ""), bucketMissing: false };
+  } catch (e) {
+    if (is404(e)) return { date: null, bucketMissing: true };
+    throw e;
+  }
+}
+
+/** Date of the latest available snapshot (most recent day on or before today).
+ *  Lists only recent days via StartAfter, widening if reporting is stale. */
+export async function latestSnapshotDate(
+  s3: S3Client,
+  bucketName: string,
+  today: Date,
+): Promise<{ date: string | null; bucketMissing: boolean }> {
+  for (const lookback of [10, 45, 180]) {
+    const after = new Date(today.getTime() - lookback * 86400_000).toISOString().slice(0, 10);
+    let token: string | undefined;
+    let max: string | null = null;
+    try {
+      do {
+        const page = await s3.send(
+          new ListObjectsV2Command({
+            Bucket: bucketName,
+            StartAfter: after,
+            ContinuationToken: token,
+          }),
+        );
+        for (const o of page.Contents ?? []) {
+          const d = snapshotDateOf(o.Key ?? "");
+          if (d && (max === null || d > max)) max = d;
+        }
+        token = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (token);
+    } catch (e) {
+      if (is404(e)) return { date: null, bucketMissing: true };
+      throw e;
+    }
+    if (max) return { date: max, bucketMissing: false };
+  }
+  return { date: null, bucketMissing: false };
+}
+
+/** All usage rows for a single day folder (summed across that day's region files). */
+export async function loadDayRows(
+  s3: S3Client,
+  bucketName: string,
+  dayDate: string,
+): Promise<ReportRow[]> {
+  const keys: string[] = [];
+  let token: string | undefined;
+  do {
+    const page = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucketName,
+        Prefix: `${dayDate}/`,
+        ContinuationToken: token,
+      }),
+    );
+    for (const o of page.Contents ?? []) {
+      const k = o.Key ?? "";
+      if (/\.csv$/i.test(k)) keys.push(k);
+    }
+    token = page.IsTruncated ? page.NextContinuationToken : undefined;
+  } while (token);
+  const texts = await mapLimit(selectUsageKeys(keys), 16, async (key) => {
+    const obj = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
+    return obj.Body!.transformToString("utf-8");
+  });
+  const rows: ReportRow[] = [];
+  for (const text of texts) for (const raw of parseCsv(text)) {
+    const mapped = mapRow(raw);
+    if (mapped) rows.push(mapped);
+  }
+  return rows;
+}
+
+/** Sum stored bytes per account from a snapshot's rows (skip null storage). */
+function storedByAccount(rows: ReportRow[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of rows) {
+    if (r.storageBytes == null) continue;
+    m.set(r.accountId, (m.get(r.accountId) ?? 0) + r.storageBytes);
+  }
+  return m;
+}
+
+export interface SnapshotGrowth {
+  accountId: string;
+  firstBytes: number;
+  lastBytes: number;
+  growthBytes: number;
+  growthPct: number | null;
+  isNew: boolean;
+}
+
+/** Per-account stored-data growth between two snapshots. Accounts present only
+ *  in `now` are new (no % baseline); present only in `then` shrank toward zero. */
+export function computeSnapshotGrowth(
+  thenRows: ReportRow[],
+  nowRows: ReportRow[],
+): SnapshotGrowth[] {
+  const then = storedByAccount(thenRows);
+  const now = storedByAccount(nowRows);
+  const out: SnapshotGrowth[] = [];
+  for (const a of new Set([...then.keys(), ...now.keys()])) {
+    const had = then.has(a);
+    const firstBytes = then.get(a) ?? 0;
+    const lastBytes = now.get(a) ?? 0;
+    out.push({
+      accountId: a,
+      firstBytes,
+      lastBytes,
+      growthBytes: lastBytes - firstBytes,
+      growthPct: had && firstBytes > 0 ? ((lastBytes - firstBytes) / firstBytes) * 100 : null,
+      isNew: !had,
+    });
+  }
+  return out.sort((x, y) => y.growthBytes - x.growthBytes);
+}
+
 // ── Phase 2 helpers ─────────────────────────────────────────────────────────
 
 /** Resolve a bucket NAME from a name-or-bucketId input (S3 ops address by name). */
@@ -327,16 +499,20 @@ export function registerInsightTools(
   // ── b2_usage_growth ───────────────────────────────────────────────────────
   server.tool(
     "b2_usage_growth",
-    "Rank accounts by how much STORED data grew or shrank over a window, from the daily B2 usage reports. For 'which customers grew the most/least', 'who's moving data off'. Returns per-account start vs current GB and % growth. Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
+    "Rank accounts by how much STORED data grew or shrank between two points in time, from the daily B2 usage reports (uses stored_gb, the end-of-day snapshot). For 'which customers grew the most/least', 'who's moving data off'. Compares the latest snapshot against one month/quarter/year earlier and fetches only those two days, so it stays fast even on large report buckets. Returns the two dates compared and per-account start vs current GB and % growth (new accounts flagged). Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
     {
+      period: z
+        .enum(["month", "quarter", "year"])
+        .optional()
+        .default("month")
+        .describe("Compare the latest snapshot against one month, quarter, or year ago. Default month."),
       days: z
         .number()
         .int()
         .min(1)
-        .max(90)
+        .max(3650)
         .optional()
-        .default(30)
-        .describe("Window length in days (1–90). Default 30."),
+        .describe("Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week)."),
       order: z
         .enum(["most_grown", "least_grown", "shrinking"])
         .optional()
@@ -346,14 +522,41 @@ export function registerInsightTools(
     },
     async (args) => {
       try {
-        const rows = await loadReportRows(s3, await reportsBucketName(auth), daysAgo(args.days));
-        if (rows === null) return toolJson(NOT_ENABLED);
-        let accounts = computeAccountGrowth(rows);
+        const bucket = await reportsBucketName(auth);
+        const today = new Date();
+        const targetThen =
+          args.days != null ? daysAgo(args.days) : periodStartDate(args.period, today);
+
+        const latest = await latestSnapshotDate(s3, bucket, today);
+        if (latest.bucketMissing) return toolJson(NOT_ENABLED);
+        if (!latest.date)
+          return toolJson({ reports_enabled: true, note: "No usage-report snapshots found yet." });
+
+        const then = await nearestSnapshotDate(s3, bucket, targetThen);
+        if (then.bucketMissing) return toolJson(NOT_ENABLED);
+        if (!then.date || then.date >= latest.date)
+          return toolJson({
+            reports_enabled: true,
+            note:
+              `Not enough report history to compare: latest snapshot is ${latest.date}, with no ` +
+              `earlier snapshot at or after the requested ${targetThen}.`,
+            latest_snapshot: latest.date,
+          });
+
+        const [thenRows, nowRows] = await Promise.all([
+          loadDayRows(s3, bucket, then.date),
+          loadDayRows(s3, bucket, latest.date),
+        ]);
+
+        let accounts = computeSnapshotGrowth(thenRows, nowRows);
         if (args.order === "least_grown") accounts = [...accounts].reverse();
         else if (args.order === "shrinking") accounts = accounts.filter((a) => a.growthBytes < 0);
         accounts = accounts.slice(0, args.limit);
+
         return toolJson({
-          window_days: args.days,
+          comparison: args.days != null ? `last ${args.days} days` : `${args.period}-over-${args.period}`,
+          from_date: then.date,
+          to_date: latest.date,
           account_count: accounts.length,
           accounts: accounts.map((a) => ({
             account: a.accountId,
@@ -361,6 +564,7 @@ export function registerInsightTools(
             current_gb: gb(a.lastBytes),
             growth_gb: gb(a.growthBytes),
             growth_pct: a.growthPct == null ? null : Math.round(a.growthPct * 10) / 10,
+            ...(a.isNew ? { new: true } : {}),
           })),
         });
       } catch (err) {
