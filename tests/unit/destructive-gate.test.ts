@@ -24,6 +24,12 @@ describe("destructive-gate", () => {
         "s3_abort_multipart_upload",
         "b2_eject_group_member",
         "b2_update_bucket",
+        // protection-removal, account creation, and mass-delete-via-lifecycle
+        "b2_update_file_retention",
+        "b2_update_file_legal_hold",
+        "b2_create_group_member",
+        "b2_reserve_trial_create_account",
+        "s3_put_bucket_lifecycle",
       ]) {
         expect(isDestructiveTool(t)).toBe(true);
       }
@@ -119,6 +125,104 @@ describe("destructive-gate", () => {
       expect(checkDestructive("b2_update_bucket", { bucketId: "b", corsRules: [] }, cfg()).ok).toBe(
         true,
       );
+    });
+
+    it("gates a lifecycle rule that schedules deletion", () => {
+      expect(
+        checkDestructive(
+          "b2_update_bucket",
+          { bucketId: "b", lifecycleRules: [{ fileNamePrefix: "", daysFromHidingToDeleting: 1 }] },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("does NOT gate a hide-only lifecycle rule (no deletion)", () => {
+      expect(
+        checkDestructive(
+          "b2_update_bucket",
+          { bucketId: "b", lifecycleRules: [{ fileNamePrefix: "", daysFromUploadingToHiding: 1 }] },
+          cfg(),
+        ).ok,
+      ).toBe(true);
+    });
+  });
+
+  describe("Object Lock protection removal is gated", () => {
+    it("gates clearing file retention (mode:null)", () => {
+      expect(
+        checkDestructive(
+          "b2_update_file_retention",
+          { fileId: "f", fileName: "n", fileRetention: { mode: null, retainUntilTimestamp: null } },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("gates bypassGovernance even when extending retention", () => {
+      expect(
+        checkDestructive(
+          "b2_update_file_retention",
+          { fileId: "f", fileName: "n", fileRetention: { mode: "governance" }, bypassGovernance: true },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("does NOT gate a normal retention set (governance/compliance, no bypass)", () => {
+      expect(
+        checkDestructive(
+          "b2_update_file_retention",
+          { fileId: "f", fileName: "n", fileRetention: { mode: "compliance", retainUntilTimestamp: 1 } },
+          cfg(),
+        ).ok,
+      ).toBe(true);
+    });
+
+    it("gates removing a legal hold (off) but not applying one (on)", () => {
+      expect(
+        checkDestructive("b2_update_file_legal_hold", { fileId: "f", fileName: "n", legalHold: "off" }, cfg()).ok,
+      ).toBe(false);
+      expect(
+        checkDestructive("b2_update_file_legal_hold", { fileId: "f", fileName: "n", legalHold: "on" }, cfg()).ok,
+      ).toBe(true);
+    });
+  });
+
+  describe("irreversible account creation is always gated", () => {
+    it("gates b2_create_group_member", () => {
+      expect(checkDestructive("b2_create_group_member", { memberEmail: "a@b.c" }, cfg()).ok).toBe(
+        false,
+      );
+    });
+    it("gates b2_reserve_trial_create_account", () => {
+      expect(
+        checkDestructive("b2_reserve_trial_create_account", { email: "a@b.c" }, cfg()).ok,
+      ).toBe(false);
+    });
+  });
+
+  describe("lifecycle mass-delete is gated (s3)", () => {
+    it("gates an expiration rule", () => {
+      expect(
+        checkDestructive(
+          "s3_put_bucket_lifecycle",
+          { bucket: "b", rules: [{ id: "r", status: "Enabled", expiration: { days: 1 } }] },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+    it("does NOT gate an abort-incomplete-upload-only rule", () => {
+      expect(
+        checkDestructive(
+          "s3_put_bucket_lifecycle",
+          {
+            bucket: "b",
+            rules: [{ id: "r", status: "Enabled", abortIncompleteMultipartUpload: { daysAfterInitiation: 7 } }],
+          },
+          cfg(),
+        ).ok,
+      ).toBe(true);
     });
   });
 });

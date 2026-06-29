@@ -6,6 +6,8 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";
+import { B2Config } from "../utils/types.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 
 // S3-compatible bucket tools are intentionally minimal: anything with a native
 // b2_* equivalent has been removed to keep the tool surface small. Only the two
@@ -14,7 +16,9 @@ import { toolError, toolSuccess } from "../utils/errors.js";
 //                               bucket/S3-compatibility validator skill)
 //   - s3_put_bucket_lifecycle — S3 AbortIncompleteMultipartUpload, which the
 //                               native lifecycle API does not express
-export function registerS3BucketTools(server: McpServer, s3: S3Client): void {
+// A lifecycle rule carrying Expiration/NoncurrentVersionExpiration schedules
+// deletion of objects, so that variant is routed through the destructive gate.
+export function registerS3BucketTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_head_bucket",
     "Check whether a B2 bucket exists and is reachable on the S3-compatible endpoint with the current credentials. Use this to validate S3-surface reachability (the native b2_list_buckets confirms existence but not S3 reachability).",
@@ -73,9 +77,17 @@ export function registerS3BucketTools(server: McpServer, s3: S3Client): void {
             .optional(),
         }),
       ),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm a lifecycle rule that schedules object deletion/expiration. Required when the server destructive policy is 'confirm' (the default). Not needed for abort-incomplete-upload-only rules.",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("s3_put_bucket_lifecycle", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         await s3.send(
           new PutBucketLifecycleConfigurationCommand({
             Bucket: args.bucket,

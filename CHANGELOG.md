@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-28
+
+### Security
+- **The internet-facing HTTP transport now defaults to `B2_DESTRUCTIVE_POLICY=block`**
+  (safe-by-default), while stdio keeps `confirm` (trusted local user). `confirm`
+  is satisfiable by a prompt-injected model, so a hosted server now refuses
+  destructive operations unless an operator explicitly opts down to `confirm`
+  (paired with host consent) or `allow`. Set per-transport in `configFromHeaders`
+  / `loadConfig`; covered by unit tests.
+- **Destructive-operation gate coverage expanded from 7 to 12 tools** to close
+  protection-removal and irreversible-action gaps found in an adversarial review.
+  Newly gated: `b2_update_file_retention` (when clearing retention or using
+  `bypassGovernance`), `b2_update_file_legal_hold` (when set to `off`),
+  `b2_create_group_member` and `b2_reserve_trial_create_account` (irreversible,
+  billable account creation), and `s3_put_bucket_lifecycle` (when a rule
+  schedules object deletion/expiration). The `b2_update_bucket` detector also now
+  flags `lifecycleRules` that schedule permanent deletion. This closes the path
+  where a prompt-injected model could strip Object Lock retention or a legal hold
+  and then delete — the gate now covers the protection-removal step, not only the
+  delete. All gated calls are refused unless `confirm: true` (confirm mode) or
+  refused outright (block mode).
+- **Webhook SSRF guard hardened** against fully-expanded and compressed internal
+  IPv6 targets (`0:0:0:0:0:0:0:1`, `::`, ULA/link-local), which a string-prefix
+  check missed. Defense-in-depth (B2 fires the webhook and validates it too).
+
 ### Added
 - **Four read-only storage-activity ("insights") tools** (36 → 40 tools, all
   `b2_*`). All are read-only and scoped by the caller's credential — a partner
@@ -31,6 +56,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group/trial tools, `s3_get_presigned_url`, `s3_put_bucket_lifecycle`) to cut
   tool-definition description text ~15% without dropping triggers, constraints,
   or destructive warnings.
+- **Control-plane-first data path: inline object I/O is now capped at 1 MiB.**
+  `s3_put_object` and `s3_get_object` move bytes *through* the server (and, for
+  base64, through the model context), so they are now bounded to small
+  control-plane payloads (manifests, sidecars, tiny configs). A larger
+  upload/download is refused with a pointer to `s3_get_presigned_url` — a
+  presigned PutObject/GetObject URL moves bulk bytes **directly** between the
+  client/worker and B2, never touching the server. (`s3_get_object`'s prior
+  100 MiB in-memory ceiling is lowered to the same 1 MiB; `saveToPath` still
+  streams any size to local disk on the trusted stdio transport.) Combined with
+  the existing HTTP-transport default of local-file access OFF, this makes the
+  internet-facing server **control-plane-only by construction**: no real object
+  data can flow through it.
+- **Multipart is now presigned-per-part.** `s3_upload_part` (which streamed
+  base64 part bytes through the server) is replaced by `s3_presign_upload_part`,
+  which mints a presigned PUT URL per part so the client/worker uploads each part
+  **directly** to B2. New flow: `s3_create_multipart_upload` →
+  `s3_presign_upload_part` → client PUTs each part and captures its ETag →
+  `s3_complete_multipart_upload`. With this, **no tool moves bulk object bytes
+  through the server** — the data plane is fully off the server for both
+  single-shot and multipart uploads. Surface stays at **40 tools (19 S3)**:
+  one S3 tool replaced, none net added.
 
 ## [2.0.0] - 2026-06-24
 

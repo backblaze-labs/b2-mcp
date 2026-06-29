@@ -2,13 +2,25 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import { B2Config } from "../utils/types.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+
+const CONFIRM_DESC =
+  "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).";
 
 /**
  * Object Lock tools for the B2 Native API.
  * Requires the bucket to have Object Lock enabled.
  * Legal holds and retention settings independently protect files from deletion.
+ *
+ * Removing retention or a legal hold is protection-stripping (the step before a
+ * delete), so those calls are routed through the destructive-operation gate.
  */
-export function registerObjectLockTools(server: McpServer, client: B2Client): void {
+export function registerObjectLockTools(
+  server: McpServer,
+  client: B2Client,
+  config: B2Config,
+): void {
   // ── b2_update_file_legal_hold ─────────────────────────────────────────────
   server.tool(
     "b2_update_file_legal_hold",
@@ -24,9 +36,12 @@ export function registerObjectLockTools(server: McpServer, client: B2Client): vo
           "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare " +
             "string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns.",
         ),
+      confirm: z.boolean().optional().describe(CONFIRM_DESC),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_update_file_legal_hold", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const result = await client.call("b2_update_file_legal_hold", {
           fileId: args.fileId,
           fileName: args.fileName,
@@ -74,9 +89,12 @@ export function registerObjectLockTools(server: McpServer, client: B2Client): vo
         .describe(
           "If true, allows overriding governance-mode retention. Requires bypassGovernance capability.",
         ),
+      confirm: z.boolean().optional().describe(CONFIRM_DESC),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_update_file_retention", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const payload: Record<string, unknown> = {
           fileId: args.fileId,
           fileName: args.fileName,

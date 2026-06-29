@@ -96,9 +96,17 @@ export function registerPartnerTools(
         .describe(
           "Region for the new account's data. Defaults to the current default region if omitted.",
         ),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm this irreversible account creation. Required when the server destructive policy is 'confirm' (the default). The created account is real, billable, and cannot be removed via API.",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_create_group_member", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const payload: Record<string, unknown> = {
           adminAccountId: args.adminAccountId,
           groupId: args.groupId,
@@ -235,9 +243,17 @@ export function registerPartnerTools(
         .enum(["us-east", "us-west", "eu-central", "ca-east"])
         .optional()
         .describe("Region for the new account's data. Backblaze picks a region if not specified."),
+      confirm: z
+        .boolean()
+        .optional()
+        .describe(
+          "Confirm this irreversible account creation. Required when the server destructive policy is 'confirm' (the default). The created trial account is real and billable.",
+        ),
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_reserve_trial_create_account", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const payload: Record<string, unknown> = {
           email: args.email,
           term: args.term,

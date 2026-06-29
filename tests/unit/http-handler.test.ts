@@ -13,6 +13,7 @@ import {
   deriveRateKey,
   HttpServerHandle,
 } from "../../src/http-server";
+import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 
 interface Resp {
   status: number;
@@ -263,5 +264,30 @@ describe("deriveRateKey", () => {
     expect(deriveRateKey("abc")).not.toBe(deriveRateKey("abd"));
     // Not a raw prefix of the input.
     expect(deriveRateKey("abcdefgh")).not.toContain("abcdefgh");
+  });
+});
+
+describe("configFromHeaders — destructive policy default (HTTP is safe-by-default)", () => {
+  const saved = process.env.B2_DESTRUCTIVE_POLICY;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;
+    else process.env.B2_DESTRUCTIVE_POLICY = saved;
+  });
+
+  it("defaults to block when B2_DESTRUCTIVE_POLICY is unset (internet-facing)", () => {
+    delete process.env.B2_DESTRUCTIVE_POLICY;
+    const cfg = configFromHeaders({ headers: creds });
+    expect(cfg).not.toBeNull();
+    expect(getDestructivePolicy(cfg!)).toBe("block");
+  });
+
+  it("honors an explicit opt-down to confirm", () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    expect(getDestructivePolicy(configFromHeaders({ headers: creds })!)).toBe("confirm");
+  });
+
+  it("honors an explicit allow", () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "allow";
+    expect(getDestructivePolicy(configFromHeaders({ headers: creds })!)).toBe("allow");
   });
 });

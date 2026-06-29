@@ -113,12 +113,12 @@ A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-acces
 
 | Tool | Description |
 | --- | --- |
-| `s3_put_object` / `s3_get_object` | Upload / download an object |
+| `s3_put_object` / `s3_get_object` | Inline upload / download of small (≤1 MiB) control-plane objects; bulk data uses a presigned URL |
 | `s3_delete_object` / `s3_delete_objects` | Delete one / bulk-delete objects |
 | `s3_head_object` | Object metadata |
 | `s3_copy_object` | Server-side copy |
 | `s3_list_objects_v2` / `s3_list_object_versions` | List objects / versions |
-| `s3_create_multipart_upload` / `s3_upload_part` / `s3_complete_multipart_upload` | Multipart upload flow (large files) |
+| `s3_create_multipart_upload` / `s3_presign_upload_part` / `s3_complete_multipart_upload` | Multipart upload flow (large files); parts are presigned and uploaded client→B2 directly |
 | `s3_abort_multipart_upload` / `s3_list_parts` / `s3_list_multipart_uploads` | Manage multipart uploads |
 | `s3_upload_part_copy` | Server-side copy of a part |
 | `s3_get_presigned_url` | Presigned PUT/GET URL (browser/CORS handoff) |

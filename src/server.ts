@@ -74,6 +74,9 @@ export function loadConfig(): B2Config {
       : null,
     allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
     allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
+    // stdio is a trusted local single-user session, so it defaults to `confirm`.
+    // The internet-facing HTTP transport defaults to `block` instead — see
+    // configFromHeaders in http-server.ts.
     destructivePolicy:
       process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
       process.env.B2_DESTRUCTIVE_POLICY === "block"
@@ -159,13 +162,13 @@ export function createServer(config: B2Config): McpServer {
   // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
   registerBucketTools(server, b2Client, auth, config);
   registerKeyTools(server, b2Client, auth, config);
-  registerObjectLockTools(server, b2Client);
+  registerObjectLockTools(server, b2Client, config);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
   registerPartnerTools(server, masterClient, masterAuth, config);
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
-  registerS3BucketTools(server, s3Client);
+  registerS3BucketTools(server, s3Client, config);
   registerS3ObjectTools(server, s3Client, config);
   registerS3MultipartTools(server, s3Client, config);
   registerS3PresignedTools(server, s3Client);

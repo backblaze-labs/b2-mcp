@@ -31,6 +31,32 @@ function redactNotificationSecrets(result: unknown): unknown {
 }
 
 /**
+ * True for IPv6 loopback (::1), unspecified (::), IPv4-mapped (::ffff:*), and
+ * ULA / link-local ranges — including fully-expanded forms like 0:0:0:0:0:0:0:1
+ * that a string-prefix check misses.
+ */
+function isLocalIPv6(raw: string): boolean {
+  const h = raw.split("%")[0].toLowerCase(); // drop any zone id
+  if (/^(fc|fd|fe8|fe9|fea|feb)/.test(h)) return true; // ULA fc00::/7, link-local fe80::/10
+  if (h.startsWith("::ffff:")) return true; // IPv4-mapped
+  let groups: string[];
+  if (h.includes("::")) {
+    const [head, tail] = h.split("::");
+    const hg = head ? head.split(":") : [];
+    const tg = tail ? tail.split(":") : [];
+    groups = [...hg, ...Array(Math.max(0, 8 - hg.length - tg.length)).fill("0"), ...tg];
+  } else {
+    groups = h.split(":");
+  }
+  if (groups.length !== 8) return false;
+  const n = groups.map((g) => parseInt(g || "0", 16));
+  if (n.some((x) => Number.isNaN(x))) return false;
+  const allZero = n.every((x) => x === 0); // ::  (unspecified)
+  const loopback = n.slice(0, 7).every((x) => x === 0) && n[7] === 1; // ::1
+  return allZero || loopback;
+}
+
+/**
  * Server-side webhook URL guard (defense-in-depth): require HTTPS and reject
  * internal/SSRF targets. Returns a reason string if invalid, or null if OK.
  */
@@ -64,8 +90,8 @@ function validateWebhookUrl(raw: string): string | null {
       return "must not target a private/loopback/link-local address";
     }
   }
-  if (host === "::1" || host.startsWith("::ffff:") || /^(fc|fd|fe80)/.test(host)) {
-    return "must not target a private/loopback or IPv4-mapped IPv6 address";
+  if (host.includes(":") && isLocalIPv6(host)) {
+    return "must not target a private/loopback/link-local or unspecified IPv6 address";
   }
   return null;
 }

@@ -8,6 +8,7 @@ import {
   ListPartsCommand,
   UploadPartCopyCommand,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
@@ -17,7 +18,7 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 export function registerS3MultipartTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_create_multipart_upload",
-    "Initiate an S3-compatible multipart upload for a large file in B2. Returns an UploadId to use with s3_upload_part.",
+    "Initiate an S3-compatible multipart upload for a large file in B2. Returns an UploadId to use with s3_presign_upload_part, which mints per-part URLs the client uploads directly to B2.",
     {
       bucket: z.string().describe("The destination bucket name."),
       key: z.string().describe("The object key for the final assembled file."),
@@ -52,33 +53,52 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
   );
 
   server.tool(
-    "s3_upload_part",
-    "Upload a single part of an S3-compatible multipart upload. Part numbers must be 1-10000. Returns an ETag needed for s3_complete_multipart_upload.",
+    "s3_presign_upload_part",
+    "Generate presigned PUT URLs for the parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2 — part bytes never pass through the MCP server. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
     {
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),
       uploadId: z.string().describe("The UploadId from s3_create_multipart_upload."),
-      partNumber: z.number().int().min(1).max(10000).describe("Part number (1-10000)."),
-      content: z
-        .string()
-        .describe(
-          "Base64-encoded content for this part. Parts (except the last) must be at least 5MB.",
-        ),
+      partNumbers: z
+        .array(z.number().int().min(1).max(10000))
+        .min(1)
+        .max(10000)
+        .describe("Part numbers to presign (each 1–10000). Mint all parts at once, or only the missing ones to resume."),
+      expiresIn: z
+        .number()
+        .int()
+        .min(1)
+        .max(604800)
+        .optional()
+        .default(3600)
+        .describe("URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days)."),
     },
     async (args) => {
       try {
-        const body = Buffer.from(args.content, "base64");
-        const result = await s3.send(
-          new UploadPartCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            UploadId: args.uploadId,
-            PartNumber: args.partNumber,
-            Body: body,
-            ContentLength: body.length,
+        const expiresIn = args.expiresIn ?? 3600;
+        const parts = await Promise.all(
+          args.partNumbers.map(async (partNumber) => {
+            const url = await getSignedUrl(
+              s3,
+              new UploadPartCommand({
+                Bucket: args.bucket,
+                Key: args.key,
+                UploadId: args.uploadId,
+                PartNumber: partNumber,
+              }),
+              { expiresIn },
+            );
+            return { partNumber, url };
           }),
         );
-        return toolJson({ partNumber: args.partNumber, etag: result.ETag });
+        return toolJson({
+          bucket: args.bucket,
+          key: args.key,
+          uploadId: args.uploadId,
+          expiresIn,
+          expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+          parts,
+        });
       } catch (err) {
         return toolError(err);
       }
@@ -96,7 +116,9 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
         .array(
           z.object({
             partNumber: z.number().int().describe("The part number."),
-            etag: z.string().describe("The ETag returned by s3_upload_part for this part."),
+            etag: z
+              .string()
+              .describe("The ETag from this part's direct PUT response (the s3_presign_upload_part flow)."),
           }),
         )
         .describe("All uploaded parts in ascending part number order."),
