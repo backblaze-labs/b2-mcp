@@ -15,7 +15,7 @@ import { toolError, toolJson } from "../utils/errors.js";
 export function registerS3PresignedTools(server: McpServer, s3: S3Client): void {
   server.tool(
     "s3_get_presigned_url",
-    "Generate a presigned URL for temporary, credential-free access to one B2 object — GetObject (download) or PutObject (upload). Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
+    "Generate a presigned URL for temporary, credential-free access to one B2 object — GetObject (download) or PutObject (upload). This is the preferred path for moving real object data: the bytes flow directly between the client/worker and B2 and never pass through the MCP server. (Use the inline s3_get_object / s3_put_object only for small ≤1 MiB control-plane payloads.) Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
     {
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),

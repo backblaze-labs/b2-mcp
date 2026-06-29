@@ -75,7 +75,9 @@ The surface is split by plane: **control plane = native, data plane = S3.**
 
 ### Object upload / data plane
 
-Object data movement runs on the **S3-compatible API** (`src/s3/objects.ts`, `src/s3/multipart.ts`) via the AWS SDK v3 `S3Client`, not the native API. Single-shot uploads use `s3_put_object`; larger uploads use the S3 multipart flow (`s3_create_multipart_upload` → `s3_upload_part` → `s3_complete_multipart_upload`), orchestrated by the caller. The AWS SDK streams request bodies, so uploads don't require buffering the whole object in memory.
+Object data movement runs on the **S3-compatible API** (`src/s3/objects.ts`, `src/s3/multipart.ts`) via the AWS SDK v3 `S3Client`, not the native API.
+
+**Control-plane-first data path.** The preferred way to move real object data is a **presigned URL** (`s3_get_presigned_url`, PutObject or GetObject): the bytes flow directly between the client/worker and B2 and never pass through the server. The inline `s3_put_object` / `s3_get_object` paths are bounded to **≤ 1 MiB** (`MAX_INLINE_OBJECT_BYTES` in `src/s3/objects.ts`) — a control-plane convenience for manifests, sidecars, and tiny configs; anything larger is refused with a pointer to `s3_get_presigned_url` or the multipart flow. **Multipart is presigned-per-part too**: `s3_create_multipart_upload` → `s3_presign_upload_part` (mints a presigned PUT URL per part) → the client PUTs each part directly to B2 → `s3_complete_multipart_upload` with the returned ETags. No multipart tool streams part bytes through the server. On the trusted stdio transport, `saveToPath` still streams any size straight to disk without buffering. Because the HTTP transport also disables local-file access by default, the internet-facing server is **control-plane-only by construction**: no bulk object data can flow through it.
 
 > The former native data tools and their files (`src/b2/files.ts`, `src/b2/large-files.ts`, `src/b2/download-urls.ts` — including `b2_upload_file`'s auto-multipart path and the native download-URL builders) were **removed** in the S3-first surface; object operations are S3-only now.
 
@@ -113,7 +115,7 @@ The HTTP server (`src/http-server.ts`) implements the MCP **Streamable HTTP** tr
 
 Because this transport is internet-facing, it is hardened by default:
 
-- **Local filesystem access is OFF.** `filePath` / `saveToPath` are rejected unless an operator sets `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox/dir` — and even then every path is confined (symlinks resolved) to that root via `src/utils/fs-guard.ts`. Remote callers should use base64 `content` instead. On the stdio transport disk access is on by default (trusted local user); set `B2_FILE_ROOT` to sandbox it or `B2_ALLOW_LOCAL_FILES=false` to disable.
+- **Local filesystem access is OFF.** `filePath` / `saveToPath` are rejected unless an operator sets `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox/dir` — and even then every path is confined (symlinks resolved) to that root via `src/utils/fs-guard.ts`. Remote callers can pass small (≤ 1 MiB) base64 `content` inline; for real object data they should use a presigned PutObject URL (`s3_get_presigned_url`) so bytes go client→B2 directly. On the stdio transport disk access is on by default (trusted local user); set `B2_FILE_ROOT` to sandbox it or `B2_ALLOW_LOCAL_FILES=false` to disable.
 - **Session caps:** `B2_MAX_SESSIONS` (default 1000) total and `B2_MAX_SESSIONS_PER_KEY` (default 20) per credential, returning 503 / 429 over the cap.
 - **Rate limiting** keys on a SHA-256 hash of the full key id (not a prefix), so distinct tenants can't collide.
 - **DNS-rebinding protection:** set `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS` (comma-separated) to enable Host/Origin validation on the `/mcp` endpoint.

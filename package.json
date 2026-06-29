@@ -1,11 +1,19 @@
 {
   "name": "@backblaze/b2-mcp-server",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "MCP server for Backblaze B2 — full B2 native API + a minimal S3-compatible set (only operations with no native equivalent)",
   "main": "dist/index.js",
   "bin": {
     "b2-mcp-server": "dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backblaze-b2-samples/b2-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/backblaze-b2-samples/b2-mcp-server/issues"
+  },
+  "homepage": "https://github.com/backblaze-b2-samples/b2-mcp-server#readme",
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc",

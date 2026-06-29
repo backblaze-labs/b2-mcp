@@ -126,7 +126,7 @@ describe("Every tool has a valid description", () => {
     "s3_list_objects_v2",
     "s3_list_object_versions",
     "s3_create_multipart_upload",
-    "s3_upload_part",
+    "s3_presign_upload_part",
     "s3_complete_multipart_upload",
     "s3_abort_multipart_upload",
     "s3_list_parts",

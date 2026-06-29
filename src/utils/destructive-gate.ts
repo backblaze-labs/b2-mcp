@@ -36,12 +36,42 @@ const DETECTORS: Record<string, Detector> = {
     "permanently delete an application key (anything using it loses access immediately)",
   b2_eject_group_member: () =>
     "eject a Group member (locks them out; the account cannot be re-added via API)",
+  // Account provisioning is irreversible and has billing impact: eject does not
+  // remove a created account, so a hijacked master-key session could mint real ones.
+  b2_create_group_member: () =>
+    "create a real, non-deletable Backblaze account (irreversible; eject cannot remove it; has billing impact)",
+  b2_reserve_trial_create_account: () =>
+    "create a real trial Backblaze account (irreversible; has billing impact)",
+  // Immutability removal — the protection-stripping step that precedes a delete.
+  // Gated when clearing retention (mode:null) or bypassing governance retention.
+  b2_update_file_retention: (args) => {
+    const fr = args.fileRetention as { mode?: unknown } | undefined;
+    const reasons: string[] = [];
+    if (fr && fr.mode === null) reasons.push("remove Object Lock retention from a file");
+    if (args.bypassGovernance === true) reasons.push("bypass governance-mode retention");
+    return reasons.length ? reasons.join(" and ") : null;
+  },
+  b2_update_file_legal_hold: (args) =>
+    args.legalHold === "off" ? "remove a legal hold, making the file deletable again" : null,
+  // Lifecycle rules can schedule mass deletion of objects and prior versions.
+  s3_put_bucket_lifecycle: (args) => {
+    const rules = (args.rules as Array<Record<string, unknown>> | undefined) ?? [];
+    const deletes = rules.some(
+      (r) => r.expiration != null || r.noncurrentVersionExpiration != null,
+    );
+    return deletes
+      ? "set a lifecycle rule that schedules deletion/expiration of objects (irreversible once it runs)"
+      : null;
+  },
   b2_update_bucket: (args) => {
     const reasons: string[] = [];
     if (args.bucketType === "allPublic") reasons.push("make the bucket PUBLIC (world-readable)");
     if (args.fileLockEnabled === false) reasons.push("disable Object Lock");
     const dr = args.defaultRetention as { mode?: unknown } | undefined;
     if (dr && dr.mode === null) reasons.push("clear the bucket's default Object Lock retention");
+    const lr = args.lifecycleRules as Array<Record<string, unknown>> | undefined;
+    if (Array.isArray(lr) && lr.some((r) => r.daysFromHidingToDeleting != null))
+      reasons.push("set a lifecycle rule that schedules permanent deletion of objects");
     return reasons.length ? reasons.join(" and ") : null;
   },
 };

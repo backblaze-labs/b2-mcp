@@ -582,6 +582,7 @@ describe("b2_update_file_legal_hold", () => {
       fileId: "file-001",
       fileName: "doc.pdf",
       legalHold: "off",
+      confirm: true, // removing a legal hold is gated
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -663,6 +664,7 @@ describe("b2_create_group_member", () => {
         adminAccountId: "test-account-123",
         groupId: "254",
         memberEmail: "member@example.com",
+        confirm: true, // account creation is gated
       }),
     );
     expect(result.applicationKeyId).toBe("100530e11d8c");
@@ -674,6 +676,7 @@ describe("b2_create_group_member", () => {
       adminAccountId: "test-account-123",
       groupId: "254",
       memberEmail: "m@example.com",
+      confirm: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ url: expect.stringContaining("b2api/v3") }),
@@ -686,6 +689,7 @@ describe("b2_create_group_member", () => {
       groupId: "254",
       memberEmail: "m@example.com",
       region: "eu-central",
+      confirm: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ region: "eu-central" }) }),
@@ -697,6 +701,7 @@ describe("b2_create_group_member", () => {
       adminAccountId: "test-account-123",
       groupId: "254",
       memberEmail: "m@example.com",
+      confirm: true,
     });
     const callArgs = (mockedAxios as any).mock.calls[0][0];
     expect(callArgs.data.region).toBeUndefined();
@@ -826,6 +831,7 @@ describe("b2_reserve_trial_create_account", () => {
         email: "user@example.com",
         term: 14,
         storage: 5,
+        confirm: true, // account creation is gated
       }),
     );
     expect(result.accountId).toBe("trial-account-123");
@@ -839,6 +845,7 @@ describe("b2_reserve_trial_create_account", () => {
       email: "user@example.com",
       term: 7,
       storage: 1,
+      confirm: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ url: expect.stringContaining("b2api/v3") }),
@@ -851,6 +858,7 @@ describe("b2_reserve_trial_create_account", () => {
       term: 30,
       storage: 10,
       region: "eu-central",
+      confirm: true,
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -901,6 +909,7 @@ describe("b2_update_file_retention", () => {
       fileName: "doc.pdf",
       fileRetention: { mode: "governance", retainUntilTimestamp: retentionTimestamp },
       bypassGovernance: true,
+      confirm: true, // bypassGovernance is gated
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ bypassGovernance: true }) }),
@@ -913,6 +922,7 @@ describe("b2_update_file_retention", () => {
       fileName: "doc.pdf",
       fileRetention: { mode: null, retainUntilTimestamp: null },
       bypassGovernance: true,
+      confirm: true, // clearing retention is gated
     });
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -23,10 +23,19 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
 
+// Inline object content moves bytes *through* the server — and, for base64,
+// through the model's context window. Keep that path for small control-plane
+// payloads only (manifests, sidecars, tiny configs the agent must inspect or
+// write) and steer real object data to a presigned URL (s3_get_presigned_url),
+// so bytes flow client/worker↔B2 directly and never touch the server. On the
+// internet-facing HTTP transport, local-file access is off by default, so this
+// cap is what keeps the data plane off the server: anything larger must presign.
+const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
+
 export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_put_object",
-    "Upload an object to a B2 bucket via the S3-compatible API. Provide either base64-encoded content or a local file path.",
+    "Upload a SMALL object inline (≤1 MiB) to a B2 bucket — for manifests, sidecars, and tiny configs. Provide base64-encoded content or a local file path. For real object data, generate a PutObject URL with s3_get_presigned_url and upload directly to B2 (bytes never pass through the server), or use the multipart tools for large objects.",
     {
       bucket: z.string().describe("The destination bucket name."),
       key: z.string().describe("The object key (file path within the bucket)."),
@@ -61,11 +70,28 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
         const safePath = args.filePath
           ? resolveLocalPath(config, args.filePath, "read")
           : undefined;
+
+        // Enforce the inline cap before moving any bytes. Bulk uploads must use a
+        // presigned PutObject URL (s3_get_presigned_url) or the multipart flow so
+        // object data never streams through the server / model context.
+        const size = safePath
+          ? fs.statSync(safePath).size
+          : Buffer.byteLength(args.content!, "base64");
+        if (size > MAX_INLINE_OBJECT_BYTES) {
+          return toolError(
+            new Error(
+              `Payload is ${size} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline limit for s3_put_object. ` +
+                `Generate a PutObject URL with s3_get_presigned_url and upload directly to B2, or use the ` +
+                `multipart tools (s3_create_multipart_upload → s3_presign_upload_part → s3_complete_multipart_upload) for large objects.`,
+            ),
+          );
+        }
+
         const body = safePath
           ? fs.createReadStream(safePath)
           : Buffer.from(args.content!, "base64");
 
-        const contentLength = safePath ? fs.statSync(safePath).size : undefined;
+        const contentLength = safePath ? size : undefined;
 
         await s3.send(
           new PutObjectCommand({
@@ -90,7 +116,7 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
 
   server.tool(
     "s3_get_object",
-    "Download an object from a B2 bucket via the S3-compatible API. Returns base64-encoded content and metadata, or saves to a local path.",
+    "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
     {
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),
@@ -123,16 +149,16 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
           return toolSuccess(`Object saved to ${safePath} (${result.ContentLength ?? "?"} bytes)`);
         }
 
-        // Bound the in-memory path (parity with the 100 MB B2-native download
-        // cap). Without saveToPath the whole object is buffered + base64-copied,
-        // so a multi-GB object would OOM the process. ContentLength is the
-        // server's declared size; reject before buffering and point to saveToPath.
-        const MAX_INMEMORY_DOWNLOAD_BYTES = 100 * 1024 * 1024;
-        if ((result.ContentLength ?? 0) > MAX_INMEMORY_DOWNLOAD_BYTES) {
+        // Bound the inline path: without saveToPath the whole object is buffered
+        // and base64-copied into the response (and the model context), so this is
+        // a control-plane convenience for small payloads only. Reject before
+        // buffering and steer bulk reads to a presigned URL or saveToPath.
+        if ((result.ContentLength ?? 0) > MAX_INLINE_OBJECT_BYTES) {
           return toolError(
             new Error(
-              `Object is ${result.ContentLength} bytes, over the ${MAX_INMEMORY_DOWNLOAD_BYTES}-byte in-memory download limit. ` +
-                `Use saveToPath to stream it to disk, or a Range request to fetch it in chunks.`,
+              `Object is ${result.ContentLength} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline read limit for s3_get_object. ` +
+                `Generate a GetObject URL with s3_get_presigned_url to download directly from B2, use saveToPath to stream it to disk, ` +
+                `or a Range request to read a small slice.`,
             ),
           );
         }
