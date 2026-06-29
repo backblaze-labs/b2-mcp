@@ -35,7 +35,7 @@ export function registerKeyTools(
   // ── b2_create_key ─────────────────────────────────────────────────────────
   server.tool(
     "b2_create_key",
-    "Create a new B2 application key with specified capabilities. Keys can be scoped to a single bucket and/or file name prefix for least-privilege access. The application key secret is only returned once — store it immediately. For safety, the server blocks minting keys with key-management capabilities (listKeys/writeKeys/deleteKeys) and unscoped write keys by default, and can enforce a maximum validity; see B2_ALLOW_KEY_MGMT_GRANTS, B2_ALLOW_UNSCOPED_KEYS, and B2_MAX_KEY_DURATION_SECONDS.",
+    "Create a B2 application key, optionally scoped to a bucket and/or filename prefix (least privilege). The secret is returned ONCE — store it immediately. By default the server blocks key-management grants (listKeys/writeKeys/deleteKeys) and unscoped write keys; overrides: B2_ALLOW_KEY_MGMT_GRANTS, B2_ALLOW_UNSCOPED_KEYS, B2_MAX_KEY_DURATION_SECONDS.",
     {
       capabilities: z
         .array(z.string())

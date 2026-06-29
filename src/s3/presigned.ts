@@ -15,7 +15,7 @@ import { toolError, toolJson } from "../utils/errors.js";
 export function registerS3PresignedTools(server: McpServer, s3: S3Client): void {
   server.tool(
     "s3_get_presigned_url",
-    "Generate a presigned URL for a B2 object via the S3-compatible API. Presigned URLs grant temporary, credential-free access to a specific object. Supports GetObject (download) or PutObject (upload). Note: Browser-based POST uploads (presigned POST) are NOT supported by Backblaze B2 — use PutObject presigned URLs instead.",
+    "Generate a presigned URL for temporary, credential-free access to one B2 object — GetObject (download) or PutObject (upload). Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
     {
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),

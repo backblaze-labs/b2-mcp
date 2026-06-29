@@ -33,7 +33,7 @@ export function registerS3BucketTools(server: McpServer, s3: S3Client): void {
 
   server.tool(
     "s3_put_bucket_lifecycle",
-    "Set lifecycle rules for a B2 bucket via the S3-compatible API. Kept primarily for AbortIncompleteMultipartUpload, which cancels incomplete S3-multipart uploads — a capability the native lifecycle API does not express. Also supports object expiration (Expiration) and noncurrent version expiration (NoncurrentVersionExpiration). Note: Transition / storage-class rules are NOT supported by Backblaze B2.",
+    "Set S3 lifecycle rules on a B2 bucket. Mainly for AbortIncompleteMultipartUpload (cancels incomplete multipart uploads — the native API can't). Also supports Expiration and NoncurrentVersionExpiration. Note: Transition/storage-class rules are NOT supported by B2.",
     {
       bucket: z.string().describe("The bucket name."),
       rules: z.array(

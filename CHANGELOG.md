@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Four read-only storage-activity ("insights") tools** (36 → 40 tools, all
+  `b2_*`). All are read-only and scoped by the caller's credential — a partner
+  key sees its sub-accounts, a customer key sees only itself; scope is automatic
+  and fail-closed.
+  - `b2_usage_growth` — rank accounts by stored-data growth/shrink over a window.
+  - `b2_egress_leaders` — rank top egress by account or bucket over a period.
+  - `b2_largest_files` — a bucket's largest objects by size (live S3 listing).
+  - `b2_unfinished_uploads` — abandoned multipart uploads wasting storage.
+
+  Phase-1 tools (`b2_usage_growth`, `b2_egress_leaders`) read the daily
+  `b2-reports-<accountId>` usage CSVs. That bucket is **Restricted** and hidden
+  from `b2_list_buckets`, so it is addressed by constructed name rather than
+  discovered by listing (a 404 surfaces as "Usage Reports not enabled"); reads
+  exclude the `audit` mirror and the `reportingLocations` index to avoid
+  double-counting, and download CSVs with bounded concurrency to stay under MCP
+  client timeouts. Phase-2 tools (`b2_largest_files`, `b2_unfinished_uploads`)
+  use live per-bucket S3 listing; no index required.
+
+### Changed
+- Tightened the wordiest tool descriptions (`b2_create_key`, the Partner
+  group/trial tools, `s3_get_presigned_url`, `s3_put_bucket_lifecycle`) to cut
+  tool-definition description text ~15% without dropping triggers, constraints,
+  or destructive warnings.
+
 ## [2.0.0] - 2026-06-24
 
 **BREAKING — S3-first tool-surface reset (pre-release baseline).** The surface was
