@@ -33,3 +33,16 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+
+  # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
+  # auto-deploy host watches this ref (read-only deploy key), so only CI-green
+  # commits ever reach production. Runs only on a successful main push.
+  mark-green:
+    needs: [lint, test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - run: git push origin "HEAD:refs/heads/ci-green" --force
