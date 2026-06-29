@@ -105,7 +105,7 @@ export function registerBucketTools(
   // ── b2_list_buckets ───────────────────────────────────────────────────────
   server.tool(
     "b2_list_buckets",
-    "List all B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket.",
+    "List B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket. Capped to `limit` buckets (default 100, max 1000) to keep the response small for accounts with many buckets; if more exist the result is truncated with total_bucket_count and a note — raise limit or filter to target specific buckets.",
     {
       bucketId: z.string().optional().describe("Filter to a specific bucket by its ID"),
       bucketName: z.string().optional().describe("Filter to a specific bucket by its name"),
@@ -113,6 +113,16 @@ export function registerBucketTools(
         .array(z.enum(["allPublic", "allPrivate", "snapshot", "all"]))
         .optional()
         .describe("Filter by bucket types. Defaults to all types."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(1000)
+        .optional()
+        .default(100)
+        .describe(
+          "Maximum number of buckets to return (default 100, max 1000). The B2 API returns every bucket in one response; this caps how many are surfaced to keep the payload and token cost bounded. If the account has more buckets than the limit, the result is truncated with total_bucket_count and a note — raise limit (up to 1000) or filter by bucketName / bucketId / bucketTypes.",
+        ),
     },
     async (args) => {
       try {
@@ -122,8 +132,29 @@ export function registerBucketTools(
         if (args.bucketName) payload.bucketName = args.bucketName;
         if (args.bucketTypes) payload.bucketTypes = args.bucketTypes;
 
-        const result = await client.call("b2_list_buckets", payload);
-        return toolJson(result);
+        // B2's b2_list_buckets has no count/pagination param — it returns every
+        // bucket in one response. For accounts with thousands of buckets that is
+        // a large, token-heavy payload, so cap how many we surface to the model.
+        const result = (await client.call("b2_list_buckets", payload)) as {
+          buckets?: unknown[];
+          [k: string]: unknown;
+        };
+        const all = Array.isArray(result.buckets) ? result.buckets : [];
+        const truncated = all.length > args.limit;
+        const buckets = truncated ? all.slice(0, args.limit) : all;
+
+        return toolJson({
+          ...result,
+          buckets,
+          bucket_count: buckets.length,
+          total_bucket_count: all.length,
+          ...(truncated
+            ? {
+                truncated: true,
+                note: `Showing the first ${args.limit} of ${all.length} buckets. Raise limit (up to 1000), or filter by bucketName, bucketId, or bucketTypes to target specific buckets.`,
+              }
+            : {}),
+        });
       } catch (err) {
         return toolError(err);
       }

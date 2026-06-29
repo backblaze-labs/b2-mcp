@@ -111,6 +111,24 @@ describe("formatB2Error", () => {
     };
     expect(formatB2Error(err)).toContain("requestId: req-500-1");
   });
+
+  it("appends master-key guidance on an S3 InvalidAccessKeyId / Malformed Access Key Id", () => {
+    const err = {
+      name: "InvalidAccessKeyId",
+      message: "Malformed Access Key Id",
+      $metadata: { httpStatusCode: 403, requestId: "req-403" },
+    };
+    const formatted = formatB2Error(err);
+    expect(formatted).toContain("InvalidAccessKeyId");
+    expect(formatted).toContain("only accepts a regular");
+    expect(formatted).toContain("master key");
+    expect(formatted).toContain("requestId: req-403"); // hint sits before the requestId
+  });
+
+  it("does not append the hint to unrelated errors", () => {
+    const err = { response: { status: 404, data: { code: "file_not_present", message: "gone" } } };
+    expect(formatB2Error(err)).not.toContain("application key");
+  });
 });
 
 describe("parseErrorText (round-trips formatB2Error for the audit layer)", () => {

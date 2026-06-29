@@ -93,8 +93,28 @@ export function parseErrorText(
  */
 export function formatB2Error(err: unknown): string {
   const parsed = parseB2Error(err);
-  const base = `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${parsed.message}`;
+  const base = `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${parsed.message}${errorHint(parsed)}`;
   return parsed.requestId ? `${base} (requestId: ${parsed.requestId})` : base;
+}
+
+/**
+ * Extra guidance appended to otherwise-cryptic B2 errors.
+ *
+ * The big one: B2's S3-compatible API (every s3_* tool and the live insight
+ * tools) rejects the account MASTER key — and any malformed key id — with
+ * InvalidAccessKeyId / "Malformed Access Key Id". Connecting with a master key
+ * is a natural mistake (it's the "full access" key), so the raw error is a
+ * common dead end. Point the operator at a regular application key.
+ */
+function errorHint(parsed: B2ApiError): string {
+  if (parsed.code === "InvalidAccessKeyId" || /malformed access key id/i.test(parsed.message)) {
+    return (
+      " — B2's S3-compatible API (used by the s3_* and insight tools) only accepts a regular " +
+      "application key, not an account master key. If you're connecting with a master key, switch " +
+      "to a non-master application key (or set B2_APP_KEY_ID / B2_APP_KEY to one for the S3 surface)."
+    );
+  }
+  return "";
 }
 
 /**

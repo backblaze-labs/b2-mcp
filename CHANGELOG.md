@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-29
+
+### Added
+- **Scan bounds on the live insight tools.** `b2_largest_files` gains `max_scan`
+  (default 50,000, max 500,000) and `b2_unfinished_uploads` gains `max_uploads`
+  (default 1,000, max 10,000), each paired with an internal wall-clock budget.
+  Sorting a bucket by object size — or summing every abandoned upload's parts —
+  requires a full listing, which on a bucket with millions of files (or a bloated
+  upload backlog) is an unbounded, rate-limited fan-out that hangs and times out.
+  The tools now stop at the cap or budget and return `truncated: true` (and, for
+  unfinished uploads, `wasted_is_lower_bound`) so the result is honest, fast, and
+  never a hang. The oldest upload is still reported accurately when truncated.
+- **`limit` on `b2_list_buckets`** (default 100, max 1,000). The B2 API returns
+  every bucket in one response; the tool now caps how many are surfaced and adds
+  `total_bucket_count` plus a `truncated` flag/note when more exist, keeping the
+  payload and token cost bounded for accounts with many buckets.
+
+### Changed
+- The bounded insight tools always emit a `truncated` boolean for a uniform
+  response shape.
+
+### Fixed
+- **Actionable master-key error on the S3 surface.** When the S3-compatible API
+  rejects an account master key (`InvalidAccessKeyId` / "Malformed Access Key
+  Id"), the formatted error now explains that the `s3_*` and insight tools need a
+  regular (non-master) application key — turning a cryptic 403 into a clear fix.
+
 ## [2.2.0] - 2026-06-28
 
 ### Added

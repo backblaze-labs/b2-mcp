@@ -33,6 +33,11 @@ const liveS3It = HAS_S3_CREDS ? test : test.skip;
 // Partner-entitled account. Gated off by default so a normal live run skips it.
 const HAS_PARTNER = HAS_CREDS && process.env.B2_PARTNER_LIVE === "1";
 const partnerIt = HAS_PARTNER ? test : test.skip;
+// Large-bucket truncation: point B2_TRUNCATION_BUCKET at a bucket preseeded with
+// > max_scan objects (5k tiny files; see scripts/seed-trunc-bucket.mjs). Needs S3
+// creds. Skipped unless both are set, so a normal live run doesn't require it.
+const TRUNC_BUCKET = process.env.B2_TRUNCATION_BUCKET;
+const truncIt = HAS_S3_CREDS && TRUNC_BUCKET ? test : test.skip;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -432,5 +437,35 @@ describe("Error handling", () => {
       bucket: "this-bucket-does-not-exist-xyz-99999",
     });
     expect(isError(result)).toBe(true);
+  });
+});
+
+// Verifies the scan bound on a real, large bucket (preseeded with 5k objects).
+describe("Large-bucket truncation — b2_largest_files (gated: B2_TRUNCATION_BUCKET)", () => {
+  truncIt("trips max_scan on a >max_scan bucket and reports truncated", async () => {
+    const raw = await callTool(server, "b2_largest_files", {
+      bucket: TRUNC_BUCKET,
+      limit: 5,
+      max_scan: 1000,
+    });
+    expect(isError(raw)).toBe(false);
+    const result = parseResult(raw);
+    expect(result.truncated).toBe(true);
+    expect(result.scanned).toBeGreaterThanOrEqual(1000);
+    expect(result.returned).toBeLessThanOrEqual(5);
+    expect(result.note).toContain("max_scan");
+    console.log(`  truncated at scanned=${result.scanned}, largest=${result.files?.[0]?.size_bytes}B`);
+  });
+
+  truncIt("returns a complete result when max_scan exceeds the object count", async () => {
+    const result = parseResult(
+      await callTool(server, "b2_largest_files", {
+        bucket: TRUNC_BUCKET,
+        limit: 5,
+        max_scan: 50000,
+      }),
+    );
+    expect(result.truncated).toBe(false);
+    expect(result.scanned).toBeGreaterThanOrEqual(5000);
   });
 });
