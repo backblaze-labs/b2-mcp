@@ -11,7 +11,7 @@ import { B2Config, DestructivePolicy } from "../../src/utils/types";
 
 // Only `destructivePolicy` is read by the gate; cast a partial config.
 const cfg = (destructivePolicy?: DestructivePolicy): B2Config =>
-  ({ destructivePolicy } as unknown as B2Config);
+  ({ destructivePolicy }) as unknown as B2Config;
 
 describe("destructive-gate", () => {
   describe("isDestructiveTool", () => {
@@ -163,7 +163,12 @@ describe("destructive-gate", () => {
       expect(
         checkDestructive(
           "b2_update_file_retention",
-          { fileId: "f", fileName: "n", fileRetention: { mode: "governance" }, bypassGovernance: true },
+          {
+            fileId: "f",
+            fileName: "n",
+            fileRetention: { mode: "governance" },
+            bypassGovernance: true,
+          },
           cfg(),
         ).ok,
       ).toBe(false);
@@ -173,7 +178,11 @@ describe("destructive-gate", () => {
       expect(
         checkDestructive(
           "b2_update_file_retention",
-          { fileId: "f", fileName: "n", fileRetention: { mode: "compliance", retainUntilTimestamp: 1 } },
+          {
+            fileId: "f",
+            fileName: "n",
+            fileRetention: { mode: "compliance", retainUntilTimestamp: 1 },
+          },
           cfg(),
         ).ok,
       ).toBe(true);
@@ -181,10 +190,18 @@ describe("destructive-gate", () => {
 
     it("gates removing a legal hold (off) but not applying one (on)", () => {
       expect(
-        checkDestructive("b2_update_file_legal_hold", { fileId: "f", fileName: "n", legalHold: "off" }, cfg()).ok,
+        checkDestructive(
+          "b2_update_file_legal_hold",
+          { fileId: "f", fileName: "n", legalHold: "off" },
+          cfg(),
+        ).ok,
       ).toBe(false);
       expect(
-        checkDestructive("b2_update_file_legal_hold", { fileId: "f", fileName: "n", legalHold: "on" }, cfg()).ok,
+        checkDestructive(
+          "b2_update_file_legal_hold",
+          { fileId: "f", fileName: "n", legalHold: "on" },
+          cfg(),
+        ).ok,
       ).toBe(true);
     });
   });
@@ -218,7 +235,13 @@ describe("destructive-gate", () => {
           "s3_put_bucket_lifecycle",
           {
             bucket: "b",
-            rules: [{ id: "r", status: "Enabled", abortIncompleteMultipartUpload: { daysAfterInitiation: 7 } }],
+            rules: [
+              {
+                id: "r",
+                status: "Enabled",
+                abortIncompleteMultipartUpload: { daysAfterInitiation: 7 },
+              },
+            ],
           },
           cfg(),
         ).ok,

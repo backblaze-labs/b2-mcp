@@ -118,12 +118,19 @@ afterEach(async () => {
 });
 
 const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
-const JSON_HEADERS = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+const JSON_HEADERS = {
+  "content-type": "application/json",
+  accept: "application/json, text/event-stream",
+};
 const INIT = JSON.stringify({
   jsonrpc: "2.0",
   id: 1,
   method: "initialize",
-  params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+  params: {
+    protocolVersion: "2025-03-26",
+    capabilities: {},
+    clientInfo: { name: "test", version: "1" },
+  },
 });
 
 describe("HTTP handler (Streamable HTTP)", () => {
@@ -172,14 +179,20 @@ describe("HTTP handler (Streamable HTTP)", () => {
 
   it("returns 503 when total session capacity is reached", async () => {
     for (let i = 0; i < 1000; i++) handle.sessions.set(`s${i}`, fakeSession(`rk${i}`));
-    const res = await request(port, "POST", "/mcp", { headers: { ...creds, ...JSON_HEADERS }, body: INIT });
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: INIT,
+    });
     expect(res.status).toBe(503);
   });
 
   it("returns 429 when per-key session capacity is reached", async () => {
     const rk = deriveRateKey("key-abc");
     for (let i = 0; i < 20; i++) handle.sessions.set(`k${i}`, fakeSession(rk));
-    const res = await request(port, "POST", "/mcp", { headers: { ...creds, ...JSON_HEADERS }, body: INIT });
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: INIT,
+    });
     expect(res.status).toBe(429);
   });
 
@@ -189,7 +202,13 @@ describe("HTTP handler (Streamable HTTP)", () => {
     // (which already carry Mcp-Session-Id) and tear down.
     const status = await new Promise<number>((resolve, reject) => {
       const req = http.request(
-        { host: "127.0.0.1", port, method: "POST", path: "/mcp", headers: { ...creds, ...JSON_HEADERS } },
+        {
+          host: "127.0.0.1",
+          port,
+          method: "POST",
+          path: "/mcp",
+          headers: { ...creds, ...JSON_HEADERS },
+        },
         (res) => {
           resolve(res.statusCode ?? 0);
           res.destroy();

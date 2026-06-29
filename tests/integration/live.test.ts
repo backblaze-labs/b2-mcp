@@ -118,7 +118,6 @@ beforeAll(async () => {
     const writableS3 = b2Buckets.buckets.find((b: any) => isUserWritableBucket(b.bucketName));
     if (writableS3) writableBucketName = writableS3.bucketName;
   }
-
 });
 
 // ── Protocol layer (no credentials needed) ────────────────────────────────────
@@ -454,7 +453,9 @@ describe("Large-bucket truncation — b2_largest_files (gated: B2_TRUNCATION_BUC
     expect(result.scanned).toBeGreaterThanOrEqual(1000);
     expect(result.returned).toBeLessThanOrEqual(5);
     expect(result.note).toContain("max_scan");
-    console.log(`  truncated at scanned=${result.scanned}, largest=${result.files?.[0]?.size_bytes}B`);
+    console.log(
+      `  truncated at scanned=${result.scanned}, largest=${result.files?.[0]?.size_bytes}B`,
+    );
   });
 
   truncIt("returns a complete result when max_scan exceeds the object count", async () => {

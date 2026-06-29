@@ -42,9 +42,12 @@ async function ensureBucket() {
 }
 
 async function existingCount() {
-  let token, n = 0;
+  let token,
+    n = 0;
   do {
-    const page = await s3.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: PREFIX, ContinuationToken: token }));
+    const page = await s3.send(
+      new ListObjectsV2Command({ Bucket: bucket, Prefix: PREFIX, ContinuationToken: token }),
+    );
     n += page.Contents?.length ?? 0;
     token = page.IsTruncated ? page.NextContinuationToken : undefined;
   } while (token);
@@ -67,12 +70,14 @@ async function seed() {
       const i = next++;
       // Vary size 10–59 bytes so "largest" is meaningful; one clear max at i=0.
       const size = i === 0 ? 200 : 10 + (i % 50);
-      await s3.send(new PutObjectCommand({
-        Bucket: bucket,
-        Key: `${PREFIX}${pad(i)}.txt`,
-        Body: "x".repeat(size),
-        ContentType: "text/plain",
-      }));
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: `${PREFIX}${pad(i)}.txt`,
+          Body: "x".repeat(size),
+          ContentType: "text/plain",
+        }),
+      );
       if (++done % 500 === 0) console.log(`  ${done}/${COUNT}`);
     }
   };

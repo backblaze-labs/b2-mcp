@@ -13,7 +13,7 @@ This server speaks the Model Context Protocol over **two transports**:
 
 ## Compatibility at a glance
 
-| Client                    | Local (stdio) | Hosted (Streamable HTTP)   | Config location                                   |
+| Client                    | Local (stdio) |  Hosted (Streamable HTTP)  | Config location                                   |
 | ------------------------- | :-----------: | :------------------------: | ------------------------------------------------- |
 | Claude Desktop            |      ✅       | ✅ via `mcp-remote` bridge | `claude_desktop_config.json`                      |
 | Claude.ai web / Pro / Max |       —       |      ✅ URL + headers      | Custom Connectors UI                              |

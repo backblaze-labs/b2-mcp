@@ -223,7 +223,11 @@ export function selectUsageKeys(keys: string[]): string[] {
 }
 
 /** Run `fn` over items with bounded concurrency, preserving order. */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {
@@ -254,7 +258,11 @@ async function loadReportRows(
         // StartAfter skips every key before the window (keys are date-prefixed
         // and sort lexically), so a long-lived report bucket isn't fully scanned.
         // StartAfter applies to the first page only; ContinuationToken drives the rest.
-        new ListObjectsV2Command({ Bucket: bucketName, StartAfter: sinceDate, ContinuationToken: token }),
+        new ListObjectsV2Command({
+          Bucket: bucketName,
+          StartAfter: sinceDate,
+          ContinuationToken: token,
+        }),
       );
       for (const o of page.Contents ?? []) {
         const k = o.Key ?? "";
@@ -295,7 +303,8 @@ function startOfMonthUTC(): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
 }
 
-const gb = (bytes: number | null) => (bytes == null ? null : Math.round((bytes / GB) * 1000) / 1000);
+const gb = (bytes: number | null) =>
+  bytes == null ? null : Math.round((bytes / GB) * 1000) / 1000;
 
 // ── Snapshot growth (point-in-time stored_gb at two dates) ──────────────────
 // Per Backblaze's Usage Report spec, stored_gb is "bytes stored in gigabytes
@@ -415,10 +424,11 @@ export async function loadDayRows(
     return obj.Body!.transformToString("utf-8");
   });
   const rows: ReportRow[] = [];
-  for (const text of texts) for (const raw of parseCsv(text)) {
-    const mapped = mapRow(raw);
-    if (mapped) rows.push(mapped);
-  }
+  for (const text of texts)
+    for (const raw of parseCsv(text)) {
+      const mapped = mapRow(raw);
+      if (mapped) rows.push(mapped);
+    }
   return rows;
 }
 
@@ -483,8 +493,7 @@ async function resolveBucketName(
   if (exact?.bucketName) return { name: exact.bucketName };
   const subs = buckets.filter((b) => b.bucketName?.includes(input));
   if (subs.length === 1 && subs[0].bucketName) return { name: subs[0].bucketName };
-  if (subs.length > 1)
-    return { candidates: subs.map((b) => b.bucketName!).filter(Boolean) };
+  if (subs.length > 1) return { candidates: subs.map((b) => b.bucketName!).filter(Boolean) };
   return {};
 }
 
@@ -505,14 +514,18 @@ export function registerInsightTools(
         .enum(["month", "quarter", "year"])
         .optional()
         .default("month")
-        .describe("Compare the latest snapshot against one month, quarter, or year ago. Default month."),
+        .describe(
+          "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
+        ),
       days: z
         .number()
         .int()
         .min(1)
         .max(3650)
         .optional()
-        .describe("Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week)."),
+        .describe(
+          "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
+        ),
       order: z
         .enum(["most_grown", "least_grown", "shrinking"])
         .optional()
@@ -554,7 +567,8 @@ export function registerInsightTools(
         accounts = accounts.slice(0, args.limit);
 
         return toolJson({
-          comparison: args.days != null ? `last ${args.days} days` : `${args.period}-over-${args.period}`,
+          comparison:
+            args.days != null ? `last ${args.days} days` : `${args.period}-over-${args.period}`,
           from_date: then.date,
           to_date: latest.date,
           account_count: accounts.length,
@@ -853,9 +867,9 @@ export function registerInsightTools(
           ? ` wasted_gb is a lower bound — stopped summing parts after a ${TIME_BUDGET_MS / 1000}s budget (sized ${sizedUploads} of ${uploads.length} uploads).`
           : "";
         const note = truncated
-          ? (stopReason === "max_uploads"
-              ? `Stopped at the max_uploads cap of ${args.max_uploads.toLocaleString()} — the bucket has more abandoned uploads than shown.${lowerBoundTip} ${lifecycleTip}`
-              : `Stopped after a ${TIME_BUDGET_MS / 1000}s time budget (${uploads.length.toLocaleString()} uploads found).${lowerBoundTip} ${lifecycleTip}`)
+          ? stopReason === "max_uploads"
+            ? `Stopped at the max_uploads cap of ${args.max_uploads.toLocaleString()} — the bucket has more abandoned uploads than shown.${lowerBoundTip} ${lifecycleTip}`
+            : `Stopped after a ${TIME_BUDGET_MS / 1000}s time budget (${uploads.length.toLocaleString()} uploads found).${lowerBoundTip} ${lifecycleTip}`
           : wastedIsLowerBound
             ? `${lowerBoundTip.trim()} ${lifecycleTip}`
             : `Consider a lifecycle rule to auto-cancel unfinished large uploads (daysFromStartingToCancelingUnfinishedLargeFiles).`;
@@ -865,7 +879,9 @@ export function registerInsightTools(
           unfinished_count: uploads.length,
           truncated,
           wasted_gb: gb(wasted),
-          ...(wastedIsLowerBound ? { wasted_is_lower_bound: true, sized_uploads: sizedUploads } : {}),
+          ...(wastedIsLowerBound
+            ? { wasted_is_lower_bound: true, sized_uploads: sizedUploads }
+            : {}),
           oldest_started_at: oldest.initiated,
           oldest_file: oldest.key,
           note,

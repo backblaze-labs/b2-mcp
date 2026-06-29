@@ -169,10 +169,38 @@ describe("insights — mapRow", () => {
 
 describe("insights — computeAccountGrowth", () => {
   const rows: ReportRow[] = [
-    { accountId: "a", _date: "2026-06-01", storageBytes: 100, egressBytes: 5, uploadBytes: 0, classCTxn: 0 },
-    { accountId: "a", _date: "2026-06-03", storageBytes: 150, egressBytes: 5, uploadBytes: 0, classCTxn: 0 },
-    { accountId: "b", _date: "2026-06-01", storageBytes: 200, egressBytes: 1, uploadBytes: 0, classCTxn: 0 },
-    { accountId: "b", _date: "2026-06-03", storageBytes: 180, egressBytes: 1, uploadBytes: 0, classCTxn: 0 },
+    {
+      accountId: "a",
+      _date: "2026-06-01",
+      storageBytes: 100,
+      egressBytes: 5,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
+    {
+      accountId: "a",
+      _date: "2026-06-03",
+      storageBytes: 150,
+      egressBytes: 5,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
+    {
+      accountId: "b",
+      _date: "2026-06-01",
+      storageBytes: 200,
+      egressBytes: 1,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
+    {
+      accountId: "b",
+      _date: "2026-06-03",
+      storageBytes: 180,
+      egressBytes: 1,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
   ];
 
   it("computes first→last growth and sorts most-grown first", () => {
@@ -191,9 +219,33 @@ describe("insights — computeAccountGrowth", () => {
 
 describe("insights — computeEgressLeaders", () => {
   const rows: ReportRow[] = [
-    { accountId: "a", _date: "d1", bucketName: "ba", storageBytes: 0, egressBytes: 30, uploadBytes: 0, classCTxn: 0 },
-    { accountId: "a", _date: "d2", bucketName: "ba", storageBytes: 0, egressBytes: 10, uploadBytes: 0, classCTxn: 0 },
-    { accountId: "b", _date: "d1", bucketName: "bb", storageBytes: 0, egressBytes: 20, uploadBytes: 0, classCTxn: 0 },
+    {
+      accountId: "a",
+      _date: "d1",
+      bucketName: "ba",
+      storageBytes: 0,
+      egressBytes: 30,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
+    {
+      accountId: "a",
+      _date: "d2",
+      bucketName: "ba",
+      storageBytes: 0,
+      egressBytes: 10,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
+    {
+      accountId: "b",
+      _date: "d1",
+      bucketName: "bb",
+      storageBytes: 0,
+      egressBytes: 20,
+      uploadBytes: 0,
+      classCTxn: 0,
+    },
   ];
 
   it("ranks accounts by total egress", () => {
@@ -215,11 +267,18 @@ import { latestSnapshotDate, loadDayRows } from "../../src/b2/insights.js";
 // Minimal S3 stand-in: returns ListObjectsV2 pages by Prefix/StartAfter and a
 // GetObject body. Lets us verify date selection and per-day loading without a network.
 function fakeS3(objectsByDay: Record<string, string[]>, csvByKey: Record<string, string> = {}) {
-  const allKeys = Object.entries(objectsByDay).flatMap(([d, names]) => names.map((n) => `${d}/${n}`));
+  const allKeys = Object.entries(objectsByDay).flatMap(([d, names]) =>
+    names.map((n) => `${d}/${n}`),
+  );
   return {
     send: async (cmd: any) => {
       const input = cmd.input ?? {};
-      if ("Key" in input && !("Prefix" in input) && !("StartAfter" in input) && !("ContinuationToken" in input)) {
+      if (
+        "Key" in input &&
+        !("Prefix" in input) &&
+        !("StartAfter" in input) &&
+        !("ContinuationToken" in input)
+      ) {
         return { Body: { transformToString: async () => csvByKey[input.Key] ?? "" } };
       }
       let keys = allKeys.slice().sort();
@@ -242,10 +301,8 @@ describe("insights — snapshot selection (fake S3)", () => {
   });
 
   it("loadDayRows loads only the requested day and sums its region files", async () => {
-    const csv =
-      "account_id,date,stored_gb\n" + "a,2026-05-28,60\n";
-    const csv2 =
-      "account_id,date,stored_gb\n" + "a,2026-05-28,40\n";
+    const csv = "account_id,date,stored_gb\n" + "a,2026-05-28,60\n";
+    const csv2 = "account_id,date,stored_gb\n" + "a,2026-05-28,40\n";
     const s3 = fakeS3(
       {
         "2026-05-28": ["usage.account-a.us-west.csv", "usage.account-a.eu-central.csv"],

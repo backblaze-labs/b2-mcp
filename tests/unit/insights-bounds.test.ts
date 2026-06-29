@@ -100,9 +100,12 @@ function queueS3(opts: {
   const upQ = [...(opts.uploadPages ?? [])];
   const parts = opts.partsByKey ?? {};
   sendSpy.mockImplementation(async (command: any) => {
-    if (command instanceof ListObjectsV2Command) return objQ.shift() ?? { Contents: [], IsTruncated: false };
-    if (command instanceof ListMultipartUploadsCommand) return upQ.shift() ?? { Uploads: [], IsTruncated: false };
-    if (command instanceof ListPartsCommand) return { Parts: parts[command.input?.Key as string] ?? [], IsTruncated: false };
+    if (command instanceof ListObjectsV2Command)
+      return objQ.shift() ?? { Contents: [], IsTruncated: false };
+    if (command instanceof ListMultipartUploadsCommand)
+      return upQ.shift() ?? { Uploads: [], IsTruncated: false };
+    if (command instanceof ListPartsCommand)
+      return { Parts: parts[command.input?.Key as string] ?? [], IsTruncated: false };
     return {};
   });
 }
@@ -115,8 +118,16 @@ describe("b2_largest_files — scan bound", () => {
   it("stops at max_scan, reports truncated, and ranks the largest seen", async () => {
     queueS3({
       objectPages: [
-        { Contents: [obj("a", 10), obj("b", 20), obj("c", 30)], IsTruncated: true, NextContinuationToken: "t1" },
-        { Contents: [obj("d", 5), obj("e", 40), obj("f", 15)], IsTruncated: true, NextContinuationToken: "t2" },
+        {
+          Contents: [obj("a", 10), obj("b", 20), obj("c", 30)],
+          IsTruncated: true,
+          NextContinuationToken: "t1",
+        },
+        {
+          Contents: [obj("d", 5), obj("e", 40), obj("f", 15)],
+          IsTruncated: true,
+          NextContinuationToken: "t2",
+        },
         // further pages exist (IsTruncated stays true) but the cap fires first
       ],
     });
@@ -138,7 +149,11 @@ describe("b2_largest_files — scan bound", () => {
     });
 
     const result = parseResult(
-      await callTool(server, "b2_largest_files", { bucket: "test-bucket", limit: 10, max_scan: 50000 }),
+      await callTool(server, "b2_largest_files", {
+        bucket: "test-bucket",
+        limit: 10,
+        max_scan: 50000,
+      }),
     );
 
     expect(result.truncated).toBe(false); // largest_files always emits the flag

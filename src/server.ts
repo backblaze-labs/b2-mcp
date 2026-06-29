@@ -79,8 +79,7 @@ export function loadConfig(): B2Config {
     // The internet-facing HTTP transport defaults to `block` instead — see
     // configFromHeaders in http-server.ts.
     destructivePolicy:
-      process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
-      process.env.B2_DESTRUCTIVE_POLICY === "block"
+      process.env.B2_DESTRUCTIVE_POLICY === "allow" || process.env.B2_DESTRUCTIVE_POLICY === "block"
         ? process.env.B2_DESTRUCTIVE_POLICY
         : "confirm",
     transport: "stdio",

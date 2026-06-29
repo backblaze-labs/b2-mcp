@@ -42,19 +42,19 @@ replaced the now-deprecated HTTP+SSE transport.
 Before exposing the server, confirm each of these. Most are on by default; the
 two **you must set for any internet-facing HTTP deployment** are marked ⚠️.
 
-| Control | How | Default |
-| --- | --- | --- |
-| **TLS** | Terminate at nginx with Let's Encrypt (Step 5). Never expose `:3000` directly. | — |
-| ⚠️ **DNS-rebinding** | `B2_ALLOWED_HOSTS=your.domain` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname. | localhost-only |
-| ⚠️ **Caller auth** | The server authenticates the *credential*, not the *caller* — it has no user auth. Front it with SSO / Cloudflare Access / mTLS at the proxy before exposing to untrusted users. | none (your job) |
-| **Least-privilege key** | Use a **non-master** application key scoped to the buckets/capabilities the workload needs. | — |
-| **Destructive-op gate** | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted). | `confirm` |
-| **`create_key` lockdown** | Rejects minting key-management or unscoped write keys. Override only if required: `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, `B2_MAX_KEY_DURATION_SECONDS`. | locked down |
-| **Session / rate caps** | `B2_MAX_SESSIONS` (1000), `B2_MAX_SESSIONS_PER_KEY` (20); per-key token-bucket rate limit. | on |
-| **Local file access** | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`. | off |
-| **Webhook targets** | `b2_set_bucket_notification_rules` enforces HTTPS and rejects internal/SSRF URLs; responses redact signing secrets. | enforced |
-| **Audit log** | Structured, values-redacted (key names only — never secrets/values). Ship stderr to journald/CloudWatch. | on |
-| **Secrets** | Provide via the systemd unit's `Environment=` (or a secrets manager) — never commit. `.env*` is gitignored; see [`.env.example`](../.env.example). | — |
+| Control                   | How                                                                                                                                                                                                                 | Default         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| **TLS**                   | Terminate at nginx with Let's Encrypt (Step 5). Never expose `:3000` directly.                                                                                                                                      | —               |
+| ⚠️ **DNS-rebinding**      | `B2_ALLOWED_HOSTS=your.domain` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname. | localhost-only  |
+| ⚠️ **Caller auth**        | The server authenticates the _credential_, not the _caller_ — it has no user auth. Front it with SSO / Cloudflare Access / mTLS at the proxy before exposing to untrusted users.                                    | none (your job) |
+| **Least-privilege key**   | Use a **non-master** application key scoped to the buckets/capabilities the workload needs.                                                                                                                         | —               |
+| **Destructive-op gate**   | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted).                                                                                                             | `confirm`       |
+| **`create_key` lockdown** | Rejects minting key-management or unscoped write keys. Override only if required: `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, `B2_MAX_KEY_DURATION_SECONDS`.                                              | locked down     |
+| **Session / rate caps**   | `B2_MAX_SESSIONS` (1000), `B2_MAX_SESSIONS_PER_KEY` (20); per-key token-bucket rate limit.                                                                                                                          | on              |
+| **Local file access**     | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                 | off             |
+| **Webhook targets**       | `b2_set_bucket_notification_rules` enforces HTTPS and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                 | enforced        |
+| **Audit log**             | Structured, values-redacted (key names only — never secrets/values). Ship stderr to journald/CloudWatch.                                                                                                            | on              |
+| **Secrets**               | Provide via the systemd unit's `Environment=` (or a secrets manager) — never commit. `.env*` is gitignored; see [`.env.example`](../.env.example).                                                                  | —               |
 
 Provide env vars to the service through systemd. To add one without touching the
 credentials in the main unit, use a drop-in:

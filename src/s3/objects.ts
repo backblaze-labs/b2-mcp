@@ -424,5 +424,4 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
       }
     },
   );
-
 }

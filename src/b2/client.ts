@@ -73,7 +73,6 @@ export class B2Client {
       }),
     );
   }
-
 }
 
 function isStatus(err: unknown, status: number): boolean {

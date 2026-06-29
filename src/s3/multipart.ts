@@ -63,7 +63,9 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
         .array(z.number().int().min(1).max(10000))
         .min(1)
         .max(10000)
-        .describe("Part numbers to presign (each 1–10000). Mint all parts at once, or only the missing ones to resume."),
+        .describe(
+          "Part numbers to presign (each 1–10000). Mint all parts at once, or only the missing ones to resume.",
+        ),
       expiresIn: z
         .number()
         .int()
@@ -118,7 +120,9 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
             partNumber: z.number().int().describe("The part number."),
             etag: z
               .string()
-              .describe("The ETag from this part's direct PUT response (the s3_presign_upload_part flow)."),
+              .describe(
+                "The ETag from this part's direct PUT response (the s3_presign_upload_part flow).",
+              ),
           }),
         )
         .describe("All uploaded parts in ascending part number order."),

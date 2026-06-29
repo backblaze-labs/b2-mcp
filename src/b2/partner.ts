@@ -270,5 +270,4 @@ export function registerPartnerTools(
       }
     },
   );
-
 }

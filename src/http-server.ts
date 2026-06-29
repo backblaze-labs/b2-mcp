@@ -227,7 +227,10 @@ export function buildHttpServer(): HttpServerHandle {
 
   // Read the request body with a hard size cap. Resolves with the raw string,
   // or null if the cap was exceeded (in which case a 413 has been sent).
-  function readCappedBody(req: http.IncomingMessage, res: http.ServerResponse): Promise<string | null> {
+  function readCappedBody(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<string | null> {
     return new Promise((resolve) => {
       let body = "";
       let bytes = 0;
@@ -373,7 +376,12 @@ export function buildHttpServer(): HttpServerHandle {
     let perKey = 0;
     for (const s of sessions.values()) if (s.rateKey === rateKey) perKey++;
     if (perKey >= MAX_SESSIONS_PER_KEY) {
-      writeJson(res, 429, { error: "Too many concurrent sessions for this key" }, { "Retry-After": "5" });
+      writeJson(
+        res,
+        429,
+        { error: "Too many concurrent sessions for this key" },
+        { "Retry-After": "5" },
+      );
       return;
     }
 

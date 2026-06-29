@@ -22,7 +22,9 @@ const baseConfig = {
 
 function toolNames(caps: string[] | null, cfg: B2Config = baseConfig): string[] {
   const server = createServer(cfg, caps);
-  return Object.keys((server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools ?? {});
+  return Object.keys(
+    (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools ?? {},
+  );
 }
 
 describe("isToolEnabled", () => {
@@ -58,22 +60,42 @@ describe("capability-aware registration", () => {
   it("read-only key drops every write/delete/admin tool", () => {
     const names = toolNames(["listBuckets", "listFiles", "readFiles", "listKeys"]);
     // present
-    for (const t of ["s3_get_object", "s3_list_objects_v2", "b2_list_buckets",
-      "s3_get_presigned_url", "b2_usage_growth", "b2_list_keys"]) {
+    for (const t of [
+      "s3_get_object",
+      "s3_list_objects_v2",
+      "b2_list_buckets",
+      "s3_get_presigned_url",
+      "b2_usage_growth",
+      "b2_list_keys",
+    ]) {
       expect(names).toContain(t);
     }
     // absent
-    for (const t of ["s3_delete_object", "s3_delete_objects", "s3_put_object",
-      "b2_delete_bucket", "b2_create_key", "b2_delete_key",
-      "b2_update_file_retention", "b2_update_file_legal_hold",
-      "b2_create_group_member", "b2_list_groups"]) {
+    for (const t of [
+      "s3_delete_object",
+      "s3_delete_objects",
+      "s3_put_object",
+      "b2_delete_bucket",
+      "b2_create_key",
+      "b2_delete_key",
+      "b2_update_file_retention",
+      "b2_update_file_legal_hold",
+      "b2_create_group_member",
+      "b2_list_groups",
+    ]) {
       expect(names).not.toContain(t);
     }
     expect(names.length).toBeLessThan(40);
   });
 
   it("write-but-no-delete key keeps writes, drops deletes", () => {
-    const names = toolNames(["listBuckets", "listFiles", "readFiles", "writeFiles", "writeBuckets"]);
+    const names = toolNames([
+      "listBuckets",
+      "listFiles",
+      "readFiles",
+      "writeFiles",
+      "writeBuckets",
+    ]);
     expect(names).toContain("s3_put_object");
     expect(names).toContain("s3_create_multipart_upload");
     expect(names).toContain("s3_put_bucket_lifecycle");
@@ -89,7 +111,11 @@ describe("capability-aware registration", () => {
 
   it("partner tools are gated: dropped without a distinct master key, present with one", () => {
     expect(toolNames(["listBuckets"])).not.toContain("b2_list_groups");
-    const withMaster = { ...baseConfig, masterKeyId: "master-distinct", masterKey: "ms" } as B2Config;
+    const withMaster = {
+      ...baseConfig,
+      masterKeyId: "master-distinct",
+      masterKey: "ms",
+    } as B2Config;
     const names = toolNames(["listBuckets"], withMaster);
     expect(names).toContain("b2_list_groups");
     expect(names).toContain("b2_create_group_member");
@@ -109,8 +135,11 @@ describe("fetchCapabilities", () => {
       authorizationToken: "t",
       apiInfo: {
         storageApi: {
-          apiUrl: "u", downloadUrl: "d", s3ApiUrl: "s",
-          recommendedPartSize: 1, absoluteMinimumPartSize: 1,
+          apiUrl: "u",
+          downloadUrl: "d",
+          s3ApiUrl: "s",
+          recommendedPartSize: 1,
+          absoluteMinimumPartSize: 1,
           ...(caps ? { allowed: { capabilities: caps } } : {}),
         },
       },
@@ -128,7 +157,9 @@ describe("fetchCapabilities", () => {
   });
 
   it("returns null on auth failure so callers fall back to the full surface", async () => {
-    jest.spyOn(axios, "get").mockRejectedValue(Object.assign(new Error("denied"), { response: { status: 401 } }));
+    jest
+      .spyOn(axios, "get")
+      .mockRejectedValue(Object.assign(new Error("denied"), { response: { status: 401 } }));
     expect(await fetchCapabilities(baseConfig)).toBeNull();
   });
 
