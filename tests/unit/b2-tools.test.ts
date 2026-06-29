@@ -163,6 +163,34 @@ describe("b2_list_buckets", () => {
       }),
     );
   });
+
+  const manyBuckets = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      bucketId: `bucket-${i}`,
+      bucketName: `bucket-${i}`,
+      bucketType: "allPrivate",
+    }));
+
+  // NOTE: this harness calls the handler directly, so the schema's .default(100)
+  // (applied by the MCP SDK's zod parse in production) is not injected here — we
+  // pass `limit` explicitly to exercise the truncation logic itself.
+  it("caps to the requested limit and reports truncation", async () => {
+    setupMocks({ buckets: manyBuckets(150) });
+    const result = parseResult(await callTool(server, "b2_list_buckets", { limit: 100 }));
+    expect(result.buckets).toHaveLength(100);
+    expect(result.bucket_count).toBe(100);
+    expect(result.total_bucket_count).toBe(150);
+    expect(result.truncated).toBe(true);
+    expect(result.note).toContain("first 100 of 150");
+  });
+
+  it("returns all buckets when limit covers the total, and omits the truncation flag", async () => {
+    setupMocks({ buckets: manyBuckets(150) });
+    const result = parseResult(await callTool(server, "b2_list_buckets", { limit: 1000 }));
+    expect(result.buckets).toHaveLength(150);
+    expect(result.total_bucket_count).toBe(150);
+    expect(result.truncated).toBeUndefined();
+  });
 });
 
 // ── b2_create_bucket ──────────────────────────────────────────────────────────

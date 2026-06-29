@@ -415,7 +415,7 @@ export function registerInsightTools(
   // ── b2_largest_files ──────────────────────────────────────────────────────
   server.tool(
     "b2_largest_files",
-    "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Returns name, size, and upload time — never contents.",
+    "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
     {
       bucket: z.string().describe("Bucket name or bucketId to inspect."),
       limit: z
@@ -427,6 +427,16 @@ export function registerInsightTools(
         .default(10)
         .describe("How many of the largest files to return (default 10, max 100)."),
       prefix: z.string().optional().describe('Optional path prefix, e.g. "checkpoints/".'),
+      max_scan: z
+        .number()
+        .int()
+        .min(1000)
+        .max(500_000)
+        .optional()
+        .default(50_000)
+        .describe(
+          "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
+        ),
     },
     async (args) => {
       try {
@@ -440,11 +450,21 @@ export function registerInsightTools(
               : `No bucket matches '${args.bucket}'.`,
           });
 
-        // Bounded top-N by size — never accumulate every object.
+        // Bounded top-N by size — never accumulate every object. Sorting by size
+        // also requires a full listing, so bound the WORK too: stop at max_scan
+        // objects or a wall-clock budget, whichever comes first. Without this a
+        // bucket with millions of files means thousands of sequential (billable,
+        // rate-limited) LIST calls that run for minutes and time out. On a bound
+        // hit we return what we have with truncated=true so the caller knows the
+        // ranking covers only the objects scanned.
+        const TIME_BUDGET_MS = 12_000;
+        const startedAt = Date.now();
         const top: Array<{ name: string; size: number; uploaded?: Date }> = [];
         let smallest = -Infinity;
         let token: string | undefined;
         let scanned = 0;
+        let truncated = false;
+        let stopReason: "complete" | "max_scan" | "time_budget" = "complete";
         do {
           const page = await s3.send(
             new ListObjectsV2Command({
@@ -464,12 +484,31 @@ export function registerInsightTools(
             }
           }
           token = page.IsTruncated ? page.NextContinuationToken : undefined;
+          if (token && scanned >= args.max_scan) {
+            truncated = true;
+            stopReason = "max_scan";
+            break;
+          }
+          if (token && Date.now() - startedAt > TIME_BUDGET_MS) {
+            truncated = true;
+            stopReason = "time_budget";
+            break;
+          }
         } while (token);
 
         return toolJson({
           bucket: resolved.name,
           scanned,
+          truncated,
           returned: top.length,
+          ...(truncated
+            ? {
+                note:
+                  stopReason === "max_scan"
+                    ? `Stopped at the max_scan cap of ${args.max_scan.toLocaleString()} objects — these are the largest among those scanned, not the whole bucket. Pass a narrower prefix (or raise max_scan) for a more complete ranking.`
+                    : `Stopped after a ${TIME_BUDGET_MS / 1000}s time budget (${scanned.toLocaleString()} objects scanned) — these are the largest among those scanned, not the whole bucket. Pass a narrower prefix to focus the scan.`,
+              }
+            : {}),
           files: top.map((f) => ({
             name: f.name,
             size_bytes: f.size,
@@ -486,7 +525,7 @@ export function registerInsightTools(
   // ── b2_unfinished_uploads ─────────────────────────────────────────────────
   server.tool(
     "b2_unfinished_uploads",
-    "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing.",
+    "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing, bounded by max_uploads and an internal time budget — on a very bloated bucket it returns a truncated result (and wasted_gb may be a lower bound) and recommends a lifecycle rule.",
     {
       bucket: z.string().describe("Bucket name or bucketId to inspect."),
       older_than_days: z
@@ -495,6 +534,16 @@ export function registerInsightTools(
         .min(0)
         .optional()
         .describe("Only count uploads started more than this many days ago (optional)."),
+      max_uploads: z
+        .number()
+        .int()
+        .min(1)
+        .max(10_000)
+        .optional()
+        .default(1000)
+        .describe(
+          "Safety cap on how many unfinished uploads to scan (default 1000, max 10,000). A bucket bloated with abandoned uploads would otherwise trigger an unbounded walk plus a per-upload parts fan-out that times out. If the cap or an internal time budget is hit, the result is truncated and wasted_gb may be a lower bound — add a lifecycle rule to auto-cancel unfinished large files.",
+        ),
     },
     async (args) => {
       try {
@@ -511,9 +560,21 @@ export function registerInsightTools(
         const cutoff =
           args.older_than_days != null ? Date.now() - args.older_than_days * 86400_000 : null;
 
+        // Bound the work. A bucket bloated with abandoned uploads — exactly what
+        // this tool hunts for — otherwise means an unbounded upload walk plus a
+        // per-upload ListParts fan-out (O(uploads × parts)) of sequential,
+        // rate-limited calls that hang and time out. Cap the uploads walked and
+        // put an overall wall-clock budget over the parts summation; report
+        // truncated / lower-bound results instead of failing.
+        const TIME_BUDGET_MS = 12_000;
+        const startedAt = Date.now();
+        const overBudget = () => Date.now() - startedAt > TIME_BUDGET_MS;
+
         const uploads: Array<{ key: string; uploadId: string; initiated?: Date }> = [];
         let keyMarker: string | undefined;
         let idMarker: string | undefined;
+        let truncated = false;
+        let stopReason: "complete" | "max_uploads" | "time_budget" = "complete";
         do {
           const page = await s3.send(
             new ListMultipartUploadsCommand({
@@ -534,6 +595,16 @@ export function registerInsightTools(
             keyMarker = undefined;
             idMarker = undefined;
           }
+          if ((keyMarker || idMarker) && uploads.length >= args.max_uploads) {
+            truncated = true;
+            stopReason = "max_uploads";
+            break;
+          }
+          if ((keyMarker || idMarker) && overBudget()) {
+            truncated = true;
+            stopReason = "time_budget";
+            break;
+          }
         } while (keyMarker || idMarker);
 
         if (!uploads.length)
@@ -544,11 +615,17 @@ export function registerInsightTools(
           });
 
         // Sum already-uploaded part bytes for wasted storage; find the oldest.
+        // The ListParts fan-out is the heaviest part, so stop summing once the
+        // budget is hit and report wasted_gb as a lower bound (oldest stays exact
+        // — finding it needs only the cheap upload list).
         let wasted = 0;
         let oldest = uploads[0];
+        let wastedIsLowerBound = false;
+        let sizedUploads = 0;
         for (const u of uploads) {
           if ((u.initiated?.getTime() ?? Infinity) < (oldest.initiated?.getTime() ?? Infinity))
             oldest = u;
+          if (wastedIsLowerBound) continue; // budget hit — keep scanning for oldest only
           let partMarker: number | undefined;
           do {
             const parts = await s3.send(
@@ -562,17 +639,32 @@ export function registerInsightTools(
             for (const p of parts.Parts ?? []) wasted += p.Size ?? 0;
             partMarker = parts.IsTruncated ? Number(parts.NextPartNumberMarker) : undefined;
           } while (partMarker != null);
+          sizedUploads++;
+          if (overBudget()) wastedIsLowerBound = true;
         }
+
+        const lifecycleTip =
+          "Add a lifecycle rule to auto-cancel unfinished large uploads (daysFromStartingToCancelingUnfinishedLargeFiles).";
+        const lowerBoundTip = wastedIsLowerBound
+          ? ` wasted_gb is a lower bound — stopped summing parts after a ${TIME_BUDGET_MS / 1000}s budget (sized ${sizedUploads} of ${uploads.length} uploads).`
+          : "";
+        const note = truncated
+          ? (stopReason === "max_uploads"
+              ? `Stopped at the max_uploads cap of ${args.max_uploads.toLocaleString()} — the bucket has more abandoned uploads than shown.${lowerBoundTip} ${lifecycleTip}`
+              : `Stopped after a ${TIME_BUDGET_MS / 1000}s time budget (${uploads.length.toLocaleString()} uploads found).${lowerBoundTip} ${lifecycleTip}`)
+          : wastedIsLowerBound
+            ? `${lowerBoundTip.trim()} ${lifecycleTip}`
+            : `Consider a lifecycle rule to auto-cancel unfinished large uploads (daysFromStartingToCancelingUnfinishedLargeFiles).`;
 
         return toolJson({
           bucket: resolved.name,
           unfinished_count: uploads.length,
+          truncated,
           wasted_gb: gb(wasted),
+          ...(wastedIsLowerBound ? { wasted_is_lower_bound: true, sized_uploads: sizedUploads } : {}),
           oldest_started_at: oldest.initiated,
           oldest_file: oldest.key,
-          note:
-            "Consider a lifecycle rule to auto-cancel unfinished large uploads " +
-            "(daysFromStartingToCancelingUnfinishedLargeFiles).",
+          note,
         });
       } catch (err) {
         return toolError(err);
