@@ -18,6 +18,14 @@ updates:
           - patch
     labels:
       - dependencies
+    ignore:
+      # Majors held until the repo raises its Node floor (engines >=18,
+      # CI tests 20/22): opossum 10 drops Node 20; @types/node majors
+      # ahead of the floor admit APIs that crash on supported runtimes.
+      - dependency-name: opossum
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
