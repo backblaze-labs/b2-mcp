@@ -1,5 +1,5 @@
 /**
- * Schema validation tests for all 42 registered MCP tools.
+ * Schema validation tests for all 40 registered MCP tools.
  *
  * These tests run without any credentials and verify that every tool:
  *   - Is registered with a unique name

@@ -2,12 +2,13 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools.
 
-**36 tools, split by what they do:**
+**40 tools, split by what they do:**
 
 - **Control plane (17, native B2 API)** — buckets, application keys, Partner/Groups provisioning, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
 - **Data plane (19, S3-compatible API)** — object upload/download/copy/list/delete, multipart, presigned URLs. _(Forward-compatible; S3 is the standard surface for object data.)_
+- **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
 
-Destructive actions are gated, credentials never enter the model's context, and the tool surface is deliberately lean (~8.6k tokens of `tools/list`).
+Destructive actions are gated, credentials never enter the model's context, and the tool surface is deliberately lean (~10.3k tokens of `tools/list`, and smaller in practice: registration is capability-aware, so a key only ever sees tools it can use).
 
 ---
 
@@ -80,7 +81,7 @@ A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-acces
 
 ## Available tools
 
-**36 total — 17 control-plane (`b2_*`) + 19 data-plane (`s3_*`).** Object data runs on S3; buckets, keys, provisioning, Object Lock, and notifications stay native. Destructive tools (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`, `b2_eject_group_member`, and public/lock-weakening `b2_update_bucket`) require `confirm: true` under the default policy.
+**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** Object data runs on S3; buckets, keys, provisioning, Object Lock, notifications, and insights stay native. Twelve destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), irreversible account operations (`b2_create_group_member`, `b2_eject_group_member`, `b2_reserve_trial_create_account`), and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
 <summary><b>Control plane — native B2 API (17)</b></summary>
@@ -125,6 +126,20 @@ A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-acces
 | `s3_head_bucket`                                                                         | Check bucket exists/reachable on the S3 endpoint                                                 |
 | `s3_get_bucket_location`                                                                 | Bucket region / location constraint                                                              |
 | `s3_put_bucket_lifecycle`                                                                | Lifecycle rules incl. `AbortIncompleteMultipartUpload`                                           |
+
+</details>
+
+<details>
+<summary><b>Insights — read-only storage activity (4)</b></summary>
+
+| Tool                    | Description                                                                                         |
+| ----------------------- | --------------------------------------------------------------------------------------------------- |
+| `b2_usage_growth`       | Rank accounts by stored-data growth between two dates (daily usage reports; requires Usage Reports) |
+| `b2_egress_leaders`     | Top egress by account or bucket over a period (daily usage reports; requires Usage Reports)         |
+| `b2_largest_files`      | A bucket's largest objects via live listing (bounded scan)                                          |
+| `b2_unfinished_uploads` | Abandoned multipart uploads silently consuming storage (bounded live listing)                       |
+
+Scope follows the caller's key — a partner key sees its sub-accounts; a customer key sees only itself. The usage-report tools feature-detect the `b2-reports-<accountId>` bucket and return a clear "not enabled" message when Usage Reports aren't enabled on the account.
 
 </details>
 

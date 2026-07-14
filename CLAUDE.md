@@ -95,7 +95,7 @@ Object data movement runs on the **S3-compatible API** (`src/s3/objects.ts`, `sr
 
 ### Test patterns
 
-Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tools-schema.test.ts` builds the full server with dummy credentials and validates all 36 tool schemas structurally.
+Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tools-schema.test.ts` builds the full server with dummy credentials and validates all 40 tool schemas structurally.
 
 Integration tests (`tests/integration/live.test.ts`) use these skip guards:
 
