@@ -17,8 +17,7 @@ function redactNotificationSecrets(result: unknown): unknown {
   if (!r || !Array.isArray(r.eventNotificationRules)) return result;
   for (const rule of r.eventNotificationRules) {
     const tc = rule?.targetConfiguration as
-      | { hmacSha256SigningSecret?: unknown; customHeaders?: Array<{ value?: unknown }> }
-      | undefined;
+      { hmacSha256SigningSecret?: unknown; customHeaders?: Array<{ value?: unknown }> } | undefined;
     if (!tc || typeof tc !== "object") continue;
     if (tc.hmacSha256SigningSecret) tc.hmacSha256SigningSecret = "[redacted]";
     if (Array.isArray(tc.customHeaders)) {
@@ -396,8 +395,7 @@ export function registerBucketTools(
         ]);
         // Default SSE-B2 algorithm (B2 requires "AES256" with SSE-B2).
         const upSse = payload.defaultServerSideEncryption as
-          | { mode?: string; algorithm?: string }
-          | undefined;
+          { mode?: string; algorithm?: string } | undefined;
         if (upSse && upSse.mode === "SSE-B2" && !upSse.algorithm) upSse.algorithm = "AES256";
         const result = await client.call("b2_update_bucket", payload);
         return toolJson(result);
