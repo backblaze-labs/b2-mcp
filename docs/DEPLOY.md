@@ -174,6 +174,54 @@ sudo certbot certonly --webroot -w /var/www/letsencrypt -d mcp.your-domain.examp
 sudo systemctl start nginx
 ```
 
+### Auto-renewal (required — issuing once is not enough)
+
+Certbot only renews when something runs `certbot renew`; the package ships a
+systemd timer but leaves it **disabled**. Enable it, and add a deploy hook so
+nginx reloads and actually serves the new certificate (without the hook, a
+renewed cert sits on disk while nginx serves the old one from memory until the
+next restart):
+
+```bash
+# Reload nginx whenever a cert is deployed
+sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh > /dev/null <<'EOF'
+#!/bin/bash
+# Reload nginx so it serves the newly deployed certificate.
+systemctl reload nginx
+EOF
+sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+
+# Schedule renewal (runs daily; renews when <30 days remain)
+sudo systemctl enable --now certbot-renew.timer
+
+# Prove the whole path end-to-end
+sudo certbot renew --dry-run
+systemctl list-timers certbot-renew.timer   # confirm the next trigger
+```
+
+Optional but recommended: a post-hook that alerts if a renew run still leaves
+the cert under 30 days (i.e. renewal is broken). Example publishing to an SNS
+topic (requires an instance role with `sns:Publish`):
+
+```bash
+sudo tee /etc/letsencrypt/renewal-hooks/post/notify-failure.sh > /dev/null <<'EOF'
+#!/bin/bash
+# Alert if any cert is within 30 days of expiry after a renew run.
+DOMAIN=mcp.your-domain.example
+CERT=/etc/letsencrypt/live/$DOMAIN/fullchain.pem
+[ -f "$CERT" ] || exit 0
+EXP_EPOCH=$(date -d "$(openssl x509 -in "$CERT" -noout -enddate | cut -d= -f2)" +%s)
+DAYS_LEFT=$(( (EXP_EPOCH - $(date +%s)) / 86400 ))
+if [ $DAYS_LEFT -lt 30 ]; then
+  aws sns publish --region us-west-2 \
+    --topic-arn arn:aws:sns:REGION:ACCOUNT:your-alerts-topic \
+    --subject "b2-mcp: TLS cert expiring in $DAYS_LEFT days" \
+    --message "Cert for $DOMAIN expires in $DAYS_LEFT days. Renewal is not completing — investigate." >/dev/null
+fi
+EOF
+sudo chmod +x /etc/letsencrypt/renewal-hooks/post/notify-failure.sh
+```
+
 ## Step 6 — nginx config
 
 `/etc/nginx/conf.d/b2-mcp.conf`:
