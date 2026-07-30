@@ -1,20 +1,21 @@
 /**
- * Tests for the stdio entry point. Mocks the SDK transport so no real stdin/
- * stdout wiring happens, and exercises startStdio() end-to-end (loadConfig →
- * createServer → connect).
+ * Tests for the stdio entry point. Mocks SDK v2 serveStdio so no real stdin/
+ * stdout wiring happens, and exercises startStdio() end-to-end.
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import axios from "axios";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 
-jest.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-  StdioServerTransport: jest.fn().mockImplementation(() => ({
-    start: jest.fn().mockResolvedValue(undefined),
-    close: jest.fn().mockResolvedValue(undefined),
-    send: jest.fn().mockResolvedValue(undefined),
-  })),
+jest.mock("axios");
+jest.mock("@modelcontextprotocol/server/stdio", () => ({
+  serveStdio: jest.fn(),
 }));
 
 import { startStdio } from "../../src/index";
+
+const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
+  get: jest.MockedFunction<typeof axios.get>;
+};
 
 describe("startStdio", () => {
   const saved = { ...process.env };
@@ -27,9 +28,32 @@ describe("startStdio", () => {
   it("loads config, builds the server, and connects the stdio transport", async () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
+    process.env.B2_REGISTER_ALL_TOOLS = "true";
 
     await expect(startStdio()).resolves.toBeUndefined();
-    expect(StdioServerTransport).toHaveBeenCalledTimes(1);
+    expect(serveStdio).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts stdio with full surface when capability discovery is transiently unavailable", async () => {
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    process.env.B2_APPLICATION_KEY = "test-key-secret";
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    mockedAxios.get.mockRejectedValue(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }));
+
+    await expect(startStdio()).resolves.toBeUndefined();
+    expect(serveStdio).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when stdio capability discovery rejects the credential", async () => {
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    process.env.B2_APPLICATION_KEY = "test-key-secret";
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    mockedAxios.get.mockRejectedValue(
+      Object.assign(new Error("denied"), { response: { status: 401 } }),
+    );
+
+    await expect(startStdio()).rejects.toMatchObject({ code: "capability_auth_failed" });
+    expect(serveStdio).not.toHaveBeenCalled();
   });
 
   it("exits the process when required credentials are missing", async () => {

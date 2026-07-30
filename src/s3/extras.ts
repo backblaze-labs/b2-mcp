@@ -1,5 +1,5 @@
 import { S3Client, GetBucketLocationCommand } from "@aws-sdk/client-s3";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";
 

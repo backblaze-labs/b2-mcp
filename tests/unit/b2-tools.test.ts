@@ -8,8 +8,8 @@
  */
 
 import axios from "axios";
-import { createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createServer, invalidateAuthManagerCache } from "../../src/server";
+import type { McpServer } from "../../src/mcp";
 
 // ── Mock axios ────────────────────────────────────────────────────────────────
 
@@ -79,11 +79,12 @@ function setupMocks(apiResponseData: Record<string, unknown>) {
 }
 
 beforeEach(() => {
-  server = createServer(testConfig);
+  invalidateAuthManagerCache();
   jest.clearAllMocks();
   // Default: auth succeeds, API returns empty object
   mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
   mockedAxios.mockResolvedValue({ data: {} } as any);
+  server = createServer(testConfig);
 });
 
 // ── b2_authorize_account ──────────────────────────────────────────────────────

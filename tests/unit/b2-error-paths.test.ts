@@ -6,7 +6,7 @@
 
 import axios from "axios";
 import { createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 import { B2Config } from "../../src/utils/types";
 
 jest.mock("axios");

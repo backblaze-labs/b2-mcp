@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createMcpServer, type McpServer } from "./mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
@@ -9,6 +9,12 @@ import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
 import { isToolEnabled } from "./utils/tool-capabilities.js";
+import {
+  CredentialResolutionError,
+  fingerprintConfig,
+  StdioEnvCredentialProvider,
+  verificationFingerprintConfig,
+} from "./credentials.js";
 
 import { registerBucketTools } from "./b2/buckets.js";
 import { registerKeyTools } from "./b2/keys.js";
@@ -26,64 +32,13 @@ import { registerS3ExtraTools } from "./s3/extras.js";
  * Load and validate configuration from environment variables.
  */
 export function loadConfig(): B2Config {
-  const keyId = process.env.B2_APPLICATION_KEY_ID;
-  const key = process.env.B2_APPLICATION_KEY;
-
-  if (!keyId || !key) {
+  try {
+    return new StdioEnvCredentialProvider().resolve().config;
+  } catch (err) {
+    if (!(err instanceof CredentialResolutionError)) throw err;
     logger.fatal("config.missing: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required");
     process.exit(1);
   }
-
-  // Optional master key — only the Partner API tools need it. Falls
-  // back to the application key so a single non-master key is a complete config
-  // for everything else. Require both halves or neither.
-  const masterId = process.env.B2_MASTER_KEY_ID;
-  const masterKey = process.env.B2_MASTER_KEY;
-  if (!!masterId !== !!masterKey) {
-    logger.warn(
-      "config: B2_MASTER_KEY_ID and B2_MASTER_KEY must both be set; ignoring the partial master key and using the application key for Partner API tools",
-    );
-  }
-  // B2_APP_KEY was the old way to supply a non-master S3 key when the primary
-  // was a master key. The current model is the reverse — make the application
-  // key the (non-master) workhorse and set B2_MASTER_KEY only for the Partner API.
-  if (process.env.B2_APP_KEY_ID) {
-    logger.warn(
-      "config: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Set B2_APPLICATION_KEY_ID to a non-master application key (it handles the S3 API too) and use B2_MASTER_KEY_ID/B2_MASTER_KEY only for Partner API tools.",
-    );
-  }
-
-  return {
-    applicationKeyId: keyId,
-    applicationKey: key,
-    // S3-compatible API: B2 rejects master keys on the S3 endpoint but accepts
-    // ordinary application keys, so this should be the application key. The
-    // deprecated B2_APP_KEY override remains only for legacy master-primary setups.
-    appKeyId: process.env.B2_APP_KEY_ID ?? keyId,
-    appKey: process.env.B2_APP_KEY ?? key,
-    masterKeyId: (masterId && masterKey ? masterId : undefined) ?? keyId,
-    masterKey: (masterId && masterKey ? masterKey : undefined) ?? key,
-    region: process.env.B2_REGION ?? "us-west-004",
-    // Local stdio is a trusted single-user process, so disk access is on by
-    // default. Set B2_ALLOW_LOCAL_FILES=false to disable, or B2_FILE_ROOT to
-    // confine all file paths to one directory.
-    allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
-    fileRoot: process.env.B2_FILE_ROOT ?? null,
-    // b2_create_key lockdown (see B2Config). Opt-in overrides; safe by default.
-    maxKeyDurationSeconds: process.env.B2_MAX_KEY_DURATION_SECONDS
-      ? parseIntEnv(process.env.B2_MAX_KEY_DURATION_SECONDS, 0)
-      : null,
-    allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
-    allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
-    // stdio is a trusted local single-user session, so it defaults to `confirm`.
-    // The internet-facing HTTP transport defaults to `block` instead — see
-    // configFromHeaders in http-server.ts.
-    destructivePolicy:
-      process.env.B2_DESTRUCTIVE_POLICY === "allow" || process.env.B2_DESTRUCTIVE_POLICY === "block"
-        ? process.env.B2_DESTRUCTIVE_POLICY
-        : "confirm",
-    transport: "stdio",
-  };
 }
 
 /**
@@ -109,12 +64,12 @@ export function loadConfig(): B2Config {
  * Build the MCP server. When `capabilities` is a non-null array, registration is
  * capability-aware: only tools the key can use (per src/utils/tool-capabilities)
  * are registered, and Partner tools register only with a distinct master key.
- * When `capabilities` is null/undefined (the default, and all unit tests), the
- * full surface is registered — no behavior change. The entry points fetch the
- * key's capabilities (see fetchCapabilities) and pass them in.
+ * When `capabilities` is null/undefined, the full surface is registered; this is
+ * reserved for explicit operator override and legacy unit tests. An empty array
+ * is a fail-closed capability set, not "unknown".
  */
 export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
-  const server = new McpServer(
+  const server = createMcpServer(
     {
       name: "backblaze-b2",
       version: VERSION,
@@ -151,14 +106,13 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // server.tool so a tool is only registered if the key can use it. Tools not in
   // the capability map (b2_authorize_account, Partner tools) are always allowed
   // through here; Partner tools are additionally gated on a master key below.
-  // Filter only when we actually have a non-empty capability list. An empty
-  // array is treated as "unknown" → full surface (defensive belt-and-suspenders
-  // with fetchCapabilities, so the surface can never collapse to one tool).
-  const filterActive = Array.isArray(capabilities) && capabilities.length > 0;
+  // Filter whenever capabilities are supplied. null/undefined remains the
+  // explicit full-surface path, while an empty array is fail-closed rather than
+  // "unknown".
+  const filterActive = Array.isArray(capabilities);
   if (filterActive) {
     const capsSet = new Set(capabilities);
     const originalTool = server.tool.bind(server);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (server as any).tool = (name: string, ...rest: any[]) =>
       isToolEnabled(name, capsSet) ? (originalTool as any)(name, ...rest) : undefined;
   }
@@ -167,17 +121,21 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // API, S3, and key management. The Partner API tools use the master
   // key; when no distinct master key is configured they fall back to the same
   // application-key client, so a single non-master key needs no extra wiring.
-  const auth = new B2AuthManager(config);
+  const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth, buildUserAgent(config));
   const s3Client = createS3Client(config);
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
+  const masterConfig = {
+    ...config,
+    applicationKeyId: config.masterKeyId,
+    applicationKey: config.masterKey,
+  };
   const masterAuth = masterIsDistinct
-    ? new B2AuthManager({
-        ...config,
-        applicationKeyId: config.masterKeyId,
-        applicationKey: config.masterKey,
-      })
+    ? getCachedAuthManager(
+        `credential:${verificationFingerprintConfig(masterConfig)}`,
+        masterConfig,
+      )
     : auth;
   const masterClient = masterIsDistinct
     ? new B2Client(masterAuth, buildUserAgent(config))
@@ -217,27 +175,229 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
 
 /**
  * One-shot authorize to read the key's capabilities for capability-aware
- * registration. Returns the capability list, or null if it can't be determined
- * (auth failure or B2_REGISTER_ALL_TOOLS=true) — callers treat null as
- * "register the full surface", so a transient auth hiccup never yields an empty
- * server. Set B2_REGISTER_ALL_TOOLS=true to skip this and always register all.
+ * registration. Returns null only when discovery is explicitly skipped via
+ * B2_REGISTER_ALL_TOOLS=true. Lookup failures throw so callers fail closed
+ * instead of exposing the full tool surface; an empty array is a fail-closed
+ * capability set and is deliberately not cached at the positive TTL.
  */
-export async function fetchCapabilities(config: B2Config): Promise<string[] | null> {
+interface CapabilityCacheEntry {
+  capabilities: string[];
+  expiresAt: number;
+}
+
+const capabilityCache = new Map<string, CapabilityCacheEntry>();
+const capabilityInflight = new Map<string, Promise<string[]>>();
+const DEFAULT_CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES = 10_000;
+const DEFAULT_AUTH_MANAGER_CACHE_TTL_MS = 23 * 60 * 60 * 1000;
+
+interface AuthManagerCacheEntry {
+  manager: B2AuthManager;
+  expiresAt: number;
+}
+
+const authManagerCache = new Map<string, AuthManagerCacheEntry>();
+
+export function invalidateCapabilityCache(cacheKey?: string): void {
+  if (cacheKey) {
+    capabilityCache.delete(cacheKey);
+    capabilityInflight.delete(cacheKey);
+  } else {
+    capabilityCache.clear();
+    capabilityInflight.clear();
+  }
+}
+
+export function invalidateAuthManagerCache(cacheKey?: string): void {
+  if (cacheKey) authManagerCache.delete(cacheKey);
+  else authManagerCache.clear();
+}
+
+function capabilityCacheTtlMs(): number {
+  const ttl = process.env.B2_CAPABILITY_CACHE_TTL_MS
+    ? parseIntEnv(process.env.B2_CAPABILITY_CACHE_TTL_MS, DEFAULT_CAPABILITY_CACHE_TTL_MS)
+    : DEFAULT_CAPABILITY_CACHE_TTL_MS;
+  return Math.max(0, ttl);
+}
+
+function capabilityCacheMaxEntries(): number {
+  const max = process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES
+    ? parseIntEnv(process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES, DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES)
+    : DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES;
+  return Math.max(1, max);
+}
+
+export function sweepCapabilityCache(now = Date.now()): void {
+  for (const [key, entry] of capabilityCache) {
+    if (entry.expiresAt <= now) capabilityCache.delete(key);
+  }
+}
+
+export function sweepAuthManagerCache(now = Date.now()): void {
+  for (const [key, entry] of authManagerCache) {
+    if (entry.expiresAt <= now) authManagerCache.delete(key);
+  }
+}
+
+function enforceCacheMax<T>(cache: Map<string, T>, maxEntries: number, cacheName: string): void {
+  let evicted = 0;
+  while (cache.size > maxEntries) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    cache.delete(oldest);
+    evicted++;
+  }
+  if (evicted > 0) {
+    logger.info({ cache: cacheName, evicted, size: cache.size, maxEntries }, "cache.evicted");
+  }
+}
+
+function getCachedAuthManager(cacheKey: string, config: B2Config): B2AuthManager {
+  const now = Date.now();
+  sweepAuthManagerCache(now);
+  const cached = authManagerCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    authManagerCache.delete(cacheKey);
+    authManagerCache.set(cacheKey, cached);
+    return cached.manager;
+  }
+  const manager = new B2AuthManager(config);
+  authManagerCache.set(cacheKey, {
+    manager,
+    expiresAt: now + DEFAULT_AUTH_MANAGER_CACHE_TTL_MS,
+  });
+  enforceCacheMax(authManagerCache, capabilityCacheMaxEntries(), "b2-auth-manager");
+  return manager;
+}
+
+function rememberCapabilities(cacheKey: string, capabilities: string[], now: number): void {
+  const ttl = capabilityCacheTtlMs();
+  if (ttl <= 0 || capabilities.length === 0) return;
+  sweepCapabilityCache(now);
+  capabilityCache.set(cacheKey, {
+    capabilities: [...capabilities],
+    expiresAt: now + ttl,
+  });
+  enforceCacheMax(capabilityCache, capabilityCacheMaxEntries(), "b2-capability");
+}
+
+export function capabilityCacheSizeForTests(): number {
+  return capabilityCache.size;
+}
+
+function redactedCapabilityMessage(err: unknown, config: B2Config): string {
+  let message = err instanceof Error ? err.message : String(err);
+  for (const value of [
+    config.applicationKeyId,
+    config.applicationKey,
+    config.appKeyId,
+    config.appKey,
+    config.masterKeyId,
+    config.masterKey,
+  ]) {
+    if (value) message = message.split(value).join("[redacted]");
+  }
+  return message;
+}
+
+function capabilityFailureDetails(
+  err: unknown,
+  config: B2Config,
+): {
+  status: number;
+  code: string;
+  log: Record<string, unknown>;
+  message: string;
+} {
+  const anyErr = err as {
+    code?: unknown;
+    response?: { status?: unknown; headers?: Record<string, unknown> };
+  };
+  const upstreamStatus =
+    typeof anyErr.response?.status === "number" ? anyErr.response.status : undefined;
+  const upstreamCode = typeof anyErr.code === "string" ? anyErr.code : undefined;
+  const requestIdHeader =
+    anyErr.response?.headers?.["x-bz-request-id"] ?? anyErr.response?.headers?.["x-b2-request-id"];
+  const requestId = typeof requestIdHeader === "string" ? requestIdHeader : undefined;
+  const authFailure = upstreamStatus === 401 || upstreamStatus === 403;
+  const retryable =
+    !authFailure &&
+    (upstreamStatus === undefined ||
+      upstreamStatus === 429 ||
+      upstreamStatus >= 500 ||
+      upstreamCode === "ECONNABORTED" ||
+      upstreamCode === "ETIMEDOUT" ||
+      upstreamCode === "ECONNRESET" ||
+      upstreamCode === "ENOTFOUND");
+
+  if (authFailure) {
+    return {
+      status: upstreamStatus,
+      code: "capability_auth_failed",
+      message: "Credential or capability resolution failed",
+      log: {
+        upstreamStatus,
+        upstreamCode,
+        retryable: false,
+        message: redactedCapabilityMessage(err, config),
+        ...(requestId && { requestId }),
+      },
+    };
+  }
+
+  return {
+    status: retryable ? 503 : 502,
+    code: retryable ? "capability_upstream_unavailable" : "capability_upstream_failed",
+    message: "B2 capability service temporarily unavailable",
+    log: {
+      upstreamStatus,
+      upstreamCode,
+      retryable,
+      message: redactedCapabilityMessage(err, config),
+      ...(requestId && { requestId }),
+    },
+  };
+}
+
+export async function fetchCapabilities(
+  config: B2Config,
+  capabilityCacheKey?: string,
+  logKey?: string,
+): Promise<string[] | null> {
   if (process.env.B2_REGISTER_ALL_TOOLS === "true") return null;
-  try {
+  const resolvedCacheKey =
+    capabilityCacheKey ?? `credential:${verificationFingerprintConfig(config)}`;
+  const credentialLogKey =
+    logKey ?? `credential:${config.credentialFingerprint ?? fingerprintConfig(config)}`;
+  const now = Date.now();
+  sweepCapabilityCache(now);
+  const cached = capabilityCache.get(resolvedCacheKey);
+  if (cached && cached.expiresAt > now) {
+    capabilityCache.delete(resolvedCacheKey);
+    capabilityCache.set(resolvedCacheKey, cached);
+    return [...cached.capabilities];
+  }
+
+  const existingInflight = capabilityInflight.get(resolvedCacheKey);
+  if (existingInflight) return [...(await existingInflight)];
+
+  const discovery = (async () => {
     const auth = new B2AuthManager(config);
     const info = await auth.getAuth();
-    // Empty/unknown capabilities → null → full surface. NEVER filter to nothing:
-    // an empty list almost always means we couldn't read them, not a key that
-    // can do nothing, and stripping the surface to just b2_authorize_account is
-    // a far worse failure than showing a tool the key can't use.
-    return info.capabilities && info.capabilities.length ? info.capabilities : null;
+    const capabilities = info.capabilities ?? [];
+    rememberCapabilities(resolvedCacheKey, capabilities, now);
+    return capabilities;
+  })();
+  capabilityInflight.set(resolvedCacheKey, discovery);
+
+  try {
+    return [...(await discovery)];
   } catch (err) {
-    logger.warn(
-      { err: err instanceof Error ? err.message : String(err) },
-      "capability fetch failed; registering full tool surface",
-    );
-    return null;
+    const details = capabilityFailureDetails(err, config);
+    logger.warn({ credential: credentialLogKey, ...details.log }, "capability.fetch.failed");
+    throw new CredentialResolutionError(details.message, details.status, details.code);
+  } finally {
+    capabilityInflight.delete(resolvedCacheKey);
   }
 }
 
@@ -261,9 +421,9 @@ export function getRegisteredTools(server: McpServer): Record<string, Registered
 
 /**
  * Wrap every registered tool handler to emit an audit log entry on
- * invocation: tool name, key-id prefix (not the full key), top-level
- * arg keys, duration, and success/error. Argument *values* are not
- * logged to avoid leaking file content, bucket data, etc.
+ * invocation: tool name, non-secret credential fingerprint, top-level arg keys,
+ * duration, and success/error. Argument *values* are not logged to avoid leaking
+ * file content, bucket data, etc.
  *
  * Returns the number of tools successfully wrapped. If the SDK internal is
  * missing, audit logging is skipped but a warning is logged so the degradation
@@ -278,7 +438,7 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
     );
     return 0;
   }
-  const keyPrefix = config.applicationKeyId.slice(0, 8);
+  const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
   let wrapped = 0;
 
   for (const name of Object.keys(tools)) {
@@ -313,7 +473,7 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
         logger.info(
           {
             tool: name,
-            key: keyPrefix,
+            credential: keyFingerprint,
             argKeys,
             durationMs,
             error: isError,
@@ -331,7 +491,7 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
         logger.warn(
           {
             tool: name,
-            key: keyPrefix,
+            credential: keyFingerprint,
             argKeys,
             durationMs,
             err: err instanceof Error ? err.message : String(err),

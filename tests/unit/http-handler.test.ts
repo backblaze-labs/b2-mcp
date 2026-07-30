@@ -1,23 +1,34 @@
 /**
- * Request-level tests for the HTTP transport. buildHttpServer() lets us listen
- * on an ephemeral port and exercise the handler branches that were previously
- * untested: auth rejection, malformed requests, body-size cap, and the
- * session/rate caps that protect the internet-facing server.
+ * Request-level tests for the HTTP entry point. Production HTTP serving is the
+ * SDK v2 per-request handler, so these tests use the 2026-07-28 envelope and
+ * assert that no MCP session state or Mcp-Session-Id is required.
  */
 
 import * as http from "http";
 import type { AddressInfo } from "net";
+import axios from "axios";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   buildHttpServer,
   configFromHeaders,
+  createInFlightLimiter,
   deriveRateKey,
+  headersFromNode,
   HttpServerHandle,
+  toWebRequest,
 } from "../../src/http-server";
+import { invalidateAuthManagerCache } from "../../src/server";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+
+jest.mock("axios");
+const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
+  get: jest.MockedFunction<typeof axios.get>;
+};
 
 interface Resp {
   status: number;
   body: string;
+  headers: http.IncomingHttpHeaders;
 }
 
 function request(
@@ -32,16 +43,12 @@ function request(
       (res) => {
         let data = "";
         const status = res.statusCode ?? 0;
-        const done = () => resolve({ status, body: data });
+        const done = () => resolve({ status, body: data, headers: res.headers });
         res.on("data", (c) => (data += c));
-        // Resolve on end OR close — the server may reset the request socket
-        // right after sending an early response (e.g. a 413).
         res.on("end", done);
         res.on("close", done);
       },
     );
-    // The server may destroy the request socket after a 413; ignore that —
-    // the response has already been flushed.
     req.on("error", () => undefined);
     const t = setTimeout(() => reject(new Error("request timed out")), 4000);
     t.unref();
@@ -50,8 +57,6 @@ function request(
   });
 }
 
-// Stream a large body and resolve as soon as the server sends response
-// headers (it responds early with 413 and closes), stopping further writes.
 function postLargeBody(port: number, pathname: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: "127.0.0.1", port, method: "POST", path: pathname }, (res) => {
@@ -59,7 +64,7 @@ function postLargeBody(port: number, pathname: string): Promise<number> {
       resolve(res.statusCode ?? 0);
       req.destroy();
     });
-    req.on("error", () => undefined); // ignore the reset once we have the response
+    req.on("error", () => undefined);
     const t = setTimeout(() => reject(new Error("request timed out")), 4000);
     t.unref();
     const chunk = Buffer.alloc(64 * 1024, 0x78);
@@ -81,48 +86,74 @@ function postLargeBody(port: number, pathname: string): Promise<number> {
   });
 }
 
-// Minimal stand-in for a Session — enough for cap checks and teardown.
-function fakeSession(rateKey: string): any {
-  return {
-    transport: { close() {}, sessionId: "x", async handleRequest() {} },
-    mcpServer: { async close() {} },
-    lastActivity: Date.now(),
-    rateKey,
-  };
-}
-
 let handle: HttpServerHandle;
 let port: number;
 
-// These tests exercise transport mechanics, not capability filtering. Force
-// full-surface registration so session creation never reaches the network to
-// fetch the key's capabilities (which would be a real authorize call).
 const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
+const savedCredentialMode = process.env.B2_HTTP_CREDENTIAL_MODE;
+
 beforeAll(() => {
   process.env.B2_REGISTER_ALL_TOOLS = "true";
+  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
 });
+
 afterAll(() => {
   if (savedRegisterAll === undefined) delete process.env.B2_REGISTER_ALL_TOOLS;
   else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
+  if (savedCredentialMode === undefined) delete process.env.B2_HTTP_CREDENTIAL_MODE;
+  else process.env.B2_HTTP_CREDENTIAL_MODE = savedCredentialMode;
 });
 
 beforeEach(async () => {
+  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  delete process.env.B2_APPLICATION_KEY_ID;
+  delete process.env.B2_APPLICATION_KEY;
+  delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
+  delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
+  delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
   handle = buildHttpServer();
   await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
   port = (handle.server.address() as AddressInfo).port;
 });
 
 afterEach(async () => {
+  jest.clearAllMocks();
+  mockedAxios.mockReset();
+  mockedAxios.get = jest.fn() as jest.MockedFunction<typeof axios.get>;
+  invalidateAuthManagerCache();
   handle.drain();
   await new Promise<void>((r) => handle.server.close(() => r()));
 });
 
 const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
+const META = {
+  "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
 const JSON_HEADERS = {
   "content-type": "application/json",
   accept: "application/json, text/event-stream",
 };
-const INIT = JSON.stringify({
+
+function modernBody(method: string, params: Record<string, unknown> = {}, id = 1): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method,
+    params: { ...params, _meta: META },
+  });
+}
+
+function modernHeaders(method: string, name?: string): Record<string, string> {
+  return {
+    ...JSON_HEADERS,
+    "mcp-method": method,
+    ...(name && { "mcp-name": name }),
+  };
+}
+
+const LIST_TOOLS = modernBody("tools/list");
+const LEGACY_INIT = JSON.stringify({
   jsonrpc: "2.0",
   id: 1,
   method: "initialize",
@@ -133,17 +164,72 @@ const INIT = JSON.stringify({
   },
 });
 
-describe("HTTP handler (Streamable HTTP)", () => {
-  it("returns 401 on POST /mcp initialize without credentials", async () => {
-    const res = await request(port, "POST", "/mcp", { headers: JSON_HEADERS, body: INIT });
+function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
+  return modernBody("tools/call", { name, arguments: args }, id);
+}
+
+function authData() {
+  return {
+    data: {
+      accountId: "account-1",
+      authorizationToken: "token-1",
+      apiInfo: {
+        storageApi: {
+          apiUrl: "https://api.example",
+          downloadUrl: "https://download.example",
+          s3ApiUrl: "https://s3.example",
+          recommendedPartSize: 100,
+          absoluteMinimumPartSize: 100,
+          allowed: { capabilities: ["listBuckets"] },
+        },
+      },
+    },
+  };
+}
+
+async function replaceHandle(getAuthInfo?: (req: any) => AuthInfo | null): Promise<void> {
+  handle.drain();
+  await new Promise<void>((r) => handle.server.close(() => r()));
+  handle = buildHttpServer({ getAuthInfo });
+  await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
+  port = (handle.server.address() as AddressInfo).port;
+}
+
+describe("HTTP handler (MCP 2026-07-28)", () => {
+  it("returns 401 on modern /mcp without credentials", async () => {
+    const res = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
     expect(res.status).toBe(401);
     expect(res.body).toMatch(/credentials/i);
   });
 
-  it("returns 200 on /health", async () => {
+  it("returns 200 on /health when default header mode needs no static B2 env", async () => {
+    delete process.env.B2_HTTP_CREDENTIAL_MODE;
+    await replaceHandle();
     const res = await request(port, "GET", "/health");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body).status).toBe("ok");
+  });
+
+  it("returns 503 on /health when server mode is missing static credentials", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    await replaceHandle();
+    const res = await request(port, "GET", "/health");
+    expect(res.status).toBe(503);
+    expect(JSON.parse(res.body).status).toBe("error");
+  });
+
+  it("fails startup on an invalid credential mode", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "session";
+    handle.drain();
+    await new Promise<void>((r) => handle.server.close(() => r()));
+    expect(() => buildHttpServer()).toThrow(/invalid/i);
+    process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+    handle = buildHttpServer();
+    await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
+    port = (handle.server.address() as AddressInfo).port;
   });
 
   it("returns 404 on an unknown path", async () => {
@@ -151,79 +237,227 @@ describe("HTTP handler (Streamable HTTP)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("rejects a non-localhost Host on /mcp when no allowlist is configured (DNS-rebinding default)", async () => {
-    // No B2_ALLOWED_HOSTS/ORIGINS set in the test env → secure default: localhost only.
+  it("rejects a non-localhost Host on /mcp when no allowlist is configured", async () => {
     const res = await request(port, "GET", "/mcp", { headers: { host: "evil.example" } });
     expect(res.status).toBe(403);
     expect(res.body).toMatch(/host\/origin/i);
   });
 
-  it("returns 400 on POST /mcp with no session when the request is not an initialize", async () => {
+  it("serves legacy initialize through the stateless transition fallback", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+      body: LEGACY_INIT,
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(res.headers["mcp-session-id"]).toBeUndefined();
+    expect(handle.sessions.size).toBe(0);
   });
 
-  it("returns 404 on GET /mcp for an unknown session", async () => {
-    const res = await request(port, "GET", "/mcp", { headers: { "mcp-session-id": "ghost" } });
-    expect(res.status).toBe(404);
+  it("does not route Mcp-Session-Id requests to stateful session storage", async () => {
+    const res = await request(port, "GET", "/mcp", {
+      headers: { ...creds, "mcp-session-id": "ghost" },
+    });
+    expect(res.status).not.toBe(200);
+    expect(handle.sessions.size).toBe(0);
   });
 
   it("returns 413 when the request body exceeds the cap", async () => {
-    // The body cap fires during read, before session routing, on any POST /mcp.
     const status = await postLargeBody(port, "/mcp");
     expect(status).toBe(413);
   });
 
-  it("returns 503 when total session capacity is reached", async () => {
-    for (let i = 0; i < 1000; i++) handle.sessions.set(`s${i}`, fakeSession(`rk${i}`));
+  it("serves a modern tools/list request without a session id", async () => {
     const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...JSON_HEADERS },
-      body: INIT,
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
     });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
+    expect(res.headers["mcp-session-id"]).toBeUndefined();
+    expect(handle.sessions.size).toBe(0);
+    expect(JSON.parse(res.body).result.tools.length).toBeGreaterThan(0);
   });
 
-  it("returns 429 when per-key session capacity is reached", async () => {
-    const rk = deriveRateKey("key-abc");
-    for (let i = 0; i < 20; i++) handle.sessions.set(`k${i}`, fakeSession(rk));
+  it("defaults unset B2_HTTP_CREDENTIAL_MODE to header compatibility", async () => {
+    delete process.env.B2_HTTP_CREDENTIAL_MODE;
+    await replaceHandle();
     const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...JSON_HEADERS },
-      body: INIT,
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
     });
-    expect(res.status).toBe(429);
+    expect(res.status).toBe(200);
   });
 
-  it("creates a session on POST /mcp initialize with valid credentials", async () => {
-    // Drive a real initialize handshake (createServer → transport → connect). The
-    // init response may be an open SSE stream, so resolve on response headers
-    // (which already carry Mcp-Session-Id) and tear down.
-    const status = await new Promise<number>((resolve, reject) => {
-      const req = http.request(
-        {
-          host: "127.0.0.1",
-          port,
-          method: "POST",
-          path: "/mcp",
-          headers: { ...creds, ...JSON_HEADERS },
-        },
-        (res) => {
-          resolve(res.statusCode ?? 0);
-          res.destroy();
-          req.destroy();
-        },
-      );
-      req.on("error", () => undefined);
-      const t = setTimeout(() => reject(new Error("init timeout")), 3000);
-      t.unref();
-      req.write(INIT);
-      req.end();
+  it("requires headers on every request in header compatibility mode", async () => {
+    const ok = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
     });
-    expect(status).toBe(200);
-    await new Promise((r) => setTimeout(r, 50)); // let onsessioninitialized fire
-    expect(handle.sessions.size).toBeGreaterThanOrEqual(1);
+    expect(ok.status).toBe(200);
+
+    const missing = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    expect(missing.status).toBe(401);
+  });
+
+  it("does not forward B2 credential or Authorization headers to the SDK request", () => {
+    const req = {
+      method: "POST",
+      url: "/mcp",
+      headers: {
+        ...creds,
+        "x-b2-mcp-key-id": "key",
+        "x-b2-mcp-key": "secret",
+        "x-b2-mcp-app-key-id": "app-key",
+        "x-b2-mcp-app-key": "app-secret",
+        "x-b2-mcp-master-key-id": "master-key",
+        "x-b2-mcp-master-key": "master-secret",
+        authorization: "Bearer caller-token",
+        "content-type": "application/json",
+        accept: "application/json",
+        "mcp-method": "tools/list",
+      },
+    } as unknown as http.IncomingMessage;
+
+    const webReq = toWebRequest(req, LIST_TOOLS);
+    expect(webReq.headers.get("content-type")).toBe("application/json");
+    expect(webReq.headers.get("mcp-method")).toBe("tools/list");
+    for (const name of [
+      "x-b2-key-id",
+      "x-b2-key",
+      "x-b2-mcp-key-id",
+      "x-b2-mcp-key",
+      "x-b2-mcp-app-key-id",
+      "x-b2-mcp-app-key",
+      "x-b2-mcp-master-key-id",
+      "x-b2-mcp-master-key",
+      "authorization",
+    ]) {
+      expect(webReq.headers.has(name)).toBe(false);
+    }
+    expect(headersFromNode(req.headers).has("authorization")).toBe(false);
+  });
+
+  it("reuses a B2 auth manager across stateless requests for the same credential", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue(authData());
+    mockedAxios.mockResolvedValue({ data: { buckets: [] } } as never);
+
+    for (let i = 0; i < 2; i++) {
+      const res = await request(port, "POST", "/mcp", {
+        headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+        body: callToolBody("b2_list_buckets", {}, i + 1),
+      });
+      expect(res.status).toBe(200);
+    }
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(mockedAxios).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse the B2 auth cache when a header secret changes", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue(authData());
+    mockedAxios.mockResolvedValue({ data: { buckets: [] } } as never);
+
+    const first = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: callToolBody("b2_list_buckets", {}, 1),
+    });
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": creds["x-b2-key-id"],
+        "x-b2-key": "different-secret",
+        ...modernHeaders("tools/call", "b2_list_buckets"),
+      },
+      body: callToolBody("b2_list_buckets", {}, 2),
+    });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds in-flight requests globally and per credential", () => {
+    const limiter = createInFlightLimiter(2, 1);
+    expect(limiter.acquire("credential:a")).toEqual({ ok: true });
+    expect(limiter.acquire("credential:a")).toMatchObject({ ok: false, status: 429 });
+    expect(limiter.acquire("credential:b")).toEqual({ ok: true });
+    expect(limiter.acquire("credential:c")).toMatchObject({ ok: false, status: 503 });
+    limiter.release("credential:a");
+    expect(limiter.acquire("credential:c")).toEqual({ ok: true });
+  });
+
+  it("server mode uses process credentials and rejects public B2 credential headers", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+    await replaceHandle();
+
+    const spoofed = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    expect(spoofed.status).toBe(400);
+    expect(spoofed.body).not.toContain("server-secret");
+
+    const ok = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("principal mode supports broker injection and rejects B2 header spoofing", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+    await replaceHandle(() => ({
+      token: "verified-token",
+      clientId: "client-a",
+      scopes: [],
+      extra: { sub: "alice" },
+    }));
+    handle.drain();
+    await new Promise<void>((r) => handle.server.close(() => r()));
+    handle = buildHttpServer({
+      getAuthInfo: () => ({
+        token: "verified-token",
+        clientId: "client-a",
+        scopes: [],
+        extra: { sub: "alice" },
+      }),
+      secretBroker: {
+        resolve: (ref) =>
+          ref === "tenant_a"
+            ? { applicationKeyId: "tenant-key", applicationKey: "tenant-secret" }
+            : null,
+      },
+    });
+    await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
+    port = (handle.server.address() as AddressInfo).port;
+
+    const spoofed = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    expect(spoofed.status).toBe(400);
+
+    const ok = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    expect(ok.status).toBe(200);
+  });
+
+  it("principal mode requires verified authInfo", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-key";
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
+    await replaceHandle();
+
+    const missingAuth = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: LIST_TOOLS,
+    });
+    expect(missingAuth.status).toBe(401);
   });
 });
 
@@ -242,7 +476,7 @@ describe("configFromHeaders — filesystem policy", () => {
 
   it("only enables local files when explicitly opted in AND given a root", () => {
     process.env.B2_ALLOW_LOCAL_FILES = "true";
-    expect(configFromHeaders(baseReq)?.allowLocalFiles).toBe(false); // no root → still off
+    expect(configFromHeaders(baseReq)?.allowLocalFiles).toBe(false);
     process.env.B2_FILE_ROOT = "/srv/uploads";
     const cfg = configFromHeaders(baseReq);
     expect(cfg?.allowLocalFiles).toBe(true);
@@ -256,8 +490,8 @@ describe("configFromHeaders — credential model", () => {
       headers: { "x-b2-key-id": "app-id", "x-b2-key": "app-secret" },
     });
     expect(cfg?.applicationKeyId).toBe("app-id");
-    expect(cfg?.appKeyId).toBe("app-id"); // S3 uses the application key
-    expect(cfg?.masterKeyId).toBe("app-id"); // master falls back to the application key
+    expect(cfg?.appKeyId).toBe("app-id");
+    expect(cfg?.masterKeyId).toBe("app-id");
     expect(cfg?.masterKey).toBe("app-secret");
   });
 
@@ -270,9 +504,21 @@ describe("configFromHeaders — credential model", () => {
         "x-b2-master-key": "master-secret",
       },
     });
-    expect(cfg?.applicationKeyId).toBe("app-id"); // workhorse stays the app key
-    expect(cfg?.masterKeyId).toBe("master-id"); // Partner/bz_* use the master key
+    expect(cfg?.applicationKeyId).toBe("app-id");
+    expect(cfg?.masterKeyId).toBe("master-id");
     expect(cfg?.masterKey).toBe("master-secret");
+  });
+
+  it("rejects partial master credential headers", () => {
+    expect(() =>
+      configFromHeaders({
+        headers: {
+          "x-b2-key-id": "app-id",
+          "x-b2-key": "app-secret",
+          "x-b2-master-key-id": "master-id",
+        },
+      }),
+    ).toThrow(/both id and secret/i);
   });
 
   it("still honors the deprecated X-B2-App-Key-* S3 override", () => {
@@ -284,8 +530,16 @@ describe("configFromHeaders — credential model", () => {
         "x-b2-app-key": "s3-secret",
       },
     });
-    expect(cfg?.appKeyId).toBe("s3-id"); // legacy: S3 signs with the non-master override
+    expect(cfg?.appKeyId).toBe("s3-id");
     expect(cfg?.applicationKeyId).toBe("master-id");
+  });
+
+  it("accepts the explicit X-B2-MCP-* header names", () => {
+    const cfg = configFromHeaders({
+      headers: { "x-b2-mcp-key-id": "app-id", "x-b2-mcp-key": "app-secret" },
+    });
+    expect(cfg?.applicationKeyId).toBe("app-id");
+    expect(cfg?.appKeyId).toBe("app-id");
   });
 });
 
@@ -293,7 +547,6 @@ describe("deriveRateKey", () => {
   it("is deterministic and distinct per key id", () => {
     expect(deriveRateKey("abc")).toBe(deriveRateKey("abc"));
     expect(deriveRateKey("abc")).not.toBe(deriveRateKey("abd"));
-    // Not a raw prefix of the input.
     expect(deriveRateKey("abcdefgh")).not.toContain("abcdefgh");
   });
 });

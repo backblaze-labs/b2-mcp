@@ -24,9 +24,9 @@ describe("configFromHeaders", () => {
     expect(configFromHeaders(req)).toBeNull();
   });
 
-  it("returns null when header values are arrays (header sent multiple times)", () => {
+  it("rejects conflicting duplicate credential header values", () => {
     const req = { headers: { "x-b2-key-id": ["a", "b"], "x-b2-key": "secret" } };
-    expect(configFromHeaders(req)).toBeNull();
+    expect(() => configFromHeaders(req)).toThrow(/conflicting/i);
   });
 
   it("falls back to primary key when app key headers are absent", () => {

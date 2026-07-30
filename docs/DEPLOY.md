@@ -1,8 +1,8 @@
 # Self-hosting the B2 MCP server
 
-This guide walks through deploying the Streamable HTTP transport behind nginx with
-Let's Encrypt TLS on AWS EC2. The same recipe works on any Linux VM — only
-the AWS-specific steps differ.
+This guide walks through deploying the MCP 2026-07-28 HTTP transport behind
+nginx with Let's Encrypt TLS on AWS EC2. The same recipe works on any Linux VM
+— only the AWS-specific steps differ.
 
 If you only need local stdio use (Claude Desktop on your laptop), follow the
 README's Quick Start instead — none of this is required.
@@ -12,23 +12,25 @@ README's Quick Start instead — none of this is required.
 ```
 Client (Claude Desktop)
     │
-    │ HTTPS  POST/GET/DELETE /mcp  (initialize POST includes X-B2-* headers)
+    │ HTTPS  POST /mcp  (credential source selected per request)
     ▼
 nginx :443  ──TLS termination, rate limits, ACL, security headers──┐
     │                                                              │
     │  HTTP (loopback only)                                         │
     ▼                                                              │
-node :3000  ── per-session McpServer, credentials in memory only ──┘
+node :3000  ── per-request MCP handler, no protocol sessions ─────┘
     │
     │ HTTPS to B2
     ▼
 api.backblazeb2.com / s3.<region>.backblazeb2.com
 ```
 
-Each session (opened by an `initialize` POST to `/mcp`) creates its own
-`McpServer` instance with its own `B2Config`. Credentials live only inside that
-session. This is the MCP **Streamable HTTP** transport (spec 2025-03-26), which
-replaced the now-deprecated HTTP+SSE transport.
+Each `/mcp` request resolves credentials before the SDK v2 handler builds a
+fresh `McpServer` instance. B2 authorization managers are cached by a
+secret-bound key so steady-state requests reuse valid B2 auth tokens.
+Credential selection is explicit: header
+compatibility, server-held credentials, or verified-principal mapping. The
+server does not depend on `initialize` or `Mcp-Session-Id` in production.
 
 ## Prerequisites
 
@@ -42,19 +44,55 @@ replaced the now-deprecated HTTP+SSE transport.
 Before exposing the server, confirm each of these. Most are on by default; the
 two **you must set for any internet-facing HTTP deployment** are marked ⚠️.
 
-| Control                   | How                                                                                                                                                                                                                 | Default         |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| **TLS**                   | Terminate at nginx with Let's Encrypt (Step 5). Never expose `:3000` directly.                                                                                                                                      | —               |
-| ⚠️ **DNS-rebinding**      | `B2_ALLOWED_HOSTS=your.domain` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname. | localhost-only  |
-| ⚠️ **Caller auth**        | The server authenticates the _credential_, not the _caller_ — it has no user auth. Front it with SSO / Cloudflare Access / mTLS at the proxy before exposing to untrusted users.                                    | none (your job) |
-| **Least-privilege key**   | Use a **non-master** application key scoped to the buckets/capabilities the workload needs.                                                                                                                         | —               |
-| **Destructive-op gate**   | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted).                                                                                                             | `confirm`       |
-| **`create_key` lockdown** | Rejects minting key-management or unscoped write keys. Override only if required: `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, `B2_MAX_KEY_DURATION_SECONDS`.                                              | locked down     |
-| **Session / rate caps**   | `B2_MAX_SESSIONS` (1000), `B2_MAX_SESSIONS_PER_KEY` (20); per-key token-bucket rate limit.                                                                                                                          | on              |
-| **Local file access**     | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                 | off             |
-| **Webhook targets**       | `b2_set_bucket_notification_rules` enforces HTTPS and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                 | enforced        |
-| **Audit log**             | Structured, values-redacted (key names only — never secrets/values). Ship stderr to journald/CloudWatch.                                                                                                            | on              |
-| **Secrets**               | Provide via the systemd unit's `Environment=` (or a secrets manager) — never commit. `.env*` is gitignored; see [`.env.example`](../.env.example).                                                                  | —               |
+| Control                   | How                                                                                                                                                                                                                                         | Default           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- |
+| **TLS**                   | Terminate at nginx with Let's Encrypt (Step 5). Never expose `:3000` directly.                                                                                                                                                              | —                 |
+| ⚠️ **DNS-rebinding**      | `B2_ALLOWED_HOSTS=your.domain` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname.                         | localhost-only    |
+| ⚠️ **Caller auth**        | `server` mode is single-tenant. `principal` mode requires your TLS/OAuth resource-server layer to validate each request and pass verified MCP `authInfo` to the SDK handler before credential lookup.                                       | none (your job)   |
+| **Least-privilege key**   | Use a **non-master** application key scoped to the buckets/capabilities the workload needs.                                                                                                                                                 | —                 |
+| **Destructive-op gate**   | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted).                                                                                                                                     | `confirm`         |
+| **`create_key` lockdown** | Rejects minting key-management or unscoped write keys. Override only if required: `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, `B2_MAX_KEY_DURATION_SECONDS`.                                                                      | locked down       |
+| **Request rate caps**     | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`.                                                                                                                                             | on                |
+| **In-flight caps**        | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; the names are retained for deploy-manifest compatibility.                                                             | 1000 / 20         |
+| **Local file access**     | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                                         | off               |
+| **Capability cache**      | Capability discovery is cached by a secret-bound verifier or verified principal, with non-secret labels for logs. `B2_CAPABILITY_CACHE_TTL_MS` and `B2_CAPABILITY_CACHE_MAX_ENTRIES` bound staleness and size. Lookup failures fail closed. | 5 minutes / 10000 |
+| **Webhook targets**       | `b2_set_bucket_notification_rules` enforces HTTPS and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                                         | enforced          |
+| **Audit log**             | Structured, values-redacted (key names only — never secrets/values). Ship stderr to journald/CloudWatch.                                                                                                                                    | on                |
+| **Secrets**               | Provide via the systemd unit's `Environment=` (or a secrets manager) — never commit. `.env*` is gitignored; see [`.env.example`](../.env.example).                                                                                          | —                 |
+
+## Credential modes
+
+Set `B2_HTTP_CREDENTIAL_MODE` explicitly for hosted deployments:
+
+| Mode        | Who holds the B2 key             | Client sends B2 key? | Notes                                                                                                                                     |
+| ----------- | -------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `headers`   | MCP client or bridge             | Yes                  | Default for compatibility. B2 credential headers must be supplied on every request.                                                       |
+| `server`    | Server process or secret manager | No                   | Single-tenant deployment; `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` are read from the server environment.                          |
+| `principal` | Customer-operated secret broker  | No                   | Requires verified MCP `authInfo`; `B2_PRINCIPAL_CREDENTIAL_MAP` maps a principal to `B2_CREDENTIAL_<REF>_*` env-injected secret material. |
+
+Rolling deploy note: because unset mode defaults to `headers`, existing
+header-based clients keep working when new code is deployed. To migrate to
+`server` mode, first configure `B2_HTTP_CREDENTIAL_MODE=server` plus
+`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` in every instance's deploy
+manifest, then roll the fleet. During a mixed fleet window, both old and new
+pods must agree on the selected mode before clients stop sending B2 headers.
+The HTTP entry also accepts the SDK v2 stateless 2025-era fallback during the
+transition window; sessionful continuity is not required, so drain or reconnect
+long-lived 2025-era clients before switching them to the 2026-07-28 path.
+
+In `server` and `principal` mode, public `X-B2-*` credential headers are
+rejected so a caller cannot select a different B2 account. In `headers` mode,
+both the explicit `X-B2-MCP-Key-Id` / `X-B2-MCP-Key` names and the legacy
+`X-B2-Key-Id` / `X-B2-Key` names are accepted for compatibility; configure your
+proxy and logs to treat them as durable secrets.
+
+For `principal` mode, this server is an MCP resource server consumer, not an
+authorization server. A customer-operated TLS/OAuth layer must validate every
+request, enforce the MCP OAuth resource-server requirements, and attach verified
+`authInfo` before the SDK handler runs. Do not pass unverified identity headers
+through from the public internet. If a trusted proxy converts identity headers
+into `authInfo`, strip inbound copies at the edge and only add trusted copies
+inside an allowlisted proxy boundary.
 
 Provide env vars to the service through systemd. To add one without touching the
 credentials in the main unit, use a drop-in:
@@ -118,6 +156,10 @@ Type=simple
 User=ec2-user
 WorkingDirectory=/home/ec2-user/b2-mcp
 ExecStart=/usr/bin/node dist/http-server.js --port 3000
+Environment=B2_HTTP_CREDENTIAL_MODE=server
+Environment=B2_ALLOWED_HOSTS=mcp.your-domain.example
+Environment=B2_APPLICATION_KEY_ID=your-application-key-id
+Environment=B2_APPLICATION_KEY=your-application-key-secret
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -256,14 +298,29 @@ server {
 
     access_log /var/log/nginx/access.log mcp_safe;
 
-    # Streamable HTTP: one endpoint handles POST (JSON-RPC, incl. initialize),
-    # GET (long-lived server->client stream), and DELETE (terminate session).
+    # MCP 2026-07-28 HTTP: the production path is per-request and does not
+    # depend on initialize or Mcp-Session-Id.
     location = /mcp {
         limit_req zone=mcp_msg burst=30 nodelay;
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
+        # Server/principal modes reject B2 credential headers. Strip
+        # public copies at the edge so callers cannot try to select accounts.
+        # Remove these lines only for explicit B2_HTTP_CREDENTIAL_MODE=headers.
+        proxy_set_header X-B2-Key-Id "";
+        proxy_set_header X-B2-Key "";
+        proxy_set_header X-B2-App-Key-Id "";
+        proxy_set_header X-B2-App-Key "";
+        proxy_set_header X-B2-Master-Key-Id "";
+        proxy_set_header X-B2-Master-Key "";
+        proxy_set_header X-B2-MCP-Key-Id "";
+        proxy_set_header X-B2-MCP-Key "";
+        proxy_set_header X-B2-MCP-App-Key-Id "";
+        proxy_set_header X-B2-MCP-App-Key "";
+        proxy_set_header X-B2-MCP-Master-Key-Id "";
+        proxy_set_header X-B2-MCP-Master-Key "";
         client_max_body_size 1m;
         # The GET stream is long-lived; disable buffering so events flush promptly.
         proxy_buffering off;
@@ -344,6 +401,12 @@ For a single host this is optional, but useful at scale:
 
 ## Step 9 — Connect a client
 
+For a server-held B2 key, set `B2_HTTP_CREDENTIAL_MODE=server` and clients send
+only MCP traffic to `https://mcp.your-domain.example/mcp`; the B2 key is held
+by the server process or customer secret manager. If `B2_HTTP_CREDENTIAL_MODE`
+is unset, header compatibility remains active and clients must continue sending
+B2 credentials on every request.
+
 ### Claude Desktop (macOS / Windows)
 
 Claude Desktop's `claude_desktop_config.json` only accepts **stdio** entries (`command` + `args`). To reach a hosted Streamable HTTP server, use the [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) bridge — it runs as a local stdio process and proxies to your hosted endpoint:
@@ -353,28 +416,11 @@ Claude Desktop's `claude_desktop_config.json` only accepts **stdio** entries (`c
   "mcpServers": {
     "backblaze-b2": {
       "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://mcp.your-domain.example/mcp",
-        "--header",
-        "X-B2-Key-Id:your-application-key-id",
-        "--header",
-        "X-B2-Key:your-application-key-secret"
-      ]
+      "args": ["-y", "mcp-remote", "https://mcp.your-domain.example/mcp"]
     }
   }
 }
 ```
-
-Add the additional headers only when `X-B2-Key-Id` is a **master** key (the S3 endpoint rejects master keys, so S3 tools need a separate non-master key in that case):
-
-```
-        "--header", "X-B2-App-Key-Id:your-non-master-key-id",
-        "--header", "X-B2-App-Key:your-non-master-key-secret"
-```
-
-A single application key works for both the B2 native API and the S3-compatible API; the master key is only required for Partner API and account-level key management in the Phase 1 tool surface.
 
 Quit Claude Desktop fully (`Cmd+Q` on macOS) and relaunch — the entry should load on next startup.
 
@@ -386,11 +432,7 @@ For the Claude.ai web app and the Custom Connector UI in Claude Desktop Pro/Max,
 {
   "mcpServers": {
     "backblaze-b2": {
-      "url": "https://mcp.your-domain.example/mcp",
-      "headers": {
-        "X-B2-Key-Id": "your-application-key-id",
-        "X-B2-Key": "your-application-key-secret"
-      }
+      "url": "https://mcp.your-domain.example/mcp"
     }
   }
 }
@@ -398,15 +440,44 @@ For the Claude.ai web app and the Custom Connector UI in Claude Desktop Pro/Max,
 
 Do **not** put this shape in `claude_desktop_config.json` — Claude Desktop will reject it as "not a valid MCP server configuration" and skip the entry.
 
+### Header compatibility mode
+
+Use this when `B2_HTTP_CREDENTIAL_MODE=headers` is set or left unset and your
+proxy does not strip B2 credential headers. The headers must be sent on every
+MCP request; `mcp-remote --header` does that.
+
+```json
+{
+  "mcpServers": {
+    "backblaze-b2": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://mcp.your-domain.example/mcp",
+        "--header",
+        "X-B2-MCP-Key-Id:your-application-key-id",
+        "--header",
+        "X-B2-MCP-Key:your-application-key-secret"
+      ]
+    }
+  }
+}
+```
+
+Add `X-B2-MCP-Master-Key-Id` / `X-B2-MCP-Master-Key` only for Partner API
+tools. A single non-master application key works for the B2 native API and the
+S3-compatible API.
+
 ## Capacity planning
 
-The server is stateless apart from in-memory session records. A 2 vCPU /
-4 GB host comfortably serves 10–20 concurrent sessions. Memory grows by
-~50–100 MB per active large-file upload (one `partSize` chunk per worker).
+The HTTP server is stateless at the MCP transport layer. A 2 vCPU / 4 GB host
+comfortably serves many short requests; memory grows by ~50–100 MB per active
+large-file upload (one `partSize` chunk per worker).
 
-For larger deployments, run multiple instances behind an ALB with sticky
-sessions — each session's requests must reach the same backend that created
-it (the session ID is in-memory).
+For larger deployments, run multiple instances behind an ALB. Sticky sessions
+are not required by the MCP transport, though your own auth/proxy layer may
+still choose affinity for operational reasons.
 
 ## Updates
 
@@ -418,14 +489,22 @@ npm run build
 sudo systemctl restart b2-mcp
 ```
 
-The `SIGTERM` handler drains active sessions before exiting (10 second cap),
-so an in-flight request will not be cut mid-response.
+The `SIGTERM` handler stops accepting new traffic and gives in-flight HTTP
+requests a short drain window before process exit.
 
 ## Smoke test
 
 After every deploy, run the included end-to-end smoke test against the
-live server. It connects via Streamable HTTP, lists tools, and exercises one
+live server. It connects via HTTP, lists tools, and exercises one
 tool per credential scope.
+
+Server or principal mode, where the client sends no B2 key:
+
+```bash
+MCP_URL=https://mcp.your-domain.example/mcp npm run smoke
+```
+
+Header compatibility mode, where the client still sends B2 credential headers:
 
 ```bash
 MCP_URL=https://mcp.your-domain.example/mcp \

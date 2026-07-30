@@ -20,18 +20,35 @@
  *   }
  */
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createServer, fetchCapabilities, loadConfig } from "./server.js";
+import { CredentialResolutionError } from "./credentials.js";
 import { logger } from "./utils/logger.js";
 
 export async function startStdio(): Promise<void> {
   const config = loadConfig();
   // Right-size the surface to the key's capabilities (null → full surface).
-  const capabilities = await fetchCapabilities(config);
-  const server = createServer(config, capabilities);
-  const transport = new StdioServerTransport();
-
-  await server.connect(transport);
+  let capabilities: string[] | null;
+  try {
+    capabilities = await fetchCapabilities(config);
+  } catch (err) {
+    if (
+      !(err instanceof CredentialResolutionError) ||
+      err.code !== "capability_upstream_unavailable"
+    ) {
+      throw err;
+    }
+    logger.warn(
+      {
+        code: err.code,
+      },
+      "capability.fetch.stdio_degraded",
+    );
+    capabilities = null;
+  }
+  serveStdio(() => createServer(config, capabilities), {
+    onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
+  });
 
   logger.info({ transport: "stdio" }, "server.started");
 }

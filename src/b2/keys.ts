@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -81,7 +81,7 @@ export function registerKeyTools(
         const requested = args.capabilities ?? [];
 
         if (!config.allowKeyMgmtGrants) {
-          const offending = requested.filter((c) => KEY_MGMT_CAPS.includes(c));
+          const offending = requested.filter((c: string) => KEY_MGMT_CAPS.includes(c));
           if (offending.length > 0) {
             return toolError(
               new Error(
@@ -95,7 +95,7 @@ export function registerKeyTools(
 
         const isScoped = !!args.bucketId || (args.bucketIds?.length ?? 0) > 0;
         if (!config.allowUnscopedKeys && !isScoped) {
-          const writeCaps = requested.filter((c) => DATA_WRITE_CAPS.includes(c));
+          const writeCaps = requested.filter((c: string) => DATA_WRITE_CAPS.includes(c));
           if (writeCaps.length > 0) {
             return toolError(
               new Error(

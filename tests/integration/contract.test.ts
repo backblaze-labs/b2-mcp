@@ -16,7 +16,7 @@
  */
 
 import { loadConfig, createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 const liveIt = HAS_CREDS ? test : test.skip;

@@ -3,11 +3,20 @@ import {
   HeadBucketCommand,
   PutBucketLifecycleConfigurationCommand,
 } from "@aws-sdk/client-s3";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
+
+interface S3LifecycleRule {
+  id: string;
+  status: "Enabled" | "Disabled";
+  filter?: { prefix?: string };
+  expiration?: { days?: number; expiredObjectDeleteMarker?: boolean };
+  noncurrentVersionExpiration?: { noncurrentDays: number };
+  abortIncompleteMultipartUpload?: { daysAfterInitiation: number };
+}
 
 // S3-compatible bucket tools are intentionally minimal: anything with a native
 // b2_* equivalent has been removed to keep the tool surface small. Only the two
@@ -92,7 +101,7 @@ export function registerS3BucketTools(server: McpServer, s3: S3Client, config: B
           new PutBucketLifecycleConfigurationCommand({
             Bucket: args.bucket,
             LifecycleConfiguration: {
-              Rules: args.rules.map((r) => ({
+              Rules: (args.rules as S3LifecycleRule[]).map((r) => ({
                 ID: r.id,
                 Status: r.status,
                 Filter: r.filter ? { Prefix: r.filter.prefix ?? "" } : { Prefix: "" },

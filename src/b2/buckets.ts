@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -6,6 +6,17 @@ import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { assignDefined } from "../utils/payload.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
+
+interface BucketNotificationRule {
+  objectNamePrefix?: string;
+  targetConfiguration: {
+    url: string;
+    hmacSha256SigningSecret?: string;
+    customHeaders?: Array<{ name: string; value: string }>;
+  };
+  isEnabled: boolean;
+  [key: string]: unknown;
+}
 
 /**
  * Redact webhook secrets from a notification-rules API response before it reaches
@@ -460,7 +471,8 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        for (const rule of args.eventNotificationRules) {
+        const eventNotificationRules = args.eventNotificationRules as BucketNotificationRule[];
+        for (const rule of eventNotificationRules) {
           const reason = validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
             return toolError(
@@ -472,7 +484,7 @@ export function registerBucketTools(
           bucketId: args.bucketId,
           // B2 requires objectNamePrefix on every rule; default to "" (matches
           // all objects) when a caller omits it, regardless of Zod default.
-          eventNotificationRules: args.eventNotificationRules.map((rule) => ({
+          eventNotificationRules: eventNotificationRules.map((rule) => ({
             ...rule,
             objectNamePrefix: rule.objectNamePrefix ?? "",
           })),

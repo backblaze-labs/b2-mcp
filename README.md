@@ -14,7 +14,7 @@ Destructive actions are gated, credentials never enter the model's context, and 
 
 ## Quick start
 
-**Prerequisites:** [Node.js 22 LTS](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
+**Prerequisites:** [Node.js 22.3+](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
 
 **1. Build:**
 
@@ -55,25 +55,30 @@ Replace the path with where you put the folder, then restart Claude Desktop — 
 
 ## Configuration
 
-| Variable                             | Required | Default               | Description                                                                                         |
-| ------------------------------------ | -------- | --------------------- | --------------------------------------------------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`              | ✅       | —                     | Application key ID (non-master) — the workhorse: native + S3 + key management                       |
-| `B2_APPLICATION_KEY`                 | ✅       | —                     | Application key secret                                                                              |
-| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` | —        | falls back to app key | Master key — used **only** by Partner API tools                                                     |
-| `B2_REGION`                          | —        | `us-west-004`         | Region for the S3-compatible endpoint                                                               |
-| `B2_MCP_UA_SUFFIX`                   | —        | —                     | Token appended to the outbound User-Agent (tag a deployment)                                        |
-| `B2_APP_KEY_ID` / `B2_APP_KEY`       | —        | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*` |
+| Variable                                                      | Required              | Default               | Description                                                                                                               |
+| ------------------------------------------------------------- | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse: native + S3 + key management                                             |
+| `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                    |
+| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master key — used **only** by Partner API tools                                                                           |
+| `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                     |
+| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                              |
+| `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                       |
+| `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments |
+| `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                           |
+| `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                |
 
 **Security / policy (safe defaults; override as needed):**
 
-| Variable                                      | Default       | Description                                                                                                               |
-| --------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `B2_DESTRUCTIVE_POLICY`                       | `confirm`     | Gate on destructive tools: `confirm` (require `confirm: true`), `block` (refuse), `allow` (off)                           |
-| `B2_ALLOW_KEY_MGMT_GRANTS`                    | `false`       | Allow `b2_create_key` to grant key-management caps (a self-perpetuating key)                                              |
-| `B2_ALLOW_UNSCOPED_KEYS`                      | `false`       | Allow `b2_create_key` to mint unscoped write keys                                                                         |
-| `B2_MAX_KEY_DURATION_SECONDS`                 | _none_        | Cap minted-key validity; reject non-expiring keys                                                                         |
-| `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS`     | _none_        | HTTP transport: Host/Origin allowlists (DNS-rebinding protection) — **set these for any internet-facing HTTP deployment** |
-| `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY` | `1000` / `20` | HTTP transport: concurrent-session caps                                                                                   |
+| Variable                                                         | Default            | Description                                                                                                               |
+| ---------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| `B2_DESTRUCTIVE_POLICY`                                          | `confirm`          | Gate on destructive tools: `confirm` (require `confirm: true`), `block` (refuse), `allow` (off)                           |
+| `B2_ALLOW_KEY_MGMT_GRANTS`                                       | `false`            | Allow `b2_create_key` to grant key-management caps (a self-perpetuating key)                                              |
+| `B2_ALLOW_UNSCOPED_KEYS`                                         | `false`            | Allow `b2_create_key` to mint unscoped write keys                                                                         |
+| `B2_MAX_KEY_DURATION_SECONDS`                                    | _none_             | Cap minted-key validity; reject non-expiring keys                                                                         |
+| `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS`                        | _none_             | HTTP transport: Host/Origin allowlists (DNS-rebinding protection) — **set these for any internet-facing HTTP deployment** |
+| `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`              | `60` / `120`       | HTTP transport: per-credential request throttling                                                                         |
+| `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`                    | `1000` / `20`      | HTTP transport: global and per-credential concurrent in-flight request caps                                               |
+| `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size. Cache identity is secret-bound; log labels are non-secret fingerprints   |
 
 A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
@@ -147,13 +152,15 @@ Scope follows the caller's key — a partner key sees its sub-accounts; a custom
 
 ## Security & self-hosting
 
-Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), a `b2_create_key` lockdown (no key-management or unscoped write keys without opt-in), per-session credentials, rate limiting, and a values-redacted audit log (key names only — never secrets, values, or file contents). The server never phones home.
+Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), a `b2_create_key` lockdown (no key-management or unscoped write keys without opt-in), explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
 
 Running it safely:
 
 - **Use a least-privilege key** — scope `b2_create_key` to the buckets/capabilities you need; a non-master key is correct.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
-- **Exposing HTTP → you own the front door.** The server reads B2 credentials per session but performs **no caller authentication**. Put it behind **your own reverse proxy with TLS and caller auth** (SSO/Cloudflare Access/mTLS), and **set `B2_ALLOWED_HOSTS`** for DNS-rebinding protection.
+- **Exposing HTTP → choose a credential mode.** Unset mode remains `headers` for one-release compatibility with existing header clients; B2 credential headers must be present on every MCP request. Set `B2_HTTP_CREDENTIAL_MODE=server` to keep one B2 credential in the server process/customer secret manager, or `principal` to map verified MCP `authInfo` to customer-held credentials.
+- **Caller auth stays at your edge.** For `principal` mode, terminate TLS and validate OAuth before the SDK handler receives `authInfo`; strip any trusted identity headers at the edge and only re-add them inside an allowlisted proxy boundary.
+- **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; dependency versions are pinned in `package.json` and `package-lock.json`.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
 
 Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).
@@ -168,7 +175,7 @@ npm run typecheck          # type-check src + tests (no emit)
 npm test                   # unit tests (no credentials needed)
 npm run test:integration   # live B2 tests — needs B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 npm start                  # stdio transport
-npm run start:http -- --port 3000   # Streamable HTTP transport
+npm run start:http -- --port 3000   # MCP 2026-07-28 HTTP transport
 npx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspector
 ```
 

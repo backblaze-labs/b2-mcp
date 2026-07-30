@@ -9,7 +9,7 @@ import {
   ListObjectsV2Command,
   ListObjectVersionsCommand,
 } from "@aws-sdk/client-s3";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -22,6 +22,11 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
+
+interface DeleteObjectEntry {
+  key: string;
+  versionId?: string;
+}
 
 // Inline object content moves bytes *through* the server — and, for base64,
 // through the model's context window. Keep that path for small control-plane
@@ -238,7 +243,10 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
           new DeleteObjectsCommand({
             Bucket: args.bucket,
             Delete: {
-              Objects: args.objects.map((o) => ({ Key: o.key, VersionId: o.versionId })),
+              Objects: (args.objects as DeleteObjectEntry[]).map((o) => ({
+                Key: o.key,
+                VersionId: o.versionId,
+              })),
               Quiet: args.quiet ?? true,
             },
           }),
