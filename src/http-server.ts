@@ -11,19 +11,16 @@
  *   DELETE /mcp   — terminates a session
  *   GET    /health
  *
- * Credentials are read per-connection from the headers on the `initialize` POST
- * (the transport then binds them to that session for its lifetime):
- *   X-B2-Key-Id          — application key ID (the workhorse: native + S3 + key mgmt)
- *   X-B2-Key             — application key secret
- *   X-B2-Master-Key-Id   — master key ID, ONLY for Partner API tools (optional)
- *   X-B2-Master-Key      — master key secret (optional)
- *   X-B2-App-Key-Id      — DEPRECATED non-master S3 override for legacy master-primary setups
- *   X-B2-App-Key         — DEPRECATED (see above)
+ * Credential mode is explicit:
+ *   B2_HTTP_CREDENTIAL_MODE=server    — B2 credentials come from server env
+ *   B2_HTTP_CREDENTIAL_MODE=principal — verified MCP authInfo maps to a credential ref
+ *   B2_HTTP_CREDENTIAL_MODE=headers   — compatibility mode; B2 headers on every request
  */
 
 import * as http from "http";
 import * as crypto from "crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createServer, fetchCapabilities } from "./server.js";
 import { B2Config } from "./utils/types.js";
@@ -31,9 +28,15 @@ import { parseIntEnv } from "./utils/config.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
+import {
+  AuthenticatedIncomingMessage,
+  configFromHttpHeaders,
+  CredentialResolution,
+  CredentialResolutionError,
+  getHttpCredentialProvider,
+} from "./credentials.js";
 
 const DEFAULT_PORT = 3000;
-const DEFAULT_REGION = "us-west-004";
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 const SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
@@ -88,13 +91,15 @@ interface Session {
   transport: StreamableHTTPServerTransport;
   mcpServer: McpServer;
   lastActivity: number;
-  /** Rate-limiter key — a hash of the X-B2-Key-Id used to connect (not a prefix). */
+  /** Non-secret provider cache key from the credential resolution boundary. */
+  credentialCacheKey: string;
+  /** Rate-limiter key — a hash of the non-secret credential/principal cache key. */
   rateKey: string;
 }
 
-/** Stable, collision-resistant rate-limit/session key derived from the full key id. */
-export function deriveRateKey(applicationKeyId: string): string {
-  return crypto.createHash("sha256").update(applicationKeyId).digest("hex").slice(0, 16);
+/** Stable rate-limit/session key derived from a non-secret credential/principal cache key. */
+export function deriveRateKey(cacheKey: string): string {
+  return crypto.createHash("sha256").update(cacheKey).digest("hex").slice(0, 16);
 }
 
 export function getPort(): number {
@@ -111,53 +116,7 @@ export function getPort(): number {
 }
 
 export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
-  const keyId = req.headers["x-b2-key-id"];
-  const key = req.headers["x-b2-key"];
-  if (!keyId || !key || Array.isArray(keyId) || Array.isArray(key)) return null;
-  const appKeyId = req.headers["x-b2-app-key-id"];
-  const appKey = req.headers["x-b2-app-key"];
-  const resolvedAppKeyId = !Array.isArray(appKeyId) && appKeyId ? appKeyId : keyId;
-  const resolvedAppKey = !Array.isArray(appKey) && appKey ? appKey : key;
-  // Optional master key — used only by the Partner API tools. Falls
-  // back to the application key, so a single key remains a complete config.
-  const masterKeyId = req.headers["x-b2-master-key-id"];
-  const masterKey = req.headers["x-b2-master-key"];
-  const resolvedMasterKeyId = !Array.isArray(masterKeyId) && masterKeyId ? masterKeyId : keyId;
-  const resolvedMasterKey = !Array.isArray(masterKey) && masterKey ? masterKey : key;
-  return {
-    applicationKeyId: keyId,
-    applicationKey: key,
-    appKeyId: resolvedAppKeyId,
-    appKey: resolvedAppKey,
-    masterKeyId: resolvedMasterKeyId,
-    masterKey: resolvedMasterKey,
-    region: process.env.B2_REGION ?? DEFAULT_REGION,
-    // Local disk access is OFF by default on the internet-facing transport — a
-    // remote caller must not reference server-local paths (use base64 content).
-    // An operator may opt in, but ONLY confined to a sandbox root (never
-    // unrestricted over HTTP).
-    allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES === "true" && !!process.env.B2_FILE_ROOT,
-    fileRoot: process.env.B2_FILE_ROOT ?? null,
-    // b2_create_key lockdown (see B2Config). Operator policy from env; safe by default.
-    maxKeyDurationSeconds: process.env.B2_MAX_KEY_DURATION_SECONDS
-      ? parseIntEnv(process.env.B2_MAX_KEY_DURATION_SECONDS, 0)
-      : null,
-    allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
-    allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
-    // Internet-facing transport is safe-by-default: destructive operations are
-    // BLOCKED unless the operator explicitly opts down. `confirm` is satisfiable
-    // by a prompt-injected model, so it is not the default for a hosted server;
-    // an operator who needs destructive ops sets B2_DESTRUCTIVE_POLICY=confirm
-    // (paired with host consent) or =allow. stdio defaults to confirm (trusted
-    // local user) — see loadConfig in server.ts.
-    destructivePolicy:
-      process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
-      process.env.B2_DESTRUCTIVE_POLICY === "block" ||
-      process.env.B2_DESTRUCTIVE_POLICY === "confirm"
-        ? process.env.B2_DESTRUCTIVE_POLICY
-        : "block",
-    transport: "http",
-  };
+  return configFromHttpHeaders(req);
 }
 
 function sessionIdHeader(req: http.IncomingMessage): string | undefined {
@@ -170,6 +129,25 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown, head
   res.end(JSON.stringify(body));
 }
 
+function writeCredentialError(res: http.ServerResponse, err: unknown): void {
+  if (err instanceof CredentialResolutionError) {
+    writeJson(res, err.status, { error: err.message });
+    return;
+  }
+  writeJson(res, 500, { error: "Credential resolution failed" });
+}
+
+function validateExistingRequest(req: AuthenticatedIncomingMessage, session: Session): void {
+  const resolved = getHttpCredentialProvider().resolve({ req });
+  if (resolved.cacheKey !== session.credentialCacheKey) {
+    throw new CredentialResolutionError(
+      "Request credentials do not match the MCP session",
+      403,
+      "credential_mismatch",
+    );
+  }
+}
+
 export interface HttpServerHandle {
   server: http.Server;
   /** Live session map — exposed for tests/observability. */
@@ -178,12 +156,17 @@ export interface HttpServerHandle {
   drain(): void;
 }
 
+export interface HttpServerOptions {
+  /** Hook for customer middleware/tests to attach verified MCP authInfo. */
+  getAuthInfo?: (req: AuthenticatedIncomingMessage) => AuthInfo | null | undefined;
+}
+
 /**
  * Build the HTTP server and its session machinery without binding to a port or
  * installing signal handlers — so it can be unit-tested by listening on an
  * ephemeral port. main() wires in getPort(), listen(), and graceful shutdown.
  */
-export function buildHttpServer(): HttpServerHandle {
+export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHandle {
   // Map of Mcp-Session-Id → session record with last-activity timestamp
   const sessions = new Map<string, Session>();
   let shuttingDown = false;
@@ -259,6 +242,9 @@ export function buildHttpServer(): HttpServerHandle {
   }
 
   const httpServer = http.createServer(async (req, res) => {
+    const authedReq = req as AuthenticatedIncomingMessage;
+    const authInfo = options.getAuthInfo?.(authedReq);
+    if (authInfo) authedReq.auth = authInfo;
     const url = new URL(req.url ?? "/", "http://localhost");
 
     if (shuttingDown) {
@@ -298,13 +284,19 @@ export function buildHttpServer(): HttpServerHandle {
         return;
       }
       const session = sessions.get(sessionId)!;
+      try {
+        validateExistingRequest(authedReq, session);
+      } catch (err) {
+        writeCredentialError(res, err);
+        return;
+      }
       if (!allowRequest(session.rateKey)) {
         writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
         return;
       }
       touch(sessionId);
       try {
-        await session.transport.handleRequest(req, res);
+        await session.transport.handleRequest(authedReq, res);
       } catch {
         if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
       }
@@ -334,13 +326,19 @@ export function buildHttpServer(): HttpServerHandle {
         writeJson(res, 404, { error: "Session not found" });
         return;
       }
+      try {
+        validateExistingRequest(authedReq, session);
+      } catch (err) {
+        writeCredentialError(res, err);
+        return;
+      }
       if (!allowRequest(session.rateKey)) {
         writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
         return;
       }
       touch(sessionId);
       try {
-        await session.transport.handleRequest(req, res, parsed);
+        await session.transport.handleRequest(authedReq, res, parsed);
       } catch {
         if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
       }
@@ -355,15 +353,15 @@ export function buildHttpServer(): HttpServerHandle {
       return;
     }
 
-    const config = configFromHeaders(req);
-    if (!config) {
-      writeJson(res, 401, {
-        error: "Missing credentials: X-B2-Key-Id and X-B2-Key headers are required",
-      });
+    let resolved: CredentialResolution;
+    try {
+      resolved = getHttpCredentialProvider().resolve({ req: authedReq });
+    } catch (err) {
+      writeCredentialError(res, err);
       return;
     }
 
-    const rateKey = deriveRateKey(config.applicationKeyId);
+    const rateKey = deriveRateKey(resolved.cacheKey);
     if (!allowRequest(rateKey)) {
       writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
       return;
@@ -385,14 +383,26 @@ export function buildHttpServer(): HttpServerHandle {
       return;
     }
 
-    // Right-size this session's tool surface to the connected key's
-    // capabilities (null → full surface; never blocks session creation).
-    const capabilities = await fetchCapabilities(config);
-    const mcpServer = createServer(config, capabilities);
+    // Right-size this session's tool surface to the resolved credential's
+    // capabilities. Lookup failures fail closed before any tool surface is exposed.
+    let capabilities: string[] | null;
+    try {
+      capabilities = await fetchCapabilities(resolved.config, resolved.cacheKey);
+    } catch (err) {
+      writeCredentialError(res, err);
+      return;
+    }
+    const mcpServer = createServer(resolved.config, capabilities);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
       onsessioninitialized: (sid) => {
-        sessions.set(sid, { transport, mcpServer, lastActivity: Date.now(), rateKey });
+        sessions.set(sid, {
+          transport,
+          mcpServer,
+          lastActivity: Date.now(),
+          credentialCacheKey: resolved.cacheKey,
+          rateKey,
+        });
       },
     });
     // When the transport closes (DELETE, client disconnect), drop the session.
@@ -403,7 +413,7 @@ export function buildHttpServer(): HttpServerHandle {
 
     try {
       await mcpServer.connect(transport);
-      await transport.handleRequest(req, res, parsed);
+      await transport.handleRequest(authedReq, res, parsed);
     } catch {
       if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
       try {

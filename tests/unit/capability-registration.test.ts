@@ -4,7 +4,7 @@
  * network-free; fetchCapabilities is tested against a mocked authorize.
  */
 import axios from "axios";
-import { createServer, fetchCapabilities } from "../../src/server";
+import { createServer, fetchCapabilities, invalidateCapabilityCache } from "../../src/server";
 import { isToolEnabled, TOOL_CAPABILITIES } from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
 
@@ -49,12 +49,11 @@ describe("capability-aware registration", () => {
     expect(toolNames(null).length).toBe(40);
   });
 
-  it("EMPTY capabilities → full surface, never collapses to one tool (regression)", () => {
-    // The bug that shipped to the box: empty caps wrongly filtered everything,
-    // leaving only b2_authorize_account. Empty must mean 'unknown' → full surface.
+  it("EMPTY capabilities → fail closed instead of full surface", () => {
     const names = toolNames([]);
-    expect(names.length).toBe(40);
-    expect(names).toContain("b2_usage_growth");
+    expect(names.length).toBeLessThan(40);
+    expect(names).toContain("b2_authorize_account");
+    expect(names).not.toContain("b2_usage_growth");
   });
 
   it("read-only key drops every write/delete/admin tool", () => {
@@ -125,7 +124,9 @@ describe("capability-aware registration", () => {
 describe("fetchCapabilities", () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    invalidateCapabilityCache();
     delete process.env.B2_REGISTER_ALL_TOOLS;
+    delete process.env.B2_CAPABILITY_CACHE_TTL_MS;
   });
 
   // v4 puts capabilities at apiInfo.storageApi.allowed.capabilities.
@@ -151,16 +152,16 @@ describe("fetchCapabilities", () => {
     expect(await fetchCapabilities(baseConfig)).toEqual(["readFiles", "listBuckets"]);
   });
 
-  it("returns null (→ full surface) when capabilities are empty or absent", async () => {
+  it("returns an empty list when capabilities are empty or absent", async () => {
     jest.spyOn(axios, "get").mockResolvedValue(authData(undefined) as never);
-    expect(await fetchCapabilities(baseConfig)).toBeNull();
+    expect(await fetchCapabilities(baseConfig)).toEqual([]);
   });
 
-  it("returns null on auth failure so callers fall back to the full surface", async () => {
+  it("rejects on auth failure so callers fail closed", async () => {
     jest
       .spyOn(axios, "get")
       .mockRejectedValue(Object.assign(new Error("denied"), { response: { status: 401 } }));
-    expect(await fetchCapabilities(baseConfig)).toBeNull();
+    await expect(fetchCapabilities(baseConfig)).rejects.toThrow(/credential or capability/i);
   });
 
   it("returns null without any network call when B2_REGISTER_ALL_TOOLS=true", async () => {
@@ -168,5 +169,21 @@ describe("fetchCapabilities", () => {
     process.env.B2_REGISTER_ALL_TOOLS = "true";
     expect(await fetchCapabilities(baseConfig)).toBeNull();
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("caches by explicit non-secret cache key and supports invalidation", async () => {
+    process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
+    const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
+
+    await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
+    await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    await expect(fetchCapabilities(baseConfig, "credential:b")).resolves.toEqual(["readFiles"]);
+    expect(spy).toHaveBeenCalledTimes(2);
+
+    invalidateCapabilityCache("credential:a");
+    await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
+    expect(spy).toHaveBeenCalledTimes(3);
   });
 });

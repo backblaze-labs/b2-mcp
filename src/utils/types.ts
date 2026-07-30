@@ -59,6 +59,8 @@ export interface B2Config {
   destructivePolicy?: DestructivePolicy;
   /** Which transport launched this server — surfaced in the outbound User-Agent. */
   transport?: "stdio" | "http";
+  /** Non-secret SHA-256-derived fingerprint used for logs, metrics, and caches. */
+  credentialFingerprint?: string;
 }
 
 export interface B2AuthResponse {

@@ -55,14 +55,17 @@ Replace the path with where you put the folder, then restart Claude Desktop — 
 
 ## Configuration
 
-| Variable                             | Required | Default               | Description                                                                                         |
-| ------------------------------------ | -------- | --------------------- | --------------------------------------------------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`              | ✅       | —                     | Application key ID (non-master) — the workhorse: native + S3 + key management                       |
-| `B2_APPLICATION_KEY`                 | ✅       | —                     | Application key secret                                                                              |
-| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` | —        | falls back to app key | Master key — used **only** by Partner API tools                                                     |
-| `B2_REGION`                          | —        | `us-west-004`         | Region for the S3-compatible endpoint                                                               |
-| `B2_MCP_UA_SUFFIX`                   | —        | —                     | Token appended to the outbound User-Agent (tag a deployment)                                        |
-| `B2_APP_KEY_ID` / `B2_APP_KEY`       | —        | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*` |
+| Variable                                                      | Required              | Default               | Description                                                                                                              |
+| ------------------------------------------------------------- | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse: native + S3 + key management                                            |
+| `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                   |
+| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master key — used **only** by Partner API tools                                                                          |
+| `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                    |
+| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                             |
+| `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                      |
+| `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `server`              | `server`, `principal`, or `headers`; headers mode is explicit compatibility and requires B2 headers on every MCP request |
+| `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                          |
+| `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                               |
 
 **Security / policy (safe defaults; override as needed):**
 
@@ -74,6 +77,7 @@ Replace the path with where you put the folder, then restart Claude Desktop — 
 | `B2_MAX_KEY_DURATION_SECONDS`                 | _none_        | Cap minted-key validity; reject non-expiring keys                                                                         |
 | `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS`     | _none_        | HTTP transport: Host/Origin allowlists (DNS-rebinding protection) — **set these for any internet-facing HTTP deployment** |
 | `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY` | `1000` / `20` | HTTP transport: concurrent-session caps                                                                                   |
+| `B2_CAPABILITY_CACHE_TTL_MS`                  | `300000`      | Bounded capability-discovery cache TTL; cache keys use a non-secret credential fingerprint or verified principal          |
 
 A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
@@ -147,13 +151,14 @@ Scope follows the caller's key — a partner key sees its sub-accounts; a custom
 
 ## Security & self-hosting
 
-Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), a `b2_create_key` lockdown (no key-management or unscoped write keys without opt-in), per-session credentials, rate limiting, and a values-redacted audit log (key names only — never secrets, values, or file contents). The server never phones home.
+Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), a `b2_create_key` lockdown (no key-management or unscoped write keys without opt-in), explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
 
 Running it safely:
 
 - **Use a least-privilege key** — scope `b2_create_key` to the buckets/capabilities you need; a non-master key is correct.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
-- **Exposing HTTP → you own the front door.** The server reads B2 credentials per session but performs **no caller authentication**. Put it behind **your own reverse proxy with TLS and caller auth** (SSO/Cloudflare Access/mTLS), and **set `B2_ALLOWED_HOSTS`** for DNS-rebinding protection.
+- **Exposing HTTP → choose a credential mode.** `server` mode keeps B2 keys in the server process/customer secret manager. `principal` mode requires verified MCP `authInfo` from your OAuth/resource-server boundary and maps the caller to a credential reference. `headers` mode is compatibility only; B2 credential headers must be present on every MCP request and cannot switch within a session.
+- **Caller auth stays at your edge.** For `principal` mode, terminate TLS and validate OAuth before the SDK handler receives `authInfo`; strip any trusted identity headers at the edge and only re-add them inside an allowlisted proxy boundary.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
 
 Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).

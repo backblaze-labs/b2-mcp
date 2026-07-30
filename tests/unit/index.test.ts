@@ -27,6 +27,7 @@ describe("startStdio", () => {
   it("loads config, builds the server, and connects the stdio transport", async () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
+    process.env.B2_REGISTER_ALL_TOOLS = "true";
 
     await expect(startStdio()).resolves.toBeUndefined();
     expect(StdioServerTransport).toHaveBeenCalledTimes(1);

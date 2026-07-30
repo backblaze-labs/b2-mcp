@@ -204,7 +204,7 @@ Point it at `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js` with the two env vars,
 
 ## B. Hosted (Streamable HTTP)
 
-For a server deployed per [`DEPLOY.md`](DEPLOY.md). The hosted endpoint is `https://<host>/mcp` (Streamable HTTP; SSE was the legacy transport, deprecated in MCP 2025-03-26). Credentials travel in request **headers** on the initialize request, not env vars.
+For a server deployed per [`DEPLOY.md`](DEPLOY.md). The hosted endpoint is `https://<host>/mcp` (Streamable HTTP; SSE was the legacy transport, deprecated in MCP 2025-03-26). By default, hosted deployments use `B2_HTTP_CREDENTIAL_MODE=server`, so the client sends no B2 key.
 
 ### Claude Desktop → hosted server (`mcp-remote` bridge)
 
@@ -215,15 +215,7 @@ Claude Desktop only accepts stdio entries, so use the [`mcp-remote`](https://www
   "mcpServers": {
     "backblaze-b2": {
       "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://mcp.your-domain.example/mcp",
-        "--header",
-        "X-B2-Key-Id:your-key-id",
-        "--header",
-        "X-B2-Key:your-key-secret"
-      ]
+      "args": ["-y", "mcp-remote", "https://mcp.your-domain.example/mcp"]
     }
   }
 }
@@ -235,24 +227,37 @@ These accept the URL + headers shape directly:
 
 ```json
 {
-  "url": "https://mcp.your-domain.example/mcp",
-  "headers": {
-    "X-B2-Key-Id": "your-key-id",
-    "X-B2-Key": "your-key-secret"
-  }
+  "url": "https://mcp.your-domain.example/mcp"
 }
 ```
 
 ### Any Streamable-HTTP-capable client
 
-Point it at `https://<host>/mcp` and send the `X-B2-Key-Id` / `X-B2-Key` headers. If your primary key is a **master** key, also send `X-B2-App-Key-Id` / `X-B2-App-Key` (a non-master key) — B2's S3 endpoint rejects master keys.
+Point it at `https://<host>/mcp`. In `server` mode, do not send B2 credential headers. In `principal` mode, your OAuth/resource-server layer must validate the caller and attach verified MCP `authInfo` before the handler runs.
+
+### Header compatibility mode
+
+If the operator explicitly sets `B2_HTTP_CREDENTIAL_MODE=headers`, send B2 credentials on every MCP request. Prefer the explicit header names:
+
+```json
+{
+  "url": "https://mcp.your-domain.example/mcp",
+  "headers": {
+    "X-B2-MCP-Key-Id": "your-key-id",
+    "X-B2-MCP-Key": "your-key-secret"
+  }
+}
+```
+
+If Partner API tools require a distinct master key, also send `X-B2-MCP-Master-Key-Id` / `X-B2-MCP-Master-Key`.
 
 ---
 
 ## Credentials & security
 
 - **stdio:** the key goes in the `env` block of the client's config file, in **plaintext**. Protect that file and never commit it to a repo.
-- **hosted:** the key travels in `X-B2-*` headers. Front the server with TLS and a caller-auth layer (see [`DEPLOY.md`](DEPLOY.md) — the HTTP transport authenticates the _B2 key_, not the _caller_).
-- **Master-key caveat:** only the Partner API and account-level key management need a master key in Phase 1. If you use one, also supply a non-master key (`B2_APP_KEY_ID`/`B2_APP_KEY` for stdio, or `X-B2-App-Key-Id`/`X-B2-App-Key` for hosted) for the S3 tools.
+- **hosted server/principal modes:** the client sends no B2 key. Front the server with TLS and, for principal mode, an MCP OAuth resource-server validation layer that supplies verified `authInfo`.
+- **hosted headers mode:** the key travels in `X-B2-MCP-*` headers on every request. Treat those headers as durable secrets in the proxy, logs, APM, and test fixtures.
+- **Master-key caveat:** only the Partner API and account-level key management need a master key in Phase 1. If you use one, also supply a non-master key (`B2_APP_KEY_ID`/`B2_APP_KEY` for stdio, or `X-B2-MCP-App-Key-Id`/`X-B2-MCP-App-Key` in hosted headers mode) for the S3 tools.
 
 See the [README](../README.md) for the full environment-variable list and the tool catalog.

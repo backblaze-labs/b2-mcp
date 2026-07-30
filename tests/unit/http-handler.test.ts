@@ -7,6 +7,7 @@
 
 import * as http from "http";
 import type { AddressInfo } from "net";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types";
 import {
   buildHttpServer,
   configFromHeaders,
@@ -98,15 +99,25 @@ let port: number;
 // full-surface registration so session creation never reaches the network to
 // fetch the key's capabilities (which would be a real authorize call).
 const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
+const savedCredentialMode = process.env.B2_HTTP_CREDENTIAL_MODE;
 beforeAll(() => {
   process.env.B2_REGISTER_ALL_TOOLS = "true";
+  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
 });
 afterAll(() => {
   if (savedRegisterAll === undefined) delete process.env.B2_REGISTER_ALL_TOOLS;
   else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
+  if (savedCredentialMode === undefined) delete process.env.B2_HTTP_CREDENTIAL_MODE;
+  else process.env.B2_HTTP_CREDENTIAL_MODE = savedCredentialMode;
 });
 
 beforeEach(async () => {
+  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  delete process.env.B2_APPLICATION_KEY_ID;
+  delete process.env.B2_APPLICATION_KEY;
+  delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
+  delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
+  delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
   handle = buildHttpServer();
   await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
   port = (handle.server.address() as AddressInfo).port;
@@ -132,6 +143,43 @@ const INIT = JSON.stringify({
     clientInfo: { name: "test", version: "1" },
   },
 });
+
+async function replaceHandle(getAuthInfo?: (req: any) => AuthInfo | null): Promise<void> {
+  handle.drain();
+  await new Promise<void>((r) => handle.server.close(() => r()));
+  handle = buildHttpServer({ getAuthInfo });
+  await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
+  port = (handle.server.address() as AddressInfo).port;
+}
+
+function initializeSession(headers: Record<string, string> = creds): Promise<{
+  status: number;
+  sessionId?: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/mcp",
+        headers: { ...headers, ...JSON_HEADERS },
+      },
+      (res) => {
+        const rawSessionId = res.headers["mcp-session-id"];
+        const sessionId = Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId;
+        resolve({ status: res.statusCode ?? 0, sessionId });
+        res.destroy();
+        req.destroy();
+      },
+    );
+    req.on("error", () => undefined);
+    const t = setTimeout(() => reject(new Error("init timeout")), 3000);
+    t.unref();
+    req.write(INIT);
+    req.end();
+  });
+}
 
 describe("HTTP handler (Streamable HTTP)", () => {
   it("returns 401 on POST /mcp initialize without credentials", async () => {
@@ -187,7 +235,8 @@ describe("HTTP handler (Streamable HTTP)", () => {
   });
 
   it("returns 429 when per-key session capacity is reached", async () => {
-    const rk = deriveRateKey("key-abc");
+    const cfg = configFromHeaders({ headers: creds });
+    const rk = deriveRateKey(`credential:${cfg?.credentialFingerprint}`);
     for (let i = 0; i < 20; i++) handle.sessions.set(`k${i}`, fakeSession(rk));
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
@@ -200,30 +249,75 @@ describe("HTTP handler (Streamable HTTP)", () => {
     // Drive a real initialize handshake (createServer → transport → connect). The
     // init response may be an open SSE stream, so resolve on response headers
     // (which already carry Mcp-Session-Id) and tear down.
-    const status = await new Promise<number>((resolve, reject) => {
-      const req = http.request(
-        {
-          host: "127.0.0.1",
-          port,
-          method: "POST",
-          path: "/mcp",
-          headers: { ...creds, ...JSON_HEADERS },
-        },
-        (res) => {
-          resolve(res.statusCode ?? 0);
-          res.destroy();
-          req.destroy();
-        },
-      );
-      req.on("error", () => undefined);
-      const t = setTimeout(() => reject(new Error("init timeout")), 3000);
-      t.unref();
-      req.write(INIT);
-      req.end();
-    });
+    const { status } = await initializeSession();
     expect(status).toBe(200);
     await new Promise((r) => setTimeout(r, 50)); // let onsessioninitialized fire
     expect(handle.sessions.size).toBeGreaterThanOrEqual(1);
+  });
+
+  it("requires the same header credentials on follow-up requests in headers mode", async () => {
+    const { status, sessionId } = await initializeSession();
+    expect(status).toBe(200);
+    expect(sessionId).toBeDefined();
+
+    const missing = await request(port, "POST", "/mcp", {
+      headers: { "mcp-session-id": sessionId!, ...JSON_HEADERS },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list" }),
+    });
+    expect(missing.status).toBe(401);
+
+    const switched = await request(port, "POST", "/mcp", {
+      headers: {
+        "mcp-session-id": sessionId!,
+        "x-b2-key-id": "other-key",
+        "x-b2-key": "other-secret",
+        ...JSON_HEADERS,
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list" }),
+    });
+    expect(switched.status).toBe(403);
+  });
+
+  it("server mode uses process credentials and rejects public B2 credential headers", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+
+    const spoofed = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: INIT,
+    });
+    expect(spoofed.status).toBe(400);
+    expect(spoofed.body).not.toContain("server-secret");
+
+    const { status } = await initializeSession({});
+    expect(status).toBe(200);
+  });
+
+  it("principal mode requires verified authInfo and rejects B2 credential headers", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-key";
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
+
+    const missingAuth = await request(port, "POST", "/mcp", { headers: JSON_HEADERS, body: INIT });
+    expect(missingAuth.status).toBe(401);
+
+    await replaceHandle(() => ({
+      token: "verified-token",
+      clientId: "client-a",
+      scopes: [],
+      extra: { sub: "alice" },
+    }));
+
+    const spoofed = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: INIT,
+    });
+    expect(spoofed.status).toBe(400);
+
+    const { status } = await initializeSession({});
+    expect(status).toBe(200);
   });
 });
 
@@ -275,6 +369,18 @@ describe("configFromHeaders — credential model", () => {
     expect(cfg?.masterKey).toBe("master-secret");
   });
 
+  it("rejects partial master credential headers", () => {
+    expect(() =>
+      configFromHeaders({
+        headers: {
+          "x-b2-key-id": "app-id",
+          "x-b2-key": "app-secret",
+          "x-b2-master-key-id": "master-id",
+        },
+      }),
+    ).toThrow(/both id and secret/i);
+  });
+
   it("still honors the deprecated X-B2-App-Key-* S3 override", () => {
     const cfg = configFromHeaders({
       headers: {
@@ -286,6 +392,14 @@ describe("configFromHeaders — credential model", () => {
     });
     expect(cfg?.appKeyId).toBe("s3-id"); // legacy: S3 signs with the non-master override
     expect(cfg?.applicationKeyId).toBe("master-id");
+  });
+
+  it("accepts the explicit X-B2-MCP-* header names", () => {
+    const cfg = configFromHeaders({
+      headers: { "x-b2-mcp-key-id": "app-id", "x-b2-mcp-key": "app-secret" },
+    });
+    expect(cfg?.applicationKeyId).toBe("app-id");
+    expect(cfg?.appKeyId).toBe("app-id");
   });
 });
 
