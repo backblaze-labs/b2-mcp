@@ -9,8 +9,14 @@
 
 import * as http from "http";
 import * as crypto from "crypto";
+import { parseIntEnv } from "./utils/config.js";
 import { createMcpHandler, type AuthInfo } from "@modelcontextprotocol/server";
-import { createServer, fetchCapabilities, sweepCapabilityCache } from "./server.js";
+import {
+  createServer,
+  fetchCapabilities,
+  sweepAuthManagerCache,
+  sweepCapabilityCache,
+} from "./server.js";
 import { B2Config } from "./utils/types.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
@@ -18,6 +24,7 @@ import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 import {
   AuthenticatedIncomingMessage,
   configFromHttpHeaders,
+  credentialFingerprint,
   CredentialProvider,
   CredentialResolution,
   CredentialResolutionError,
@@ -30,6 +37,8 @@ const DEFAULT_PORT = 3000;
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
 const SHUTDOWN_DRAIN_MS = 10 * 1000; // 10 seconds to drain on SIGTERM
+const DEFAULT_MAX_IN_FLIGHT = 1000;
+const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
 
 /** Comma-separated allowlists for DNS-rebinding protection (empty = unset). */
 function csvEnv(name: string): string[] {
@@ -95,9 +104,24 @@ function writeCredentialError(res: http.ServerResponse, err: unknown): void {
   writeJson(res, 500, { error: "Credential resolution failed" });
 }
 
-function headersFromNode(headers: http.IncomingHttpHeaders): Headers {
+const SDK_HEADER_ALLOWLIST = new Set([
+  "accept",
+  "content-type",
+  "content-length",
+  "last-event-id",
+  "traceparent",
+  "tracestate",
+]);
+
+function sdkHeaderAllowed(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SDK_HEADER_ALLOWLIST.has(lower) || lower.startsWith("mcp-");
+}
+
+export function headersFromNode(headers: http.IncomingHttpHeaders): Headers {
   const webHeaders = new Headers();
   for (const [name, value] of Object.entries(headers)) {
+    if (!sdkHeaderAllowed(name)) continue;
     if (value === undefined) continue;
     if (Array.isArray(value)) {
       for (const item of value) webHeaders.append(name, item);
@@ -119,12 +143,44 @@ function requestUrl(req: http.IncomingMessage): string {
   ).toString();
 }
 
-function toWebRequest(req: http.IncomingMessage, body?: string): Request {
+export function toWebRequest(
+  req: http.IncomingMessage,
+  body?: string,
+  signal?: AbortSignal,
+): Request {
   const method = req.method ?? "GET";
   return new Request(requestUrl(req), {
     method,
     headers: headersFromNode(req.headers),
     body: method === "GET" || method === "HEAD" ? undefined : (body ?? ""),
+    signal,
+  });
+}
+
+function writeChunk(res: http.ServerResponse, chunk: Buffer): Promise<void> {
+  if (res.destroyed) return Promise.reject(new Error("Client disconnected"));
+  if (res.write(chunk)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    function cleanup(): void {
+      res.off("drain", onDrain);
+      res.off("error", onError);
+      res.off("close", onClose);
+    }
+    function onDrain(): void {
+      cleanup();
+      resolve();
+    }
+    function onError(err: Error): void {
+      cleanup();
+      reject(err);
+    }
+    function onClose(): void {
+      cleanup();
+      reject(new Error("Client disconnected"));
+    }
+    res.once("drain", onDrain);
+    res.once("error", onError);
+    res.once("close", onClose);
   });
 }
 
@@ -136,12 +192,103 @@ async function writeFetchResponse(res: http.ServerResponse, response: Response):
     return;
   }
   const reader = response.body.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    res.write(Buffer.from(value));
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      await writeChunk(res, Buffer.from(value));
+    }
+    res.end();
+  } catch (err) {
+    res.destroy(err instanceof Error ? err : undefined);
+    throw err;
+  } finally {
+    reader.releaseLock();
   }
-  res.end();
+}
+
+function intEnv(name: string, fallback: number): number {
+  return Math.max(1, parseIntEnv(process.env[name], fallback));
+}
+
+export interface InFlightLimiter {
+  readonly active: number;
+  acquire(cacheKey: string): { ok: true } | { ok: false; status: number; error: string };
+  release(cacheKey: string): void;
+}
+
+export function createInFlightLimiter(
+  maxTotal = intEnv("B2_MAX_SESSIONS", DEFAULT_MAX_IN_FLIGHT),
+  maxPerKey = intEnv("B2_MAX_SESSIONS_PER_KEY", DEFAULT_MAX_IN_FLIGHT_PER_KEY),
+): InFlightLimiter {
+  let active = 0;
+  const byKey = new Map<string, number>();
+  return {
+    get active() {
+      return active;
+    },
+    acquire(cacheKey: string) {
+      if (active >= maxTotal) {
+        return { ok: false, status: 503, error: "Too many in-flight MCP requests" };
+      }
+      const current = byKey.get(cacheKey) ?? 0;
+      if (current >= maxPerKey) {
+        return { ok: false, status: 429, error: "Too many in-flight MCP requests for credential" };
+      }
+      active++;
+      byKey.set(cacheKey, current + 1);
+      return { ok: true };
+    },
+    release(cacheKey: string) {
+      const current = byKey.get(cacheKey) ?? 0;
+      if (current <= 1) byKey.delete(cacheKey);
+      else byKey.set(cacheKey, current - 1);
+      active = Math.max(0, active - 1);
+    },
+  };
+}
+
+function authPrincipalLabel(authInfo: AuthInfo | null | undefined): string | undefined {
+  const extra = authInfo?.extra ?? {};
+  const subject =
+    typeof extra.sub === "string"
+      ? extra.sub
+      : typeof extra.subject === "string"
+        ? extra.subject
+        : typeof extra.principal === "string"
+          ? extra.principal
+          : undefined;
+  if (!subject?.trim()) return undefined;
+  const issuer =
+    typeof extra.iss === "string"
+      ? extra.iss
+      : typeof extra.issuer === "string"
+        ? extra.issuer
+        : undefined;
+  const label = issuer?.trim() ? `${issuer.trim()}#${subject.trim()}` : subject.trim();
+  return credentialFingerprint(label);
+}
+
+function logCredentialResolutionFailure(
+  provider: CredentialProvider,
+  req: http.IncomingMessage,
+  authInfo: AuthInfo | null | undefined,
+  err: unknown,
+): void {
+  const status = err instanceof CredentialResolutionError ? err.status : 500;
+  const code = err instanceof CredentialResolutionError ? err.code : "credential_resolution_failed";
+  const principal = authPrincipalLabel(authInfo);
+  logger.warn(
+    {
+      provider: provider.name,
+      status,
+      code,
+      method: req.method,
+      path: new URL(req.url ?? "/", "http://localhost").pathname,
+      ...(principal && { principal }),
+    },
+    "credential.resolve.failed",
+  );
 }
 
 export interface HttpServerHandle {
@@ -163,6 +310,7 @@ export interface HttpServerOptions {
 
 export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHandle {
   const sessions = new Map<string, never>();
+  const inFlight = createInFlightLimiter();
   let shuttingDown = false;
 
   const credentialProvider =
@@ -187,6 +335,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     const now = Date.now();
     sweepIdleBuckets(now);
     sweepCapabilityCache(now);
+    sweepAuthManagerCache(now);
   }, IDLE_SWEEP_INTERVAL_MS);
   idleSweep.unref();
 
@@ -275,43 +424,65 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     try {
       resolved = credentialProvider.resolve({ req: authedReq });
     } catch (err) {
+      logCredentialResolutionFailure(credentialProvider, req, authInfo, err);
       writeCredentialError(res, err);
+      return;
+    }
+
+    const inFlightPermit = inFlight.acquire(resolved.cacheKey);
+    if (!inFlightPermit.ok) {
+      writeJson(
+        res,
+        inFlightPermit.status,
+        { error: inFlightPermit.error },
+        { "Retry-After": "1" },
+      );
       return;
     }
 
     const rateKey = deriveRateKey(resolved.cacheKey);
-    if (!allowRequest(rateKey)) {
-      writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
-      return;
-    }
-
-    let capabilities: string[] | null;
     try {
-      capabilities = await fetchCapabilities(
-        resolved.config,
-        resolved.verificationKey,
-        resolved.cacheKey,
-      );
-    } catch (err) {
-      writeCredentialError(res, err);
-      return;
-    }
+      if (!allowRequest(rateKey)) {
+        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+        return;
+      }
 
-    const handler = createMcpHandler(() => createServer(resolved.config, capabilities), {
-      legacy: "reject",
-      onerror: (error) => logger.warn({ err: error.message }, "mcp.http.error"),
-    });
+      let capabilities: string[] | null;
+      try {
+        capabilities = await fetchCapabilities(
+          resolved.config,
+          resolved.capabilityCacheKey,
+          resolved.cacheKey,
+        );
+      } catch (err) {
+        writeCredentialError(res, err);
+        return;
+      }
 
-    try {
-      const response = await handler.fetch(toWebRequest(req, rawBody), {
-        authInfo: authInfo ?? undefined,
+      const handler = createMcpHandler(() => createServer(resolved.config, capabilities), {
+        legacy: "stateless",
+        onerror: (error) => logger.warn({ err: error.message }, "mcp.http.error"),
       });
-      await writeFetchResponse(res, response);
-    } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
-      if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
+
+      const abortController = new AbortController();
+      req.on("aborted", () => abortController.abort());
+      res.on("close", () => {
+        if (!res.writableEnded) abortController.abort();
+      });
+
+      try {
+        const response = await handler.fetch(toWebRequest(req, rawBody, abortController.signal), {
+          authInfo: authInfo ?? undefined,
+        });
+        await writeFetchResponse(res, response);
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+        if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
+      } finally {
+        await handler.close().catch(() => undefined);
+      }
     } finally {
-      await handler.close().catch(() => undefined);
+      inFlight.release(resolved.cacheKey);
     }
   });
 

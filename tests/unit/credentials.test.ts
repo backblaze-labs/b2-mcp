@@ -41,7 +41,7 @@ describe("credential providers", () => {
     expect(resolved.config.transport).toBe("stdio");
     expect(resolved.config.credentialFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("stdio-id");
-    expect(resolved.verificationKey).toMatch(/^credential:[a-f0-9]{16}$/);
+    expect(resolved.capabilityCacheKey).toMatch(/^credential:[a-f0-9]{16}$/);
   });
 
   it("fails closed when required stdio credentials are missing", () => {
@@ -70,7 +70,7 @@ describe("credential providers", () => {
     expect(resolved.config.transport).toBe("http");
     expect(resolved.cacheKey).not.toContain("header-id");
     expect(resolved.cacheKey).not.toContain("header-secret");
-    expect(resolved.verificationKey).not.toBe(resolved.cacheKey);
+    expect(resolved.capabilityCacheKey).not.toBe(resolved.cacheKey);
   });
 
   it("rejects partial optional header credentials", () => {
@@ -113,7 +113,7 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("tenant-id");
     expect(resolved.principal).toBe("alice");
     expect(resolved.cacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
-    expect(resolved.verificationKey).toMatch(/^principal:[a-f0-9]{16}$/);
+    expect(resolved.capabilityCacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("alice");
     expect(resolved.cacheKey).not.toContain("tenant-id");
   });
@@ -138,7 +138,7 @@ describe("credential providers", () => {
     });
   });
 
-  it("uses the secret in verification identity without changing log identity", () => {
+  it("uses the secret in capability-cache identity without changing log identity", () => {
     const provider = new HttpHeaderCredentialProvider();
     const first = provider.resolve({
       req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-a" } } as any,
@@ -147,7 +147,94 @@ describe("credential providers", () => {
       req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-b" } } as any,
     });
     expect(first.cacheKey).toBe(second.cacheKey);
-    expect(first.verificationKey).not.toBe(second.verificationKey);
+    expect(first.capabilityCacheKey).not.toBe(second.capabilityCacheKey);
+  });
+
+  it("principal provider rejects mutable email-only and clientId-only identities", () => {
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({
+      "alice@example.com": "tenant_a",
+      "client-a": "tenant_a",
+    });
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-id";
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
+    const provider = new HttpPrincipalCredentialProvider();
+
+    expect(() =>
+      provider.resolve({
+        req: {
+          headers: {},
+          auth: {
+            token: "verified",
+            clientId: "client-a",
+            scopes: [],
+            extra: { email: "alice@example.com" },
+          },
+        } as any,
+      }),
+    ).toThrow(/principal/i);
+
+    expect(() =>
+      provider.resolve({
+        req: {
+          headers: {},
+          auth: { token: "verified", clientId: "client-a", scopes: [], extra: {} },
+        } as any,
+      }),
+    ).toThrow(/principal/i);
+  });
+
+  it("principal provider qualifies subjects with issuer when present", () => {
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({
+      "https://issuer.example#alice": "tenant_a",
+    });
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-id";
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
+
+    const resolved = new HttpPrincipalCredentialProvider().resolve({
+      req: {
+        headers: {},
+        auth: {
+          token: "verified",
+          clientId: "client-a",
+          scopes: [],
+          extra: { iss: "https://issuer.example", sub: "alice" },
+        },
+      } as any,
+    });
+    expect(resolved.principal).toBe("https://issuer.example#alice");
+  });
+
+  it("rejects principal maps with credential ref normalization collisions", () => {
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({
+      alice: "tenant-a",
+      mallory: "tenant_a",
+    });
+    expect(() =>
+      new HttpPrincipalCredentialProvider().resolve({
+        req: {
+          headers: {},
+          auth: { token: "verified", clientId: "client-a", scopes: [], extra: { sub: "alice" } },
+        } as any,
+      }),
+    ).toThrow(/principal credential map/i);
+  });
+
+  it("does not map inherited object property names as principals", () => {
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+    const provider = new HttpPrincipalCredentialProvider();
+    expect(() =>
+      provider.resolve({
+        req: {
+          headers: {},
+          auth: {
+            token: "verified",
+            clientId: "client-a",
+            scopes: [],
+            extra: { sub: "constructor" },
+          },
+        } as any,
+      }),
+    ).toThrow(/No credential mapping/i);
   });
 
   it("principal provider rejects unauthenticated requests and B2 header spoofing", () => {

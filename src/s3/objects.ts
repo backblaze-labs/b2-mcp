@@ -23,6 +23,11 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
 
+interface DeleteObjectEntry {
+  key: string;
+  versionId?: string;
+}
+
 // Inline object content moves bytes *through* the server — and, for base64,
 // through the model's context window. Keep that path for small control-plane
 // payloads only (manifests, sidecars, tiny configs the agent must inspect or
@@ -238,7 +243,10 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
           new DeleteObjectsCommand({
             Bucket: args.bucket,
             Delete: {
-              Objects: args.objects.map((o: any) => ({ Key: o.key, VersionId: o.versionId })),
+              Objects: (args.objects as DeleteObjectEntry[]).map((o) => ({
+                Key: o.key,
+                VersionId: o.versionId,
+              })),
               Quiet: args.quiet ?? true,
             },
           }),

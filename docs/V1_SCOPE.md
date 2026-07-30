@@ -405,16 +405,12 @@ Phase 1 supports two transports:
 | Transport | Preferred era    | Phase 1 fallback                                                           | Notes                                                                                                   |
 | --------- | ---------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `stdio`   | MCP `2026-07-28` | Stateless 2025-era compatibility for `2025-03-26` and `2025-06-18` clients | Local clients run the Node entry point as a subprocess.                                                 |
-| HTTP      | MCP `2026-07-28` | 2025-era session requests are rejected in the production path              | Hosted deployments use a single `/mcp` endpoint behind customer-operated TLS and caller authentication. |
+| HTTP      | MCP `2026-07-28` | Stateless 2025-era compatibility during the migration window               | Hosted deployments use a single `/mcp` endpoint behind customer-operated TLS and caller authentication. |
 
 MCP `2026-07-28` is the preferred era for `v0.1.0`. Production HTTP serving is
-strictly per-request; compatibility for sessionful 2025-era HTTP must be isolated
-behind a separately named legacy path if it is ever reintroduced.
-
-At the time of this metadata pass, npm publishes `@modelcontextprotocol/sdk`
-`1.x` as the latest TypeScript SDK package. If a future upstream SDK v2 package
-split becomes part of the Phase 1 baseline, that migration is release-blocking
-before the repository claims the v2 SDK contract.
+strictly per-request; 2025-era compatibility is stateless and exists only for a
+migration window. Sessionful 2025-era HTTP must be isolated behind a separately
+named legacy path if it is ever reintroduced.
 
 Phase 1 does not require HTTP+SSE, protocol-level sessions, GET streams, DELETE
 session termination, event replay, Roots, Sampling, MCP Logging, Tasks, MCP Apps,
@@ -497,11 +493,13 @@ or CI artifacts.
 If `http-headers` compatibility mode remains enabled in an implementation, it
 must meet all of these requirements:
 
-- It is disabled by default and requires an explicit operator setting.
-- It uses only the dedicated B2 MCP secret header names
+- It remains the default for one release to preserve existing hosted clients;
+  hosted operators should set `B2_HTTP_CREDENTIAL_MODE` explicitly before
+  switching to `server` or `principal`.
+- It accepts the dedicated B2 MCP secret header names
   `X-B2-MCP-Key-Id`, `X-B2-MCP-Key`, `X-B2-MCP-Master-Key-Id`, and
-  `X-B2-MCP-Master-Key`. Generic B2 environment variable names and inherited
-  `X-B2-Key-*` header names are not the Phase 1 compatibility contract.
+  `X-B2-MCP-Master-Key`; inherited `X-B2-Key-*` names remain a temporary
+  compatibility alias.
 - Those dedicated header names are classified as secrets by the HTTP server,
   reverse proxy, APM, and log redaction configuration.
 - The edge strips inbound duplicate credential headers before forwarding.

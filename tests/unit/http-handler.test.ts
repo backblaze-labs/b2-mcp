@@ -6,14 +6,24 @@
 
 import * as http from "http";
 import type { AddressInfo } from "net";
+import axios from "axios";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   buildHttpServer,
   configFromHeaders,
+  createInFlightLimiter,
   deriveRateKey,
+  headersFromNode,
   HttpServerHandle,
+  toWebRequest,
 } from "../../src/http-server";
+import { invalidateAuthManagerCache } from "../../src/server";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+
+jest.mock("axios");
+const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
+  get: jest.MockedFunction<typeof axios.get>;
+};
 
 interface Resp {
   status: number;
@@ -107,6 +117,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  jest.clearAllMocks();
+  mockedAxios.mockReset();
+  mockedAxios.get = jest.fn() as jest.MockedFunction<typeof axios.get>;
+  invalidateAuthManagerCache();
   handle.drain();
   await new Promise<void>((r) => handle.server.close(() => r()));
 });
@@ -149,6 +163,29 @@ const LEGACY_INIT = JSON.stringify({
     clientInfo: { name: "test", version: "1" },
   },
 });
+
+function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
+  return modernBody("tools/call", { name, arguments: args }, id);
+}
+
+function authData() {
+  return {
+    data: {
+      accountId: "account-1",
+      authorizationToken: "token-1",
+      apiInfo: {
+        storageApi: {
+          apiUrl: "https://api.example",
+          downloadUrl: "https://download.example",
+          s3ApiUrl: "https://s3.example",
+          recommendedPartSize: 100,
+          absoluteMinimumPartSize: 100,
+          allowed: { capabilities: ["listBuckets"] },
+        },
+      },
+    },
+  };
+}
 
 async function replaceHandle(getAuthInfo?: (req: any) => AuthInfo | null): Promise<void> {
   handle.drain();
@@ -206,13 +243,12 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(res.body).toMatch(/host\/origin/i);
   });
 
-  it("rejects legacy initialize instead of creating a session", async () => {
+  it("serves legacy initialize through the stateless transition fallback", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
       body: LEGACY_INIT,
     });
-    expect(res.status).toBe(400);
-    expect(res.body).toMatch(/unsupported protocol/i);
+    expect(res.status).toBe(200);
     expect(res.headers["mcp-session-id"]).toBeUndefined();
     expect(handle.sessions.size).toBe(0);
   });
@@ -263,6 +299,90 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       body: LIST_TOOLS,
     });
     expect(missing.status).toBe(401);
+  });
+
+  it("does not forward B2 credential or Authorization headers to the SDK request", () => {
+    const req = {
+      method: "POST",
+      url: "/mcp",
+      headers: {
+        ...creds,
+        "x-b2-mcp-key-id": "key",
+        "x-b2-mcp-key": "secret",
+        "x-b2-mcp-app-key-id": "app-key",
+        "x-b2-mcp-app-key": "app-secret",
+        "x-b2-mcp-master-key-id": "master-key",
+        "x-b2-mcp-master-key": "master-secret",
+        authorization: "Bearer caller-token",
+        "content-type": "application/json",
+        accept: "application/json",
+        "mcp-method": "tools/list",
+      },
+    } as unknown as http.IncomingMessage;
+
+    const webReq = toWebRequest(req, LIST_TOOLS);
+    expect(webReq.headers.get("content-type")).toBe("application/json");
+    expect(webReq.headers.get("mcp-method")).toBe("tools/list");
+    for (const name of [
+      "x-b2-key-id",
+      "x-b2-key",
+      "x-b2-mcp-key-id",
+      "x-b2-mcp-key",
+      "x-b2-mcp-app-key-id",
+      "x-b2-mcp-app-key",
+      "x-b2-mcp-master-key-id",
+      "x-b2-mcp-master-key",
+      "authorization",
+    ]) {
+      expect(webReq.headers.has(name)).toBe(false);
+    }
+    expect(headersFromNode(req.headers).has("authorization")).toBe(false);
+  });
+
+  it("reuses a B2 auth manager across stateless requests for the same credential", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue(authData());
+    mockedAxios.mockResolvedValue({ data: { buckets: [] } } as never);
+
+    for (let i = 0; i < 2; i++) {
+      const res = await request(port, "POST", "/mcp", {
+        headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+        body: callToolBody("b2_list_buckets", {}, i + 1),
+      });
+      expect(res.status).toBe(200);
+    }
+    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(mockedAxios).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reuse the B2 auth cache when a header secret changes", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue(authData());
+    mockedAxios.mockResolvedValue({ data: { buckets: [] } } as never);
+
+    const first = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: callToolBody("b2_list_buckets", {}, 1),
+    });
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": creds["x-b2-key-id"],
+        "x-b2-key": "different-secret",
+        ...modernHeaders("tools/call", "b2_list_buckets"),
+      },
+      body: callToolBody("b2_list_buckets", {}, 2),
+    });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds in-flight requests globally and per credential", () => {
+    const limiter = createInFlightLimiter(2, 1);
+    expect(limiter.acquire("credential:a")).toEqual({ ok: true });
+    expect(limiter.acquire("credential:a")).toMatchObject({ ok: false, status: 429 });
+    expect(limiter.acquire("credential:b")).toEqual({ ok: true });
+    expect(limiter.acquire("credential:c")).toMatchObject({ ok: false, status: 503 });
+    limiter.release("credential:a");
+    expect(limiter.acquire("credential:c")).toEqual({ ok: true });
   });
 
   it("server mode uses process credentials and rejects public B2 credential headers", async () => {

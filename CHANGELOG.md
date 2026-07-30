@@ -12,14 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documentation, and public contract skeleton documents for Phase 1 ownership.
 - Added policy coverage for live workflow secret gates and the Streamable HTTP
   smoke helper contract.
+- Added explicit environment, per-request header, server-managed, and
+  verified-principal B2 credential providers.
 
 ### Changed
 - Canonicalized repository, package, workflow, security, and setup metadata for
   `backblaze-labs/b2-mcp`.
 - Aligned package metadata on the `0.1.0` Phase 1 release line.
 - Raised the enforced minimum Node runtime in `engines.node` from `>=18.0.0` to
-  `>=22.0.0`; operators on Node 18 or Node 20 must upgrade to Node 22 before
+  `>=22.3.0`; operators on Node 18 or Node 20 must upgrade to Node 22 before
   running `npm ci`, `npm run build`, or the release gate.
+- Migrated HTTP and stdio serving to the MCP TypeScript SDK v2 modern entry
+  points for MCP `2026-07-28`.
 - Made `b2-mcp` the canonical CLI binary while preserving `b2-mcp-server` as a
   transition alias.
 - Switched the smoke helper to Streamable HTTP `/mcp` and the 40-tool Phase 1

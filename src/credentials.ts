@@ -30,19 +30,20 @@ export interface CredentialProviderContext {
 
 export interface CredentialResolution {
   config: B2Config;
-  /** Non-secret cache/metrics key: either a credential fingerprint or verified principal. */
+  /** Non-secret log/rate-limit key: either a credential fingerprint or verified principal. */
   cacheKey: string;
   /**
-   * Secret-bound verifier for capability-cache identity and legacy adapters.
-   * This is a one-way digest and must never be logged or returned.
+   * Secret-bound capability-cache key. This is a one-way digest and must never
+   * be logged or returned.
    */
-  verificationKey: string;
+  capabilityCacheKey: string;
   principal?: string;
 }
 
 export interface CredentialProvider {
   readonly name: string;
   resolve(context?: CredentialProviderContext): CredentialResolution;
+  validateConfiguration?(): void;
 }
 
 export class CredentialResolutionError extends Error {
@@ -111,7 +112,7 @@ export function verificationFingerprintConfig(
   );
 }
 
-function verificationKeyForConfig(prefix: string, config: B2Config): string {
+function capabilityCacheKeyForConfig(prefix: string, config: B2Config): string {
   return `${prefix}:${verificationFingerprintConfig(config)}`;
 }
 
@@ -268,7 +269,7 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
     return {
       config,
       cacheKey: `credential:${config.credentialFingerprint}`,
-      verificationKey: verificationKeyForConfig("credential", config),
+      capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
     };
   }
 }
@@ -284,7 +285,7 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
     return {
       config,
       cacheKey: `credential:${config.credentialFingerprint}`,
-      verificationKey: verificationKeyForConfig("credential", config),
+      capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
     };
   }
 }
@@ -304,8 +305,12 @@ export class HttpServerCredentialProvider implements CredentialProvider {
     return {
       config,
       cacheKey: `credential:${config.credentialFingerprint}`,
-      verificationKey: verificationKeyForConfig("credential", config),
+      capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
     };
+  }
+
+  validateConfiguration(): void {
+    this.resolve({ req: { headers: {} } as AuthenticatedIncomingMessage });
   }
 }
 
@@ -334,13 +339,19 @@ function credentialRefEnvPrefix(ref: string): string {
 
 function principalFromAuthInfo(authInfo: AuthInfo): string | null {
   const extra = authInfo.extra ?? {};
-  // Keep stable subject-like claims ahead of mutable/display claims; this
-  // order defines which credential reference a verified caller resolves to.
-  for (const key of ["sub", "subject", "principal", "email"]) {
+  // This is an authorization boundary: only stable, verified subject claims can
+  // select a B2 credential. Do not fall back to mutable display/contact claims
+  // such as email, or shared application identifiers such as clientId.
+  for (const key of ["sub", "subject", "principal"]) {
     const value = extra[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value !== "string" || !value.trim()) continue;
+    const issuer = extra.iss ?? extra.issuer;
+    if (typeof issuer === "string" && issuer.trim()) {
+      return `${issuer.trim()}#${value.trim()}`;
+    }
+    return value.trim();
   }
-  return authInfo.clientId?.trim() || null;
+  return null;
 }
 
 let cachedPrincipalMapRaw: string | undefined;
@@ -355,11 +366,18 @@ function principalMap(): Record<string, string> {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("not an object");
     }
-    const map = Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    );
+    const map: Record<string, string> = Object.create(null);
+    const prefixes = new Map<string, string>();
+    for (const [principal, refValue] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof refValue !== "string") continue;
+      const normalized = credentialRefEnvPrefix(refValue);
+      const existing = prefixes.get(normalized);
+      if (existing && existing !== refValue) {
+        throw new Error("credential ref collision");
+      }
+      prefixes.set(normalized, refValue);
+      map[principal] = refValue;
+    }
     cachedPrincipalMapRaw = raw;
     cachedPrincipalMap = map;
     return map;
@@ -404,14 +422,15 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
         "missing_principal",
       );
     }
-    const ref = principalMap()[principal];
-    if (!ref) {
+    const map = principalMap();
+    if (!Object.prototype.hasOwnProperty.call(map, principal)) {
       throw new CredentialResolutionError(
         "No credential mapping for principal",
         403,
         "principal_not_mapped",
       );
     }
+    const ref = map[principal];
     const material = this.broker.resolve(ref);
     if (!material) {
       throw new CredentialResolutionError(
@@ -424,11 +443,15 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
     return {
       config,
       cacheKey: `principal:${credentialFingerprint(principal)}`,
-      verificationKey: `principal:${credentialFingerprint(
+      capabilityCacheKey: `principal:${credentialFingerprint(
         [principal, verificationFingerprintConfig(config)].join("\0"),
       )}`,
       principal,
     };
+  }
+
+  validateConfiguration(): void {
+    principalMap();
   }
 }
 
@@ -456,12 +479,7 @@ export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProv
 export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
-  if (provider instanceof HttpServerCredentialProvider) {
-    provider.resolve({ req: { headers: {} } as AuthenticatedIncomingMessage });
-  }
-  if (provider instanceof HttpPrincipalCredentialProvider) {
-    principalMap();
-  }
+  provider.validateConfiguration?.();
 }
 
 /**

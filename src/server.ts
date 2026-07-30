@@ -121,17 +121,21 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // API, S3, and key management. The Partner API tools use the master
   // key; when no distinct master key is configured they fall back to the same
   // application-key client, so a single non-master key needs no extra wiring.
-  const auth = new B2AuthManager(config);
+  const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth, buildUserAgent(config));
   const s3Client = createS3Client(config);
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
+  const masterConfig = {
+    ...config,
+    applicationKeyId: config.masterKeyId,
+    applicationKey: config.masterKey,
+  };
   const masterAuth = masterIsDistinct
-    ? new B2AuthManager({
-        ...config,
-        applicationKeyId: config.masterKeyId,
-        applicationKey: config.masterKey,
-      })
+    ? getCachedAuthManager(
+        `credential:${verificationFingerprintConfig(masterConfig)}`,
+        masterConfig,
+      )
     : auth;
   const masterClient = masterIsDistinct
     ? new B2Client(masterAuth, buildUserAgent(config))
@@ -182,12 +186,31 @@ interface CapabilityCacheEntry {
 }
 
 const capabilityCache = new Map<string, CapabilityCacheEntry>();
+const capabilityInflight = new Map<string, Promise<string[]>>();
 const DEFAULT_CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
-const DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES = 1000;
+const DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES = 10_000;
+const DEFAULT_AUTH_MANAGER_CACHE_TTL_MS = 23 * 60 * 60 * 1000;
+
+interface AuthManagerCacheEntry {
+  manager: B2AuthManager;
+  expiresAt: number;
+}
+
+const authManagerCache = new Map<string, AuthManagerCacheEntry>();
 
 export function invalidateCapabilityCache(cacheKey?: string): void {
-  if (cacheKey) capabilityCache.delete(cacheKey);
-  else capabilityCache.clear();
+  if (cacheKey) {
+    capabilityCache.delete(cacheKey);
+    capabilityInflight.delete(cacheKey);
+  } else {
+    capabilityCache.clear();
+    capabilityInflight.clear();
+  }
+}
+
+export function invalidateAuthManagerCache(cacheKey?: string): void {
+  if (cacheKey) authManagerCache.delete(cacheKey);
+  else authManagerCache.clear();
 }
 
 function capabilityCacheTtlMs(): number {
@@ -210,6 +233,43 @@ export function sweepCapabilityCache(now = Date.now()): void {
   }
 }
 
+export function sweepAuthManagerCache(now = Date.now()): void {
+  for (const [key, entry] of authManagerCache) {
+    if (entry.expiresAt <= now) authManagerCache.delete(key);
+  }
+}
+
+function enforceCacheMax<T>(cache: Map<string, T>, maxEntries: number, cacheName: string): void {
+  let evicted = 0;
+  while (cache.size > maxEntries) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    cache.delete(oldest);
+    evicted++;
+  }
+  if (evicted > 0) {
+    logger.info({ cache: cacheName, evicted, size: cache.size, maxEntries }, "cache.evicted");
+  }
+}
+
+function getCachedAuthManager(cacheKey: string, config: B2Config): B2AuthManager {
+  const now = Date.now();
+  sweepAuthManagerCache(now);
+  const cached = authManagerCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    authManagerCache.delete(cacheKey);
+    authManagerCache.set(cacheKey, cached);
+    return cached.manager;
+  }
+  const manager = new B2AuthManager(config);
+  authManagerCache.set(cacheKey, {
+    manager,
+    expiresAt: now + DEFAULT_AUTH_MANAGER_CACHE_TTL_MS,
+  });
+  enforceCacheMax(authManagerCache, capabilityCacheMaxEntries(), "b2-auth-manager");
+  return manager;
+}
+
 function rememberCapabilities(cacheKey: string, capabilities: string[], now: number): void {
   const ttl = capabilityCacheTtlMs();
   if (ttl <= 0 || capabilities.length === 0) return;
@@ -218,12 +278,7 @@ function rememberCapabilities(cacheKey: string, capabilities: string[], now: num
     capabilities: [...capabilities],
     expiresAt: now + ttl,
   });
-  const maxEntries = capabilityCacheMaxEntries();
-  while (capabilityCache.size > maxEntries) {
-    const oldest = capabilityCache.keys().next().value as string | undefined;
-    if (!oldest) break;
-    capabilityCache.delete(oldest);
-  }
+  enforceCacheMax(capabilityCache, capabilityCacheMaxEntries(), "b2-capability");
 }
 
 export function capabilityCacheSizeForTests(): number {
@@ -306,11 +361,12 @@ function capabilityFailureDetails(
 
 export async function fetchCapabilities(
   config: B2Config,
-  cacheKey?: string,
+  capabilityCacheKey?: string,
   logKey?: string,
 ): Promise<string[] | null> {
   if (process.env.B2_REGISTER_ALL_TOOLS === "true") return null;
-  const resolvedCacheKey = cacheKey ?? `credential:${verificationFingerprintConfig(config)}`;
+  const resolvedCacheKey =
+    capabilityCacheKey ?? `credential:${verificationFingerprintConfig(config)}`;
   const credentialLogKey =
     logKey ?? `credential:${config.credentialFingerprint ?? fingerprintConfig(config)}`;
   const now = Date.now();
@@ -322,16 +378,26 @@ export async function fetchCapabilities(
     return [...cached.capabilities];
   }
 
-  try {
+  const existingInflight = capabilityInflight.get(resolvedCacheKey);
+  if (existingInflight) return [...(await existingInflight)];
+
+  const discovery = (async () => {
     const auth = new B2AuthManager(config);
     const info = await auth.getAuth();
     const capabilities = info.capabilities ?? [];
     rememberCapabilities(resolvedCacheKey, capabilities, now);
     return capabilities;
+  })();
+  capabilityInflight.set(resolvedCacheKey, discovery);
+
+  try {
+    return [...(await discovery)];
   } catch (err) {
     const details = capabilityFailureDetails(err, config);
     logger.warn({ credential: credentialLogKey, ...details.log }, "capability.fetch.failed");
     throw new CredentialResolutionError(details.message, details.status, details.code);
+  } finally {
+    capabilityInflight.delete(resolvedCacheKey);
   }
 }
 

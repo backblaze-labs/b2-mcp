@@ -246,6 +246,20 @@ describe("fetchCapabilities", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
+  it("deduplicates concurrent cold-cache capability lookups", async () => {
+    process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
+    const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
+
+    await expect(
+      Promise.all([
+        fetchCapabilities(baseConfig, "credential:singleflight"),
+        fetchCapabilities(baseConfig, "credential:singleflight"),
+        fetchCapabilities(baseConfig, "credential:singleflight"),
+      ]),
+    ).resolves.toEqual([["readFiles"], ["readFiles"], ["readFiles"]]);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
   it("bounds capability-cache growth as distinct credentials connect", async () => {
     process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
     process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES = "2";

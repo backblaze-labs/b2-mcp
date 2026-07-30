@@ -48,14 +48,14 @@ npm run test:integration
 ### Entry points
 
 - `src/index.ts` — stdio transport (Claude Desktop, local use)
-- `src/http-server.ts` — **Streamable HTTP** transport (MCP spec 2025-03-26; replaced the deprecated HTTP+SSE transport) for hosted deployments. Single `/mcp` endpoint (`POST` for JSON-RPC incl. `initialize`, `GET` for the server→client stream, `DELETE` to terminate); `GET /health`. Reads B2 credentials per-session from the headers on the `initialize` POST (`X-B2-Key-Id`, `X-B2-Key`, optional `X-B2-App-Key-Id`, `X-B2-App-Key`); returns 401 without them. The `initialize` response returns an `Mcp-Session-Id` header that follow-up requests must send. Each session gets its own `McpServer` + `B2Config` — no shared credential state. Sessions are tracked in `Map<Mcp-Session-Id, {transport, mcpServer, lastActivity, rateKey}>` and swept after 30 minutes of inactivity. Handles `SIGTERM`/`SIGINT` for graceful drain on deploy.
+- `src/http-server.ts` — **Streamable HTTP** transport for hosted deployments. Production serving uses the MCP SDK v2 per-request handler for MCP `2026-07-28` and a stateless 2025-era transition fallback; it does not create or depend on protocol sessions. Each `/mcp` request resolves credentials through the selected provider (`headers`, `server`, or `principal`) before the SDK handler runs. B2 credential and Authorization headers are stripped before crossing into the SDK boundary; verified caller identity travels only as `authInfo`. Handles `GET /health`, Host/Origin checks, request body caps, rate limiting, in-flight caps, graceful drain, and periodic cache sweeps.
 
 ### Tool registration flow
 
 `server.ts` exports three functions:
 
 - `loadConfig()` — reads env vars, validates required keys, returns `B2Config`
-- `fetchCapabilities(config)` — one-shot authorize that returns the key's `allowed.capabilities` (or `null` on failure / `B2_REGISTER_ALL_TOOLS=true`)
+- `fetchCapabilities(config)` — one-shot authorize that returns the key's `allowed.capabilities`; returns `null` only for `B2_REGISTER_ALL_TOOLS=true`. Lookup failures throw so HTTP fails closed.
 - `createServer(config, capabilities?)` — instantiates `B2AuthManager`, `B2Client`, and `S3Client`, then calls all `register*Tools()` functions
 
 Each register function receives the server + client(s) and calls `server.tool(name, description, zodSchema, handler)` for each tool. Adding a new tool means adding it to the appropriate register file — no changes to `server.ts` needed unless it's a new register file. **New tools should also be added to the capability map** (`src/utils/tool-capabilities.ts`).
@@ -112,14 +112,14 @@ B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
 B2_PARTNER_LIVE=1 npm run test:integration
 ```
 
-## HTTP transport: per-session credentials & hardening
+## HTTP transport: per-request credentials & hardening
 
-The HTTP server (`src/http-server.ts`) implements the MCP **Streamable HTTP** transport (single `/mcp` endpoint; SSE was the legacy transport, deprecated in MCP 2025-03-26). It reads credentials per-session from the headers on the `initialize` POST. Each session gets its own `B2Config` + `McpServer` instance, torn down (transport **and** server) on `DELETE`, client disconnect, or idle sweep.
+The HTTP server (`src/http-server.ts`) implements a single `/mcp` endpoint with MCP `2026-07-28` as the preferred era and stateless 2025-era compatibility during migration. Credentials are resolved per request. Unset `B2_HTTP_CREDENTIAL_MODE` defaults to `headers` for one-release compatibility; hosted operators should set `server` or `principal` explicitly when clients must not send B2 keys.
 
 Because this transport is internet-facing, it is hardened by default:
 
 - **Local filesystem access is OFF.** `filePath` / `saveToPath` are rejected unless an operator sets `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox/dir` — and even then every path is confined (symlinks resolved) to that root via `src/utils/fs-guard.ts`. Remote callers can pass small (≤ 1 MiB) base64 `content` inline; for real object data they should use a presigned PutObject URL (`s3_get_presigned_url`) so bytes go client→B2 directly. On the stdio transport disk access is on by default (trusted local user); set `B2_FILE_ROOT` to sandbox it or `B2_ALLOW_LOCAL_FILES=false` to disable.
-- **Session caps:** `B2_MAX_SESSIONS` (default 1000) total and `B2_MAX_SESSIONS_PER_KEY` (default 20) per credential, returning 503 / 429 over the cap.
+- **In-flight caps:** `B2_MAX_SESSIONS` (default 1000) total and `B2_MAX_SESSIONS_PER_KEY` (default 20) per credential, returning 503 / 429 over the cap. The env names are retained for deploy-manifest compatibility.
 - **Rate limiting** keys on a SHA-256 hash of the full key id (not a prefix), so distinct tenants can't collide.
 - **DNS-rebinding protection:** set `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS` (comma-separated) to enable Host/Origin validation on the `/mcp` endpoint.
 - **Body cap:** POST bodies to `/mcp` are capped at 1 MB (413 over the cap).

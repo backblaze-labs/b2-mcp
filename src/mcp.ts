@@ -1,13 +1,19 @@
 import { McpServer as V2McpServer } from "@modelcontextprotocol/server";
 
-type LegacyToolArgs = [string, string, Record<string, unknown>, (...args: any[]) => any];
+type LegacyToolCallback<TArgs = any> = (args: TArgs, extra: unknown) => unknown | Promise<unknown>;
+type LegacyToolArgs<TArgs = any> = [
+  string,
+  string,
+  Record<string, unknown>,
+  LegacyToolCallback<TArgs>,
+];
 
 export type McpServer = V2McpServer & {
-  tool(
+  tool<TArgs = any>(
     name: string,
     description: string,
     inputSchema: Record<string, unknown>,
-    cb: (...args: any[]) => any,
+    cb: LegacyToolCallback<TArgs>,
   ): unknown;
 };
 
@@ -17,8 +23,11 @@ export type McpServer = V2McpServer & {
  */
 export function createMcpServer(...args: ConstructorParameters<typeof V2McpServer>): McpServer {
   const server = new V2McpServer(...args) as McpServer;
-  server.tool = (...toolArgs: LegacyToolArgs) => {
+  server.tool = <TArgs = any>(...toolArgs: LegacyToolArgs<TArgs>) => {
     const [name, description, inputSchema, cb] = toolArgs;
+    // The SDK v2 registerTool surface accepts its own schema representation.
+    // This adapter is the only place that bridges the repo's legacy zod-shaped
+    // tool declarations into that surface.
     return server.registerTool(name, { description, inputSchema: inputSchema as any }, cb as any);
   };
   return server;

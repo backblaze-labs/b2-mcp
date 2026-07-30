@@ -8,6 +8,8 @@
  *
  * Required env:
  *   MCP_URL       — full MCP endpoint, e.g. https://mcp.example.com/mcp
+ *
+ * Optional env for header compatibility mode:
  *   B2_KEY_ID     — value for the X-B2-Key-Id request header
  *   B2_KEY        — value for the X-B2-Key request header
  *
@@ -15,25 +17,37 @@
  *   B2_APP_KEY_ID — value for the X-B2-App-Key-Id header
  *   B2_APP_KEY    — value for the X-B2-App-Key header
  *
+ * Optional env for a customer OAuth/resource-server edge:
+ *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
+ *
  * Exits 0 on success, 1 if any check fails. Credential values are never
  * printed.
  */
 
-const { MCP_URL, B2_KEY_ID, B2_KEY, B2_APP_KEY_ID, B2_APP_KEY } = process.env;
+const { MCP_URL, B2_KEY_ID, B2_KEY, B2_APP_KEY_ID, B2_APP_KEY, MCP_AUTHORIZATION } = process.env;
 const EXPECTED_FULL_TOOL_COUNT = 40;
 
-if (!MCP_URL || !B2_KEY_ID || !B2_KEY) {
-  console.error("Missing required env: MCP_URL, B2_KEY_ID, B2_KEY");
+if (!MCP_URL) {
+  console.error("Missing required env: MCP_URL");
   process.exit(2);
 }
 
-const headers = {
-  "X-B2-Key-Id": B2_KEY_ID,
-  "X-B2-Key": B2_KEY,
-};
+if ((B2_KEY_ID && !B2_KEY) || (!B2_KEY_ID && B2_KEY)) {
+  console.error("B2_KEY_ID and B2_KEY must be set together for headers mode");
+  process.exit(2);
+}
+
+const headers = {};
+if (B2_KEY_ID && B2_KEY) {
+  headers["X-B2-Key-Id"] = B2_KEY_ID;
+  headers["X-B2-Key"] = B2_KEY;
+}
 if (B2_APP_KEY_ID && B2_APP_KEY) {
   headers["X-B2-App-Key-Id"] = B2_APP_KEY_ID;
   headers["X-B2-App-Key"] = B2_APP_KEY;
+}
+if (MCP_AUTHORIZATION) {
+  headers.Authorization = MCP_AUTHORIZATION;
 }
 
 const failures = [];

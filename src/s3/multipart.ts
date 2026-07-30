@@ -15,6 +15,11 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
+interface CompletedMultipartPart {
+  partNumber: number;
+  etag: string;
+}
+
 export function registerS3MultipartTools(server: McpServer, s3: S3Client, config: B2Config): void {
   server.tool(
     "s3_create_multipart_upload",
@@ -135,7 +140,10 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
             Key: args.key,
             UploadId: args.uploadId,
             MultipartUpload: {
-              Parts: args.parts.map((p: any) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+              Parts: (args.parts as CompletedMultipartPart[]).map((p) => ({
+                PartNumber: p.partNumber,
+                ETag: p.etag,
+              })),
             },
           }),
         );
