@@ -14,12 +14,12 @@ Destructive actions are gated, credentials never enter the model's context, and 
 
 ## Quick start
 
-**Prerequisites:** [Node.js 18+](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
+**Prerequisites:** [Node.js 22 LTS](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
 
 **1. Build:**
 
 ```bash
-cd b2-mcp-server
+cd b2-mcp
 npm install
 npm run build          # produces dist/ — required before first run
 ```
@@ -31,7 +31,7 @@ npm run build          # produces dist/ — required before first run
   "mcpServers": {
     "backblaze-b2": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-application-key-id",
         "B2_APPLICATION_KEY": "your-application-key-secret"
@@ -169,13 +169,18 @@ npm test                   # unit tests (no credentials needed)
 npm run test:integration   # live B2 tests — needs B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 npm start                  # stdio transport
 npm run start:http -- --port 3000   # Streamable HTTP transport
-npx @modelcontextprotocol/inspector npx @backblaze/b2-mcp-server   # interactive inspector
+npx @modelcontextprotocol/inspector npx @backblaze-labs/b2-mcp   # interactive inspector
 ```
 
 ## Documentation
 
 - [`docs/CLIENTS.md`](docs/CLIENTS.md) — per-client setup + compatibility matrix
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — hosted deployment + security baseline
+- [`docs/PUBLIC_CONTRACTS.md`](docs/PUBLIC_CONTRACTS.md) — public document ownership and contract status
+- [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — Phase 1 tool-contract skeleton
+- [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
+- [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md) — pre-public security and provenance review checklist
+- [`RELEASE.md`](RELEASE.md) — release process and `[Unreleased]` discipline
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 - [`SECURITY.md`](SECURITY.md) — reporting vulnerabilities
 

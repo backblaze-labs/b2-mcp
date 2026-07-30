@@ -1,0 +1,9 @@
+name: b2-mcp
+channels:
+  - conda-forge
+dependencies:
+  - nodejs=22
+  - python=3.10
+  - git
+  - gh
+  - trufflehog

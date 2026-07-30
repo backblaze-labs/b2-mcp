@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * End-to-end smoke test against a running b2-mcp-server.
+ * End-to-end smoke test against a running b2-mcp server.
  *
  * Connects via SSE, lists tools, and exercises one tool per credential
  * scope. Intended for post-deploy verification — not a replacement for

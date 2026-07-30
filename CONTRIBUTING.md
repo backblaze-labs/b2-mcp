@@ -7,7 +7,8 @@ By participating you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.m
 
 ## Development setup
 
-The CI matrix runs on Node 20 and 22; develop on one of those.
+The CI gate runs on Node 22. Develop on Node 22 LTS so local behavior matches
+the Phase 1 runtime floor.
 
 ```bash
 npm ci
@@ -15,6 +16,14 @@ npm run build        # clean + tsc → dist/
 npm test             # typecheck (pretest) + unit suite, no credentials needed
 npm run lint         # eslint src tests
 npm run format:check # prettier
+```
+
+For a reproducible conda setup:
+
+```bash
+mamba env create -f environment.yml
+mamba run -n b2-mcp node --version
+mamba run -n b2-mcp npm ci
 ```
 
 Integration tests need real B2 credentials and are not run in the default suite;

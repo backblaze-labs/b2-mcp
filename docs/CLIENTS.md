@@ -6,7 +6,7 @@ This server speaks the Model Context Protocol over **two transports**:
 - **Streamable HTTP** — the server runs as a hosted endpoint behind a URL (single `/mcp` endpoint; the MCP Streamable HTTP transport, spec 2025-03-26, which replaced the deprecated HTTP+SSE transport). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
 
 > **The one thing that matters:** every stdio client runs the _same_ command —
-> `node /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js` with two env vars. Only the
+> `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js` with two env vars. Only the
 > **config file location** and the **wrapper key name** differ per client. If a
 > client's config format has changed since this was written, its own MCP docs are
 > authoritative — the invocation below is what you're wiring up.
@@ -29,8 +29,8 @@ This server speaks the Model Context Protocol over **two transports**:
 ## Prerequisites
 
 ```bash
-git clone <repo-url> b2-mcp-server
-cd b2-mcp-server
+git clone https://github.com/backblaze-labs/b2-mcp.git b2-mcp
+cd b2-mcp
 npm install
 npm run build      # produces dist/ — required for the stdio command below
 ```
@@ -38,7 +38,7 @@ npm run build      # produces dist/ — required for the stdio command below
 You also need a Backblaze B2 **Application Key** (key ID + secret). A single non-master application key works for both the B2 native and S3-compatible APIs. (Master keys are only needed for Partner API, `bz_*` Computer Backup, and account-level key management — see the README.)
 
 > Once the package is published to npm you'll be able to skip the clone/build and
-> use `command: "npx"`, `args: ["-y", "@backblaze/b2-mcp-server"]`. Until then, use
+> use `command: "npx"`, `args: ["-y", "@backblaze-labs/b2-mcp"]`. Until then, use
 > the local `node dist/index.js` path shown below.
 
 ---
@@ -49,7 +49,7 @@ The universal invocation, wrapped differently per client:
 
 ```
 command: node
-args:    /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js
+args:    /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js
 env:     B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
 ```
 
@@ -62,7 +62,7 @@ env:     B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
   "mcpServers": {
     "backblaze-b2": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-key-id",
         "B2_APPLICATION_KEY": "your-key-secret"
@@ -83,7 +83,7 @@ Restart Claude Desktop fully (Cmd/Ctrl+Q) and reopen.
   "mcpServers": {
     "backblaze-b2": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-key-id",
         "B2_APPLICATION_KEY": "your-key-secret"
@@ -103,7 +103,7 @@ Restart Claude Desktop fully (Cmd/Ctrl+Q) and reopen.
     "backblaze-b2": {
       "type": "stdio",
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-key-id",
         "B2_APPLICATION_KEY": "your-key-secret"
@@ -122,7 +122,7 @@ Cline → **MCP Servers → Configure** (edits `cline_mcp_settings.json`):
   "mcpServers": {
     "backblaze-b2": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-key-id",
         "B2_APPLICATION_KEY": "your-key-secret"
@@ -141,7 +141,7 @@ Cline → **MCP Servers → Configure** (edits `cline_mcp_settings.json`):
   "mcpServers": {
     "backblaze-b2": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-key-id",
         "B2_APPLICATION_KEY": "your-key-secret"
@@ -161,7 +161,7 @@ Cline → **MCP Servers → Configure** (edits `cline_mcp_settings.json`):
     "backblaze-b2": {
       "command": {
         "path": "node",
-        "args": ["/ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js"],
+        "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
         "env": {
           "B2_APPLICATION_KEY_ID": "your-key-id",
           "B2_APPLICATION_KEY": "your-key-secret"
@@ -181,7 +181,7 @@ mcpServers:
   - name: backblaze-b2
     command: node
     args:
-      - /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js
+      - /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js
     env:
       B2_APPLICATION_KEY_ID: your-key-id
       B2_APPLICATION_KEY: your-key-secret
@@ -192,13 +192,13 @@ mcpServers:
 ```bash
 goose configure
 # → Add Extension → Command-line Extension
-# Command:  node /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js
+# Command:  node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js
 # add env:  B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
 ```
 
 ### Any other stdio client
 
-Point it at `node /ABSOLUTE/PATH/TO/b2-mcp-server/dist/index.js` with the two env vars, under whatever key your client uses for MCP servers. Consult the client's MCP documentation for the exact file and key name.
+Point it at `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js` with the two env vars, under whatever key your client uses for MCP servers. Consult the client's MCP documentation for the exact file and key name.
 
 ---
 

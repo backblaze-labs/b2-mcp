@@ -20,7 +20,7 @@ on:
 
 jobs:
   smoke:
-    if: github.repository == 'backblaze-b2-samples/b2-mcp-server'
+    if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added CODEOWNERS, reproducible conda environment metadata, release process
+  documentation, and public contract skeleton documents for Phase 1 ownership.
+
+### Changed
+- Canonicalized repository, package, workflow, security, and setup metadata for
+  `backblaze-labs/b2-mcp`.
+- Standardized documented development and CI runtime metadata on Node.js 22.
+
 ## [2.3.0] - 2026-06-29
 
 ### Added

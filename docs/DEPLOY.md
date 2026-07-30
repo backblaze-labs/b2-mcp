@@ -80,7 +80,7 @@ aws ec2 run-instances \
   --security-group-ids <sg-with-22-80-443> \
   --metadata-options HttpTokens=required \
   --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":20,"VolumeType":"gp3","Encrypted":true}}]' \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=b2-mcp-server}]'
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=b2-mcp}]'
 ```
 
 `HttpTokens=required` enforces IMDSv2 — blocks SSRF-based metadata theft.
@@ -98,8 +98,8 @@ node --version  # confirm v22+
 
 ```bash
 sudo useradd -r -m -s /bin/bash mcp || true   # optional dedicated user
-git clone <repo-url> /home/ec2-user/b2-mcp-server
-cd /home/ec2-user/b2-mcp-server
+git clone https://github.com/backblaze-labs/b2-mcp.git /home/ec2-user/b2-mcp
+cd /home/ec2-user/b2-mcp
 npm ci
 npm run build
 ```
@@ -116,7 +116,7 @@ After=network.target
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/b2-mcp-server
+WorkingDirectory=/home/ec2-user/b2-mcp
 ExecStart=/usr/bin/node dist/http-server.js --port 3000
 Restart=always
 RestartSec=5
@@ -411,7 +411,7 @@ it (the session ID is in-memory).
 ## Updates
 
 ```bash
-cd /home/ec2-user/b2-mcp-server
+cd /home/ec2-user/b2-mcp
 git pull
 npm ci
 npm run build

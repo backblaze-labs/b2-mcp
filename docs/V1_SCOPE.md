@@ -60,16 +60,16 @@ The canonical npm package is:
 - Package name: `@backblaze-labs/b2-mcp`
 - Owning npm organization/scope: `@backblaze-labs`
 
-The current inherited package name, `@backblaze/b2-mcp-server`, is not the
-canonical Phase 1 package name.
+Inherited package names from the incoming repository are not canonical Phase 1
+metadata.
 
 ## Transition State
 
 At the time this record is added, some visible repository surfaces still contain
 inherited values from the incoming project:
 
-- Package/version metadata may still say `@backblaze/b2-mcp-server` and `2.3.0`.
-- Public docs may still mention Node.js 18.
+- Version metadata may still say `2.3.0` until release automation converges on
+  `0.1.0`.
 - Existing tool-count text may still describe the pre-decision surface.
 
 Those inherited values are temporary and must be treated as pre-Phase-1 state.
