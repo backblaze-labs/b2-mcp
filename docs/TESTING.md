@@ -1,6 +1,6 @@
 # Testing And Quality Gates
 
-Owner: Sophie / QK (`@sophiecarreras`). Implementation owner: Gonza
+Owner: Sophie / Quality Keeper (QK) (`@sophiecarreras`). Implementation owner: Gonza
 (`@goanpeca`).
 
 Status: skeleton. Issues #50, #51, #52, #60, #61, and #63 own the test-gate
@@ -57,6 +57,8 @@ Required properties:
 
 The live path runs through `.github/workflows/smoke.yml`,
 `.github/workflows/contract.yml`, or a protected manual equivalent. Any workflow
-that consumes `B2_*` secrets must use a protected GitHub environment, run only
-from `main` or protected `v*` tags, serialize live write tests, and reference
-only environment-scoped `LIVE_B2_*` secrets.
+that consumes `B2_*` secrets must use a protected GitHub environment, fail
+loudly when manually dispatched outside `main`, check out `ci-green` before any
+repository code runs with secrets, serialize live write tests, and reference
+only environment-scoped `LIVE_B2_*` secrets. Release-triggered live workflows
+must first prove the `v*` release tag points at `ci-green`.

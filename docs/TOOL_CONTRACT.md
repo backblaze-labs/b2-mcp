@@ -1,6 +1,6 @@
 # Tool Contract
 
-Owner: Gonza (`@goanpeca`). Quality reviewer: Sophie / QK
+Owner: Gonza (`@goanpeca`). Quality reviewer: Sophie / Quality Keeper (QK)
 (`@sophiecarreras`).
 
 Status: skeleton. Issue #49 owns the deterministic fixture and drift-test

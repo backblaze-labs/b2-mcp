@@ -7,8 +7,8 @@ By participating you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.m
 
 ## Development setup
 
-The CI gate runs on Node 22. Develop on Node 22 LTS so local behavior matches
-the Phase 1 runtime floor.
+The CI gate runs on the exact Node patch pinned in `.nvmrc`. Develop on that
+Node 22 patch so local behavior matches the Phase 1 runtime floor.
 
 ```bash
 npm ci
@@ -18,7 +18,7 @@ npm run lint         # eslint src tests
 npm run format:check # prettier
 ```
 
-For the version-pinned conda bootstrap:
+For the version/build-pinned conda bootstrap:
 
 ```bash
 mamba env create -f environment.yml

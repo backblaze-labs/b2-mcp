@@ -67,17 +67,10 @@ metadata.
 
 ## Transition State
 
-At the time this record is added, some visible repository surfaces still contain
-inherited values from the incoming project:
-
-- Version metadata may still say `2.3.0` until release automation converges on
-  `0.1.0`.
-- Existing tool-count text may still describe the pre-decision surface.
-
-Those inherited values are temporary and must be treated as pre-Phase-1 state.
-Follow-up metadata, documentation, and release work must replace them with the
-canonical `@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js 22 contract before
-`v0.1.0` is released.
+Inherited values from the incoming project must be treated as pre-Phase-1
+history. Release work must keep visible metadata aligned with the canonical
+`@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js 22 contract before `v0.1.0` is
+released.
 
 ## Runtime
 
@@ -418,6 +411,11 @@ MCP `2026-07-28` is the preferred era for `v0.1.0`. Stateless 2025-era fallback
 exists only to keep compatible `2025-03-26` and `2025-06-18` clients working
 during migration. No other 2025 revision is part of the Phase 1 support matrix
 unless a later decision record adds it.
+
+At the time of this metadata pass, npm publishes `@modelcontextprotocol/sdk`
+`1.x` as the latest TypeScript SDK package. If a future upstream SDK v2 package
+split becomes part of the Phase 1 baseline, that migration is release-blocking
+before the repository claims the v2 SDK contract.
 
 Phase 1 does not require HTTP+SSE, protocol-level sessions, GET streams, DELETE
 session termination, event replay, Roots, Sampling, MCP Logging, Tasks, MCP Apps,

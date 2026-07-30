@@ -1,6 +1,6 @@
 # Security And Provenance Review
 
-Owner: Sophie / QK (`@sophiecarreras`). Implementation owner: Gonza
+Owner: Sophie / Quality Keeper (QK) (`@sophiecarreras`). Implementation owner: Gonza
 (`@goanpeca`).
 
 Status: skeleton. Issues #62, #66, and #67 own the final pre-public review.
@@ -12,15 +12,19 @@ fresh clone of the canonical repository:
 
 ```bash
 mamba env create -f environment.yml
+mamba run -n b2-mcp trufflehog --json --regex --entropy=False \
+  --repo_path . file://$(pwd)
 mamba run -n b2-mcp trufflehog --json --regex --entropy=True \
-  --exclude_paths .trufflehog-exclude \
+  --exclude_paths .trufflehog-entropy-exclude \
   --repo_path . file://$(pwd)
 ```
 
-The exclude file is limited to lockfile integrity-hash noise. Do not disable
-entropy globally: B2 application-key secrets and many session tokens are
-high-entropy strings without a stable textual prefix. Findings must be revoked,
-removed from history if necessary, and documented before release.
+The first pass scans every file, including `package-lock.json`, for regex-backed
+credential patterns. The second pass enables entropy detection and excludes only
+lockfile integrity-hash noise. Do not disable entropy globally: B2
+application-key secrets and many session tokens are high-entropy strings without
+a stable textual prefix. Findings must be revoked, removed from history if
+necessary, and documented before release.
 
 To verify the scanner still catches non-regex high-entropy material, create a
 temporary git repository, commit a random high-entropy sentinel string, and

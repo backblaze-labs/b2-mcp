@@ -2,7 +2,8 @@
 # named owners until a durable Backblaze Labs GitHub team exists for this repo.
 * @goanpeca
 
-# Public contracts and quality/security gates need implementation and QK review.
+# Public contracts and quality/security gates need implementation and
+# Quality Keeper (QK) review.
 docs/V1_SCOPE.md @goanpeca @sophiecarreras
 docs/PUBLIC_CONTRACTS.md @goanpeca @sophiecarreras
 docs/TOOL_CONTRACT.md @goanpeca @sophiecarreras

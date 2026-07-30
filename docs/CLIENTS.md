@@ -35,11 +35,11 @@ npm install
 npm run build      # produces dist/ — required for the stdio command below
 ```
 
-You also need a Backblaze B2 **Application Key** (key ID + secret). A single non-master application key works for both the B2 native and S3-compatible APIs. (Master keys are only needed for Partner API, `bz_*` Computer Backup, and account-level key management — see the README.)
+You also need a Backblaze B2 **Application Key** (key ID + secret). A single non-master application key works for both the B2 native and S3-compatible APIs. Master keys are only needed for Partner API and account-level key management in the Phase 1 tool surface.
 
-> Once the package is published to npm you'll be able to skip the clone/build and
-> use `command: "npx"`, `args: ["-y", "@backblaze-labs/b2-mcp"]`. Until then, use
-> the local `node dist/index.js` path shown below.
+> The npm package name is planned for the Phase 1 release line but not yet
+> advertised as an install command. Use the local `node dist/index.js` path shown
+> below until the release gate verifies npm ownership and provenance.
 
 ---
 
@@ -253,6 +253,6 @@ Point it at `https://<host>/mcp` and send the `X-B2-Key-Id` / `X-B2-Key` headers
 
 - **stdio:** the key goes in the `env` block of the client's config file, in **plaintext**. Protect that file and never commit it to a repo.
 - **hosted:** the key travels in `X-B2-*` headers. Front the server with TLS and a caller-auth layer (see [`DEPLOY.md`](DEPLOY.md) — the HTTP transport authenticates the _B2 key_, not the _caller_).
-- **Master-key caveat:** only the Partner API, `bz_*` tools, and account-level key management need a master key. If you use one, also supply a non-master key (`B2_APP_KEY_ID`/`B2_APP_KEY` for stdio, or `X-B2-App-Key-Id`/`X-B2-App-Key` for hosted) for the S3 tools.
+- **Master-key caveat:** only the Partner API and account-level key management need a master key in Phase 1. If you use one, also supply a non-master key (`B2_APP_KEY_ID`/`B2_APP_KEY` for stdio, or `X-B2-App-Key-Id`/`X-B2-App-Key` for hosted) for the S3 tools.
 
 See the [README](../README.md) for the full environment-variable list and the tool catalog.

@@ -2,8 +2,9 @@ name: Smoke
 
 # Runs an end-to-end smoke test against the live server.
 # Triggers:
-#   - workflow_dispatch:  manual trigger from the Actions tab
-#   - release.published:  after a tagged release is published
+#   - workflow_dispatch:  manual trigger from the Actions tab, from main only
+#   - release.published:  after a tagged release is published, only when the tag
+#                         points at the ci-green ref
 #
 # The 6-hour schedule heartbeat was removed: it ran against the hosted demo
 # endpoint, which fails when that server is down/redeployed and produced a steady
@@ -14,9 +15,9 @@ name: Smoke
 # failing runs (they don't have the credentials set as secrets).
 #
 # B2 secrets and MCP_URL must live in the protected `live-b2-smoke`
-# environment, with branch/tag restrictions for `main` and protected `v*` tags.
-# Add required reviewers there when the repository plan supports environment
-# reviewers.
+# environment. The workflow checks out `ci-green` before package code sees
+# secrets and rejects release tags that do not point at `ci-green`. Add required
+# reviewers when the repository plan supports environment reviewers.
 
 on:
   workflow_dispatch:
@@ -31,23 +32,82 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  guard:
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    outputs:
+      checkout-ref: ${{ steps.ref.outputs.checkout_ref }}
+    steps:
+      - name: Validate protected live-test ref
+        id: ref
+        run: |
+          set -euo pipefail
+          checkout_ref="ci-green"
+          protected_ref="refs/heads/ci-green"
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "::error::workflow_dispatch must run from main; got ${GITHUB_REF}"
+              exit 1
+            fi
+          elif [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+              echo "::error::release smoke/contract runs only accept v* tags; got ${GITHUB_REF}"
+              exit 1
+            fi
+            git init --quiet /tmp/live-ref-check
+            cd /tmp/live-ref-check
+            git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+            ci_green_sha="$(git ls-remote origin "${protected_ref}" | awk '{print $1}')"
+            tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}" | awk '{print $1}')"
+            if [[ -z "$tag_sha" ]]; then
+              tag_sha="$(git ls-remote origin "${GITHUB_REF}" | awk '{print $1}')"
+            fi
+            if [[ -z "$ci_green_sha" || -z "$tag_sha" || "$tag_sha" != "$ci_green_sha" ]]; then
+              echo "::error::release tag ${GITHUB_REF_NAME} must point at ${protected_ref}"
+              echo "ci_green_sha=${ci_green_sha:-missing}"
+              echo "tag_sha=${tag_sha:-missing}"
+              exit 1
+            fi
+          else
+            echo "::error::unsupported live-test event: ${GITHUB_EVENT_NAME}"
+            exit 1
+          fi
+
+          echo "checkout_ref=${checkout_ref}" >> "$GITHUB_OUTPUT"
+
   smoke:
-    if: >-
-      github.repository == 'backblaze-labs/b2-mcp' &&
-      (
-        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-        (github.event_name == 'release' && startsWith(github.ref, 'refs/tags/v'))
-      )
+    needs: guard
+    if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: live-b2-smoke
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.guard.outputs.checkout-ref }}
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+      - name: Validate live B2 environment
+        env:
+          MCP_URL: ${{ vars.MCP_URL }}
+          B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required live-b2-smoke variable or secret for ${name}"
+              missing=1
+            fi
+          done
+          exit "$missing"
       - run: npm run smoke
         env:
           MCP_URL: ${{ vars.MCP_URL }}

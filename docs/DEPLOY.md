@@ -374,7 +374,7 @@ Add the additional headers only when `X-B2-Key-Id` is a **master** key (the S3 e
         "--header", "X-B2-App-Key:your-non-master-key-secret"
 ```
 
-A single application key works for both the B2 native API and the S3-compatible API; the master key is only required for Partner API, `bz_*` Computer Backup tools, and account-level key management.
+A single application key works for both the B2 native API and the S3-compatible API; the master key is only required for Partner API and account-level key management in the Phase 1 tool surface.
 
 Quit Claude Desktop fully (`Cmd+Q` on macOS) and relaunch — the entry should load on next startup.
 
@@ -450,7 +450,9 @@ It depends on these protected `live-b2-smoke` environment secrets and variable:
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 
-The workflow is gated to the canonical repo and protected refs, then further
-gated by the `live-b2-smoke` GitHub environment. Configure that environment
-with branch/tag restrictions before storing live B2 secrets there. Add required
-reviewers when the repository plan supports environment reviewers.
+The workflow is gated to the canonical repo and protected refs, fails loudly
+when dispatched from a non-main ref, verifies release tags point at `ci-green`,
+and checks out `ci-green` before running package code with live secrets. It is
+then further gated by the `live-b2-smoke` GitHub environment. Configure that
+environment with branch/tag restrictions before storing live B2 secrets there.
+Add required reviewers when the repository plan supports environment reviewers.

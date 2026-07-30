@@ -1,10 +1,10 @@
 # Release Process
 
-Owner: Gonza (`@goanpeca`). Quality and security reviewer: Sophie / QK
+Owner: Gonza (`@goanpeca`). Quality and security reviewer: Sophie / Quality Keeper (QK)
 (`@sophiecarreras`).
 
 The canonical first public release line is `v0.1.0`. The inherited `v1.2.x`
-draft releases and `2.3.0` package version are historical input from the
+draft releases and historical `2.3.0` package version are input from the
 incoming repository, not the Phase 1 release line.
 
 The canonical CLI binary is `b2-mcp`. The inherited `b2-mcp-server` binary is
@@ -34,5 +34,11 @@ Before publishing `v0.1.0`:
 4. Run the secret scan and legal/provenance review in
    `docs/SECURITY_REVIEW.md`.
 5. Confirm the live B2 smoke evidence required by `docs/TESTING.md`.
-6. Publish only from the canonical repository:
+6. Confirm `@backblaze-labs/b2-mcp` is owned by Backblaze on npm and package
+   provenance is enabled before publishing or advertising npm install commands.
+7. Confirm the live B2 workflow environments have `LIVE_B2_*` secrets and
+   `MCP_URL` populated, then manually dispatch smoke and contract from `main`.
+8. Confirm any claimed MCP SDK package split is either implemented or tracked as
+   a release-blocking follow-up once the upstream package exists.
+9. Publish only from the canonical repository:
    `https://github.com/backblaze-labs/b2-mcp`.

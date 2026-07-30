@@ -1,6 +1,6 @@
 # Public Contract Documents
 
-Owner: Gonza (`@goanpeca`). Quality owner: Sophie / QK (`@sophiecarreras`).
+Owner: Gonza (`@goanpeca`). Quality owner: Sophie / Quality Keeper (QK) (`@sophiecarreras`).
 
 This register is the public-document skeleton for Phase 1. A document listed
 here is part of the customer-facing or release-facing contract and must be kept

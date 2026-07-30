@@ -2,12 +2,12 @@
 /**
  * End-to-end smoke test against a running b2-mcp server.
  *
- * Connects via SSE, lists tools, and exercises one tool per credential
+ * Connects via Streamable HTTP, lists tools, and exercises one tool per credential
  * scope. Intended for post-deploy verification — not a replacement for
  * the unit suite.
  *
  * Required env:
- *   MCP_URL       — full SSE endpoint, e.g. https://mcp.example.com/sse
+ *   MCP_URL       — full Streamable HTTP endpoint, e.g. https://mcp.example.com/mcp
  *   B2_KEY_ID     — value for the X-B2-Key-Id request header
  *   B2_KEY        — value for the X-B2-Key request header
  *
@@ -20,7 +20,9 @@
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const EXPECTED_FULL_TOOL_COUNT = 40;
 
 const { MCP_URL, B2_KEY_ID, B2_KEY, B2_APP_KEY_ID, B2_APP_KEY } = process.env;
 
@@ -48,12 +50,8 @@ function check(name, ok, detail = "") {
 async function main() {
   console.log(`Connecting: ${MCP_URL}`);
 
-  const transport = new SSEClientTransport(new URL(MCP_URL), {
+  const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
     requestInit: { headers },
-    eventSourceInit: {
-      fetch: (url, init) =>
-        fetch(url, { ...init, headers: { ...(init?.headers ?? {}), ...headers } }),
-    },
   });
   const client = new Client({ name: "smoke-test", version: "1.0.0" }, {});
   await client.connect(transport);
@@ -65,7 +63,11 @@ async function main() {
   check("server delivers instructions", !!instructions);
 
   const tools = await client.listTools();
-  check("tools/list returns ≥ 85 tools", tools.tools.length >= 85, `${tools.tools.length} tools`);
+  check(
+    `tools/list returns at least ${EXPECTED_FULL_TOOL_COUNT} tools`,
+    tools.tools.length >= EXPECTED_FULL_TOOL_COUNT,
+    `${tools.tools.length} tools`,
+  );
 
   // b2_authorize_account — exercises the primary key path
   try {
