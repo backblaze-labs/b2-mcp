@@ -44,6 +44,18 @@ describe("startStdio", () => {
     expect(serveStdio).toHaveBeenCalledTimes(1);
   });
 
+  it("fails closed when stdio capability discovery rejects the credential", async () => {
+    process.env.B2_APPLICATION_KEY_ID = "test-key-id";
+    process.env.B2_APPLICATION_KEY = "test-key-secret";
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    mockedAxios.get.mockRejectedValue(
+      Object.assign(new Error("denied"), { response: { status: 401 } }),
+    );
+
+    await expect(startStdio()).rejects.toMatchObject({ code: "capability_auth_failed" });
+    expect(serveStdio).not.toHaveBeenCalled();
+  });
+
   it("exits the process when required credentials are missing", async () => {
     delete process.env.B2_APPLICATION_KEY_ID;
     delete process.env.B2_APPLICATION_KEY;

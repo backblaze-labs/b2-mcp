@@ -32,9 +32,15 @@ export async function startStdio(): Promise<void> {
   try {
     capabilities = await fetchCapabilities(config);
   } catch (err) {
+    if (
+      !(err instanceof CredentialResolutionError) ||
+      err.code !== "capability_upstream_unavailable"
+    ) {
+      throw err;
+    }
     logger.warn(
       {
-        code: err instanceof CredentialResolutionError ? err.code : "capability_resolution_failed",
+        code: err.code,
       },
       "capability.fetch.stdio_degraded",
     );
