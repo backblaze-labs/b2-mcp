@@ -80,7 +80,7 @@ aws ec2 run-instances \
   --security-group-ids <sg-with-22-80-443> \
   --metadata-options HttpTokens=required \
   --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"VolumeSize":20,"VolumeType":"gp3","Encrypted":true}}]' \
-  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=b2-mcp-server}]'
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=b2-mcp}]'
 ```
 
 `HttpTokens=required` enforces IMDSv2 — blocks SSRF-based metadata theft.
@@ -98,8 +98,8 @@ node --version  # confirm v22+
 
 ```bash
 sudo useradd -r -m -s /bin/bash mcp || true   # optional dedicated user
-git clone <repo-url> /home/ec2-user/b2-mcp-server
-cd /home/ec2-user/b2-mcp-server
+git clone https://github.com/backblaze-labs/b2-mcp.git /home/ec2-user/b2-mcp
+cd /home/ec2-user/b2-mcp
 npm ci
 npm run build
 ```
@@ -116,7 +116,7 @@ After=network.target
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/home/ec2-user/b2-mcp-server
+WorkingDirectory=/home/ec2-user/b2-mcp
 ExecStart=/usr/bin/node dist/http-server.js --port 3000
 Restart=always
 RestartSec=5
@@ -374,7 +374,7 @@ Add the additional headers only when `X-B2-Key-Id` is a **master** key (the S3 e
         "--header", "X-B2-App-Key:your-non-master-key-secret"
 ```
 
-A single application key works for both the B2 native API and the S3-compatible API; the master key is only required for Partner API, `bz_*` Computer Backup tools, and account-level key management.
+A single application key works for both the B2 native API and the S3-compatible API; the master key is only required for Partner API and account-level key management in the Phase 1 tool surface.
 
 Quit Claude Desktop fully (`Cmd+Q` on macOS) and relaunch — the entry should load on next startup.
 
@@ -411,7 +411,7 @@ it (the session ID is in-memory).
 ## Updates
 
 ```bash
-cd /home/ec2-user/b2-mcp-server
+cd /home/ec2-user/b2-mcp
 git pull
 npm ci
 npm run build
@@ -442,14 +442,17 @@ skipped. Exit code 0 = pass, 1 = at least one check failed.
 The same script also runs automatically via `.github/workflows/smoke.yml`:
 
 - After every `release.published` event (so a `gh release create` triggers it)
-- Every 6 hours as a heartbeat
-- On manual `workflow_dispatch` from the Actions tab
+- On manual `workflow_dispatch` from the Actions tab when run from `main`
 
-It depends on these repo-level secrets and variable:
+It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
-- `secrets.B2_KEY_ID`, `secrets.B2_KEY`
-- `secrets.B2_APP_KEY_ID`, `secrets.B2_APP_KEY`
+- `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
+- `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 
-The workflow is gated to the canonical repo (`if: github.repository == ...`)
-so personal mirrors don't fire failing runs.
+The workflow is gated to the canonical repo and protected refs, fails loudly
+when dispatched from a non-main ref, verifies release tags point at `ci-green`,
+and checks out `ci-green` before running package code with live secrets. It is
+then further gated by the `live-b2-smoke` GitHub environment. Configure that
+environment with branch/tag restrictions before storing live B2 secrets there.
+Add required reviewers when the repository plan supports environment reviewers.

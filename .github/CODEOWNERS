@@ -1,0 +1,19 @@
+# Default repository owner for code, docs, and release metadata. Phase 1 uses
+# named owners until a durable Backblaze Labs GitHub team exists for this repo.
+* @goanpeca
+
+# Public contracts and quality/security gates need implementation and
+# Quality Keeper (QK) review.
+docs/V1_SCOPE.md @goanpeca @sophiecarreras
+docs/PUBLIC_CONTRACTS.md @goanpeca @sophiecarreras
+docs/TOOL_CONTRACT.md @goanpeca @sophiecarreras
+docs/TESTING.md @goanpeca @sophiecarreras
+docs/SECURITY_REVIEW.md @goanpeca @sophiecarreras
+SECURITY.md @goanpeca @sophiecarreras
+RELEASE.md @goanpeca @sophiecarreras
+CHANGELOG.md @goanpeca
+
+# CI, package metadata, and release automation.
+.github/workflows/ @goanpeca
+package.json @goanpeca
+package-lock.json @goanpeca
