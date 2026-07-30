@@ -1,7 +1,8 @@
 # Phase 1 Scope and Contract Decisions
 
-Issue: [#55](https://github.com/backblaze-labs/b2-mcp/issues/55)  
-Planning ID: `P1-00`  
+Issues: [#55](https://github.com/backblaze-labs/b2-mcp/issues/55),
+[#71](https://github.com/backblaze-labs/b2-mcp/issues/71)
+Planning IDs: `P1-00`, `P1-SDK-01`
 Milestone: `v0.1.0`
 
 This decision record freezes the Phase 1 product, tool, authentication, runtime,
@@ -82,18 +83,25 @@ the `v0.1.0` support contract.
 
 ## API Architecture
 
-The current TypeScript data-plane implementation that uses AWS SDK v3 against
-B2's S3-compatible endpoint is acceptable for Phase 1.
+The official Backblaze TypeScript SDK is the required B2 integration boundary
+for Phase 1. The reviewed adoption and parity matrix lives in
+[`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) and supersedes the prior
+implementation allowance from #55 that accepted direct Axios B2 calls and direct
+AWS SDK S3 calls as the default architecture.
+
+Direct Axios calls to the B2 Native API and direct AWS SDK calls to B2's
+S3-compatible endpoint are inherited implementation details only. New B2
+behavior must use the public high-level `@backblaze-labs/b2-sdk` facade,
+documented `@backblaze-labs/b2-sdk/raw`, documented
+`@backblaze-labs/b2-sdk/s3`, or composition of public SDK operations. Missing
+SDK capabilities must be tracked upstream and released in a stable SDK version
+before the MCP release consumes them.
 
 The product contract is Backblaze B2 through MCP, not S3 as a standalone product
-surface. The S3-compatible API is an implementation detail for object-data
-operations in Phase 1. B2-native APIs remain the control-plane source for
-buckets, keys, Object Lock, notifications, Partner/Groups operations, and
-storage insights.
-
-Contract tests may assert the approved `s3_*` tool names for Phase 1, but public
-product documentation must not promise general S3 compatibility beyond the
-implemented B2 object-data tools.
+surface. Existing `s3_*` names remain compatibility names only until #49 freezes
+the final public tool contract. #49 must keep `s3_*` names only where S3
+semantics are material, turn compatible rows into aliases over public SDK
+operations, or rename/remove/defer them before contract freeze.
 
 ## Decision Levels
 
@@ -408,9 +416,16 @@ Phase 1 supports two transports:
 | HTTP      | MCP `2026-07-28` | Stateless 2025-era compatibility during the migration window               | Hosted deployments use a single `/mcp` endpoint behind customer-operated TLS and caller authentication. |
 
 MCP `2026-07-28` is the preferred era for `v0.1.0`. Production HTTP serving is
-strictly per-request; 2025-era compatibility is stateless and exists only for a
-migration window. Sessionful 2025-era HTTP must be isolated behind a separately
-named legacy path if it is ever reintroduced.
+strictly per-request. Stateless fallback exists only for compatible
+`2025-03-26` and `2025-06-18` clients during migration; no other 2025 revision
+is supported unless a later decision record adds it. Sessionful 2025-era HTTP
+must be isolated behind a separately named legacy path if it is ever
+reintroduced.
+
+The modern MCP baseline is `@modelcontextprotocol/server` v2 through
+`createMcpHandler` and `serveStdio`. The monolithic
+`@modelcontextprotocol/sdk` v1 package has been removed. Add other public v2
+packages only when the implementation imports their supported APIs.
 
 Phase 1 does not require HTTP+SSE, protocol-level sessions, GET streams, DELETE
 session termination, event replay, Roots, Sampling, MCP Logging, Tasks, MCP Apps,
@@ -526,6 +541,9 @@ are not required for the Phase 1 definition of done.
 
 The Phase 1 tool contract must satisfy these requirements directly:
 
+- Freeze only after the SDK adoption matrix in
+  [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) and its implementation
+  follow-ups are complete.
 - Use the profile count table and enumerated profile lists above as the approved
   human-readable profile source of truth.
 - Generate deterministic `tools/list` fixtures for `full`, `phase1-default`,
@@ -555,7 +573,10 @@ The Phase 1 tool contract must satisfy these requirements directly:
 The tracker issues that should consume this decision include:
 
 - [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) for deterministic
-  tool contract fixtures.
+  tool contract fixtures. #49 must freeze the post-SDK-migration surface, not
+  the inherited Axios/AWS implementation.
+- [#71](https://github.com/backblaze-labs/b2-mcp/issues/71) for the official
+  SDK adoption and MCP tool parity contract.
 - [#57](https://github.com/backblaze-labs/b2-mcp/issues/57) for credential
   providers.
 - [#58](https://github.com/backblaze-labs/b2-mcp/issues/58) for durable-secret

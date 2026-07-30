@@ -6,6 +6,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      b2-sdk:
+        patterns:
+          - "@backblaze-labs/b2-sdk"
       aws-sdk:
         patterns:
           - "@aws-sdk/*"
