@@ -30,6 +30,7 @@ describe("live secret workflow policy", () => {
       );
       expect(text).toContain("startsWith(github.ref, 'refs/tags/v')");
       expect(text).toContain("node-version-file: .nvmrc");
+      expect(text).toContain("permissions:\n  contents: read");
     },
   );
 

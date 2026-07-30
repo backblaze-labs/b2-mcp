@@ -28,6 +28,9 @@ on:
   schedule:
     - cron: "30 */6 * * *"
 
+permissions:
+  contents: read
+
 concurrency:
   group: live-b2-contract-${{ github.repository }}
   cancel-in-progress: false

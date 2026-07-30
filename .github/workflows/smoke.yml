@@ -23,6 +23,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 concurrency:
   group: live-b2-smoke-${{ github.repository }}
   cancel-in-progress: false
