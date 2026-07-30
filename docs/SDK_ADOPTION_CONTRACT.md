@@ -1,8 +1,8 @@
 # Official B2 SDK Adoption and Tool Parity Contract
 
-Issue: [#71](https://github.com/backblaze-labs/b2-mcp/issues/71)  
-Planning ID: `P1-SDK-01`  
-Reviewed SDK: `@backblaze-labs/b2-sdk@0.2.0` from npm, verified 2026-07-30  
+Issue: [#71](https://github.com/backblaze-labs/b2-mcp/issues/71)
+Planning ID: `P1-SDK-01`
+Reviewed SDK: `@backblaze-labs/b2-sdk@0.2.0` from npm, verified 2026-07-30
 Target MCP revision: `2026-07-28`
 
 This record supersedes the implementation allowance in

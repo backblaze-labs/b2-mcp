@@ -37,7 +37,7 @@ server does not depend on `initialize` or `Mcp-Session-Id` in production.
 - A Linux host with sudo
 - A domain name pointed at the host (A record)
 - Open ports 80 (Let's Encrypt only) and 443 inbound
-- Node.js 22.3.0 or newer
+- Node.js 22.13.0 or newer
 
 ## Security baseline
 
@@ -129,7 +129,7 @@ For other providers: any VM with 2 vCPU and 4 GB RAM works.
 
 ```bash
 sudo dnf install -y nodejs git nginx certbot python3-certbot-nginx fail2ban
-node --version  # confirm v22.3+
+node --version  # confirm v22.13+
 ```
 
 ## Step 3 — Build and run
