@@ -248,8 +248,10 @@ capabilities:
 - `s3_list_objects_v2`
 - `s3_list_parts`
 
-For `read-only`, `s3_get_presigned_url` is limited to read/download URLs. A
-write-capable presigned URL must not be available through the read-only
+For `read-only`, Phase 1 implementations must add an operation-level guard so
+`s3_get_presigned_url` can produce only read/download URLs. Profile registration
+alone is not sufficient because the tool schema can expose multiple operations.
+A write-capable presigned URL must not be available through the read-only
 contract.
 
 ## Secret-Producing Tools
