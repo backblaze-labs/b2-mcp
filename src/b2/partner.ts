@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";

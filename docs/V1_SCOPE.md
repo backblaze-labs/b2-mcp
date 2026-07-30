@@ -402,15 +402,14 @@ cannot mint write-capable presigned URLs.
 
 Phase 1 supports two transports:
 
-| Transport       | Preferred era    | Phase 1 fallback                                                                           | Notes                                                                                                   |
-| --------------- | ---------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `stdio`         | MCP `2026-07-28` | Stateless 2025-era compatibility for `2025-03-26` and `2025-06-18` clients                 | Local clients run the Node entry point as a subprocess.                                                 |
-| Streamable HTTP | MCP `2026-07-28` | Stateless 2025-era Streamable HTTP compatibility for `2025-03-26` and `2025-06-18` clients | Hosted deployments use a single `/mcp` endpoint behind customer-operated TLS and caller authentication. |
+| Transport | Preferred era    | Phase 1 fallback                                                           | Notes                                                                                                   |
+| --------- | ---------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `stdio`   | MCP `2026-07-28` | Stateless 2025-era compatibility for `2025-03-26` and `2025-06-18` clients | Local clients run the Node entry point as a subprocess.                                                 |
+| HTTP      | MCP `2026-07-28` | 2025-era session requests are rejected in the production path              | Hosted deployments use a single `/mcp` endpoint behind customer-operated TLS and caller authentication. |
 
-MCP `2026-07-28` is the preferred era for `v0.1.0`. Stateless 2025-era fallback
-exists only to keep compatible `2025-03-26` and `2025-06-18` clients working
-during migration. No other 2025 revision is part of the Phase 1 support matrix
-unless a later decision record adds it.
+MCP `2026-07-28` is the preferred era for `v0.1.0`. Production HTTP serving is
+strictly per-request; compatibility for sessionful 2025-era HTTP must be isolated
+behind a separately named legacy path if it is ever reintroduced.
 
 At the time of this metadata pass, npm publishes `@modelcontextprotocol/sdk`
 `1.x` as the latest TypeScript SDK package. If a future upstream SDK v2 package
@@ -484,12 +483,12 @@ previously advertised tools in a later deploy.
 
 Phase 1 supports these credential modes:
 
-| Mode             | Transport                | Credential custody                                          | Phase 1 requirement                                                                                                                                |
-| ---------------- | ------------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stdio-env`      | `stdio`                  | Local process environment                                   | Read `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`; optionally read `B2_MASTER_KEY_ID` and `B2_MASTER_KEY` for explicit Partner/admin profiles. |
-| `http-headers`   | Streamable HTTP fallback | MCP client or bridge                                        | Explicit opt-in compatibility mode only. Prefer credential references or short-lived tokens. Durable B2 keys in headers are disabled by default.   |
-| `http-server`    | Streamable HTTP          | Customer-operated server process or customer secret manager | The MCP client sends no B2 key. The customer-operated deployment selects the configured B2 credential.                                             |
-| `http-principal` | Streamable HTTP          | Customer-operated secret broker                             | A customer-operated MCP OAuth resource server validates the caller and passes verified principal/auth info to map to a B2 credential reference.    |
+| Mode             | Transport       | Credential custody                                          | Phase 1 requirement                                                                                                                                               |
+| ---------------- | --------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stdio-env`      | `stdio`         | Local process environment                                   | Read `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`; optionally read `B2_MASTER_KEY_ID` and `B2_MASTER_KEY` for explicit Partner/admin profiles.                |
+| `http-headers`   | HTTP            | MCP client or bridge                                        | Default for one-release compatibility with existing hosted clients; B2 headers are required on every request. Prefer credential references or short-lived tokens. |
+| `http-server`    | Streamable HTTP | Customer-operated server process or customer secret manager | The MCP client sends no B2 key. The customer-operated deployment selects the configured B2 credential.                                                            |
+| `http-principal` | Streamable HTTP | Customer-operated secret broker                             | A customer-operated MCP OAuth resource server validates the caller and passes verified principal/auth info to map to a B2 credential reference.                   |
 
 Credential values must never be accepted as ordinary tool input fields and must
 not appear in MCP tool content, structured content, logs, HTTP errors, snapshots,

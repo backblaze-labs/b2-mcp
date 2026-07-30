@@ -3,7 +3,7 @@
 This server speaks the Model Context Protocol over **two transports**:
 
 - **stdio** — the server runs as a local subprocess of the client. Used by desktop apps and IDE extensions (Claude Desktop, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose…).
-- **Streamable HTTP** — the server runs as a hosted endpoint behind a URL (single `/mcp` endpoint; the MCP Streamable HTTP transport, spec 2025-03-26, which replaced the deprecated HTTP+SSE transport). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
+- **HTTP** — the server runs as a hosted MCP 2026-07-28 endpoint behind a URL (single `/mcp` endpoint). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
 
 > **The one thing that matters:** every stdio client runs the _same_ command —
 > `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js` with two env vars. Only the
@@ -202,9 +202,9 @@ Point it at `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js` with the two env vars,
 
 ---
 
-## B. Hosted (Streamable HTTP)
+## B. Hosted HTTP
 
-For a server deployed per [`DEPLOY.md`](DEPLOY.md). The hosted endpoint is `https://<host>/mcp` (Streamable HTTP; SSE was the legacy transport, deprecated in MCP 2025-03-26). By default, hosted deployments use `B2_HTTP_CREDENTIAL_MODE=server`, so the client sends no B2 key.
+For a server deployed per [`DEPLOY.md`](DEPLOY.md). The hosted endpoint is `https://<host>/mcp`. Unset `B2_HTTP_CREDENTIAL_MODE` defaults to `headers` for compatibility with existing hosted clients; set `server` or `principal` explicitly when the client should send no B2 key.
 
 ### Claude Desktop → hosted server (`mcp-remote` bridge)
 
@@ -231,13 +231,13 @@ These accept the URL + headers shape directly:
 }
 ```
 
-### Any Streamable-HTTP-capable client
+### Any HTTP-capable MCP client
 
 Point it at `https://<host>/mcp`. In `server` mode, do not send B2 credential headers. In `principal` mode, your OAuth/resource-server layer must validate the caller and attach verified MCP `authInfo` before the handler runs.
 
 ### Header compatibility mode
 
-If the operator explicitly sets `B2_HTTP_CREDENTIAL_MODE=headers`, send B2 credentials on every MCP request. Prefer the explicit header names:
+If the operator sets `B2_HTTP_CREDENTIAL_MODE=headers` or leaves it unset, send B2 credentials on every MCP request. Prefer the explicit header names:
 
 ```json
 {

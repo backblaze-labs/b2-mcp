@@ -24,7 +24,7 @@ import {
   ListPartsCommand,
 } from "@aws-sdk/client-s3";
 import { createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 
 jest.mock("axios");
 

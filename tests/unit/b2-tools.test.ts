@@ -9,7 +9,7 @@
 
 import axios from "axios";
 import { createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 
 // ── Mock axios ────────────────────────────────────────────────────────────────
 

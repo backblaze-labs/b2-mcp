@@ -4,7 +4,13 @@
  * network-free; fetchCapabilities is tested against a mocked authorize.
  */
 import axios from "axios";
-import { createServer, fetchCapabilities, invalidateCapabilityCache } from "../../src/server";
+import {
+  capabilityCacheSizeForTests,
+  createServer,
+  fetchCapabilities,
+  invalidateCapabilityCache,
+} from "../../src/server";
+import { verificationFingerprintConfig } from "../../src/credentials";
 import { isToolEnabled, TOOL_CAPABILITIES } from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
 
@@ -127,6 +133,7 @@ describe("fetchCapabilities", () => {
     invalidateCapabilityCache();
     delete process.env.B2_REGISTER_ALL_TOOLS;
     delete process.env.B2_CAPABILITY_CACHE_TTL_MS;
+    delete process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES;
   });
 
   // v4 puts capabilities at apiInfo.storageApi.allowed.capabilities.
@@ -161,7 +168,20 @@ describe("fetchCapabilities", () => {
     jest
       .spyOn(axios, "get")
       .mockRejectedValue(Object.assign(new Error("denied"), { response: { status: 401 } }));
-    await expect(fetchCapabilities(baseConfig)).rejects.toThrow(/credential or capability/i);
+    await expect(fetchCapabilities(baseConfig)).rejects.toMatchObject({
+      status: 401,
+      code: "capability_auth_failed",
+    });
+  });
+
+  it("returns retryable status for upstream capability failures", async () => {
+    jest
+      .spyOn(axios, "get")
+      .mockRejectedValue(Object.assign(new Error("B2 500"), { response: { status: 500 } }));
+    await expect(fetchCapabilities(baseConfig)).rejects.toMatchObject({
+      status: 503,
+      code: "capability_upstream_unavailable",
+    });
   });
 
   it("returns null without any network call when B2_REGISTER_ALL_TOOLS=true", async () => {
@@ -171,7 +191,7 @@ describe("fetchCapabilities", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("caches by explicit non-secret cache key and supports invalidation", async () => {
+  it("caches by explicit secret-bound cache key and supports invalidation", async () => {
     process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
     const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
 
@@ -185,5 +205,55 @@ describe("fetchCapabilities", () => {
     invalidateCapabilityCache("credential:a");
     await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
     expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not reuse a warm cache entry for the same key id with a wrong secret", async () => {
+    process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
+    const wrongSecret = {
+      ...baseConfig,
+      applicationKey: "wrong",
+      appKey: "wrong",
+      masterKey: "wrong",
+    };
+    const spy = jest
+      .spyOn(axios, "get")
+      .mockResolvedValueOnce(authData(["readFiles"]) as never)
+      .mockRejectedValueOnce(Object.assign(new Error("denied"), { response: { status: 401 } }));
+
+    await expect(
+      fetchCapabilities(
+        baseConfig,
+        `credential:${verificationFingerprintConfig(baseConfig)}`,
+        "credential:non-secret",
+      ),
+    ).resolves.toEqual(["readFiles"]);
+
+    await expect(
+      fetchCapabilities(
+        wrongSecret,
+        `credential:${verificationFingerprintConfig(wrongSecret)}`,
+        "credential:non-secret",
+      ),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache an empty capability response at the positive TTL", async () => {
+    process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
+    const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(undefined) as never);
+    await expect(fetchCapabilities(baseConfig, "credential:empty")).resolves.toEqual([]);
+    await expect(fetchCapabilities(baseConfig, "credential:empty")).resolves.toEqual([]);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds capability-cache growth as distinct credentials connect", async () => {
+    process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
+    process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES = "2";
+    jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
+
+    for (let i = 0; i < 5; i++) {
+      await fetchCapabilities({ ...baseConfig, applicationKey: `s-${i}` }, `credential:${i}`);
+    }
+    expect(capabilityCacheSizeForTests()).toBeLessThanOrEqual(2);
   });
 });

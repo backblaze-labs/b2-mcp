@@ -1,6 +1,6 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
 

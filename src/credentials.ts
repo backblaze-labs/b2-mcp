@@ -1,9 +1,9 @@
 import * as crypto from "crypto";
 import * as http from "http";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
-import { B2Config } from "./utils/types.js";
+import { B2Config, DestructivePolicy } from "./utils/types.js";
 
 const DEFAULT_REGION = "us-west-004";
 
@@ -32,6 +32,11 @@ export interface CredentialResolution {
   config: B2Config;
   /** Non-secret cache/metrics key: either a credential fingerprint or verified principal. */
   cacheKey: string;
+  /**
+   * Secret-bound verifier for capability-cache identity and legacy adapters.
+   * This is a one-way digest and must never be logged or returned.
+   */
+  verificationKey: string;
   principal?: string;
 }
 
@@ -78,6 +83,44 @@ export function fingerprintConfig(
   return credentialFingerprint(
     [config.applicationKeyId, config.appKeyId, config.masterKeyId, config.region].join("\0"),
   );
+}
+
+export function verificationFingerprintConfig(
+  config: Pick<
+    B2Config,
+    | "applicationKeyId"
+    | "applicationKey"
+    | "appKeyId"
+    | "appKey"
+    | "masterKeyId"
+    | "masterKey"
+    | "region"
+  >,
+): string {
+  return credentialFingerprint(
+    [
+      "b2-mcp-credential-verifier-v1",
+      config.applicationKeyId,
+      config.applicationKey,
+      config.appKeyId,
+      config.appKey,
+      config.masterKeyId,
+      config.masterKey,
+      config.region,
+    ].join("\0"),
+  );
+}
+
+function verificationKeyForConfig(prefix: string, config: B2Config): string {
+  return `${prefix}:${verificationFingerprintConfig(config)}`;
+}
+
+function resolveDestructivePolicy(transport: "stdio" | "http"): DestructivePolicy {
+  const value = process.env.B2_DESTRUCTIVE_POLICY;
+  if (transport === "http") {
+    return value === "allow" || value === "block" || value === "confirm" ? value : "block";
+  }
+  return value === "allow" || value === "block" ? value : "confirm";
 }
 
 function resolveOptionalPair(
@@ -146,17 +189,7 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
       : null,
     allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
     allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
-    destructivePolicy:
-      options.transport === "http"
-        ? process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
-          process.env.B2_DESTRUCTIVE_POLICY === "block" ||
-          process.env.B2_DESTRUCTIVE_POLICY === "confirm"
-          ? process.env.B2_DESTRUCTIVE_POLICY
-          : "block"
-        : process.env.B2_DESTRUCTIVE_POLICY === "allow" ||
-            process.env.B2_DESTRUCTIVE_POLICY === "block"
-          ? process.env.B2_DESTRUCTIVE_POLICY
-          : "confirm",
+    destructivePolicy: resolveDestructivePolicy(options.transport),
     transport: options.transport,
   };
   config.credentialFingerprint = fingerprintConfig(config);
@@ -221,13 +254,22 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
   readonly name = "stdio-env";
 
   resolve(): CredentialResolution {
+    if (process.env.B2_APP_KEY_ID) {
+      logger.warn(
+        "config.deprecated: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Use B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY with B2_MASTER_KEY_* only when a separate master credential is required.",
+      );
+    }
     const config = configFromMaterial(envMaterial(), {
       transport: "stdio",
       allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
       fileRoot: process.env.B2_FILE_ROOT ?? null,
       strictOptionalPairs: false,
     });
-    return { config, cacheKey: `credential:${config.credentialFingerprint}` };
+    return {
+      config,
+      cacheKey: `credential:${config.credentialFingerprint}`,
+      verificationKey: verificationKeyForConfig("credential", config),
+    };
   }
 }
 
@@ -239,7 +281,11 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
     }
     const config = configFromMaterial(headerMaterial(context.req.headers), httpConfigOptions());
-    return { config, cacheKey: `credential:${config.credentialFingerprint}` };
+    return {
+      config,
+      cacheKey: `credential:${config.credentialFingerprint}`,
+      verificationKey: verificationKeyForConfig("credential", config),
+    };
   }
 }
 
@@ -255,7 +301,11 @@ export class HttpServerCredentialProvider implements CredentialProvider {
       );
     }
     const config = configFromMaterial(envMaterial(), httpConfigOptions());
-    return { config, cacheKey: `credential:${config.credentialFingerprint}` };
+    return {
+      config,
+      cacheKey: `credential:${config.credentialFingerprint}`,
+      verificationKey: verificationKeyForConfig("credential", config),
+    };
   }
 }
 
@@ -283,6 +333,8 @@ function credentialRefEnvPrefix(ref: string): string {
 
 function principalFromAuthInfo(authInfo: AuthInfo): string | null {
   const extra = authInfo.extra ?? {};
+  // Keep stable subject-like claims ahead of mutable/display claims; this
+  // order defines which credential reference a verified caller resolves to.
   for (const key of ["sub", "subject", "principal", "email"]) {
     const value = extra[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -290,19 +342,26 @@ function principalFromAuthInfo(authInfo: AuthInfo): string | null {
   return authInfo.clientId?.trim() || null;
 }
 
+let cachedPrincipalMapRaw: string | undefined;
+let cachedPrincipalMap: Record<string, string> | undefined;
+
 function principalMap(): Record<string, string> {
   const raw = process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   if (!raw) return {};
+  if (raw === cachedPrincipalMapRaw && cachedPrincipalMap) return cachedPrincipalMap;
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       throw new Error("not an object");
     }
-    return Object.fromEntries(
+    const map = Object.fromEntries(
       Object.entries(parsed as Record<string, unknown>).filter(
         (entry): entry is [string, string] => typeof entry[1] === "string",
       ),
     );
+    cachedPrincipalMapRaw = raw;
+    cachedPrincipalMap = map;
+    return map;
   } catch {
     throw new CredentialResolutionError(
       "Invalid principal credential map",
@@ -364,13 +423,16 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
     return {
       config,
       cacheKey: `principal:${credentialFingerprint(principal)}`,
+      verificationKey: `principal:${credentialFingerprint(
+        [principal, verificationFingerprintConfig(config)].join("\0"),
+      )}`,
       principal,
     };
   }
 }
 
 export function getHttpCredentialMode(): HttpCredentialMode {
-  const raw = (process.env.B2_HTTP_CREDENTIAL_MODE ?? "server").trim().toLowerCase();
+  const raw = (process.env.B2_HTTP_CREDENTIAL_MODE ?? "headers").trim().toLowerCase();
   if (raw === "server" || raw === "principal" || raw === "headers") return raw;
   throw new CredentialResolutionError(
     "Invalid B2_HTTP_CREDENTIAL_MODE",
@@ -379,17 +441,33 @@ export function getHttpCredentialMode(): HttpCredentialMode {
   );
 }
 
-export function getHttpCredentialProvider(): CredentialProvider {
+export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProvider {
   switch (getHttpCredentialMode()) {
     case "headers":
       return new HttpHeaderCredentialProvider();
     case "principal":
-      return new HttpPrincipalCredentialProvider();
+      return new HttpPrincipalCredentialProvider(broker);
     case "server":
       return new HttpServerCredentialProvider();
   }
 }
 
+export function validateHttpCredentialConfiguration(
+  provider: CredentialProvider = getHttpCredentialProvider(),
+): void {
+  if (provider instanceof HttpServerCredentialProvider) {
+    provider.resolve({ req: { headers: {} } as AuthenticatedIncomingMessage });
+  }
+  if (provider instanceof HttpPrincipalCredentialProvider) {
+    principalMap();
+  }
+}
+
+/**
+ * Header-compatibility parser. Returns null only when the required primary
+ * header pair is absent/incomplete. Malformed optional pairs or conflicting
+ * duplicate headers throw CredentialResolutionError with a stable code.
+ */
 export function configFromHttpHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
   try {
     return new HttpHeaderCredentialProvider().resolve({ req: req as AuthenticatedIncomingMessage })

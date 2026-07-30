@@ -9,7 +9,7 @@ import {
   ListObjectsV2Command,
   ListObjectVersionsCommand,
 } from "@aws-sdk/client-s3";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -238,7 +238,7 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
           new DeleteObjectsCommand({
             Bucket: args.bucket,
             Delete: {
-              Objects: args.objects.map((o) => ({ Key: o.key, VersionId: o.versionId })),
+              Objects: args.objects.map((o: any) => ({ Key: o.key, VersionId: o.versionId })),
               Quiet: args.quiet ?? true,
             },
           }),

@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -460,7 +460,7 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        for (const rule of args.eventNotificationRules) {
+        for (const rule of args.eventNotificationRules as Array<any>) {
           const reason = validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
             return toolError(
@@ -472,7 +472,7 @@ export function registerBucketTools(
           bucketId: args.bucketId,
           // B2 requires objectNamePrefix on every rule; default to "" (matches
           // all objects) when a caller omits it, regardless of Zod default.
-          eventNotificationRules: args.eventNotificationRules.map((rule) => ({
+          eventNotificationRules: args.eventNotificationRules.map((rule: any) => ({
             ...rule,
             objectNamePrefix: rule.objectNamePrefix ?? "",
           })),

@@ -1,9 +1,9 @@
 /**
  * Capability-aware tool registration.
  *
- * Maps each tool to the B2 key capability it needs. At session start the server
- * reads the key's `allowed.capabilities` (from b2_authorize_account) and only
- * registers the tools the key can actually use — so the surface auto-right-sizes
+ * Maps each tool to the B2 key capability it needs. Before serving a request,
+ * the server reads the key's `allowed.capabilities` (from b2_authorize_account)
+ * and only registers the tools the key can actually use — so the surface auto-right-sizes
  * to the credential: smaller context, no dead tools, and a surface that matches
  * the key's real power. This is a layer below the destructive gate (the key
  * decides what is *possible*; the gate decides what is *permitted*).

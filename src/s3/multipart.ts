@@ -9,7 +9,7 @@ import {
   UploadPartCopyCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
@@ -79,7 +79,7 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
       try {
         const expiresIn = args.expiresIn ?? 3600;
         const parts = await Promise.all(
-          args.partNumbers.map(async (partNumber) => {
+          args.partNumbers.map(async (partNumber: number) => {
             const url = await getSignedUrl(
               s3,
               new UploadPartCommand({
@@ -135,7 +135,7 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
             Key: args.key,
             UploadId: args.uploadId,
             MultipartUpload: {
-              Parts: args.parts.map((p) => ({ PartNumber: p.partNumber, ETag: p.etag })),
+              Parts: args.parts.map((p: any) => ({ PartNumber: p.partNumber, ETag: p.etag })),
             },
           }),
         );

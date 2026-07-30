@@ -22,7 +22,7 @@ import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
 import { loadConfig, createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 // S3-compatible API requires a non-master application key (set B2_APP_KEY_ID).

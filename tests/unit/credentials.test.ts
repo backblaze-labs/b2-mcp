@@ -8,6 +8,7 @@ import {
   HttpPrincipalCredentialProvider,
   HttpServerCredentialProvider,
   StdioEnvCredentialProvider,
+  verificationFingerprintConfig,
 } from "../../src/credentials";
 
 const savedEnv = process.env;
@@ -40,6 +41,7 @@ describe("credential providers", () => {
     expect(resolved.config.transport).toBe("stdio");
     expect(resolved.config.credentialFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("stdio-id");
+    expect(resolved.verificationKey).toMatch(/^credential:[a-f0-9]{16}$/);
   });
 
   it("fails closed when required stdio credentials are missing", () => {
@@ -68,6 +70,7 @@ describe("credential providers", () => {
     expect(resolved.config.transport).toBe("http");
     expect(resolved.cacheKey).not.toContain("header-id");
     expect(resolved.cacheKey).not.toContain("header-secret");
+    expect(resolved.verificationKey).not.toBe(resolved.cacheKey);
   });
 
   it("rejects partial optional header credentials", () => {
@@ -110,8 +113,21 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("tenant-id");
     expect(resolved.principal).toBe("alice");
     expect(resolved.cacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
+    expect(resolved.verificationKey).toMatch(/^principal:[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("alice");
     expect(resolved.cacheKey).not.toContain("tenant-id");
+  });
+
+  it("uses the secret in verification identity without changing log identity", () => {
+    const provider = new HttpHeaderCredentialProvider();
+    const first = provider.resolve({
+      req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-a" } } as any,
+    });
+    const second = provider.resolve({
+      req: { headers: { "x-b2-key-id": "header-id", "x-b2-key": "secret-b" } } as any,
+    });
+    expect(first.cacheKey).toBe(second.cacheKey);
+    expect(first.verificationKey).not.toBe(second.verificationKey);
   });
 
   it("principal provider rejects unauthenticated requests and B2 header spoofing", () => {
@@ -129,9 +145,9 @@ describe("credential providers", () => {
 });
 
 describe("credential mode parsing", () => {
-  it("defaults HTTP credential mode to server", () => {
-    expect(getHttpCredentialMode()).toBe("server");
-    expect(getHttpCredentialProvider()).toBeInstanceOf(HttpServerCredentialProvider);
+  it("defaults HTTP credential mode to header compatibility", () => {
+    expect(getHttpCredentialMode()).toBe("headers");
+    expect(getHttpCredentialProvider()).toBeInstanceOf(HttpHeaderCredentialProvider);
   });
 
   it("selects explicit header and principal providers", () => {
@@ -157,6 +173,29 @@ describe("credential fingerprints and header detection", () => {
     });
     expect(fingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(fingerprint).not.toContain("key-id");
+  });
+
+  it("uses a separate secret-bound verifier", () => {
+    const a = verificationFingerprintConfig({
+      applicationKeyId: "key-id",
+      applicationKey: "secret-a",
+      appKeyId: "app-id",
+      appKey: "secret-a",
+      masterKeyId: "master-id",
+      masterKey: "secret-a",
+      region: "us-west-004",
+    });
+    const b = verificationFingerprintConfig({
+      applicationKeyId: "key-id",
+      applicationKey: "secret-b",
+      appKeyId: "app-id",
+      appKey: "secret-b",
+      masterKeyId: "master-id",
+      masterKey: "secret-b",
+      region: "us-west-004",
+    });
+    expect(a).not.toBe(b);
+    expect(a).not.toContain("secret-a");
   });
 
   it("detects legacy and explicit B2 credential headers", () => {

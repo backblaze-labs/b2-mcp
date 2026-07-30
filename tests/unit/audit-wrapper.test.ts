@@ -5,7 +5,7 @@
  * silently, and the wrapper reports how many tools it wrapped.
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 import { wrapToolsWithAudit, getRegisteredTools } from "../../src/server";
 import { logger } from "../../src/utils/logger";
 import { B2Config } from "../../src/utils/types";

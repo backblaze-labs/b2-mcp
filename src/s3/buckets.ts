@@ -3,7 +3,7 @@ import {
   HeadBucketCommand,
   PutBucketLifecycleConfigurationCommand,
 } from "@aws-sdk/client-s3";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
@@ -92,7 +92,7 @@ export function registerS3BucketTools(server: McpServer, s3: S3Client, config: B
           new PutBucketLifecycleConfigurationCommand({
             Bucket: args.bucket,
             LifecycleConfiguration: {
-              Rules: args.rules.map((r) => ({
+              Rules: args.rules.map((r: any) => ({
                 ID: r.id,
                 Status: r.status,
                 Filter: r.filter ? { Prefix: r.filter.prefix ?? "" } : { Prefix: "" },

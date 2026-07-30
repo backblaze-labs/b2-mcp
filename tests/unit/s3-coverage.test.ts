@@ -5,7 +5,7 @@
 
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer } from "../../src/server";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../../src/mcp";
 import { B2Config } from "../../src/utils/types";
 
 const testConfig: B2Config = {

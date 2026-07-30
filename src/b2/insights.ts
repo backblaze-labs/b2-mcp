@@ -11,9 +11,9 @@
  *   Phase 2 (b2_largest_files, b2_unfinished_uploads) — live, per-bucket S3
  *     listing. Works on any account; no index required.
  *
- * Everything is read-only and scoped by the caller's credential: each session
- * builds its own B2Client/S3Client from the request headers, so a partner key
- * sees its sub-accounts (one report row each) and a customer key sees only
+ * Everything is read-only and scoped by the caller's credential: HTTP builds a
+ * fresh B2Client/S3Client after per-request credential resolution, so a partner
+ * key sees its sub-accounts (one report row each) and a customer key sees only
  * itself — scope is automatic and fail-closed.
  *
  * The original handoff spec named native list tools (b2_list_file_names,
@@ -27,7 +27,7 @@ import {
   ListMultipartUploadsCommand,
   ListPartsCommand,
 } from "@aws-sdk/client-s3";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";

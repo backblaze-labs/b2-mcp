@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createMcpServer, type McpServer } from "./mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
@@ -13,6 +13,7 @@ import {
   CredentialResolutionError,
   fingerprintConfig,
   StdioEnvCredentialProvider,
+  verificationFingerprintConfig,
 } from "./credentials.js";
 
 import { registerBucketTools } from "./b2/buckets.js";
@@ -68,7 +69,7 @@ export function loadConfig(): B2Config {
  * is a fail-closed capability set, not "unknown".
  */
 export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
-  const server = new McpServer(
+  const server = createMcpServer(
     {
       name: "backblaze-b2",
       version: VERSION,
@@ -170,10 +171,10 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
 
 /**
  * One-shot authorize to read the key's capabilities for capability-aware
- * registration. Returns the capability list and caches it by a non-secret
- * fingerprint/principal cache key. Capability lookup failures throw so callers
- * fail closed instead of exposing the full tool surface. Set
- * B2_REGISTER_ALL_TOOLS=true to explicitly skip discovery and register all.
+ * registration. Returns null only when discovery is explicitly skipped via
+ * B2_REGISTER_ALL_TOOLS=true. Lookup failures throw so callers fail closed
+ * instead of exposing the full tool surface; an empty array is a fail-closed
+ * capability set and is deliberately not cached at the positive TTL.
  */
 interface CapabilityCacheEntry {
   capabilities: string[];
@@ -182,6 +183,7 @@ interface CapabilityCacheEntry {
 
 const capabilityCache = new Map<string, CapabilityCacheEntry>();
 const DEFAULT_CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
+const DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES = 1000;
 
 export function invalidateCapabilityCache(cacheKey?: string): void {
   if (cacheKey) capabilityCache.delete(cacheKey);
@@ -195,33 +197,141 @@ function capabilityCacheTtlMs(): number {
   return Math.max(0, ttl);
 }
 
+function capabilityCacheMaxEntries(): number {
+  const max = process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES
+    ? parseIntEnv(process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES, DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES)
+    : DEFAULT_CAPABILITY_CACHE_MAX_ENTRIES;
+  return Math.max(1, max);
+}
+
+export function sweepCapabilityCache(now = Date.now()): void {
+  for (const [key, entry] of capabilityCache) {
+    if (entry.expiresAt <= now) capabilityCache.delete(key);
+  }
+}
+
+function rememberCapabilities(cacheKey: string, capabilities: string[], now: number): void {
+  const ttl = capabilityCacheTtlMs();
+  if (ttl <= 0 || capabilities.length === 0) return;
+  sweepCapabilityCache(now);
+  capabilityCache.set(cacheKey, {
+    capabilities: [...capabilities],
+    expiresAt: now + ttl,
+  });
+  const maxEntries = capabilityCacheMaxEntries();
+  while (capabilityCache.size > maxEntries) {
+    const oldest = capabilityCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    capabilityCache.delete(oldest);
+  }
+}
+
+export function capabilityCacheSizeForTests(): number {
+  return capabilityCache.size;
+}
+
+function redactedCapabilityMessage(err: unknown, config: B2Config): string {
+  let message = err instanceof Error ? err.message : String(err);
+  for (const value of [
+    config.applicationKeyId,
+    config.applicationKey,
+    config.appKeyId,
+    config.appKey,
+    config.masterKeyId,
+    config.masterKey,
+  ]) {
+    if (value) message = message.split(value).join("[redacted]");
+  }
+  return message;
+}
+
+function capabilityFailureDetails(
+  err: unknown,
+  config: B2Config,
+): {
+  status: number;
+  code: string;
+  log: Record<string, unknown>;
+  message: string;
+} {
+  const anyErr = err as {
+    code?: unknown;
+    response?: { status?: unknown; headers?: Record<string, unknown> };
+  };
+  const upstreamStatus =
+    typeof anyErr.response?.status === "number" ? anyErr.response.status : undefined;
+  const upstreamCode = typeof anyErr.code === "string" ? anyErr.code : undefined;
+  const requestIdHeader =
+    anyErr.response?.headers?.["x-bz-request-id"] ?? anyErr.response?.headers?.["x-b2-request-id"];
+  const requestId = typeof requestIdHeader === "string" ? requestIdHeader : undefined;
+  const authFailure = upstreamStatus === 401 || upstreamStatus === 403;
+  const retryable =
+    !authFailure &&
+    (upstreamStatus === undefined ||
+      upstreamStatus === 429 ||
+      upstreamStatus >= 500 ||
+      upstreamCode === "ECONNABORTED" ||
+      upstreamCode === "ETIMEDOUT" ||
+      upstreamCode === "ECONNRESET" ||
+      upstreamCode === "ENOTFOUND");
+
+  if (authFailure) {
+    return {
+      status: upstreamStatus,
+      code: "capability_auth_failed",
+      message: "Credential or capability resolution failed",
+      log: {
+        upstreamStatus,
+        upstreamCode,
+        retryable: false,
+        message: redactedCapabilityMessage(err, config),
+        ...(requestId && { requestId }),
+      },
+    };
+  }
+
+  return {
+    status: retryable ? 503 : 502,
+    code: retryable ? "capability_upstream_unavailable" : "capability_upstream_failed",
+    message: "B2 capability service temporarily unavailable",
+    log: {
+      upstreamStatus,
+      upstreamCode,
+      retryable,
+      message: redactedCapabilityMessage(err, config),
+      ...(requestId && { requestId }),
+    },
+  };
+}
+
 export async function fetchCapabilities(
   config: B2Config,
   cacheKey?: string,
+  logKey?: string,
 ): Promise<string[] | null> {
   if (process.env.B2_REGISTER_ALL_TOOLS === "true") return null;
-  const resolvedCacheKey =
-    cacheKey ?? `credential:${config.credentialFingerprint ?? fingerprintConfig(config)}`;
+  const resolvedCacheKey = cacheKey ?? `credential:${verificationFingerprintConfig(config)}`;
+  const credentialLogKey =
+    logKey ?? `credential:${config.credentialFingerprint ?? fingerprintConfig(config)}`;
   const now = Date.now();
+  sweepCapabilityCache(now);
   const cached = capabilityCache.get(resolvedCacheKey);
-  if (cached && cached.expiresAt > now) return [...cached.capabilities];
+  if (cached && cached.expiresAt > now) {
+    capabilityCache.delete(resolvedCacheKey);
+    capabilityCache.set(resolvedCacheKey, cached);
+    return [...cached.capabilities];
+  }
 
   try {
     const auth = new B2AuthManager(config);
     const info = await auth.getAuth();
     const capabilities = info.capabilities ?? [];
-    capabilityCache.set(resolvedCacheKey, {
-      capabilities: [...capabilities],
-      expiresAt: now + capabilityCacheTtlMs(),
-    });
+    rememberCapabilities(resolvedCacheKey, capabilities, now);
     return capabilities;
-  } catch {
-    logger.warn({ credential: resolvedCacheKey }, "capability.fetch.failed");
-    throw new CredentialResolutionError(
-      "Credential or capability resolution failed",
-      401,
-      "capability_resolution_failed",
-    );
+  } catch (err) {
+    const details = capabilityFailureDetails(err, config);
+    logger.warn({ credential: credentialLogKey, ...details.log }, "capability.fetch.failed");
+    throw new CredentialResolutionError(details.message, details.status, details.code);
   }
 }
 
