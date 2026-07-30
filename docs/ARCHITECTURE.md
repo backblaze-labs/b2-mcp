@@ -27,12 +27,14 @@ unpublished branches.
 
 ## MCP Runtime Boundary
 
-The target MCP revision is `2026-07-28`. The modern MCP runtime must use the
-stable v2 package split through `createMcpHandler` for Streamable HTTP and
-`serveStdio` for stdio.
+The target MCP revision is `2026-07-28`. The target modern MCP runtime must use
+the stable v2 package split through `createMcpHandler` for Streamable HTTP and
+`serveStdio` for stdio. Issue
+[#59](https://github.com/backblaze-labs/b2-mcp/issues/59) tracks that migration.
 
-The monolithic `@modelcontextprotocol/sdk` v1 package and session-bound modern
-behavior are migration debt, not an allowed final Phase 1 architecture.
+Until #59 lands, the current monolithic `@modelcontextprotocol/sdk` v1 imports
+and session-bound modern behavior are migration debt, not an allowed final Phase
+1 architecture.
 
 ## S3-Compatible Surface
 

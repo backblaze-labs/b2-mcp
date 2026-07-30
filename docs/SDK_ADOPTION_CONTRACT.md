@@ -29,10 +29,12 @@ for Phase 1 migration and for the public MCP tool contract freeze.
 - Missing SDK capabilities must be tracked upstream and must land in a stable
   SDK release before the MCP release can claim that capability as an SDK-backed
   contract.
-- The MCP protocol baseline remains `2026-07-28`. The modern MCP runtime must
-  use the stable v2 package split through `createMcpHandler` and `serveStdio`.
-  The monolithic `@modelcontextprotocol/sdk` v1 package is compatibility debt,
-  not an allowed modern architecture.
+- The MCP protocol baseline remains `2026-07-28`. The target modern MCP runtime
+  must use the stable v2 package split through `createMcpHandler` and
+  `serveStdio`. Issue [#59](https://github.com/backblaze-labs/b2-mcp/issues/59)
+  tracks that migration. Until #59 lands, the current monolithic
+  `@modelcontextprotocol/sdk` v1 imports are compatibility debt, not an allowed
+  final modern architecture.
 
 ## Package Policy
 
@@ -93,10 +95,10 @@ official SDK, or explicitly justified as S3-material compatibility paths.
 | `src/s3/extras.ts`        | `@aws-sdk/client-s3`                                  | `GetBucketLocation` region probe                                             | Covered by SDK helper issue #154; retain only as S3 endpoint/region verification.                                                                                |
 | `src/b2/insights.ts`      | `@aws-sdk/client-s3`                                  | Usage Report CSV reads and live object/multipart listings                    | Prefer SDK native listing/download composition; use `/s3` helper only where report-bucket or multipart behavior remains S3-material.                             |
 
-Package note: `@aws-sdk/s3-presigned-post` is a dependency but has no runtime
-source import. It must be removed before release unless a reviewed SDK-backed
-contract row reintroduces a supported use. B2 does not support S3 POST Object
-form uploads in the current MCP contract.
+Package note: `@aws-sdk/s3-presigned-post` is intentionally absent because there
+is no runtime source import or approved MCP tool row for S3 POST Object form
+uploads. It must not be reintroduced unless a reviewed SDK-backed contract row
+adds a supported use.
 
 ## Shared Migration Semantics
 

@@ -167,6 +167,15 @@ describe("SDK adoption contract", () => {
     expect(ci).toContain("npm ci --engine-strict");
   });
 
+  it("keeps unsupported S3 POST presigning out of runtime dependencies", () => {
+    const pkg = readJson<{ dependencies: Record<string, string> }>("package.json");
+    const lock = readJson<{ packages: Record<string, unknown> }>("package-lock.json");
+
+    expect(pkg.dependencies).not.toHaveProperty("@aws-sdk/s3-presigned-post");
+    expect(lock.packages["node_modules/@aws-sdk/s3-presigned-post"]).toBeUndefined();
+    expect(contract).toContain("`@aws-sdk/s3-presigned-post` is intentionally absent");
+  });
+
   it("links the upstream SDK gaps and the #49 release gate", () => {
     expect(contract).toContain("backblaze-labs/b2-sdk-typescript/issues/153");
     expect(contract).toContain("backblaze-labs/b2-sdk-typescript/issues/154");
