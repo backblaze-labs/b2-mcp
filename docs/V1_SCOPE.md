@@ -100,14 +100,31 @@ Contract tests may assert the approved `s3_*` tool names for Phase 1, but public
 product documentation must not promise general S3 compatibility beyond the
 implemented B2 object-data tools.
 
+## Decision Levels
+
+This record freezes the Phase 1 product scope, package decision, release line,
+runtime floor, transport matrix, named profile identifiers, and exact named
+profile counts.
+
+The safety sections below are binding Phase 1 requirements, but they are not
+intended to freeze every internal design choice. Downstream implementation issues
+may choose the exact internal metric names, error strings, recovery ledger shape,
+and storage formats as long as they preserve the required safety outcomes and
+tests. Header names called out in the credential-mode section are part of the
+external compatibility contract.
+
 ## Tool Profiles
 
-All profile contracts must use deterministic tool ordering by name. Credential
-resolution may narrow a profile, but it must never expand beyond the selected
-named profile.
+All profile contracts must use deterministic tool ordering by name.
 
-The profile count table below is the only numeric source of truth in this
-document:
+The named profile fixtures are exact contracts. The `full`, `phase1-default`,
+and `read-only` fixtures must assert the fixed counts in the table below.
+Credential resolution may produce a narrowed subset, but that subset is not one
+of the exact named fixtures. A narrowed subset must have a derived profile
+identifier, version, ordered tool list, count, and hash, and it must never expand
+beyond its parent named profile.
+
+The profile count table below is the canonical numeric source in this document:
 
 | Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                 |
 | ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------- |
@@ -115,10 +132,11 @@ document:
 | `phase1-default` | 34          | 15     | 19     | 0      | Default customer-hosted user profile for `v0.1.0`.                      |
 | `read-only`      | 17          | 8      | 9      | 0      | Deterministic read-only profile for safe use and contract verification. |
 
-The enumerated tool lists are a Phase 1 point-in-time snapshot. The code source
-of truth is the tool registration modules plus `src/utils/tool-capabilities.ts`;
-any tool-surface change must update those sources, this record or its successor,
-and the generated contract fixtures together.
+The enumerated tool lists below are the canonical membership snapshot for this
+decision. The implementation source is the tool registration modules plus
+`src/utils/tool-capabilities.ts`. The generated contract fixture must
+mechanically assert that the count table, enumerated lists, fixture files, and
+actual registrations agree; any drift must fail CI.
 
 ### `full`
 
@@ -207,7 +225,27 @@ application-key secret.
 - `b2_update_file_retention`
 - `b2_usage_growth`
 
-`s3_*` tools in `phase1-default` are the same `s3_*` tools listed for `full`.
+`s3_*` tools in `phase1-default`:
+
+- `s3_abort_multipart_upload`
+- `s3_complete_multipart_upload`
+- `s3_copy_object`
+- `s3_create_multipart_upload`
+- `s3_delete_object`
+- `s3_delete_objects`
+- `s3_get_bucket_location`
+- `s3_get_object`
+- `s3_get_presigned_url`
+- `s3_head_bucket`
+- `s3_head_object`
+- `s3_list_multipart_uploads`
+- `s3_list_object_versions`
+- `s3_list_objects_v2`
+- `s3_list_parts`
+- `s3_presign_upload_part`
+- `s3_put_bucket_lifecycle`
+- `s3_put_object`
+- `s3_upload_part_copy`
 
 Destructive or protection-weakening tools may be present in `phase1-default`,
 but their registration is not authorization. They are governed by the target
@@ -282,15 +320,13 @@ contract before it can be enabled:
 - If the sink write succeeds but the MCP response fails, a retry with the same
   idempotency key must return the same non-secret sink reference and must not
   create a second credential or account.
-- If B2 creates the secret but the sink write fails, the tool must emit
-  `secret_sink_write_failed`, increment a redacted
-  `b2_mcp_secret_sink_write_failed_total` metric, and log only the correlation
-  ID, idempotency key fingerprint, tool name, principal, target identifier, and
-  non-secret created-resource ID.
-- For `b2_create_key`, sink failure must trigger an immediate compensating
-  `b2_delete_key`. If deletion fails, the key must be marked quarantined in the
-  operator-visible recovery ledger and the metric
-  `b2_mcp_secret_compensation_failed_total` must be incremented.
+- If B2 creates the secret but the sink write fails, the tool must emit a stable
+  non-secret sink-write-failed error class, increment a redacted sink-write
+  failure metric, and log only the correlation ID, idempotency key fingerprint,
+  tool name, principal, target identifier, and non-secret created-resource ID.
+- For `b2_create_key`, sink failure must revoke the created key. If revocation
+  fails, the key must be marked quarantined in the operator-visible recovery
+  ledger and a redacted compensation-failed metric must be incremented.
 - For `b2_create_group_member` and `b2_reserve_trial_create_account`, sink
   failure must either revoke/eject the created account or place it in an
   operator-visible quarantine state that prevents use until the operator
@@ -403,12 +439,13 @@ Every mutating tool must document one of these retry modes:
 - Not retry-safe: the tool must return a clear error class instructing the
   caller to reconcile state before retry.
 
-Creates, durable-secret-producing tools, lifecycle updates, retention changes,
-legal-hold changes, notification changes, multipart start/complete/abort, and
-server-side copy operations require either an idempotency key or a reviewed
-natural-idempotency rule. Deletes by exact identifier may be naturally
-idempotent only when "already missing" can be tied to the same authorized target
-and is reported as already complete rather than as an unknown outcome.
+Create operations, durable-secret-producing operations, lifecycle updates,
+retention changes, legal-hold changes, notification changes, multipart
+start/complete/abort operations, and server-side copy operations require either
+an idempotency key or a reviewed natural-idempotency rule. Deletes by exact
+identifier may be naturally idempotent only when "already missing" can be tied
+to the same authorized target and is reported as already complete rather than as
+an unknown outcome.
 
 The tool contract reference must classify retry behavior for each mutating tool
 individually. The minimum Phase 1 set is the target-authorized default-profile
@@ -492,13 +529,18 @@ are not required for the Phase 1 definition of done.
 
 The Phase 1 tool contract must satisfy these requirements directly:
 
-- Use the profile count table and enumerated profile lists above as the
-  approved profile source of truth.
+- Use the profile count table and enumerated profile lists above as the approved
+  human-readable profile source of truth.
 - Generate deterministic `tools/list` fixtures for `full`, `phase1-default`,
   and `read-only`.
+- Mechanically assert that the generated fixtures, count table, enumerated lists,
+  and actual tool registrations match. Any mismatch must fail CI.
 - Verify total tool count, prefix counts, complete sorted tool names, required
   fields, schema validity, destructive confirmation fields, and absence of
   credential input fields or sensitive header annotations.
+- Assert the fixed named-profile counts for `full`, `phase1-default`, and
+  `read-only`; test credential-resolved subsets separately with derived profile
+  identifiers, derived counts, ordered tool lists, and hashes.
 - Verify no default profile includes a durable-secret-producing tool.
 - Verify per-operation authorization for `s3_get_presigned_url`, including the
   `read-only` prohibition on `PutObject` URLs.
