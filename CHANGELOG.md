@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added the official B2 SDK adoption contract, architecture record, and
+  drift guard for the 40-tool SDK parity matrix.
+- Added an exact `@backblaze-labs/b2-sdk@0.2.0` production dependency pin for
+  the reviewed SDK migration boundary.
 - Added CODEOWNERS, version/build-pinned conda environment metadata, release process
   documentation, and public contract skeleton documents for Phase 1 ownership.
 - Added policy coverage for live workflow secret gates and the Streamable HTTP
@@ -20,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backblaze-labs/b2-mcp`.
 - Aligned package metadata on the `0.1.0` Phase 1 release line.
 - Raised the enforced minimum Node runtime in `engines.node` from `>=18.0.0` to
-  `>=22.3.0`; operators on Node 18 or Node 20 must upgrade to Node 22 before
-  running `npm ci`, `npm run build`, or the release gate.
+  `>=22.3.0`; operators on Node 18, Node 20, or Node 22.0.x-22.2.x must upgrade
+  before running `npm ci`, `npm run build`, or the release gate.
 - Migrated HTTP and stdio serving to the MCP TypeScript SDK v2 modern entry
   points for MCP `2026-07-28`.
 - Made `b2-mcp` the canonical CLI binary while preserving `b2-mcp-server` as a

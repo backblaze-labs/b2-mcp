@@ -6,6 +6,8 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # The SDK will handle durable B2 credentials after migration. Every bump
+      # requires human parity, provenance, and engine-floor review.
       b2-sdk:
         patterns:
           - "@backblaze-labs/b2-sdk"

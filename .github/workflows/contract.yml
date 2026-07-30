@@ -93,7 +93,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
+      - run: npm ci --engine-strict
       - run: npm run build
       - name: Validate live B2 environment
         env:

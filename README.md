@@ -14,7 +14,7 @@ Destructive actions are gated, credentials never enter the model's context, and 
 
 ## Quick start
 
-**Prerequisites:** [Node.js 22.3+](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
+**Prerequisites:** [Node.js 22.3.0 or newer](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
 
 **1. Build:**
 

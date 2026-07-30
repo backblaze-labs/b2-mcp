@@ -7,6 +7,16 @@ on:
     branches: [main]
 
 jobs:
+  engine-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.3.0
+          cache: npm
+      - run: npm ci --engine-strict
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -15,7 +25,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
+      - run: npm ci --engine-strict
       - run: npm run lint
       - run: npm run format:check
 
@@ -27,7 +37,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
+      - run: npm ci --engine-strict
       - run: npm run build
       - run: npm test
 
@@ -35,7 +45,7 @@ jobs:
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green
   # commits ever reach production. Runs only on a successful main push.
   mark-green:
-    needs: [lint, test]
+    needs: [engine-floor, lint, test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
