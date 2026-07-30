@@ -316,7 +316,8 @@ export interface SecretBroker {
 export class EnvSecretBroker implements SecretBroker {
   resolve(ref: string): CredentialMaterial | null {
     const prefix = credentialRefEnvPrefix(ref);
-    return envMaterial(prefix);
+    const material = envMaterial(prefix);
+    return material.applicationKeyId && material.applicationKey ? material : null;
   }
 }
 

@@ -118,6 +118,26 @@ describe("credential providers", () => {
     expect(resolved.cacheKey).not.toContain("tenant-id");
   });
 
+  it("principal provider reports an unmapped secret reference when env material is absent", () => {
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
+
+    let caught: unknown;
+    try {
+      new HttpPrincipalCredentialProvider().resolve({
+        req: {
+          headers: {},
+          auth: { token: "verified", clientId: "client-a", scopes: [], extra: { sub: "alice" } },
+        } as any,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({
+      code: "credential_ref_not_found",
+      status: 403,
+    });
+  });
+
   it("uses the secret in verification identity without changing log identity", () => {
     const provider = new HttpHeaderCredentialProvider();
     const first = provider.resolve({
