@@ -90,7 +90,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
+      - run: npm ci --engine-strict
       - name: Validate live B2 environment
         env:
           MCP_URL: ${{ vars.MCP_URL }}

@@ -46,8 +46,8 @@
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
-    "@aws-sdk/s3-presigned-post": "^3.1086.0",
     "@aws-sdk/s3-request-presigner": "^3.1086.0",
+    "@backblaze-labs/b2-sdk": "0.2.0",
     "@modelcontextprotocol/server": "2.0.0",
     "axios": "^1.18.1",
     "opossum": "^9.0.0",
@@ -69,7 +69,7 @@
     "typescript-eslint": "^8.64.0"
   },
   "engines": {
-    "node": ">=22.3.0"
+    "node": ">=22.13.0"
   },
   "files": [
     "dist/**/*",

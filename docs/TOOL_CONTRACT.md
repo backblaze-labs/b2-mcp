@@ -4,12 +4,15 @@ Owner: Gonza (`@goanpeca`). Quality reviewer: Sophie / Quality Keeper (QK)
 (`@sophiecarreras`).
 
 Status: skeleton. Issue #49 owns the deterministic fixture and drift-test
-implementation. Issue #59 owns the MCP SDK v2 and protocol-era migration.
+implementation, but it is gated on the official SDK parity matrix from #71.
+Issue #59 owns the MCP SDK v2 and protocol-era migration.
 
 ## Phase 1 Source Of Truth
 
 The normative Phase 1 tool-profile decisions live in [`V1_SCOPE.md`](V1_SCOPE.md).
-This document will become the stable public contract once the fixture work lands.
+The normative SDK adoption and 40-tool parity matrix lives in
+[`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md). This document will
+become the stable public contract once the fixture work lands.
 
 The public contract must define:
 
@@ -30,6 +33,12 @@ The public contract must define:
 
 Blocking follow-up coverage is tracked in #49, #58, and #61. Until those land,
 the guarantees above are contract requirements rather than complete CI evidence.
+
+Issue #49 must not freeze tool names, schemas, capability maps, response
+fixtures, or profile hashes until #71 and its SDK implementation follow-ups are
+complete. The frozen fixture must identify the resolved
+`@backblaze-labs/b2-sdk` version and fail if inherited Axios/AWS behavior
+silently reappears outside the reviewed SDK boundary.
 
 Until this document is filled out, [`V1_SCOPE.md`](V1_SCOPE.md) remains the
 normative contract source.
