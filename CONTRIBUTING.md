@@ -18,7 +18,7 @@ npm run lint         # eslint src tests
 npm run format:check # prettier
 ```
 
-For a reproducible conda setup:
+For the version-pinned conda bootstrap:
 
 ```bash
 mamba env create -f environment.yml

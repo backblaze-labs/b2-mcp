@@ -1,4 +1,5 @@
-# Default repository owner for code, docs, and release metadata.
+# Default repository owner for code, docs, and release metadata. Phase 1 uses
+# named owners until a durable Backblaze Labs GitHub team exists for this repo.
 * @goanpeca
 
 # Public contracts and quality/security gates need implementation and QK review.

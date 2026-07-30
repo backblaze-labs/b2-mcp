@@ -442,14 +442,15 @@ skipped. Exit code 0 = pass, 1 = at least one check failed.
 The same script also runs automatically via `.github/workflows/smoke.yml`:
 
 - After every `release.published` event (so a `gh release create` triggers it)
-- Every 6 hours as a heartbeat
-- On manual `workflow_dispatch` from the Actions tab
+- On manual `workflow_dispatch` from the Actions tab when run from `main`
 
-It depends on these repo-level secrets and variable:
+It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
-- `secrets.B2_KEY_ID`, `secrets.B2_KEY`
-- `secrets.B2_APP_KEY_ID`, `secrets.B2_APP_KEY`
+- `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
+- `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 
-The workflow is gated to the canonical repo (`if: github.repository == ...`)
-so personal mirrors don't fire failing runs.
+The workflow is gated to the canonical repo and protected refs, then further
+gated by the `live-b2-smoke` GitHub environment. Configure that environment
+with branch/tag restrictions before storing live B2 secrets there. Add required
+reviewers when the repository plan supports environment reviewers.

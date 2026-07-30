@@ -63,6 +63,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
         console.log("  No writable bucket; skipping.");
         return;
       }
+      console.log(`  Contract notification bucketId=${writableBucketId}`);
       // Capture existing rules to restore.
       const before = parseResult(
         await callTool(server, "b2_get_bucket_notification_rules", { bucketId: writableBucketId }),
@@ -108,6 +109,7 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
     async () => {
       const bucketName = `mcp-contract-retrofit-${Date.now().toString(36)}`;
       let bucketId = "";
+      console.log(`  Contract bucketName=${bucketName}`);
       try {
         const created = parseResult(
           await callTool(server, "b2_create_bucket", { bucketName, bucketType: "allPrivate" }),
@@ -153,6 +155,7 @@ describe("Contract: v4 tool-surface alignment", () => {
       const bucketName = `mcp-contract-pathb-${Date.now().toString(36)}`;
       let bucketId = "";
       const keyIds: string[] = [];
+      console.log(`  Contract bucketName=${bucketName}`);
       try {
         // (e) SSE-B2 with no algorithm — server must inject algorithm:"AES256"
         //     (regresses to HTTP 400 "Invalid default server-side encryption algorithm" if dropped).

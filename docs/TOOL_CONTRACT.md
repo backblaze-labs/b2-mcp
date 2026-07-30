@@ -28,5 +28,8 @@ The public contract must define:
 - Tests for credential redaction, destructive-operation gating, and unsupported
   capability behavior.
 
+Blocking follow-up coverage is tracked in #49, #58, and #61. Until those land,
+the guarantees above are contract requirements rather than complete CI evidence.
+
 Until this document is filled out, [`V1_SCOPE.md`](V1_SCOPE.md) remains the
 normative contract source.

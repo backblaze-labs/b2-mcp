@@ -7,6 +7,10 @@ The canonical first public release line is `v0.1.0`. The inherited `v1.2.x`
 draft releases and `2.3.0` package version are historical input from the
 incoming repository, not the Phase 1 release line.
 
+The canonical CLI binary is `b2-mcp`. The inherited `b2-mcp-server` binary is
+kept as a transition alias until a later release explicitly deprecates or
+removes it.
+
 ## Changelog Discipline
 
 - Every user-visible change must update `CHANGELOG.md` under `[Unreleased]`.
@@ -23,8 +27,9 @@ Before publishing `v0.1.0`:
 
 1. Confirm `docs/V1_SCOPE.md` still matches the implemented package, runtime,
    tool profiles, and MCP transport contract.
-2. Run the deterministic local gate: `npm ci`, `npm run build`,
-   `npm run typecheck`, `npm run lint`, `npm run format:check`, and `npm test`.
+2. Confirm operators and CI use Node 22, then run the deterministic local gate:
+   `npm ci`, `npm run build`, `npm run typecheck`, `npm run lint`,
+   `npm run format:check`, and `npm test`.
 3. Run or risk-accept the production dependency audit.
 4. Run the secret scan and legal/provenance review in
    `docs/SECURITY_REVIEW.md`.

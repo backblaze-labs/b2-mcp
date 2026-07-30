@@ -59,6 +59,8 @@ The canonical npm package is:
 
 - Package name: `@backblaze-labs/b2-mcp`
 - Owning npm organization/scope: `@backblaze-labs`
+- Canonical CLI binary: `b2-mcp`
+- Transition CLI alias: `b2-mcp-server`
 
 Inherited package names from the incoming repository are not canonical Phase 1
 metadata.

@@ -14,7 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Canonicalized repository, package, workflow, security, and setup metadata for
   `backblaze-labs/b2-mcp`.
-- Standardized documented development and CI runtime metadata on Node.js 22.
+- Raised the enforced minimum Node runtime in `engines.node` from `>=18.0.0` to
+  `>=22.0.0`; operators on Node 18 or Node 20 must upgrade to Node 22 before
+  running `npm ci`, `npm run build`, or the release gate.
+- Made `b2-mcp` the canonical CLI binary while preserving `b2-mcp-server` as a
+  transition alias.
 
 ## [2.3.0] - 2026-06-29
 

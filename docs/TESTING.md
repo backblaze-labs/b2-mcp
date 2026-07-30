@@ -8,7 +8,8 @@ implementation.
 
 ## Deterministic PR Gate
 
-The PR gate must not require real B2 credentials. The intended gate is:
+The PR gate must not require real B2 credentials. The current credential-free
+gate is:
 
 ```bash
 npm ci
@@ -17,13 +18,29 @@ npm run typecheck
 npm run lint
 npm run format:check
 npm test
-npm run test:integration
-npm run test:contract
-npm audit --omit=dev
 ```
 
-`test:integration` and `test:contract` are tracked as required Phase 1 work
-until they are deterministic, credential-free, and wired into CI.
+The current CI check names are `lint` and `test`. If branch protection is added,
+use those names, not the retired matrix names `test (20)` or `test (22)`.
+
+## Future Credential-Free Contract Gate
+
+These commands are required Phase 1 work, but they must not be added to the
+deterministic PR gate until they run without live B2 credentials:
+
+```bash
+npm run test:integration
+npm run test:contract
+```
+
+## Networked Security Gate
+
+The production dependency audit is release-gate evidence and may also become a
+CI gate once #62 resolves or risk-accepts current findings:
+
+```bash
+npm audit --omit=dev
+```
 
 ## Live B2 Smoke Gate
 
@@ -38,5 +55,8 @@ Required properties:
 - teardown that cannot affect unrelated objects;
 - logs and tool responses checked for credential redaction.
 
-The live path runs through `.github/workflows/smoke.yml` or a protected manual
-equivalent.
+The live path runs through `.github/workflows/smoke.yml`,
+`.github/workflows/contract.yml`, or a protected manual equivalent. Any workflow
+that consumes `B2_*` secrets must use a protected GitHub environment, run only
+from `main` or protected `v*` tags, serialize live write tests, and reference
+only environment-scoped `LIVE_B2_*` secrets.

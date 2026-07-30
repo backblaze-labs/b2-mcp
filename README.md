@@ -169,7 +169,7 @@ npm test                   # unit tests (no credentials needed)
 npm run test:integration   # live B2 tests — needs B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 npm start                  # stdio transport
 npm run start:http -- --port 3000   # Streamable HTTP transport
-npx @modelcontextprotocol/inspector npx @backblaze-labs/b2-mcp   # interactive inspector
+npx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspector
 ```
 
 ## Documentation

@@ -12,12 +12,19 @@ fresh clone of the canonical repository:
 
 ```bash
 mamba env create -f environment.yml
-mamba run -n b2-mcp trufflehog --json --regex --entropy=False --repo_path . file://$(pwd)
+mamba run -n b2-mcp trufflehog --json --regex --entropy=True \
+  --exclude_paths .trufflehog-exclude \
+  --repo_path . file://$(pwd)
 ```
 
-`trufflehog` entropy checks can also be run as a secondary pass, but lockfile
-integrity hashes must be triaged separately from secret material. Findings must
-be revoked, removed from history if necessary, and documented before release.
+The exclude file is limited to lockfile integrity-hash noise. Do not disable
+entropy globally: B2 application-key secrets and many session tokens are
+high-entropy strings without a stable textual prefix. Findings must be revoked,
+removed from history if necessary, and documented before release.
+
+To verify the scanner still catches non-regex high-entropy material, create a
+temporary git repository, commit a random high-entropy sentinel string, and
+confirm the command above reports it before running the release scan.
 
 ## Legal And Provenance Checklist
 
