@@ -63,6 +63,20 @@ The canonical npm package is:
 The current inherited package name, `@backblaze/b2-mcp-server`, is not the
 canonical Phase 1 package name.
 
+## Transition State
+
+At the time this record is added, some visible repository surfaces still contain
+inherited values from the incoming project:
+
+- Package/version metadata may still say `@backblaze/b2-mcp-server` and `2.3.0`.
+- Public docs may still mention Node.js 18.
+- Existing tool-count text may still describe the pre-decision surface.
+
+Those inherited values are temporary and must be treated as pre-Phase-1 state.
+Follow-up metadata, documentation, and release work must replace them with the
+canonical `@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js 22 contract before
+`v0.1.0` is released.
+
 ## Runtime
 
 Node.js 22 is the minimum supported runtime for Phase 1.
@@ -92,18 +106,27 @@ All profile contracts must use deterministic tool ordering by name. Credential
 resolution may narrow a profile, but it must never expand beyond the selected
 named profile.
 
-### `full-40`
+The profile count table below is the only numeric source of truth in this
+document:
 
-`full-40` is the complete implemented tool superset. It contains 40 tools:
+| Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                 |
+| ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------- |
+| `full`           | 40          | 21     | 19     | 0      | Complete implemented tool superset for explicit review and regression.  |
+| `phase1-default` | 34          | 15     | 19     | 0      | Default customer-hosted user profile for `v0.1.0`.                      |
+| `read-only`      | 17          | 8      | 9      | 0      | Deterministic read-only profile for safe use and contract verification. |
 
-- 21 `b2_*` tools.
-- 19 `s3_*` tools.
-- 0 `bz_*` tools.
+The enumerated tool lists are a Phase 1 point-in-time snapshot. The code source
+of truth is the tool registration modules plus `src/utils/tool-capabilities.ts`;
+any tool-surface change must update those sources, this record or its successor,
+and the generated contract fixtures together.
 
-`full-40` is for explicit full-surface contract generation, administrative
-review, and regression detection. It is not the default user profile.
+### `full`
 
-`b2_*` tools in `full-40`:
+`full` is the complete implemented tool superset. It is for explicit
+full-surface contract generation, administrative review, and regression
+detection. It is not the default user profile.
+
+`b2_*` tools in `full`:
 
 - `b2_authorize_account`
 - `b2_create_bucket`
@@ -127,7 +150,7 @@ review, and regression detection. It is not the default user profile.
 - `b2_update_file_retention`
 - `b2_usage_growth`
 
-`s3_*` tools in `full-40`:
+`s3_*` tools in `full`:
 
 - `s3_abort_multipart_upload`
 - `s3_complete_multipart_upload`
@@ -155,13 +178,7 @@ review, and regression detection. It is not the default user profile.
 customer-hosted deployment with a standard B2 application key, no distinct
 Partner/master credential, and no configured out-of-band secret sink.
 
-`phase1-default` contains 34 tools:
-
-- 15 `b2_*` tools.
-- 19 `s3_*` tools.
-- 0 `bz_*` tools.
-
-It excludes all 5 Partner/Groups tools:
+It excludes all Partner/Groups tools:
 
 - `b2_create_group_member`
 - `b2_eject_group_member`
@@ -190,12 +207,11 @@ application-key secret.
 - `b2_update_file_retention`
 - `b2_usage_growth`
 
-`s3_*` tools in `phase1-default` are the same 19 `s3_*` tools listed for
-`full-40`.
+`s3_*` tools in `phase1-default` are the same `s3_*` tools listed for `full`.
 
 Destructive or protection-weakening tools may be present in `phase1-default`,
-but they remain governed by server-side destructive-action policy and must not
-execute accidentally.
+but their registration is not authorization. They are governed by the target
+authorization and idempotency requirements below before any side effect occurs.
 
 ### `read-only`
 
@@ -208,12 +224,6 @@ capabilities:
 - `readFiles`
 - `listKeys`
 - `readBucketNotifications`
-
-`read-only` contains 17 tools:
-
-- 8 `b2_*` tools.
-- 9 `s3_*` tools.
-- 0 `bz_*` tools.
 
 `b2_*` tools in `read-only`:
 
@@ -242,7 +252,7 @@ For `read-only`, `s3_get_presigned_url` is limited to read/download URLs. A
 write-capable presigned URL must not be available through the read-only
 contract.
 
-### Secret-Producing Tools
+## Secret-Producing Tools
 
 These tools are classified as durable-secret-producing:
 
@@ -256,15 +266,104 @@ They may be available only in an explicit non-default profile when all of these
 conditions are true:
 
 - The operator has configured an out-of-band secret sink.
-- The tool writes the one-time secret only to that sink.
+- The request includes an idempotency key that is bound to the caller principal,
+  target account or bucket, tool name, and normalized input.
+- The tool writes the one-time secret only to the configured sink.
 - MCP output returns only a reference, key ID, scope, expiry, and non-secret
   metadata.
-- Logs, errors, test artifacts, and structured MCP content never contain the
-  secret value.
+- Logs, metrics, errors, test artifacts, and structured MCP content never
+  contain the secret value.
+
+Each durable-secret-producing tool must define and test its partial-failure
+contract before it can be enabled:
+
+- If the sink write succeeds but the MCP response fails, a retry with the same
+  idempotency key must return the same non-secret sink reference and must not
+  create a second credential or account.
+- If B2 creates the secret but the sink write fails, the tool must emit
+  `secret_sink_write_failed`, increment a redacted
+  `b2_mcp_secret_sink_write_failed_total` metric, and log only the correlation
+  ID, idempotency key fingerprint, tool name, principal, target identifier, and
+  non-secret created-resource ID.
+- For `b2_create_key`, sink failure must trigger an immediate compensating
+  `b2_delete_key`. If deletion fails, the key must be marked quarantined in the
+  operator-visible recovery ledger and the metric
+  `b2_mcp_secret_compensation_failed_total` must be incremented.
+- For `b2_create_group_member` and `b2_reserve_trial_create_account`, sink
+  failure must either revoke/eject the created account or place it in an
+  operator-visible quarantine state that prevents use until the operator
+  recovers or revokes it. The MCP response must be a failure, not a success with
+  a missing secret.
+- Restart-after-side-effect tests must cover request crash, timeout, duplicate
+  retry, sink outage, compensation success, and compensation failure.
+
+## Target Authorization
+
+`phase1-default` may include mutating, destructive, or protection-weakening
+tools, but a visible tool is not sufficient authorization.
+
+For `http-server` and `http-principal` modes, a caller crosses from an
+authenticated MCP principal into a server-held B2 credential boundary. Every
+mutating, destructive, or protection-weakening call must pass target-scoped
+authorization for the specific bucket, application key, object, file version,
+retention setting, legal hold, lifecycle rule, notification rule, multipart
+upload, or account affected by the request.
+
+Target authorization must happen after credential/principal resolution and
+before any B2 or S3 side effect. Shape validation, possession of a tool name,
+and broad access to the shared B2 credential are not authorization.
+
+Negative security tests are required for the default profile and must prove that
+one authenticated principal cannot:
+
+- Delete or update another principal's bucket.
+- Delete another principal's application key.
+- Delete, overwrite, copy, or multipart-write another principal's objects.
+- Weaken retention, clear legal hold, or schedule lifecycle deletion for another
+  principal's files.
+- Use a shared server-held credential to operate on a target outside the
+  principal's allowlist.
+
+Default-profile tools that require this target authorization include:
+
+- `b2_create_bucket`
+- `b2_delete_bucket`
+- `b2_delete_key`
+- `b2_set_bucket_notification_rules`
+- `b2_update_bucket`
+- `b2_update_file_legal_hold`
+- `b2_update_file_retention`
+- `s3_abort_multipart_upload`
+- `s3_complete_multipart_upload`
+- `s3_copy_object`
+- `s3_create_multipart_upload`
+- `s3_delete_object`
+- `s3_delete_objects`
+- `s3_presign_upload_part`
+- `s3_put_bucket_lifecycle`
+- `s3_put_object`
+- `s3_upload_part_copy`
+
+## Presigned URL Policy
 
 Presigned URLs are short-lived bearer capabilities, not durable B2 secrets. They
-may be returned through MCP only with clear operation, target, and expiry
-metadata, and their maximum duration must remain policy-bounded.
+may be returned through MCP only with clear operation, target, expiry, principal,
+and correlation metadata.
+
+`s3_get_presigned_url` must authorize the requested operation, not only the tool
+name:
+
+- `GetObject` URLs require read authorization for the exact target.
+- `PutObject` URLs require write authorization for the exact target.
+- `PutObject` URLs are forbidden in `read-only`.
+- The expiry must be capped by operator policy, and the default maximum must be
+  conservative enough for the intended transfer rather than the S3 service
+  maximum.
+- Structured logs must record only non-secret URL metadata, never the bearer URL
+  itself.
+
+Negative tests must prove that read-only credentials and read-only principals
+cannot mint write-capable presigned URLs.
 
 ## Transport and Protocol Matrix
 
@@ -272,11 +371,13 @@ Phase 1 supports two transports:
 
 | Transport       | Preferred era    | Phase 1 fallback                                                                           | Notes                                                                                                   |
 | --------------- | ---------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| `stdio`         | MCP `2026-07-28` | Stateless 2025-era compatibility                                                           | Local clients run the Node entry point as a subprocess.                                                 |
+| `stdio`         | MCP `2026-07-28` | Stateless 2025-era compatibility for `2025-03-26` and `2025-06-18` clients                 | Local clients run the Node entry point as a subprocess.                                                 |
 | Streamable HTTP | MCP `2026-07-28` | Stateless 2025-era Streamable HTTP compatibility for `2025-03-26` and `2025-06-18` clients | Hosted deployments use a single `/mcp` endpoint behind customer-operated TLS and caller authentication. |
 
 MCP `2026-07-28` is the preferred era for `v0.1.0`. Stateless 2025-era fallback
-exists only to keep compatible 2025-era clients working during migration.
+exists only to keep compatible `2025-03-26` and `2025-06-18` clients working
+during migration. No other 2025 revision is part of the Phase 1 support matrix
+unless a later decision record adds it.
 
 Phase 1 does not require HTTP+SSE, protocol-level sessions, GET streams, DELETE
 session termination, event replay, Roots, Sampling, MCP Logging, Tasks, MCP Apps,
@@ -286,6 +387,60 @@ Modern and fallback clients must observe the same approved tool profile for the
 same resolved authorization. Modern tool-list caching must be private and
 authorization-safe.
 
+## Stateless Retry and Idempotency
+
+Phase 1 supports mutating tools over stateless Streamable HTTP, so retry safety
+is part of the product contract.
+
+Every mutating tool must document one of these retry modes:
+
+- Natural idempotency: the repeated request has the same final state and returns
+  a stable already-complete result when the target state already matches.
+- Required idempotency key: the caller supplies a key bound to the principal,
+  tool name, target, and normalized input before any side effect.
+- Not retry-safe: the tool must return a clear error class instructing the
+  caller to reconcile state before retry.
+
+Creates, durable-secret-producing tools, lifecycle updates, retention changes,
+legal-hold changes, notification changes, multipart start/complete/abort, and
+server-side copy operations require either an idempotency key or a reviewed
+natural-idempotency rule. Deletes by exact identifier may be naturally
+idempotent only when "already missing" can be tied to the same authorized target
+and is reported as already complete rather than as an unknown outcome.
+
+The tool contract reference must classify retry behavior for each mutating tool
+individually. The minimum Phase 1 set is the target-authorized default-profile
+tools listed above plus any enabled durable-secret-producing tools.
+
+Structured logs for every mutating call must include a non-secret correlation
+ID, principal or credential fingerprint, tool name, target identifier,
+idempotency key fingerprint when present, final outcome, and safe-to-retry
+classification. The raw B2 secret, presigned URL, or request body content must
+not be logged.
+
+Contract tests or operational runbooks must cover duplicate requests,
+restart-after-side-effect, timeout-after-side-effect, and retry of each declared
+safe-to-retry error class.
+
+## Rolling Deploy Compatibility
+
+Tool-profile compatibility must survive rolling deploys.
+
+Each generated tool profile must carry a count-independent profile identifier
+(`full`, `phase1-default`, or `read-only`), a semantic profile version, and a
+hash of the ordered tool/schema contract. Cache keys and modern private
+`tools/list` metadata must include the profile identifier and hash.
+
+During a rolling deploy, new instances must continue serving the previous
+deploy's advertised profile until the maximum advertised tool-list TTL has
+expired. After that TTL, calls that carry an unknown or expired profile hash may
+return a typed stale-profile error that tells the client to refresh `tools/list`
+without executing a side effect.
+
+Profile changes must follow an expand-contract rule: add backward-compatible
+tools or fields first, wait for caches to expire, then remove or narrow
+previously advertised tools in a later deploy.
+
 ## Credential Modes
 
 Phase 1 supports these credential modes:
@@ -293,13 +448,31 @@ Phase 1 supports these credential modes:
 | Mode             | Transport                | Credential custody                                          | Phase 1 requirement                                                                                                                                |
 | ---------------- | ------------------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stdio-env`      | `stdio`                  | Local process environment                                   | Read `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`; optionally read `B2_MASTER_KEY_ID` and `B2_MASTER_KEY` for explicit Partner/admin profiles. |
-| `http-headers`   | Streamable HTTP fallback | MCP client or bridge                                        | Compatibility mode only. B2 credentials are sent on every request over TLS. The server must not persist them beyond request handling.              |
+| `http-headers`   | Streamable HTTP fallback | MCP client or bridge                                        | Explicit opt-in compatibility mode only. Prefer credential references or short-lived tokens. Durable B2 keys in headers are disabled by default.   |
 | `http-server`    | Streamable HTTP          | Customer-operated server process or customer secret manager | The MCP client sends no B2 key. The customer-operated deployment selects the configured B2 credential.                                             |
 | `http-principal` | Streamable HTTP          | Customer-operated secret broker                             | A customer-operated MCP OAuth resource server validates the caller and passes verified principal/auth info to map to a B2 credential reference.    |
 
 Credential values must never be accepted as ordinary tool input fields and must
 not appear in MCP tool content, structured content, logs, HTTP errors, snapshots,
 or CI artifacts.
+
+If `http-headers` compatibility mode remains enabled in an implementation, it
+must meet all of these requirements:
+
+- It is disabled by default and requires an explicit operator setting.
+- It uses only the dedicated B2 MCP secret header names
+  `X-B2-MCP-Key-Id`, `X-B2-MCP-Key`, `X-B2-MCP-Master-Key-Id`, and
+  `X-B2-MCP-Master-Key`. Generic B2 environment variable names and inherited
+  `X-B2-Key-*` header names are not the Phase 1 compatibility contract.
+- Those dedicated header names are classified as secrets by the HTTP server,
+  reverse proxy, APM, and log redaction configuration.
+- The edge strips inbound duplicate credential headers before forwarding.
+- Headers are never propagated to downstream logs, errors, telemetry, snapshots,
+  access logs, or CI artifacts.
+- Dependency and middleware review treats request headers as durable secret
+  material.
+- Negative tests prove B2 credential headers cannot appear in structured logs,
+  HTTP errors, snapshots, or test artifacts.
 
 ## OAuth and Hosted Service Boundary
 
@@ -313,16 +486,43 @@ A Backblaze-managed authorization server, Backblaze-operated token exchange,
 hosted multi-tenancy, and Backblaze-managed credential broker are Phase 2 and
 are not required for the Phase 1 definition of done.
 
-## Contract Implications
+## Tool Contract Requirements
 
-Issue [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) must derive its
-expected tool contract from this document:
+The Phase 1 tool contract must satisfy these requirements directly:
 
-- `full-40`: 40 total, 21 `b2_*`, 19 `s3_*`, 0 `bz_*`.
-- `phase1-default`: 34 total, 15 `b2_*`, 19 `s3_*`, 0 `bz_*`.
-- `read-only`: 17 total, 8 `b2_*`, 9 `s3_*`, 0 `bz_*`.
-- No default profile includes a durable-secret-producing tool.
-- Modern and stateless fallback eras must expose the same profile for the same
+- Use the profile count table and enumerated profile lists above as the
+  approved profile source of truth.
+- Generate deterministic `tools/list` fixtures for `full`, `phase1-default`,
+  and `read-only`.
+- Verify total tool count, prefix counts, complete sorted tool names, required
+  fields, schema validity, destructive confirmation fields, and absence of
+  credential input fields or sensitive header annotations.
+- Verify no default profile includes a durable-secret-producing tool.
+- Verify per-operation authorization for `s3_get_presigned_url`, including the
+  `read-only` prohibition on `PutObject` URLs.
+- Verify target-scoped authorization for destructive and protection-weakening
+  default-profile tools.
+- Verify idempotency, retry, and restart-after-side-effect behavior for
+  mutating tools.
+- Verify modern and stateless fallback eras expose the same profile for the same
   resolved authorization.
-- Tool names must sort deterministically and no contract may include credentials
-  or sensitive header annotations.
+- Verify rolling deploy compatibility through profile identifiers, profile
+  hashes, cache TTLs, and stale-profile handling.
+
+## Tracking Notes
+
+The tracker issues that should consume this decision include:
+
+- [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) for deterministic
+  tool contract fixtures.
+- [#57](https://github.com/backblaze-labs/b2-mcp/issues/57) for credential
+  providers.
+- [#58](https://github.com/backblaze-labs/b2-mcp/issues/58) for durable-secret
+  output policy.
+- [#59](https://github.com/backblaze-labs/b2-mcp/issues/59) for MCP
+  `2026-07-28` and 2025-era fallback serving.
+- [#64](https://github.com/backblaze-labs/b2-mcp/issues/64) for package and
+  release automation.
+
+These links are provenance, not the normative contract. The normative
+requirements are the sections above.
