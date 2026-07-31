@@ -123,11 +123,20 @@ describe("SDK adoption contract", () => {
     const matrixRows = [...contract.matchAll(/^\| `((?:b2|s3)_[a-z0-9_]+)`\s+\|/gm)].map(
       (match) => match[1],
     );
+    const rowCounts = new Map<string, number>();
+    for (const tool of matrixRows) rowCounts.set(tool, (rowCounts.get(tool) ?? 0) + 1);
+    const duplicateRows = [...rowCounts]
+      .filter(([, count]) => count > 1)
+      .map(([tool]) => tool)
+      .sort();
+    const uniqueRows = [...rowCounts.keys()].sort();
 
     const registeredSet = new Set(registered);
-    const extraRows = [...new Set(matrixRows)].filter((tool) => !registeredSet.has(tool));
+    const extraRows = uniqueRows.filter((tool) => !registeredSet.has(tool)).sort();
+    const expectedRows = [...registered, ...DURABLE_SECRET_PRODUCING_TOOLS].sort();
 
-    expect(registered.every((tool) => matrixRows.includes(tool))).toBe(true);
+    expect(duplicateRows).toEqual([]);
+    expect(uniqueRows).toEqual(expectedRows);
     expect(extraRows.sort()).toEqual([...DURABLE_SECRET_PRODUCING_TOOLS].sort());
   });
 
