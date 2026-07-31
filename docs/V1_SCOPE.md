@@ -129,11 +129,11 @@ beyond its parent named profile.
 
 The profile count table below is the canonical numeric source in this document:
 
-| Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                 |
-| ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------- |
-| `full`           | 37          | 18     | 19     | 0      | Complete implemented tool superset for explicit review and regression.  |
-| `phase1-default` | 34          | 15     | 19     | 0      | Default customer-hosted user profile for `v0.1.0`.                      |
-| `read-only`      | 17          | 8      | 9      | 0      | Deterministic read-only profile for safe use and contract verification. |
+| Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                   |
+| ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------------------------- |
+| `full`           | 40          | 21     | 19     | 0      | Complete implemented tool superset plus 3 unavailable compatibility stubs.                |
+| `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted user profile for `v0.1.0` plus 3 unavailable compatibility stubs. |
+| `read-only`      | 20          | 11     | 9      | 0      | Deterministic read-only profile plus 3 unavailable compatibility stubs.                   |
 
 The enumerated tool lists below are the canonical membership snapshot for this
 decision. The implementation source is the tool registration modules plus
@@ -300,9 +300,10 @@ These tools are classified as durable-secret-producing:
 - `b2_create_group_member`
 - `b2_reserve_trial_create_account`
 
-They are excluded from `phase1-default` and `read-only`. The current
-implementation has no out-of-band secret sink, so these tools are not registered
-in any served profile.
+Their secret-producing handlers are excluded from `phase1-default` and
+`read-only`. The current implementation has no out-of-band secret sink, so these
+tool names are registered only as compatibility stubs that return a structured
+non-secret unavailable error.
 
 Sensitive response fields and structures inventoried for the Phase 1 sanitizer:
 
@@ -477,7 +478,8 @@ an unknown outcome.
 
 The tool contract reference must classify retry behavior for each mutating tool
 individually. The minimum Phase 1 set is the target-authorized default-profile
-tools listed above plus any enabled durable-secret-producing tools.
+tools listed above plus unavailable durable-secret-producing compatibility stubs
+or any future sink-backed durable-secret-producing tools.
 
 Structured logs for every mutating call must include a non-secret correlation
 ID, principal or credential fingerprint, tool name, target identifier,

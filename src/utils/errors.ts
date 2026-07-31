@@ -23,6 +23,26 @@ function headerRequestId(headers: unknown): string | undefined {
   return typeof id === "string" ? id : undefined;
 }
 
+function stringOrFallback(value: unknown, fallback: string): string {
+  return typeof value === "string" && value ? value : fallback;
+}
+
+function messageOrFallback(value: unknown, fallback: string): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return fallback;
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json === "string") return json;
+  } catch {
+    // Fall through to String(value).
+  }
+  return String(value);
+}
+
+function numberOrFallback(value: unknown, fallback: number): number {
+  return typeof value === "number" ? value : fallback;
+}
+
 /**
  * Parse an error from a B2 API call and return a structured error object.
  *
@@ -49,7 +69,7 @@ export function parseB2Error(err: unknown): B2ApiError {
       return {
         status,
         code,
-        message: typeof e.message === "string" ? e.message : "An unknown error occurred",
+        message: messageOrFallback(e.message, "An unknown error occurred"),
         requestId: typeof meta.requestId === "string" ? meta.requestId : undefined,
         extendedRequestId:
           typeof meta.extendedRequestId === "string" ? meta.extendedRequestId : undefined,
@@ -59,11 +79,12 @@ export function parseB2Error(err: unknown): B2ApiError {
     // Axios-style error with a response body (B2 native API).
     if (e.response && typeof e.response === "object") {
       const resp = e.response as Record<string, unknown>;
-      const data = (resp.data ?? {}) as Record<string, unknown>;
+      const data =
+        resp.data && typeof resp.data === "object" ? (resp.data as Record<string, unknown>) : {};
       return {
-        status: (resp.status as number) ?? 500,
-        code: (data.code as string) ?? "unknown_error",
-        message: (data.message as string) ?? "An unknown error occurred",
+        status: numberOrFallback(resp.status, 500),
+        code: stringOrFallback(data.code, "unknown_error"),
+        message: messageOrFallback(data.message, "An unknown error occurred"),
         requestId: headerRequestId(resp.headers),
       };
     }
@@ -72,7 +93,11 @@ export function parseB2Error(err: unknown): B2ApiError {
       return { status: (e.status as number) ?? 500, code: e.code, message: e.message };
     }
     if (e.message) {
-      return { status: 500, code: "internal_error", message: String(e.message) };
+      return {
+        status: 500,
+        code: "internal_error",
+        message: messageOrFallback(e.message, "An unknown error occurred"),
+      };
     }
   }
   return { status: 500, code: "internal_error", message: String(err) };

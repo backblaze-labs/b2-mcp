@@ -284,11 +284,20 @@ describe("b2_delete_bucket", () => {
 // ── durable-secret-producing tools ────────────────────────────────────────────
 
 describe("durable-secret-producing tools", () => {
-  it("does not register tools that would return one-time B2 secrets without a sink", () => {
+  it("keeps stale tool names callable as non-secret unavailable stubs", async () => {
     const tools = (server as any)._registeredTools ?? {};
-    expect(tools.b2_create_key).toBeUndefined();
-    expect(tools.b2_create_group_member).toBeUndefined();
-    expect(tools.b2_reserve_trial_create_account).toBeUndefined();
+    for (const name of [
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
+    ]) {
+      expect(tools[name]).toBeDefined();
+      const result = await callTool(server, name, { keyName: "stale-client" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("tool_unavailable");
+      expect(result.content[0].text).not.toContain("mock-token-xyz");
+    }
+    expect(mockedAxios).not.toHaveBeenCalled();
   });
 });
 

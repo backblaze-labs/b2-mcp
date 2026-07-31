@@ -71,9 +71,10 @@ export function registerPartnerTools(
     },
   );
 
-  // Phase 1 deliberately does not register b2_create_group_member. The response
-  // includes a one-time application key secret, and this server has no
-  // out-of-band secret sink for durable credentials.
+  // Phase 1 deliberately does not register the real b2_create_group_member
+  // handler here. The response includes a one-time application key secret, and
+  // this server has no out-of-band secret sink for durable credentials.
+  // createServer registers a non-secret compatibility stub for stale clients.
 
   // ── b2_eject_group_member ───────────────────────────────────────────────────
   server.tool(
@@ -169,6 +170,8 @@ export function registerPartnerTools(
     },
   );
 
-  // Phase 1 deliberately does not register b2_reserve_trial_create_account for
-  // the same reason: trial account creation returns durable credential material.
+  // Phase 1 deliberately does not register the real
+  // b2_reserve_trial_create_account handler for the same reason: trial account
+  // creation returns durable credential material. createServer registers a
+  // non-secret compatibility stub for stale clients.
 }

@@ -67,10 +67,16 @@ export const TEXT_SECRET_LABELS = [
   ...SECRET_ENV_VAR_NAMES,
 ] as const;
 
+const NON_SECRET_TOKEN_FIELD_NAMES = new Set([
+  "continuationtoken",
+  "nextcontinuationtoken",
+  "nexttoken",
+]);
+
 const LABELED_SECRET = new RegExp(
-  `((?:${TEXT_SECRET_LABELS.map(escapeRegExp)
+  `(["']?(?:${TEXT_SECRET_LABELS.map(escapeRegExp)
     .sort((a, b) => b.length - a.length)
-    .join("|")})\\s*[:=]\\s*["']?)([^"',\\s}\\]]+)`,
+    .join("|")})["']?\\s*[:=]\\s*["']?)(?!${escapeRegExp(REDACTED)})([^"',\\s}\\]]+)`,
   "gi",
 );
 
@@ -105,7 +111,7 @@ function isSensitiveField(key: string, path: readonly string[]): boolean {
   const normalized = normalizeKey(key);
   if (SENSITIVE_FIELD_NAMES.has(normalized)) return true;
   if (normalized.endsWith("secret") && normalized !== "secretname") return true;
-  if (normalized.endsWith("token") && !["continuationtoken", "nexttoken"].includes(normalized)) {
+  if (normalized.endsWith("token") && !NON_SECRET_TOKEN_FIELD_NAMES.has(normalized)) {
     return true;
   }
   if (key === "value" && path.some((segment) => normalizeKey(segment) === "customheaders")) {
@@ -179,7 +185,7 @@ export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): Sani
 }
 
 export function sanitizeText(text: string, options: SanitizerOptions = {}): string {
-  let safe = text;
+  let safe = typeof text === "string" ? text : String(text);
   for (const secret of configuredSecretValues(options)) {
     safe = safe.split(secret).join(REDACTED);
   }
@@ -187,17 +193,6 @@ export function sanitizeText(text: string, options: SanitizerOptions = {}): stri
     .replace(CANARY_SECRET, REDACTED)
     .replace(BEARER_OR_BASIC, `$1${REDACTED}`)
     .replace(LABELED_SECRET, `$1${REDACTED}`);
-}
-
-function sanitizeJsonText(text: string, options: SanitizerOptions): string | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
-  try {
-    const parsed = JSON.parse(text);
-    return JSON.stringify(sanitizeForMcpOutput(parsed, options), null, 2);
-  } catch {
-    return null;
-  }
 }
 
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
@@ -211,7 +206,7 @@ function sanitizeValue(
   options: SanitizerOptions,
 ): unknown {
   if (typeof value === "string") {
-    return sanitizeJsonText(value, options) ?? sanitizeText(value, options);
+    return sanitizeText(value, options);
   }
   if (value === null || typeof value !== "object") return value;
   if (value instanceof Date) return value;

@@ -133,11 +133,14 @@ describe("SDK adoption contract", () => {
 
     const registeredSet = new Set(registered);
     const extraRows = uniqueRows.filter((tool) => !registeredSet.has(tool)).sort();
-    const expectedRows = [...registered, ...DURABLE_SECRET_PRODUCING_TOOLS].sort();
+    const approvedExtraRows = [...DURABLE_SECRET_PRODUCING_TOOLS]
+      .filter((tool) => !registeredSet.has(tool))
+      .sort();
+    const expectedRows = [...new Set([...registered, ...DURABLE_SECRET_PRODUCING_TOOLS])].sort();
 
     expect(duplicateRows).toEqual([]);
     expect(uniqueRows).toEqual(expectedRows);
-    expect(extraRows.sort()).toEqual([...DURABLE_SECRET_PRODUCING_TOOLS].sort());
+    expect(extraRows).toEqual(approvedExtraRows);
   });
 
   it("inventories every runtime Axios and AWS SDK import site from src", () => {

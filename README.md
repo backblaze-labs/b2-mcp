@@ -2,11 +2,12 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools.
 
-**37 tools, split by what they do:**
+**40 tools, split by what they do:**
 
 - **Control plane (14, native B2 API)** — buckets, key listing/deletion, Partner/Groups administration, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
 - **Data plane (19, S3-compatible API)** — object upload/download/copy/list/delete, multipart, presigned URLs. _(Forward-compatible; S3 is the standard surface for object data.)_
 - **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
+- **Unavailable compatibility stubs (3, native B2 API)** — durable-secret-producing tool names return a non-secret unavailable error until a reviewed out-of-band secret sink exists.
 
 Destructive actions are gated, durable B2 secrets never enter the model's context, and the tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
@@ -85,7 +86,7 @@ A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-acces
 
 ## Available tools
 
-**37 total — 18 native (`b2_*`) + 19 data-plane (`s3_*`).** Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, Partner/Groups administration, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), Group-member eject (`b2_eject_group_member`), and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 37 tools are active; 3 native names are unavailable compatibility stubs for stale cached `tools/list` clients. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, Partner/Groups administration, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), Group-member eject (`b2_eject_group_member`), and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
 <summary><b>Control plane — native B2 API (14)</b></summary>
@@ -110,7 +111,7 @@ A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-acces
 
 </details>
 
-Durable-secret-producing operations are not registered in Phase 1 because there is no configured out-of-band secret sink. This excludes `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account`. A future sink-backed profile may expose them only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
+Durable-secret-producing operations are registered only as compatibility stubs in Phase 1 because there is no configured out-of-band secret sink. Calls to `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` return a structured non-secret unavailable error. A future sink-backed profile may expose them only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
 
 <details>
 <summary><b>Data plane — S3-compatible API (19)</b></summary>

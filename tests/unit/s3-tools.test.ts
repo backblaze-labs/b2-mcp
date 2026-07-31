@@ -79,6 +79,24 @@ describe("s3_head_bucket", () => {
   });
 });
 
+describe("s3_list_objects_v2", () => {
+  it("preserves nextContinuationToken for truncated responses", async () => {
+    sendSpy.mockResolvedValue({
+      Contents: [{ Key: "a.txt", Size: 1 }],
+      IsTruncated: true,
+      NextContinuationToken: "usable-page-cursor",
+      KeyCount: 1,
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_list_objects_v2", { bucket: "b", maxKeys: 1 }),
+    );
+
+    expect(result.isTruncated).toBe(true);
+    expect(result.nextContinuationToken).toBe("usable-page-cursor");
+  });
+});
+
 // ── s3_put_bucket_lifecycle ───────────────────────────────────────────────────
 
 describe("s3_put_bucket_lifecycle", () => {

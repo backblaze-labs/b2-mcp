@@ -90,6 +90,21 @@ describe("parseB2Error", () => {
     };
     expect(parseB2Error(err).requestId).toBe("bz-req-9");
   });
+
+  it("stringifies non-string axios response messages", () => {
+    const parsed = parseB2Error({
+      response: {
+        status: 400,
+        data: {
+          code: "bad_request",
+          message: { applicationKey: CANARY, reason: "bad" },
+        },
+      },
+    });
+
+    expect(parsed.message).toContain("applicationKey");
+    expect(parsed.message).toContain(CANARY);
+  });
 });
 
 describe("formatB2Error", () => {
@@ -172,6 +187,23 @@ describe("formatB2Error", () => {
       else process.env.B2_APPLICATION_KEY = old;
     }
   });
+
+  it("formats and sanitizes object-valued provider messages without throwing", () => {
+    const formatted = formatB2Error({
+      response: {
+        status: 400,
+        data: {
+          code: "bad_request",
+          message: { applicationKey: CANARY, authorizationToken: CANARY, reason: "bad" },
+        },
+      },
+    });
+
+    expect(formatted).toContain("bad_request");
+    expect(formatted).toContain("400");
+    expect(formatted).not.toContain(CANARY);
+    expect(formatted).toContain(SECRET_SANITIZER_REDACTION);
+  });
 });
 
 describe("parseErrorText (round-trips formatB2Error for the audit layer)", () => {
@@ -205,6 +237,22 @@ describe("toolError", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].type).toBe("text");
     expect(result.content[0].text).toContain("test error");
+  });
+
+  it("returns a sanitized structured error for object-valued provider messages", () => {
+    const result = toolError({
+      response: {
+        status: 400,
+        data: {
+          code: "bad_request",
+          message: { applicationKey: CANARY, authorizationToken: CANARY, reason: "bad" },
+        },
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("bad_request");
+    expect(result.content[0].text).not.toContain(CANARY);
   });
 });
 

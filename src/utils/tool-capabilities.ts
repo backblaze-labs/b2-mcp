@@ -12,8 +12,9 @@
  * Semantics: a tool registers when the key holds ANY of its listed capabilities.
  * A tool NOT in this map is always registered (e.g. b2_authorize_account, and the
  * Partner tools, which are gated separately on a configured master key). Durable
- * secret-producing tools are not in the Phase 1 registry at all until a reviewed
- * out-of-band secret sink exists.
+ * secret-producing handlers are disabled until a reviewed out-of-band secret
+ * sink exists; createServer adds non-secret compatibility stubs for stale
+ * tools/list clients.
  */
 export const TOOL_CAPABILITIES: Record<string, string[]> = {
   // ── B2 native control plane ──────────────────────────────────────────────
@@ -55,7 +56,7 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_put_bucket_lifecycle: ["writeBuckets"],
 };
 
-/** Durable-secret-producing tools excluded from Phase 1 registration. */
+/** Durable-secret-producing tool handlers excluded from Phase 1 registration. */
 export const DURABLE_SECRET_PRODUCING_TOOLS = new Set<string>([
   "b2_create_key",
   "b2_create_group_member",
@@ -73,11 +74,11 @@ export const PARTNER_TOOLS = new Set<string>([
 
 /**
  * Whether a tool should be registered for a key with the given capabilities.
- * Durable-secret-producing tools are always disabled until a reviewed secret
+ * Durable-secret-producing handlers are always disabled until a reviewed secret
  * sink exists. Unmapped tools otherwise register unconditionally (conservative:
  * never hide a tool we did not explicitly classify). Mapped tools register when
  * the key holds any of the required capabilities. A null capability set is the
- * explicit full-surface mode and still honors durable-secret exclusion.
+ * explicit full-surface mode and still honors durable-secret handler exclusion.
  */
 export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): boolean {
   if (DURABLE_SECRET_PRODUCING_TOOLS.has(name)) return false;

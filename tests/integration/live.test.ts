@@ -123,14 +123,14 @@ beforeAll(async () => {
 // ── Protocol layer (no credentials needed) ────────────────────────────────────
 
 describe("Protocol layer", () => {
-  it("registers 37 tools total", () => {
+  it("registers 40 callable tool names total", () => {
     const count = Object.keys((server as any)._registeredTools ?? {}).length;
-    expect(count).toBe(37);
+    expect(count).toBe(40);
   });
 
-  it("has 18 B2 native + Partner + insight b2_ tools", () => {
+  it("has 21 B2 native + Partner + insight b2_ tool names", () => {
     const tools = Object.keys((server as any)._registeredTools ?? {});
-    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(18);
+    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(21);
   });
 
   it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
@@ -159,12 +159,13 @@ describe("Protocol layer", () => {
       "b2_list_groups",
       "b2_eject_group_member",
       "b2_list_group_members",
+      // Durable-secret-producing compatibility stubs
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
     ]) {
       expect(tools.has(name)).toBe(true);
     }
-    expect(tools.has("b2_create_key")).toBe(false);
-    expect(tools.has("b2_create_group_member")).toBe(false);
-    expect(tools.has("b2_reserve_trial_create_account")).toBe(false);
   });
 });
 
@@ -357,10 +358,13 @@ describe("Partner API — Groups (gated: B2_PARTNER_LIVE=1)", () => {
     console.log("  Members in group", groupId, ":", members.members?.length ?? 0);
   });
 
-  test("secret-producing Partner create tools are not registered without a sink", () => {
-    const tools = (server as any)._registeredTools ?? {};
-    expect(tools.b2_create_group_member).toBeUndefined();
-    expect(tools.b2_reserve_trial_create_account).toBeUndefined();
+  test("secret-producing Partner create tools are unavailable compatibility stubs", async () => {
+    for (const name of ["b2_create_group_member", "b2_reserve_trial_create_account"]) {
+      const result = await callTool(server, name, {});
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("tool_unavailable");
+      expect(result.content[0].text).not.toContain("authorizationToken");
+    }
   });
 });
 

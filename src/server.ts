@@ -2,13 +2,13 @@ import { createMcpServer, type McpServer } from "./mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
-import { parseErrorText } from "./utils/errors.js";
+import { parseErrorText, toolError } from "./utils/errors.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
-import { isToolEnabled } from "./utils/tool-capabilities.js";
+import { DURABLE_SECRET_PRODUCING_TOOLS, isToolEnabled } from "./utils/tool-capabilities.js";
 import {
   sanitizeError,
   sanitizerOptionsFromConfig,
@@ -46,6 +46,22 @@ export function loadConfig(): B2Config {
     if (!(err instanceof CredentialResolutionError)) throw err;
     logger.fatal("config.missing: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required");
     process.exit(1);
+  }
+}
+
+function registerDurableSecretCompatibilityStubs(registerTool: McpServer["tool"]): void {
+  for (const name of DURABLE_SECRET_PRODUCING_TOOLS) {
+    registerTool(
+      name,
+      "Compatibility stub for a durable-secret-producing B2 operation that is unavailable until an out-of-band secret sink is configured.",
+      {},
+      async () =>
+        toolError({
+          status: 410,
+          code: "tool_unavailable",
+          message: `${name} is unavailable because it produces durable credential material and no out-of-band secret sink is configured.`,
+        }),
+    );
   }
 }
 
@@ -172,6 +188,12 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // Phase 1 reads the daily usage-report CSVs (native bucket lookup + S3 get);
   // Phase 2 is live per-bucket S3 listing.
   registerInsightTools(server, b2Client, s3Client, auth);
+
+  // Rolling deploy compatibility: clients can cache an older tools/list that
+  // included durable-secret-producing tools. Keep those names callable, but
+  // return a stable non-secret unavailable error instead of reintroducing the
+  // old secret-producing handlers.
+  registerDurableSecretCompatibilityStubs(originalTool as McpServer["tool"]);
 
   const toolCount = wrapToolsWithAudit(server, config);
   logger.info({ toolCount, version: VERSION }, "server.ready");

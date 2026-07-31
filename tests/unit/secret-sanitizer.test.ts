@@ -6,6 +6,7 @@ import {
   configuredSecretValuesFromConfig,
   LOGGER_SECRET_REDACTION_PATHS,
   sanitizeForMcpOutput,
+  sanitizeError,
   sanitizeText,
   SECRET_SANITIZER_REDACTION,
   STRUCTURED_SECRET_FIELD_NAMES,
@@ -49,7 +50,11 @@ describe("secret sanitizer canary policy", () => {
         hmacSha256SigningSecret: CANARY,
         customHeaders: [{ name: "X-Auth", value: CANARY }],
       },
-      nested: { secretAccessKey: CANARY, continuationToken: "page-2" },
+      nested: {
+        secretAccessKey: CANARY,
+        continuationToken: "page-2",
+        nextContinuationToken: "page-3",
+      },
     });
     const parsed = JSON.parse(result.content[0].text);
 
@@ -68,6 +73,7 @@ describe("secret sanitizer canary policy", () => {
     expect(parsed.targetConfiguration.customHeaders[0].value).toBe(SECRET_SANITIZER_REDACTION);
     expect(parsed.nested.secretAccessKey).toBe(SECRET_SANITIZER_REDACTION);
     expect(parsed.nested.continuationToken).toBe("page-2");
+    expect(parsed.nested.nextContinuationToken).toBe("page-3");
   });
 
   it("does not redact allowed short-lived presigned URL bearer fields", () => {
@@ -86,12 +92,40 @@ describe("secret sanitizer canary policy", () => {
   });
 
   it("redacts bearer and basic authorization values after an authorization label", () => {
-    expect(sanitizeText("authorization: Bearer bearer-token-secret")).not.toContain(
+    expect(sanitizeText("Authorization: Bearer bearer-token-secret")).not.toContain(
       "bearer-token-secret",
     );
     expect(sanitizeText("authorization: Basic basic-token-secret")).not.toContain(
       "basic-token-secret",
     );
+  });
+
+  it("redacts JSON-formatted sensitive fields in text without parsing the whole string", () => {
+    const json = `{"applicationKey":"json-application-secret","authorizationToken":"json-auth-secret","metadata":"keep"}`;
+
+    expect(sanitizeText(json)).toBe(
+      `{"applicationKey":"${SECRET_SANITIZER_REDACTION}","authorizationToken":"${SECRET_SANITIZER_REDACTION}","metadata":"keep"}`,
+    );
+  });
+
+  it("redacts JSON-formatted sensitive fields from sanitized Error objects", () => {
+    const safe = sanitizeError(
+      new Error(`{"applicationKey":"${CANARY}","authorizationToken":"${CONFIGURED_APP_KEY}"}`),
+      { secrets: [CONFIGURED_APP_KEY] },
+    );
+
+    expect(safe.message).not.toContain(CANARY);
+    expect(safe.message).not.toContain(CONFIGURED_APP_KEY);
+  });
+
+  it("leaves non-secret JSON-valued strings byte-for-byte unchanged", () => {
+    const metadata = `{"plain":"value","nested":{"count":2}}`;
+    const largeJsonLookingString = `[${Array.from({ length: 2000 }, (_, i) => `"item-${i}"`).join(
+      ",",
+    )}]`;
+    const result = sanitizeForMcpOutput({ metadata, largeJsonLookingString });
+
+    expect(result).toEqual({ metadata, largeJsonLookingString });
   });
 
   it("redacts supported configured secret env aliases from text", () => {
@@ -139,7 +173,10 @@ describe("secret sanitizer canary policy", () => {
     const result = toolError({
       response: {
         status: 400,
-        data: { code: "bad_request", message: `applicationKey=${CANARY}` },
+        data: {
+          code: "bad_request",
+          message: `{"applicationKey":"${CANARY}","authorizationToken":"${CANARY}"}`,
+        },
       },
     });
     expect(result.isError).toBe(true);
@@ -169,6 +206,28 @@ describe("secret sanitizer canary policy", () => {
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(CONFIGURED_APPLICATION_KEY);
   });
 
+  it("redacts JSON-formatted sensitive fields from wrapped response strings", async () => {
+    const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const tool: Record<string, unknown> = {
+      callback: jest.fn().mockResolvedValue({
+        content: [
+          {
+            type: "text",
+            text: `{"applicationKey":"${CANARY}","authorizationToken":"${CONFIGURED_APPLICATION_KEY}"}`,
+          },
+        ],
+      }),
+    };
+    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
+    wrapToolsWithAudit(server, cfg);
+
+    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)({}, {});
+
+    expectNoCanary(result);
+    expect(JSON.stringify(result)).not.toContain(CONFIGURED_APPLICATION_KEY);
+    expectNoCanary(infoSpy.mock.calls);
+  });
+
   it("redacts configured secret values from wrapped tool errors", async () => {
     const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const tool: Record<string, unknown> = {
@@ -191,7 +250,9 @@ describe("secret sanitizer canary policy", () => {
       callback: jest
         .fn()
         .mockRejectedValue(
-          new Error(`authorizationToken=${CANARY} raw ${CONFIGURED_APPLICATION_KEY}`),
+          new Error(
+            `{"applicationKey":"${CANARY}","authorizationToken":"${CONFIGURED_APPLICATION_KEY}"}`,
+          ),
         ),
     };
     const server = { _registeredTools: { t: tool } } as unknown as McpServer;

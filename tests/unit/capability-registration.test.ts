@@ -65,14 +65,15 @@ describe("isToolEnabled", () => {
 });
 
 describe("capability-aware registration", () => {
-  it("null capabilities → full surface, no filtering (37 tools)", () => {
-    expect(toolNames(null).length).toBe(37);
+  it("null capabilities → full surface plus compatibility stubs, no filtering (40 tools)", () => {
+    expect(toolNames(null).length).toBe(40);
   });
 
   it("EMPTY capabilities → fail closed instead of full surface", () => {
     const names = toolNames([]);
-    expect(names.length).toBeLessThan(37);
+    expect(names.length).toBeLessThan(40);
     expect(names).toContain("b2_authorize_account");
+    expect(names).toContain("b2_create_key");
     expect(names).not.toContain("b2_usage_growth");
   });
 
@@ -95,16 +96,21 @@ describe("capability-aware registration", () => {
       "s3_delete_objects",
       "s3_put_object",
       "b2_delete_bucket",
-      "b2_create_key",
       "b2_delete_key",
       "b2_update_file_retention",
       "b2_update_file_legal_hold",
-      "b2_create_group_member",
       "b2_list_groups",
     ]) {
       expect(names).not.toContain(t);
     }
-    expect(names.length).toBeLessThan(37);
+    for (const t of [
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
+    ]) {
+      expect(names).toContain(t);
+    }
+    expect(names.length).toBeLessThan(40);
   });
 
   it("write-but-no-delete key keeps writes, drops deletes", () => {
@@ -139,8 +145,8 @@ describe("capability-aware registration", () => {
     expect(names).toContain("b2_list_groups");
     expect(names).toContain("b2_eject_group_member");
     expect(names).toContain("b2_list_group_members");
-    expect(names).not.toContain("b2_create_group_member");
-    expect(names).not.toContain("b2_reserve_trial_create_account");
+    expect(names).toContain("b2_create_group_member");
+    expect(names).toContain("b2_reserve_trial_create_account");
   });
 });
 

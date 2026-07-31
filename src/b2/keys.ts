@@ -12,9 +12,11 @@ export function registerKeyTools(
   auth: B2AuthManager,
   config: B2Config,
 ): void {
-  // Phase 1 deliberately does not register b2_create_key. B2 returns the new
-  // application key secret once, and this server has no out-of-band secret sink.
-  // Re-enable only with a sink-backed contract that returns non-secret metadata.
+  // Phase 1 deliberately does not register the real b2_create_key handler here.
+  // B2 returns the new application key secret once, and this server has no
+  // out-of-band secret sink. createServer registers a non-secret compatibility
+  // stub for stale tools/list clients. Re-enable only with a sink-backed
+  // contract that returns non-secret metadata.
 
   // ── b2_list_keys ──────────────────────────────────────────────────────────
   server.tool(
