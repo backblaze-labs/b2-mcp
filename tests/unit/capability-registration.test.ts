@@ -11,8 +11,15 @@ import {
   invalidateCapabilityCache,
 } from "../../src/server";
 import { verificationFingerprintConfig } from "../../src/credentials";
-import { isToolEnabled, TOOL_CAPABILITIES } from "../../src/utils/tool-capabilities";
+import { logger } from "../../src/utils/logger";
+import {
+  DURABLE_SECRET_PRODUCING_TOOLS,
+  isToolEnabled,
+  TOOL_CAPABILITIES,
+} from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
+
+const CANARY = "B2_MCP_CANARY_SECRET_capability_do_not_leak";
 
 const baseConfig = {
   applicationKeyId: "k",
@@ -36,6 +43,13 @@ function toolNames(caps: string[] | null, cfg: B2Config = baseConfig): string[] 
 describe("isToolEnabled", () => {
   it("registers unmapped tools unconditionally", () => {
     expect(isToolEnabled("b2_authorize_account", new Set())).toBe(true);
+  });
+
+  it("always excludes durable-secret-producing tools", () => {
+    for (const tool of DURABLE_SECRET_PRODUCING_TOOLS) {
+      expect(isToolEnabled(tool, null)).toBe(false);
+      expect(isToolEnabled(tool, new Set(Object.values(TOOL_CAPABILITIES).flat()))).toBe(false);
+    }
   });
 
   it("gates a mapped tool on its capability", () => {
@@ -185,6 +199,41 @@ describe("fetchCapabilities", () => {
       status: 503,
       code: "capability_upstream_unavailable",
     });
+  });
+
+  it("sanitizes capability fetch failure log text, code, and request id", async () => {
+    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const configWithSecrets = {
+      ...baseConfig,
+      applicationKey: "configured-capability-secret",
+      appKey: "configured-app-capability-secret",
+      masterKey: "configured-master-capability-secret",
+    } as B2Config;
+    jest.spyOn(axios, "get").mockRejectedValue(
+      Object.assign(new Error(`authorizationToken=${CANARY} ${configWithSecrets.applicationKey}`), {
+        code: `bad_${CANARY}`,
+        response: { status: 500, headers: { "x-bz-request-id": `req-${CANARY}` } },
+      }),
+    );
+
+    await expect(
+      fetchCapabilities(configWithSecrets, "credential:capability-leak", "credential:non-secret"),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "capability_upstream_unavailable",
+    });
+
+    const logText = JSON.stringify(warnSpy.mock.calls);
+    expect(logText).not.toContain(CANARY);
+    expect(logText).not.toContain(configWithSecrets.applicationKey);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        upstreamCode: "[redacted]",
+        requestId: "[redacted]",
+        message: expect.not.stringContaining(CANARY),
+      }),
+      "capability.fetch.failed",
+    );
   });
 
   it("returns null without any network call when B2_REGISTER_ALL_TOOLS=true", async () => {

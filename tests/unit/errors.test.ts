@@ -6,6 +6,9 @@ import {
   toolSuccess,
   toolJson,
 } from "../../src/utils/errors";
+import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
+
+const CANARY = "B2_MCP_CANARY_SECRET_errors_do_not_leak";
 
 describe("parseB2Error", () => {
   it("should parse axios-style error with response body", () => {
@@ -128,6 +131,46 @@ describe("formatB2Error", () => {
   it("does not append the hint to unrelated errors", () => {
     const err = { response: { status: 404, data: { code: "file_not_present", message: "gone" } } };
     expect(formatB2Error(err)).not.toContain("application key");
+  });
+
+  it("redacts malicious provider error codes before formatting", () => {
+    const formatted = formatB2Error({
+      response: {
+        status: 500,
+        data: { code: `bad_${CANARY}`, message: "provider failed" },
+      },
+    });
+    expect(formatted).not.toContain(CANARY);
+    expect(formatted).toContain(`B2 Error [${SECRET_SANITIZER_REDACTION}]`);
+  });
+
+  it("redacts malicious B2 request ids before formatting", () => {
+    const formatted = formatB2Error({
+      response: {
+        status: 500,
+        data: { code: "internal_error", message: "provider failed" },
+        headers: { "x-bz-request-id": CANARY },
+      },
+    });
+    expect(formatted).not.toContain(CANARY);
+    expect(formatted).toContain(`requestId: ${SECRET_SANITIZER_REDACTION}`);
+  });
+
+  it("redacts configured secret values from AWS request ids before formatting", () => {
+    const old = process.env.B2_APPLICATION_KEY;
+    process.env.B2_APPLICATION_KEY = "configured-request-secret";
+    try {
+      const formatted = formatB2Error({
+        name: "UnknownError",
+        message: "UnknownError",
+        $metadata: { httpStatusCode: 500, requestId: "configured-request-secret" },
+      });
+      expect(formatted).not.toContain("configured-request-secret");
+      expect(formatted).toContain(`requestId: ${SECRET_SANITIZER_REDACTION}`);
+    } finally {
+      if (old === undefined) delete process.env.B2_APPLICATION_KEY;
+      else process.env.B2_APPLICATION_KEY = old;
+    }
   });
 });
 

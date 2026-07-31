@@ -8,9 +8,15 @@
 import type { McpServer } from "../../src/mcp";
 import { wrapToolsWithAudit, getRegisteredTools } from "../../src/server";
 import { logger } from "../../src/utils/logger";
+import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
 
-const cfg = { applicationKeyId: "test-key-id-1234567890" } as B2Config;
+const CONFIGURED_APPLICATION_KEY = "configured-audit-secret-value";
+const CANARY = "B2_MCP_CANARY_SECRET_audit_do_not_leak";
+const cfg = {
+  applicationKeyId: "test-key-id-1234567890",
+  applicationKey: CONFIGURED_APPLICATION_KEY,
+} as B2Config;
 
 let infoSpy: jest.SpyInstance;
 let warnSpy: jest.SpyInstance;
@@ -92,6 +98,39 @@ describe("wrapToolsWithAudit", () => {
         code: "NoSuchKey",
         status: 404,
         requestId: "req-7",
+      }),
+      "tool.call",
+    );
+  });
+
+  it("sanitizes parsed error metadata before audit logging", async () => {
+    const original = jest.fn().mockResolvedValue({
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `B2 Error [bad_${CANARY}] (HTTP 500): nope (requestId: ${CONFIGURED_APPLICATION_KEY})`,
+        },
+      ],
+    });
+    const tool: Record<string, unknown> = { callback: original };
+    const server = { _registeredTools: { s3_get_object: tool } } as unknown as McpServer;
+    wrapToolsWithAudit(server, cfg);
+
+    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)(
+      { bucket: "b", key: "k" },
+      {},
+    );
+    const auditLog = JSON.stringify(infoSpy.mock.calls);
+
+    expect(JSON.stringify(result)).not.toContain(CANARY);
+    expect(JSON.stringify(result)).not.toContain(CONFIGURED_APPLICATION_KEY);
+    expect(auditLog).not.toContain(CANARY);
+    expect(auditLog).not.toContain(CONFIGURED_APPLICATION_KEY);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: SECRET_SANITIZER_REDACTION,
+        requestId: SECRET_SANITIZER_REDACTION,
       }),
       "tool.call",
     );

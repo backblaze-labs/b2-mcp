@@ -9,7 +9,14 @@ import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
 import { isToolEnabled } from "./utils/tool-capabilities.js";
-import { sanitizeError, sanitizeMcpResponse } from "./utils/secret-sanitizer.js";
+import {
+  sanitizeError,
+  sanitizerOptionsFromConfig,
+  sanitizeMcpResponse,
+  sanitizeProviderCode,
+  sanitizeProviderRequestId,
+  sanitizeText,
+} from "./utils/secret-sanitizer.js";
 import {
   CredentialResolutionError,
   fingerprintConfig,
@@ -103,20 +110,18 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
     },
   );
 
-  // Capability-aware registration: when capabilities are supplied, wrap
-  // server.tool so a tool is only registered if the key can use it. Tools not in
-  // the capability map (b2_authorize_account, Partner tools) are always allowed
-  // through here; Partner tools are additionally gated on a master key below.
-  // Filter whenever capabilities are supplied. null/undefined remains the
-  // explicit full-surface path, while an empty array is fail-closed rather than
-  // "unknown".
+  // Capability-aware registration: wrap server.tool so durable-secret-producing
+  // tools always fail closed, and when capabilities are supplied, a tool is only
+  // registered if the key can use it. Tools not in the capability map
+  // (b2_authorize_account, Partner tools) are allowed through here; Partner
+  // tools are additionally gated on a master key below. null/undefined remains
+  // the explicit full-surface path, while an empty array is fail-closed rather
+  // than "unknown".
   const filterActive = Array.isArray(capabilities);
-  if (filterActive) {
-    const capsSet = new Set(capabilities);
-    const originalTool = server.tool.bind(server);
-    (server as any).tool = (name: string, ...rest: any[]) =>
-      isToolEnabled(name, capsSet) ? (originalTool as any)(name, ...rest) : undefined;
-  }
+  const capsSet = filterActive ? new Set(capabilities) : null;
+  const originalTool = server.tool.bind(server);
+  (server as any).tool = (name: string, ...rest: any[]) =>
+    isToolEnabled(name, capsSet) ? (originalTool as any)(name, ...rest) : undefined;
 
   // Initialize clients. The application (workhorse) key drives the B2 native
   // API, S3, and key management. The Partner API tools use the master
@@ -287,18 +292,8 @@ export function capabilityCacheSizeForTests(): number {
 }
 
 function redactedCapabilityMessage(err: unknown, config: B2Config): string {
-  let message = err instanceof Error ? err.message : String(err);
-  for (const value of [
-    config.applicationKeyId,
-    config.applicationKey,
-    config.appKeyId,
-    config.appKey,
-    config.masterKeyId,
-    config.masterKey,
-  ]) {
-    if (value) message = message.split(value).join("[redacted]");
-  }
-  return message;
+  const message = err instanceof Error ? err.message : String(err);
+  return sanitizeText(message, sanitizerOptionsFromConfig(config));
 }
 
 function capabilityFailureDetails(
@@ -316,10 +311,19 @@ function capabilityFailureDetails(
   };
   const upstreamStatus =
     typeof anyErr.response?.status === "number" ? anyErr.response.status : undefined;
-  const upstreamCode = typeof anyErr.code === "string" ? anyErr.code : undefined;
+  const sanitizerOptions = sanitizerOptionsFromConfig(config);
+  const upstreamCode =
+    typeof anyErr.code === "string"
+      ? sanitizeProviderCode(anyErr.code, sanitizerOptions)
+      : undefined;
   const requestIdHeader =
-    anyErr.response?.headers?.["x-bz-request-id"] ?? anyErr.response?.headers?.["x-b2-request-id"];
-  const requestId = typeof requestIdHeader === "string" ? requestIdHeader : undefined;
+    anyErr.response?.headers?.["x-bz-request-id"] ??
+    anyErr.response?.headers?.["x-b2-request-id"] ??
+    anyErr.response?.headers?.["x-amz-request-id"];
+  const requestId =
+    typeof requestIdHeader === "string"
+      ? sanitizeProviderRequestId(requestIdHeader, sanitizerOptions)
+      : undefined;
   const authFailure = upstreamStatus === 401 || upstreamStatus === 403;
   const retryable =
     !authFailure &&
@@ -464,13 +468,24 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
       const argKeys =
         args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
       try {
-        const result = sanitizeMcpResponse(await original.call(this, args, extra));
+        const sanitizerOptions = sanitizerOptionsFromConfig(config);
+        const result = sanitizeMcpResponse(
+          await original.call(this, args, extra),
+          sanitizerOptions,
+        );
         const durationMs = Date.now() - start;
         const isError = result?.isError === true;
         // When the tool returned a structured error, surface the classified
         // code/status/requestId in the audit event — this is the local metrics
         // stream operators mine for failing/slow tools (no values, no PII).
         const errInfo = isError ? parseErrorText(result?.content?.[0]?.text) : null;
+        const safeErrInfo = errInfo
+          ? {
+              code: sanitizeProviderCode(errInfo.code, sanitizerOptions),
+              status: errInfo.status,
+              requestId: sanitizeProviderRequestId(errInfo.requestId, sanitizerOptions),
+            }
+          : null;
         logger.info(
           {
             tool: name,
@@ -478,17 +493,18 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
             argKeys,
             durationMs,
             error: isError,
-            ...(errInfo && {
-              code: errInfo.code,
-              status: errInfo.status,
-              ...(errInfo.requestId && { requestId: errInfo.requestId }),
+            ...(safeErrInfo && {
+              code: safeErrInfo.code,
+              status: safeErrInfo.status,
+              ...(safeErrInfo.requestId && { requestId: safeErrInfo.requestId }),
             }),
           },
           "tool.call",
         );
         return result;
       } catch (err) {
-        const safeErr = sanitizeError(err);
+        const sanitizerOptions = sanitizerOptionsFromConfig(config);
+        const safeErr = sanitizeError(err, sanitizerOptions);
         const durationMs = Date.now() - start;
         logger.warn(
           {

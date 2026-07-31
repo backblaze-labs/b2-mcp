@@ -49,7 +49,9 @@ Replace the path with where you put the folder, then restart Claude Desktop — 
 
 **Then just ask:**
 
-> _"Create a read-only key scoped to my `public-assets` bucket."_ · _"Upload `./data.csv` to `reports/may-2026.csv`."_ · _"Give me a 1-hour download link for `backups/latest.tar.gz`."_ · _"List files under `logs/2026/`."_
+> _"List the buckets this key can access."_ · _"Upload `./data.csv` to `reports/may-2026.csv`."_ · _"Give me a 1-hour download link for `backups/latest.tar.gz`."_ · _"List files under `logs/2026/`."_
+
+Create and rotate application keys outside the MCP workflow, such as in the Backblaze console or CLI, until a reviewed secret sink is available.
 
 ---
 

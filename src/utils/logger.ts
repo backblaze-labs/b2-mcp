@@ -1,5 +1,6 @@
 import pino from "pino";
 import { VERSION } from "../version.js";
+import { LOGGER_SECRET_REDACTION_PATHS, SECRET_SANITIZER_REDACTION } from "./secret-sanitizer.js";
 
 const isTest = process.env.NODE_ENV === "test";
 
@@ -19,43 +20,8 @@ export const logger = pino(
       level: (label) => ({ level: label }),
     },
     redact: {
-      paths: [
-        "applicationKey",
-        "applicationKeyId",
-        "appKey",
-        "appKeyId",
-        "masterKey",
-        "masterKeyId",
-        "accessKeyId",
-        "secretAccessKey",
-        "authorizationToken",
-        "uploadAuthToken",
-        "uploadUrl",
-        "customerKey",
-        "customerKeyMd5",
-        "*.applicationKey",
-        "*.applicationKeyId",
-        "*.appKey",
-        "*.appKeyId",
-        "*.masterKey",
-        "*.masterKeyId",
-        "*.accessKeyId",
-        "*.secretAccessKey",
-        "*.authorizationToken",
-        "*.uploadAuthToken",
-        "*.uploadUrl",
-        "*.customerKey",
-        "*.customerKeyMd5",
-        "*.credentials.accessKeyId",
-        "*.credentials.secretAccessKey",
-        "*.serverSideEncryption.customerKey",
-        "*.*.applicationKey",
-        "*.*.appKey",
-        "*.*.authorizationToken",
-        "*.*.uploadAuthToken",
-        "*.*.customerKey",
-      ],
-      censor: "[redacted]",
+      paths: LOGGER_SECRET_REDACTION_PATHS,
+      censor: SECRET_SANITIZER_REDACTION,
     },
   },
   pino.destination({ dest: 2, sync: false }),
