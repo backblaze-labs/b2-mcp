@@ -113,7 +113,7 @@ export function parseErrorText(
   text: string | undefined,
 ): { code: string; status: number; requestId?: string } | null {
   if (!text) return null;
-  const m = text.match(/^B2 Error \[(.+?)\] \(HTTP (\d+)\): [\s\S]*?(?: \(requestId: (.+?)\))?$/);
+  const m = text.match(/^B2 Error \[(.+)\] \(HTTP (\d+)\): [\s\S]*?(?: \(requestId: (.+?)\))?$/);
   if (!m) return null;
   return { code: m[1], status: Number(m[2]), requestId: m[3] };
 }

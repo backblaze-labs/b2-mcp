@@ -216,6 +216,22 @@ describe("parseErrorText (round-trips formatB2Error for the audit layer)", () =>
     expect(parseErrorText(text)).toEqual({ code: "NoSuchKey", status: 404, requestId: "req-9" });
   });
 
+  it("round-trips a bracketed redaction placeholder", () => {
+    const text = formatB2Error({
+      response: {
+        status: 500,
+        data: { code: `bad_${CANARY}`, message: "provider failed" },
+      },
+    });
+
+    expect(text).toContain(`B2 Error [${SECRET_SANITIZER_REDACTION}]`);
+    expect(parseErrorText(text)).toEqual({
+      code: SECRET_SANITIZER_REDACTION,
+      status: 500,
+      requestId: undefined,
+    });
+  });
+
   it("works without a requestId", () => {
     const text = "B2 Error [bad_request] (HTTP 400): nope";
     expect(parseErrorText(text)).toEqual({

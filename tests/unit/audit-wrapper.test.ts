@@ -7,6 +7,7 @@
 
 import type { McpServer } from "../../src/mcp";
 import { wrapToolsWithAudit, getRegisteredTools } from "../../src/server";
+import { formatB2Error } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
@@ -109,7 +110,13 @@ describe("wrapToolsWithAudit", () => {
       content: [
         {
           type: "text",
-          text: `B2 Error [bad_${CANARY}] (HTTP 500): nope (requestId: ${CONFIGURED_APPLICATION_KEY})`,
+          text: formatB2Error({
+            response: {
+              status: 500,
+              data: { code: `bad_${CANARY}`, message: "nope" },
+              headers: { "x-bz-request-id": CONFIGURED_APPLICATION_KEY },
+            },
+          }),
         },
       ],
     });
@@ -125,6 +132,7 @@ describe("wrapToolsWithAudit", () => {
 
     expect(JSON.stringify(result)).not.toContain(CANARY);
     expect(JSON.stringify(result)).not.toContain(CONFIGURED_APPLICATION_KEY);
+    expect(JSON.stringify(result)).toContain(`B2 Error [${SECRET_SANITIZER_REDACTION}]`);
     expect(auditLog).not.toContain(CANARY);
     expect(auditLog).not.toContain(CONFIGURED_APPLICATION_KEY);
     expect(infoSpy).toHaveBeenCalledWith(
