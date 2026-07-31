@@ -9,6 +9,7 @@ import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { createS3Client } from "./s3/client.js";
 import { isToolEnabled } from "./utils/tool-capabilities.js";
+import { sanitizeError, sanitizeMcpResponse } from "./utils/secret-sanitizer.js";
 import {
   CredentialResolutionError,
   fingerprintConfig,
@@ -463,7 +464,7 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
       const argKeys =
         args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
       try {
-        const result = await original.call(this, args, extra);
+        const result = sanitizeMcpResponse(await original.call(this, args, extra));
         const durationMs = Date.now() - start;
         const isError = result?.isError === true;
         // When the tool returned a structured error, surface the classified
@@ -487,6 +488,7 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
         );
         return result;
       } catch (err) {
+        const safeErr = sanitizeError(err);
         const durationMs = Date.now() - start;
         logger.warn(
           {
@@ -494,11 +496,11 @@ export function wrapToolsWithAudit(server: McpServer, config: B2Config): number 
             credential: keyFingerprint,
             argKeys,
             durationMs,
-            err: err instanceof Error ? err.message : String(err),
+            err: safeErr.message,
           },
           "tool.error",
         );
-        throw err;
+        throw safeErr;
       }
     };
     wrapped++;

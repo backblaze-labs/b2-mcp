@@ -25,7 +25,7 @@
  */
 
 const { MCP_URL, B2_KEY_ID, B2_KEY, B2_APP_KEY_ID, B2_APP_KEY, MCP_AUTHORIZATION } = process.env;
-const EXPECTED_FULL_TOOL_COUNT = 40;
+const EXPECTED_FULL_TOOL_COUNT = 37;
 
 if (!MCP_URL) {
   console.error("Missing required env: MCP_URL");

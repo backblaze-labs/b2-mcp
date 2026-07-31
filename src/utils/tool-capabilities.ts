@@ -10,7 +10,9 @@
  *
  * Semantics: a tool registers when the key holds ANY of its listed capabilities.
  * A tool NOT in this map is always registered (e.g. b2_authorize_account, and the
- * Partner tools, which are gated separately on a configured master key).
+ * Partner tools, which are gated separately on a configured master key). Durable
+ * secret-producing tools are not in the Phase 1 registry at all until a reviewed
+ * out-of-band secret sink exists.
  */
 export const TOOL_CAPABILITIES: Record<string, string[]> = {
   // ── B2 native control plane ──────────────────────────────────────────────
@@ -21,7 +23,6 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   b2_get_bucket_notification_rules: ["readBucketNotifications", "writeBucketNotifications"],
   b2_set_bucket_notification_rules: ["writeBucketNotifications"],
   b2_list_keys: ["listKeys"],
-  b2_create_key: ["writeKeys"],
   b2_delete_key: ["deleteKeys"],
   b2_update_file_retention: ["writeFileRetentions"],
   b2_update_file_legal_hold: ["writeFileLegalHolds"],
@@ -53,15 +54,20 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_put_bucket_lifecycle: ["writeBuckets"],
 };
 
+/** Durable-secret-producing tools excluded from Phase 1 registration. */
+export const DURABLE_SECRET_PRODUCING_TOOLS = new Set<string>([
+  "b2_create_key",
+  "b2_create_group_member",
+  "b2_reserve_trial_create_account",
+]);
+
 /** Partner/Groups tools — registered only when a distinct master key is
  *  configured (they need Partner-API entitlement, not a standard capability),
  *  so they are exempt from capability filtering and gated in createServer. */
 export const PARTNER_TOOLS = new Set<string>([
   "b2_list_groups",
-  "b2_create_group_member",
   "b2_eject_group_member",
   "b2_list_group_members",
-  "b2_reserve_trial_create_account",
 ]);
 
 /**

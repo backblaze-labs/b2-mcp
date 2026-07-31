@@ -281,95 +281,14 @@ describe("b2_delete_bucket", () => {
   });
 });
 
-// ── b2_create_key ─────────────────────────────────────────────────────────────
+// ── durable-secret-producing tools ────────────────────────────────────────────
 
-describe("b2_create_key", () => {
-  beforeEach(() =>
-    setupMocks({
-      keyName: "test-key",
-      applicationKeyId: "key-123",
-      applicationKey: "secret-abc",
-      capabilities: ["readFiles", "writeFiles"],
-    }),
-  );
-
-  it("returns the new key info and forwards accountId + scope to the API", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_create_key", {
-        keyName: "test-key",
-        capabilities: ["readFiles", "writeFiles"],
-        bucketId: "bucket-001",
-        namePrefix: "incoming/",
-        validDurationInSeconds: 3600,
-      }),
-    );
-    expect(result.keyName).toBe("test-key");
-    expect(result.applicationKeyId).toBe("key-123");
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          accountId: "test-account-123",
-          keyName: "test-key",
-          capabilities: ["readFiles", "writeFiles"],
-          bucketId: "bucket-001",
-          namePrefix: "incoming/",
-          validDurationInSeconds: 3600,
-        }),
-      }),
-    );
-  });
-
-  it("rejects a key that grants key-management capabilities by default", async () => {
-    const result = await callTool(server, "b2_create_key", {
-      keyName: "backdoor-key",
-      capabilities: ["readFiles", "writeKeys"],
-      bucketId: "bucket-001",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/key-management capabilities/i);
-  });
-
-  it("rejects an unscoped key with write capabilities by default", async () => {
-    const result = await callTool(server, "b2_create_key", {
-      keyName: "broad-key",
-      capabilities: ["writeFiles"],
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/unscoped key/i);
-  });
-
-  it("allows key-management grants when B2_ALLOW_KEY_MGMT_GRANTS is enabled", async () => {
-    const permissive = createServer({ ...testConfig, allowKeyMgmtGrants: true });
-    const result = parseResult(
-      await callTool(permissive, "b2_create_key", {
-        keyName: "admin-key",
-        capabilities: ["writeKeys"],
-        bucketId: "bucket-001",
-        validDurationInSeconds: 3600,
-      }),
-    );
-    expect(result.keyName).toBe("test-key");
-    expect(result.isError).toBeUndefined();
-  });
-
-  it("enforces a max key duration and forbids non-expiring keys when capped", async () => {
-    const capped = createServer({ ...testConfig, maxKeyDurationSeconds: 3600 });
-    const tooLong = await callTool(capped, "b2_create_key", {
-      keyName: "long-key",
-      capabilities: ["readFiles"],
-      bucketId: "bucket-001",
-      validDurationInSeconds: 100000,
-    });
-    expect(tooLong.isError).toBe(true);
-    expect(tooLong.content[0].text).toMatch(/exceeds the server cap/i);
-
-    const nonExpiring = await callTool(capped, "b2_create_key", {
-      keyName: "forever-key",
-      capabilities: ["readFiles"],
-      bucketId: "bucket-001",
-    });
-    expect(nonExpiring.isError).toBe(true);
-    expect(nonExpiring.content[0].text).toMatch(/requires application keys to expire/i);
+describe("durable-secret-producing tools", () => {
+  it("does not register tools that would return one-time B2 secrets without a sink", () => {
+    const tools = (server as any)._registeredTools ?? {};
+    expect(tools.b2_create_key).toBeUndefined();
+    expect(tools.b2_create_group_member).toBeUndefined();
+    expect(tools.b2_reserve_trial_create_account).toBeUndefined();
   });
 });
 
@@ -672,71 +591,6 @@ describe("b2_list_groups", () => {
   });
 });
 
-describe("b2_create_group_member", () => {
-  const mockMember = {
-    applicationKeyId: "100530e11d8c",
-    applicationKey: "K100wD6xncrk",
-    groupMember: {
-      accountId: "new-account-abc",
-      email: "member@example.com",
-      groupId: "254",
-      groupName: "Partner Group 2",
-      region: "us-west",
-    },
-  };
-
-  beforeEach(() => setupMocks(mockMember));
-
-  it("returns applicationKeyId and groupMember info", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_create_group_member", {
-        adminAccountId: "test-account-123",
-        groupId: "254",
-        memberEmail: "member@example.com",
-        confirm: true, // account creation is gated
-      }),
-    );
-    expect(result.applicationKeyId).toBe("100530e11d8c");
-    expect(result.groupMember.email).toBe("member@example.com");
-  });
-
-  it("uses b2api/v3 in the request URL", async () => {
-    await callTool(server, "b2_create_group_member", {
-      adminAccountId: "test-account-123",
-      groupId: "254",
-      memberEmail: "m@example.com",
-      confirm: true,
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ url: expect.stringContaining("b2api/v3") }),
-    );
-  });
-
-  it("sends region when provided", async () => {
-    await callTool(server, "b2_create_group_member", {
-      adminAccountId: "test-account-123",
-      groupId: "254",
-      memberEmail: "m@example.com",
-      region: "eu-central",
-      confirm: true,
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ region: "eu-central" }) }),
-    );
-  });
-
-  it("omits region when not provided", async () => {
-    await callTool(server, "b2_create_group_member", {
-      adminAccountId: "test-account-123",
-      groupId: "254",
-      memberEmail: "m@example.com",
-      confirm: true,
-    });
-    const callArgs = (mockedAxios as any).mock.calls[0][0];
-    expect(callArgs.data.region).toBeUndefined();
-  });
-});
-
 describe("b2_eject_group_member", () => {
   const mockEjected = {
     accountId: "member-account-xyz",
@@ -834,69 +688,6 @@ describe("b2_list_group_members", () => {
     expect(mockedAxios).toHaveBeenCalledWith(
       expect.objectContaining({
         params: expect.objectContaining({ startEmail: "first@example.com" }),
-      }),
-    );
-  });
-});
-
-describe("b2_reserve_trial_create_account", () => {
-  const mockTrial = {
-    accountId: "trial-account-123",
-    applicationKey: "K100trial",
-    applicationKeyId: "key-trial-id",
-    s3Endpoint: "s3.us-west-004.backblazeb2.com",
-    startDate: "2026-05-16",
-    endDate: "2026-05-30",
-    email: "user@example.com",
-    bucketName: "my-trial-bucket",
-    bucketId: "bucket-trial-001",
-  };
-
-  beforeEach(() => setupMocks(mockTrial));
-
-  it("returns trial account info with credentials and dates", async () => {
-    const result = parseResult(
-      await callTool(server, "b2_reserve_trial_create_account", {
-        email: "user@example.com",
-        term: 14,
-        storage: 5,
-        confirm: true, // account creation is gated
-      }),
-    );
-    expect(result.accountId).toBe("trial-account-123");
-    expect(result.bucketName).toBe("my-trial-bucket");
-    expect(result.startDate).toBe("2026-05-16");
-    expect(result.endDate).toBe("2026-05-30");
-  });
-
-  it("uses b2api/v3 in the request URL", async () => {
-    await callTool(server, "b2_reserve_trial_create_account", {
-      email: "user@example.com",
-      term: 7,
-      storage: 1,
-      confirm: true,
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({ url: expect.stringContaining("b2api/v3") }),
-    );
-  });
-
-  it("sends email, term, and storage in the POST body", async () => {
-    await callTool(server, "b2_reserve_trial_create_account", {
-      email: "trial@company.com",
-      term: 30,
-      storage: 10,
-      region: "eu-central",
-      confirm: true,
-    });
-    expect(mockedAxios).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          email: "trial@company.com",
-          term: 30,
-          storage: 10,
-          region: "eu-central",
-        }),
       }),
     );
   });

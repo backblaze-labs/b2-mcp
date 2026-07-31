@@ -15,7 +15,7 @@ describe("smoke script release contract", () => {
   });
 
   it("asserts the Phase 1 full tool surface, not the inherited 85-tool surface", () => {
-    expect(smokeScript).toContain("EXPECTED_FULL_TOOL_COUNT = 40");
+    expect(smokeScript).toContain("EXPECTED_FULL_TOOL_COUNT = 37");
     expect(smokeScript).not.toContain("85 tools");
     expect(smokeScript).not.toContain(">= 85");
     expect(smokeScript).not.toContain("≥ 85");

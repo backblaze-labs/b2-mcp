@@ -1,7 +1,6 @@
 import * as crypto from "crypto";
 import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
-import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
 import { B2Config, DestructivePolicy } from "./utils/types.js";
 
@@ -185,11 +184,6 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     region: process.env.B2_REGION ?? DEFAULT_REGION,
     allowLocalFiles: options.allowLocalFiles,
     fileRoot: options.fileRoot,
-    maxKeyDurationSeconds: process.env.B2_MAX_KEY_DURATION_SECONDS
-      ? parseIntEnv(process.env.B2_MAX_KEY_DURATION_SECONDS, 0)
-      : null,
-    allowKeyMgmtGrants: process.env.B2_ALLOW_KEY_MGMT_GRANTS === "true",
-    allowUnscopedKeys: process.env.B2_ALLOW_UNSCOPED_KEYS === "true",
     destructivePolicy: resolveDestructivePolicy(options.transport),
     transport: options.transport,
   };

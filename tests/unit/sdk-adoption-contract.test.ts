@@ -1,14 +1,15 @@
 /**
  * Drift guard for the official B2 SDK adoption contract.
  *
- * Issue #71 freezes a 40-tool SDK parity matrix. If the registered surface,
- * runtime import sites, or reviewed SDK version changes, this document must be
- * updated intentionally instead of drifting behind the implementation.
+ * Issue #71 freezes the SDK parity matrix. If the registered surface, runtime
+ * import sites, or reviewed SDK version changes, this document must be updated
+ * intentionally instead of drifting behind the implementation.
  */
 
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { createServer, getRegisteredTools } from "../../src/server";
+import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 
 const ROOT = join(__dirname, "../..");
 const SDK_VERSION = "0.2.0";
@@ -105,7 +106,7 @@ describe("SDK adoption contract", () => {
     expect(compareFloor(pkg.engines.node, sdk?.engines?.node ?? "")).toBeGreaterThanOrEqual(0);
   });
 
-  it("has one matrix row for every registered tool", () => {
+  it("has rows for every registered tool and only approved sink-blocked extras", () => {
     const config = {
       applicationKeyId: "test",
       applicationKey: "test",
@@ -123,8 +124,11 @@ describe("SDK adoption contract", () => {
       (match) => match[1],
     );
 
-    expect(matrixRows).toHaveLength(40);
-    expect([...new Set(matrixRows)].sort()).toEqual(registered);
+    const registeredSet = new Set(registered);
+    const extraRows = [...new Set(matrixRows)].filter((tool) => !registeredSet.has(tool));
+
+    expect(registered.every((tool) => matrixRows.includes(tool))).toBe(true);
+    expect(extraRows.sort()).toEqual([...DURABLE_SECRET_PRODUCING_TOOLS].sort());
   });
 
   it("inventories every runtime Axios and AWS SDK import site from src", () => {

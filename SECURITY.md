@@ -46,3 +46,17 @@ Out of scope:
   exposed credentials in environment) — see [`docs/DEPLOY.md`](docs/DEPLOY.md)
   for recommended hardening
 - Issues requiring root or local access on the machine running the server
+
+## MCP Secret Output Policy
+
+Default MCP tools must not return durable B2 secrets. Operations that create
+one-time application-key material, including `b2_create_key`,
+`b2_create_group_member`, and `b2_reserve_trial_create_account`, are not
+registered until a reviewed out-of-band secret sink exists. Tool responses,
+structured logs, thrown errors, snapshots, and CI artifacts are covered by a
+central sanitizer that redacts known B2 credential, authorization-token, upload
+token, notification signing-secret, and secret-header fields.
+
+Presigned S3 URLs are short-lived bearer capabilities, not durable B2
+application keys. Tools may return them only with operation and expiry metadata;
+operators and clients must treat the URL as sensitive until `expiresAt`.

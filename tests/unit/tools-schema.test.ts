@@ -1,5 +1,5 @@
 /**
- * Schema validation tests for all 40 registered MCP tools.
+ * Schema validation tests for all registered MCP tools.
  *
  * These tests run without any credentials and verify that every tool:
  *   - Is registered with a unique name
@@ -64,8 +64,8 @@ beforeAll(() => {
 // ── Inventory ─────────────────────────────────────────────────────────────────
 
 describe("Tool inventory", () => {
-  it("registers exactly 40 tools", () => {
-    expect(toolNames.length).toBe(40);
+  it("registers exactly 37 tools", () => {
+    expect(toolNames.length).toBe(37);
   });
 
   it("has no duplicate tool names", () => {
@@ -80,8 +80,8 @@ describe("Tool inventory", () => {
     expect(invalid).toEqual([]);
   });
 
-  it("has 21 B2 native + Partner + insight b2_ tools (control plane)", () => {
-    expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(21);
+  it("has 18 B2 native + Partner + insight b2_ tools (control plane)", () => {
+    expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(18);
   });
 
   it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
@@ -105,17 +105,14 @@ describe("Every tool has a valid description", () => {
     "b2_update_bucket",
     "b2_get_bucket_notification_rules",
     "b2_set_bucket_notification_rules",
-    "b2_create_key",
     "b2_list_keys",
     "b2_delete_key",
     "b2_update_file_legal_hold",
     "b2_update_file_retention",
     // Partner API (b2_ prefix)
     "b2_list_groups",
-    "b2_create_group_member",
     "b2_eject_group_member",
     "b2_list_group_members",
-    "b2_reserve_trial_create_account",
     // S3-compatible — object data plane
     "s3_put_object",
     "s3_get_object",
@@ -198,11 +195,10 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("key");
   });
 
-  it("b2_create_key requires capabilities and keyName", () => {
-    const schema = tools["b2_create_key"]?.inputSchema;
-    const required = requiredKeys(schema);
-    expect(required).toContain("capabilities");
-    expect(required).toContain("keyName");
+  it("does not register durable-secret-producing tools without a sink", () => {
+    expect(tools.b2_create_key).toBeUndefined();
+    expect(tools.b2_create_group_member).toBeUndefined();
+    expect(tools.b2_reserve_trial_create_account).toBeUndefined();
   });
 });
 

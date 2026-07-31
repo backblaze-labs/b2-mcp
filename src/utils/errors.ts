@@ -93,7 +93,7 @@ export function parseErrorText(
  */
 export function formatB2Error(err: unknown): string {
   const parsed = parseB2Error(err);
-  const base = `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${parsed.message}${errorHint(parsed)}`;
+  const base = `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${sanitizeText(parsed.message)}${errorHint(parsed)}`;
   return parsed.requestId ? `${base} (requestId: ${parsed.requestId})` : base;
 }
 
@@ -134,12 +134,13 @@ export function toolError(err: unknown): {
  * Return a successful tool response with text content.
  */
 export function toolSuccess(text: string): { content: Array<{ type: "text"; text: string }> } {
-  return { content: [{ type: "text", text }] };
+  return { content: [{ type: "text", text: sanitizeText(text) }] };
 }
 
 /**
  * Return a successful tool response with a JSON object.
  */
 export function toolJson(data: unknown): { content: Array<{ type: "text"; text: string }> } {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(sanitizeForMcpOutput(data), null, 2) }] };
 }
+import { sanitizeForMcpOutput, sanitizeText } from "./secret-sanitizer.js";

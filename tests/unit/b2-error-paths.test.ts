@@ -100,15 +100,12 @@ describe("B2 tool error paths (catch blocks)", () => {
     "b2_get_bucket_notification_rules",
     "b2_set_bucket_notification_rules",
     "b2_list_keys",
-    "b2_create_key",
     "b2_delete_key",
     "b2_update_file_legal_hold",
     "b2_update_file_retention",
     "b2_list_groups",
-    "b2_create_group_member",
     "b2_eject_group_member",
     "b2_list_group_members",
-    "b2_reserve_trial_create_account",
   ];
 
   it.each(tools)("%s returns a structured error", async (tool) => {

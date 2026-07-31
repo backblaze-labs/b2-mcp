@@ -51,13 +51,13 @@ describe("isToolEnabled", () => {
 });
 
 describe("capability-aware registration", () => {
-  it("null capabilities → full surface, no filtering (40 tools)", () => {
-    expect(toolNames(null).length).toBe(40);
+  it("null capabilities → full surface, no filtering (37 tools)", () => {
+    expect(toolNames(null).length).toBe(37);
   });
 
   it("EMPTY capabilities → fail closed instead of full surface", () => {
     const names = toolNames([]);
-    expect(names.length).toBeLessThan(40);
+    expect(names.length).toBeLessThan(37);
     expect(names).toContain("b2_authorize_account");
     expect(names).not.toContain("b2_usage_growth");
   });
@@ -90,7 +90,7 @@ describe("capability-aware registration", () => {
     ]) {
       expect(names).not.toContain(t);
     }
-    expect(names.length).toBeLessThan(40);
+    expect(names.length).toBeLessThan(37);
   });
 
   it("write-but-no-delete key keeps writes, drops deletes", () => {
@@ -123,7 +123,10 @@ describe("capability-aware registration", () => {
     } as B2Config;
     const names = toolNames(["listBuckets"], withMaster);
     expect(names).toContain("b2_list_groups");
-    expect(names).toContain("b2_create_group_member");
+    expect(names).toContain("b2_eject_group_member");
+    expect(names).toContain("b2_list_group_members");
+    expect(names).not.toContain("b2_create_group_member");
+    expect(names).not.toContain("b2_reserve_trial_create_account");
   });
 });
 

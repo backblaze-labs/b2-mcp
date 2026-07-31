@@ -123,14 +123,14 @@ beforeAll(async () => {
 // ── Protocol layer (no credentials needed) ────────────────────────────────────
 
 describe("Protocol layer", () => {
-  it("registers 36 tools total", () => {
+  it("registers 37 tools total", () => {
     const count = Object.keys((server as any)._registeredTools ?? {}).length;
-    expect(count).toBe(36);
+    expect(count).toBe(37);
   });
 
-  it("has 17 B2 native + Partner b2_ tools", () => {
+  it("has 18 B2 native + Partner + insight b2_ tools", () => {
     const tools = Object.keys((server as any)._registeredTools ?? {});
-    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(17);
+    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(18);
   });
 
   it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
@@ -157,13 +157,14 @@ describe("Protocol layer", () => {
       "s3_get_presigned_url",
       // Partner API tools
       "b2_list_groups",
-      "b2_create_group_member",
       "b2_eject_group_member",
       "b2_list_group_members",
-      "b2_reserve_trial_create_account",
     ]) {
       expect(tools.has(name)).toBe(true);
     }
+    expect(tools.has("b2_create_key")).toBe(false);
+    expect(tools.has("b2_create_group_member")).toBe(false);
+    expect(tools.has("b2_reserve_trial_create_account")).toBe(false);
   });
 });
 
@@ -356,56 +357,11 @@ describe("Partner API — Groups (gated: B2_PARTNER_LIVE=1)", () => {
     console.log("  Members in group", groupId, ":", members.members?.length ?? 0);
   });
 
-  // ⚠️  MUTATING — creates a REAL Backblaze account that eject does NOT delete
-  // (and which cannot be re-added via API). Triple-gated so it never runs by
-  // accident: needs B2_PARTNER_LIVE=1, B2_PARTNER_MUTATE=1, and a unique
-  // B2_PARTNER_TEST_EMAIL that is not already a Backblaze account.
-  const HAS_MUTATE =
-    HAS_PARTNER && process.env.B2_PARTNER_MUTATE === "1" && !!process.env.B2_PARTNER_TEST_EMAIL;
-  const mutateIt = HAS_MUTATE ? test : test.skip;
-
-  mutateIt(
-    "mutating: create_group_member → list → eject (leaves a real account)",
-    async () => {
-      const auth = parseResult(await callTool(server, "b2_authorize_account", {}));
-      const adminAccountId = auth.accountId;
-      const groups = parseResult(await callTool(server, "b2_list_groups", { adminAccountId }));
-      const groupId = groups.groups?.[0]?.groupId;
-      if (!groupId) {
-        console.log("  No managed group available — skip");
-        return;
-      }
-
-      const memberEmail = process.env.B2_PARTNER_TEST_EMAIL!;
-      const created = parseResult(
-        await callTool(server, "b2_create_group_member", { adminAccountId, groupId, memberEmail }),
-      );
-      // The new account's credentials are returned exactly once.
-      expect(created).toHaveProperty("applicationKeyId");
-      const memberAccountId = created.accountId ?? created.member?.accountId;
-      console.log("  Created member account:", memberAccountId);
-
-      try {
-        const members = parseResult(
-          await callTool(server, "b2_list_group_members", {
-            adminAccountId,
-            groupId,
-            maxMemberCount: 1000,
-          }),
-        );
-        expect(members.members?.some((m: any) => m.accountId === memberAccountId)).toBe(true);
-      } finally {
-        const ejected = await callTool(server, "b2_eject_group_member", {
-          adminAccountId,
-          groupId,
-          memberAccountId,
-        });
-        expect(isError(ejected)).toBe(false);
-        console.log("  Ejected (account persists, cannot be re-added via API)");
-      }
-    },
-    60_000,
-  );
+  test("secret-producing Partner create tools are not registered without a sink", () => {
+    const tools = (server as any)._registeredTools ?? {};
+    expect(tools.b2_create_group_member).toBeUndefined();
+    expect(tools.b2_reserve_trial_create_account).toBeUndefined();
+  });
 });
 
 // ── Error handling ────────────────────────────────────────────────────────────

@@ -150,11 +150,10 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
 // ── v4 tool-surface alignment ─────────────────────────────────────────────────
 describe("Contract: v4 tool-surface alignment", () => {
   liveIt(
-    "SSE-B2 default, lifecycle cancel-unfinished field, v4 bucketIds key, and >30d key duration use B2-accepted shapes",
+    "SSE-B2 default and lifecycle cancel-unfinished field use B2-accepted shapes",
     async () => {
       const bucketName = `mcp-contract-pathb-${Date.now().toString(36)}`;
       let bucketId = "";
-      const keyIds: string[] = [];
       console.log(`  Contract bucketName=${bucketName}`);
       try {
         // (e) SSE-B2 with no algorithm — server must inject algorithm:"AES256"
@@ -177,33 +176,7 @@ describe("Contract: v4 tool-surface alignment", () => {
           ],
         });
         expect(isError(life)).toBe(false);
-
-        // (b) key duration beyond the old 30-day (2,592,000s) cap — 40 days.
-        const v2key = parseResult(
-          await callTool(server, "b2_create_key", {
-            keyName: `c-v2-${Date.now().toString(36)}`,
-            capabilities: ["listFiles", "readFiles"],
-            bucketId,
-            validDurationInSeconds: 3_456_000,
-          }),
-        );
-        expect(isError(v2key)).toBe(false);
-        if (v2key.applicationKeyId) keyIds.push(v2key.applicationKeyId);
-
-        // (a) v4 multi-bucket key via bucketIds[] (created through the v4 endpoint).
-        const v4key = parseResult(
-          await callTool(server, "b2_create_key", {
-            keyName: `c-v4-${Date.now().toString(36)}`,
-            capabilities: ["listFiles", "readFiles"],
-            bucketIds: [bucketId],
-          }),
-        );
-        expect(isError(v4key)).toBe(false);
-        if (v4key.applicationKeyId) keyIds.push(v4key.applicationKeyId);
-        const scoped = Array.isArray(v4key.bucketIds) ? v4key.bucketIds : [v4key.bucketId];
-        expect(scoped).toContain(bucketId);
       } finally {
-        for (const id of keyIds) await callTool(server, "b2_delete_key", { applicationKeyId: id });
         if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
       }
     },

@@ -12,6 +12,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { createServer } from "../../src/server";
+import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 
 let toolNames: string[];
 let readme: string;
@@ -44,9 +45,11 @@ describe("README tool-surface drift", () => {
     // s3_list_objects_v2). Excludes env vars and config keys by the prefix.
     const mentioned = [...readme.matchAll(/`((?:b2|bz|s3)_[a-z0-9_]+)`/g)].map((m) => m[1]);
     const registered = new Set(toolNames);
-    // b2_create_key appears in prose about the lockdown; any mention must
-    // still be a real tool — stale names (removed tools) fail here.
-    const stale = [...new Set(mentioned)].filter((name) => !registered.has(name));
+    // Durable-secret-producing tools may appear in README as intentionally
+    // unavailable until a secret sink exists. Everything else must be registered.
+    const stale = [...new Set(mentioned)].filter(
+      (name) => !registered.has(name) && !DURABLE_SECRET_PRODUCING_TOOLS.has(name),
+    );
     expect(stale).toEqual([]);
   });
 

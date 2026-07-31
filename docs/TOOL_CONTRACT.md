@@ -10,7 +10,7 @@ Issue #59 owns the MCP SDK v2 and protocol-era migration.
 ## Phase 1 Source Of Truth
 
 The normative Phase 1 tool-profile decisions live in [`V1_SCOPE.md`](V1_SCOPE.md).
-The normative SDK adoption and 40-tool parity matrix lives in
+The normative SDK adoption and tool-parity matrix lives in
 [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md). This document will
 become the stable public contract once the fixture work lands.
 
@@ -28,11 +28,13 @@ The public contract must define:
 
 - Deterministic `tools/list` fixtures for every named profile.
 - CI checks that compare fixtures, README counts, and actual registration.
-- Tests for credential redaction, destructive-operation gating, and unsupported
+- Tests for credential redaction, durable-secret output sanitization,
+  destructive-operation gating, and unsupported
   capability behavior.
 
-Blocking follow-up coverage is tracked in #49, #58, and #61. Until those land,
-the guarantees above are contract requirements rather than complete CI evidence.
+Blocking follow-up coverage is tracked in #49 and #61. Until those land, the
+remaining fixture and authorization guarantees above are contract requirements
+rather than complete CI evidence.
 
 Issue #49 must not freeze tool names, schemas, capability maps, response
 fixtures, or profile hashes until #71 and its SDK implementation follow-ups are
