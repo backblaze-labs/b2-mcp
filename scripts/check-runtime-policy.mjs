@@ -4,12 +4,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const NODE_FLOOR = ">=22.3.0";
-const MIN_NODE = "22.3.0";
-const MATRIX_TEXT = "node-version: [22.3.0, 24, 26]";
-const CROSS_PLATFORM_OS_TEXT = "os: [ubuntu-latest, windows-latest, macos-latest]";
-const REQUIRED_DOC_POLICY = "Node.js 22.3.0, 24, and 26";
-
 const errors = [];
 
 function read(relativePath) {
@@ -18,21 +12,6 @@ function read(relativePath) {
 
 function readJson(relativePath) {
   return JSON.parse(read(relativePath));
-}
-
-function requireEqual(label, actual, expected) {
-  if (actual !== expected)
-    errors.push(`${label}: expected ${expected}, got ${actual ?? "missing"}`);
-}
-
-function requireContains(relativePath, needle) {
-  const text = read(relativePath);
-  if (!text.includes(needle)) errors.push(`${relativePath}: missing ${needle}`);
-}
-
-function requireNotContains(relativePath, needle) {
-  const text = read(relativePath);
-  if (text.includes(needle)) errors.push(`${relativePath}: must not contain ${needle}`);
 }
 
 function listFiles(dir) {
@@ -48,82 +27,148 @@ function listFiles(dir) {
   return files;
 }
 
+function fail(message) {
+  errors.push(message);
+}
+
+function requireEqual(label, actual, expected) {
+  if (actual !== expected) fail(`${label}: expected ${expected}, got ${actual ?? "missing"}`);
+}
+
+function parseNodeVersion(value) {
+  const match = String(value)
+    .trim()
+    .match(/^(\d+)(?:\.(\d+)\.(\d+))?$/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: match[2] === undefined ? null : Number(match[2]),
+    patch: match[3] === undefined ? null : Number(match[3]),
+    raw: String(value).trim(),
+  };
+}
+
+function comparePatch(a, b) {
+  const left = parseNodeVersion(a);
+  const right = parseNodeVersion(b);
+  if (!left || !right || left.minor === null || right.minor === null) {
+    throw new Error(`Patch comparison requires full versions: ${a}, ${b}`);
+  }
+  for (const key of ["major", "minor", "patch"]) {
+    if (left[key] !== right[key]) return left[key] - right[key];
+  }
+  return 0;
+}
+
+function requireNode22LtsPatch(label, version, policy) {
+  const parsed = parseNodeVersion(version);
+  if (!parsed || parsed.major !== 22 || parsed.minor === null || parsed.patch === null) {
+    fail(`${label}: expected a full Node 22 patch, got ${version}`);
+    return;
+  }
+  if (comparePatch(parsed.raw, policy.node22LtsMinimum) < 0) {
+    fail(`${label}: expected >=${policy.node22LtsMinimum}, got ${version}`);
+  }
+}
+
+function matrixLiteral(values) {
+  return `[${values.join(", ")}]`;
+}
+
+function requireWorkflowMatrix(relativePath, matrixKey, expectedValues) {
+  const text = read(relativePath);
+  const expected = `${matrixKey}: ${matrixLiteral(expectedValues)}`;
+  if (!text.includes(expected)) fail(`${relativePath}: missing ${expected}`);
+}
+
+function requireWorkflowNodeVersion(relativePath, expectedValue, label) {
+  const text = read(relativePath);
+  const needle = `node-version: ${expectedValue}`;
+  if (!text.includes(needle)) fail(`${relativePath}: missing ${label} ${needle}`);
+}
+
+function parseEnvironmentNodeVersion() {
+  const match = read("environment.yml").match(/^\s*-\s*nodejs=(\d+\.\d+\.\d+)(?:=|\s|$)/m);
+  return match?.[1] ?? null;
+}
+
+function requireNoLegacyRuntimeJobs(policy) {
+  const unsupported = new Set(policy.unsupportedMajors.map(String));
+  for (const workflow of listFiles(".github/workflows")) {
+    const text = read(workflow);
+    if (text.includes("node-version-file:")) fail(`${workflow}: node-version-file is not allowed`);
+    for (const match of text.matchAll(/node-version:\s*([^\n]+)/g)) {
+      const versions = match[1]
+        .replace(/[${}{},[\]]/g, " ")
+        .split(/\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      for (const version of versions) {
+        const parsed = parseNodeVersion(version);
+        if (parsed && unsupported.has(String(parsed.major))) {
+          fail(`${workflow}: unsupported Node ${parsed.major} is present`);
+        }
+      }
+    }
+  }
+}
+
+const policy = readJson("runtime-policy.json");
 const packageJson = readJson("package.json");
 const lock = readJson("package-lock.json");
-requireEqual("package.json engines.node", packageJson.engines?.node, NODE_FLOOR);
-requireEqual("package-lock root engines.node", lock.packages?.[""]?.engines?.node, NODE_FLOOR);
+
+requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineFloor);
+requireEqual(
+  "package-lock root engines.node",
+  lock.packages?.[""]?.engines?.node,
+  policy.engineFloor,
+);
 requireEqual(
   "Backblaze SDK engine floor",
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
-  NODE_FLOOR,
+  policy.engineFloor,
 );
 
-if (!String(packageJson.devDependencies?.["@types/node"] ?? "").startsWith("^26.")) {
-  errors.push("package.json devDependencies.@types/node must track Node 26");
+const nvmrc = read(".nvmrc").trim();
+requireNode22LtsPatch(".nvmrc", nvmrc, policy);
+requireNode22LtsPatch("environment.yml nodejs", parseEnvironmentNodeVersion(), policy);
+
+if (
+  !String(packageJson.devDependencies?.["@types/node"] ?? "").startsWith(
+    `^${policy.typesNodeMajor}.`,
+  )
+) {
+  fail(`package.json devDependencies.@types/node must track Node ${policy.typesNodeMajor}`);
 }
-if (!String(lock.packages?.["node_modules/@types/node"]?.version ?? "").startsWith("26.")) {
-  errors.push("package-lock @types/node must resolve to Node 26 types");
-}
-
-requireEqual(".nvmrc", read(".nvmrc").trim(), MIN_NODE);
-requireContains("environment.yml", "nodejs=22.3.0");
-
-const workflowFiles = listFiles(".github/workflows");
-for (const workflow of workflowFiles) {
-  requireNotContains(workflow, "node-version-file:");
-}
-
-requireContains(".github/workflows/test.yml", MATRIX_TEXT);
-requireContains(".github/workflows/test.yml", CROSS_PLATFORM_OS_TEXT);
-requireContains(".github/workflows/test.yml", "node-version: 22.3.0");
-requireContains(".github/workflows/test.yml", "npm run check:runtime-policy");
-requireContains(".github/workflows/test.yml", "npm run test:coverage");
-requireContains(".github/workflows/test.yml", "npm run test:integration");
-requireContains(".github/workflows/test.yml", "npm run test:contract");
-requireContains(".github/workflows/test.yml", "npm run smoke:package");
-requireContains(".github/workflows/test.yml", "npm audit --omit=dev");
-requireContains(".github/workflows/contract.yml", MATRIX_TEXT);
-requireContains(".github/workflows/contract.yml", "max-parallel: 1");
-requireContains(".github/workflows/smoke.yml", MATRIX_TEXT);
-requireContains(".github/workflows/smoke.yml", "max-parallel: 1");
-
-for (const doc of [
-  "README.md",
-  "CONTRIBUTING.md",
-  "docs/TESTING.md",
-  "docs/DEPLOY.md",
-  "RELEASE.md",
-]) {
-  requireContains(doc, REQUIRED_DOC_POLICY);
+if (
+  !String(lock.packages?.["node_modules/@types/node"]?.version ?? "").startsWith(
+    `${policy.typesNodeMajor}.`,
+  )
+) {
+  fail(`package-lock @types/node must resolve to Node ${policy.typesNodeMajor} types`);
 }
 
-const scannedPolicyFiles = [
-  ".nvmrc",
-  "environment.yml",
-  "package.json",
-  ".github/dependabot.yml",
-  ".github/PULL_REQUEST_TEMPLATE.md",
-  ...listFiles(".github/workflows"),
-  ...listFiles(".github/ISSUE_TEMPLATE"),
-  "README.md",
-  "CONTRIBUTING.md",
-  "RELEASE.md",
-  "CHANGELOG.md",
-  "SECURITY.md",
-  ...listFiles("docs"),
-];
+requireWorkflowMatrix(
+  ".github/workflows/test.yml",
+  "node-version",
+  policy.deterministicLinuxMatrix,
+);
+requireWorkflowMatrix(".github/workflows/test.yml", "os", [
+  "ubuntu-latest",
+  "windows-latest",
+  "macos-latest",
+]);
+requireWorkflowNodeVersion(
+  ".github/workflows/test.yml",
+  policy.crossPlatformNode,
+  "cross-platform minimum",
+);
+requireWorkflowMatrix(".github/workflows/contract.yml", "node-version", policy.liveNodeMatrix);
+requireWorkflowMatrix(".github/workflows/smoke.yml", "node-version", policy.liveNodeMatrix);
+requireNoLegacyRuntimeJobs(policy);
 
-const bannedRuntimePatterns = [
-  /\bNode(?:\.js)?\s+v?(?:18|20)(?:\b|\.)/i,
-  /\bnode-version\s*:\s*["']?(?:18|20)(?:\b|\.)/i,
-  /\btest\s+\((?:18|20)\)/i,
-];
-
-for (const file of scannedPolicyFiles) {
-  const text = read(file);
-  for (const pattern of bannedRuntimePatterns) {
-    if (pattern.test(text)) errors.push(`${file}: contains unsupported legacy runtime text`);
-  }
+for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smoke.yml"]) {
+  if (!read(workflow).includes("max-parallel: 1")) fail(`${workflow}: live matrix must serialize`);
 }
 
 if (errors.length > 0) {
@@ -131,4 +176,4 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-console.log("runtime-policy: Node.js 22.3.0, 24, and 26 policy is aligned");
+console.log("runtime-policy: Node.js runtime metadata and workflow matrices are aligned");

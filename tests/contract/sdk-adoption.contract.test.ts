@@ -16,7 +16,6 @@ const SDK_VERSION = "0.2.0";
 const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz";
 const SDK_INTEGRITY =
   "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==";
-const NODE_FLOOR = ">=22.3.0";
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir)
@@ -153,6 +152,11 @@ describe("SDK adoption contract", () => {
   });
 
   it("keeps the effective Node runtime floor aligned with the SDK", () => {
+    const policy = readJson<{
+      engineFloor: string;
+      deterministicLinuxMatrix: string[];
+      crossPlatformNode: string;
+    }>("runtime-policy.json");
     const pkg = readJson<{
       engines: { node: string };
     }>("package.json");
@@ -164,19 +168,19 @@ describe("SDK adoption contract", () => {
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
     const ci = readFileSync(join(ROOT, ".github/workflows/test.yml"), "utf8");
 
-    expect(pkg.engines.node).toBe(NODE_FLOOR);
-    expect(lock.packages[""]?.engines?.node).toBe(NODE_FLOOR);
+    expect(pkg.engines.node).toBe(policy.engineFloor);
+    expect(lock.packages[""]?.engines?.node).toBe(policy.engineFloor);
     expect(
       compareFloor(
         pkg.engines.node,
         lock.packages["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node ?? "",
       ),
     ).toBeGreaterThanOrEqual(0);
-    expect(v1Scope).toContain("Node.js 22.3.0, 24, and 26");
-    expect(deploy).toContain("Node.js 22.3.0, 24, and 26");
-    expect(readme).toContain("Node.js 22.3.0, 24, and 26");
-    expect(ci).toContain("node-version: [22.3.0, 24, 26]");
-    expect(ci).toContain("node-version: 22.3.0");
+    expect(v1Scope).toContain(policy.engineFloor);
+    expect(deploy).toContain(policy.crossPlatformNode);
+    expect(readme).toContain(policy.crossPlatformNode);
+    expect(ci).toContain(`node-version: [${policy.deterministicLinuxMatrix.join(", ")}]`);
+    expect(ci).toContain(`node-version: ${policy.crossPlatformNode}`);
     expect(ci).toContain("npm ci --engine-strict");
   });
 

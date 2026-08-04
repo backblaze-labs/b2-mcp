@@ -94,6 +94,7 @@
     "dist/**/*",
     "README.md",
     "CHANGELOG.md",
+    "runtime-policy.json",
     "SECURITY.md",
     "LICENSE"
   ],

@@ -1,0 +1,10 @@
+{
+  "allowedAdvisories": [
+    {
+      "name": "@hono/node-server",
+      "source": 1124006,
+      "expires": "2026-10-01",
+      "reason": "Transitive through stable @modelcontextprotocol/node@2.0.0; no fixed stable MCP v2 package is published yet."
+    }
+  ]
+}

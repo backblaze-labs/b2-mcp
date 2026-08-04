@@ -12,17 +12,19 @@ permissions:
 jobs:
   runtime-policy:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.3.0
+          node-version: 22.23.1
       - run: npm run check:runtime-policy
 
   deterministic-linux:
     name: deterministic linux / Node ${{ matrix.node-version }}
     needs: runtime-policy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -42,12 +44,12 @@ jobs:
       - run: npm run test:contract
       - run: npm run build
       - run: npm run smoke:package
-      - run: npm audit --omit=dev --audit-level=high
 
   cross-platform-minimum:
     name: cross-platform minimum / ${{ matrix.os }}
     needs: runtime-policy
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -56,7 +58,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
         with:
-          node-version: 22.3.0
+          node-version: 22.23.1
           cache: npm
       - run: npm ci --engine-strict
       - run: npm run build
@@ -69,7 +71,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
         with:
-          node-version-file: .nvmrc
+          node-version: 22.23.1
           cache: npm
       - run: npm ci --engine-strict
       - run: npm run test:package
@@ -82,6 +84,20 @@ jobs:
             reports/junit/package.xml
             reports/jest/package.json
           if-no-files-found: error
+
+  supply-chain-audit:
+    name: supply-chain audit
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - run: npm ci --engine-strict
+      - run: npm run audit:supply-chain
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green

@@ -133,16 +133,17 @@ npm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_
 
 ## Networked Security Gate
 
-The production dependency audit is release-gate evidence and a CI gate for high
-or critical findings:
+The full lockfile audit is release-gate evidence and a pull-request CI gate.
+It runs outside the `mark-green` deploy path so a newly published advisory does
+not stall auto-deploy without a code change:
 
 ```bash
-npm audit --omit=dev --audit-level=high
+npm run audit:supply-chain
 ```
 
+Known exceptions must live in `audit-policy.json` with an expiry and rationale.
 The stable MCP Node adapter currently pulls a moderate `@hono/node-server`
-advisory with no fixed stable MCP v2 package available. Keep the audit output in
-release evidence and raise the gate once the SDK exposes a fixed adapter.
+advisory with no fixed stable MCP v2 package available.
 
 ## Live B2 Smoke Gate
 
@@ -163,5 +164,5 @@ that consumes `B2_*` secrets must use a protected GitHub environment, fail
 loudly when manually dispatched outside `main`, check out `ci-green` before any
 repository code runs with secrets, serialize live write tests, and reference
 only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
-serially on Node.js 22.3.0, 24, and 26. Release-triggered live workflows must
-first prove the `v*` release tag points at `ci-green`.
+serially on patched Node 22 LTS, Node.js 24, and Node.js 26. Release-triggered
+live workflows must first prove the `v*` release tag points at `ci-green`.

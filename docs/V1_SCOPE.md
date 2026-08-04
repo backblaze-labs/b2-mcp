@@ -28,7 +28,8 @@ In scope for Phase 1:
 - Customer-operated MCP OAuth resource-server integration.
 - Deterministic tool-profile contracts for the full, default, and read-only
   profiles.
-- A Node.js 22.3.0 runtime floor with Node.js 22.3.0, 24, and 26 coverage.
+- A Node.js `>=22.3.0` package engine floor matching the official B2 SDK, with
+  Node.js 22.3.0 minimum-floor evidence plus Node.js 24 and 26 coverage.
 - Release, package, CI, protocol, security, and reference-deployment work needed
   to ship `v0.1.0`.
 
@@ -70,16 +71,18 @@ metadata.
 
 Inherited values from the incoming project must be treated as pre-Phase-1
 history. Release work must keep visible metadata aligned with the canonical
-`@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js 22.3.0 contract before `v0.1.0`
+`@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js `>=22.3.0` contract before `v0.1.0`
 is released.
 
 ## Runtime
 
-Node.js 22.3.0 is the minimum supported runtime for Phase 1.
+Node.js `>=22.3.0` is the package engine floor for Phase 1.
 
 Implementation, tests, package verification, reference deployment instructions,
-and CI must run on Node.js 22.3.0, 24, and 26. Other Node.js lines are not part
-of the `v0.1.0` support contract.
+and CI must continuously verify Node.js 22.3.0, 24, and 26. Operators should use
+a patched Node 22 LTS release (`22.23.1` or newer at the time of writing),
+Node.js 24, or Node.js 26. Other Node.js lines are not part of the `v0.1.0`
+support contract.
 
 ## API Architecture
 

@@ -2,6 +2,10 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { root } from "./support";
 
+const runtimePolicy = JSON.parse(readFileSync(join(root, "runtime-policy.json"), "utf8")) as {
+  liveNodeMatrix: string[];
+};
+
 const liveWorkflows = [
   {
     path: ".github/workflows/contract.yml",
@@ -46,7 +50,7 @@ describe("live secret workflow policy", () => {
       const text = workflowText(path);
       expect(text).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
       expect(text).toMatch(jobField(job, "environment", environment));
-      expect(text).toContain("node-version: [22.3.0, 24, 26]");
+      expect(text).toContain(`node-version: [${runtimePolicy.liveNodeMatrix.join(", ")}]`);
       expect(text).toContain("max-parallel: 1");
       expect(text).toMatch(/^\s{2}guard:\s*$/m);
       expect(text).toMatch(/if: github\.repository == 'backblaze-labs\/b2-mcp'/);
