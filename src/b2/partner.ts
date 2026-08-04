@@ -1,6 +1,9 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError } from "../utils/errors.js";
+import type { B2AuthManager } from "../auth.js";
+import type { B2Client } from "./client.js";
+import type { B2Config } from "../utils/types.js";
 
 const PARTNER_SDK_GAP =
   "Partner/Groups tools are unavailable in this release because @backblaze-labs/b2-sdk@0.2.0 does not publish a stable Partner API. Tracked upstream at backblaze-labs/b2-sdk-typescript#153.";
@@ -25,16 +28,16 @@ function partnerSdkGap(name: string) {
  */
 export function registerPartnerTools(
   server: ToolRegistrar,
-  _client: unknown,
-  _auth: unknown,
-  _config: unknown,
+  _client: B2Client,
+  _auth: B2AuthManager,
+  _config: B2Config,
 ): void {
   // ── b2_list_groups ──────────────────────────────────────────────────────────
   server.registerTool(
     "b2_list_groups",
     {
       description:
-        "List active Groups administered by a Group admin account. Returns up to 100 groups per call; use nextGroupId for pagination. Requires the account to be authorized for the Partner API.",
+        "Unavailable compatibility stub for listing active Groups. The official Backblaze SDK version used by this release does not expose Partner/Groups operations yet; calls return tool_unavailable until backblaze-labs/b2-sdk-typescript#153 ships in a stable SDK.",
       inputSchema: {
         adminAccountId: z
           .string()
@@ -71,7 +74,7 @@ export function registerPartnerTools(
     "b2_eject_group_member",
     {
       description:
-        "Eject a member from a Group. The account is NOT deleted — just removed (the member resets their password on next login). Optionally change their email on eject. Cannot be re-added via API (only the Group Management page).",
+        "Unavailable compatibility stub for ejecting a Group member. The official Backblaze SDK version used by this release does not expose Partner/Groups operations yet; calls return tool_unavailable until backblaze-labs/b2-sdk-typescript#153 ships in a stable SDK.",
       inputSchema: {
         adminAccountId: z
           .string()
@@ -105,7 +108,7 @@ export function registerPartnerTools(
     "b2_list_group_members",
     {
       description:
-        "List active (ACCEPTED) Group members for a specific Group. Returns up to 1,000 members per call; use nextEmail for pagination. Includes B2 storage stats per member.",
+        "Unavailable compatibility stub for listing Group members. The official Backblaze SDK version used by this release does not expose Partner/Groups operations yet; calls return tool_unavailable until backblaze-labs/b2-sdk-typescript#153 ships in a stable SDK.",
       inputSchema: {
         adminAccountId: z
           .string()

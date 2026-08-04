@@ -2,6 +2,7 @@ import { B2Client as SdkB2Client } from "@backblaze-labs/b2-sdk";
 import {
   B2AuthManager,
   RequestSignalTransport,
+  SDK_RETRY_OPTIONS,
   setB2SdkClientFactoryForTests,
 } from "../../src/auth";
 import { B2Config } from "../../src/utils/types";
@@ -142,5 +143,14 @@ describe("B2AuthManager", () => {
 
     expect(auth.accountId).toBe("test-account-123");
     expect(auth.authorizationToken).toBeDefined();
+  });
+
+  it("uses the reviewed SDK retry envelope for native calls", () => {
+    expect(SDK_RETRY_OPTIONS).toMatchObject({
+      maxRetries: 3,
+      initialRetryDelayMs: 1000,
+      maxRetryDelayMs: 4000,
+      requestTimeoutMs: 30_000,
+    });
   });
 });

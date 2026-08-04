@@ -1,52 +1,50 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
-import { createS3ClientConfig } from "@backblaze-labs/b2-sdk/s3";
 import type {
   ApplicationKey,
+  ApplicationKeyId,
+  B2Client as SdkB2Client,
   BucketInfo,
+  BucketId,
   BucketType,
   EventNotificationRule,
   FileVersion,
+  GetBucketNotificationRulesResponse,
   ListFileNamesResponse,
   ListKeysResponse,
   ListPartsResponse,
   ListUnfinishedLargeFilesResponse,
   PartInfo,
+  SetBucketNotificationRulesResponse,
+  UpdateBucketRequest,
+  UpdateFileLegalHoldResponse,
+  UpdateFileRetentionResponse,
   UnfinishedLargeFile,
 } from "@backblaze-labs/b2-sdk";
+import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
 import { B2AuthManager } from "../auth.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
-import { VERSION } from "../version.js";
+import { createReportS3Client } from "../s3/client.js";
+import { dateFromTimestamp } from "../utils/date.js";
 
-interface BucketFilters {
+export interface BucketFilters {
   bucketId?: string;
   bucketName?: string;
-  bucketTypes?: string[];
+  bucketTypes?: Array<BucketType | "all">;
 }
 
-interface CreateBucketOptions {
-  bucketName: string;
-  bucketType: BucketType;
-  bucketInfo?: Record<string, string>;
-  corsRules?: unknown[];
-  lifecycleRules?: unknown[];
-  defaultServerSideEncryption?: unknown;
-  defaultRetention?: unknown;
-  fileLockEnabled?: boolean;
-  replicationConfiguration?: unknown;
-}
+export type CreateBucketOptions = Parameters<SdkB2Client["createBucket"]>[0];
 
-interface UpdateBucketOptions extends Partial<CreateBucketOptions> {
+export type UpdateBucketOptions = Omit<UpdateBucketRequest, "accountId" | "bucketId"> & {
   bucketId: string;
-  ifRevisionIs?: number;
-}
+};
 
-interface ListKeysOptions {
+export interface ListKeysOptions {
   maxKeyCount?: number;
   startApplicationKeyId?: string;
 }
 
-interface ListFileNamesOptions {
+export interface ListFileNamesOptions {
   bucketId: string;
   startFileName?: string;
   maxFileCount?: number;
@@ -54,17 +52,33 @@ interface ListFileNamesOptions {
   delimiter?: string;
 }
 
-interface ListUnfinishedLargeFilesOptions {
+export interface ListUnfinishedLargeFilesOptions {
   bucketId: string;
   namePrefix?: string;
   startFileId?: string;
   maxFileCount?: number;
 }
 
-interface ListPartsOptions {
+export interface ListPartsOptions {
   fileId: string;
   startPartNumber?: number;
   maxPartCount?: number;
+}
+
+export interface UpdateFileLegalHoldOptions {
+  fileId: string;
+  fileName: string;
+  legalHold: "on" | "off";
+}
+
+export interface UpdateFileRetentionOptions {
+  fileId: string;
+  fileName: string;
+  fileRetention: {
+    mode: "governance" | "compliance" | null;
+    retainUntilTimestamp: number | null;
+  };
+  bypassGovernance?: boolean;
 }
 
 export interface ReportObjectPage {
@@ -90,16 +104,25 @@ export interface ListedPart {
   size: number;
 }
 
-function dateFromTimestamp(value: number | undefined): Date | undefined {
-  return typeof value === "number" ? new Date(value) : undefined;
-}
-
-function reportS3UserAgent() {
-  return `backblaze-b2-mcp/${VERSION} surface/b2-insights-reports`;
-}
-
 function cloneJsonResponse<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function maybeBucketId(value: string | undefined): BucketId | undefined {
+  return value ? bucketId(value) : undefined;
+}
+
+function maybeApplicationKeyId(value: string | undefined): ApplicationKeyId | undefined {
+  return value ? applicationKeyId(value) : undefined;
+}
+
+function toBucketFilters(options: BucketFilters) {
+  const bucketTypes = options.bucketTypes?.filter((type): type is BucketType => type !== "all");
+  return {
+    bucketId: maybeBucketId(options.bucketId),
+    bucketName: options.bucketName,
+    bucketTypes: bucketTypes?.length ? bucketTypes : undefined,
+  };
 }
 
 /**
@@ -113,52 +136,57 @@ export class B2Client {
 
   async listBuckets(options: BucketFilters = {}): Promise<{ buckets: BucketInfo[] }> {
     const { client } = await this.auth.getAuthorizedSdk();
-    const buckets = await withCircuit(() => client.listBuckets(options as never));
+    const buckets = await withCircuit(() => client.listBuckets(toBucketFilters(options)));
     return { buckets: buckets.map((bucket) => cloneJsonResponse(bucket.info)) };
   }
 
   async createBucket(options: CreateBucketOptions): Promise<BucketInfo> {
     const { client } = await this.auth.getAuthorizedSdk();
-    const bucket = await withCircuit(() => client.createBucket(options as never));
+    const bucket = await withCircuit(() => client.createBucket(options));
     return cloneJsonResponse(bucket.info);
   }
 
-  async deleteBucket(bucketId: string): Promise<BucketInfo> {
+  async deleteBucket(bucketIdValue: string): Promise<BucketInfo> {
     const { client } = await this.auth.getAuthorizedSdk();
-    return cloneJsonResponse(await withCircuit(() => client.deleteBucket(bucketId as never)));
+    return cloneJsonResponse(await withCircuit(() => client.deleteBucket(bucketId(bucketIdValue))));
   }
 
   async updateBucket(options: UpdateBucketOptions): Promise<BucketInfo> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
+    const { bucketId: rawBucketId, ...rest } = options;
+    const request: UpdateBucketRequest = {
+      accountId: accountId(auth.accountId),
+      bucketId: bucketId(rawBucketId),
+      ...rest,
+    };
     return cloneJsonResponse(
       await withCircuit(() =>
-        client.raw.updateBucket(auth.apiUrl, auth.authorizationToken, {
-          accountId: auth.accountId,
-          ...(options as unknown as Record<string, unknown>),
-        } as never),
+        client.raw.updateBucket(auth.apiUrl, auth.authorizationToken, request),
       ),
     );
   }
 
-  async getBucketNotificationRules(bucketId: string): Promise<unknown> {
+  async getBucketNotificationRules(
+    bucketIdValue: string,
+  ): Promise<GetBucketNotificationRulesResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
     return withCircuit(() =>
       client.raw.getBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
-        bucketId,
-      } as never),
+        bucketId: bucketId(bucketIdValue),
+      }),
     );
   }
 
   async setBucketNotificationRules(
-    bucketId: string,
+    bucketIdValue: string,
     eventNotificationRules: EventNotificationRule[],
-  ): Promise<unknown> {
+  ): Promise<SetBucketNotificationRulesResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
     return withCircuit(() =>
       client.raw.setBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
-        bucketId,
+        bucketId: bucketId(bucketIdValue),
         eventNotificationRules,
-      } as never),
+      }),
     );
   }
 
@@ -167,46 +195,41 @@ export class B2Client {
     return withCircuit(() =>
       client.listKeys({
         pageSize: options.maxKeyCount,
-        startApplicationKeyId: options.startApplicationKeyId as never,
-      } as never),
+        startApplicationKeyId: maybeApplicationKeyId(options.startApplicationKeyId),
+      }),
     );
   }
 
-  async deleteKey(applicationKeyId: string): Promise<ApplicationKey> {
+  async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKey> {
     const { client } = await this.auth.getAuthorizedSdk();
-    return withCircuit(() => client.deleteKey(applicationKeyId as never));
+    return withCircuit(() => client.deleteKey(applicationKeyId(applicationKeyIdValue)));
   }
 
-  async updateFileLegalHold(options: {
-    fileId: string;
-    fileName: string;
-    legalHold: "on" | "off";
-  }): Promise<unknown> {
+  async updateFileLegalHold(
+    options: UpdateFileLegalHoldOptions,
+  ): Promise<UpdateFileLegalHoldResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
+    const request = { ...options, fileId: fileId(options.fileId) };
     return withCircuit(() =>
-      client.raw.updateFileLegalHold(auth.apiUrl, auth.authorizationToken, options as never),
+      client.raw.updateFileLegalHold(auth.apiUrl, auth.authorizationToken, request),
     );
   }
 
-  async updateFileRetention(options: {
-    fileId: string;
-    fileName: string;
-    fileRetention: {
-      mode: "governance" | "compliance" | null;
-      retainUntilTimestamp: number | null;
-    };
-    bypassGovernance?: boolean;
-  }): Promise<unknown> {
+  async updateFileRetention(
+    options: UpdateFileRetentionOptions,
+  ): Promise<UpdateFileRetentionResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
+    const request = { ...options, fileId: fileId(options.fileId) };
     return withCircuit(() =>
-      client.raw.updateFileRetention(auth.apiUrl, auth.authorizationToken, options as never),
+      client.raw.updateFileRetention(auth.apiUrl, auth.authorizationToken, request),
     );
   }
 
   async listFileNames(options: ListFileNamesOptions): Promise<ListFileNamesResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
+    const request = { ...options, bucketId: bucketId(options.bucketId) };
     return withCircuit(() =>
-      client.raw.listFileNames(auth.apiUrl, auth.authorizationToken, options as never, {
+      client.raw.listFileNames(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
     );
@@ -216,8 +239,13 @@ export class B2Client {
     options: ListUnfinishedLargeFilesOptions,
   ): Promise<ListUnfinishedLargeFilesResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
+    const request = {
+      ...options,
+      bucketId: bucketId(options.bucketId),
+      startFileId: options.startFileId ? largeFileId(options.startFileId) : undefined,
+    };
     return withCircuit(() =>
-      client.raw.listUnfinishedLargeFiles(auth.apiUrl, auth.authorizationToken, options as never, {
+      client.raw.listUnfinishedLargeFiles(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
     );
@@ -225,8 +253,9 @@ export class B2Client {
 
   async listParts(options: ListPartsOptions): Promise<ListPartsResponse> {
     const { client, auth } = await this.auth.getAuthorizedSdk();
+    const request = { ...options, fileId: largeFileId(options.fileId) };
     return withCircuit(() =>
-      client.raw.listParts(auth.apiUrl, auth.authorizationToken, options as never, {
+      client.raw.listParts(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
     );
@@ -298,18 +327,9 @@ export class B2Client {
 
   private async getReportS3Client(): Promise<S3Client> {
     if (this.reportS3Client) return this.reportS3Client;
-    const sdk = await this.auth.getSdkClient();
     const config = this.auth.getConfig();
-    const s3Config = createS3ClientConfig({
-      accountInfo: sdk.accountInfo,
-      applicationKeyId: config.appKeyId,
-      applicationKey: config.appKey,
-      region: config.region,
-    });
-    this.reportS3Client = new S3Client({
-      ...s3Config,
-      customUserAgent: reportS3UserAgent(),
-    });
+    const auth = await this.auth.getAuth();
+    this.reportS3Client = createReportS3Client(config, auth);
     return this.reportS3Client;
   }
 }

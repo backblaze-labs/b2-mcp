@@ -21,6 +21,7 @@ import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import { dateFromTimestamp } from "../utils/date.js";
 
 const GB = 1e9; // report columns are GB = 1e9 bytes
 
@@ -290,10 +291,6 @@ function startOfMonthUTC(): string {
 const gb = (bytes: number | null) =>
   bytes == null ? null : Math.round((bytes / GB) * 1000) / 1000;
 
-function dateFromTimestamp(value: number | undefined): Date | undefined {
-  return typeof value === "number" ? new Date(value) : undefined;
-}
-
 // ── Snapshot growth (point-in-time stored_gb at two dates) ──────────────────
 // Per Backblaze's Usage Report spec, stored_gb is "bytes stored in gigabytes
 // (at the end of the day)" — a point-in-time snapshot — so growth is the
@@ -476,6 +473,29 @@ async function resolveBucketName(
   return {};
 }
 
+function bucketResolutionError(
+  input: string,
+  resolved: { name?: string; id?: string; candidates?: string[] },
+): Record<string, unknown> | null {
+  if (!resolved.name) {
+    return {
+      error: "bucket_not_uniquely_resolved",
+      candidates: resolved.candidates ?? [],
+      note: resolved.candidates?.length
+        ? "Multiple buckets match; pass an exact name or bucketId."
+        : `No bucket matches '${input}'.`,
+    };
+  }
+  if (!resolved.id) {
+    return {
+      error: "bucket_id_unavailable",
+      candidates: [],
+      note: `No bucket ID could be resolved for '${input}'.`,
+    };
+  }
+  return null;
+}
+
 // ── Tool registration ───────────────────────────────────────────────────────
 
 export function registerInsightTools(
@@ -652,20 +672,10 @@ export function registerInsightTools(
     async (args) => {
       try {
         const resolved = await resolveBucketName(b2Client, args.bucket);
-        if (!resolved.name)
-          return toolJson({
-            error: "bucket_not_uniquely_resolved",
-            candidates: resolved.candidates ?? [],
-            note: resolved.candidates?.length
-              ? "Multiple buckets match; pass an exact name or bucketId."
-              : `No bucket matches '${args.bucket}'.`,
-          });
-        if (!resolved.id)
-          return toolJson({
-            error: "bucket_not_uniquely_resolved",
-            candidates: [],
-            note: `No bucket ID could be resolved for '${args.bucket}'.`,
-          });
+        const resolutionError = bucketResolutionError(args.bucket, resolved);
+        if (resolutionError) return toolJson(resolutionError);
+        const resolvedBucketName = resolved.name!;
+        const resolvedBucketId = resolved.id!;
 
         // Bounded top-N by size — never accumulate every object. Sorting by size
         // also requires a full listing, so bound the WORK too: stop at max_scan
@@ -684,12 +694,20 @@ export function registerInsightTools(
         let stopReason: "complete" | "max_scan" | "time_budget" = "complete";
         do {
           const page = await b2Client.listFileNames({
-            bucketId: resolved.id,
+            bucketId: resolvedBucketId,
             prefix: args.prefix,
             startFileName: token,
             maxFileCount: Math.min(Math.max(args.limit, 1000), 10_000),
           });
-          for (const file of page.files ?? []) {
+          const files = page.files ?? [];
+          let pageExhausted = true;
+          for (const file of files) {
+            if (scanned >= args.max_scan) {
+              truncated = true;
+              stopReason = "max_scan";
+              pageExhausted = false;
+              break;
+            }
             const listed = b2Client.toListedFile(file);
             scanned++;
             const size = listed.size;
@@ -701,7 +719,7 @@ export function registerInsightTools(
             }
           }
           token = page.nextFileName ?? undefined;
-          if (token && scanned >= args.max_scan) {
+          if (scanned >= args.max_scan && (token || !pageExhausted)) {
             truncated = true;
             stopReason = "max_scan";
             break;
@@ -714,7 +732,7 @@ export function registerInsightTools(
         } while (token);
 
         return toolJson({
-          bucket: resolved.name,
+          bucket: resolvedBucketName,
           scanned,
           truncated,
           returned: top.length,
@@ -768,20 +786,10 @@ export function registerInsightTools(
     async (args) => {
       try {
         const resolved = await resolveBucketName(b2Client, args.bucket);
-        if (!resolved.name)
-          return toolJson({
-            error: "bucket_not_uniquely_resolved",
-            candidates: resolved.candidates ?? [],
-            note: resolved.candidates?.length
-              ? "Multiple buckets match; pass an exact name or bucketId."
-              : `No bucket matches '${args.bucket}'.`,
-          });
-        if (!resolved.id)
-          return toolJson({
-            error: "bucket_not_uniquely_resolved",
-            candidates: [],
-            note: `No bucket ID could be resolved for '${args.bucket}'.`,
-          });
+        const resolutionError = bucketResolutionError(args.bucket, resolved);
+        if (resolutionError) return toolJson(resolutionError);
+        const resolvedBucketName = resolved.name!;
+        const resolvedBucketId = resolved.id!;
 
         const cutoff =
           args.older_than_days != null ? Date.now() - args.older_than_days * 86400_000 : null;
@@ -802,17 +810,34 @@ export function registerInsightTools(
         let stopReason: "complete" | "max_uploads" | "time_budget" = "complete";
         do {
           const page = await b2Client.listUnfinishedLargeFiles({
-            bucketId: resolved.id,
+            bucketId: resolvedBucketId,
             startFileId: fileIdMarker,
             maxFileCount: 100,
           });
-          for (const file of page.files ?? []) {
+          const files = page.files ?? [];
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
             const listed = b2Client.toListedUnfinishedUpload(file);
             const initiated = dateFromTimestamp(listed.uploadTimestamp);
             if (cutoff != null && initiated && initiated.getTime() > cutoff) continue;
+            if (uploads.length >= args.max_uploads) {
+              const remainingMatches = files.slice(i).some((candidate) => {
+                const ts = b2Client.toListedUnfinishedUpload(candidate).uploadTimestamp;
+                const remainingInitiated = dateFromTimestamp(ts);
+                return (
+                  cutoff == null || !remainingInitiated || remainingInitiated.getTime() <= cutoff
+                );
+              });
+              if (remainingMatches || page.nextFileId) {
+                truncated = true;
+                stopReason = "max_uploads";
+              }
+              break;
+            }
             uploads.push({ fileId: listed.fileId, fileName: listed.fileName, initiated });
           }
           fileIdMarker = page.nextFileId ?? undefined;
+          if (truncated) break;
           if (fileIdMarker && uploads.length >= args.max_uploads) {
             truncated = true;
             stopReason = "max_uploads";
@@ -827,7 +852,7 @@ export function registerInsightTools(
 
         if (!uploads.length)
           return toolJson({
-            bucket: resolved.name,
+            bucket: resolvedBucketName,
             unfinished_count: 0,
             note: "No abandoned multipart uploads found.",
           });
@@ -872,7 +897,7 @@ export function registerInsightTools(
             : `Consider a lifecycle rule to auto-cancel unfinished large uploads (daysFromStartingToCancelingUnfinishedLargeFiles).`;
 
         return toolJson({
-          bucket: resolved.name,
+          bucket: resolvedBucketName,
           unfinished_count: uploads.length,
           truncated,
           wasted_gb: gb(wasted),

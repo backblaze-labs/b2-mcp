@@ -136,7 +136,7 @@ The profile count table below is the canonical numeric source in this document:
 
 | Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                   |
 | ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------------------------- |
-| `full`           | 40          | 21     | 19     | 0      | Complete implemented tool superset plus 3 unavailable compatibility stubs.                |
+| `full`           | 40          | 21     | 19     | 0      | Complete tool superset; 6 `b2_*` names are unavailable compatibility stubs.               |
 | `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted user profile for `v0.1.0` plus 3 unavailable compatibility stubs. |
 | `read-only`      | 20          | 11     | 9      | 0      | Deterministic read-only profile plus 3 unavailable compatibility stubs.                   |
 
@@ -151,6 +151,11 @@ actual registrations agree; any drift must fail CI.
 `full` is the complete implemented tool superset. It is for explicit
 full-surface contract generation, administrative review, and regression
 detection. It is not the default user profile.
+
+Six `b2_*` names in `full` are unavailable compatibility stubs: the durable
+secret-producing names `b2_create_key`, `b2_create_group_member`, and
+`b2_reserve_trial_create_account`, plus the Partner/Groups SDK-gap names
+`b2_list_groups`, `b2_eject_group_member`, and `b2_list_group_members`.
 
 `b2_*` tools in `full`:
 
@@ -204,7 +209,10 @@ detection. It is not the default user profile.
 customer-hosted deployment with a standard B2 application key, no distinct
 Partner/master credential, and no configured out-of-band secret sink.
 
-It excludes real Partner/Groups handlers:
+It excludes Partner/Groups handlers unless an explicit distinct master-key
+profile is configured. In `full`, these names are compatibility stubs because
+the official Backblaze SDK version consumed for v0.1 does not publish stable
+Partner/Groups operations:
 
 - `b2_eject_group_member`
 - `b2_list_group_members`

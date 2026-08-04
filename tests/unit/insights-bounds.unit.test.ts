@@ -148,10 +148,29 @@ describe("b2_largest_files — scan bound", () => {
     );
 
     expect(result.truncated).toBe(true);
-    expect(result.scanned).toBe(6);
+    expect(result.scanned).toBe(5);
     expect(result.returned).toBe(3);
     expect(result.files.map((f: any) => f.size_bytes)).toEqual([40, 30, 20]);
     expect(result.note).toContain("max_scan");
+  });
+
+  it("stops inside the final returned page and reports truncation", async () => {
+    queueB2({
+      fileNamePages: [
+        {
+          files: [file("a", 10), file("b", 20), file("c", 30)],
+          nextFileName: null,
+        },
+      ],
+    });
+
+    const result = parseResult(
+      await callTool(server, "b2_largest_files", { bucket: "test-bucket", limit: 3, max_scan: 2 }),
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.scanned).toBe(2);
+    expect(result.files.map((f: any) => f.name)).toEqual(["b", "a"]);
   });
 
   it("returns a complete (non-truncated) result when the listing ends within the cap", async () => {
@@ -217,6 +236,32 @@ describe("b2_unfinished_uploads — upload bound", () => {
     expect(result.unfinished_count).toBe(2);
     expect(result.oldest_file).toBe("u2");
     expect(result.wasted_gb).toBe(3);
+    expect(result.note).toContain("max_uploads");
+  });
+
+  it("stops inside the final upload page and reports matching items left", async () => {
+    queueB2({
+      uploadPages: [
+        {
+          files: [
+            upload("u1", "1", "2020-02-01T00:00:00.000Z"),
+            upload("u2", "2", "2020-01-01T00:00:00.000Z"),
+            upload("u3", "3", "2020-03-01T00:00:00.000Z"),
+          ],
+          nextFileId: null,
+        },
+      ],
+      partsByFileId: { "1": [part("1", 1e9)] },
+    });
+
+    const result = parseResult(
+      await callTool(server, "b2_unfinished_uploads", { bucket: "test-bucket", max_uploads: 1 }),
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.unfinished_count).toBe(1);
+    expect(result.oldest_file).toBe("u1");
+    expect(result.wasted_gb).toBe(1);
     expect(result.note).toContain("max_uploads");
   });
 

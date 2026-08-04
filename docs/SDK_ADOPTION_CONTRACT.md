@@ -107,9 +107,13 @@ adds a supported use.
   request signal through. If a selected SDK facade method lacks request-level
   abort support, the row must say so and the implementation issue must either
   switch to a raw method that accepts a signal or track the SDK gap.
-- Retries and idempotency: use SDK retry policy for transport errors. Mutating
-  MCP tools still need their own idempotency contract; SDK retries do not make a
-  lost-success create, copy, multipart finish, or secret-producing call safe.
+- Retries and idempotency: native SDK clients are configured with the MCP-owned
+  retry envelope formerly used by `withRetry`: 3 retries, 1s initial
+  exponential backoff, 4s maximum backoff, and a 30s per-attempt timeout. The
+  SDK retries transient transport/B2 errors and refreshes expired auth tokens;
+  mutating MCP tools still need their own idempotency contract because SDK
+  retries do not make a lost-success create, copy, multipart finish, or
+  secret-producing call safe.
 - Pagination: preserve the MCP tool's existing cursor names and caps unless the
   row explicitly changes them. SDK paginators may be used internally, but MCP
   responses must keep bounded output and explicit continuation fields.

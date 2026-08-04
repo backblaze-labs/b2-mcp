@@ -116,6 +116,31 @@ describe("SDK 401 re-auth-and-retry", () => {
     expect(result.buckets.map((b: any) => b.bucketName)).toContain("reauth-bucket");
   });
 
+  it("re-authorizes and retries raw SDK calls on an expired auth token", async () => {
+    const bucket = await createBucket("raw-reauth-bucket");
+    await bucket.upload({
+      fileName: "large.bin",
+      source: new BufferSource(new TextEncoder().encode("x")),
+    });
+    sim.injectFailure({
+      on: "b2_list_file_names",
+      status: 401,
+      code: "expired_auth_token",
+      message: "expired",
+      count: 1,
+    });
+
+    const result = parseResult(
+      await callTool(server, "b2_largest_files", {
+        bucket: "raw-reauth-bucket",
+        limit: 1,
+        max_scan: 1000,
+      }),
+    );
+
+    expect(result.files[0].name).toBe("large.bin");
+  });
+
   it("surfaces repeated auth failures as a structured tool error", async () => {
     sim.injectFailure({
       on: "b2_list_buckets",
@@ -415,7 +440,9 @@ describe("object lock tools", () => {
 
 describe("Partner API tools", () => {
   it("returns explicit SDK-gap errors instead of using a parallel transport", async () => {
+    const tools = getRegisteredTools(server) ?? {};
     for (const name of ["b2_list_groups", "b2_eject_group_member", "b2_list_group_members"]) {
+      expect(tools[name].description).toMatch(/Unavailable compatibility stub/);
       const result = await callTool(server, name, {
         adminAccountId: "test-account-123",
         groupId: "254",

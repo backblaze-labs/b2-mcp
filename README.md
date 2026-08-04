@@ -4,10 +4,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 
 **40 tools, split by what they do:**
 
-- **Control plane (14, native B2 API)** — buckets, key listing/deletion, Partner/Groups administration, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
+- **Control plane (11 active, native B2 API)** — buckets, key listing/deletion, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
 - **Data plane (19, S3-compatible API)** — object upload/download/copy/list/delete, multipart, presigned URLs. _(Forward-compatible; S3 is the standard surface for object data.)_
 - **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
-- **Unavailable compatibility stubs (3, native B2 API)** — durable-secret-producing tool names return a non-secret unavailable error until a reviewed out-of-band secret sink exists.
+- **Unavailable compatibility stubs (6, native B2 API in the full surface)** — three durable-secret-producing tool names and three Partner/Groups SDK-gap tool names return a non-secret unavailable error until their reviewed dependencies exist.
 
 Destructive actions are gated, durable B2 secrets never enter the model's context, and the tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
@@ -128,10 +128,10 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 37 tools are active; 3 native names are unavailable compatibility stubs for stale cached `tools/list` clients. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, Partner/Groups administration, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), Group-member eject (`b2_eject_group_member`), and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 34 tools are active in the full surface; 6 native names are unavailable compatibility stubs for stale cached `tools/list` clients or deferred dependencies. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, and insights stay native. Nine destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`) and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
-<summary><b>Control plane — native B2 API (14)</b></summary>
+<summary><b>Control plane — native B2 API (11 active + 3 Partner SDK-gap stubs)</b></summary>
 
 | Tool                                 | Description                                                        |
 | ------------------------------------ | ------------------------------------------------------------------ |
@@ -147,13 +147,13 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 | `b2_update_file_legal_hold`          | Set/clear legal hold on an object                                  |
 | `b2_update_file_retention`           | Set/clear retention on an object                                   |
 | **Partner API** _(needs master key)_ |                                                                    |
-| `b2_list_groups`                     | List partner groups                                                |
-| `b2_eject_group_member`              | Remove an account from a group                                     |
-| `b2_list_group_members`              | List group members                                                 |
+| `b2_list_groups`                     | Unavailable SDK-gap compatibility stub for listing partner groups  |
+| `b2_eject_group_member`              | Unavailable SDK-gap compatibility stub for removing a group member |
+| `b2_list_group_members`              | Unavailable SDK-gap compatibility stub for listing group members   |
 
 </details>
 
-Durable-secret-producing operations are registered only as compatibility stubs in Phase 1 because there is no configured out-of-band secret sink. Calls to `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` return a structured non-secret unavailable error. A future sink-backed profile may expose them only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
+Durable-secret-producing operations are registered only as compatibility stubs in Phase 1 because there is no configured out-of-band secret sink. Calls to `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` return a structured non-secret unavailable error. Partner/Groups operations `b2_list_groups`, `b2_eject_group_member`, and `b2_list_group_members` are also unavailable compatibility stubs until the official Backblaze SDK publishes stable Partner APIs. A future sink-backed profile may expose secret-producing operations only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
 
 <details>
 <summary><b>Data plane — S3-compatible API (19)</b></summary>

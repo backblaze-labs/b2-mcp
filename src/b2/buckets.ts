@@ -1,9 +1,14 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client } from "./client.js";
+import {
+  B2Client,
+  type BucketFilters,
+  type CreateBucketOptions,
+  type UpdateBucketOptions,
+} from "./client.js";
+import type { EventNotificationRule } from "@backblaze-labs/b2-sdk";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
-import { assignDefined } from "../utils/payload.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
 interface BucketNotificationRule {
@@ -16,6 +21,10 @@ interface BucketNotificationRule {
   isEnabled: boolean;
   [key: string]: unknown;
 }
+
+type Mutable<T> = {
+  -readonly [K in keyof T]: T[K];
+};
 
 /**
  * Redact webhook secrets from a notification-rules API response before it reaches
@@ -137,7 +146,7 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const payload: Record<string, unknown> = {};
+        const payload: BucketFilters = {};
         if (args.bucketId) payload.bucketId = args.bucketId;
         if (args.bucketName) payload.bucketName = args.bucketName;
         if (args.bucketTypes) payload.bucketTypes = args.bucketTypes;
@@ -145,10 +154,7 @@ export function registerBucketTools(
         // B2's b2_list_buckets has no count/pagination param — it returns every
         // bucket in one response. For accounts with thousands of buckets that is
         // a large, token-heavy payload, so cap how many we surface to the model.
-        const result = (await client.listBuckets(payload)) as {
-          buckets?: unknown[];
-          [k: string]: unknown;
-        };
+        const result = await client.listBuckets(payload);
         const all = Array.isArray(result.buckets) ? result.buckets : [];
         const truncated = all.length > args.limit;
         const buckets = truncated ? all.slice(0, args.limit) : all;
@@ -231,7 +237,7 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const payload: Record<string, unknown> = {
+        const payload: Partial<CreateBucketOptions> = {
           bucketName: args.bucketName,
           bucketType: args.bucketType,
         };
@@ -246,11 +252,12 @@ export function registerBucketTools(
             algorithm?: string;
           };
           if (sse.mode === "SSE-B2" && !sse.algorithm) sse.algorithm = "AES256";
-          payload.defaultServerSideEncryption = sse;
+          payload.defaultServerSideEncryption =
+            sse as CreateBucketOptions["defaultServerSideEncryption"];
         }
         if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
 
-        const result = await client.createBucket(payload as never);
+        const result = await client.createBucket(payload as CreateBucketOptions);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -393,25 +400,27 @@ export function registerBucketTools(
       try {
         const gate = checkDestructive("b2_update_bucket", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const payload: Record<string, unknown> = {
+        const payload: Mutable<UpdateBucketOptions> = {
           bucketId: args.bucketId,
         };
-        assignDefined(payload, args, [
-          "bucketType",
-          "bucketInfo",
-          "corsRules",
-          "lifecycleRules",
-          "defaultServerSideEncryption",
-          "replicationConfiguration",
-          "fileLockEnabled",
-          "defaultRetention",
-          "ifRevisionIs",
-        ]);
+        if (args.bucketType !== undefined) payload.bucketType = args.bucketType;
+        if (args.bucketInfo !== undefined) payload.bucketInfo = args.bucketInfo;
+        if (args.corsRules !== undefined) payload.corsRules = args.corsRules;
+        if (args.lifecycleRules !== undefined) payload.lifecycleRules = args.lifecycleRules;
+        if (args.defaultServerSideEncryption !== undefined) {
+          payload.defaultServerSideEncryption = args.defaultServerSideEncryption;
+        }
+        if (args.replicationConfiguration !== undefined) {
+          payload.replicationConfiguration = args.replicationConfiguration;
+        }
+        if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
+        if (args.defaultRetention !== undefined) payload.defaultRetention = args.defaultRetention;
+        if (args.ifRevisionIs !== undefined) payload.ifRevisionIs = args.ifRevisionIs;
         // Default SSE-B2 algorithm (B2 requires "AES256" with SSE-B2).
         const upSse = payload.defaultServerSideEncryption as
           { mode?: string; algorithm?: string } | undefined;
         if (upSse && upSse.mode === "SSE-B2" && !upSse.algorithm) upSse.algorithm = "AES256";
-        const result = await client.updateBucket(payload as never);
+        const result = await client.updateBucket(payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -493,7 +502,7 @@ export function registerBucketTools(
             // B2 requires objectNamePrefix on every rule; default to "" (matches
             // all objects) when a caller omits it, regardless of Zod default.
             objectNamePrefix: rule.objectNamePrefix ?? "",
-          })) as never,
+          })) as EventNotificationRule[],
         );
         return toolJson(redactNotificationSecrets(result));
       } catch (err) {

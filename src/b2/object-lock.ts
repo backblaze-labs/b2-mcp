@@ -1,6 +1,6 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client } from "./client.js";
+import { B2Client, type UpdateFileRetentionOptions } from "./client.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
@@ -101,14 +101,14 @@ export function registerObjectLockTools(
       try {
         const gate = checkDestructive("b2_update_file_retention", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const payload: Record<string, unknown> = {
+        const payload: UpdateFileRetentionOptions = {
           fileId: args.fileId,
           fileName: args.fileName,
           fileRetention: args.fileRetention,
         };
         if (args.bypassGovernance) payload.bypassGovernance = true;
 
-        const result = await client.updateFileRetention(payload as never);
+        const result = await client.updateFileRetention(payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);

@@ -171,6 +171,27 @@ describe("SDK adoption contract", () => {
     expect(contract).toContain("`@aws-sdk/s3-presigned-post` is intentionally absent");
   });
 
+  it("keeps the SDK subpath shim documented and aligned with installed declarations", () => {
+    const shim = readFileSync(join(ROOT, "src/types/backblaze-b2-sdk-s3.d.ts"), "utf8");
+    const sdkS3 = readFileSync(
+      join(ROOT, "node_modules/@backblaze-labs/b2-sdk/dist/s3/index.d.ts"),
+      "utf8",
+    );
+    const sdkSimulator = readFileSync(
+      join(ROOT, "node_modules/@backblaze-labs/b2-sdk/dist/simulator/index.d.ts"),
+      "utf8",
+    );
+
+    expect(shim).toContain("Temporary TypeScript-resolution shim");
+    expect(shim).toContain("Issue");
+    expect(sdkS3).toContain("export declare function createS3ClientConfig");
+    expect(sdkS3).toContain("readonly forcePathStyle: boolean");
+    expect(shim).toContain("export function createS3ClientConfig");
+    expect(shim).toContain("readonly forcePathStyle: boolean");
+    expect(sdkSimulator).toContain("export declare class B2Simulator");
+    expect(shim).toContain("export class B2Simulator");
+  });
+
   it("links the upstream SDK gaps and the #49 release gate", () => {
     expect(contract).toContain("backblaze-labs/b2-sdk-typescript/issues/153");
     expect(contract).toContain("backblaze-labs/b2-sdk-typescript/issues/154");

@@ -1,3 +1,10 @@
+// Temporary TypeScript-resolution shim for @backblaze-labs/b2-sdk@0.2.0.
+// The package ships declarations for ./s3 and ./simulator under dist/, but this
+// repository still builds as CommonJS with classic package resolution, which
+// does not follow the package "exports" map to those subpath .d.ts files. Issue
+// #72 keeps this shim narrow and tests it against the installed SDK declarations
+// so it cannot silently drift; remove it when the project moves to a module
+// resolution mode that consumes the SDK's subpath declarations directly.
 declare module "@backblaze-labs/b2-sdk/s3" {
   import type { AccountInfo } from "@backblaze-labs/b2-sdk";
 

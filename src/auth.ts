@@ -7,6 +7,7 @@ import {
   type HttpRequest,
   type HttpResponse,
   type HttpTransport,
+  type RetryOptions,
 } from "@backblaze-labs/b2-sdk";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
@@ -14,6 +15,13 @@ import { currentMcpRequestSignal } from "./request-context.js";
 
 /** Timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
+
+export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
+  maxRetries: 3,
+  initialRetryDelayMs: 1000,
+  maxRetryDelayMs: 4000,
+  requestTimeoutMs: API_TIMEOUT_MS,
+};
 
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
@@ -51,7 +59,7 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
       applicationKeyId: config.applicationKeyId,
       applicationKey: config.applicationKey,
       transport,
-      retry: { requestTimeoutMs: API_TIMEOUT_MS },
+      retry: SDK_RETRY_OPTIONS,
     }),
     urlGuard,
   };
