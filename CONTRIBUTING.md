@@ -13,7 +13,7 @@ Node 22 patch so local behavior matches the Phase 1 runtime floor.
 ```bash
 npm ci
 npm run build        # clean + tsc → dist/
-npm test             # fast unit suite, no credentials needed
+npm test             # typecheck via pretest, then fast unit suite
 npm run verify       # full no-credential local gate
 npm run lint         # eslint src tests
 npm run format:check # prettier
@@ -35,13 +35,15 @@ Live tests need real B2 credentials and are not run in the default suite. Use
 Test files must follow the layer suffix convention documented in
 [`docs/TESTING.md`](./docs/TESTING.md): `*.unit.test.ts`,
 `*.contract.test.ts`, `*.modern-protocol.test.ts`, `*.legacy-protocol.test.ts`,
-`*.slow.test.ts`, `*.package.test.ts`, or `*.live.test.ts`.
+`*.slow.test.ts`, `*.package.test.ts`, `*.integration.live.test.ts`, or
+`*.contract.live.test.ts`.
 
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
 - `npm run verify` must pass before opening a PR. CI also calls each test layer
-  independently and uploads JUnit, Jest JSON, and coverage summaries.
+  independently, uploads JUnit/Jest JSON/coverage summaries for deterministic
+  layers, and keeps package-install verification off the deploy-gating path.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
 - Update `CHANGELOG.md` under the appropriate heading.

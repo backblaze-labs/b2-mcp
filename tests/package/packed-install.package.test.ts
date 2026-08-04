@@ -41,11 +41,15 @@ describe("packed package", () => {
         JSON.stringify({ name: "b2-mcp-pack-test", private: true }, null, 2),
       );
       const tarball = join(packDir, pack.filename);
-      execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
-        cwd: appDir,
-        stdio: "pipe",
-        timeout: 120_000,
-      });
+      execFileSync(
+        "npm",
+        ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tarball],
+        {
+          cwd: appDir,
+          stdio: "pipe",
+          timeout: 120_000,
+        },
+      );
 
       execFileSync(
         "node",

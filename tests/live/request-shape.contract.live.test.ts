@@ -48,14 +48,23 @@ const isUserWritableBucket = (n: string) =>
 let server: McpServer;
 let writableBucketId = "";
 
+function failContractPrerequisite(message: string, detail?: unknown): never {
+  const suffix = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
+  throw new Error(`Live contract prerequisite failed - ${message}${suffix}`);
+}
+
 beforeAll(async () => {
   if (!HAS_CREDS) return;
   // Integration tests create AND clean up real resources, so disable the
   // destructive-op gate here (it is unit-tested separately).
   server = createServer({ ...loadConfig(), destructivePolicy: "allow" });
   const buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
+  if (isError(buckets)) failContractPrerequisite("could not list buckets", errText(buckets));
   const w = (buckets?.buckets ?? []).find((b: any) => isUserWritableBucket(b.bucketName));
   if (w) writableBucketId = w.bucketId;
+  if (!writableBucketId) {
+    failContractPrerequisite("no user-writable bucket available for notification contract");
+  }
 });
 
 // ── Object Lock write-shape contract ──────────────────────────────────────────
@@ -63,10 +72,6 @@ describe("Contract: notification rules objectNamePrefix", () => {
   liveIt(
     "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
     async () => {
-      if (!writableBucketId) {
-        console.log("  No writable bucket; skipping.");
-        return;
-      }
       console.log(`  Contract notification bucketId=${writableBucketId}`);
       // Capture existing rules to restore.
       const before = parseResult(
@@ -91,9 +96,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
         });
         // The account may have Event Notifications disabled ("API not enabled") — that is fine.
         // The CONTRACT is only that we never see the objectNamePrefix-missing rejection again.
-        if (isError(res)) {
-          expect(errText(res).toLowerCase()).not.toContain("objectnameprefix");
-        }
+        expect(errText(res).toLowerCase()).not.toContain("objectnameprefix");
       } finally {
         // Restore whatever was there before (best-effort).
         await callTool(server, "b2_set_bucket_notification_rules", {
@@ -119,8 +122,10 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
           await callTool(server, "b2_create_bucket", { bucketName, bucketType: "allPrivate" }),
         );
         if (isError(created)) {
-          console.log("  Could not create bucket; skipping:", errText(created));
-          return;
+          failContractPrerequisite(
+            "could not create Object Lock retrofit bucket",
+            errText(created),
+          );
         }
         bucketId = created.bucketId;
         expect(created.fileLockConfiguration?.value?.isFileLockEnabled).toBe(false);
@@ -169,6 +174,12 @@ describe("Contract: v4 tool-surface alignment", () => {
             defaultServerSideEncryption: { mode: "SSE-B2" },
           }),
         );
+        if (isError(created)) {
+          failContractPrerequisite(
+            "could not create SSE/lifecycle contract bucket",
+            errText(created),
+          );
+        }
         expect(isError(created)).toBe(false);
         bucketId = created.bucketId;
 

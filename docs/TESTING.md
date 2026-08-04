@@ -20,19 +20,21 @@ npm run verify
 coverage, deterministic slow tests, and packed-package installation tests. The
 individual deterministic layers are:
 
-| Command                 | Layer                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------- |
-| `npm test`              | Alias for `npm run test:unit`; fast deterministic unit tests only.                    |
-| `npm run test:unit`     | Fast source unit tests.                                                               |
-| `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                         |
-| `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).            |
-| `npm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Jest worker.    |
-| `npm run test:package`  | Builds, packs, installs the tarball, and verifies the installed package entry points. |
-| `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.      |
+| Command                 | Layer                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `npm test`              | Typecheck via `pretest`, then `npm run test:unit`.                                   |
+| `npm run test:unit`     | Fast source unit tests.                                                              |
+| `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
+| `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
+| `npm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Jest worker.   |
+| `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
+| `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.     |
 
-CI can call each layer independently. The current CI check names are `lint` and
-`test`. If branch protection is added, use those names, not the retired matrix
-names `test (20)` or `test (22)`.
+CI can call each layer independently. The deploy-gating `test` job runs coverage
+plus slow deterministic lifecycle checks once; `test:package` runs in a separate
+non-blocking package job so npm registry availability cannot stall `ci-green`.
+The current CI check names are `lint` and `test`. If branch protection is added,
+use those names, not the retired matrix names `test (20)` or `test (22)`.
 
 ## File Naming Convention
 
@@ -55,7 +57,10 @@ import `src/`; only the slow/package layers may build or inspect `dist/`.
 ## Test Reports
 
 All npm Jest layer commands run through `scripts/run-jest-layer.mjs`. The runner
-preserves the normal terminal reporter and also writes:
+preserves the normal terminal reporter and writes machine-readable summaries.
+Deterministic layers also write JUnit XML. Live layers do not load the
+third-party JUnit reporter because they run with B2 credentials in the
+environment.
 
 - JUnit XML: `reports/junit/<layer>.xml`
 - Jest JSON summary: `reports/jest/<layer>.json`

@@ -1,16 +1,7 @@
-import { readdirSync, readFileSync, statSync } from "fs";
+import { execFileSync, spawnSync } from "child_process";
+import { existsSync, readFileSync, rmSync } from "fs";
 import { basename, join } from "path";
-
-const root = join(__dirname, "../..");
-
-function listFiles(dir: string): string[] {
-  return readdirSync(dir)
-    .flatMap((name) => {
-      const path = join(dir, name);
-      return statSync(path).isDirectory() ? listFiles(path) : [path];
-    })
-    .sort();
-}
+import { listFiles, root } from "./support";
 
 describe("test layer naming", () => {
   const testFiles = listFiles(join(root, "tests"))
@@ -45,5 +36,79 @@ describe("test layer naming", () => {
       );
 
     expect(unitDistImports).toEqual([]);
+  });
+
+  it("does not load third-party JUnit reporters for live layers", () => {
+    const nonLiveJunitPath = join(root, "reports/junit/review-nonlive.xml");
+    const liveJunitPath = join(root, "reports/junit/review-live.xml");
+    if (existsSync(nonLiveJunitPath)) rmSync(nonLiveJunitPath);
+    if (existsSync(liveJunitPath)) rmSync(liveJunitPath);
+
+    execFileSync(
+      "node",
+      [
+        "scripts/run-jest-layer.mjs",
+        "review-nonlive",
+        "--",
+        "--runTestsByPath",
+        "tests/unit/test-axios-mock.unit.test.ts",
+      ],
+      {
+        cwd: root,
+        stdio: "pipe",
+        timeout: 30_000,
+      },
+    );
+
+    execFileSync(
+      "node",
+      [
+        "scripts/run-jest-layer.mjs",
+        "review-live",
+        "--",
+        "--runTestsByPath",
+        "tests/unit/test-axios-mock.unit.test.ts",
+      ],
+      {
+        cwd: root,
+        env: {
+          ...process.env,
+          B2_APPLICATION_KEY_ID: "fake-live-key-id",
+          B2_APPLICATION_KEY: "fake-live-key-secret",
+        },
+        stdio: "pipe",
+        timeout: 30_000,
+      },
+    );
+
+    expect(existsSync(nonLiveJunitPath)).toBe(true);
+    expect(existsSync(liveJunitPath)).toBe(false);
+  });
+
+  it("rejects custom reporters for live layers with B2 credentials", () => {
+    const result = spawnSync(
+      "node",
+      [
+        "scripts/run-jest-layer.mjs",
+        "review-live",
+        "--",
+        "--reporters=jest-junit",
+        "--runTestsByPath",
+        "tests/unit/test-axios-mock.unit.test.ts",
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          B2_APPLICATION_KEY_ID: "fake-live-key-id",
+          B2_APPLICATION_KEY: "fake-live-key-secret",
+        },
+        timeout: 30_000,
+      },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("do not accept custom reporters");
   });
 });

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added deterministic test-layer scripts, JUnit/Jest summaries, coverage
   summaries, packed-package install coverage, and the `npm run verify`
   no-credential gate.
+- Added live-safe test reporting: live layers keep JSON summaries but avoid
+  third-party JUnit reporters while B2 credentials are present.
 - Added the official B2 SDK adoption contract, architecture record, and
   drift guard for the 40-tool SDK parity matrix.
 - Added an exact `@backblaze-labs/b2-sdk@0.2.0` production dependency pin for
@@ -31,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
   live test files by stable suffix so `npm test` works from a clean checkout
   without relying on `dist/`.
+- Restored `npm test` typechecking through `pretest`, made package-install
+  verification use the npm cache offline, and kept it off the `ci-green`
+  deploy-gating path.
 - Canonicalized repository, package, workflow, security, and setup metadata for
   `backblaze-labs/b2-mcp`.
 - Aligned package metadata on the `0.1.0` Phase 1 release line.

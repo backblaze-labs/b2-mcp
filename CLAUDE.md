@@ -8,21 +8,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run build          # compile TypeScript → dist/ (src only)
 npm run typecheck      # type-check src + ALL tests, no emit (tsconfig.typecheck.json)
 npm test               # runs `typecheck` first (pretest), then unit tests — no credentials needed
-npm run test:integration  # live tests — requires real B2 credentials in env
+npm run test:contract  # deterministic MCP/schema/workflow contracts
+npm run test:protocol  # deterministic modern + legacy MCP protocol behavior
+npm run test:integration:live  # live tests — requires real B2 credentials in env
 npm run start          # stdio transport (local Claude Desktop use)
 npm run start:http     # Streamable HTTP transport — add --port 3000
 ```
 
 > `npm run build` uses `tsconfig.json`, which **excludes `tests/`** — so it does
 > not catch compile errors in test files. `npm run typecheck` (wired as `pretest`)
-> compiles `src` **and** `tests` via `tsconfig.typecheck.json`, so integration-test
+> compiles `src` **and** `tests` via `tsconfig.typecheck.json`, so live-test
 > compile errors are caught with no credentials. This closed a real gap where a
-> broken `tests/integration` reference only surfaced on a live (credentialed) run.
+> broken live-test reference only surfaced on a credentialed run.
 
 Run a single unit test file:
 
 ```bash
-npx jest tests/unit/auth.test.ts
+npx jest tests/unit/auth.unit.test.ts
 ```
 
 Run a single test by name:
@@ -35,12 +37,12 @@ Integration tests require env vars. A single non-master application key works fo
 
 ```bash
 # Most users — one (non-master) application key covers native + S3 + key mgmt:
-B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy npm run test:integration
+B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy npm run test:integration:live
 
 # Add a master key ONLY for Partner API flows:
 B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
 B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
-npm run test:integration
+npm run test:integration:live
 ```
 
 ## Architecture
@@ -95,9 +97,9 @@ Object data movement runs on the **S3-compatible API** (`src/s3/objects.ts`, `sr
 
 ### Test patterns
 
-Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tools-schema.test.ts` builds the full server with dummy credentials and validates all 40 tool schemas structurally.
+Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tests/contract/tools-schema.contract.test.ts` builds the full server with dummy credentials and validates all 40 tool schemas structurally.
 
-Integration tests (`tests/integration/live.test.ts`) use these skip guards:
+Live integration tests (`tests/live/b2.integration.live.test.ts`) use these skip guards:
 
 - `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (general B2 + Partner/master-only tests use this credential)
 - `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key, which is only required when the primary key is a master key)
@@ -109,7 +111,7 @@ To run the Partner Groups test, supply a **master** key via `B2_MASTER_KEY_*` (P
 ```bash
 B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
 B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
-B2_PARTNER_LIVE=1 npm run test:integration
+B2_PARTNER_LIVE=1 npm run test:integration:live
 ```
 
 ## HTTP transport: per-request credentials & hardening

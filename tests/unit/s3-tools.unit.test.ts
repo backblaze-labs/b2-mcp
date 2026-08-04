@@ -39,7 +39,7 @@ const testConfig = {
   applicationKey: "test-key-secret",
   appKeyId: "test-app-key-id",
   appKey: "test-app-key-secret",
-  masterKeyId: "test-app-key-secret",
+  masterKeyId: "test-master-key-id",
   masterKey: "test-app-key-secret",
   region: "us-west-004",
   allowLocalFiles: true,

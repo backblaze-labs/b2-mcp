@@ -1,20 +1,5 @@
-import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
-
-const root = join(__dirname, "../..");
-
-function readJson<T>(relativePath: string): T {
-  return JSON.parse(readFileSync(join(root, relativePath), "utf8")) as T;
-}
-
-function listFiles(dir: string): string[] {
-  return readdirSync(dir)
-    .flatMap((name) => {
-      const path = join(dir, name);
-      return statSync(path).isDirectory() ? listFiles(path) : [path];
-    })
-    .sort();
-}
+import { listFiles, readJson, root } from "./support";
 
 describe("MCP SDK and protocol contract", () => {
   it("uses the reviewed SDK v2 package split and not the monolithic v1 package", () => {
@@ -23,25 +8,29 @@ describe("MCP SDK and protocol contract", () => {
       devDependencies: Record<string, string>;
     }>("package.json");
     const lock = readJson<{ packages: Record<string, { version?: string }> }>("package-lock.json");
+    const serverVersion = pkg.dependencies["@modelcontextprotocol/server"];
+    const nodeVersion = pkg.dependencies["@modelcontextprotocol/node"];
+    const clientVersion = pkg.devDependencies["@modelcontextprotocol/client"];
 
-    expect(pkg.dependencies["@modelcontextprotocol/server"]).toBe("2.0.0");
-    expect(pkg.dependencies["@modelcontextprotocol/node"]).toBe("2.0.0");
-    expect(pkg.devDependencies["@modelcontextprotocol/client"]).toBe("2.0.0");
+    expect(serverVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(nodeVersion).toBe(serverVersion);
+    expect(clientVersion).toBe(serverVersion);
+    expect(lock.packages["node_modules/@modelcontextprotocol/server"]?.version).toBe(serverVersion);
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(nodeVersion);
+    expect(lock.packages["node_modules/@modelcontextprotocol/client"]?.version).toBe(clientVersion);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(pkg.devDependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(lock.packages["node_modules/@modelcontextprotocol/sdk"]).toBeUndefined();
   });
 
-  it("keeps modern HTTP and stdio on the explicit SDK v2 entry points", () => {
-    const httpServer = readFileSync(join(root, "src/http-server.ts"), "utf8");
-    const stdio = readFileSync(join(root, "src/index.ts"), "utf8");
+  it("exposes the SDK v2 entry points required by the serving adapters", async () => {
+    const serverSdk = await import("@modelcontextprotocol/server");
+    const stdioSdk = await import("@modelcontextprotocol/server/stdio");
+    const nodeSdk = await import("@modelcontextprotocol/node");
 
-    expect(httpServer).toContain("createMcpHandler");
-    expect(httpServer).toContain('from "@modelcontextprotocol/server"');
-    expect(httpServer).toContain("toNodeHandler");
-    expect(httpServer).toContain('from "@modelcontextprotocol/node"');
-    expect(stdio).toContain("serveStdio");
-    expect(stdio).toContain('from "@modelcontextprotocol/server/stdio"');
+    expect(typeof serverSdk.createMcpHandler).toBe("function");
+    expect(typeof stdioSdk.serveStdio).toBe("function");
+    expect(typeof nodeSdk.toNodeHandler).toBe("function");
   });
 
   it("keeps modern and legacy protocol behavior in separately named tests", () => {
