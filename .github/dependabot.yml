@@ -11,6 +11,11 @@ updates:
       b2-sdk:
         patterns:
           - "@backblaze-labs/b2-sdk"
+      # TOON dev/test decoder bumps can change contract-oracle behavior. Keep
+      # them isolated from routine dependency drift.
+      toon-format:
+        patterns:
+          - "@toon-format/toon"
       aws-sdk:
         patterns:
           - "@aws-sdk/*"
@@ -29,6 +34,8 @@ updates:
       - dependency-name: opossum
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@toon-format/toon"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions

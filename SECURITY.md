@@ -57,6 +57,20 @@ structured logs, thrown errors, snapshots, and CI artifacts are covered by a
 central sanitizer that redacts known B2 credential, authorization-token, upload
 token, notification signing-secret, and secret-header fields.
 
+Structured successful tool results use `structuredContent` as the canonical
+sanitized JSON value. The LLM-facing text block may be TOON or compact JSON, but
+it is generated only after the same sanitization and tool-specific result bounds
+have run. TOON is not a protocol content type and must not be used to bypass
+JSON validation, redaction, or output-size controls.
+
+TOON serialization does not execute third-party package code in the
+credential-bearing server process. The runtime encoder is reviewed
+repository-owned code for TOON spec `4.1`; `@toon-format/toon@4.1.0` is retained
+only as a dev/test decoder oracle. TOON mode is preflighted during config
+validation and falls back to compact JSON for bounded encode failures, so an
+optional text optimization must not turn a successful structured tool result
+into a failed B2 operation.
+
 Presigned S3 URLs are short-lived bearer capabilities, not durable B2
 application keys. Tools may return them only with operation and expiry metadata;
 operators and clients must treat the URL as sensitive until `expiresAt`.

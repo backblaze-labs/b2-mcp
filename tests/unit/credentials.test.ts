@@ -8,6 +8,7 @@ import {
   HttpPrincipalCredentialProvider,
   HttpServerCredentialProvider,
   StdioEnvCredentialProvider,
+  validateHttpCredentialConfiguration,
   verificationFingerprintConfig,
 } from "../../src/credentials";
 
@@ -22,6 +23,7 @@ beforeEach(() => {
   delete process.env.B2_APP_KEY;
   delete process.env.B2_MASTER_KEY_ID;
   delete process.env.B2_MASTER_KEY;
+  delete process.env.B2_MCP_OUTPUT_FORMAT;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
@@ -39,6 +41,7 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("stdio-id");
     expect(resolved.config.applicationKey).toBe("stdio-secret");
     expect(resolved.config.transport).toBe("stdio");
+    expect(resolved.config.outputFormat).toBe("json");
     expect(resolved.config.credentialFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("stdio-id");
     expect(resolved.capabilityCacheKey).toMatch(/^credential:[a-f0-9]{16}$/);
@@ -46,6 +49,76 @@ describe("credential providers", () => {
 
   it("fails closed when required stdio credentials are missing", () => {
     expect(() => new StdioEnvCredentialProvider().resolve()).toThrow(CredentialResolutionError);
+  });
+
+  it("honors compact JSON output compatibility mode", () => {
+    process.env.B2_APPLICATION_KEY_ID = "stdio-id";
+    process.env.B2_APPLICATION_KEY = "stdio-secret";
+    process.env.B2_MCP_OUTPUT_FORMAT = "json";
+    const resolved = new StdioEnvCredentialProvider().resolve();
+    expect(resolved.config.outputFormat).toBe("json");
+  });
+
+  it("honors TOON output mode", () => {
+    process.env.B2_APPLICATION_KEY_ID = "stdio-id";
+    process.env.B2_APPLICATION_KEY = "stdio-secret";
+    process.env.B2_MCP_OUTPUT_FORMAT = "toon";
+    const resolved = new StdioEnvCredentialProvider().resolve();
+    expect(resolved.config.outputFormat).toBe("toon");
+  });
+
+  it("rejects unknown output formats during config resolution", () => {
+    process.env.B2_APPLICATION_KEY_ID = "stdio-id";
+    process.env.B2_APPLICATION_KEY = "stdio-secret";
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    let caught: unknown;
+    try {
+      new StdioEnvCredentialProvider().resolve();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: "invalid_output_format" });
+  });
+
+  it("rejects unknown output formats during HTTP header-mode readiness", () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    let caught: unknown;
+    try {
+      validateHttpCredentialConfiguration();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: "invalid_output_format" });
+  });
+
+  it("rejects TOON mode during HTTP readiness when the encoder preflight fails", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+    process.env.B2_MCP_OUTPUT_FORMAT = "toon";
+
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock("../../src/utils/toon-encoder", () => ({
+        encodeToon: () => {
+          throw new Error("encoder unavailable");
+        },
+      }));
+      try {
+        const { validateHttpCredentialConfiguration: validate } =
+          await import("../../src/credentials");
+        let caught: unknown;
+        try {
+          validate();
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toMatchObject({
+          code: "invalid_output_format",
+          message: "encoder unavailable",
+        });
+      } finally {
+        jest.dontMock("../../src/utils/toon-encoder");
+      }
+    });
   });
 
   it("ignores partial optional stdio master credentials and falls back to the app key", () => {

@@ -48,6 +48,7 @@ async function callTool(server: McpServer, toolName: string, args: Record<string
 }
 
 function parseResult(result: any): any {
+  if (result?.structuredContent !== undefined) return result.structuredContent;
   const text = result?.content?.[0]?.text;
   if (!text) return result;
   try {

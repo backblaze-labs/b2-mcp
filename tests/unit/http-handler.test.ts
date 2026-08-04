@@ -136,6 +136,7 @@ const savedMaxInFlight = process.env.B2_MAX_SESSIONS;
 const savedMaxInFlightPerKey = process.env.B2_MAX_SESSIONS_PER_KEY;
 const savedAllowedHosts = process.env.B2_ALLOWED_HOSTS;
 const savedAllowedOrigins = process.env.B2_ALLOWED_ORIGINS;
+const savedOutputFormat = process.env.B2_MCP_OUTPUT_FORMAT;
 
 beforeAll(() => {
   process.env.B2_REGISTER_ALL_TOOLS = "true";
@@ -155,6 +156,8 @@ afterAll(() => {
   else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
   if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
   else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
+  if (savedOutputFormat === undefined) delete process.env.B2_MCP_OUTPUT_FORMAT;
+  else process.env.B2_MCP_OUTPUT_FORMAT = savedOutputFormat;
 });
 
 beforeEach(async () => {
@@ -164,6 +167,8 @@ beforeEach(async () => {
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
+  if (savedOutputFormat === undefined) delete process.env.B2_MCP_OUTPUT_FORMAT;
+  else process.env.B2_MCP_OUTPUT_FORMAT = savedOutputFormat;
   if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
   else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
   if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
@@ -303,6 +308,15 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     const res = await request(port, "GET", "/health");
     expect(res.status).toBe(200);
     expect(JSON.parse(res.body).status).toBe("ok");
+  });
+
+  it("returns 503 on /health when output format is invalid in header mode", async () => {
+    delete process.env.B2_HTTP_CREDENTIAL_MODE;
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    await replaceHandle();
+    const res = await request(port, "GET", "/health");
+    expect(res.status).toBe(503);
+    expect(JSON.parse(res.body).status).toBe("error");
   });
 
   it("returns 503 on /health when server mode is missing static credentials", async () => {

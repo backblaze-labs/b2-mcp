@@ -1,7 +1,9 @@
 // ── Shared Types ─────────────────────────────────────────────────────────────
+import type { McpOutputFormat } from "./result-serializer.js";
 
 /** Policy for the destructive-operation gate (see utils/destructive-gate.ts). */
 export type DestructivePolicy = "allow" | "confirm" | "block";
+export type { McpOutputFormat };
 
 export interface B2Config {
   /** The application key — the workhorse credential. Used for the B2 native API,
@@ -39,6 +41,11 @@ export interface B2Config {
    *  b2_update_bucket). "confirm" (default) requires confirm:true; "block" refuses;
    *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY. */
   destructivePolicy?: DestructivePolicy;
+  /**
+   * LLM-facing TextContent serialization for structured successful tool results.
+   * structuredContent always remains canonical JSON.
+   */
+  outputFormat?: McpOutputFormat;
   /** Which transport launched this server — surfaced in the outbound User-Agent. */
   transport?: "stdio" | "http";
   /** Non-secret SHA-256-derived fingerprint used for logs, metrics, and caches. */

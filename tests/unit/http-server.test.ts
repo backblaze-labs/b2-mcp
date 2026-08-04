@@ -9,6 +9,7 @@ describe("configFromHeaders", () => {
   const baseEnv = { ...process.env };
   beforeEach(() => {
     delete process.env.B2_REGION;
+    delete process.env.B2_MCP_OUTPUT_FORMAT;
   });
   afterAll(() => {
     process.env = baseEnv;
@@ -64,6 +65,23 @@ describe("configFromHeaders", () => {
     const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
     const config = configFromHeaders(req)!;
     expect(config.region).toBe("eu-central-003");
+  });
+
+  it("defaults structured tool-result text output to compact JSON", () => {
+    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    expect(configFromHeaders(req)?.outputFormat).toBe("json");
+  });
+
+  it("honors TOON structured tool-result text output mode", () => {
+    process.env.B2_MCP_OUTPUT_FORMAT = "toon";
+    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    expect(configFromHeaders(req)?.outputFormat).toBe("toon");
+  });
+
+  it("rejects unknown structured tool-result text output modes", () => {
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    expect(() => configFromHeaders(req)).toThrow(/B2_MCP_OUTPUT_FORMAT/);
   });
 });
 

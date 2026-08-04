@@ -7,8 +7,15 @@ import {
   toolJson,
 } from "../../src/utils/errors";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
+import { runWithResultSerializationOptions } from "../../src/utils/result-serializer";
+import type { JsonCompatible } from "../../src/utils/result-serializer";
 
 const CANARY = "B2_MCP_CANARY_SECRET_errors_do_not_leak";
+
+async function decodeToon(text: string): Promise<JsonCompatible> {
+  const { decode } = await import("@toon-format/toon");
+  return decode(text) as JsonCompatible;
+}
 
 describe("parseB2Error", () => {
   it("should parse axios-style error with response body", () => {
@@ -281,11 +288,20 @@ describe("toolSuccess", () => {
 });
 
 describe("toolJson", () => {
-  it("should serialize data as pretty JSON", () => {
+  it("serializes structured successes as compact JSON text by default", async () => {
     const data = { bucketId: "abc123", bucketName: "my-bucket" };
-    const result = toolJson(data);
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.bucketId).toBe("abc123");
-    expect(parsed.bucketName).toBe("my-bucket");
+    const result = await toolJson(data);
+    expect(result.structuredContent).toEqual(data);
+    expect(result.content[0].text).toBe('{"bucketId":"abc123","bucketName":"my-bucket"}');
+  });
+
+  it("supports TOON output mode", async () => {
+    const data = { bucketId: "abc123", bucketName: "my-bucket" };
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+      toolJson(data),
+    );
+    expect(result.content[0].text).toContain("bucketId: abc123");
+    await expect(decodeToon(result.content[0].text)).resolves.toEqual(data);
+    expect(result.structuredContent).toEqual(data);
   });
 });

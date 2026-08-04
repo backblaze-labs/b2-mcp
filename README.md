@@ -65,6 +65,7 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 | `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master key — used **only** by Partner API tools                                                                           |
 | `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                     |
 | `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                              |
+| `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                            |
 | `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                       |
 | `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments |
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                           |
@@ -81,6 +82,47 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size. Cache identity is secret-bound; log labels are non-secret fingerprints   |
 
 A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+---
+
+## Tool result text format
+
+MCP transport messages always remain JSON-RPC JSON. Structured successful tool
+results carry the lossless sanitized value in `structuredContent`, and the
+single LLM-facing text block in `content[0].text` is selected by
+`B2_MCP_OUTPUT_FORMAT`.
+
+- `json` (default): compact JSON text for clients that parse text content.
+- `toon`: opt-in TOON text using the repo-owned encoder for TOON spec `4.1`.
+
+Errors, validation failures, and concise one-line status messages stay plain
+text. `TextContent` has no media-type field, so the server advertises the
+selected text format in instructions instead of per-result prefixes or protocol
+extensions.
+
+Example `b2_list_buckets` text in default compact JSON mode:
+
+```text
+{"accountId":"account-123","buckets":[{"bucketId":"bucket-a","bucketName":"logs-2026","bucketType":"allPrivate"},{"bucketId":"bucket-b","bucketName":"public-assets","bucketType":"allPublic"}],"bucket_count":2,"total_bucket_count":2}
+```
+
+The same structured result with `B2_MCP_OUTPUT_FORMAT=toon`:
+
+```toon
+accountId: account-123
+buckets[2]{bucketId,bucketName,bucketType}:
+  bucket-a,logs-2026,allPrivate
+  bucket-b,public-assets,allPublic
+bucket_count: 2
+total_bucket_count: 2
+```
+
+The canonical `structuredContent` value is identical in both modes.
+
+Rollout note: `TextContent` has no media-type field. Keep the default `json`
+for rolling deployments and text-parsing clients. Opt into TOON only after
+clients prefer `structuredContent` or explicitly support TOON; otherwise a fleet
+with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ---
 
@@ -160,7 +202,7 @@ Running it safely:
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
 - **Exposing HTTP → choose a credential mode.** Unset mode remains `headers` for one-release compatibility with existing header clients; B2 credential headers must be present on every MCP request. Set `B2_HTTP_CREDENTIAL_MODE=server` to keep one B2 credential in the server process/customer secret manager, or `principal` to map verified MCP `authInfo` to customer-held credentials.
 - **Caller auth stays at your edge.** For `principal` mode, terminate TLS and validate OAuth before the SDK handler receives `authInfo`; strip any trusted identity headers at the edge and only re-add them inside an allowlisted proxy boundary.
-- **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; dependency versions are pinned in `package.json` and `package-lock.json`.
+- **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; opt-in TOON output uses a reviewed repo-owned encoder for spec `4.1`, with `@toon-format/toon@4.1.0` retained only as a dev/test decoder oracle.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
 
 Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).
