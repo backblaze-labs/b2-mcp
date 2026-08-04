@@ -34,8 +34,11 @@ Local scripts can call each deterministic layer independently. The deploy-gating
 CI `test` job runs the bundled coverage layer plus slow deterministic lifecycle
 checks once; `test:package` runs in a separate non-blocking package job so npm
 registry availability cannot stall `ci-green`.
-The current CI check names are `lint` and `test`. If branch protection is added,
-use those names, not the retired matrix names `test (20)` or `test (22)`.
+CI runs the credential-free deterministic gate on Linux for Node.js 22.3.0, 24,
+and 26. It also runs `npm run check:runtime-policy`, which fails if workflow or
+metadata runtime policy drifts. Cross-platform coverage stays lean: the fast
+stdio, CLI port parsing, local-path policy, and request shutdown/signal suite
+runs on Linux, Windows, and macOS at the patched Node 22 LTS pin.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
 `typescript-eslint` declares a `<6.1.0` peer range. Widen the TypeScript range
@@ -130,12 +133,16 @@ npm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_
 
 ## Networked Security Gate
 
-The production dependency audit is release-gate evidence and may also become a
-CI gate once #62 resolves or risk-accepts current findings:
+The production dependency audit is release-gate evidence and a CI gate for high
+or critical findings:
 
 ```bash
-npm audit --omit=dev
+npm audit --omit=dev --audit-level=high
 ```
+
+The stable MCP Node adapter currently pulls a moderate `@hono/node-server`
+advisory with no fixed stable MCP v2 package available. Keep the audit output in
+release evidence and raise the gate once the SDK exposes a fixed adapter.
 
 ## Live B2 Smoke Gate
 
@@ -155,5 +162,6 @@ The live path runs through `.github/workflows/smoke.yml`,
 that consumes `B2_*` secrets must use a protected GitHub environment, fail
 loudly when manually dispatched outside `main`, check out `ci-green` before any
 repository code runs with secrets, serialize live write tests, and reference
-only environment-scoped `LIVE_B2_*` secrets. Release-triggered live workflows
-must first prove the `v*` release tag points at `ci-green`.
+only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
+serially on Node.js 22.3.0, 24, and 26. Release-triggered live workflows must
+first prove the `v*` release tag points at `ci-green`.

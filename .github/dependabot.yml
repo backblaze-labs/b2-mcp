@@ -29,8 +29,8 @@ updates:
     labels:
       - dependencies
     ignore:
-      # Majors held for manual runtime review. Phase 1 standardizes on
-      # Node 22; opossum and @types/node major bumps may raise that floor.
+      # Majors held for manual runtime review. Phase 1 supports Node.js 22.3.0,
+      # 24, and 26; opossum and @types/node major bumps may raise that floor.
       - dependency-name: opossum
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"

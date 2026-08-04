@@ -16,7 +16,7 @@ const SDK_VERSION = "0.2.0";
 const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz";
 const SDK_INTEGRITY =
   "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==";
-const NODE_FLOOR = ">=22.13.0";
+const NODE_FLOOR = ">=22.3.0";
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir)
@@ -172,10 +172,11 @@ describe("SDK adoption contract", () => {
         lock.packages["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node ?? "",
       ),
     ).toBeGreaterThanOrEqual(0);
-    expect(v1Scope).toContain("Node.js 22.13.0");
-    expect(deploy).toContain("Node.js 22.13.0 or newer");
-    expect(readme).toContain("Node.js 22.13.0 or newer");
-    expect(ci).toContain("node-version: 22.13.0");
+    expect(v1Scope).toContain("Node.js 22.3.0, 24, and 26");
+    expect(deploy).toContain("Node.js 22.3.0, 24, and 26");
+    expect(readme).toContain("Node.js 22.3.0, 24, and 26");
+    expect(ci).toContain("node-version: [22.3.0, 24, 26]");
+    expect(ci).toContain("node-version: 22.3.0");
     expect(ci).toContain("npm ci --engine-strict");
   });
 

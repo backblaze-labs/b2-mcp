@@ -41,11 +41,13 @@ const jobField = (job: string, field: string, value: string) =>
 
 describe("live secret workflow policy", () => {
   it.each(liveWorkflows)(
-    "$path wires the protected environment, protected refs, and shared Node version",
+    "$path wires the protected environment, protected refs, and serialized Node matrix",
     ({ path, job, environment }) => {
       const text = workflowText(path);
       expect(text).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
       expect(text).toMatch(jobField(job, "environment", environment));
+      expect(text).toContain("node-version: [22.3.0, 24, 26]");
+      expect(text).toContain("max-parallel: 1");
       expect(text).toMatch(/^\s{2}guard:\s*$/m);
       expect(text).toMatch(/if: github\.repository == 'backblaze-labs\/b2-mcp'/);
       expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
@@ -53,7 +55,8 @@ describe("live secret workflow policy", () => {
       expect(text).toContain('protected_ref="refs/heads/ci-green"');
       expect(text).toContain('tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}"');
       expect(text).toContain('"$tag_sha" != "$ci_green_sha"');
-      expect(text).toContain("node-version-file: .nvmrc");
+      expect(text).toContain("node-version: ${{ matrix.node-version }}");
+      expect(text).not.toContain("node-version-file:");
     },
   );
 

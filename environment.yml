@@ -2,7 +2,7 @@ name: b2-mcp
 channels:
   - conda-forge
 dependencies:
-  - nodejs=22.23.1=h35957e4_0
+  - nodejs=22.3.0=h3fe1c63_0
   # Python is present only for conda-forge trufflehog 2.2.1, which requires
   # Python <3.11. Keep this pin with the scanner pin below.
   - python=3.10.20=hac0b6dc_1_cpython

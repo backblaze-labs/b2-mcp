@@ -7,8 +7,9 @@ By participating you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.m
 
 ## Development setup
 
-The CI gate runs on the exact Node patch pinned in `.nvmrc`. Develop on that
-Node 22 patch so local behavior matches the Phase 1 runtime floor.
+The runtime policy is Node.js 22.3.0, 24, and 26. Develop on the `.nvmrc`
+minimum floor when changing runtime-sensitive code so local behavior matches
+the strictest supported environment.
 
 ```bash
 npm ci
@@ -42,8 +43,9 @@ Test files must follow the layer suffix convention documented in
 
 - Branch off `main`; keep changes focused.
 - `npm run verify` must pass before opening a PR. CI runs the bundled
-  deterministic coverage layer, the slow deterministic layer, and a separate
-  package-install verification job that stays off the deploy-gating path.
+  deterministic coverage and slow layers on Node.js 22.3.0, 24, and 26, plus a
+  patched Node 22 LTS cross-platform suite. A separate package-install job stays
+  off the deploy-gating path.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
 - Update `CHANGELOG.md` under the appropriate heading.
@@ -65,12 +67,14 @@ tools must respect the existing guardrails:
 
 ## Dependencies and `npm audit`
 
-Production dependencies ship in `dist/` and are kept free of known
-vulnerabilities. Any findings reported by `npm audit` are in the **development
-toolchain only** (Jest, Babel, ts-jest, and their transitive deps); they are not
-installed at runtime and do not ship in the published package, whose `files`
-allowlist is limited to `dist/`, `README.md`, `CHANGELOG.md`, `SECURITY.md`, and
-`LICENSE`. Please keep production dependencies audit-clean.
+Production dependencies ship in `dist/`, so review `npm audit --omit=dev
+--audit-level=high` before release. The stable MCP Node adapter currently has a
+moderate transitive `@hono/node-server` advisory with no fixed stable MCP v2
+package available; keep that risk decision explicit and do not add high or
+critical production findings. Development-toolchain findings (Jest, Babel,
+ts-jest, and their transitive deps) do not ship in the published package, whose
+`files` allowlist is limited to `dist/`, `README.md`, `CHANGELOG.md`,
+`SECURITY.md`, and `LICENSE`.
 
 ## Reporting security issues
 
