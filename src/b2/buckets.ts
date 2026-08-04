@@ -160,11 +160,32 @@ function isNonGlobalIpLiteral(host: string): boolean {
   return false;
 }
 
+function rawUrlHost(raw: string): string | null {
+  const authority = raw.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i)?.[1];
+  if (!authority) return null;
+  const withoutUserInfo = authority.slice(authority.lastIndexOf("@") + 1);
+  if (withoutUserInfo.startsWith("[")) {
+    const end = withoutUserInfo.indexOf("]");
+    return end >= 0 ? withoutUserInfo.slice(1, end).toLowerCase() : withoutUserInfo;
+  }
+  return withoutUserInfo.replace(/:\d*$/, "").toLowerCase();
+}
+
+function isNonCanonicalNumericIpHost(host: string): boolean {
+  return /^\d+(?:\.\d+){0,3}$/.test(host) && !/^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+}
+
 /**
  * Server-side webhook URL guard (defense-in-depth): require HTTPS and reject
  * internal/SSRF targets. Returns a reason string if invalid, or null if OK.
  */
 function validateWebhookUrl(raw: string): string | null {
+  const rawHost = rawUrlHost(raw);
+  if (rawHost?.includes("%")) return "must not include an IPv6 zone identifier";
+  if (rawHost && isNonCanonicalNumericIpHost(rawHost)) {
+    return "must not target a numeric IP address";
+  }
+
   let u: URL;
   try {
     u = new URL(raw);

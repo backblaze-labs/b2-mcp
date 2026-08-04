@@ -550,6 +550,8 @@ describe("bucket notification rules", () => {
     const bucket = await createBucket("notify-ssrf");
     for (const url of [
       "https://169.254.169.254/latest/meta-data",
+      "https://127.1/hook",
+      "https://127.0.1/hook",
       "https://2130706433/hook",
       "https://0x7f000001/hook",
       "https://0177.0.0.1/hook",
@@ -559,6 +561,7 @@ describe("bucket notification rules", () => {
       "https://240.0.0.1/hook",
       "https://[::ffff:127.0.0.1]/hook",
       "https://[fec0::1]/hook",
+      "https://[fe80::1%25en0]/hook",
       "https://[ff02::1]/hook",
     ]) {
       const res = await callTool(server, "b2_set_bucket_notification_rules", {
