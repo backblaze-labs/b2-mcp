@@ -38,6 +38,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci --engine-strict
+      - run: npm run build
       - id: typecheck
         continue-on-error: true
         run: npm run typecheck

@@ -7,6 +7,7 @@ class JestLayerSummaryReporter {
     if (!outputPath) return;
 
     const summary = {
+      runId: process.env.JEST_LAYER_RUN_ID ?? null,
       success: results.success,
       startTime: results.startTime,
       numTotalTestSuites: results.numTotalTestSuites,

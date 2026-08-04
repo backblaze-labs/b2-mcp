@@ -21,6 +21,7 @@
 
 import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { contractBucketName } from "./support/contract-buckets";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 const liveIt = HAS_CREDS ? test : test.skip;
@@ -50,9 +51,9 @@ function failContractPrerequisite(message: string, detail?: unknown): never {
   throw new Error(`Live contract prerequisite failed - ${message}${suffix}`);
 }
 
-function contractBucketName(label: string): string {
-  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  return `mcp-contract-${label}-${suffix}`;
+interface ContractBucketRef {
+  bucketId: string;
+  bucketName?: string;
 }
 
 async function createContractBucket(label: string): Promise<any> {
@@ -68,6 +69,27 @@ async function createContractBucket(label: string): Promise<any> {
   return parseResult(created);
 }
 
+async function deleteContractBucket(bucket: ContractBucketRef, label: string): Promise<void> {
+  if (!bucket.bucketId) return;
+  const deleted = await callTool(server, "b2_delete_bucket", { bucketId: bucket.bucketId });
+  if (!isError(deleted)) return;
+
+  const detail = errText(deleted);
+  console.error(
+    [
+      `Live contract cleanup failed for ${label} bucket.`,
+      `bucketId=${bucket.bucketId}`,
+      bucket.bucketName ? `bucketName=${bucket.bucketName}` : "",
+      detail ? `providerError=${detail}` : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
+  throw new Error(
+    `Live contract cleanup failed for ${label} bucket ${bucket.bucketName ?? bucket.bucketId}: ${detail}`,
+  );
+}
+
 beforeAll(async () => {
   if (!HAS_CREDS) return;
   // Integration tests create AND clean up real resources, so disable the
@@ -80,12 +102,13 @@ describe("Contract: notification rules objectNamePrefix", () => {
   liveIt(
     "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
     async () => {
-      let bucketId = "";
+      const cleanupBucket: ContractBucketRef = { bucketId: "" };
       try {
         const bucket = await createContractBucket("notify");
-        bucketId = bucket.bucketId;
+        cleanupBucket.bucketId = bucket.bucketId;
+        cleanupBucket.bucketName = bucket.bucketName;
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
-          bucketId,
+          bucketId: cleanupBucket.bucketId,
           eventNotificationRules: [
             {
               name: "mcp-contract-rule",
@@ -108,7 +131,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
         }
         expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
       } finally {
-        if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
+        await deleteContractBucket(cleanupBucket, "notify");
       }
     },
     30_000,
@@ -120,15 +143,16 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
   liveIt(
     "enables Object Lock on an existing bucket and sets defaultRetention via b2_update_bucket",
     async () => {
-      let bucketId = "";
+      const cleanupBucket: ContractBucketRef = { bucketId: "" };
       try {
         const created = await createContractBucket("retrofit");
-        bucketId = created.bucketId;
+        cleanupBucket.bucketId = created.bucketId;
+        cleanupBucket.bucketName = created.bucketName;
         expect(created.fileLockConfiguration?.value?.isFileLockEnabled).toBe(false);
 
         // Retrofit: enable Object Lock on the EXISTING bucket (native API allows this).
         const enabled = await callTool(server, "b2_update_bucket", {
-          bucketId,
+          bucketId: cleanupBucket.bucketId,
           fileLockEnabled: true,
         });
         expect(isError(enabled)).toBe(false);
@@ -136,11 +160,13 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
 
         // Set the bucket default retention and confirm it took.
         const retained = await callTool(server, "b2_update_bucket", {
-          bucketId,
+          bucketId: cleanupBucket.bucketId,
           defaultRetention: { mode: "governance", period: { duration: 7, unit: "days" } },
         });
         expect(isError(retained)).toBe(false);
-        const listed = await callTool(server, "b2_list_buckets", { bucketId });
+        const listed = await callTool(server, "b2_list_buckets", {
+          bucketId: cleanupBucket.bucketId,
+        });
         if (isError(listed)) {
           failContractPrerequisite("could not list Object Lock retrofit bucket", errText(listed));
         }
@@ -148,7 +174,7 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
         expect(back?.mode).toBe("governance");
         expect(back?.period).toEqual({ duration: 7, unit: "days" });
       } finally {
-        if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
+        await deleteContractBucket(cleanupBucket, "retrofit");
       }
     },
     90_000,
@@ -160,9 +186,10 @@ describe("Contract: v4 tool-surface alignment", () => {
   liveIt(
     "SSE-B2 default and lifecycle cancel-unfinished field use B2-accepted shapes",
     async () => {
-      let bucketId = "";
+      const cleanupBucket: ContractBucketRef = { bucketId: "" };
       try {
         const bucketName = contractBucketName("pathb");
+        cleanupBucket.bucketName = bucketName;
         console.log(`  Contract bucketName=${bucketName}`);
         // (e) SSE-B2 with no algorithm — server must inject algorithm:"AES256"
         //     (regresses to HTTP 400 "Invalid default server-side encryption algorithm" if dropped).
@@ -178,18 +205,19 @@ describe("Contract: v4 tool-surface alignment", () => {
           );
         }
         const created = parseResult(createResult);
-        bucketId = created.bucketId;
+        cleanupBucket.bucketId = created.bucketId;
+        cleanupBucket.bucketName = created.bucketName ?? bucketName;
 
         // (c) native lifecycle field daysFromStartingToCancelingUnfinishedLargeFiles.
         const life = await callTool(server, "b2_update_bucket", {
-          bucketId,
+          bucketId: cleanupBucket.bucketId,
           lifecycleRules: [
             { fileNamePrefix: "tmp/", daysFromStartingToCancelingUnfinishedLargeFiles: 2 },
           ],
         });
         expect(isError(life)).toBe(false);
       } finally {
-        if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
+        await deleteContractBucket(cleanupBucket, "pathb");
       }
     },
     90_000,

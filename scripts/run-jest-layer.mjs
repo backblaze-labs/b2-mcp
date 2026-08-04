@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
+/* global console, process */
+
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { b2CredentialEnvNames, redactB2CredentialValues } from "./b2-credential-env.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [layer, maybeSeparator, ...rest] = process.argv.slice(2);
@@ -17,12 +20,12 @@ const layerGlobs = {
   package: "**/tests/package/**/*.package.test.ts",
   "integration-live": "**/tests/live/**/*.integration.live.test.ts",
   "contract-live": "**/tests/live/**/*.contract.live.test.ts",
-  "runner-fixture": "tests/contract/run-jest-layer-fixture.contract.test.ts",
+  "runner-fixture": "tests/fixtures/run-jest-layer-fixture.fixture.test.ts",
 };
 
 const testMatchArgs = (...patterns) => patterns.flatMap((pattern) => ["--testMatch", pattern]);
 
-const layerRegistry = {
+const publicLayerRegistry = {
   unit: { args: testMatchArgs(layerGlobs.unit), live: false },
   contract: { args: testMatchArgs(layerGlobs.contract), live: false },
   "protocol-modern": {
@@ -67,7 +70,11 @@ const layerRegistry = {
     ],
     live: false,
   },
-  // Fixture-only layers used by tests/contract/test-layering.contract.test.ts.
+};
+
+// Fixture-only layers used by tests/contract/test-layering.contract.test.ts.
+// Keep them out of the public CLI surface and normal layer reports.
+const fixtureLayerRegistry = {
   "runner-fixture-nonlive": {
     args: ["--runTestsByPath", layerGlobs["runner-fixture"], "--runInBand"],
     live: false,
@@ -78,7 +85,11 @@ const layerRegistry = {
   },
 };
 
-const supportedLayers = Object.keys(layerRegistry).sort();
+const layerRegistry =
+  process.env.B2_JEST_LAYER_ENABLE_FIXTURES === "true"
+    ? { ...publicLayerRegistry, ...fixtureLayerRegistry }
+    : publicLayerRegistry;
+const supportedLayers = Object.keys(publicLayerRegistry).sort();
 
 function printUsage(message) {
   if (message) console.error(message);
@@ -101,12 +112,7 @@ if (!/^[A-Za-z0-9._-]+$/.test(layer) || !layerRegistry[layer]) {
 const extraJestArgs = maybeSeparator === "--" ? rest : [maybeSeparator, ...rest].filter(Boolean);
 const layerConfig = layerRegistry[layer];
 const liveLayer = layerConfig.live;
-const hasB2CredentialEnv = [
-  "B2_APPLICATION_KEY",
-  "B2_APPLICATION_KEY_ID",
-  "B2_APP_KEY",
-  "B2_APP_KEY_ID",
-].some((name) => process.env[name]);
+const hasB2CredentialEnv = b2CredentialEnvNames(process.env).length > 0;
 const hasCustomReporter = extraJestArgs.some(
   (arg) => arg === "--reporters" || arg.startsWith("--reporters="),
 );
@@ -120,19 +126,23 @@ const allowJunit = !liveLayer && !hasB2CredentialEnv;
 const summaryDir = join(root, "reports", "jest");
 const junitDir = join(root, "reports", "junit");
 const summaryPath = join(summaryDir, `${layer}.json`);
+const junitPath = join(junitDir, `${layer}.xml`);
 const jestBin = join(root, "node_modules", "jest", "bin", "jest.js");
 const summaryReporter = join(root, "scripts", "jest-layer-summary-reporter.cjs");
 const jestArgs = [...layerConfig.args, ...extraJestArgs];
+const runId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 mkdirSync(summaryDir, { recursive: true });
 mkdirSync(junitDir, { recursive: true });
+rmSync(summaryPath, { force: true });
+rmSync(junitPath, { force: true });
 
 const result = spawnSync(
   process.execPath,
   [
     jestBin,
     ...jestArgs,
-    "--reporters=default",
+    ...(!hasB2CredentialEnv ? ["--reporters=default"] : []),
     `--reporters=${summaryReporter}`,
     ...(allowJunit ? ["--reporters=jest-junit"] : []),
   ],
@@ -144,10 +154,19 @@ const result = spawnSync(
       JEST_JUNIT_OUTPUT_DIR: junitDir,
       JEST_JUNIT_OUTPUT_NAME: `${layer}.xml`,
       JEST_LAYER_SUMMARY_PATH: summaryPath,
+      JEST_LAYER_RUN_ID: runId,
     },
-    stdio: "inherit",
+    encoding: "utf8",
+    stdio: hasB2CredentialEnv ? "pipe" : "inherit",
   },
 );
+
+if (hasB2CredentialEnv) {
+  const stdout = redactB2CredentialValues(result.stdout ?? "", process.env);
+  const stderr = redactB2CredentialValues(result.stderr ?? "", process.env);
+  if (stdout) process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+}
 
 let summary;
 let summaryError = "";
@@ -159,6 +178,10 @@ if (!existsSync(summaryPath)) {
   } catch (err) {
     summaryError = `Could not parse Jest summary at ${summaryPath}: ${err.message}`;
   }
+}
+
+if (summary && summary.runId !== runId) {
+  summaryError = `Jest layer '${layer}' did not write a summary for the current run.`;
 }
 
 if (summaryError) {

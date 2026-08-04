@@ -20,6 +20,7 @@ describe("CI workflow policy", () => {
 
     expect(markGreen).toContain("needs: [engine-floor, lint, test]");
     expect(markGreen).not.toContain("package");
+    expect(testJob).toContain("npm run build");
     expect(testJob).not.toContain("test:package");
     expect(testJob).not.toContain("smoke:package");
     expect(packageJob).toContain("continue-on-error: true");
