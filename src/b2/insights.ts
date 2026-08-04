@@ -180,6 +180,94 @@ const NOT_ENABLED = {
     "Once enabled, B2 backfills the previous 7 days.",
 };
 
+const REPORT_SCAN_LIMITS = {
+  maxPages: 100,
+  maxCandidateKeys: 5_000,
+  maxSelectedKeys: 1_000,
+  maxDownloadedBytes: 25 * 1024 * 1024,
+  maxRows: 100_000,
+  maxElapsedMs: 12_000,
+  maxKeysPerPage: 1000,
+  concurrency: 4,
+};
+
+interface ReportLoadStats {
+  pages: number;
+  listed_keys: number;
+  candidate_keys: number;
+  selected_keys: number;
+  downloaded_keys: number;
+  downloaded_bytes: number;
+  parsed_rows: number;
+  stop_reason?: string;
+}
+
+interface ReportRowsResult {
+  rows: ReportRow[];
+  truncated: boolean;
+  stats: ReportLoadStats;
+}
+
+function newReportStats(): ReportLoadStats {
+  return {
+    pages: 0,
+    listed_keys: 0,
+    candidate_keys: 0,
+    selected_keys: 0,
+    downloaded_keys: 0,
+    downloaded_bytes: 0,
+    parsed_rows: 0,
+  };
+}
+
+function stopReportScan(stats: ReportLoadStats, reason: string): void {
+  stats.stop_reason ??= reason;
+}
+
+function reportScanTimedOut(startedAt: number): boolean {
+  return Date.now() - startedAt > REPORT_SCAN_LIMITS.maxElapsedMs;
+}
+
+function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknown> {
+  const truncated = loads.some((load) => load.truncated);
+  const totals = loads.reduce(
+    (acc, load) => {
+      acc.pages += load.stats.pages;
+      acc.listed_keys += load.stats.listed_keys;
+      acc.candidate_keys += load.stats.candidate_keys;
+      acc.selected_keys += load.stats.selected_keys;
+      acc.downloaded_keys += load.stats.downloaded_keys;
+      acc.downloaded_bytes += load.stats.downloaded_bytes;
+      acc.parsed_rows += load.stats.parsed_rows;
+      if (load.stats.stop_reason) acc.stop_reasons.add(load.stats.stop_reason);
+      return acc;
+    },
+    {
+      pages: 0,
+      listed_keys: 0,
+      candidate_keys: 0,
+      selected_keys: 0,
+      downloaded_keys: 0,
+      downloaded_bytes: 0,
+      parsed_rows: 0,
+      stop_reasons: new Set<string>(),
+    },
+  );
+  return {
+    ...(truncated ? { truncated: true, partial: true } : {}),
+    report_scan: {
+      pages: totals.pages,
+      listed_keys: totals.listed_keys,
+      candidate_keys: totals.candidate_keys,
+      selected_keys: totals.selected_keys,
+      downloaded_keys: totals.downloaded_keys,
+      downloaded_mb: Math.round((totals.downloaded_bytes / 1024 / 1024) * 10) / 10,
+      parsed_rows: totals.parsed_rows,
+      ...(totals.stop_reasons.size ? { stop_reasons: [...totals.stop_reasons].sort() } : {}),
+    },
+  };
+}
+
 /**
  * The reserved daily-report bucket name for the caller: `b2-reports-<accountId>`.
  * This bucket is "Restricted" and B2 HIDES it from b2_list_buckets even for
@@ -212,24 +300,6 @@ export function selectUsageKeys(keys: string[]): string[] {
   return usage.length ? usage : keys.filter((k) => !/audit/i.test(k));
 }
 
-/** Run `fn` over items with bounded concurrency, preserving order. */
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length) {
-      const i = next++;
-      out[i] = await fn(items[i]);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return out;
-}
-
 /**
  * List + download the Usage CSVs within the window and return mapped rows.
  * Returns null when the bucket does not exist (reports not enabled).
@@ -238,23 +308,43 @@ async function loadReportRows(
   b2Client: B2Client,
   bucketName: string,
   sinceDate: string,
-): Promise<ReportRow[] | null> {
+): Promise<ReportRowsResult | null> {
   const keyRe = /^\d{4}-\d{2}-\d{2}\/.+\.csv$/;
   const keys: string[] = [];
   let token: string | undefined;
+  const stats = newReportStats();
+  const startedAt = Date.now();
   try {
     do {
+      if (reportScanTimedOut(startedAt)) {
+        stopReportScan(stats, "time_budget");
+        break;
+      }
       const page = await b2Client.listReportObjectKeys(bucketName, {
         // StartAfter skips every key before the window (keys are date-prefixed
         // and sort lexically), so a long-lived report bucket isn't fully scanned.
         // StartAfter applies to the first page only; ContinuationToken drives the rest.
         startAfter: sinceDate,
         continuationToken: token,
+        maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
       });
+      stats.pages++;
+      stats.listed_keys += page.keys.length;
       for (const k of page.keys) {
-        if (keyRe.test(k) && k.slice(0, 10) >= sinceDate) keys.push(k);
+        if (!keyRe.test(k) || k.slice(0, 10) < sinceDate) continue;
+        if (keys.length >= REPORT_SCAN_LIMITS.maxCandidateKeys) {
+          stopReportScan(stats, "max_candidate_keys");
+          break;
+        }
+        keys.push(k);
       }
+      stats.candidate_keys = keys.length;
       token = page.isTruncated ? page.nextContinuationToken : undefined;
+      if (stats.stop_reason) break;
+      if (token && stats.pages >= REPORT_SCAN_LIMITS.maxPages) {
+        stopReportScan(stats, "max_pages");
+        break;
+      }
     } while (token);
   } catch (e) {
     const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
@@ -262,20 +352,65 @@ async function loadReportRows(
     throw e;
   }
 
-  // Download the day CSVs concurrently — a partner bucket can hold a month of
-  // files, and a sequential fetch blows past MCP client timeouts (~60s).
-  const texts = await mapLimit(selectUsageKeys(keys), 16, async (key) => {
-    return b2Client.downloadReportObjectText(bucketName, key);
-  });
+  return loadRowsFromReportKeys(b2Client, bucketName, keys, stats, startedAt);
+}
+
+async function loadRowsFromReportKeys(
+  b2Client: B2Client,
+  bucketName: string,
+  keys: string[],
+  stats: ReportLoadStats,
+  startedAt: number,
+): Promise<ReportRowsResult> {
+  const selectedKeys = selectUsageKeys(keys);
+  const boundedKeys = selectedKeys.slice(0, REPORT_SCAN_LIMITS.maxSelectedKeys);
+  const selectedKeysWereCapped = selectedKeys.length > boundedKeys.length;
+  stats.selected_keys = boundedKeys.length;
 
   const rows: ReportRow[] = [];
-  for (const text of texts) {
-    for (const raw of parseCsv(text)) {
-      const mapped = mapRow(raw);
-      if (mapped) rows.push(mapped);
+  let next = 0;
+  let stopDownloads = stats.stop_reason === "time_budget";
+
+  const worker = async () => {
+    while (next < boundedKeys.length && !stopDownloads) {
+      if (reportScanTimedOut(startedAt)) {
+        stopReportScan(stats, "time_budget");
+        stopDownloads = true;
+        return;
+      }
+      const key = boundedKeys[next++];
+      const text = await b2Client.downloadReportObjectText(bucketName, key);
+      stats.downloaded_keys++;
+      stats.downloaded_bytes += Buffer.byteLength(text, "utf8");
+      if (stats.downloaded_bytes > REPORT_SCAN_LIMITS.maxDownloadedBytes) {
+        stopReportScan(stats, "max_downloaded_bytes");
+        stopDownloads = true;
+        return;
+      }
+      for (const raw of parseCsv(text)) {
+        const mapped = mapRow(raw);
+        if (!mapped) continue;
+        if (rows.length >= REPORT_SCAN_LIMITS.maxRows) {
+          stopReportScan(stats, "max_rows");
+          stopDownloads = true;
+          return;
+        }
+        rows.push(mapped);
+        stats.parsed_rows++;
+      }
     }
-  }
-  return rows;
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(REPORT_SCAN_LIMITS.concurrency, boundedKeys.length) }, worker),
+  );
+  if (selectedKeysWereCapped && !stats.stop_reason) stopReportScan(stats, "max_selected_keys");
+
+  return {
+    rows,
+    truncated: stats.stop_reason !== undefined,
+    stats,
+  };
 }
 
 function daysAgo(days: number): string {
@@ -386,28 +521,47 @@ export async function loadDayRows(
   bucketName: string,
   dayDate: string,
 ): Promise<ReportRow[]> {
+  return (await loadDayRowsBounded(b2Client, bucketName, dayDate)).rows;
+}
+
+async function loadDayRowsBounded(
+  b2Client: B2Client,
+  bucketName: string,
+  dayDate: string,
+): Promise<ReportRowsResult> {
   const keys: string[] = [];
   let token: string | undefined;
+  const stats = newReportStats();
+  const startedAt = Date.now();
   do {
+    if (reportScanTimedOut(startedAt)) {
+      stopReportScan(stats, "time_budget");
+      break;
+    }
     const page = await b2Client.listReportObjectKeys(bucketName, {
       prefix: `${dayDate}/`,
       continuationToken: token,
+      maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
     });
+    stats.pages++;
+    stats.listed_keys += page.keys.length;
     for (const k of page.keys) {
-      if (/\.csv$/i.test(k)) keys.push(k);
+      if (!/\.csv$/i.test(k)) continue;
+      if (keys.length >= REPORT_SCAN_LIMITS.maxCandidateKeys) {
+        stopReportScan(stats, "max_candidate_keys");
+        break;
+      }
+      keys.push(k);
     }
+    stats.candidate_keys = keys.length;
     token = page.isTruncated ? page.nextContinuationToken : undefined;
-  } while (token);
-  const texts = await mapLimit(selectUsageKeys(keys), 16, async (key) => {
-    return b2Client.downloadReportObjectText(bucketName, key);
-  });
-  const rows: ReportRow[] = [];
-  for (const text of texts)
-    for (const raw of parseCsv(text)) {
-      const mapped = mapRow(raw);
-      if (mapped) rows.push(mapped);
+    if (stats.stop_reason) break;
+    if (token && stats.pages >= REPORT_SCAN_LIMITS.maxPages) {
+      stopReportScan(stats, "max_pages");
+      break;
     }
-  return rows;
+  } while (token);
+  return loadRowsFromReportKeys(b2Client, bucketName, keys, stats, startedAt);
 }
 
 /** Sum stored bytes per account from a snapshot's rows (skip null storage). */
@@ -496,6 +650,23 @@ function bucketResolutionError(
   return null;
 }
 
+type UnfinishedUploadFile = Parameters<B2Client["toListedUnfinishedUpload"]>[0];
+
+function matchingUnfinishedUploads(
+  b2Client: B2Client,
+  files: readonly UnfinishedUploadFile[],
+  cutoff: number | null,
+): Array<{ fileId: string; fileName: string; initiated?: Date }> {
+  const matches: Array<{ fileId: string; fileName: string; initiated?: Date }> = [];
+  for (const file of files) {
+    const listed = b2Client.toListedUnfinishedUpload(file);
+    const initiated = dateFromTimestamp(listed.uploadTimestamp);
+    if (cutoff != null && initiated && initiated.getTime() > cutoff) continue;
+    matches.push({ fileId: listed.fileId, fileName: listed.fileName, initiated });
+  }
+  return matches;
+}
+
 // ── Tool registration ───────────────────────────────────────────────────────
 
 export function registerInsightTools(
@@ -564,11 +735,11 @@ export function registerInsightTools(
           });
 
         const [thenRows, nowRows] = await Promise.all([
-          loadDayRows(b2Client, bucket, then.date),
-          loadDayRows(b2Client, bucket, latest.date),
+          loadDayRowsBounded(b2Client, bucket, then.date),
+          loadDayRowsBounded(b2Client, bucket, latest.date),
         ]);
 
-        let accounts = computeSnapshotGrowth(thenRows, nowRows);
+        let accounts = computeSnapshotGrowth(thenRows.rows, nowRows.rows);
         if (args.order === "least_grown") accounts = [...accounts].reverse();
         else if (args.order === "shrinking") accounts = accounts.filter((a) => a.growthBytes < 0);
         accounts = accounts.slice(0, args.limit);
@@ -579,6 +750,7 @@ export function registerInsightTools(
           from_date: then.date,
           to_date: latest.date,
           account_count: accounts.length,
+          ...reportScanMetadata(thenRows, nowRows),
           accounts: accounts.map((a) => ({
             account: a.accountId,
             start_gb: gb(a.firstBytes),
@@ -619,15 +791,16 @@ export function registerInsightTools(
     async (args) => {
       try {
         const since = args.days != null ? daysAgo(args.days) : startOfMonthUTC();
-        const rows = await loadReportRows(b2Client, await reportsBucketName(auth), since);
-        if (rows === null) return toolJson(NOT_ENABLED);
-        const leaders = computeEgressLeaders(rows, args.by);
+        const loaded = await loadReportRows(b2Client, await reportsBucketName(auth), since);
+        if (loaded === null) return toolJson(NOT_ENABLED);
+        const leaders = computeEgressLeaders(loaded.rows, args.by);
         const total = leaders.reduce((s, l) => s + l.egress, 0);
         const top = leaders.slice(0, args.limit);
         return toolJson({
           period: args.days != null ? `last ${args.days} days` : "current month to date",
           rank_by: args.by,
           total_egress_gb: gb(total),
+          ...reportScanMetadata(loaded),
           leaders: top.map((l) => ({
             [args.by]: args.by === "bucket" ? l.bucketName || l.key : l.key,
             egress_gb: gb(l.egress),
@@ -814,31 +987,14 @@ export function registerInsightTools(
             startFileId: fileIdMarker,
             maxFileCount: 100,
           });
-          const files = page.files ?? [];
-          for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            const listed = b2Client.toListedUnfinishedUpload(file);
-            const initiated = dateFromTimestamp(listed.uploadTimestamp);
-            if (cutoff != null && initiated && initiated.getTime() > cutoff) continue;
-            if (uploads.length >= args.max_uploads) {
-              const remainingMatches = files.slice(i).some((candidate) => {
-                const ts = b2Client.toListedUnfinishedUpload(candidate).uploadTimestamp;
-                const remainingInitiated = dateFromTimestamp(ts);
-                return (
-                  cutoff == null || !remainingInitiated || remainingInitiated.getTime() <= cutoff
-                );
-              });
-              if (remainingMatches || page.nextFileId) {
-                truncated = true;
-                stopReason = "max_uploads";
-              }
-              break;
-            }
-            uploads.push({ fileId: listed.fileId, fileName: listed.fileName, initiated });
-          }
+          const matchingUploads = matchingUnfinishedUploads(b2Client, page.files ?? [], cutoff);
+          const availableSlots = Math.max(0, args.max_uploads - uploads.length);
+          uploads.push(...matchingUploads.slice(0, availableSlots));
           fileIdMarker = page.nextFileId ?? undefined;
-          if (truncated) break;
-          if (fileIdMarker && uploads.length >= args.max_uploads) {
+          const hitUploadCap =
+            matchingUploads.length > availableSlots ||
+            (fileIdMarker !== undefined && uploads.length >= args.max_uploads);
+          if (hitUploadCap) {
             truncated = true;
             stopReason = "max_uploads";
             break;

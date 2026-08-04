@@ -1,9 +1,16 @@
-import { withCircuit, circuitBreaker, isClientError } from "../../src/utils/circuit-breaker";
+import {
+  withCircuit,
+  withReportCircuit,
+  circuitBreaker,
+  reportCircuitBreaker,
+  isClientError,
+} from "../../src/utils/circuit-breaker";
 
 describe("circuit-breaker", () => {
   afterEach(() => {
     // Force the breaker back to a clean closed state between tests.
     circuitBreaker.close();
+    reportCircuitBreaker.close();
   });
 
   it("passes through results when closed", async () => {
@@ -51,5 +58,12 @@ describe("circuit-breaker", () => {
   it("fails fast when open", async () => {
     circuitBreaker.open();
     await expect(withCircuit(async () => 1)).rejects.toThrow(/breaker/i);
+  });
+
+  it("keeps report S3 failures isolated from the native breaker", async () => {
+    reportCircuitBreaker.open();
+
+    await expect(withReportCircuit(async () => 1)).rejects.toThrow(/breaker/i);
+    await expect(withCircuit(async () => 42)).resolves.toBe(42);
   });
 });

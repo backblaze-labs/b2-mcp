@@ -4,27 +4,13 @@ import {
   B2Client,
   type BucketFilters,
   type CreateBucketOptions,
+  type EventNotificationRuleInput,
+  type ServerSideEncryptionInput,
   type UpdateBucketOptions,
 } from "./client.js";
-import type { EventNotificationRule } from "@backblaze-labs/b2-sdk";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-
-interface BucketNotificationRule {
-  objectNamePrefix?: string;
-  targetConfiguration: {
-    url: string;
-    hmacSha256SigningSecret?: string;
-    customHeaders?: Array<{ name: string; value: string }>;
-  };
-  isEnabled: boolean;
-  [key: string]: unknown;
-}
-
-type Mutable<T> = {
-  -readonly [K in keyof T]: T[K];
-};
 
 /**
  * Redact webhook secrets from a notification-rules API response before it reaches
@@ -112,6 +98,49 @@ function validateWebhookUrl(raw: string): string | null {
     return "must not target a private/loopback/link-local or unspecified IPv6 address";
   }
   return null;
+}
+
+function normalizeBucketSse(
+  value: { mode: "none" | "SSE-B2"; algorithm?: string } | undefined,
+): ServerSideEncryptionInput | undefined {
+  if (!value) return undefined;
+  return value.mode === "SSE-B2"
+    ? { mode: "SSE-B2", algorithm: value.algorithm === "AES256" ? "AES256" : undefined }
+    : { mode: "none" };
+}
+
+interface NotificationRuleArgs {
+  name: string;
+  eventTypes: string[];
+  isEnabled: boolean;
+  objectNamePrefix?: string;
+  targetConfiguration: {
+    targetType: string;
+    url: string;
+    hmacSha256SigningSecret?: string;
+    customHeaders?: Array<{ name: string; value: string }>;
+  };
+}
+
+function normalizeNotificationRule(rule: NotificationRuleArgs): EventNotificationRuleInput {
+  return {
+    name: rule.name,
+    eventTypes: rule.eventTypes,
+    isEnabled: rule.isEnabled,
+    // B2 requires objectNamePrefix on every rule; default to "" (matches all
+    // objects) when a caller omits it, regardless of Zod default.
+    objectNamePrefix: rule.objectNamePrefix ?? "",
+    targetConfiguration: {
+      targetType: rule.targetConfiguration.targetType,
+      url: rule.targetConfiguration.url,
+      ...(rule.targetConfiguration.hmacSha256SigningSecret !== undefined
+        ? { hmacSha256SigningSecret: rule.targetConfiguration.hmacSha256SigningSecret }
+        : {}),
+      ...(rule.targetConfiguration.customHeaders !== undefined
+        ? { customHeaders: rule.targetConfiguration.customHeaders }
+        : {}),
+    },
+  };
 }
 
 export function registerBucketTools(
@@ -237,27 +266,19 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const payload: Partial<CreateBucketOptions> = {
+        const payload: CreateBucketOptions = {
           bucketName: args.bucketName,
           bucketType: args.bucketType,
+          ...(args.bucketInfo !== undefined ? { bucketInfo: args.bucketInfo } : {}),
+          ...(args.corsRules !== undefined ? { corsRules: args.corsRules } : {}),
+          ...(args.lifecycleRules !== undefined ? { lifecycleRules: args.lifecycleRules } : {}),
+          ...(args.defaultServerSideEncryption !== undefined
+            ? { defaultServerSideEncryption: normalizeBucketSse(args.defaultServerSideEncryption) }
+            : {}),
+          ...(args.fileLockEnabled !== undefined ? { fileLockEnabled: args.fileLockEnabled } : {}),
         };
-        if (args.bucketInfo) payload.bucketInfo = args.bucketInfo;
-        if (args.corsRules) payload.corsRules = args.corsRules;
-        if (args.lifecycleRules) payload.lifecycleRules = args.lifecycleRules;
-        if (args.defaultServerSideEncryption) {
-          // B2's native API requires algorithm "AES256" with SSE-B2; default it so
-          // callers can pass just { mode: "SSE-B2" }.
-          const sse = { ...args.defaultServerSideEncryption } as {
-            mode: string;
-            algorithm?: string;
-          };
-          if (sse.mode === "SSE-B2" && !sse.algorithm) sse.algorithm = "AES256";
-          payload.defaultServerSideEncryption =
-            sse as CreateBucketOptions["defaultServerSideEncryption"];
-        }
-        if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
 
-        const result = await client.createBucket(payload as CreateBucketOptions);
+        const result = await client.createBucket(payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -400,26 +421,24 @@ export function registerBucketTools(
       try {
         const gate = checkDestructive("b2_update_bucket", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const payload: Mutable<UpdateBucketOptions> = {
+        const payload: UpdateBucketOptions = {
           bucketId: args.bucketId,
+          ...(args.bucketType !== undefined ? { bucketType: args.bucketType } : {}),
+          ...(args.bucketInfo !== undefined ? { bucketInfo: args.bucketInfo } : {}),
+          ...(args.corsRules !== undefined ? { corsRules: args.corsRules } : {}),
+          ...(args.lifecycleRules !== undefined ? { lifecycleRules: args.lifecycleRules } : {}),
+          ...(args.defaultServerSideEncryption !== undefined
+            ? { defaultServerSideEncryption: normalizeBucketSse(args.defaultServerSideEncryption) }
+            : {}),
+          ...(args.replicationConfiguration !== undefined
+            ? { replicationConfiguration: args.replicationConfiguration }
+            : {}),
+          ...(args.fileLockEnabled !== undefined ? { fileLockEnabled: args.fileLockEnabled } : {}),
+          ...(args.defaultRetention !== undefined
+            ? { defaultRetention: args.defaultRetention }
+            : {}),
+          ...(args.ifRevisionIs !== undefined ? { ifRevisionIs: args.ifRevisionIs } : {}),
         };
-        if (args.bucketType !== undefined) payload.bucketType = args.bucketType;
-        if (args.bucketInfo !== undefined) payload.bucketInfo = args.bucketInfo;
-        if (args.corsRules !== undefined) payload.corsRules = args.corsRules;
-        if (args.lifecycleRules !== undefined) payload.lifecycleRules = args.lifecycleRules;
-        if (args.defaultServerSideEncryption !== undefined) {
-          payload.defaultServerSideEncryption = args.defaultServerSideEncryption;
-        }
-        if (args.replicationConfiguration !== undefined) {
-          payload.replicationConfiguration = args.replicationConfiguration;
-        }
-        if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
-        if (args.defaultRetention !== undefined) payload.defaultRetention = args.defaultRetention;
-        if (args.ifRevisionIs !== undefined) payload.ifRevisionIs = args.ifRevisionIs;
-        // Default SSE-B2 algorithm (B2 requires "AES256" with SSE-B2).
-        const upSse = payload.defaultServerSideEncryption as
-          { mode?: string; algorithm?: string } | undefined;
-        if (upSse && upSse.mode === "SSE-B2" && !upSse.algorithm) upSse.algorithm = "AES256";
         const result = await client.updateBucket(payload);
         return toolJson(result);
       } catch (err) {
@@ -486,7 +505,8 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const eventNotificationRules = args.eventNotificationRules as BucketNotificationRule[];
+        const eventNotificationRules: EventNotificationRuleInput[] =
+          args.eventNotificationRules.map(normalizeNotificationRule);
         for (const rule of eventNotificationRules) {
           const reason = validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
@@ -497,12 +517,7 @@ export function registerBucketTools(
         }
         const result = await client.setBucketNotificationRules(
           args.bucketId,
-          eventNotificationRules.map((rule) => ({
-            ...rule,
-            // B2 requires objectNamePrefix on every rule; default to "" (matches
-            // all objects) when a caller omits it, regardless of Zod default.
-            objectNamePrefix: rule.objectNamePrefix ?? "",
-          })) as EventNotificationRule[],
+          eventNotificationRules,
         );
         return toolJson(redactNotificationSecrets(result));
       } catch (err) {

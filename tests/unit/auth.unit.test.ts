@@ -1,10 +1,12 @@
-import { B2Client as SdkB2Client } from "@backblaze-labs/b2-sdk";
+import { B2Client as SdkB2Client, RetryTransport } from "@backblaze-labs/b2-sdk";
 import {
   B2AuthManager,
   RequestSignalTransport,
+  SDK_MAX_RETRY_BUDGET_MS,
   SDK_RETRY_OPTIONS,
   setB2SdkClientFactoryForTests,
 } from "../../src/auth";
+import { CIRCUIT_TIMEOUT_MS } from "../../src/utils/circuit-breaker";
 import { B2Config } from "../../src/utils/types";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import {
@@ -150,7 +152,45 @@ describe("B2AuthManager", () => {
       maxRetries: 3,
       initialRetryDelayMs: 1000,
       maxRetryDelayMs: 4000,
-      requestTimeoutMs: 30_000,
+      requestTimeoutMs: 10_000,
     });
+    expect(SDK_MAX_RETRY_BUDGET_MS).toBeLessThan(CIRCUIT_TIMEOUT_MS);
+  });
+
+  it("passes the MCP abort signal into SDK retry backoff", async () => {
+    const inner = new RecordingTransport(
+      () =>
+        new StaticHttpResponse(
+          503,
+          { status: 503, code: "service_unavailable", message: "try later" },
+          { "Retry-After": "10" },
+        ),
+    );
+    const transport = new RequestSignalTransport(
+      new RetryTransport({
+        transport: inner,
+        retry: {
+          maxRetries: 1,
+          initialRetryDelayMs: 10_000,
+          maxRetryDelayMs: 10_000,
+          requestTimeoutMs: 30_000,
+        },
+      }),
+    );
+    const abort = new AbortController();
+    const request = {
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
+      method: "POST" as const,
+      headers: { Authorization: "token" },
+      body: "{}",
+    };
+
+    const pending = runWithMcpRequestSignal(abort.signal, () => transport.send(request));
+    await Promise.resolve();
+    await Promise.resolve();
+    abort.abort(new DOMException("Aborted", "AbortError"));
+
+    await expect(pending).rejects.toThrow(/Aborted/);
+    expect(inner.requests).toHaveLength(1);
   });
 });

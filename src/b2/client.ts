@@ -3,41 +3,141 @@ import type {
   ApplicationKey,
   ApplicationKeyId,
   B2Client as SdkB2Client,
+  BucketRetentionPolicy as SdkBucketRetentionPolicy,
+  CorsRule as SdkCorsRule,
+  EncryptionSetting as SdkEncryptionSetting,
   BucketInfo,
   BucketId,
-  BucketType,
-  EventNotificationRule,
+  EventNotificationRule as SdkEventNotificationRule,
   FileVersion,
   GetBucketNotificationRulesResponse,
-  ListFileNamesResponse,
-  ListKeysResponse,
-  ListPartsResponse,
-  ListUnfinishedLargeFilesResponse,
+  ListBucketsRequest,
+  LifecycleRule as SdkLifecycleRule,
   PartInfo,
+  ReplicationConfiguration as SdkReplicationConfiguration,
   SetBucketNotificationRulesResponse,
   UpdateBucketRequest,
-  UpdateFileLegalHoldResponse,
-  UpdateFileRetentionResponse,
   UnfinishedLargeFile,
 } from "@backblaze-labs/b2-sdk";
 import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
 import { B2AuthManager } from "../auth.js";
-import { withCircuit } from "../utils/circuit-breaker.js";
+import { withCircuit, withReportCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
 import { createReportS3Client } from "../s3/client.js";
 import { dateFromTimestamp } from "../utils/date.js";
+import { B2AuthResponse } from "../utils/types.js";
+
+export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
+export type BucketTypeFilter = BucketType | "all";
+
+export interface CorsRuleInput {
+  corsRuleName: string;
+  allowedOrigins: string[];
+  allowedHeaders?: string[] | null;
+  allowedOperations: string[];
+  exposeHeaders?: string[] | null;
+  maxAgeSeconds: number;
+}
+
+export interface LifecycleRuleInput {
+  fileNamePrefix: string;
+  daysFromHidingToDeleting?: number | null;
+  daysFromUploadingToHiding?: number | null;
+  daysFromStartingToCancelingUnfinishedLargeFiles?: number | null;
+}
+
+export interface ServerSideEncryptionInput {
+  mode: "none" | "SSE-B2";
+  algorithm?: "AES256";
+}
+
+export interface BucketRetentionInput {
+  mode: "governance" | "compliance" | null;
+  period: { duration: number; unit: "days" | "years" } | null;
+}
+
+export interface ReplicationConfigurationInput {
+  asReplicationSource?: {
+    replicationRules: Array<{
+      replicationRuleName: string;
+      destinationBucketId: string;
+      fileNamePrefix?: string;
+      includeExistingFiles?: boolean;
+      isEnabled: boolean;
+      priority: number;
+    }>;
+    sourceApplicationKeyId: string;
+  } | null;
+  asReplicationDestination?: {
+    sourceToDestinationKeyMapping: Record<string, string>;
+  } | null;
+}
+
+export interface CreateBucketOptions {
+  bucketName: string;
+  bucketType: "allPublic" | "allPrivate";
+  bucketInfo?: Record<string, string>;
+  corsRules?: CorsRuleInput[];
+  defaultServerSideEncryption?: ServerSideEncryptionInput;
+  defaultRetention?: BucketRetentionInput;
+  fileLockEnabled?: boolean;
+  lifecycleRules?: LifecycleRuleInput[];
+  replicationConfiguration?: ReplicationConfigurationInput;
+}
+
+export interface UpdateBucketOptions {
+  bucketId: string;
+  bucketType?: "allPublic" | "allPrivate";
+  bucketInfo?: Record<string, string>;
+  corsRules?: CorsRuleInput[];
+  defaultServerSideEncryption?: ServerSideEncryptionInput;
+  defaultRetention?: BucketRetentionInput;
+  fileLockEnabled?: boolean;
+  lifecycleRules?: LifecycleRuleInput[];
+  replicationConfiguration?: ReplicationConfigurationInput;
+  ifRevisionIs?: number;
+}
+
+export interface EventNotificationRuleInput {
+  name: string;
+  eventTypes: string[];
+  isEnabled: boolean;
+  objectNamePrefix?: string;
+  targetConfiguration: {
+    targetType: string;
+    url: string;
+    hmacSha256SigningSecret?: string;
+    customHeaders?: Array<{ name: string; value: string }> | Record<string, string>;
+  };
+  isSuspended?: boolean;
+  suspensionReason?: string;
+}
 
 export interface BucketFilters {
   bucketId?: string;
   bucketName?: string;
-  bucketTypes?: Array<BucketType | "all">;
+  bucketTypes?: BucketTypeFilter[];
 }
 
-export type CreateBucketOptions = Parameters<SdkB2Client["createBucket"]>[0];
-
-export type UpdateBucketOptions = Omit<UpdateBucketRequest, "accountId" | "bucketId"> & {
+export interface BucketInfoResult {
   bucketId: string;
-};
+  bucketName: string;
+  bucketType: string;
+}
+
+export interface ListBucketsResult {
+  buckets: BucketInfoResult[];
+}
+
+export interface NotificationRulesResult {
+  eventNotificationRules: EventNotificationRuleInput[];
+}
+
+export type ApplicationKeyResult = object;
+
+export interface ListKeysResult {
+  keys: ApplicationKeyResult[];
+}
 
 export interface ListKeysOptions {
   maxKeyCount?: number;
@@ -81,10 +181,45 @@ export interface UpdateFileRetentionOptions {
   bypassGovernance?: boolean;
 }
 
+export type UpdateFileLegalHoldResult = object;
+export type UpdateFileRetentionResult = object;
+
 export interface ReportObjectPage {
   keys: string[];
   isTruncated: boolean;
   nextContinuationToken?: string;
+}
+
+export interface FileVersionResult {
+  fileName: string;
+  contentLength: number;
+  uploadTimestamp: number;
+}
+
+export interface ListFileNamesResult {
+  files: FileVersionResult[];
+  nextFileName?: string | null;
+}
+
+export interface UnfinishedLargeFileResult {
+  fileId: string;
+  fileName: string;
+  uploadTimestamp?: number;
+}
+
+export interface ListUnfinishedLargeFilesResult {
+  files: UnfinishedLargeFileResult[];
+  nextFileId?: string | null;
+}
+
+export interface PartInfoResult {
+  partNumber: number;
+  contentLength: number;
+}
+
+export interface ListPartsResult {
+  parts: PartInfoResult[];
+  nextPartNumber?: number | null;
 }
 
 export interface ListedFile {
@@ -105,7 +240,71 @@ export interface ListedPart {
 }
 
 function cloneJsonResponse<T>(value: T): T {
+  // SDK simulator responses can contain shared object references that the MCP
+  // sanitizer would otherwise mark as circular. B2 API payloads are JSON-only,
+  // so a JSON round-trip preserves the wire contract while giving callers an
+  // owned plain object.
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function toPlainObject<T extends object>(value: T): object {
+  return Object.assign({}, cloneJsonResponse(value));
+}
+
+function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
+  return Object.assign({}, cloneJsonResponse(value), {
+    bucketId: String(value.bucketId),
+    bucketName: value.bucketName,
+    bucketType: value.bucketType,
+  });
+}
+
+function toNotificationRulesResult(
+  value: GetBucketNotificationRulesResponse | SetBucketNotificationRulesResponse,
+): NotificationRulesResult {
+  return Object.assign({}, cloneJsonResponse(value), {
+    eventNotificationRules: value.eventNotificationRules.map((rule) => ({
+      name: rule.name,
+      eventTypes: [...rule.eventTypes],
+      isEnabled: rule.isEnabled,
+      isSuspended: rule.isSuspended,
+      objectNamePrefix: rule.objectNamePrefix,
+      suspensionReason: rule.suspensionReason,
+      targetConfiguration: {
+        ...rule.targetConfiguration,
+        ...(rule.targetConfiguration.customHeaders !== undefined
+          ? { customHeaders: rule.targetConfiguration.customHeaders }
+          : {}),
+      },
+    })),
+  });
+}
+
+function toApplicationKeyResult(value: ApplicationKey): ApplicationKeyResult {
+  return toPlainObject(value);
+}
+
+function toFileVersionResult(value: FileVersion): FileVersionResult {
+  return Object.assign({}, cloneJsonResponse(value), {
+    fileName: value.fileName,
+    contentLength: value.contentLength,
+    uploadTimestamp: value.uploadTimestamp,
+  });
+}
+
+function toUnfinishedLargeFileResult(value: UnfinishedLargeFile): UnfinishedLargeFileResult {
+  return Object.assign({}, cloneJsonResponse(value), {
+    fileId: String(value.fileId),
+    fileName: value.fileName,
+    uploadTimestamp: value.uploadTimestamp,
+  });
+}
+
+function toPartInfoResult(value: PartInfo): PartInfoResult {
+  return Object.assign({}, cloneJsonResponse(value), {
+    partNumber: value.partNumber,
+    contentLength: value.contentLength,
+  });
 }
 
 function maybeBucketId(value: string | undefined): BucketId | undefined {
@@ -116,13 +315,210 @@ function maybeApplicationKeyId(value: string | undefined): ApplicationKeyId | un
   return value ? applicationKeyId(value) : undefined;
 }
 
-function toBucketFilters(options: BucketFilters) {
-  const bucketTypes = options.bucketTypes?.filter((type): type is BucketType => type !== "all");
+function toBucketFilters(auth: B2AuthResponse, options: BucketFilters): ListBucketsRequest {
+  const requestedTypes = options.bucketTypes?.includes("all") ? ["all"] : options.bucketTypes;
   return {
+    accountId: accountId(auth.accountId),
     bucketId: maybeBucketId(options.bucketId),
     bucketName: options.bucketName,
-    bucketTypes: bucketTypes?.length ? bucketTypes : undefined,
+    // The native B2 API accepts the "all" wildcard, but SDK 0.2.0's type only
+    // models concrete bucket types. Keep the compatibility cast isolated here.
+    bucketTypes: requestedTypes?.length
+      ? (requestedTypes as unknown as ListBucketsRequest["bucketTypes"])
+      : undefined,
   };
+}
+
+function normalizeCorsRule(rule: CorsRuleInput): SdkCorsRule {
+  return {
+    corsRuleName: rule.corsRuleName,
+    allowedOrigins: rule.allowedOrigins,
+    // B2's CORS operation strings are an extensible public wire contract. The
+    // tool schema accepts strings so newer B2 operations do not require a server
+    // release; the adapter narrows at the SDK boundary.
+    allowedOperations: rule.allowedOperations as unknown as SdkCorsRule["allowedOperations"],
+    allowedHeaders: rule.allowedHeaders ?? null,
+    exposeHeaders: rule.exposeHeaders ?? null,
+    maxAgeSeconds: rule.maxAgeSeconds,
+  };
+}
+
+function normalizeLifecycleRule(rule: LifecycleRuleInput): SdkLifecycleRule {
+  const normalized: SdkLifecycleRule & {
+    daysFromStartingToCancelingUnfinishedLargeFiles?: number | null;
+  } = {
+    fileNamePrefix: rule.fileNamePrefix,
+    daysFromHidingToDeleting: rule.daysFromHidingToDeleting ?? null,
+    daysFromUploadingToHiding: rule.daysFromUploadingToHiding ?? null,
+  };
+  // The native API accepts this field for large-file cleanup. SDK 0.2.0's
+  // LifecycleRule type omits it, so keep the wire-compatible extension local to
+  // the adapter instead of leaking it through tool handlers.
+  if (rule.daysFromStartingToCancelingUnfinishedLargeFiles !== undefined) {
+    normalized.daysFromStartingToCancelingUnfinishedLargeFiles =
+      rule.daysFromStartingToCancelingUnfinishedLargeFiles ?? null;
+  }
+  return normalized;
+}
+
+function normalizeSse(
+  value: ServerSideEncryptionInput | undefined,
+): SdkEncryptionSetting | undefined {
+  if (!value) return undefined;
+  if (value.mode === "none") return { mode: "none" };
+  return { mode: "SSE-B2", algorithm: value.algorithm ?? "AES256" };
+}
+
+function normalizeRetention(
+  value: BucketRetentionInput | undefined,
+): SdkBucketRetentionPolicy | undefined {
+  if (!value) return undefined;
+  return {
+    mode: value.mode ?? "none",
+    period: value.period,
+  };
+}
+
+function normalizeReplication(
+  value: ReplicationConfigurationInput | undefined,
+): SdkReplicationConfiguration | undefined {
+  if (!value) return undefined;
+  return {
+    asReplicationSource: value.asReplicationSource
+      ? {
+          sourceApplicationKeyId: applicationKeyId(
+            value.asReplicationSource.sourceApplicationKeyId,
+          ),
+          replicationRules: value.asReplicationSource.replicationRules.map((rule) => ({
+            replicationRuleName: rule.replicationRuleName,
+            destinationBucketId: bucketId(rule.destinationBucketId),
+            fileNamePrefix: rule.fileNamePrefix ?? "",
+            includeExistingFiles: rule.includeExistingFiles ?? false,
+            isEnabled: rule.isEnabled,
+            priority: rule.priority,
+          })),
+        }
+      : null,
+    asReplicationDestination: value.asReplicationDestination
+      ? {
+          sourceToDestinationKeyMapping: Object.fromEntries(
+            Object.entries(value.asReplicationDestination.sourceToDestinationKeyMapping).map(
+              ([source, destination]) => [source, applicationKeyId(destination)],
+            ),
+          ),
+        }
+      : null,
+  };
+}
+
+function normalizeCreateBucketOptions(options: CreateBucketOptions) {
+  return {
+    bucketName: options.bucketName,
+    bucketType: options.bucketType,
+    ...(options.bucketInfo !== undefined ? { bucketInfo: options.bucketInfo } : {}),
+    ...(options.corsRules !== undefined
+      ? { corsRules: options.corsRules.map(normalizeCorsRule) }
+      : {}),
+    ...(options.defaultServerSideEncryption !== undefined
+      ? { defaultServerSideEncryption: normalizeSse(options.defaultServerSideEncryption) }
+      : {}),
+    ...(options.defaultRetention !== undefined
+      ? { defaultRetention: normalizeRetention(options.defaultRetention) }
+      : {}),
+    ...(options.fileLockEnabled !== undefined ? { fileLockEnabled: options.fileLockEnabled } : {}),
+    ...(options.lifecycleRules !== undefined
+      ? { lifecycleRules: options.lifecycleRules.map(normalizeLifecycleRule) }
+      : {}),
+    ...(options.replicationConfiguration !== undefined
+      ? { replicationConfiguration: normalizeReplication(options.replicationConfiguration) }
+      : {}),
+  };
+}
+
+function normalizeUpdateBucketRequest(
+  auth: B2AuthResponse,
+  options: UpdateBucketOptions,
+): UpdateBucketRequest {
+  return {
+    accountId: accountId(auth.accountId),
+    bucketId: bucketId(options.bucketId),
+    ...(options.bucketType !== undefined ? { bucketType: options.bucketType } : {}),
+    ...(options.bucketInfo !== undefined ? { bucketInfo: options.bucketInfo } : {}),
+    ...(options.corsRules !== undefined
+      ? { corsRules: options.corsRules.map(normalizeCorsRule) }
+      : {}),
+    ...(options.defaultServerSideEncryption !== undefined
+      ? { defaultServerSideEncryption: normalizeSse(options.defaultServerSideEncryption) }
+      : {}),
+    ...(options.defaultRetention !== undefined
+      ? { defaultRetention: normalizeRetention(options.defaultRetention) }
+      : {}),
+    ...(options.fileLockEnabled !== undefined ? { fileLockEnabled: options.fileLockEnabled } : {}),
+    ...(options.lifecycleRules !== undefined
+      ? { lifecycleRules: options.lifecycleRules.map(normalizeLifecycleRule) }
+      : {}),
+    ...(options.replicationConfiguration !== undefined
+      ? { replicationConfiguration: normalizeReplication(options.replicationConfiguration) }
+      : {}),
+    ...(options.ifRevisionIs !== undefined ? { ifRevisionIs: options.ifRevisionIs } : {}),
+  };
+}
+
+function normalizeCustomHeaders(
+  value: EventNotificationRuleInput["targetConfiguration"]["customHeaders"],
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return value;
+  return Object.fromEntries(value.map((header) => [header.name, header.value]));
+}
+
+function normalizeEventNotificationRule(
+  rule: EventNotificationRuleInput,
+): SdkEventNotificationRule {
+  return {
+    name: rule.name,
+    // Event strings are intentionally forward-compatible at the tool boundary;
+    // B2 validates unknown values and the SDK type is the reviewed current set.
+    eventTypes: rule.eventTypes as unknown as SdkEventNotificationRule["eventTypes"],
+    isEnabled: rule.isEnabled,
+    isSuspended: rule.isSuspended ?? false,
+    objectNamePrefix: rule.objectNamePrefix ?? "",
+    suspensionReason: rule.suspensionReason ?? "",
+    targetConfiguration: {
+      ...rule.targetConfiguration,
+      customHeaders: normalizeCustomHeaders(rule.targetConfiguration.customHeaders),
+    },
+  };
+}
+
+export function validateB2ApiUrl(raw: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return "is not a valid URL";
+  }
+  if (parsed.protocol !== "https:") return "must use https://";
+  if (parsed.username || parsed.password) return "must not include credentials";
+  if (parsed.port) return "must not include a custom port";
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    return "must not include a path, query, or fragment";
+  }
+  if (!/(^|\.)backblazeb2\.com$/i.test(parsed.hostname)) {
+    return "must match a trusted backblazeb2.com host";
+  }
+  return null;
+}
+
+function assertB2ApiUrl(raw: string): void {
+  const reason = validateB2ApiUrl(raw);
+  if (reason) throw new Error(`Authorized B2 API endpoint ${reason}.`);
+}
+
+function isUnauthorized(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { status?: number; response?: { status?: number } };
+  return e.status === 401 || e.response?.status === 401;
 }
 
 /**
@@ -134,131 +530,147 @@ export class B2Client {
 
   constructor(private readonly auth: B2AuthManager) {}
 
-  async listBuckets(options: BucketFilters = {}): Promise<{ buckets: BucketInfo[] }> {
-    const { client } = await this.auth.getAuthorizedSdk();
-    const buckets = await withCircuit(() => client.listBuckets(toBucketFilters(options)));
-    return { buckets: buckets.map((bucket) => cloneJsonResponse(bucket.info)) };
+  async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
+    const result = await this.withNativeCircuit((client, auth) =>
+      client.raw.listBuckets(auth.apiUrl, auth.authorizationToken, toBucketFilters(auth, options)),
+    );
+    return { buckets: result.buckets.map(toBucketInfoResult) };
   }
 
-  async createBucket(options: CreateBucketOptions): Promise<BucketInfo> {
-    const { client } = await this.auth.getAuthorizedSdk();
-    const bucket = await withCircuit(() => client.createBucket(options));
-    return cloneJsonResponse(bucket.info);
+  async createBucket(options: CreateBucketOptions): Promise<BucketInfoResult> {
+    const bucket = await this.withNativeCircuit((client) =>
+      client.createBucket(normalizeCreateBucketOptions(options)),
+    );
+    return toBucketInfoResult(bucket.info);
   }
 
-  async deleteBucket(bucketIdValue: string): Promise<BucketInfo> {
-    const { client } = await this.auth.getAuthorizedSdk();
-    return cloneJsonResponse(await withCircuit(() => client.deleteBucket(bucketId(bucketIdValue))));
+  async deleteBucket(bucketIdValue: string): Promise<BucketInfoResult> {
+    return toBucketInfoResult(
+      await this.withNativeCircuit((client) => client.deleteBucket(bucketId(bucketIdValue))),
+    );
   }
 
-  async updateBucket(options: UpdateBucketOptions): Promise<BucketInfo> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
-    const { bucketId: rawBucketId, ...rest } = options;
-    const request: UpdateBucketRequest = {
-      accountId: accountId(auth.accountId),
-      bucketId: bucketId(rawBucketId),
-      ...rest,
-    };
-    return cloneJsonResponse(
-      await withCircuit(() =>
-        client.raw.updateBucket(auth.apiUrl, auth.authorizationToken, request),
+  async updateBucket(options: UpdateBucketOptions): Promise<BucketInfoResult> {
+    return toBucketInfoResult(
+      await this.withNativeCircuit((client, auth) =>
+        client.raw.updateBucket(
+          auth.apiUrl,
+          auth.authorizationToken,
+          normalizeUpdateBucketRequest(auth, options),
+        ),
       ),
     );
   }
 
-  async getBucketNotificationRules(
-    bucketIdValue: string,
-  ): Promise<GetBucketNotificationRulesResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
-    return withCircuit(() =>
-      client.raw.getBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
-        bucketId: bucketId(bucketIdValue),
-      }),
+  async getBucketNotificationRules(bucketIdValue: string): Promise<NotificationRulesResult> {
+    return toNotificationRulesResult(
+      await this.withNativeCircuit((client, auth) =>
+        client.raw.getBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
+          bucketId: bucketId(bucketIdValue),
+        }),
+      ),
     );
   }
 
   async setBucketNotificationRules(
     bucketIdValue: string,
-    eventNotificationRules: EventNotificationRule[],
-  ): Promise<SetBucketNotificationRulesResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
-    return withCircuit(() =>
-      client.raw.setBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
-        bucketId: bucketId(bucketIdValue),
-        eventNotificationRules,
-      }),
+    eventNotificationRules: EventNotificationRuleInput[],
+  ): Promise<NotificationRulesResult> {
+    return toNotificationRulesResult(
+      await this.withNativeCircuit((client, auth) =>
+        client.raw.setBucketNotificationRules(auth.apiUrl, auth.authorizationToken, {
+          bucketId: bucketId(bucketIdValue),
+          eventNotificationRules: eventNotificationRules.map(normalizeEventNotificationRule),
+        }),
+      ),
     );
   }
 
-  async listKeys(options: ListKeysOptions): Promise<ListKeysResponse> {
-    const { client } = await this.auth.getAuthorizedSdk();
-    return withCircuit(() =>
+  async listKeys(options: ListKeysOptions): Promise<ListKeysResult> {
+    const result = await this.withNativeCircuit((client) =>
       client.listKeys({
         pageSize: options.maxKeyCount,
         startApplicationKeyId: maybeApplicationKeyId(options.startApplicationKeyId),
       }),
     );
+    return Object.assign({}, toPlainObject(result), {
+      keys: result.keys.map(toApplicationKeyResult),
+    });
   }
 
-  async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKey> {
-    const { client } = await this.auth.getAuthorizedSdk();
-    return withCircuit(() => client.deleteKey(applicationKeyId(applicationKeyIdValue)));
+  async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKeyResult> {
+    return toApplicationKeyResult(
+      await this.withNativeCircuit((client) =>
+        client.deleteKey(applicationKeyId(applicationKeyIdValue)),
+      ),
+    );
   }
 
   async updateFileLegalHold(
     options: UpdateFileLegalHoldOptions,
-  ): Promise<UpdateFileLegalHoldResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
+  ): Promise<UpdateFileLegalHoldResult> {
     const request = { ...options, fileId: fileId(options.fileId) };
-    return withCircuit(() =>
-      client.raw.updateFileLegalHold(auth.apiUrl, auth.authorizationToken, request),
+    return toPlainObject(
+      await this.withNativeCircuit((client, auth) =>
+        client.raw.updateFileLegalHold(auth.apiUrl, auth.authorizationToken, request),
+      ),
     );
   }
 
   async updateFileRetention(
     options: UpdateFileRetentionOptions,
-  ): Promise<UpdateFileRetentionResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
+  ): Promise<UpdateFileRetentionResult> {
     const request = { ...options, fileId: fileId(options.fileId) };
-    return withCircuit(() =>
-      client.raw.updateFileRetention(auth.apiUrl, auth.authorizationToken, request),
+    return toPlainObject(
+      await this.withNativeCircuit((client, auth) =>
+        client.raw.updateFileRetention(auth.apiUrl, auth.authorizationToken, request),
+      ),
     );
   }
 
-  async listFileNames(options: ListFileNamesOptions): Promise<ListFileNamesResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
+  async listFileNames(options: ListFileNamesOptions): Promise<ListFileNamesResult> {
     const request = { ...options, bucketId: bucketId(options.bucketId) };
-    return withCircuit(() =>
+    const result = await this.withNativeCircuit((client, auth) =>
       client.raw.listFileNames(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
     );
+    return Object.assign({}, toPlainObject(result), {
+      files: result.files.map(toFileVersionResult),
+      nextFileName: result.nextFileName,
+    });
   }
 
   async listUnfinishedLargeFiles(
     options: ListUnfinishedLargeFilesOptions,
-  ): Promise<ListUnfinishedLargeFilesResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
+  ): Promise<ListUnfinishedLargeFilesResult> {
     const request = {
       ...options,
       bucketId: bucketId(options.bucketId),
       startFileId: options.startFileId ? largeFileId(options.startFileId) : undefined,
     };
-    return withCircuit(() =>
+    const result = await this.withNativeCircuit((client, auth) =>
       client.raw.listUnfinishedLargeFiles(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
     );
+    return Object.assign({}, toPlainObject(result), {
+      files: result.files.map(toUnfinishedLargeFileResult),
+      nextFileId: result.nextFileId,
+    });
   }
 
-  async listParts(options: ListPartsOptions): Promise<ListPartsResponse> {
-    const { client, auth } = await this.auth.getAuthorizedSdk();
+  async listParts(options: ListPartsOptions): Promise<ListPartsResult> {
     const request = { ...options, fileId: largeFileId(options.fileId) };
-    return withCircuit(() =>
+    const result = await this.withNativeCircuit((client, auth) =>
       client.raw.listParts(auth.apiUrl, auth.authorizationToken, request, {
         signal: currentMcpRequestSignal(),
       }),
     );
+    return Object.assign({}, toPlainObject(result), {
+      parts: result.parts.map(toPartInfoResult),
+      nextPartNumber: result.nextPartNumber,
+    });
   }
 
   async listReportObjectKeys(
@@ -271,7 +683,7 @@ export class B2Client {
     } = {},
   ): Promise<ReportObjectPage> {
     const s3 = await this.getReportS3Client();
-    return withCircuit(async () => {
+    return withReportCircuit(async () => {
       const page = await s3.send(
         new ListObjectsV2Command({
           Bucket: bucketName,
@@ -294,7 +706,7 @@ export class B2Client {
 
   async downloadReportObjectText(bucketName: string, key: string): Promise<string> {
     const s3 = await this.getReportS3Client();
-    return withCircuit(async () => {
+    return withReportCircuit(async () => {
       const obj = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: key }), {
         abortSignal: currentMcpRequestSignal(),
       });
@@ -302,7 +714,7 @@ export class B2Client {
     });
   }
 
-  toListedFile(file: FileVersion): ListedFile {
+  toListedFile(file: FileVersionResult): ListedFile {
     return {
       name: file.fileName,
       size: file.contentLength,
@@ -310,7 +722,7 @@ export class B2Client {
     };
   }
 
-  toListedUnfinishedUpload(file: UnfinishedLargeFile): ListedUnfinishedUpload {
+  toListedUnfinishedUpload(file: UnfinishedLargeFileResult): ListedUnfinishedUpload {
     return {
       fileId: file.fileId,
       fileName: file.fileName,
@@ -318,7 +730,7 @@ export class B2Client {
     };
   }
 
-  toListedPart(part: PartInfo): ListedPart {
+  toListedPart(part: PartInfoResult): ListedPart {
     return {
       partNumber: part.partNumber,
       size: part.contentLength,
@@ -332,23 +744,34 @@ export class B2Client {
     this.reportS3Client = createReportS3Client(config, auth);
     return this.reportS3Client;
   }
-}
 
-/**
- * Decode a JSON error body that arrived as raw bytes. Retained for callers and
- * tests that normalize binary download errors before sending them to toolError.
- */
-export function decodeBinaryErrorBody(err: unknown): unknown {
-  if (typeof err === "object" && err !== null) {
-    const e = err as { response?: { data?: unknown } };
-    const data = e.response?.data;
-    if (data instanceof ArrayBuffer || Buffer.isBuffer(data)) {
+  private async withNativeCircuit<T>(
+    operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
+  ): Promise<T> {
+    return withCircuit(() => this.withFreshNativeAuth(operation));
+  }
+
+  private async withFreshNativeAuth<T>(
+    operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
+  ): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { client, auth } = await this.auth.getAuthorizedSdk();
+      assertB2ApiUrl(auth.apiUrl);
       try {
-        e.response!.data = JSON.parse(Buffer.from(data as ArrayBuffer).toString("utf8"));
-      } catch {
-        // Not JSON; leave the raw body as-is.
+        const result = await operation(client, auth);
+        this.auth.syncCachedAuthFromSdk();
+        return result;
+      } catch (err) {
+        this.auth.syncCachedAuthFromSdk();
+        lastError = err;
+        if (attempt === 0 && isUnauthorized(err) && currentMcpRequestSignal()?.aborted !== true) {
+          this.auth.invalidate();
+          continue;
+        }
+        throw err;
       }
     }
+    throw lastError;
   }
-  return err;
 }

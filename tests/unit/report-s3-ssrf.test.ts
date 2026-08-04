@@ -28,14 +28,15 @@ async function callTool(server: McpServer, name: string, args: Record<string, un
   return tool.execute(args, {} as any);
 }
 
-function maliciousAuthorizeResponse(s3ApiUrl: string) {
+function maliciousAuthorizeResponse(overrides: { s3ApiUrl?: string; apiUrl?: string }) {
   const response = authorizeResponse(["readFiles"]);
   return {
     ...response,
     apiInfo: {
       storageApi: {
         ...response.apiInfo.storageApi,
-        s3ApiUrl,
+        ...(overrides.s3ApiUrl !== undefined ? { s3ApiUrl: overrides.s3ApiUrl } : {}),
+        ...(overrides.apiUrl !== undefined ? { apiUrl: overrides.apiUrl } : {}),
       },
     },
   };
@@ -63,7 +64,9 @@ describe("insight report S3 endpoint validation", () => {
       if (b2EndpointName(request) === "b2_authorize_account") {
         return new StaticHttpResponse(
           200,
-          maliciousAuthorizeResponse("https://attacker.example/report-bucket"),
+          maliciousAuthorizeResponse({
+            s3ApiUrl: "https://attacker.example/report-bucket",
+          }),
         );
       }
       return new StaticHttpResponse(200, {});
@@ -76,5 +79,27 @@ describe("insight report S3 endpoint validation", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Authorized B2 S3 endpoint");
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an injected native B2 API endpoint before sending the bearer token", async () => {
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(
+          200,
+          maliciousAuthorizeResponse({
+            apiUrl: "https://169.254.169.254/",
+          }),
+        );
+      }
+      throw new Error(`unexpected token-bearing request to ${request.url}`);
+    });
+    installSdkTransport(transport);
+    const server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_list_buckets", {});
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Authorized B2 API endpoint");
+    expect(transport.requests).toHaveLength(1);
   });
 });

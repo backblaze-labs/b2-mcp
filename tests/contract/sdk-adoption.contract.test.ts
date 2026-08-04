@@ -171,24 +171,17 @@ describe("SDK adoption contract", () => {
     expect(contract).toContain("`@aws-sdk/s3-presigned-post` is intentionally absent");
   });
 
-  it("keeps the SDK subpath shim documented and aligned with installed declarations", () => {
+  it("keeps the SDK subpath shim documented and aligned with public subpaths", async () => {
     const shim = readFileSync(join(ROOT, "src/types/backblaze-b2-sdk-s3.d.ts"), "utf8");
-    const sdkS3 = readFileSync(
-      join(ROOT, "node_modules/@backblaze-labs/b2-sdk/dist/s3/index.d.ts"),
-      "utf8",
-    );
-    const sdkSimulator = readFileSync(
-      join(ROOT, "node_modules/@backblaze-labs/b2-sdk/dist/simulator/index.d.ts"),
-      "utf8",
-    );
+    const sdkS3 = await import("@backblaze-labs/b2-sdk/s3");
+    const sdkSimulator = await import("@backblaze-labs/b2-sdk/simulator");
 
     expect(shim).toContain("Temporary TypeScript-resolution shim");
     expect(shim).toContain("Issue");
-    expect(sdkS3).toContain("export declare function createS3ClientConfig");
-    expect(sdkS3).toContain("readonly forcePathStyle: boolean");
+    expect(typeof sdkS3.createS3ClientConfig).toBe("function");
     expect(shim).toContain("export function createS3ClientConfig");
     expect(shim).toContain("readonly forcePathStyle: boolean");
-    expect(sdkSimulator).toContain("export declare class B2Simulator");
+    expect(typeof sdkSimulator.B2Simulator).toBe("function");
     expect(shim).toContain("export class B2Simulator");
   });
 

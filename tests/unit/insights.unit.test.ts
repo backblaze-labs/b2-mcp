@@ -7,6 +7,7 @@ import {
   computeSnapshotGrowth,
   periodStartDate,
   selectUsageKeys,
+  registerInsightTools,
   ReportRow,
 } from "../../src/b2/insights.js";
 
@@ -316,5 +317,46 @@ describe("insights — snapshot selection (fake report client)", () => {
     expect(rows.every((r) => r._date === "2026-05-28")).toBe(true);
     // two region rows for account a → 60 + 40 GB stored
     expect(rows.reduce((s, r) => s + (r.storageBytes ?? 0), 0)).toBe(100 * GB);
+  });
+});
+
+describe("insights — report scan bounds", () => {
+  it("returns partial metadata when report CSV selection is capped", async () => {
+    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+    const server = {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const keys = Array.from(
+      { length: 1005 },
+      (_, i) => `${today}/usage.account-${String(i).padStart(4, "0")}.csv`,
+    );
+    const csv = `account_id,date,downloaded_gb,stored_gb\nacct,${today},1,1\n`;
+    const b2Client = {
+      listReportObjectKeys: async () => ({
+        keys,
+        isTruncated: false,
+      }),
+      downloadReportObjectText: async () => csv,
+    };
+    const auth = {
+      getAuth: async () => ({ accountId: "acct" }),
+    };
+    registerInsightTools(server as any, b2Client as any, auth as any);
+
+    const result = await tools.b2_egress_leaders.execute({
+      by: "account",
+      days: 90,
+      limit: 1,
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.partial).toBe(true);
+    expect(body.truncated).toBe(true);
+    expect(body.report_scan.selected_keys).toBe(1000);
+    expect(body.report_scan.downloaded_keys).toBe(1000);
+    expect(body.report_scan.stop_reasons).toContain("max_selected_keys");
   });
 });

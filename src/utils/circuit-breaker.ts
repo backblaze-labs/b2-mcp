@@ -1,6 +1,8 @@
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
 
+export const CIRCUIT_TIMEOUT_MS = 60_000;
+
 /**
  * Errors that should NOT count as B2 service failures.
  * Client-side 4xx (except 408 and 429) reflect bad requests, not B2 trouble.
@@ -36,7 +38,7 @@ const breaker = new CircuitBreaker(
   // Pass-through action; the caller's function is invoked via .fire(fn).
   async (fn: () => Promise<unknown>) => fn(),
   {
-    timeout: 60_000,
+    timeout: CIRCUIT_TIMEOUT_MS,
     errorThresholdPercentage: 50,
     resetTimeout: 30_000,
     rollingCountTimeout: 10_000,
@@ -76,6 +78,28 @@ longBreaker.on("halfOpen", () => logger.info("circuit.transfer.halfOpen"));
 longBreaker.on("close", () => logger.info("circuit.transfer.close"));
 
 /**
+ * Separate breaker for optional Usage Report S3 reads.
+ *
+ * Report buckets are an insights-only data source. Keeping them on their own
+ * breaker prevents a report endpoint incident or oversized CSV read from
+ * opening the native control-plane breaker used by bucket/key/Object Lock tools.
+ */
+const reportBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
+  timeout: CIRCUIT_TIMEOUT_MS,
+  errorThresholdPercentage: 50,
+  resetTimeout: 30_000,
+  rollingCountTimeout: 10_000,
+  rollingCountBuckets: 10,
+  volumeThreshold: 10,
+  errorFilter: isClientError,
+  name: "b2-report-s3",
+});
+
+reportBreaker.on("open", () => logger.warn("circuit.reportS3.open"));
+reportBreaker.on("halfOpen", () => logger.info("circuit.reportS3.halfOpen"));
+reportBreaker.on("close", () => logger.info("circuit.reportS3.close"));
+
+/**
  * Run `fn` through the circuit breaker. When the breaker is open, this
  * throws an `EOPENBREAKER` error immediately without invoking `fn`.
  */
@@ -91,5 +115,13 @@ export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return longBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
 }
 
+/**
+ * Run Usage Report S3 calls through their own breaker.
+ */
+export async function withReportCircuit<T>(fn: () => Promise<T>): Promise<T> {
+  return reportBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+}
+
 export const circuitBreaker = breaker;
 export const transferCircuitBreaker = longBreaker;
+export const reportCircuitBreaker = reportBreaker;

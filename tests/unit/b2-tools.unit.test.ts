@@ -9,6 +9,13 @@ import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../../src/auth";
 import type { McpServer } from "../../src/mcp";
+import {
+  authorizeResponse,
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "./sdk-test-helpers";
 
 async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
   const tool = getRegisteredTools(server)?.[name];
@@ -141,6 +148,84 @@ describe("SDK 401 re-auth-and-retry", () => {
     expect(result.files[0].name).toBe("large.bin");
   });
 
+  it("syncs cached auth after raw 401 recovery so the next raw call uses the fresh token", async () => {
+    invalidateAuthManagerCache();
+    let authorizeCalls = 0;
+    const listFileAuthHeaders: string[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCalls++;
+        return new StaticHttpResponse(200, {
+          ...authorizeResponse(["listBuckets", "listFiles"]),
+          authorizationToken: authorizeCalls === 1 ? "expired-token" : "fresh-token",
+        });
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, {
+          buckets: [
+            {
+              accountId: "test-account-123",
+              bucketId: "bucket-1",
+              bucketName: "raw-cache-bucket",
+              bucketType: "allPrivate",
+              bucketInfo: {},
+              corsRules: [],
+              lifecycleRules: [],
+              revision: 1,
+              options: [],
+            },
+          ],
+        });
+      }
+      if (endpoint === "b2_list_file_names") {
+        const authHeader = String(request.headers?.Authorization ?? "");
+        listFileAuthHeaders.push(authHeader);
+        if (authHeader === "expired-token") {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "expired_auth_token",
+            message: "expired",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          files: [
+            {
+              accountId: "test-account-123",
+              bucketId: "bucket-1",
+              fileId: "file-1",
+              fileName: "fresh.bin",
+              action: "upload",
+              contentLength: 1,
+              contentSha1: "none",
+              contentType: "b2/x-auto",
+              fileInfo: {},
+              uploadTimestamp: Date.parse("2021-01-01T00:00:00.000Z"),
+            },
+          ],
+          nextFileName: null,
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    for (let i = 0; i < 2; i++) {
+      const result = parseResult(
+        await callTool(server, "b2_largest_files", {
+          bucket: "raw-cache-bucket",
+          limit: 1,
+          max_scan: 1000,
+        }),
+      );
+      expect(result.files[0].name).toBe("fresh.bin");
+    }
+
+    expect(authorizeCalls).toBe(2);
+    expect(listFileAuthHeaders).toEqual(["expired-token", "fresh-token", "fresh-token"]);
+  });
+
   it("surfaces repeated auth failures as a structured tool error", async () => {
     sim.injectFailure({
       on: "b2_list_buckets",
@@ -166,6 +251,50 @@ describe("b2_list_buckets", () => {
 
     expect(result.buckets).toHaveLength(1);
     expect(result.buckets[0].bucketName).toBe("private-bucket");
+  });
+
+  it("honors the all bucketTypes wildcard instead of narrowing it away", async () => {
+    invalidateAuthManagerCache();
+    const bucketTypesByRequest: unknown[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        const body = typeof request.body === "string" ? JSON.parse(request.body) : {};
+        bucketTypesByRequest.push(body.bucketTypes);
+        return new StaticHttpResponse(200, {
+          buckets: [
+            {
+              accountId: "test-account-123",
+              bucketId: "bucket-snapshot",
+              bucketName: "snapshot-bucket",
+              bucketType: "snapshot",
+              bucketInfo: {},
+              corsRules: [],
+              lifecycleRules: [],
+              revision: 1,
+              options: [],
+            },
+          ],
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const allOnly = parseResult(
+      await callTool(server, "b2_list_buckets", { bucketTypes: ["all"] }),
+    );
+    const mixed = parseResult(
+      await callTool(server, "b2_list_buckets", { bucketTypes: ["allPublic", "all"] }),
+    );
+
+    expect(allOnly.buckets[0].bucketType).toBe("snapshot");
+    expect(mixed.buckets[0].bucketType).toBe("snapshot");
+    expect(bucketTypesByRequest).toEqual([["all"], ["all"]]);
   });
 
   it("caps to the requested limit and reports truncation", async () => {

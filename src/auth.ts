@@ -13,8 +13,8 @@ import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 import { currentMcpRequestSignal } from "./request-context.js";
 
-/** Timeout for ordinary SDK JSON requests, including authorization. */
-const API_TIMEOUT_MS = 30_000;
+/** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
+const API_TIMEOUT_MS = 10_000;
 
 export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   maxRetries: 3,
@@ -22,6 +22,10 @@ export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   maxRetryDelayMs: 4000,
   requestTimeoutMs: API_TIMEOUT_MS,
 };
+
+export const SDK_MAX_RETRY_BUDGET_MS =
+  API_TIMEOUT_MS * ((SDK_RETRY_OPTIONS.maxRetries ?? 0) + 1) +
+  (SDK_RETRY_OPTIONS.maxRetries ?? 0) * (SDK_RETRY_OPTIONS.maxRetryDelayMs ?? 0);
 
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
@@ -46,21 +50,27 @@ function lockUrlGuard(client: ManagedSdkClient, auth: AuthorizeAccountResponse):
   client.urlGuard?.setAllowedSuffixes(deriveAllowedSuffixes(auth.apiInfo.storageApi));
 }
 
+function injectMcpSignalBeforeSdkRetry(client: SdkB2Client): void {
+  // The SDK owns the RetryTransport. Wrap its already-built raw transport so
+  // MCP cancellation is visible before retry sleeps/backoff begin.
+  const raw = client.raw as unknown as { transport: HttpTransport };
+  raw.transport = new RequestSignalTransport(raw.transport);
+}
+
 function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
   const urlGuard = new UrlGuard();
-  const transport = new RequestSignalTransport(
-    new FetchTransport({
+  const client = new SdkB2Client({
+    applicationKeyId: config.applicationKeyId,
+    applicationKey: config.applicationKey,
+    transport: new FetchTransport({
       userAgent: buildUserAgent(config),
       urlGuard,
     }),
-  );
+    retry: SDK_RETRY_OPTIONS,
+  });
+  injectMcpSignalBeforeSdkRetry(client);
   return {
-    client: new SdkB2Client({
-      applicationKeyId: config.applicationKeyId,
-      applicationKey: config.applicationKey,
-      transport,
-      retry: SDK_RETRY_OPTIONS,
-    }),
+    client,
     urlGuard,
   };
 }
@@ -115,6 +125,7 @@ export class B2AuthManager {
    * callers share a single in-flight SDK authorize call.
    */
   async getAuth(): Promise<B2AuthResponse> {
+    this.syncCachedAuthFromSdk();
     if (this.isValid()) {
       return this.cachedAuth!;
     }
@@ -130,14 +141,24 @@ export class B2AuthManager {
     return this.inflightAuth;
   }
 
-  async getSdkClient(): Promise<SdkB2Client> {
-    await this.getAuth();
-    return this.sdk.client;
-  }
-
   async getAuthorizedSdk(): Promise<{ client: SdkB2Client; auth: B2AuthResponse }> {
     const auth = await this.getAuth();
     return { client: this.sdk.client, auth };
+  }
+
+  syncCachedAuthFromSdk(): void {
+    const data = this.sdk.client.accountInfo.getAuth();
+    if (!data) return;
+    const flattened = flattenAuth(data);
+    if (
+      this.cachedAuth?.authorizationToken === flattened.authorizationToken &&
+      this.cachedAuth.apiUrl === flattened.apiUrl
+    ) {
+      return;
+    }
+    lockUrlGuard(this.sdk, data);
+    this.cachedAuth = flattened;
+    this.authTime = Date.now();
   }
 
   /**
