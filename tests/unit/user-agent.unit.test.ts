@@ -13,10 +13,10 @@ describe("buildUserAgent", () => {
     expect(ua).toMatch(/^backblaze-b2-mcp\/\d+\.\d+\.\d+ \(http\)/);
   });
 
-  it("preserves the underlying stack (axios + Node)", () => {
+  it("does not rebuild the SDK transport stack identity", () => {
     const ua = buildUserAgent(cfg());
-    expect(ua).toContain("axios/");
-    expect(ua).toContain(`Node.js/${process.versions.node}`);
+    expect(ua).not.toContain("axios/");
+    expect(ua).not.toContain(`Node.js/${process.versions.node}`);
   });
 
   it("defaults transport to stdio when unset", () => {

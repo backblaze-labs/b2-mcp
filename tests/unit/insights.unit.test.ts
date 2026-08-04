@@ -261,49 +261,47 @@ describe("insights — computeEgressLeaders", () => {
   });
 });
 
-// ── Snapshot listing/selection (fake S3 — proves the perf-critical path) ──────
+// ── Snapshot listing/selection (fake report client — proves the perf-critical path) ──────
 import { latestSnapshotDate, loadDayRows } from "../../src/b2/insights.js";
 
-// Minimal S3 stand-in: returns ListObjectsV2 pages by Prefix/StartAfter and a
-// GetObject body. Lets us verify date selection and per-day loading without a network.
-function fakeS3(objectsByDay: Record<string, string[]>, csvByKey: Record<string, string> = {}) {
+function fakeReportClient(
+  objectsByDay: Record<string, string[]>,
+  csvByKey: Record<string, string> = {},
+) {
   const allKeys = Object.entries(objectsByDay).flatMap(([d, names]) =>
     names.map((n) => `${d}/${n}`),
   );
   return {
-    send: async (cmd: any) => {
-      const input = cmd.input ?? {};
-      if (
-        "Key" in input &&
-        !("Prefix" in input) &&
-        !("StartAfter" in input) &&
-        !("ContinuationToken" in input)
-      ) {
-        return { Body: { transformToString: async () => csvByKey[input.Key] ?? "" } };
-      }
+    listReportObjectKeys: async (
+      _bucketName: string,
+      input: { prefix?: string; startAfter?: string; maxKeys?: number },
+    ) => {
       let keys = allKeys.slice().sort();
-      if (input.Prefix) keys = keys.filter((k) => k.startsWith(input.Prefix));
-      if (input.StartAfter) keys = keys.filter((k) => k > input.StartAfter);
-      if (input.MaxKeys) keys = keys.slice(0, input.MaxKeys);
-      return { Contents: keys.map((Key) => ({ Key })), IsTruncated: false };
+      const prefix = input.prefix;
+      const startAfter = input.startAfter;
+      if (prefix) keys = keys.filter((k) => k.startsWith(prefix));
+      if (startAfter) keys = keys.filter((k) => k > startAfter);
+      if (input.maxKeys) keys = keys.slice(0, input.maxKeys);
+      return { keys, isTruncated: false };
     },
+    downloadReportObjectText: async (_bucketName: string, key: string) => csvByKey[key] ?? "",
   } as any;
 }
 
-describe("insights — snapshot selection (fake S3)", () => {
+describe("insights — snapshot selection (fake report client)", () => {
   it("latestSnapshotDate returns the most recent day present", async () => {
-    const s3 = fakeS3({
+    const b2Client = fakeReportClient({
       "2026-06-20": ["usage.account-a.us-west.csv"],
       "2026-06-27": ["usage.account-a.us-west.csv"],
     });
     const today = new Date(Date.UTC(2026, 5, 28));
-    expect((await latestSnapshotDate(s3, "b2-reports-x", today)).date).toBe("2026-06-27");
+    expect((await latestSnapshotDate(b2Client, "b2-reports-x", today)).date).toBe("2026-06-27");
   });
 
   it("loadDayRows loads only the requested day and sums its region files", async () => {
     const csv = "account_id,date,stored_gb\n" + "a,2026-05-28,60\n";
     const csv2 = "account_id,date,stored_gb\n" + "a,2026-05-28,40\n";
-    const s3 = fakeS3(
+    const b2Client = fakeReportClient(
       {
         "2026-05-28": ["usage.account-a.us-west.csv", "usage.account-a.eu-central.csv"],
         "2026-06-27": ["usage.account-a.us-west.csv"], // must NOT be loaded
@@ -313,7 +311,7 @@ describe("insights — snapshot selection (fake S3)", () => {
         "2026-05-28/usage.account-a.eu-central.csv": csv2,
       },
     );
-    const rows = await loadDayRows(s3, "b2-reports-x", "2026-05-28");
+    const rows = await loadDayRows(b2Client, "b2-reports-x", "2026-05-28");
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r._date === "2026-05-28")).toBe(true);
     // two region rows for account a → 60 + 40 GB stored

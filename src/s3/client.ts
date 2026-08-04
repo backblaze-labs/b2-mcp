@@ -5,6 +5,8 @@ import {
   type ServiceInputTypes,
   type ServiceOutputTypes,
 } from "@aws-sdk/client-s3";
+import { InMemoryAccountInfo, type AuthorizeAccountResponse } from "@backblaze-labs/b2-sdk";
+import { createS3ClientConfig } from "@backblaze-labs/b2-sdk/s3";
 import type { Command, HttpHandlerOptions } from "@smithy/types";
 import { B2Config } from "../utils/types.js";
 import { VERSION } from "../version.js";
@@ -57,20 +59,48 @@ class RequestAbortS3Client extends S3Client {
   }
 }
 
+function accountInfoForS3Config(config: B2Config): InMemoryAccountInfo {
+  const accountInfo = new InMemoryAccountInfo();
+  accountInfo.setAuth({
+    accountId: "s3-client-config-account",
+    authorizationToken: "s3-client-config-token",
+    apiInfo: {
+      storageApi: {
+        apiUrl: "https://api.backblazeb2.com",
+        downloadUrl: "https://f000.backblazeb2.com",
+        s3ApiUrl: `https://s3.${config.region}.backblazeb2.com`,
+        recommendedPartSize: 100 * 1024 * 1024,
+        absoluteMinimumPartSize: 5 * 1024 * 1024,
+        bucketId: null,
+        bucketName: null,
+        infoType: "storageApi",
+        namePrefix: null,
+        allowed: {
+          capabilities: [],
+          buckets: null,
+          bucketId: null,
+          bucketName: null,
+          namePrefix: null,
+        },
+      },
+    },
+    applicationKeyExpirationTimestamp: null,
+  } as unknown as AuthorizeAccountResponse);
+  return accountInfo;
+}
+
 /**
- * Create an AWS SDK S3Client configured to point at the B2 S3-compatible endpoint.
+ * Create an AWS SDK S3Client configured through the B2 SDK S3 helper.
  */
 export function createS3Client(config: B2Config): S3Client {
-  const endpoint = `https://s3.${config.region}.backblazeb2.com`;
-
-  const s3Config: S3ClientConfig = {
-    endpoint,
+  const sdkS3Config = createS3ClientConfig({
+    accountInfo: accountInfoForS3Config(config),
+    applicationKeyId: config.appKeyId,
+    applicationKey: config.appKey,
     region: config.region,
-    credentials: {
-      accessKeyId: config.appKeyId,
-      secretAccessKey: config.appKey,
-    },
-    forcePathStyle: true, // Required for B2 S3-compatible API
+  });
+  const s3Config: S3ClientConfig = {
+    ...sdkS3Config,
     // Attribute S3 traffic to the MCP in B2's server-side logs (appended to the
     // SDK User-Agent). The SDK signs requests, so this is the safe way to tag
     // them — never inject raw headers. No credentials/PII, only product+transport.

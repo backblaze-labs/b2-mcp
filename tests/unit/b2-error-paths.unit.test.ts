@@ -1,32 +1,19 @@
 /**
- * Covers the error (catch) paths across B2-native tool handlers by making the
- * underlying client.call reject with a client (4xx) error — 4xx so the circuit
- * breaker isn't tripped mid-loop.
+ * Covers the error (catch) paths across B2-native tool handlers with SDK
+ * transport responses that classify to typed B2 errors.
  */
 
-import axios from "axios";
-import { createServer, getRegisteredTools } from "../../src/server";
+import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { setB2SdkClientFactoryForTests } from "../../src/auth";
 import type { McpServer } from "../../src/mcp";
 import { B2Config } from "../../src/utils/types";
-
-jest.mock("axios");
-const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
-  get: jest.MockedFunction<typeof axios.get>;
-};
-
-const mockAuthData = {
-  accountId: "acct",
-  authorizationToken: "tok",
-  apiInfo: {
-    storageApi: {
-      apiUrl: "https://api.example",
-      downloadUrl: "https://dl.example",
-      s3ApiUrl: "https://s3.example",
-      recommendedPartSize: 1e8,
-      absoluteMinimumPartSize: 5e6,
-    },
-  },
-};
+import {
+  authorizeResponse,
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "./sdk-test-helpers";
 
 const config: B2Config = {
   applicationKeyId: "k",
@@ -49,50 +36,49 @@ async function callTool(server: McpServer, name: string, args: Record<string, un
 let server: McpServer;
 
 beforeEach(() => {
-  jest.clearAllMocks();
-  mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-  // Every client.call (callable axios) rejects with a 4xx.
-  mockedAxios.mockRejectedValue({
-    response: { status: 400, data: { code: "bad_request", message: "bad" } },
-  } as never);
+  invalidateAuthManagerCache();
+  installSdkTransport(
+    new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      return new StaticHttpResponse(
+        400,
+        { status: 400, code: "bad_request", message: "bad" },
+        { "X-Bz-Request-Id": "req-native-error" },
+      );
+    }),
+  );
   server = createServer(config);
+});
+
+afterEach(() => {
+  setB2SdkClientFactoryForTests(null);
+  invalidateAuthManagerCache();
 });
 
 describe("B2 tool error paths (catch blocks)", () => {
   const args = {
-    keyName: "k",
-    capabilities: ["listFiles"],
     applicationKeyId: "a",
     bucketId: "b",
     bucketName: "bk",
     bucketType: "allPrivate",
-    fileNamePrefix: "",
-    validDurationInSeconds: 3600,
+    eventNotificationRules: [
+      {
+        name: "r",
+        eventTypes: ["b2:ObjectCreated:*"],
+        isEnabled: true,
+        targetConfiguration: { targetType: "webhook", url: "https://example.com/hook" },
+      },
+    ],
     fileId: "f",
     fileName: "n",
-    contentType: "b2/x-auto",
-    content: Buffer.from("x").toString("base64"),
-    sourceFileId: "src",
-    largeFileId: "lf",
-    partNumber: 1,
-    partSha1Array: ["a"],
     legalHold: "on",
     fileRetention: { mode: "governance", retainUntilTimestamp: 1 },
-    adminAccountId: "a",
-    groupId: "g",
-    memberEmail: "x@example.com",
-    memberAccountId: "m",
-    email: "x@example.com",
-    term: 7,
-    storage: 1,
-    accountId: "a",
-    computerId: "c",
-    confirm: true, // satisfy the destructive-op gate so the API error path is exercised
+    confirm: true,
   };
 
-  // B2-native tools that go through client.call (excludes auth, downloads, and
-  // URL-builders, which don't hit the rejecting call path).
-  const tools = [
+  const nativeTools = [
     "b2_list_buckets",
     "b2_create_bucket",
     "b2_delete_bucket",
@@ -103,13 +89,26 @@ describe("B2 tool error paths (catch blocks)", () => {
     "b2_delete_key",
     "b2_update_file_legal_hold",
     "b2_update_file_retention",
-    "b2_list_groups",
-    "b2_eject_group_member",
-    "b2_list_group_members",
   ];
 
-  it.each(tools)("%s returns a structured error", async (tool) => {
+  it.each(nativeTools)("%s returns a structured SDK error", async (tool) => {
     const result = await callTool(server, tool, args);
     expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("bad_request");
+    expect(result.content[0].text).toContain("req-native-error");
   });
+
+  it.each(["b2_list_groups", "b2_eject_group_member", "b2_list_group_members"])(
+    "%s returns an explicit SDK-gap error",
+    async (tool) => {
+      const result = await callTool(server, tool, {
+        adminAccountId: "a",
+        groupId: "g",
+        memberAccountId: "m",
+        confirm: true,
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("tool_unavailable");
+    },
+  );
 });

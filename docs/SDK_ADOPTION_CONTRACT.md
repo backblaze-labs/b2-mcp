@@ -6,10 +6,10 @@ Reviewed SDK: `@backblaze-labs/b2-sdk@0.2.0` from npm, verified 2026-07-30
 Target MCP revision: `2026-07-28`
 
 This record supersedes the implementation allowance in
-[#55](https://github.com/backblaze-labs/b2-mcp/issues/55) that treated direct
-Axios B2 calls and direct AWS SDK S3 calls as acceptable Phase 1 architecture.
-The official Backblaze TypeScript SDK is the required B2 integration boundary
-for Phase 1 migration and for the public MCP tool contract freeze.
+[#55](https://github.com/backblaze-labs/b2-mcp/issues/55) that treated direct B2
+HTTP calls and direct AWS SDK S3 calls as acceptable Phase 1 architecture. The
+official Backblaze TypeScript SDK is the required B2 integration boundary for
+Phase 1 migration and for the public MCP tool contract freeze.
 
 ## Binding Decision
 
@@ -22,10 +22,9 @@ for Phase 1 migration and for the public MCP tool contract freeze.
   `@backblaze-labs/b2-sdk`, then documented `@backblaze-labs/b2-sdk/raw`, then
   documented `@backblaze-labs/b2-sdk/s3`, then composition of public SDK
   operations.
-- Direct Axios and direct AWS SDK usage in the current tree is inherited
-  implementation only. New B2 behavior must not expand those adapters. Any
-  retained direct AWS peer usage must be justified by S3-material semantics and
-  anchored through the SDK's documented `/s3` helper path.
+- Direct B2 HTTP transports are not allowed in runtime code. Any retained direct
+  AWS peer usage must be justified by S3-material semantics and anchored through
+  the SDK's documented `/s3` helper path.
 - Missing SDK capabilities must be tracked upstream and must land in a stable
   SDK release before the MCP release can claim that capability as an SDK-backed
   contract.
@@ -81,18 +80,15 @@ contract. The contract freeze must apply this rule:
 These are the current runtime call sites that must be migrated, wrapped by the
 official SDK, or explicitly justified as S3-material compatibility paths.
 
-| Source                    | Runtime import                                        | Current purpose                                                              | Contract disposition                                                                                                                                             |
-| ------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/auth.ts`             | `axios`                                               | `b2_authorize_account` v4 and token cache                                    | Replace with SDK `B2Client.authorize` or `RawClient.authorizeAccount`; keep output redaction of `authorizationToken`.                                            |
-| `src/b2/client.ts`        | `axios`                                               | Generic native REST wrapper with retry, circuit breaker, and one 401 re-auth | Replace with SDK facade/raw operations and SDK error classes; any circuit-breaker behavior must wrap SDK calls without bypassing SDK retry policy.               |
-| `src/utils/user-agent.ts` | `axios`                                               | Includes Axios version in the native User-Agent string                       | Replace with SDK `userAgent` option; no future contract may depend on Axios version text.                                                                        |
-| `src/s3/client.ts`        | `@aws-sdk/client-s3`                                  | Creates a B2 S3-compatible `S3Client`                                        | Replace endpoint and credential derivation with `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; direct AWS client remains only as documented SDK peer usage. |
-| `src/s3/buckets.ts`       | `@aws-sdk/client-s3`                                  | `HeadBucket`, `PutBucketLifecycleConfiguration`                              | Covered by S3-only helper issue #154; retain only for reachability and `AbortIncompleteMultipartUpload` semantics.                                               |
-| `src/s3/objects.ts`       | `@aws-sdk/client-s3`                                  | Put/Get/Delete/Head/Copy/List object commands                                | Prefer native SDK composition where semantics match; retain direct S3 peer only for a reviewed S3-material delta.                                                |
-| `src/s3/multipart.ts`     | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 multipart start, part presign, finish, abort, list, upload-part-copy      | Covered by SDK helper issue #154; retain as the decided S3-material multipart compatibility path; `s3_presign_upload_part` remains release-blocking until #154.  |
-| `src/s3/presigned.ts`     | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 GET/PUT presigned object URLs                                             | Replace GET/PUT URL signing with `presignS3GetObjectUrl` and `presignS3PutObjectUrl` from `/s3`; returned URLs remain bearer credentials.                        |
-| `src/s3/extras.ts`        | `@aws-sdk/client-s3`                                  | `GetBucketLocation` region probe                                             | Covered by SDK helper issue #154; retain only as S3 endpoint/region verification.                                                                                |
-| `src/b2/insights.ts`      | `@aws-sdk/client-s3`                                  | Usage Report CSV reads and live object/multipart listings                    | Prefer SDK native listing/download composition; use `/s3` helper only where report-bucket or multipart behavior remains S3-material.                             |
+| Source                | Runtime import                                        | Current purpose                                                         | Contract disposition                                                                                                                                            |
+| --------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/b2/client.ts`    | `@aws-sdk/client-s3`                                  | Usage Report CSV object reads through SDK `/s3` configuration           | Retain only for report-bucket reads anchored by `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; native/control-plane calls must use the B2 SDK facade/raw.  |
+| `src/s3/client.ts`    | `@aws-sdk/client-s3`                                  | Creates a B2 S3-compatible `S3Client` through SDK `/s3` configuration   | Endpoint and credential derivation come from `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; direct AWS client remains only as documented SDK peer usage.   |
+| `src/s3/buckets.ts`   | `@aws-sdk/client-s3`                                  | `HeadBucket`, `PutBucketLifecycleConfiguration`                         | Covered by S3-only helper issue #154; retain only for reachability and `AbortIncompleteMultipartUpload` semantics.                                              |
+| `src/s3/objects.ts`   | `@aws-sdk/client-s3`                                  | Put/Get/Delete/Head/Copy/List object commands                           | Prefer native SDK composition where semantics match; retain direct S3 peer only for a reviewed S3-material delta.                                               |
+| `src/s3/multipart.ts` | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 multipart start, part presign, finish, abort, list, upload-part-copy | Covered by SDK helper issue #154; retain as the decided S3-material multipart compatibility path; `s3_presign_upload_part` remains release-blocking until #154. |
+| `src/s3/presigned.ts` | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 GET/PUT presigned object URLs                                        | Replace GET/PUT URL signing with `presignS3GetObjectUrl` and `presignS3PutObjectUrl` from `/s3`; returned URLs remain bearer credentials.                       |
+| `src/s3/extras.ts`    | `@aws-sdk/client-s3`                                  | `GetBucketLocation` region probe                                        | Covered by SDK helper issue #154; retain only as S3 endpoint/region verification.                                                                               |
 
 Package note: `@aws-sdk/s3-presigned-post` is intentionally absent because there
 is no runtime source import or approved MCP tool row for S3 POST Object form
@@ -135,7 +131,7 @@ Each retained row has exactly one reviewed implementation class:
 
 | Tool                               | Class     | Reviewed SDK path                                                                                                 | v0.1 disposition and semantic contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ---------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `b2_authorize_account`             | `facade`  | `B2Client.authorize` or `RawClient.authorizeAccount`                                                              | Keep as a credential verification tool. IO changes from Axios response to SDK auth response; continue stripping `authorizationToken`. Cap: none beyond valid credentials. Pagination: none. Abort: SDK facade has no per-call signal in 0.2.0, use raw only if signal support becomes required. Retry/idempotency: read-like authorize with SDK retry. Secret: application key stays in config and token is redacted. Error: SDK auth errors to MCP `toolError`.                                                                            |
+| `b2_authorize_account`             | `facade`  | `B2Client.authorize` or `RawClient.authorizeAccount`                                                              | Keep as a credential verification tool. IO uses the SDK auth response and continues stripping `authorizationToken`. Cap: none beyond valid credentials. Pagination: none. Abort: SDK facade has no per-call signal in 0.2.0, use raw only if signal support becomes required. Retry/idempotency: read-like authorize with SDK retry. Secret: application key stays in config and token is redacted. Error: SDK auth errors to MCP `toolError`.                                                                                              |
 | `b2_list_buckets`                  | `facade`  | `B2Client.listBuckets`                                                                                            | Preserve filters and MCP `limit` cap because B2 returns all buckets. Cap: `listBuckets`. Pagination: no upstream cursor; output truncation remains explicit. Abort: no facade signal in 0.2.0. Retry/idempotency: read with SDK retry. Secret: none. Error: SDK B2 errors to MCP shape.                                                                                                                                                                                                                                                     |
 | `b2_create_bucket`                 | `facade`  | `B2Client.createBucket`                                                                                           | Preserve input schema, including SSE-B2 defaulting and Object Lock flag. Cap: `writeBuckets`. Pagination: none. Abort: no facade signal in 0.2.0. Retry/idempotency: create requires idempotency review because lost success can leave an existing bucket. Secret: none. Error: duplicate-name and validation errors must map to structured MCP errors.                                                                                                                                                                                     |
 | `b2_delete_bucket`                 | `facade`  | `B2Client.deleteBucket`                                                                                           | Preserve destructive confirmation and empty-bucket precondition. Cap: `deleteBuckets`. Pagination: none. Abort: no facade signal in 0.2.0. Retry/idempotency: natural idempotency only when target bucket ID is verified and already absent is reported as complete. Secret: none. Error: SDK not-found/conflict errors to MCP shape.                                                                                                                                                                                                       |
@@ -182,5 +178,5 @@ Each retained row has exactly one reviewed implementation class:
 names, descriptions, schemas, capability maps, response fixtures, or profile
 hashes until this matrix and the SDK implementation issues it creates are
 complete. The frozen contract must identify the resolved
-`@backblaze-labs/b2-sdk` version and must fail if inherited Axios/AWS behavior
+`@backblaze-labs/b2-sdk` version and must fail if direct B2 HTTP/AWS behavior
 silently reappears outside the reviewed SDK boundary.

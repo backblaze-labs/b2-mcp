@@ -45,7 +45,7 @@ export function registerObjectLockTools(
       try {
         const gate = checkDestructive("b2_update_file_legal_hold", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const result = await client.call("b2_update_file_legal_hold", {
+        const result = await client.updateFileLegalHold({
           fileId: args.fileId,
           fileName: args.fileName,
           legalHold: args.legalHold,
@@ -108,7 +108,7 @@ export function registerObjectLockTools(
         };
         if (args.bypassGovernance) payload.bypassGovernance = true;
 
-        const result = await client.call("b2_update_file_retention", payload);
+        const result = await client.updateFileRetention(payload as never);
         return toolJson(result);
       } catch (err) {
         return toolError(err);

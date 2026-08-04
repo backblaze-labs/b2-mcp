@@ -19,7 +19,7 @@ export interface B2ApiError {
   extendedRequestId?: string;
 }
 
-/** Pull a request id out of axios response headers (B2 native / S3 proxy variants). */
+/** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */
 function headerRequestId(headers: unknown): string | undefined {
   if (typeof headers !== "object" || headers === null) return undefined;
   const h = headers as Record<string, unknown>;
@@ -51,9 +51,10 @@ function numberOrFallback(value: unknown, fallback: number): number {
  * Parse an error from a B2 API call and return a structured error object.
  *
  * Handles both error shapes used in this codebase:
- *   - B2 native (axios): `err.response.status` + `err.response.data.{code,message}`
+ *   - B2 SDK typed/native errors: `err.status` + `err.code` + `err.requestId`
  *   - S3 / AWS SDK v3:   `err.$metadata.httpStatusCode` + `err.name`/`err.Code`,
  *     with the trace id in `err.$metadata.requestId`.
+ *   - Legacy HTTP-client response errors retained for compatibility in tests.
  *
  * Reading the AWS SDK shape is what lets us tell a genuine Backblaze 5xx apart
  * from a 4xx (e.g. NoSuchKey) and surface the requestId support needs.
@@ -61,6 +62,16 @@ function numberOrFallback(value: unknown, fallback: number): number {
 export function parseB2Error(err: unknown): B2ApiError {
   if (typeof err === "object" && err !== null) {
     const e = err as Record<string, unknown>;
+
+    // Official B2 SDK typed errors.
+    if (typeof e.status === "number" && typeof e.code === "string") {
+      return {
+        status: e.status,
+        code: e.code,
+        message: messageOrFallback(e.message, "An unknown error occurred"),
+        requestId: typeof e.requestId === "string" ? e.requestId : undefined,
+      };
+    }
 
     // AWS SDK v3 error (S3 tools) — has a $metadata object.
     if (e.$metadata && typeof e.$metadata === "object") {
@@ -80,7 +91,7 @@ export function parseB2Error(err: unknown): B2ApiError {
       };
     }
 
-    // Axios-style error with a response body (B2 native API).
+    // Legacy response-style error with a response body.
     if (e.response && typeof e.response === "object") {
       const resp = e.response as Record<string, unknown>;
       const data =
@@ -92,9 +103,14 @@ export function parseB2Error(err: unknown): B2ApiError {
         requestId: headerRequestId(resp.headers),
       };
     }
-    // Already a parsed B2 error
+    // Already a parsed B2 error.
     if (typeof e.code === "string" && typeof e.message === "string") {
-      return { status: (e.status as number) ?? 500, code: e.code, message: e.message };
+      return {
+        status: (e.status as number) ?? 500,
+        code: e.code,
+        message: e.message,
+        requestId: typeof e.requestId === "string" ? e.requestId : undefined,
+      };
     }
     if (e.message) {
       return {

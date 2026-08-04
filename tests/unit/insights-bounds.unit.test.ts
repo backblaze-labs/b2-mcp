@@ -1,50 +1,24 @@
 /**
  * Unit tests for the large-bucket safety bounds on the live insight tools.
  *
- * b2_largest_files and b2_unfinished_uploads walk a bucket via the S3 client; on
- * very large / bloated buckets that walk must stop at a scan cap or a wall-clock
- * budget rather than hang. These tests drive a mocked S3 client through those
- * bound conditions.
- *
- * Mocks:
- *   - axios (module)            → auth (axios.get) + resolveBucketName's
- *                                 b2Client.call("b2_list_buckets")
- *   - S3Client.prototype.send   → the ListObjectsV2 / ListMultipartUploads /
- *                                 ListParts pages the handlers paginate
+ * b2_largest_files and b2_unfinished_uploads walk a bucket through native SDK
+ * list endpoints; those walks must stop at scan caps or wall-clock budgets.
  *
  * NOTE: callTool invokes handlers directly, so the MCP SDK's zod .default() is
  * not applied here — we pass limit / max_scan / max_uploads explicitly.
  */
 
-import axios from "axios";
-import {
-  S3Client,
-  ListObjectsV2Command,
-  ListMultipartUploadsCommand,
-  ListPartsCommand,
-} from "@aws-sdk/client-s3";
-import { createServer, getRegisteredTools } from "../../src/server";
+import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { setB2SdkClientFactoryForTests } from "../../src/auth";
 import type { McpServer } from "../../src/mcp";
-
-jest.mock("axios");
-
-const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
-  get: jest.MockedFunction<typeof axios.get>;
-};
-
-const mockAuthData = {
-  accountId: "test-account-123",
-  authorizationToken: "mock-token-xyz",
-  apiInfo: {
-    storageApi: {
-      apiUrl: "https://api005.backblazeb2.com",
-      downloadUrl: "https://f005.backblazeb2.com",
-      s3ApiUrl: "https://s3.us-west-004.backblazeb2.com",
-      recommendedPartSize: 100 * 1024 * 1024,
-      absoluteMinimumPartSize: 5 * 1024 * 1024,
-    },
-  },
-};
+import {
+  authorizeResponse,
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  requestJson,
+  StaticHttpResponse,
+} from "./sdk-test-helpers";
 
 const testConfig = {
   applicationKeyId: "test-key-id",
@@ -75,60 +49,97 @@ function parseResult(result: any) {
   }
 }
 
+const bucketInfo = {
+  accountId: "test-account-123",
+  bucketId: "bucket-1",
+  bucketName: "test-bucket",
+  bucketType: "allPrivate",
+  bucketInfo: {},
+  corsRules: [],
+  lifecycleRules: [],
+  revision: 1,
+  options: [],
+};
+
 let server: McpServer;
-let sendSpy: jest.SpyInstance;
 
 beforeEach(() => {
-  // Auth + bucket resolution: resolveBucketName resolves "test-bucket" by name.
-  mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
-  mockedAxios.mockResolvedValue({
-    data: { buckets: [{ bucketName: "test-bucket", bucketId: "bucket-1" }] },
-  } as any);
-  sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
-  server = createServer(testConfig);
+  invalidateAuthManagerCache();
 });
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => {
+  jest.restoreAllMocks();
+  setB2SdkClientFactoryForTests(null);
+  invalidateAuthManagerCache();
+});
 
-/** Route the mocked S3 send to queued pages by command type. */
-function queueS3(opts: {
-  objectPages?: any[];
+function queueB2(opts: {
+  fileNamePages?: any[];
   uploadPages?: any[];
-  partsByKey?: Record<string, any[]>;
+  partsByFileId?: Record<string, any[]>;
 }) {
-  const objQ = [...(opts.objectPages ?? [])];
-  const upQ = [...(opts.uploadPages ?? [])];
-  const parts = opts.partsByKey ?? {};
-  sendSpy.mockImplementation(async (command: any) => {
-    if (command instanceof ListObjectsV2Command)
-      return objQ.shift() ?? { Contents: [], IsTruncated: false };
-    if (command instanceof ListMultipartUploadsCommand)
-      return upQ.shift() ?? { Uploads: [], IsTruncated: false };
-    if (command instanceof ListPartsCommand)
-      return { Parts: parts[command.input?.Key as string] ?? [], IsTruncated: false };
-    return {};
-  });
+  const fileNamePages = [...(opts.fileNamePages ?? [])];
+  const uploadPages = [...(opts.uploadPages ?? [])];
+  const partsByFileId = opts.partsByFileId ?? {};
+
+  installSdkTransport(
+    new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets", "listFiles"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, { buckets: [bucketInfo] });
+      }
+      if (endpoint === "b2_list_file_names") {
+        return new StaticHttpResponse(
+          200,
+          fileNamePages.shift() ?? { files: [], nextFileName: null },
+        );
+      }
+      if (endpoint === "b2_list_unfinished_large_files") {
+        return new StaticHttpResponse(200, uploadPages.shift() ?? { files: [], nextFileId: null });
+      }
+      if (endpoint === "b2_list_parts") {
+        const fileId = String(requestJson(request).fileId);
+        return new StaticHttpResponse(200, {
+          parts: partsByFileId[fileId] ?? [],
+          nextPartNumber: null,
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    }),
+  );
+  server = createServer(testConfig);
 }
 
-const obj = (Key: string, Size: number) => ({ Key, Size, LastModified: new Date("2021-01-01") });
+const file = (fileName: string, contentLength: number) => ({
+  accountId: "test-account-123",
+  bucketId: "bucket-1",
+  fileId: `id-${fileName}`,
+  fileName,
+  action: "upload",
+  contentLength,
+  contentSha1: "none",
+  contentType: "b2/x-auto",
+  fileInfo: {},
+  uploadTimestamp: Date.parse("2021-01-01T00:00:00.000Z"),
+});
 
 // ── b2_largest_files ──────────────────────────────────────────────────────────
 
 describe("b2_largest_files — scan bound", () => {
   it("stops at max_scan, reports truncated, and ranks the largest seen", async () => {
-    queueS3({
-      objectPages: [
+    queueB2({
+      fileNamePages: [
         {
-          Contents: [obj("a", 10), obj("b", 20), obj("c", 30)],
-          IsTruncated: true,
-          NextContinuationToken: "t1",
+          files: [file("a", 10), file("b", 20), file("c", 30)],
+          nextFileName: "d",
         },
         {
-          Contents: [obj("d", 5), obj("e", 40), obj("f", 15)],
-          IsTruncated: true,
-          NextContinuationToken: "t2",
+          files: [file("d", 5), file("e", 40), file("f", 15)],
+          nextFileName: "g",
         },
-        // further pages exist (IsTruncated stays true) but the cap fires first
       ],
     });
 
@@ -137,15 +148,15 @@ describe("b2_largest_files — scan bound", () => {
     );
 
     expect(result.truncated).toBe(true);
-    expect(result.scanned).toBe(6); // stopped after the 2nd page (6 ≥ 5) with a token still pending
+    expect(result.scanned).toBe(6);
     expect(result.returned).toBe(3);
     expect(result.files.map((f: any) => f.size_bytes)).toEqual([40, 30, 20]);
     expect(result.note).toContain("max_scan");
   });
 
   it("returns a complete (non-truncated) result when the listing ends within the cap", async () => {
-    queueS3({
-      objectPages: [{ Contents: [obj("a", 10), obj("b", 20)], IsTruncated: false }],
+    queueB2({
+      fileNamePages: [{ files: [file("a", 10), file("b", 20)], nextFileName: null }],
     });
 
     const result = parseResult(
@@ -156,7 +167,7 @@ describe("b2_largest_files — scan bound", () => {
       }),
     );
 
-    expect(result.truncated).toBe(false); // largest_files always emits the flag
+    expect(result.truncated).toBe(false);
     expect(result.scanned).toBe(2);
     expect(result.returned).toBe(2);
     expect(result.files[0].size_bytes).toBe(20);
@@ -166,23 +177,36 @@ describe("b2_largest_files — scan bound", () => {
 // ── b2_unfinished_uploads ───────────────────────────────────────────────────--
 
 describe("b2_unfinished_uploads — upload bound", () => {
-  const up = (Key: string, UploadId: string, isoDate: string) => ({
-    Key,
-    UploadId,
-    Initiated: new Date(isoDate),
+  const upload = (fileName: string, fileId: string, isoDate: string) => ({
+    accountId: "test-account-123",
+    bucketId: "bucket-1",
+    contentType: "b2/x-auto",
+    fileId,
+    fileInfo: {},
+    fileName,
+    uploadTimestamp: Date.parse(isoDate),
+  });
+
+  const part = (fileId: string, contentLength: number, partNumber = 1) => ({
+    fileId,
+    partNumber,
+    contentLength,
+    contentSha1: "none",
+    uploadTimestamp: Date.parse("2021-01-01T00:00:00.000Z"),
   });
 
   it("stops at max_uploads, reports truncated, and still finds the oldest + wasted bytes", async () => {
-    queueS3({
+    queueB2({
       uploadPages: [
         {
-          Uploads: [up("u1", "1", "2020-02-01"), up("u2", "2", "2020-01-01")],
-          IsTruncated: true,
-          NextKeyMarker: "k",
-          NextUploadIdMarker: "i",
+          files: [
+            upload("u1", "1", "2020-02-01T00:00:00.000Z"),
+            upload("u2", "2", "2020-01-01T00:00:00.000Z"),
+          ],
+          nextFileId: "next",
         },
       ],
-      partsByKey: { u1: [{ Size: 1e9 }], u2: [{ Size: 2e9 }] },
+      partsByFileId: { "1": [part("1", 1e9)], "2": [part("2", 2e9)] },
     });
 
     const result = parseResult(
@@ -192,38 +216,51 @@ describe("b2_unfinished_uploads — upload bound", () => {
     expect(result.truncated).toBe(true);
     expect(result.unfinished_count).toBe(2);
     expect(result.oldest_file).toBe("u2");
-    expect(result.wasted_gb).toBe(3); // (1 + 2) GB
+    expect(result.wasted_gb).toBe(3);
     expect(result.note).toContain("max_uploads");
   });
 
   it("reports wasted_gb as a lower bound when the parts-summing budget is hit", async () => {
-    // Walk completes (no markers); the per-upload parts fan-out trips the budget.
-    queueS3({
-      uploadPages: [
-        { Uploads: [up("u1", "1", "2020-02-01"), up("u2", "2", "2020-01-01")], IsTruncated: false },
-      ],
-      partsByKey: { u1: [{ Size: 1e9 }], u2: [{ Size: 2e9 }] },
-    });
-
-    // Clock: 0 through auth/walk/u1, then jump past the 12s budget so overBudget()
-    // trips right after u1's parts are summed (u2 is then skipped for sizing).
     let clock = 0;
     jest.spyOn(Date, "now").mockImplementation(() => clock);
-    const realImpl = sendSpy.getMockImplementation()!;
-    sendSpy.mockImplementation(async (command: any) => {
-      const out = await realImpl(command);
-      if (command instanceof ListPartsCommand && command.input?.Key === "u1") clock = 999_999;
-      return out;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets", "listFiles"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, { buckets: [bucketInfo] });
+      }
+      if (endpoint === "b2_list_unfinished_large_files") {
+        return new StaticHttpResponse(200, {
+          files: [
+            upload("u1", "1", "2020-02-01T00:00:00.000Z"),
+            upload("u2", "2", "2020-01-01T00:00:00.000Z"),
+          ],
+          nextFileId: null,
+        });
+      }
+      if (endpoint === "b2_list_parts") {
+        const fileId = String(requestJson(request).fileId);
+        if (fileId === "1") clock = 999_999;
+        return new StaticHttpResponse(200, {
+          parts: fileId === "1" ? [part("1", 1e9)] : [part("2", 2e9)],
+          nextPartNumber: null,
+        });
+      }
+      return new StaticHttpResponse(200, {});
     });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
 
     const result = parseResult(
       await callTool(server, "b2_unfinished_uploads", { bucket: "test-bucket", max_uploads: 1000 }),
     );
 
-    expect(result.truncated).toBe(false); // the walk itself completed
+    expect(result.truncated).toBe(false);
     expect(result.wasted_is_lower_bound).toBe(true);
     expect(result.sized_uploads).toBe(1);
-    expect(result.wasted_gb).toBe(1); // only u1 (1 GB) summed before the budget
-    expect(result.oldest_file).toBe("u2"); // oldest still found via the cheap list
+    expect(result.wasted_gb).toBe(1);
+    expect(result.oldest_file).toBe("u2");
   });
 });

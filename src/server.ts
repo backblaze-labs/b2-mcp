@@ -8,7 +8,6 @@ import {
 export { getRegisteredTools } from "./mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
-import { buildUserAgent } from "./utils/user-agent.js";
 import { isSanitizedMcpResponse, parseErrorText, toolError } from "./utils/errors.js";
 import {
   DEFAULT_MCP_OUTPUT_FORMAT,
@@ -176,7 +175,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // key; when no distinct master key is configured they fall back to the same
   // application-key client, so a single non-master key needs no extra wiring.
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
-  const b2Client = new B2Client(auth, buildUserAgent(config));
+  const b2Client = new B2Client(auth);
   const s3Client = createS3Client(config);
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
@@ -191,12 +190,10 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
         masterConfig,
       )
     : auth;
-  const masterClient = masterIsDistinct
-    ? new B2Client(masterAuth, buildUserAgent(config))
-    : b2Client;
+  const masterClient = masterIsDistinct ? new B2Client(masterAuth) : b2Client;
 
   // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
-  registerBucketTools(registrar, b2Client, auth, config);
+  registerBucketTools(registrar, b2Client, config);
   registerKeyTools(registrar, b2Client, auth, config);
   registerObjectLockTools(registrar, b2Client, config);
 
@@ -219,7 +216,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────
   // Phase 1 reads the daily usage-report CSVs (native bucket lookup + S3 get);
   // Phase 2 is live per-bucket S3 listing.
-  registerInsightTools(registrar, b2Client, s3Client, auth);
+  registerInsightTools(registrar, b2Client, auth);
 
   // Rolling deploy compatibility: clients can cache an older tools/list that
   // included durable-secret-producing tools. Keep those names callable, but
@@ -360,11 +357,17 @@ function capabilityFailureDetails(
   message: string;
 } {
   const anyErr = err as {
+    status?: unknown;
     code?: unknown;
+    requestId?: unknown;
     response?: { status?: unknown; headers?: Record<string, unknown> };
   };
   const upstreamStatus =
-    typeof anyErr.response?.status === "number" ? anyErr.response.status : undefined;
+    typeof anyErr.status === "number"
+      ? anyErr.status
+      : typeof anyErr.response?.status === "number"
+        ? anyErr.response.status
+        : undefined;
   const sanitizerOptions = sanitizerOptionsFromConfig(config);
   const upstreamCode =
     typeof anyErr.code === "string"
@@ -374,9 +377,10 @@ function capabilityFailureDetails(
     anyErr.response?.headers?.["x-bz-request-id"] ??
     anyErr.response?.headers?.["x-b2-request-id"] ??
     anyErr.response?.headers?.["x-amz-request-id"];
+  const rawRequestId = typeof anyErr.requestId === "string" ? anyErr.requestId : requestIdHeader;
   const requestId =
-    typeof requestIdHeader === "string"
-      ? sanitizeProviderRequestId(requestIdHeader, sanitizerOptions)
+    typeof rawRequestId === "string"
+      ? sanitizeProviderRequestId(rawRequestId, sanitizerOptions)
       : undefined;
   const authFailure = upstreamStatus === 401 || upstreamStatus === 403;
   const retryable =

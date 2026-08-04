@@ -1,13 +1,17 @@
-/**
- * Unit tests for B2AuthManager.
- * Uses jest.spyOn to mock axios at the module level, avoiding
- * nock's circular-reference issues on Node.js v22.
- */
-
-import axios from "axios";
-import { B2AuthManager } from "../../src/auth";
+import { B2Client as SdkB2Client } from "@backblaze-labs/b2-sdk";
+import {
+  B2AuthManager,
+  RequestSignalTransport,
+  setB2SdkClientFactoryForTests,
+} from "../../src/auth";
 import { B2Config } from "../../src/utils/types";
 import { runWithMcpRequestSignal } from "../../src/request-context";
+import {
+  authorizeResponse,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "./sdk-test-helpers";
 
 const mockConfig: B2Config = {
   applicationKeyId: "test-key-id",
@@ -21,42 +25,40 @@ const mockConfig: B2Config = {
   fileRoot: null,
 };
 
-// v4 b2_authorize_account response shape (apiInfo.storageApi) — auth manager flattens this internally
-const mockAuthResponse = {
-  accountId: "test-account-id",
-  authorizationToken: "test-auth-token",
-  apiInfo: {
-    storageApi: {
-      apiUrl: "https://api005.backblazeb2.com",
-      downloadUrl: "https://f005.backblazeb2.com",
-      s3ApiUrl: "https://s3.us-west-004.backblazeb2.com",
-      recommendedPartSize: 100 * 1024 * 1024,
-      absoluteMinimumPartSize: 5 * 1024 * 1024,
-    },
-  },
-};
+function installAuthorizeTransport(
+  handler: (call: number) => unknown = () => authorizeResponse(["listBuckets"]),
+) {
+  let calls = 0;
+  const transport = new RecordingTransport(async () => {
+    calls++;
+    const result = handler(calls);
+    if (result instanceof Error) throw result;
+    return new StaticHttpResponse(200, result);
+  });
+  installSdkTransport(transport);
+  return transport;
+}
 
 describe("B2AuthManager", () => {
-  let getSpy: jest.SpyInstance;
-
-  beforeEach(() => {
-    getSpy = jest.spyOn(axios, "get").mockResolvedValue({ data: mockAuthResponse });
-  });
-
   afterEach(() => {
+    setB2SdkClientFactoryForTests(null);
     jest.restoreAllMocks();
   });
 
-  it("should authorize on first getAuth() call", async () => {
+  it("authorizes on first getAuth() call through the SDK", async () => {
+    const transport = installAuthorizeTransport();
     const manager = new B2AuthManager(mockConfig);
     const auth = await manager.getAuth();
 
-    expect(auth.accountId).toBe("test-account-id");
+    expect(auth.accountId).toBe("test-account-123");
     expect(auth.apiUrl).toBe("https://api005.backblazeb2.com");
-    expect(getSpy).toHaveBeenCalledTimes(1);
+    expect(transport.requests).toHaveLength(1);
+    expect(transport.requests[0].url).toContain("b2_authorize_account");
+    expect(transport.requests[0].headers?.Authorization).toMatch(/^Basic /);
   });
 
-  it("should cache the token and not re-authorize on subsequent calls", async () => {
+  it("caches the token and does not re-authorize on subsequent calls", async () => {
+    const transport = installAuthorizeTransport();
     const manager = new B2AuthManager(mockConfig);
 
     const auth1 = await manager.getAuth();
@@ -65,32 +67,38 @@ describe("B2AuthManager", () => {
 
     expect(auth1.authorizationToken).toBe(auth2.authorizationToken);
     expect(auth2.authorizationToken).toBe(auth3.authorizationToken);
-    expect(getSpy).toHaveBeenCalledTimes(1); // Only one HTTP call
+    expect(transport.requests).toHaveLength(1);
   });
 
-  it("should re-authorize after invalidate()", async () => {
-    getSpy
-      .mockResolvedValueOnce({ data: mockAuthResponse })
-      .mockResolvedValueOnce({ data: { ...mockAuthResponse, authorizationToken: "new-token" } });
+  it("re-authorizes after invalidate()", async () => {
+    const transport = installAuthorizeTransport((call) =>
+      call === 1
+        ? authorizeResponse(["listBuckets"])
+        : { ...authorizeResponse(["listBuckets"]), authorizationToken: "new-token" },
+    );
 
     const manager = new B2AuthManager(mockConfig);
     const auth1 = await manager.getAuth();
-    expect(auth1.authorizationToken).toBe("test-auth-token");
+    expect(auth1.authorizationToken).toBe("mock-token-xyz");
 
     manager.invalidate();
     const auth2 = await manager.getAuth();
     expect(auth2.authorizationToken).toBe("new-token");
-    expect(getSpy).toHaveBeenCalledTimes(2);
+    expect(transport.requests).toHaveLength(2);
   });
 
-  it("should throw on authorization failure", async () => {
-    getSpy.mockRejectedValue(new Error("Unauthorized"));
+  it("throws on authorization failure", async () => {
+    const transport = new RecordingTransport(() => {
+      throw new Error("Unauthorized");
+    });
+    installSdkTransport(transport);
 
     const manager = new B2AuthManager(mockConfig);
     await expect(manager.getAuth()).rejects.toThrow("Unauthorized");
   });
 
-  it("should handle concurrent getAuth() calls with a single HTTP request", async () => {
+  it("handles concurrent getAuth() calls with a single SDK authorize request", async () => {
+    const transport = installAuthorizeTransport();
     const manager = new B2AuthManager(mockConfig);
 
     const [auth1, auth2, auth3] = await Promise.all([
@@ -99,28 +107,40 @@ describe("B2AuthManager", () => {
       manager.getAuth(),
     ]);
 
-    expect(getSpy).toHaveBeenCalledTimes(1); // In-flight dedup
+    expect(transport.requests).toHaveLength(1);
     expect(auth1.authorizationToken).toBe(auth2.authorizationToken);
     expect(auth2.authorizationToken).toBe(auth3.authorizationToken);
   });
 
   it("passes the current MCP request abort signal to authorize_account", async () => {
+    const inner = installAuthorizeTransport();
+    setB2SdkClientFactoryForTests((config) => ({
+      client: new SdkB2Client({
+        applicationKeyId: config.applicationKeyId,
+        applicationKey: config.applicationKey,
+        transport: new RequestSignalTransport(inner),
+        retry: {
+          maxRetries: 0,
+          initialRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          requestTimeoutMs: 30_000,
+        },
+      }),
+    }));
     const manager = new B2AuthManager(mockConfig);
     const abort = new AbortController();
 
     await runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
 
-    expect(getSpy).toHaveBeenCalledWith(
-      expect.stringContaining("b2_authorize_account"),
-      expect.objectContaining({ signal: abort.signal }),
-    );
+    expect(inner.requests[0].signal).toBe(abort.signal);
   });
 
-  it("should not expose auth token in forceRefresh result (handled by tool layer)", async () => {
+  it("forceRefresh returns full auth data for the tool layer to redact", async () => {
+    installAuthorizeTransport();
     const manager = new B2AuthManager(mockConfig);
     const auth = await manager.forceRefresh();
-    // forceRefresh returns the full auth data — the tool layer is responsible for redacting the token
-    expect(auth.accountId).toBe("test-account-id");
+
+    expect(auth.accountId).toBe("test-account-123");
     expect(auth.authorizationToken).toBeDefined();
   });
 });

@@ -3,25 +3,24 @@
  * stdout wiring happens, and exercises startStdio() end-to-end.
  */
 
-import axios from "axios";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { invalidateCapabilityCache } from "../../src/server";
+import { setB2SdkClientFactoryForTests } from "../../src/auth";
+import { installSdkTransport, RecordingTransport, StaticHttpResponse } from "./sdk-test-helpers";
 
-jest.mock("axios");
 jest.mock("@modelcontextprotocol/server/stdio", () => ({
   serveStdio: jest.fn(),
 }));
 
 import { startStdio } from "../../src/index";
 
-const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
-  get: jest.MockedFunction<typeof axios.get>;
-};
-
 describe("startStdio", () => {
   const saved = { ...process.env };
 
   afterEach(() => {
     process.env = { ...saved };
+    setB2SdkClientFactoryForTests(null);
+    invalidateCapabilityCache();
     jest.clearAllMocks();
   });
 
@@ -38,7 +37,16 @@ describe("startStdio", () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
     delete process.env.B2_REGISTER_ALL_TOOLS;
-    mockedAxios.get.mockRejectedValue(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }));
+    installSdkTransport(
+      new RecordingTransport(
+        () =>
+          new StaticHttpResponse(500, {
+            status: 500,
+            code: "internal_error",
+            message: "timeout",
+          }),
+      ),
+    );
 
     await expect(startStdio()).resolves.toBeUndefined();
     expect(serveStdio).toHaveBeenCalledTimes(1);
@@ -48,8 +56,15 @@ describe("startStdio", () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
     delete process.env.B2_REGISTER_ALL_TOOLS;
-    mockedAxios.get.mockRejectedValue(
-      Object.assign(new Error("denied"), { response: { status: 401 } }),
+    installSdkTransport(
+      new RecordingTransport(
+        () =>
+          new StaticHttpResponse(401, {
+            status: 401,
+            code: "unauthorized",
+            message: "denied",
+          }),
+      ),
     );
 
     await expect(startStdio()).rejects.toMatchObject({ code: "capability_auth_failed" });

@@ -8,9 +8,13 @@ import { logger } from "./logger.js";
  */
 export function isClientError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
-  const e = err as { response?: { status?: number }; $metadata?: { httpStatusCode?: number } };
-  // B2 native (axios) status, or AWS SDK v3 (S3) status from $metadata.
-  const status = e.response?.status ?? e.$metadata?.httpStatusCode;
+  const e = err as {
+    status?: number;
+    response?: { status?: number };
+    $metadata?: { httpStatusCode?: number };
+  };
+  // Official B2 SDK status, legacy response status, or AWS SDK v3 S3 status.
+  const status = e.status ?? e.response?.status ?? e.$metadata?.httpStatusCode;
   if (typeof status !== "number") return false;
   // 408 (timeout) and 429 (rate limit) DO count as B2 trouble.
   if (status === 408 || status === 429) return false;
@@ -54,7 +58,7 @@ breaker.on("close", () => logger.info("circuit.close"));
  * per-call timeout DISABLED. A 100 MB part on a slow uplink legitimately takes
  * far longer than the default 60s; timing it out would abort a healthy upload,
  * surface a non-retryable error, and unfairly push the breaker toward open.
- * Transfer health is governed by axios timeouts and the retry layer instead.
+ * Transfer health is governed by SDK/request timeouts and the retry layer instead.
  */
 const longBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
   timeout: false,

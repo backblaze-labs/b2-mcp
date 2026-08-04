@@ -90,16 +90,17 @@ Node.js lines are not part of the `v0.1.0` support contract.
 The official Backblaze TypeScript SDK is the required B2 integration boundary
 for Phase 1. The reviewed adoption and parity matrix lives in
 [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) and supersedes the prior
-implementation allowance from #55 that accepted direct Axios B2 calls and direct
+implementation allowance from #55 that accepted direct B2 HTTP calls and direct
 AWS SDK S3 calls as the default architecture.
 
-Direct Axios calls to the B2 Native API and direct AWS SDK calls to B2's
-S3-compatible endpoint are inherited implementation details only. New B2
-behavior must use the public high-level `@backblaze-labs/b2-sdk` facade,
-documented `@backblaze-labs/b2-sdk/raw`, documented
-`@backblaze-labs/b2-sdk/s3`, or composition of public SDK operations. Missing
-SDK capabilities must be tracked upstream and released in a stable SDK version
-before the MCP release consumes them.
+Direct B2 HTTP calls are not allowed in runtime code. Direct AWS SDK calls to
+B2's S3-compatible endpoint are retained only when anchored through the SDK
+`/s3` helper and justified by S3-material behavior. New B2 behavior must use
+the public high-level `@backblaze-labs/b2-sdk` facade, documented
+`@backblaze-labs/b2-sdk/raw`, documented `@backblaze-labs/b2-sdk/s3`, or
+composition of public SDK operations. Missing SDK capabilities must be tracked
+upstream and released in a stable SDK version before the MCP release consumes
+them.
 
 The product contract is Backblaze B2 through MCP, not S3 as a standalone product
 surface. Existing `s3_*` names remain compatibility names only until #49 freezes
@@ -609,7 +610,7 @@ The tracker issues that should consume this decision include:
 
 - [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) for deterministic
   tool contract fixtures. #49 must freeze the post-SDK-migration surface, not
-  the inherited Axios/AWS implementation.
+  inherited direct B2 HTTP/AWS behavior.
 - [#71](https://github.com/backblaze-labs/b2-mcp/issues/71) for the official
   SDK adoption and MCP tool parity contract.
 - [#57](https://github.com/backblaze-labs/b2-mcp/issues/57) for credential
