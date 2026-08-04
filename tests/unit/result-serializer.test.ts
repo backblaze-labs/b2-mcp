@@ -22,8 +22,8 @@ async function decodeToon(text: string): Promise<JsonCompatible> {
 }
 
 describe("result serializer", () => {
-  it("defaults structured tool-result text to compact JSON and keeps structuredContent", () => {
-    const result = serializeStructuredToolResult({
+  it("defaults structured tool-result text to compact JSON and keeps structuredContent", async () => {
+    const result = await serializeStructuredToolResult({
       buckets: [
         { bucketName: "alpha", bucketType: "allPrivate" },
         { bucketName: "beta", bucketType: "allPublic" },
@@ -43,7 +43,7 @@ describe("result serializer", () => {
   });
 
   it("serializes TOON when opt-in mode is selected", async () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({
         buckets: [
           { bucketName: "alpha", bucketType: "allPrivate" },
@@ -57,8 +57,8 @@ describe("result serializer", () => {
     await expect(decodeToon(result.content[0].text)).resolves.toEqual(result.structuredContent);
   });
 
-  it("serializes compact JSON when compatibility mode is selected", () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "json" }, () =>
+  it("serializes compact JSON when compatibility mode is selected", async () => {
+    const result = await runWithResultSerializationOptions({ outputFormat: "json" }, () =>
       toolJson({ bucketId: "b2", fileCount: 2 }),
     );
 
@@ -67,7 +67,7 @@ describe("result serializer", () => {
   });
 
   it("sanitizes structuredContent before TOON encoding", async () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       runWithSanitizerOptions({ secrets: [CANARY] }, () =>
         toolJson({
           applicationKey: CANARY,
@@ -85,7 +85,7 @@ describe("result serializer", () => {
   });
 
   it("round-trips hostile B2-controlled strings without treating them as syntax", async () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({
         objects: [
           {
@@ -102,7 +102,7 @@ describe("result serializer", () => {
   });
 
   it("round-trips hostile B2-controlled keys without treating them as syntax", async () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({
         meta: {
           "evil,key\n  injected: 1": "v",
@@ -116,7 +116,7 @@ describe("result serializer", () => {
   });
 
   it("normalizes successful structured output through JSON compatibility", async () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({
         createdAt: new Date("2026-08-04T00:00:00.000Z"),
         omitted: undefined,
@@ -131,8 +131,8 @@ describe("result serializer", () => {
     await expect(decodeToon(result.content[0].text)).resolves.toEqual(result.structuredContent);
   });
 
-  it("emits visible text for an empty object in TOON mode", () => {
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+  it("emits visible text for an empty object in TOON mode", async () => {
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({ omitted: undefined }),
     );
 
@@ -147,14 +147,18 @@ describe("result serializer", () => {
       });
       try {
         const serializer = await import("../../src/utils/result-serializer");
-        expect(serializer.serializeStructuredToolResult({ ok: true }).content[0].text).toBe(
-          '{"ok":true}',
-        );
-        expect(
+        await expect(serializer.serializeStructuredToolResult({ ok: true })).resolves.toEqual({
+          content: [{ type: "text", text: '{"ok":true}' }],
+          structuredContent: { ok: true },
+        });
+        await expect(
           serializer.runWithResultSerializationOptions({ outputFormat: "json" }, () =>
             serializer.serializeStructuredToolResult({ ok: true }),
-          ).content[0].text,
-        ).toBe('{"ok":true}');
+          ),
+        ).resolves.toEqual({
+          content: [{ type: "text", text: '{"ok":true}' }],
+          structuredContent: { ok: true },
+        });
       } finally {
         jest.dontMock("@toon-format/toon");
       }

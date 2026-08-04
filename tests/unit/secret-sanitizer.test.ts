@@ -33,8 +33,8 @@ function expectNoCanary(value: unknown): void {
 describe("secret sanitizer canary policy", () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it("redacts sensitive B2/API response fields from MCP JSON content", () => {
-    const result = toolJson({
+  it("redacts sensitive B2/API response fields from MCP JSON content", async () => {
+    const result = await toolJson({
       applicationKeyId: "key-id-is-non-secret",
       applicationKey: CANARY,
       appKey: CANARY,
@@ -76,10 +76,10 @@ describe("secret sanitizer canary policy", () => {
     expect(parsed.nested.nextContinuationToken).toBe("page-3");
   });
 
-  it("does not redact allowed short-lived presigned URL bearer fields", () => {
+  it("does not redact allowed short-lived presigned URL bearer fields", async () => {
     const url =
       "https://example.s3.us-west-004.backblazeb2.com/bucket/object?X-Amz-Signature=abc123";
-    const result = toolJson({ url, operation: "GetObject", expiresIn: 3600 });
+    const result = await toolJson({ url, operation: "GetObject", expiresIn: 3600 });
     const parsed = result.structuredContent as any;
     expect(parsed.url).toBe(url);
   });

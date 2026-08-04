@@ -288,16 +288,16 @@ describe("toolSuccess", () => {
 });
 
 describe("toolJson", () => {
-  it("serializes structured successes as compact JSON text by default", () => {
+  it("serializes structured successes as compact JSON text by default", async () => {
     const data = { bucketId: "abc123", bucketName: "my-bucket" };
-    const result = toolJson(data);
+    const result = await toolJson(data);
     expect(result.structuredContent).toEqual(data);
     expect(result.content[0].text).toBe('{"bucketId":"abc123","bucketName":"my-bucket"}');
   });
 
   it("supports TOON output mode", async () => {
     const data = { bucketId: "abc123", bucketName: "my-bucket" };
-    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+    const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson(data),
     );
     expect(result.content[0].text).toContain("bucketId: abc123");

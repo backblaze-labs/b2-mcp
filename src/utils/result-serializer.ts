@@ -4,12 +4,17 @@ import type { decode as decodeType, encode as encodeType } from "@toon-format/to
 import { sanitizeForMcpOutput, type SanitizerOptions } from "./secret-sanitizer.js";
 
 const nodeRequire = createRequire(__filename);
+
 interface ToonModule {
   encode: typeof encodeType;
   decode: typeof decodeType;
 }
 
-let toonModule: ToonModule | null = null;
+type ToonDynamicImport = (specifier: string) => Promise<ToonModule>;
+
+const importToonModule = new Function("specifier", "return import(specifier)") as ToonDynamicImport;
+
+let toonModulePromise: Promise<ToonModule> | null = null;
 
 export const TOON_PACKAGE_VERSION = "4.1.0";
 export const TOON_SPEC_VERSION = "4.1";
@@ -67,21 +72,24 @@ export function outputFormatInstructions(format: McpOutputFormat): string {
   ].join(" ");
 }
 
-export function serializeStructuredToolResult(
+export async function serializeStructuredToolResult(
   data: unknown,
   sanitizerOptions: SanitizerOptions = {},
   format: McpOutputFormat = currentMcpOutputFormat(),
-): StructuredToolResult {
+): Promise<StructuredToolResult> {
   const structuredContent = sanitizeJsonCompatible(data, sanitizerOptions);
   return {
-    content: [{ type: "text", text: serializeStructuredText(structuredContent, format) }],
+    content: [{ type: "text", text: await serializeStructuredText(structuredContent, format) }],
     structuredContent,
   };
 }
 
-function serializeStructuredText(value: JsonCompatible, format: McpOutputFormat): string {
+async function serializeStructuredText(
+  value: JsonCompatible,
+  format: McpOutputFormat,
+): Promise<string> {
   if (format === "json") return JSON.stringify(value);
-  const text = loadToonModule().encode(value);
+  const text = (await loadToonModule()).encode(value);
   return text === "" && isEmptyObject(value) ? "{}" : text;
 }
 
@@ -100,11 +108,30 @@ function isEmptyObject(value: JsonCompatible): value is { [key: string]: JsonCom
     : false;
 }
 
-function loadToonModule(): ToonModule {
-  if (toonModule) return toonModule;
-  // @toon-format/toon 4.1.0 is ESM-only while this project still emits and
-  // tests CommonJS, so static importing would compile to an incompatible
-  // require(). Keep the runtime load lazy so JSON mode never executes it.
-  toonModule = nodeRequire("@toon-format/toon") as ToonModule;
-  return toonModule;
+async function loadToonModule(): Promise<ToonModule> {
+  if (toonModulePromise) return toonModulePromise;
+  // TypeScript rewrites import("@toon-format/toon") to require() for this
+  // CommonJS build. Use an indirect import expression so production dist/ loads
+  // the package through Node's ESM loader while JSON mode keeps it untouched.
+  try {
+    toonModulePromise = importToonModule("@toon-format/toon").catch((err: unknown) =>
+      recoverFromJestVmDynamicImportError(err),
+    );
+  } catch (err) {
+    toonModulePromise = recoverFromJestVmDynamicImportError(err);
+  }
+  return toonModulePromise;
+}
+
+function recoverFromJestVmDynamicImportError(err: unknown): Promise<ToonModule> {
+  if (isJestVmDynamicImportError(err)) {
+    return Promise.resolve(nodeRequire("@toon-format/toon") as ToonModule);
+  }
+  toonModulePromise = null;
+  throw err;
+}
+
+function isJestVmDynamicImportError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return process.env.NODE_ENV === "test" && message.includes("--experimental-vm-modules");
 }

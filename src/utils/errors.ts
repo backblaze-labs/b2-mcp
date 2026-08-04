@@ -198,6 +198,8 @@ export function toolSuccess(text: string): { content: Array<{ type: "text"; text
 /**
  * Return a successful tool response with a JSON object.
  */
-export function toolJson(data: unknown): StructuredToolResult {
-  return markSanitizedMcpResponse(serializeStructuredToolResult(data, currentSanitizerOptions()));
+export async function toolJson(data: unknown): Promise<StructuredToolResult> {
+  return markSanitizedMcpResponse(
+    await serializeStructuredToolResult(data, currentSanitizerOptions()),
+  );
 }
