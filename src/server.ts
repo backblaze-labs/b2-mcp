@@ -347,6 +347,24 @@ function redactedCapabilityMessage(err: unknown, config: B2Config): string {
   return sanitizeText(message, sanitizerOptionsFromConfig(config));
 }
 
+function responseHeader(headers: unknown, names: string[]): unknown {
+  if (typeof headers !== "object" || headers === null) return undefined;
+  const maybeGet = (headers as { get?: unknown }).get;
+  if (typeof maybeGet === "function") {
+    for (const name of names) {
+      const value = maybeGet.call(headers, name);
+      if (value !== null && value !== undefined) return value;
+    }
+  }
+  const entries = Object.entries(headers as Record<string, unknown>);
+  for (const name of names) {
+    const lowerName = name.toLowerCase();
+    const match = entries.find(([key]) => key.toLowerCase() === lowerName);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
 function capabilityFailureDetails(
   err: unknown,
   config: B2Config,
@@ -360,7 +378,7 @@ function capabilityFailureDetails(
     status?: unknown;
     code?: unknown;
     requestId?: unknown;
-    response?: { status?: unknown; headers?: Record<string, unknown> };
+    response?: { status?: unknown; headers?: unknown };
   };
   const upstreamStatus =
     typeof anyErr.status === "number"
@@ -373,10 +391,11 @@ function capabilityFailureDetails(
     typeof anyErr.code === "string"
       ? sanitizeProviderCode(anyErr.code, sanitizerOptions)
       : undefined;
-  const requestIdHeader =
-    anyErr.response?.headers?.["x-bz-request-id"] ??
-    anyErr.response?.headers?.["x-b2-request-id"] ??
-    anyErr.response?.headers?.["x-amz-request-id"];
+  const requestIdHeader = responseHeader(anyErr.response?.headers, [
+    "x-bz-request-id",
+    "x-b2-request-id",
+    "x-amz-request-id",
+  ]);
   const rawRequestId = typeof anyErr.requestId === "string" ? anyErr.requestId : requestIdHeader;
   const requestId =
     typeof rawRequestId === "string"

@@ -186,6 +186,17 @@ describe("fetchCapabilities", () => {
     return transport;
   }
 
+  function installAuthorizeThrow(err: unknown): void {
+    setB2SdkClientFactoryForTests(() => ({
+      client: {
+        accountInfo: { getAuth: () => null, clear: () => undefined },
+        authorize: async () => {
+          throw err;
+        },
+      } as never,
+    }));
+  }
+
   it("returns the key's capabilities from apiInfo.storageApi.allowed", async () => {
     installAuthorizeResponse(["readFiles", "listBuckets"]);
     expect(await fetchCapabilities(baseConfig)).toEqual(["readFiles", "listBuckets"]);
@@ -242,6 +253,32 @@ describe("fetchCapabilities", () => {
         upstreamCode: "[redacted]",
         requestId: "[redacted]",
         message: expect.not.stringContaining(CANARY),
+      }),
+      "capability.fetch.failed",
+    );
+  });
+
+  it("captures capability failure request ids from Headers instances", async () => {
+    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    installAuthorizeThrow({
+      status: 500,
+      code: "internal_error",
+      response: {
+        status: 500,
+        headers: new Headers({ "X-Bz-Request-Id": "req-from-headers" }),
+      },
+    });
+
+    await expect(
+      fetchCapabilities(baseConfig, "credential:capability-headers", "credential:headers"),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "capability_upstream_unavailable",
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-from-headers",
       }),
       "capability.fetch.failed",
     );
