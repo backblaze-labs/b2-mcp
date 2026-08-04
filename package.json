@@ -64,7 +64,7 @@
     "@backblaze-labs/b2-sdk": "0.2.0",
     "@modelcontextprotocol/server": "2.0.0",
     "axios": "^1.19.0",
-    "opossum": "^9.0.0",
+    "opossum": "^10.0.0",
     "pino": "^10.3.1",
     "zod": "4.4.3"
   },
