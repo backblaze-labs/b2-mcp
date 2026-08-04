@@ -30,9 +30,10 @@ individual deterministic layers are:
 | `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
 | `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.     |
 
-CI can call each layer independently. The deploy-gating `test` job runs coverage
-plus slow deterministic lifecycle checks once; `test:package` runs in a separate
-non-blocking package job so npm registry availability cannot stall `ci-green`.
+Local scripts can call each deterministic layer independently. The deploy-gating
+CI `test` job runs the bundled coverage layer plus slow deterministic lifecycle
+checks once; `test:package` runs in a separate non-blocking package job so npm
+registry availability cannot stall `ci-green`.
 The current CI check names are `lint` and `test`. If branch protection is added,
 use those names, not the retired matrix names `test (20)` or `test (22)`.
 
@@ -57,10 +58,10 @@ import `src/`; only the slow/package layers may build or inspect `dist/`.
 ## Test Reports
 
 All npm Jest layer commands run through `scripts/run-jest-layer.mjs`. The runner
-preserves the normal terminal reporter and writes machine-readable summaries.
-Deterministic layers also write JUnit XML. Live layers do not load the
-third-party JUnit reporter because they run with B2 credentials in the
-environment.
+preserves the normal terminal reporter and writes machine-readable summaries
+without raw failure messages. Deterministic layers also write JUnit XML. Live
+layers do not load the third-party JUnit reporter because they run with B2
+credentials in the environment.
 
 - JUnit XML: `reports/junit/<layer>.xml`
 - Jest JSON summary: `reports/jest/<layer>.json`

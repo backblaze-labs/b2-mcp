@@ -8,66 +8,94 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [layer, maybeSeparator, ...rest] = process.argv.slice(2);
 
-if (!layer) {
-  console.error("Usage: node scripts/run-jest-layer.mjs <layer> -- <jest args...>");
-  process.exit(2);
-}
-
 const layerGlobs = {
   unit: "**/tests/unit/**/*.unit.test.ts",
   contract: "**/tests/contract/**/*.contract.test.ts",
-  modernProtocol: "**/tests/protocol/**/*.modern-protocol.test.ts",
-  legacyProtocol: "**/tests/protocol/**/*.legacy-protocol.test.ts",
+  "protocol-modern": "**/tests/protocol/**/*.modern-protocol.test.ts",
+  "protocol-legacy": "**/tests/protocol/**/*.legacy-protocol.test.ts",
   slow: "**/tests/slow/**/*.slow.test.ts",
   package: "**/tests/package/**/*.package.test.ts",
-  integrationLive: "**/tests/live/**/*.integration.live.test.ts",
-  contractLive: "**/tests/live/**/*.contract.live.test.ts",
+  "integration-live": "**/tests/live/**/*.integration.live.test.ts",
+  "contract-live": "**/tests/live/**/*.contract.live.test.ts",
+  "runner-fixture": "tests/contract/run-jest-layer-fixture.contract.test.ts",
 };
 
-const layerDefaults = {
-  unit: ["--testMatch", layerGlobs.unit],
-  contract: ["--testMatch", layerGlobs.contract],
-  "protocol-modern": [
-    "--testMatch",
-    layerGlobs.modernProtocol,
-    "--runInBand",
-    "--testTimeout=30000",
-  ],
-  "protocol-legacy": [
-    "--testMatch",
-    layerGlobs.legacyProtocol,
-    "--runInBand",
-    "--testTimeout=30000",
-  ],
-  slow: ["--testMatch", layerGlobs.slow, "--runInBand", "--testTimeout=120000"],
-  package: ["--testMatch", layerGlobs.package, "--runInBand", "--testTimeout=120000"],
-  "integration-live": [
-    "--testMatch",
-    layerGlobs.integrationLive,
-    "--runInBand",
-    "--testTimeout=120000",
-  ],
-  "contract-live": ["--testMatch", layerGlobs.contractLive, "--runInBand", "--testTimeout=120000"],
-  coverage: [
-    "--coverage",
-    "--coverageReporters=text-summary",
-    "--coverageReporters=json-summary",
-    "--coverageReporters=cobertura",
-    "--coverageDirectory=coverage",
-    "--runInBand",
-    "--testTimeout=30000",
-    "--testMatch",
-    layerGlobs.unit,
-    layerGlobs.contract,
-    layerGlobs.modernProtocol,
-    layerGlobs.legacyProtocol,
-  ],
+const layerRegistry = {
+  unit: { args: ["--testMatch", layerGlobs.unit], live: false },
+  contract: { args: ["--testMatch", layerGlobs.contract], live: false },
+  "protocol-modern": {
+    args: ["--testMatch", layerGlobs["protocol-modern"], "--runInBand", "--testTimeout=30000"],
+    live: false,
+  },
+  "protocol-legacy": {
+    args: ["--testMatch", layerGlobs["protocol-legacy"], "--runInBand", "--testTimeout=30000"],
+    live: false,
+  },
+  slow: {
+    args: ["--testMatch", layerGlobs.slow, "--runInBand", "--testTimeout=120000"],
+    live: false,
+  },
+  package: {
+    args: ["--testMatch", layerGlobs.package, "--runInBand", "--testTimeout=120000"],
+    live: false,
+  },
+  "integration-live": {
+    args: ["--testMatch", layerGlobs["integration-live"], "--runInBand", "--testTimeout=120000"],
+    live: true,
+  },
+  "contract-live": {
+    args: ["--testMatch", layerGlobs["contract-live"], "--runInBand", "--testTimeout=120000"],
+    live: true,
+  },
+  coverage: {
+    args: [
+      "--coverage",
+      "--coverageReporters=text-summary",
+      "--coverageReporters=json-summary",
+      "--coverageReporters=cobertura",
+      "--coverageDirectory=coverage",
+      "--runInBand",
+      "--testTimeout=30000",
+      "--testMatch",
+      layerGlobs.unit,
+      layerGlobs.contract,
+      layerGlobs["protocol-modern"],
+      layerGlobs["protocol-legacy"],
+    ],
+    live: false,
+  },
+  // Fixture-only layers used by tests/contract/test-layering.contract.test.ts.
+  "runner-fixture-nonlive": {
+    args: ["--runTestsByPath", layerGlobs["runner-fixture"], "--runInBand"],
+    live: false,
+  },
+  "runner-fixture-live": {
+    args: ["--runTestsByPath", layerGlobs["runner-fixture"], "--runInBand"],
+    live: true,
+  },
 };
+
+const supportedLayers = Object.keys(layerRegistry).sort();
+
+function printUsage(message) {
+  if (message) console.error(message);
+  console.error("Usage: node scripts/run-jest-layer.mjs <layer> -- <jest args...>");
+  console.error(`Supported layers: ${supportedLayers.join(", ")}`);
+}
+
+if (!layer) {
+  printUsage();
+  process.exit(2);
+}
+
+if (!/^[A-Za-z0-9._-]+$/.test(layer) || !layerRegistry[layer]) {
+  printUsage(`Unknown Jest layer '${layer}'.`);
+  process.exit(2);
+}
 
 const extraJestArgs = maybeSeparator === "--" ? rest : [maybeSeparator, ...rest].filter(Boolean);
-const safeLayer = layer.replace(/[^A-Za-z0-9._-]/g, "-");
-const defaultJestArgs = layerDefaults[safeLayer] ?? [];
-const liveLayer = safeLayer.endsWith("-live");
+const layerConfig = layerRegistry[layer];
+const liveLayer = layerConfig.live;
 const hasB2CredentialEnv = [
   "B2_APPLICATION_KEY",
   "B2_APPLICATION_KEY_ID",
@@ -83,11 +111,12 @@ if (liveLayer && hasB2CredentialEnv && hasCustomReporter) {
   process.exit(2);
 }
 
-const jestArgs = [...defaultJestArgs, ...extraJestArgs];
 const summaryDir = join(root, "reports", "jest");
 const junitDir = join(root, "reports", "junit");
-const summaryPath = join(summaryDir, `${safeLayer}.json`);
+const summaryPath = join(summaryDir, `${layer}.json`);
 const jestBin = join(root, "node_modules", "jest", "bin", "jest.js");
+const summaryReporter = join(root, "scripts", "jest-layer-summary-reporter.cjs");
+const jestArgs = [...layerConfig.args, ...extraJestArgs];
 
 mkdirSync(summaryDir, { recursive: true });
 mkdirSync(junitDir, { recursive: true });
@@ -97,9 +126,8 @@ const result = spawnSync(
   [
     jestBin,
     ...jestArgs,
-    "--json",
-    `--outputFile=${summaryPath}`,
     "--reporters=default",
+    `--reporters=${summaryReporter}`,
     ...(!liveLayer ? ["--reporters=jest-junit"] : []),
   ],
   {
@@ -108,7 +136,8 @@ const result = spawnSync(
       ...process.env,
       NODE_ENV: "test",
       JEST_JUNIT_OUTPUT_DIR: junitDir,
-      JEST_JUNIT_OUTPUT_NAME: `${safeLayer}.xml`,
+      JEST_JUNIT_OUTPUT_NAME: `${layer}.xml`,
+      JEST_LAYER_SUMMARY_PATH: summaryPath,
     },
     stdio: "inherit",
   },

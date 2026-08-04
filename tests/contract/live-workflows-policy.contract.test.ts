@@ -9,12 +9,14 @@ const liveWorkflows = [
     job: "contract",
     environment: "live-b2-contract",
     concurrency: "live-b2-contract-${{ github.repository }}",
+    b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY"],
   },
   {
     path: ".github/workflows/smoke.yml",
     job: "smoke",
     environment: "live-b2-smoke",
     concurrency: "live-b2-smoke-${{ github.repository }}",
+    b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_APP_KEY_ID", "LIVE_B2_APP_KEY"],
   },
 ];
 
@@ -86,18 +88,16 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("contract_key_prefix=c-v");
   });
 
-  it.each(liveWorkflows)("$path uses only environment-scoped B2 secrets", ({ path }) => {
-    const text = workflowText(path);
-    const secretRefs = [...text.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
-    expect(secretRefs.filter((name) => name.includes("B2"))).not.toEqual([]);
-    expect(secretRefs.filter((name) => name.includes("B2"))).toEqual(
-      expect.arrayContaining([
-        "LIVE_B2_KEY_ID",
-        "LIVE_B2_KEY",
-        "LIVE_B2_APP_KEY_ID",
-        "LIVE_B2_APP_KEY",
-      ]),
-    );
-    expect(secretRefs.filter((name) => /^B2_/.test(name))).toEqual([]);
-  });
+  it.each(liveWorkflows)(
+    "$path uses only required environment-scoped B2 secrets",
+    ({ path, b2Secrets }) => {
+      const text = workflowText(path);
+      const secretRefs = [...text.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
+      expect(secretRefs.filter((name) => name.includes("B2"))).not.toEqual([]);
+      expect([...new Set(secretRefs.filter((name) => name.includes("B2")))].sort()).toEqual(
+        b2Secrets.slice().sort(),
+      );
+      expect(secretRefs.filter((name) => /^B2_/.test(name))).toEqual([]);
+    },
+  );
 });

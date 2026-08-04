@@ -1,7 +1,5 @@
 import { execFileSync } from "child_process";
-import { join } from "path";
-
-const root = join(__dirname, "../..");
+import { root } from "../contract/support";
 
 describe("compiled output", () => {
   it("rebuilds dist and exposes the compiled entry points", () => {

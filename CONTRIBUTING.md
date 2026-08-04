@@ -41,9 +41,9 @@ Test files must follow the layer suffix convention documented in
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
-- `npm run verify` must pass before opening a PR. CI also calls each test layer
-  independently, uploads JUnit/Jest JSON/coverage summaries for deterministic
-  layers, and keeps package-install verification off the deploy-gating path.
+- `npm run verify` must pass before opening a PR. CI runs the bundled
+  deterministic coverage layer, the slow deterministic layer, and a separate
+  package-install verification job that stays off the deploy-gating path.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
 - Update `CHANGELOG.md` under the appropriate heading.

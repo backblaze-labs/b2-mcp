@@ -99,12 +99,10 @@ jobs:
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
-          B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
-          B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
         run: |
           set -euo pipefail
           missing=0
-          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY B2_APP_KEY_ID B2_APP_KEY; do
+          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-contract secret for ${name}"
               missing=1
@@ -116,8 +114,6 @@ jobs:
           # Environment-scoped live B2 secrets. Do not use repo-level B2 secrets here.
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
-          B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
-          B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
       - name: Print cleanup context
         if: always()
         run: |

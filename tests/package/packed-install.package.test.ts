@@ -2,8 +2,7 @@ import { execFileSync } from "child_process";
 import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
-
-const root = join(__dirname, "../..");
+import { root } from "../contract/support";
 
 interface PackFile {
   path: string;

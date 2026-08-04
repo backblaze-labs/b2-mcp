@@ -42,15 +42,30 @@ function parseResult(result: any): any {
 }
 const isError = (r: any): boolean => r?.isError === true;
 const errText = (r: any): string => r?.content?.[0]?.text ?? "";
-const isUserWritableBucket = (n: string) =>
-  !n.toLowerCase().includes("snapshot") && !n.toLowerCase().startsWith("b2-");
 
 let server: McpServer;
-let writableBucketId = "";
 
 function failContractPrerequisite(message: string, detail?: unknown): never {
   const suffix = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
   throw new Error(`Live contract prerequisite failed - ${message}${suffix}`);
+}
+
+function contractBucketName(label: string): string {
+  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `mcp-contract-${label}-${suffix}`;
+}
+
+async function createContractBucket(label: string): Promise<any> {
+  const bucketName = contractBucketName(label);
+  console.log(`  Contract bucketName=${bucketName}`);
+  const created = await callTool(server, "b2_create_bucket", {
+    bucketName,
+    bucketType: "allPrivate",
+  });
+  if (isError(created)) {
+    failContractPrerequisite(`could not create ${label} contract bucket`, errText(created));
+  }
+  return parseResult(created);
 }
 
 beforeAll(async () => {
@@ -58,29 +73,19 @@ beforeAll(async () => {
   // Integration tests create AND clean up real resources, so disable the
   // destructive-op gate here (it is unit-tested separately).
   server = createServer({ ...loadConfig(), destructivePolicy: "allow" });
-  const buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
-  if (isError(buckets)) failContractPrerequisite("could not list buckets", errText(buckets));
-  const w = (buckets?.buckets ?? []).find((b: any) => isUserWritableBucket(b.bucketName));
-  if (w) writableBucketId = w.bucketId;
-  if (!writableBucketId) {
-    failContractPrerequisite("no user-writable bucket available for notification contract");
-  }
 });
 
-// ── Object Lock write-shape contract ──────────────────────────────────────────
+// ── Notification rule write-shape contract ────────────────────────────────────
 describe("Contract: notification rules objectNamePrefix", () => {
   liveIt(
     "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
     async () => {
-      console.log(`  Contract notification bucketId=${writableBucketId}`);
-      // Capture existing rules to restore.
-      const before = parseResult(
-        await callTool(server, "b2_get_bucket_notification_rules", { bucketId: writableBucketId }),
-      );
-      const original = before?.eventNotificationRules ?? [];
+      let bucketId = "";
       try {
+        const bucket = await createContractBucket("notify");
+        bucketId = bucket.bucketId;
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
-          bucketId: writableBucketId,
+          bucketId,
           eventNotificationRules: [
             {
               name: "mcp-contract-rule",
@@ -94,15 +99,16 @@ describe("Contract: notification rules objectNamePrefix", () => {
             },
           ],
         });
-        // The account may have Event Notifications disabled ("API not enabled") — that is fine.
-        // The CONTRACT is only that we never see the objectNamePrefix-missing rejection again.
-        expect(errText(res).toLowerCase()).not.toContain("objectnameprefix");
+        if (isError(res)) {
+          const detail = errText(res);
+          if (detail.toLowerCase().includes("api not enabled")) {
+            failContractPrerequisite("Event Notifications API is unavailable", detail);
+          }
+          throw new Error(`notification rules shape contract failed: ${detail}`);
+        }
+        expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
       } finally {
-        // Restore whatever was there before (best-effort).
-        await callTool(server, "b2_set_bucket_notification_rules", {
-          bucketId: writableBucketId,
-          eventNotificationRules: original,
-        });
+        if (bucketId) await callTool(server, "b2_delete_bucket", { bucketId });
       }
     },
     30_000,
@@ -114,19 +120,9 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
   liveIt(
     "enables Object Lock on an existing bucket and sets defaultRetention via b2_update_bucket",
     async () => {
-      const bucketName = `mcp-contract-retrofit-${Date.now().toString(36)}`;
       let bucketId = "";
-      console.log(`  Contract bucketName=${bucketName}`);
       try {
-        const created = parseResult(
-          await callTool(server, "b2_create_bucket", { bucketName, bucketType: "allPrivate" }),
-        );
-        if (isError(created)) {
-          failContractPrerequisite(
-            "could not create Object Lock retrofit bucket",
-            errText(created),
-          );
-        }
+        const created = await createContractBucket("retrofit");
         bucketId = created.bucketId;
         expect(created.fileLockConfiguration?.value?.isFileLockEnabled).toBe(false);
 
@@ -144,8 +140,11 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
           defaultRetention: { mode: "governance", period: { duration: 7, unit: "days" } },
         });
         expect(isError(retained)).toBe(false);
-        const back = parseResult(await callTool(server, "b2_list_buckets", { bucketId })).buckets[0]
-          .fileLockConfiguration?.value?.defaultRetention;
+        const listed = await callTool(server, "b2_list_buckets", { bucketId });
+        if (isError(listed)) {
+          failContractPrerequisite("could not list Object Lock retrofit bucket", errText(listed));
+        }
+        const back = parseResult(listed).buckets[0].fileLockConfiguration?.value?.defaultRetention;
         expect(back?.mode).toBe("governance");
         expect(back?.period).toEqual({ duration: 7, unit: "days" });
       } finally {
@@ -161,26 +160,24 @@ describe("Contract: v4 tool-surface alignment", () => {
   liveIt(
     "SSE-B2 default and lifecycle cancel-unfinished field use B2-accepted shapes",
     async () => {
-      const bucketName = `mcp-contract-pathb-${Date.now().toString(36)}`;
       let bucketId = "";
-      console.log(`  Contract bucketName=${bucketName}`);
       try {
+        const bucketName = contractBucketName("pathb");
+        console.log(`  Contract bucketName=${bucketName}`);
         // (e) SSE-B2 with no algorithm — server must inject algorithm:"AES256"
         //     (regresses to HTTP 400 "Invalid default server-side encryption algorithm" if dropped).
-        const created = parseResult(
-          await callTool(server, "b2_create_bucket", {
-            bucketName,
-            bucketType: "allPrivate",
-            defaultServerSideEncryption: { mode: "SSE-B2" },
-          }),
-        );
-        if (isError(created)) {
+        const createResult = await callTool(server, "b2_create_bucket", {
+          bucketName,
+          bucketType: "allPrivate",
+          defaultServerSideEncryption: { mode: "SSE-B2" },
+        });
+        if (isError(createResult)) {
           failContractPrerequisite(
             "could not create SSE/lifecycle contract bucket",
-            errText(created),
+            errText(createResult),
           );
         }
-        expect(isError(created)).toBe(false);
+        const created = parseResult(createResult);
         bucketId = created.bucketId;
 
         // (c) native lifecycle field daysFromStartingToCancelingUnfinishedLargeFiles.
