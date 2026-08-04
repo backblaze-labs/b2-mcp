@@ -3,6 +3,7 @@ import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { logger } from "./utils/logger.js";
 import { B2Config, DestructivePolicy } from "./utils/types.js";
+import { parseMcpOutputFormat } from "./utils/result-serializer.js";
 
 const DEFAULT_REGION = "us-west-004";
 
@@ -185,10 +186,23 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     allowLocalFiles: options.allowLocalFiles,
     fileRoot: options.fileRoot,
     destructivePolicy: resolveDestructivePolicy(options.transport),
+    outputFormat: resolveOutputFormat(),
     transport: options.transport,
   };
   config.credentialFingerprint = fingerprintConfig(config);
   return config;
+}
+
+function resolveOutputFormat() {
+  try {
+    return parseMcpOutputFormat(process.env.B2_MCP_OUTPUT_FORMAT);
+  } catch (err) {
+    throw new CredentialResolutionError(
+      err instanceof Error ? err.message : "Invalid B2_MCP_OUTPUT_FORMAT",
+      500,
+      "invalid_output_format",
+    );
+  }
 }
 
 function envMaterial(prefix = "B2"): CredentialMaterial {

@@ -7,6 +7,10 @@ import {
   toolJson,
 } from "../../src/utils/errors";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
+import {
+  decodeToonForTests,
+  runWithResultSerializationOptions,
+} from "../../src/utils/result-serializer";
 
 const CANARY = "B2_MCP_CANARY_SECRET_errors_do_not_leak";
 
@@ -281,11 +285,20 @@ describe("toolSuccess", () => {
 });
 
 describe("toolJson", () => {
-  it("should serialize data as pretty JSON", () => {
+  it("serializes structured successes as TOON text by default", () => {
     const data = { bucketId: "abc123", bucketName: "my-bucket" };
     const result = toolJson(data);
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.bucketId).toBe("abc123");
-    expect(parsed.bucketName).toBe("my-bucket");
+    expect(result.structuredContent).toEqual(data);
+    expect(result.content[0].text).toContain("bucketId: abc123");
+    expect(decodeToonForTests(result.content[0].text)).toEqual(data);
+  });
+
+  it("supports compact JSON compatibility mode", () => {
+    const data = { bucketId: "abc123", bucketName: "my-bucket" };
+    const result = runWithResultSerializationOptions({ outputFormat: "json" }, () =>
+      toolJson(data),
+    );
+    expect(result.content[0].text).toBe('{"bucketId":"abc123","bucketName":"my-bucket"}');
+    expect(result.structuredContent).toEqual(data);
   });
 });

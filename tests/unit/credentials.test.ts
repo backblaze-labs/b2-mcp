@@ -22,6 +22,7 @@ beforeEach(() => {
   delete process.env.B2_APP_KEY;
   delete process.env.B2_MASTER_KEY_ID;
   delete process.env.B2_MASTER_KEY;
+  delete process.env.B2_MCP_OUTPUT_FORMAT;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
@@ -39,6 +40,7 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("stdio-id");
     expect(resolved.config.applicationKey).toBe("stdio-secret");
     expect(resolved.config.transport).toBe("stdio");
+    expect(resolved.config.outputFormat).toBe("toon");
     expect(resolved.config.credentialFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("stdio-id");
     expect(resolved.capabilityCacheKey).toMatch(/^credential:[a-f0-9]{16}$/);
@@ -46,6 +48,27 @@ describe("credential providers", () => {
 
   it("fails closed when required stdio credentials are missing", () => {
     expect(() => new StdioEnvCredentialProvider().resolve()).toThrow(CredentialResolutionError);
+  });
+
+  it("honors compact JSON output compatibility mode", () => {
+    process.env.B2_APPLICATION_KEY_ID = "stdio-id";
+    process.env.B2_APPLICATION_KEY = "stdio-secret";
+    process.env.B2_MCP_OUTPUT_FORMAT = "json";
+    const resolved = new StdioEnvCredentialProvider().resolve();
+    expect(resolved.config.outputFormat).toBe("json");
+  });
+
+  it("rejects unknown output formats during config resolution", () => {
+    process.env.B2_APPLICATION_KEY_ID = "stdio-id";
+    process.env.B2_APPLICATION_KEY = "stdio-secret";
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    let caught: unknown;
+    try {
+      new StdioEnvCredentialProvider().resolve();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: "invalid_output_format" });
   });
 
   it("ignores partial optional stdio master credentials and falls back to the app key", () => {

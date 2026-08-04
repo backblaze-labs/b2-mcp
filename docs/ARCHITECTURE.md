@@ -70,6 +70,25 @@ names deterministically, and then calls the public SDK `registerTool()` API. The
 adapter also exposes the test/diagnostic registry; production code never reads
 SDK private tool storage.
 
+Structured successful tool results flow through the repository-owned result
+serializer in `src/utils/result-serializer.ts`. Tool handlers continue to return
+sanitized JSON-compatible values through `toolJson`; the serializer keeps that
+value in MCP `structuredContent` and emits exactly one LLM-facing
+`TextContent.text` representation. `B2_MCP_OUTPUT_FORMAT=toon` is the default
+and uses the official `@toon-format/toon` encoder pinned at `4.1.0` against
+TOON spec `4.1`; `B2_MCP_OUTPUT_FORMAT=json` emits compact JSON for
+compatibility. Protocol envelopes, HTTP `Content-Type`, and MCP
+`structuredContent` remain JSON. The server does not claim TOON negotiation or
+add an MCP extension because `TextContent` has no media-type field.
+
+The serializer runs after tool-specific bounds and the central sanitizer. It
+normalizes through JSON serialization before TOON/JSON text emission, so Dates,
+non-finite numbers, omitted fields, pagination tokens, request IDs, metadata,
+and B2-controlled object names follow the same JSON data model as
+`structuredContent`. Field order is the JavaScript insertion order produced by
+the B2/S3 SDKs and repository payload builders; the TOON encoder preserves that
+order and performs no repository-side key sorting.
+
 ## S3-Compatible Surface
 
 Backblaze B2 through MCP is the product contract. S3-compatible behavior is

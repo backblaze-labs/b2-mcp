@@ -50,12 +50,14 @@
     "@backblaze-labs/b2-sdk": "0.2.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@toon-format/toon": "4.1.0",
     "axios": "^1.18.1",
     "opossum": "^9.0.0",
     "pino": "^10.3.1",
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@babel/plugin-transform-modules-commonjs": "7.29.7",
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/client": "2.0.0",
     "@types/jest": "^29.5.0",
@@ -83,6 +85,20 @@
   "jest": {
     "preset": "ts-jest",
     "testEnvironment": "node",
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest",
+      "^.+\\.mjs$": [
+        "babel-jest",
+        {
+          "plugins": [
+            "@babel/plugin-transform-modules-commonjs"
+          ]
+        }
+      ]
+    },
+    "transformIgnorePatterns": [
+      "/node_modules/(?!@toon-format/toon/)"
+    ],
     "testMatch": [
       "**/tests/**/*.test.ts"
     ],

@@ -45,6 +45,20 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Tool Result Serialization
+
+Credential-free unit tests cover the structured result serializer:
+
+- default TOON text output round-trips with the official
+  `@toon-format/toon@4.1.0` decoder;
+- `B2_MCP_OUTPUT_FORMAT=json` emits compact JSON text while preserving the same
+  `structuredContent`;
+- unknown output formats fail during config resolution;
+- redaction runs before text serialization;
+- delimiters, indentation, quotes, backslashes, tabs, CR/LF, Unicode,
+  formula-like prefixes, and strings resembling TOON headers/comments round-trip
+  through `structuredContent`.
+
 ## Future Credential-Free Contract Gate
 
 These commands are required Phase 1 work, but they must not be added to the

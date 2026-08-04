@@ -9,6 +9,7 @@ export interface ToolRegistrationConfig {
   title?: string;
   description?: string;
   inputSchema?: z.ZodRawShape;
+  outputSchema?: z.ZodType;
   force?: boolean;
 }
 
@@ -16,6 +17,7 @@ export interface RegisteredToolRecord {
   name: string;
   description?: string;
   inputSchema?: z.ZodObject<z.ZodRawShape>;
+  outputSchema?: z.ZodType;
   execute: ToolCallback;
 }
 
@@ -34,6 +36,7 @@ interface PendingTool {
   title?: string;
   description?: string;
   inputSchema: z.ZodObject<z.ZodRawShape>;
+  outputSchema?: z.ZodType;
   callback: ToolCallback;
 }
 
@@ -75,6 +78,7 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
       name,
       description: config.description,
       inputSchema,
+      outputSchema: config.outputSchema,
       execute: callback,
     };
     this.pending.push({
@@ -82,6 +86,7 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
       title: config.title,
       description: config.description,
       inputSchema,
+      outputSchema: config.outputSchema,
       callback,
     });
   }
@@ -89,15 +94,16 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
   commit(): number {
     if (this.committed) return Object.keys(this.records).length;
     this.committed = true;
-    for (const { name, title, description, inputSchema, callback } of [...this.pending].sort(
-      (a, b) => a.name.localeCompare(b.name),
-    )) {
+    for (const { name, title, description, inputSchema, outputSchema, callback } of [
+      ...this.pending,
+    ].sort((a, b) => a.name.localeCompare(b.name))) {
       this.server.registerTool(
         name,
         {
           title,
           description,
           inputSchema,
+          ...(outputSchema && { outputSchema }),
         },
         callback as any,
       );

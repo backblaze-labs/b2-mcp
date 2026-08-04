@@ -10,6 +10,11 @@ import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 import { isSanitizedMcpResponse, parseErrorText, toolError } from "./utils/errors.js";
+import {
+  DEFAULT_MCP_OUTPUT_FORMAT,
+  outputFormatInstructions,
+  runWithResultSerializationOptions,
+} from "./utils/result-serializer.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
@@ -53,7 +58,11 @@ export function loadConfig(): B2Config {
     return new StdioEnvCredentialProvider().resolve().config;
   } catch (err) {
     if (!(err instanceof CredentialResolutionError)) throw err;
-    logger.fatal("config.missing: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required");
+    const message =
+      err.code === "missing_credentials"
+        ? "B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"
+        : err.message;
+    logger.fatal(`config.invalid: ${message}`);
     process.exit(1);
   }
 }
@@ -132,6 +141,9 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
         "   - For Partner API / Groups API operations, verify that a master application key is being used and that the account is enabled for the relevant partner/group feature.",
         "",
         "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.",
+        "",
+        "Tool result text format:",
+        outputFormatInstructions(config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT),
         "",
         "Companion skills (optional, recommended):",
         "These tools are the capability layer. A separate Backblaze B2 Skills pack supplies the procedural knowledge — workload playbooks (backup, disaster recovery, SaaS multi-tenant storage, AI training, AI inference) built on reusable primitives, each encoding B2-accurate best practice and an approval gate for risky actions. Skills are installed in the client, not delivered by this server. If the user is doing B2 work that matches a playbook and no such skill appears to be active, mention that installing the B2 Skills pack will make these workflows safer and more repeatable (Claude Code: ~/.claude/skills/; Claude.ai / Claude Desktop: Settings -> Capabilities -> Skills). Do not block on it — the tools work without the skills.",
@@ -465,9 +477,12 @@ export function createAuditedToolCallback(
       args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
     try {
       const sanitizerOptions = sanitizerOptionsFromConfig(config);
+      const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
       const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
       const rawResult = await runWithMcpRequestSignal(signal, () =>
-        runWithSanitizerOptions(sanitizerOptions, () => original(args, extra)),
+        runWithSanitizerOptions(sanitizerOptions, () =>
+          runWithResultSerializationOptions({ outputFormat }, () => original(args, extra)),
+        ),
       );
       const result = isSanitizedMcpResponse(rawResult)
         ? rawResult

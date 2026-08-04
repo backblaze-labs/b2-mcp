@@ -1,11 +1,11 @@
 import {
   currentSanitizerOptions,
   hasCurrentSanitizerOptions,
-  sanitizeForMcpOutput,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
   sanitizeText,
 } from "./secret-sanitizer.js";
+import { serializeStructuredToolResult, type StructuredToolResult } from "./result-serializer.js";
 
 const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
 
@@ -198,13 +198,8 @@ export function toolSuccess(text: string): { content: Array<{ type: "text"; text
 /**
  * Return a successful tool response with a JSON object.
  */
-export function toolJson(data: unknown): { content: Array<{ type: "text"; text: string }> } {
-  return markSanitizedMcpResponse({
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify(sanitizeForMcpOutput(data, currentSanitizerOptions()), null, 2),
-      },
-    ],
-  });
+export function toolJson(data: unknown): StructuredToolResult {
+  return markSanitizedMcpResponse(
+    serializeStructuredToolResult(data, currentSanitizerOptions()),
+  ) as StructuredToolResult;
 }

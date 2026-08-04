@@ -55,9 +55,10 @@ describe("secret sanitizer canary policy", () => {
         nextContinuationToken: "page-3",
       },
     });
-    const parsed = JSON.parse(result.content[0].text);
+    const parsed = result.structuredContent as any;
 
     expectNoCanary(result);
+    expect(result.content[0].text).not.toContain(CANARY);
     expect(parsed.applicationKeyId).toBe("key-id-is-non-secret");
     expect(parsed.applicationKey).toBe(SECRET_SANITIZER_REDACTION);
     expect(parsed.appKey).toBe(SECRET_SANITIZER_REDACTION);
@@ -79,7 +80,7 @@ describe("secret sanitizer canary policy", () => {
     const url =
       "https://example.s3.us-west-004.backblazeb2.com/bucket/object?X-Amz-Signature=abc123";
     const result = toolJson({ url, operation: "GetObject", expiresIn: 3600 });
-    const parsed = JSON.parse(result.content[0].text);
+    const parsed = result.structuredContent as any;
     expect(parsed.url).toBe(url);
   });
 
