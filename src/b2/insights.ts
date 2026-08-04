@@ -27,7 +27,7 @@ import {
   ListMultipartUploadsCommand,
   ListPartsCommand,
 } from "@aws-sdk/client-s3";
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -500,38 +500,47 @@ async function resolveBucketName(
 // ── Tool registration ───────────────────────────────────────────────────────
 
 export function registerInsightTools(
-  server: McpServer,
+  server: ToolRegistrar,
   b2Client: B2Client,
   s3: S3Client,
   auth: B2AuthManager,
 ): void {
   // ── b2_usage_growth ───────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_usage_growth",
-    "Rank accounts by how much STORED data grew or shrank between two points in time, from the daily B2 usage reports (uses stored_gb, the end-of-day snapshot). For 'which customers grew the most/least', 'who's moving data off'. Compares the latest snapshot against one month/quarter/year earlier and fetches only those two days, so it stays fast even on large report buckets. Returns the two dates compared and per-account start vs current GB and % growth (new accounts flagged). Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
     {
-      period: z
-        .enum(["month", "quarter", "year"])
-        .optional()
-        .default("month")
-        .describe(
-          "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
-        ),
-      days: z
-        .number()
-        .int()
-        .min(1)
-        .max(3650)
-        .optional()
-        .describe(
-          "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
-        ),
-      order: z
-        .enum(["most_grown", "least_grown", "shrinking"])
-        .optional()
-        .default("most_grown")
-        .describe("Ranking. Default most_grown."),
-      limit: z.number().int().min(1).optional().default(50).describe("Max accounts (default 50)."),
+      description:
+        "Rank accounts by how much STORED data grew or shrank between two points in time, from the daily B2 usage reports (uses stored_gb, the end-of-day snapshot). For 'which customers grew the most/least', 'who's moving data off'. Compares the latest snapshot against one month/quarter/year earlier and fetches only those two days, so it stays fast even on large report buckets. Returns the two dates compared and per-account start vs current GB and % growth (new accounts flagged). Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
+      inputSchema: {
+        period: z
+          .enum(["month", "quarter", "year"])
+          .optional()
+          .default("month")
+          .describe(
+            "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
+          ),
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(3650)
+          .optional()
+          .describe(
+            "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
+          ),
+        order: z
+          .enum(["most_grown", "least_grown", "shrinking"])
+          .optional()
+          .default("most_grown")
+          .describe("Ranking. Default most_grown."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .default(50)
+          .describe("Max accounts (default 50)."),
+      },
     },
     async (args) => {
       try {
@@ -588,23 +597,26 @@ export function registerInsightTools(
   );
 
   // ── b2_egress_leaders ─────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_egress_leaders",
-    "Rank top egress (downloaded bytes) by account or bucket over a period — default month-to-date. For 'who's downloading the most', 'where is egress concentrated'. Returns leaders with each one's share of total egress, from the daily usage reports. Scope follows the caller's key. Needs Usage Reports enabled.",
     {
-      by: z
-        .enum(["account", "bucket"])
-        .optional()
-        .default("account")
-        .describe("Rank by 'account' (default) or 'bucket'."),
-      days: z
-        .number()
-        .int()
-        .min(1)
-        .max(90)
-        .optional()
-        .describe("Rolling window in days (1–90). Omit for current month to date."),
-      limit: z.number().int().min(1).optional().default(15).describe("Leaders to return (15)."),
+      description:
+        "Rank top egress (downloaded bytes) by account or bucket over a period — default month-to-date. For 'who's downloading the most', 'where is egress concentrated'. Returns leaders with each one's share of total egress, from the daily usage reports. Scope follows the caller's key. Needs Usage Reports enabled.",
+      inputSchema: {
+        by: z
+          .enum(["account", "bucket"])
+          .optional()
+          .default("account")
+          .describe("Rank by 'account' (default) or 'bucket'."),
+        days: z
+          .number()
+          .int()
+          .min(1)
+          .max(90)
+          .optional()
+          .describe("Rolling window in days (1–90). Omit for current month to date."),
+        limit: z.number().int().min(1).optional().default(15).describe("Leaders to return (15)."),
+      },
     },
     async (args) => {
       try {
@@ -631,30 +643,33 @@ export function registerInsightTools(
   );
 
   // ── b2_largest_files ──────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_largest_files",
-    "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
     {
-      bucket: z.string().describe("Bucket name or bucketId to inspect."),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .optional()
-        .default(10)
-        .describe("How many of the largest files to return (default 10, max 100)."),
-      prefix: z.string().optional().describe('Optional path prefix, e.g. "checkpoints/".'),
-      max_scan: z
-        .number()
-        .int()
-        .min(1000)
-        .max(500_000)
-        .optional()
-        .default(50_000)
-        .describe(
-          "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
-        ),
+      description:
+        "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
+      inputSchema: {
+        bucket: z.string().describe("Bucket name or bucketId to inspect."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .default(10)
+          .describe("How many of the largest files to return (default 10, max 100)."),
+        prefix: z.string().optional().describe('Optional path prefix, e.g. "checkpoints/".'),
+        max_scan: z
+          .number()
+          .int()
+          .min(1000)
+          .max(500_000)
+          .optional()
+          .default(50_000)
+          .describe(
+            "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -741,27 +756,30 @@ export function registerInsightTools(
   );
 
   // ── b2_unfinished_uploads ─────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_unfinished_uploads",
-    "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing, bounded by max_uploads and an internal time budget — on a very bloated bucket it returns a truncated result (and wasted_gb may be a lower bound) and recommends a lifecycle rule.",
     {
-      bucket: z.string().describe("Bucket name or bucketId to inspect."),
-      older_than_days: z
-        .number()
-        .int()
-        .min(0)
-        .optional()
-        .describe("Only count uploads started more than this many days ago (optional)."),
-      max_uploads: z
-        .number()
-        .int()
-        .min(1)
-        .max(10_000)
-        .optional()
-        .default(1000)
-        .describe(
-          "Safety cap on how many unfinished uploads to scan (default 1000, max 10,000). A bucket bloated with abandoned uploads would otherwise trigger an unbounded walk plus a per-upload parts fan-out that times out. If the cap or an internal time budget is hit, the result is truncated and wasted_gb may be a lower bound — add a lifecycle rule to auto-cancel unfinished large files.",
-        ),
+      description:
+        "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing, bounded by max_uploads and an internal time budget — on a very bloated bucket it returns a truncated result (and wasted_gb may be a lower bound) and recommends a lifecycle rule.",
+      inputSchema: {
+        bucket: z.string().describe("Bucket name or bucketId to inspect."),
+        older_than_days: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Only count uploads started more than this many days ago (optional)."),
+        max_uploads: z
+          .number()
+          .int()
+          .min(1)
+          .max(10_000)
+          .optional()
+          .default(1000)
+          .describe(
+            "Safety cap on how many unfinished uploads to scan (default 1000, max 10,000). A bucket bloated with abandoned uploads would otherwise trigger an unbounded walk plus a per-upload parts fan-out that times out. If the cap or an internal time budget is hit, the result is truncated and wasted_gb may be a lower bound — add a lifecycle rule to auto-cancel unfinished large files.",
+          ),
+      },
     },
     async (args) => {
       try {

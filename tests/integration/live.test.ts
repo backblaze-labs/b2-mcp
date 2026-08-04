@@ -21,7 +21,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
-import { loadConfig, createServer } from "../../src/server";
+import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
@@ -42,7 +42,7 @@ const truncIt = HAS_S3_CREDS && TRUNC_BUCKET ? test : test.skip;
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function callTool(server: McpServer, toolName: string, args: Record<string, unknown>) {
-  const tool = (server as any)._registeredTools?.[toolName];
+  const tool = getRegisteredTools(server)?.[toolName];
   if (!tool) throw new Error(`Tool not found: ${toolName}`);
   const handler = tool.handler ?? tool.callback ?? tool.execute;
   if (typeof handler !== "function") {
@@ -124,27 +124,27 @@ beforeAll(async () => {
 
 describe("Protocol layer", () => {
   it("registers 40 callable tool names total", () => {
-    const count = Object.keys((server as any)._registeredTools ?? {}).length;
+    const count = Object.keys(getRegisteredTools(server) ?? {}).length;
     expect(count).toBe(40);
   });
 
   it("has 21 B2 native + Partner + insight b2_ tool names", () => {
-    const tools = Object.keys((server as any)._registeredTools ?? {});
+    const tools = Object.keys(getRegisteredTools(server) ?? {});
     expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(21);
   });
 
   it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
-    const tools = Object.keys((server as any)._registeredTools ?? {});
+    const tools = Object.keys(getRegisteredTools(server) ?? {});
     expect(tools.filter((t) => t.startsWith("bz_")).length).toBe(0);
   });
 
   it("has 19 S3-compatible data-plane tools (s3_ prefix)", () => {
-    const tools = Object.keys((server as any)._registeredTools ?? {});
+    const tools = Object.keys(getRegisteredTools(server) ?? {});
     expect(tools.filter((t) => t.startsWith("s3_")).length).toBe(19);
   });
 
   it("includes all expected landmark tools", () => {
-    const tools = new Set(Object.keys((server as any)._registeredTools ?? {}));
+    const tools = new Set(Object.keys(getRegisteredTools(server) ?? {}));
     for (const name of [
       "b2_authorize_account",
       "s3_put_object",

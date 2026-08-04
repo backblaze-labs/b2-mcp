@@ -11,7 +11,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { createServer } from "../../src/server";
+import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 
 let toolNames: string[];
@@ -30,7 +30,7 @@ beforeAll(() => {
     fileRoot: null,
   };
   const server = createServer(config);
-  toolNames = Object.keys((server as any)._registeredTools ?? {}).sort();
+  toolNames = Object.keys(getRegisteredTools(server) ?? {}).sort();
   readme = readFileSync(join(__dirname, "../../README.md"), "utf8");
 });
 

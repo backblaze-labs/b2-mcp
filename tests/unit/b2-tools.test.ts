@@ -8,7 +8,7 @@
  */
 
 import axios from "axios";
-import { createServer, invalidateAuthManagerCache } from "../../src/server";
+import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 
 // ── Mock axios ────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
-  const tool = (server as any)._registeredTools?.[name];
+  const tool = getRegisteredTools(server)?.[name];
   if (!tool) throw new Error(`Tool not found: ${name}`);
   const handler = tool.handler ?? tool.callback ?? tool.execute;
   return handler(args, {} as any);
@@ -285,7 +285,7 @@ describe("b2_delete_bucket", () => {
 
 describe("durable-secret-producing tools", () => {
   it("keeps stale tool names callable as non-secret unavailable stubs", async () => {
-    const tools = (server as any)._registeredTools ?? {};
+    const tools = getRegisteredTools(server) ?? {};
     for (const name of [
       "b2_create_key",
       "b2_create_group_member",

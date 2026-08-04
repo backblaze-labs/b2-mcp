@@ -14,7 +14,7 @@
  * neither "optional" nor "default".
  */
 
-import { createServer } from "../../src/server";
+import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 
 // ── Zod-mini schema helpers ───────────────────────────────────────────────────
@@ -57,7 +57,7 @@ beforeAll(() => {
     fileRoot: null,
   };
   server = createServer(config);
-  tools = (server as any)._registeredTools ?? {};
+  tools = getRegisteredTools(server) ?? {};
   toolNames = Object.keys(tools).sort();
 });
 

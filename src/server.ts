@@ -1,4 +1,13 @@
-import { createMcpServer, type McpServer } from "./mcp.js";
+import {
+  createMcpServer,
+  getRegisteredTools as getRepoRegisteredTools,
+  ToolRegistrationAdapter,
+  type McpRequestContext,
+  type McpServer,
+  type RegisteredToolMap,
+  type ToolCallback,
+  type ToolRegistrar,
+} from "./mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
@@ -49,12 +58,16 @@ export function loadConfig(): B2Config {
   }
 }
 
-function registerDurableSecretCompatibilityStubs(registerTool: McpServer["tool"]): void {
+function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void {
   for (const name of DURABLE_SECRET_PRODUCING_TOOLS) {
-    registerTool(
+    registrar.registerTool(
       name,
-      "Compatibility stub for a durable-secret-producing B2 operation that is unavailable until an out-of-band secret sink is configured.",
-      {},
+      {
+        description:
+          "Compatibility stub for a durable-secret-producing B2 operation that is unavailable until an out-of-band secret sink is configured.",
+        inputSchema: {},
+        force: true,
+      },
       async () =>
         toolError({
           status: 410,
@@ -92,7 +105,11 @@ function registerDurableSecretCompatibilityStubs(registerTool: McpServer["tool"]
  * reserved for explicit operator override and legacy unit tests. An empty array
  * is a fail-closed capability set, not "unknown".
  */
-export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
+export function createServer(
+  config: B2Config,
+  capabilities?: string[] | null,
+  _requestContext?: McpRequestContext,
+): McpServer {
   const server = createMcpServer(
     {
       name: "backblaze-b2",
@@ -123,21 +140,26 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
         "Companion skills (optional, recommended):",
         "These tools are the capability layer. A separate Backblaze B2 Skills pack supplies the procedural knowledge — workload playbooks (backup, disaster recovery, SaaS multi-tenant storage, AI training, AI inference) built on reusable primitives, each encoding B2-accurate best practice and an approval gate for risky actions. Skills are installed in the client, not delivered by this server. If the user is doing B2 work that matches a playbook and no such skill appears to be active, mention that installing the B2 Skills pack will make these workflows safer and more repeatable (Claude Code: ~/.claude/skills/; Claude.ai / Claude Desktop: Settings -> Capabilities -> Skills). Do not block on it — the tools work without the skills.",
       ].join("\n"),
+      cacheHints: {
+        "server/discover": { ttlMs: 30_000, cacheScope: "private" },
+        "tools/list": { ttlMs: 30_000, cacheScope: "private" },
+      },
     },
   );
 
-  // Capability-aware registration: wrap server.tool so durable-secret-producing
-  // tools always fail closed, and when capabilities are supplied, a tool is only
-  // registered if the key can use it. Tools not in the capability map
-  // (b2_authorize_account, Partner tools) are allowed through here; Partner
-  // tools are additionally gated on a master key below. null/undefined remains
-  // the explicit full-surface path, while an empty array is fail-closed rather
-  // than "unknown".
+  // Capability-aware registration: durable-secret-producing tools always fail
+  // closed, and when capabilities are supplied, a tool is only registered if
+  // the key can use it. Tools not in the capability map (b2_authorize_account,
+  // Partner tools) are allowed through here; Partner tools are additionally
+  // gated on a master key below. null/undefined remains the explicit
+  // full-surface path, while an empty array is fail-closed rather than
+  // "unknown".
   const filterActive = Array.isArray(capabilities);
   const capsSet = filterActive ? new Set(capabilities) : null;
-  const originalTool = server.tool.bind(server);
-  (server as any).tool = (name: string, ...rest: any[]) =>
-    isToolEnabled(name, capsSet) ? (originalTool as any)(name, ...rest) : undefined;
+  const registrar = new ToolRegistrationAdapter(server, {
+    shouldRegister: (name) => isToolEnabled(name, capsSet),
+    wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config),
+  });
 
   // Initialize clients. The application (workhorse) key drives the B2 native
   // API, S3, and key management. The Partner API tools use the master
@@ -164,9 +186,9 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
     : b2Client;
 
   // ── B2 Native API tools (control plane: buckets, keys, object lock) ──────
-  registerBucketTools(server, b2Client, auth, config);
-  registerKeyTools(server, b2Client, auth, config);
-  registerObjectLockTools(server, b2Client, config);
+  registerBucketTools(registrar, b2Client, auth, config);
+  registerKeyTools(registrar, b2Client, auth, config);
+  registerObjectLockTools(registrar, b2Client, config);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
   // Partner tools need a master key + Partner-API entitlement, not a standard
@@ -174,28 +196,28 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // distinct master key is configured; otherwise (and in full-surface mode) keep
   // the prior behavior of always registering them.
   if (!filterActive || masterIsDistinct) {
-    registerPartnerTools(server, masterClient, masterAuth, config);
+    registerPartnerTools(registrar, masterClient, masterAuth, config);
   }
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
-  registerS3BucketTools(server, s3Client, config);
-  registerS3ObjectTools(server, s3Client, config);
-  registerS3MultipartTools(server, s3Client, config);
-  registerS3PresignedTools(server, s3Client);
-  registerS3ExtraTools(server, s3Client);
+  registerS3BucketTools(registrar, s3Client, config);
+  registerS3ObjectTools(registrar, s3Client, config);
+  registerS3MultipartTools(registrar, s3Client, config);
+  registerS3PresignedTools(registrar, s3Client);
+  registerS3ExtraTools(registrar, s3Client);
 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────
   // Phase 1 reads the daily usage-report CSVs (native bucket lookup + S3 get);
   // Phase 2 is live per-bucket S3 listing.
-  registerInsightTools(server, b2Client, s3Client, auth);
+  registerInsightTools(registrar, b2Client, s3Client, auth);
 
   // Rolling deploy compatibility: clients can cache an older tools/list that
   // included durable-secret-producing tools. Keep those names callable, but
   // return a stable non-secret unavailable error instead of reintroducing the
   // old secret-producing handlers.
-  registerDurableSecretCompatibilityStubs(originalTool as McpServer["tool"]);
+  registerDurableSecretCompatibilityStubs(registrar);
 
-  const toolCount = wrapToolsWithAudit(server, config);
+  const toolCount = registrar.commit();
   logger.info({ toolCount, version: VERSION }, "server.ready");
 
   return server;
@@ -428,120 +450,78 @@ export async function fetchCapabilities(
   }
 }
 
-/** Shape of an entry in the MCP SDK's internal tool registry (the subset we touch). */
-interface RegisteredTool {
-  callback?: (...args: any[]) => any;
-  handler?: (...args: any[]) => any;
-  execute?: (...args: any[]) => any;
+/**
+ * Repository-owned view of registered tools. This intentionally reads the
+ * adapter registry populated before SDK registration rather than any SDK
+ * private field.
+ */
+export function getRegisteredTools(server: McpServer): RegisteredToolMap | null {
+  return getRepoRegisteredTools(server);
 }
 
 /**
- * Access the MCP SDK's private tool registry. This is the ONE place that
- * depends on an SDK internal (`McpServer._registeredTools`) — isolated here so
- * a future SDK rename surfaces in a single spot. Returns null if the internal
- * is absent (e.g. the SDK changed), letting the caller log and degrade.
+ * Wrap a tool handler to emit an audit log entry on invocation: tool name,
+ * non-secret credential fingerprint, top-level arg keys, duration, and
+ * success/error. Argument values are not logged to avoid leaking file content,
+ * bucket data, or credentials.
  */
-export function getRegisteredTools(server: McpServer): Record<string, RegisteredTool> | null {
-  const tools = (server as any)._registeredTools as Record<string, RegisteredTool> | undefined;
-  return tools ?? null;
-}
-
-/**
- * Wrap every registered tool handler to emit an audit log entry on
- * invocation: tool name, non-secret credential fingerprint, top-level arg keys,
- * duration, and success/error. Argument *values* are not logged to avoid leaking
- * file content, bucket data, etc.
- *
- * Returns the number of tools successfully wrapped. If the SDK internal is
- * missing, audit logging is skipped but a warning is logged so the degradation
- * is visible rather than silent.
- */
-export function wrapToolsWithAudit(server: McpServer, config: B2Config): number {
-  const tools = getRegisteredTools(server);
-  if (!tools) {
-    logger.warn(
-      { reason: "registry-missing" },
-      "audit.wrap.skipped: MCP SDK tool registry not found — audit logging disabled",
-    );
-    return 0;
-  }
+export function createAuditedToolCallback(
+  name: string,
+  original: ToolCallback,
+  config: B2Config,
+): ToolCallback {
   const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
-  let wrapped = 0;
 
-  for (const name of Object.keys(tools)) {
-    const tool = tools[name];
-    const handlerKey: keyof RegisteredTool | null =
-      typeof tool.callback === "function"
-        ? "callback"
-        : typeof tool.handler === "function"
-          ? "handler"
-          : typeof tool.execute === "function"
-            ? "execute"
-            : null;
-    if (!handlerKey) {
-      logger.warn({ tool: name }, "audit.wrap.skipped: no recognizable handler key on tool");
-      continue;
+  return async function auditedToolCallback(args: any, extra: any) {
+    const start = Date.now();
+    const argKeys =
+      args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+    try {
+      const sanitizerOptions = sanitizerOptionsFromConfig(config);
+      const result = sanitizeMcpResponse(await original(args, extra), sanitizerOptions);
+      const durationMs = Date.now() - start;
+      const isError = result?.isError === true;
+      // When the tool returned a structured error, surface the classified
+      // code/status/requestId in the audit event. Values stay out of logs.
+      const errInfo = isError ? parseErrorText(result?.content?.[0]?.text) : null;
+      const safeErrInfo = errInfo
+        ? {
+            code: sanitizeProviderCode(errInfo.code, sanitizerOptions),
+            status: errInfo.status,
+            requestId: sanitizeProviderRequestId(errInfo.requestId, sanitizerOptions),
+          }
+        : null;
+      logger.info(
+        {
+          tool: name,
+          credential: keyFingerprint,
+          argKeys,
+          durationMs,
+          error: isError,
+          ...(safeErrInfo && {
+            code: safeErrInfo.code,
+            status: safeErrInfo.status,
+            ...(safeErrInfo.requestId && { requestId: safeErrInfo.requestId }),
+          }),
+        },
+        "tool.call",
+      );
+      return result;
+    } catch (err) {
+      const sanitizerOptions = sanitizerOptionsFromConfig(config);
+      const safeErr = sanitizeError(err, sanitizerOptions);
+      const durationMs = Date.now() - start;
+      logger.warn(
+        {
+          tool: name,
+          credential: keyFingerprint,
+          argKeys,
+          durationMs,
+          err: safeErr.message,
+        },
+        "tool.error",
+      );
+      throw safeErr;
     }
-
-    const original = tool[handlerKey] as (...args: any[]) => any;
-
-    tool[handlerKey] = async function (this: unknown, args: any, extra: any) {
-      const start = Date.now();
-      const argKeys =
-        args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
-      try {
-        const sanitizerOptions = sanitizerOptionsFromConfig(config);
-        const result = sanitizeMcpResponse(
-          await original.call(this, args, extra),
-          sanitizerOptions,
-        );
-        const durationMs = Date.now() - start;
-        const isError = result?.isError === true;
-        // When the tool returned a structured error, surface the classified
-        // code/status/requestId in the audit event — this is the local metrics
-        // stream operators mine for failing/slow tools (no values, no PII).
-        const errInfo = isError ? parseErrorText(result?.content?.[0]?.text) : null;
-        const safeErrInfo = errInfo
-          ? {
-              code: sanitizeProviderCode(errInfo.code, sanitizerOptions),
-              status: errInfo.status,
-              requestId: sanitizeProviderRequestId(errInfo.requestId, sanitizerOptions),
-            }
-          : null;
-        logger.info(
-          {
-            tool: name,
-            credential: keyFingerprint,
-            argKeys,
-            durationMs,
-            error: isError,
-            ...(safeErrInfo && {
-              code: safeErrInfo.code,
-              status: safeErrInfo.status,
-              ...(safeErrInfo.requestId && { requestId: safeErrInfo.requestId }),
-            }),
-          },
-          "tool.call",
-        );
-        return result;
-      } catch (err) {
-        const sanitizerOptions = sanitizerOptionsFromConfig(config);
-        const safeErr = sanitizeError(err, sanitizerOptions);
-        const durationMs = Date.now() - start;
-        logger.warn(
-          {
-            tool: name,
-            credential: keyFingerprint,
-            argKeys,
-            durationMs,
-            err: safeErr.message,
-          },
-          "tool.error",
-        );
-        throw safeErr;
-      }
-    };
-    wrapped++;
-  }
-  return wrapped;
+  };
 }

@@ -4,7 +4,7 @@
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
-import { createServer } from "../../src/server";
+import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 import { B2Config } from "../../src/utils/types";
 
@@ -21,7 +21,8 @@ const testConfig: B2Config = {
 };
 
 async function callTool(server: McpServer, name: string, args: Record<string, unknown>) {
-  const tool = (server as any)._registeredTools?.[name];
+  const tool = getRegisteredTools(server)?.[name];
+  if (!tool) throw new Error(`Tool not found: ${name}`);
   const handler = tool.handler ?? tool.callback ?? tool.execute;
   return handler(args, {} as any);
 }

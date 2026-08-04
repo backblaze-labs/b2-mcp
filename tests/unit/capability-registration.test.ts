@@ -7,6 +7,7 @@ import axios from "axios";
 import {
   capabilityCacheSizeForTests,
   createServer,
+  getRegisteredTools,
   fetchCapabilities,
   invalidateCapabilityCache,
 } from "../../src/server";
@@ -35,9 +36,7 @@ const baseConfig = {
 
 function toolNames(caps: string[] | null, cfg: B2Config = baseConfig): string[] {
   const server = createServer(cfg, caps);
-  return Object.keys(
-    (server as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools ?? {},
-  );
+  return Object.keys(getRegisteredTools(server) ?? {});
 }
 
 describe("isToolEnabled", () => {

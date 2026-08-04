@@ -30,7 +30,7 @@ afterEach(() => {
 });
 
 async function loadConfig() {
-  const { loadConfig: lc } = await import("../../dist/server");
+  const { loadConfig: lc } = await import("../../src/server");
   return lc();
 }
 

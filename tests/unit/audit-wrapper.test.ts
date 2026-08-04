@@ -1,12 +1,8 @@
 /**
- * Tests for the audit-logging wrapper (wrapToolsWithAudit / getRegisteredTools),
- * including the degradation paths added for resilience: a missing SDK registry
- * and tools with no recognizable handler key both warn instead of failing
- * silently, and the wrapper reports how many tools it wrapped.
+ * Tests for the registration-time audit wrapper and repo-owned tool registry.
  */
 
-import type { McpServer } from "../../src/mcp";
-import { wrapToolsWithAudit, getRegisteredTools } from "../../src/server";
+import { createAuditedToolCallback, createServer, getRegisteredTools } from "../../src/server";
 import { formatB2Error } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
@@ -30,48 +26,34 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe("getRegisteredTools", () => {
-  it("returns null when the SDK registry is absent", () => {
-    expect(getRegisteredTools({} as McpServer)).toBeNull();
+  it("returns null when the repo registry is absent", () => {
+    expect(getRegisteredTools({} as never)).toBeNull();
   });
 
-  it("returns the registry object when present", () => {
-    const reg = { a: {} };
-    expect(getRegisteredTools({ _registeredTools: reg } as unknown as McpServer)).toBe(reg);
+  it("returns deterministic repo-owned registrations from createServer", () => {
+    const server = createServer({
+      applicationKeyId: "test",
+      applicationKey: "test",
+      appKeyId: "test",
+      appKey: "test",
+      masterKeyId: "test",
+      masterKey: "test",
+      region: "us-west-004",
+      allowLocalFiles: true,
+      fileRoot: null,
+    });
+    const names = Object.keys(getRegisteredTools(server) ?? {});
+    expect(names.length).toBe(40);
+    expect(names).toEqual([...names].sort());
   });
 });
 
-describe("wrapToolsWithAudit", () => {
-  it("warns and returns 0 when the registry is missing", () => {
-    const count = wrapToolsWithAudit({} as McpServer, cfg);
-    expect(count).toBe(0);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "registry-missing" }),
-      expect.stringContaining("audit.wrap.skipped"),
-    );
-  });
-
-  it("skips (with a warning) a tool that has no recognizable handler key", () => {
-    const server = { _registeredTools: { broken: { notAHandler: 1 } } } as unknown as McpServer;
-    const count = wrapToolsWithAudit(server, cfg);
-    expect(count).toBe(0);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ tool: "broken" }),
-      expect.stringContaining("no recognizable handler key"),
-    );
-  });
-
-  it("wraps a tool, logs tool.call on success, and preserves the result", async () => {
+describe("createAuditedToolCallback", () => {
+  it("logs tool.call on success and preserves the result", async () => {
     const original = jest.fn().mockResolvedValue({ isError: false, ok: true });
-    const tool: Record<string, unknown> = { callback: original };
-    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
+    const wrapped = createAuditedToolCallback("t", original, cfg);
 
-    const count = wrapToolsWithAudit(server, cfg);
-    expect(count).toBe(1);
-
-    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)(
-      { bucketId: "b" },
-      {},
-    );
+    const result = await wrapped({ bucketId: "b" }, {});
     expect(result).toEqual({ isError: false, ok: true });
     expect(original).toHaveBeenCalled();
     expect(infoSpy).toHaveBeenCalledWith(
@@ -87,11 +69,9 @@ describe("wrapToolsWithAudit", () => {
         { type: "text", text: "B2 Error [NoSuchKey] (HTTP 404): missing (requestId: req-7)" },
       ],
     });
-    const tool: Record<string, unknown> = { callback: original };
-    const server = { _registeredTools: { s3_get_object: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+    const wrapped = createAuditedToolCallback("s3_get_object", original, cfg);
 
-    await (tool.callback as (...a: unknown[]) => Promise<unknown>)({ bucket: "b", key: "k" }, {});
+    await wrapped({ bucket: "b", key: "k" }, {});
     expect(infoSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: "s3_get_object",
@@ -120,14 +100,9 @@ describe("wrapToolsWithAudit", () => {
         },
       ],
     });
-    const tool: Record<string, unknown> = { callback: original };
-    const server = { _registeredTools: { s3_get_object: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+    const wrapped = createAuditedToolCallback("s3_get_object", original, cfg);
 
-    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)(
-      { bucket: "b", key: "k" },
-      {},
-    );
+    const result = await wrapped({ bucket: "b", key: "k" }, {});
     const auditLog = JSON.stringify(infoSpy.mock.calls);
 
     expect(JSON.stringify(result)).not.toContain(CANARY);
@@ -146,13 +121,9 @@ describe("wrapToolsWithAudit", () => {
 
   it("logs tool.error and rethrows when the handler throws", async () => {
     const original = jest.fn().mockRejectedValue(new Error("boom"));
-    const tool: Record<string, unknown> = { callback: original };
-    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+    const wrapped = createAuditedToolCallback("t", original, cfg);
 
-    await expect((tool.callback as (...a: unknown[]) => Promise<unknown>)({}, {})).rejects.toThrow(
-      "boom",
-    );
+    await expect(wrapped({}, {})).rejects.toThrow("boom");
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({ tool: "t", err: "boom" }),
       "tool.error",

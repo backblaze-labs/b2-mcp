@@ -23,6 +23,28 @@ npm test
 The current CI check names are `lint` and `test`. If branch protection is added,
 use those names, not the retired matrix names `test (20)` or `test (22)`.
 
+## MCP Protocol Matrix
+
+Protocol tests cover the SDK v2 serving matrix used in production:
+
+| Area  | Coverage                                                                                   |
+| ----- | ------------------------------------------------------------------------------------------ |
+| HTTP  | Modern `2026-07-28` POST requests for `tools/list` and `tools/call` without MCP sessions.  |
+| HTTP  | Stateless 2025-era `initialize` compatibility through `createMcpHandler(..., { legacy })`. |
+| HTTP  | Header/body validation for `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name`.           |
+| HTTP  | GET/DELETE rejection, ignored `Mcp-Session-Id`, no event replay from `Last-Event-ID`.      |
+| stdio | `serveStdio` factory wiring, including degraded capability lookup behavior.                |
+
+The modern HTTP path uses one `createMcpHandler` wrapped once by
+`toNodeHandler` from `@modelcontextprotocol/node`. Tests assert that body-size,
+Host, Origin, credential, rate-limit, in-flight, and shutdown behavior stays
+outside the MCP handler while the SDK owns protocol validation and modern result
+metadata.
+
+Tool-surface tests inspect the repository-owned registration registry, not SDK
+private fields. The registry is sorted by tool name and mirrors the public
+`registerTool()` calls made at server construction.
+
 ## Future Credential-Free Contract Gate
 
 These commands are required Phase 1 work, but they must not be added to the

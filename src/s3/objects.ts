@@ -9,7 +9,7 @@ import {
   ListObjectsV2Command,
   ListObjectVersionsCommand,
 } from "@aws-sdk/client-s3";
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
@@ -37,31 +37,34 @@ interface DeleteObjectEntry {
 // cap is what keeps the data plane off the server: anything larger must presign.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
-export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B2Config): void {
-  server.tool(
+export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, config: B2Config): void {
+  server.registerTool(
     "s3_put_object",
-    "Upload a SMALL object inline (≤1 MiB) to a B2 bucket — for manifests, sidecars, and tiny configs. Provide base64-encoded content or a local file path. For real object data, generate a PutObject URL with s3_get_presigned_url and upload directly to B2 (bytes never pass through the server), or use the multipart tools for large objects.",
     {
-      bucket: z.string().describe("The destination bucket name."),
-      key: z.string().describe("The object key (file path within the bucket)."),
-      filePath: z.string().optional().describe("Absolute local path to the file to upload."),
-      content: z.string().optional().describe("Base64-encoded content to upload."),
-      contentType: z.string().optional().describe("MIME type of the object."),
-      metadata: z
-        .record(z.string(), z.string())
-        .optional()
-        .describe("Custom metadata key-value pairs."),
-      acl: z.enum(["private", "public-read"]).optional().describe("Canned ACL for the object."),
-      serverSideEncryption: z
-        .enum(["AES256"])
-        .optional()
-        .describe("Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS."),
-      storageClass: z
-        .string()
-        .optional()
-        .describe(
-          "Storage class, e.g. STANDARD (B2 ignores this but accepts it for S3 compatibility).",
-        ),
+      description:
+        "Upload a SMALL object inline (≤1 MiB) to a B2 bucket — for manifests, sidecars, and tiny configs. Provide base64-encoded content or a local file path. For real object data, generate a PutObject URL with s3_get_presigned_url and upload directly to B2 (bytes never pass through the server), or use the multipart tools for large objects.",
+      inputSchema: {
+        bucket: z.string().describe("The destination bucket name."),
+        key: z.string().describe("The object key (file path within the bucket)."),
+        filePath: z.string().optional().describe("Absolute local path to the file to upload."),
+        content: z.string().optional().describe("Base64-encoded content to upload."),
+        contentType: z.string().optional().describe("MIME type of the object."),
+        metadata: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Custom metadata key-value pairs."),
+        acl: z.enum(["private", "public-read"]).optional().describe("Canned ACL for the object."),
+        serverSideEncryption: z
+          .enum(["AES256"])
+          .optional()
+          .describe("Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS."),
+        storageClass: z
+          .string()
+          .optional()
+          .describe(
+            "Storage class, e.g. STANDARD (B2 ignores this but accepts it for S3 compatibility).",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -119,15 +122,21 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_get_object",
-    "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
     {
-      bucket: z.string().describe("The bucket name."),
-      key: z.string().describe("The object key."),
-      range: z.string().optional().describe("Byte range, e.g. 'bytes=0-1048575'."),
-      versionId: z.string().optional().describe("Specific version of the object to retrieve."),
-      saveToPath: z.string().optional().describe("If provided, save the file to this local path."),
+      description:
+        "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        key: z.string().describe("The object key."),
+        range: z.string().optional().describe("Byte range, e.g. 'bytes=0-1048575'."),
+        versionId: z.string().optional().describe("Specific version of the object to retrieve."),
+        saveToPath: z
+          .string()
+          .optional()
+          .describe("If provided, save the file to this local path."),
+      },
     },
     async (args) => {
       try {
@@ -187,14 +196,17 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_delete_object",
-    "Delete an object from a B2 bucket. Optionally specify a version ID to delete a specific version.",
     {
-      bucket: z.string().describe("The bucket name."),
-      key: z.string().describe("The object key to delete."),
-      versionId: z.string().optional().describe("Version ID of the specific version to delete."),
-      confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      description:
+        "Delete an object from a B2 bucket. Optionally specify a version ID to delete a specific version.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        key: z.string().describe("The object key to delete."),
+        versionId: z.string().optional().describe("Version ID of the specific version to delete."),
+        confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      },
     },
     async (args) => {
       try {
@@ -214,26 +226,29 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_delete_objects",
-    "Delete multiple objects from a B2 bucket in a single request (up to 1000 objects).",
     {
-      bucket: z.string().describe("The bucket name."),
-      objects: z
-        .array(
-          z.object({
-            key: z.string().describe("The object key."),
-            versionId: z.string().optional().describe("Specific version to delete."),
-          }),
-        )
-        .max(1000)
-        .describe("Array of objects to delete."),
-      quiet: z
-        .boolean()
-        .optional()
-        .default(true)
-        .describe("If true, only return errors (not successes) in the response."),
-      confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      description:
+        "Delete multiple objects from a B2 bucket in a single request (up to 1000 objects).",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        objects: z
+          .array(
+            z.object({
+              key: z.string().describe("The object key."),
+              versionId: z.string().optional().describe("Specific version to delete."),
+            }),
+          )
+          .max(1000)
+          .describe("Array of objects to delete."),
+        quiet: z
+          .boolean()
+          .optional()
+          .default(true)
+          .describe("If true, only return errors (not successes) in the response."),
+        confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      },
     },
     async (args) => {
       try {
@@ -261,13 +276,16 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_head_object",
-    "Get metadata for a B2 object without downloading it. Returns content type, size, last modified, ETag, and custom metadata.",
     {
-      bucket: z.string().describe("The bucket name."),
-      key: z.string().describe("The object key."),
-      versionId: z.string().optional().describe("Specific version of the object."),
+      description:
+        "Get metadata for a B2 object without downloading it. Returns content type, size, last modified, ETag, and custom metadata.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        key: z.string().describe("The object key."),
+        versionId: z.string().optional().describe("Specific version of the object."),
+      },
     },
     async (args) => {
       try {
@@ -295,29 +313,31 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_copy_object",
-    "Copy an object within B2 or between B2 buckets via the S3-compatible API.",
     {
-      sourceBucket: z.string().describe("The source bucket name."),
-      sourceKey: z.string().describe("The source object key."),
-      destinationBucket: z.string().describe("The destination bucket name."),
-      destinationKey: z.string().describe("The destination object key."),
-      sourceVersionId: z
-        .string()
-        .optional()
-        .describe("Copy a specific version of the source object."),
-      metadataDirective: z
-        .enum(["COPY", "REPLACE"])
-        .optional()
-        .default("COPY")
-        .describe("COPY copies metadata from source; REPLACE uses the provided metadata."),
-      contentType: z.string().optional().describe("New content type (only used with REPLACE)."),
-      metadata: z
-        .record(z.string(), z.string())
-        .optional()
-        .describe("New metadata (only used with REPLACE)."),
-      acl: z.enum(["private", "public-read"]).optional(),
+      description: "Copy an object within B2 or between B2 buckets via the S3-compatible API.",
+      inputSchema: {
+        sourceBucket: z.string().describe("The source bucket name."),
+        sourceKey: z.string().describe("The source object key."),
+        destinationBucket: z.string().describe("The destination bucket name."),
+        destinationKey: z.string().describe("The destination object key."),
+        sourceVersionId: z
+          .string()
+          .optional()
+          .describe("Copy a specific version of the source object."),
+        metadataDirective: z
+          .enum(["COPY", "REPLACE"])
+          .optional()
+          .default("COPY")
+          .describe("COPY copies metadata from source; REPLACE uses the provided metadata."),
+        contentType: z.string().optional().describe("New content type (only used with REPLACE)."),
+        metadata: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("New metadata (only used with REPLACE)."),
+        acl: z.enum(["private", "public-read"]).optional(),
+      },
     },
     async (args) => {
       try {
@@ -345,25 +365,28 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_list_objects_v2",
-    "List objects in a B2 bucket via the S3-compatible ListObjectsV2 API. Supports prefix filtering, delimiter-based folder listings, and pagination.",
     {
-      bucket: z.string().describe("The bucket name."),
-      prefix: z
-        .string()
-        .optional()
-        .describe("Only return objects whose keys start with this prefix."),
-      delimiter: z.string().optional().describe("Use '/' to list like a folder tree."),
-      maxKeys: z.number().int().min(1).max(1000).optional().default(1000),
-      continuationToken: z
-        .string()
-        .optional()
-        .describe("Pagination token from a previous response."),
-      startAfter: z
-        .string()
-        .optional()
-        .describe("Return objects after this key (inclusive pagination)."),
+      description:
+        "List objects in a B2 bucket via the S3-compatible ListObjectsV2 API. Supports prefix filtering, delimiter-based folder listings, and pagination.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        prefix: z
+          .string()
+          .optional()
+          .describe("Only return objects whose keys start with this prefix."),
+        delimiter: z.string().optional().describe("Use '/' to list like a folder tree."),
+        maxKeys: z.number().int().min(1).max(1000).optional().default(1000),
+        continuationToken: z
+          .string()
+          .optional()
+          .describe("Pagination token from a previous response."),
+        startAfter: z
+          .string()
+          .optional()
+          .describe("Return objects after this key (inclusive pagination)."),
+      },
     },
     async (args) => {
       try {
@@ -390,22 +413,25 @@ export function registerS3ObjectTools(server: McpServer, s3: S3Client, config: B
     },
   );
 
-  server.tool(
+  server.registerTool(
     "s3_list_object_versions",
-    "List all versions of objects in a versioned B2 bucket, including delete markers.",
     {
-      bucket: z.string().describe("The bucket name."),
-      prefix: z.string().optional().describe("Only list versions for objects with this prefix."),
-      delimiter: z.string().optional(),
-      maxKeys: z.number().int().min(1).max(1000).optional().default(1000),
-      keyMarker: z
-        .string()
-        .optional()
-        .describe("Pagination cursor — key from a previous response."),
-      versionIdMarker: z
-        .string()
-        .optional()
-        .describe("Pagination cursor — version ID from a previous response."),
+      description:
+        "List all versions of objects in a versioned B2 bucket, including delete markers.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        prefix: z.string().optional().describe("Only list versions for objects with this prefix."),
+        delimiter: z.string().optional(),
+        maxKeys: z.number().int().min(1).max(1000).optional().default(1000),
+        keyMarker: z
+          .string()
+          .optional()
+          .describe("Pagination cursor — key from a previous response."),
+        versionIdMarker: z
+          .string()
+          .optional()
+          .describe("Pagination cursor — version ID from a previous response."),
+      },
     },
     async (args) => {
       try {

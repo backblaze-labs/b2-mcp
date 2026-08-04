@@ -15,14 +15,14 @@
  * Skipped automatically when absent, so this file is safe to run anywhere.
  */
 
-import { loadConfig, createServer } from "../../src/server";
+import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 const liveIt = HAS_CREDS ? test : test.skip;
 
 async function callTool(server: McpServer, toolName: string, args: Record<string, unknown>) {
-  const tool = (server as any)._registeredTools?.[toolName];
+  const tool = getRegisteredTools(server)?.[toolName];
   if (!tool) throw new Error(`Tool not found: ${toolName}`);
   const handler = tool.handler ?? tool.callback ?? tool.execute;
   return handler(args, {} as any);

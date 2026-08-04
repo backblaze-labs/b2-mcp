@@ -9,8 +9,15 @@
 
 import * as http from "http";
 import * as crypto from "crypto";
+import { AsyncLocalStorage } from "async_hooks";
 import { parseIntEnv } from "./utils/config.js";
-import { createMcpHandler, type AuthInfo } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  type AuthInfo,
+  type McpHandlerRequestOptions,
+  type McpRequestContext,
+} from "@modelcontextprotocol/server";
+import { toNodeHandler } from "@modelcontextprotocol/node";
 import {
   createServer,
   fetchCapabilities,
@@ -96,12 +103,22 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown, head
   res.end(JSON.stringify(body));
 }
 
-function writeCredentialError(res: http.ServerResponse, err: unknown): void {
+function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...headers },
+  });
+}
+
+function credentialErrorResponse(err: unknown): Response {
   if (err instanceof CredentialResolutionError) {
-    writeJson(res, err.status, { error: err.message });
-    return;
+    return jsonResponse(err.status, { error: err.message });
   }
-  writeJson(res, 500, { error: "Credential resolution failed" });
+  return jsonResponse(500, { error: "Credential resolution failed" });
 }
 
 const SDK_HEADER_ALLOWLIST = new Set([
@@ -155,56 +172,6 @@ export function toWebRequest(
     body: method === "GET" || method === "HEAD" ? undefined : (body ?? ""),
     signal,
   });
-}
-
-function writeChunk(res: http.ServerResponse, chunk: Buffer): Promise<void> {
-  if (res.destroyed) return Promise.reject(new Error("Client disconnected"));
-  if (res.write(chunk)) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    function cleanup(): void {
-      res.off("drain", onDrain);
-      res.off("error", onError);
-      res.off("close", onClose);
-    }
-    function onDrain(): void {
-      cleanup();
-      resolve();
-    }
-    function onError(err: Error): void {
-      cleanup();
-      reject(err);
-    }
-    function onClose(): void {
-      cleanup();
-      reject(new Error("Client disconnected"));
-    }
-    res.once("drain", onDrain);
-    res.once("error", onError);
-    res.once("close", onClose);
-  });
-}
-
-async function writeFetchResponse(res: http.ServerResponse, response: Response): Promise<void> {
-  response.headers.forEach((value, name) => res.setHeader(name, value));
-  res.writeHead(response.status);
-  if (!response.body) {
-    res.end();
-    return;
-  }
-  const reader = response.body.getReader();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      await writeChunk(res, Buffer.from(value));
-    }
-    res.end();
-  } catch (err) {
-    res.destroy(err instanceof Error ? err : undefined);
-    throw err;
-  } finally {
-    reader.releaseLock();
-  }
 }
 
 function intEnv(name: string, fallback: number): number {
@@ -291,6 +258,67 @@ function logCredentialResolutionFailure(
   );
 }
 
+interface PreparedMcpRequest {
+  resolved: CredentialResolution;
+  capabilities: string[] | null;
+}
+
+function headersFromWebRequest(headers: Headers): http.IncomingHttpHeaders {
+  const nodeHeaders: http.IncomingHttpHeaders = {};
+  headers.forEach((value, name) => {
+    nodeHeaders[name.toLowerCase()] = value;
+  });
+  return nodeHeaders;
+}
+
+function credentialRequestFromContext(ctx: Pick<McpRequestContext, "authInfo" | "requestInfo">) {
+  const requestInfo = ctx.requestInfo;
+  if (!requestInfo) {
+    throw new CredentialResolutionError("HTTP request required", 500, "request_required");
+  }
+  return {
+    method: requestInfo.method,
+    url: new URL(requestInfo.url).pathname,
+    headers: headersFromWebRequest(requestInfo.headers),
+    auth: ctx.authInfo,
+  } as AuthenticatedIncomingMessage;
+}
+
+function sanitizedHeadersFromWeb(headers: Headers): Headers {
+  const sanitized = new Headers();
+  headers.forEach((value, name) => {
+    if (sdkHeaderAllowed(name)) sanitized.set(name, value);
+  });
+  return sanitized;
+}
+
+async function sanitizedMcpRequest(request: Request): Promise<Request> {
+  const method = request.method.toUpperCase();
+  const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
+  return new Request(request.url, {
+    method,
+    headers: sanitizedHeadersFromWeb(request.headers),
+    body,
+    signal: request.signal,
+  });
+}
+
+function nodeRequestWithBody(
+  req: http.IncomingMessage,
+  body: string | undefined,
+  authInfo: AuthInfo | null | undefined,
+) {
+  return {
+    method: req.method,
+    url: req.url,
+    headers: req.headers as Record<string, string | string[] | undefined>,
+    ...(authInfo && { auth: authInfo }),
+    async *[Symbol.asyncIterator]() {
+      if (body !== undefined) yield body;
+    },
+  };
+}
+
 export interface HttpServerHandle {
   server: http.Server;
   /** MCP v2 HTTP is stateless; this remains for tests/observability. */
@@ -370,6 +398,89 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     });
   }
 
+  const preparedRequests = new WeakMap<Request, PreparedMcpRequest>();
+  const preparedRequestScope = new AsyncLocalStorage<PreparedMcpRequest>();
+  const mcpHandler = createMcpHandler(
+    (ctx: McpRequestContext) => {
+      const prepared =
+        (ctx.requestInfo ? preparedRequests.get(ctx.requestInfo) : undefined) ??
+        preparedRequestScope.getStore();
+      if (!prepared) {
+        throw new Error("Prepared MCP request state missing");
+      }
+      return createServer(prepared.resolved.config, prepared.capabilities, ctx);
+    },
+    {
+      legacy: "stateless",
+      onerror: (error) => logger.warn({ err: error.message }, "mcp.http.error"),
+    },
+  );
+
+  const nodeMcpHandler = toNodeHandler(
+    {
+      fetch: async (request: Request, requestOptions?: McpHandlerRequestOptions) => {
+        const authInfo = requestOptions?.authInfo;
+        const credentialReq = credentialRequestFromContext({
+          requestInfo: request,
+          authInfo,
+        });
+
+        let resolved: CredentialResolution;
+        try {
+          resolved = credentialProvider.resolve({ req: credentialReq });
+        } catch (err) {
+          logCredentialResolutionFailure(credentialProvider, credentialReq, authInfo, err);
+          return credentialErrorResponse(err);
+        }
+
+        const inFlightPermit = inFlight.acquire(resolved.cacheKey);
+        if (!inFlightPermit.ok) {
+          return jsonResponse(
+            inFlightPermit.status,
+            { error: inFlightPermit.error },
+            { "Retry-After": "1" },
+          );
+        }
+
+        try {
+          const rateKey = deriveRateKey(resolved.cacheKey);
+          if (!allowRequest(rateKey)) {
+            return jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+          }
+
+          let capabilities: string[] | null;
+          try {
+            capabilities = await fetchCapabilities(
+              resolved.config,
+              resolved.capabilityCacheKey,
+              resolved.cacheKey,
+            );
+          } catch (err) {
+            return credentialErrorResponse(err);
+          }
+
+          const sdkRequest = await sanitizedMcpRequest(request);
+          const prepared = { resolved, capabilities };
+          preparedRequests.set(sdkRequest, prepared);
+          try {
+            return await preparedRequestScope.run(prepared, () =>
+              mcpHandler.fetch(sdkRequest, {
+                ...(authInfo && { authInfo }),
+              }),
+            );
+          } finally {
+            preparedRequests.delete(sdkRequest);
+          }
+        } finally {
+          inFlight.release(resolved.cacheKey);
+        }
+      },
+    },
+    {
+      onerror: (error) => logger.warn({ err: error.message }, "mcp.http.failed"),
+    },
+  );
+
   const httpServer = http.createServer(async (req, res) => {
     const authedReq = req as AuthenticatedIncomingMessage;
     const authInfo = options.getAuthInfo?.(authedReq);
@@ -420,69 +531,11 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     const rawBody = req.method === "POST" ? await readCappedBody(req, res) : undefined;
     if (rawBody === null) return;
 
-    let resolved: CredentialResolution;
     try {
-      resolved = credentialProvider.resolve({ req: authedReq });
+      await nodeMcpHandler(nodeRequestWithBody(req, rawBody, authInfo), res);
     } catch (err) {
-      logCredentialResolutionFailure(credentialProvider, req, authInfo, err);
-      writeCredentialError(res, err);
-      return;
-    }
-
-    const inFlightPermit = inFlight.acquire(resolved.cacheKey);
-    if (!inFlightPermit.ok) {
-      writeJson(
-        res,
-        inFlightPermit.status,
-        { error: inFlightPermit.error },
-        { "Retry-After": "1" },
-      );
-      return;
-    }
-
-    const rateKey = deriveRateKey(resolved.cacheKey);
-    try {
-      if (!allowRequest(rateKey)) {
-        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
-        return;
-      }
-
-      let capabilities: string[] | null;
-      try {
-        capabilities = await fetchCapabilities(
-          resolved.config,
-          resolved.capabilityCacheKey,
-          resolved.cacheKey,
-        );
-      } catch (err) {
-        writeCredentialError(res, err);
-        return;
-      }
-
-      const handler = createMcpHandler(() => createServer(resolved.config, capabilities), {
-        legacy: "stateless",
-        onerror: (error) => logger.warn({ err: error.message }, "mcp.http.error"),
-      });
-
-      const abortController = new AbortController();
-      req.on("aborted", () => abortController.abort());
-      res.on("close", () => {
-        if (!res.writableEnded) abortController.abort();
-      });
-
-      try {
-        const response = await handler.fetch(toWebRequest(req, rawBody, abortController.signal), {
-          authInfo: authInfo ?? undefined,
-        });
-        await writeFetchResponse(res, response);
-      } catch (err) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
-        if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
-      } finally {
-        await handler.close().catch(() => undefined);
-      }
-    } finally {
-      inFlight.release(resolved.cacheKey);
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+      if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
     }
   });
 
@@ -490,6 +543,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     if (shuttingDown) return;
     shuttingDown = true;
     clearInterval(idleSweep);
+    void mcpHandler.close().catch(() => undefined);
   }
 
   return { server: httpServer, sessions, drain };
