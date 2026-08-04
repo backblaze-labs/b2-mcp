@@ -319,8 +319,8 @@ function toPartInfoResult(value: PartInfo): PartInfoResult {
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return (
-    typeof value === "object" &&
-    value !== null &&
+    !!value &&
+    (typeof value === "object" || typeof value === "function") &&
     Symbol.asyncIterator in value &&
     typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
   );
