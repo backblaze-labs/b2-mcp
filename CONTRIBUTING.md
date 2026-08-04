@@ -13,7 +13,8 @@ Node 22 patch so local behavior matches the Phase 1 runtime floor.
 ```bash
 npm ci
 npm run build        # clean + tsc → dist/
-npm test             # typecheck (pretest) + unit suite, no credentials needed
+npm test             # typecheck via pretest, then fast unit suite
+npm run verify       # full no-credential local gate
 npm run lint         # eslint src tests
 npm run format:check # prettier
 ```
@@ -26,16 +27,25 @@ mamba run -n b2-mcp node --version
 mamba run -n b2-mcp npm ci
 ```
 
-Integration tests need real B2 credentials and are not run in the default suite;
-see `README.md` and `CLAUDE.md` for how to run them.
+Live tests need real B2 credentials and are not run in the default suite. Use
+`npm run test:integration:live` for live integration behavior and
+`npm run test:contract:live` for live request-shape checks; both require
+`B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`.
+
+Test files must follow the layer suffix convention documented in
+[`docs/TESTING.md`](./docs/TESTING.md): `*.unit.test.ts`,
+`*.contract.test.ts`, `*.modern-protocol.test.ts`, `*.legacy-protocol.test.ts`,
+`*.slow.test.ts`, `*.package.test.ts`, `*.integration.live.test.ts`, or
+`*.contract.live.test.ts`.
 
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
-- `npm test`, `npm run lint`, and `npm run format:check` must pass. CI runs all
-  three on every PR plus a build.
+- `npm run verify` must pass before opening a PR. CI runs the bundled
+  deterministic coverage layer, the slow deterministic layer, and a separate
+  package-install verification job that stays off the deploy-gating path.
 - Add or update unit tests for any behavior change. New tools need a schema entry
-  in `tests/unit/tools-schema.test.ts` and at least one handler test.
+  in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
 - Update `CHANGELOG.md` under the appropriate heading.
 
 ## Safety requirements for new tools
@@ -46,7 +56,7 @@ tools must respect the existing guardrails:
 - **Any irreversible or protection-removing action must be wired to the
   destructive-operation gate** (`src/utils/destructive-gate.ts`): add a detector
   and call `checkDestructive(...)` at the top of the handler, returning
-  `toolError` when `!ok`. Add gate coverage to `tests/unit/destructive-gate.test.ts`.
+  `toolError` when `!ok`. Add gate coverage to `tests/unit/destructive-gate.unit.test.ts`.
 - **Bulk object data must not flow through the server.** Use presigned URLs for
   uploads and downloads; the inline object paths are capped at 1 MiB for small
   control-plane payloads only.

@@ -10,17 +10,13 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
 import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
+import { readJson, root as ROOT } from "./support";
 
-const ROOT = join(__dirname, "../..");
 const SDK_VERSION = "0.2.0";
 const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz";
 const SDK_INTEGRITY =
   "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==";
 const NODE_FLOOR = ">=22.13.0";
-
-function readJson<T>(relativePath: string): T {
-  return JSON.parse(readFileSync(join(ROOT, relativePath), "utf8")) as T;
-}
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir)

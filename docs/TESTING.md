@@ -3,25 +3,74 @@
 Owner: Sophie / Quality Keeper (QK) (`@sophiecarreras`). Implementation owner: Gonza
 (`@goanpeca`).
 
-Status: skeleton. Issues #50, #51, #52, #60, #61, and #63 own the test-gate
-implementation.
+Status: active. Test selection is based on explicit filename suffixes, not broad
+directory sweeps.
 
 ## Deterministic PR Gate
 
-The PR gate must not require real B2 credentials. The current credential-free
-gate is:
+The PR gate must not require real B2 credentials. The complete local
+no-credential gate is:
 
 ```bash
 npm ci
-npm run build
-npm run typecheck
-npm run lint
-npm run format:check
-npm test
+npm run verify
 ```
 
+`npm run verify` runs typecheck, build, lint, format check, deterministic
+coverage, deterministic slow tests, and packed-package installation tests. The
+individual deterministic layers are:
+
+| Command                 | Layer                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `npm test`              | Typecheck via `pretest`, then `npm run test:unit`.                                   |
+| `npm run test:unit`     | Fast source unit tests.                                                              |
+| `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
+| `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
+| `npm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Jest worker.   |
+| `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
+| `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.     |
+
+Local scripts can call each deterministic layer independently. The deploy-gating
+CI `test` job runs the bundled coverage layer plus slow deterministic lifecycle
+checks once; `test:package` runs in a separate non-blocking package job so npm
+registry availability cannot stall `ci-green`.
 The current CI check names are `lint` and `test`. If branch protection is added,
 use those names, not the retired matrix names `test (20)` or `test (22)`.
+
+## File Naming Convention
+
+Test files must use these suffixes so scripts do not depend on accidental paths:
+
+| Suffix                                     | Command owner           |
+| ------------------------------------------ | ----------------------- |
+| `tests/unit/*.unit.test.ts`                | `test:unit`             |
+| `tests/contract/*.contract.test.ts`        | `test:contract`         |
+| `tests/protocol/*.modern-protocol.test.ts` | `test:protocol:modern`  |
+| `tests/protocol/*.legacy-protocol.test.ts` | `test:protocol:legacy`  |
+| `tests/slow/*.slow.test.ts`                | `test:slow`             |
+| `tests/package/*.package.test.ts`          | `test:package`          |
+| `tests/live/*.integration.live.test.ts`    | `test:integration:live` |
+| `tests/live/*.contract.live.test.ts`       | `test:contract:live`    |
+
+Do not put credential-free assertions in live files. Source unit tests must
+import `src/`; only the slow/package layers may build or inspect `dist/`.
+
+## Test Reports
+
+All npm Jest layer commands run through `scripts/run-jest-layer.mjs`. The runner
+preserves the normal terminal reporter and writes machine-readable summaries
+without raw failure messages. Deterministic layers write JUnit XML only when no
+B2 credential environment variables are present. Any layer running with B2
+credentials suppresses the third-party JUnit reporter.
+
+- JUnit XML: `reports/junit/<layer>.xml`
+- Jest JSON summary: `reports/jest/<layer>.json`
+- Coverage summary: `coverage/coverage-summary.json` from `npm run test:coverage`
+- Cobertura XML: `coverage/cobertura-coverage.xml` from `npm run test:coverage`
+
+If a selected layer has zero executed tests because every case was skipped, the
+runner exits nonzero and prints the summary path. A skipped-only run is visible
+evidence, not an authoritative pass.
 
 ## MCP Protocol Matrix
 
@@ -64,14 +113,14 @@ Credential-free unit tests cover the structured result serializer:
   formula-like prefixes, hostile keys, and strings resembling TOON
   headers/comments round-trip through `structuredContent`.
 
-## Future Credential-Free Contract Gate
+## Live B2 Commands
 
-These commands are required Phase 1 work, but they must not be added to the
-deterministic PR gate until they run without live B2 credentials:
+These live commands are outside the deterministic PR gate and fail fast when the
+required credentials are not present:
 
 ```bash
-npm run test:integration
-npm run test:contract
+npm run test:integration:live # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+npm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 ```
 
 ## Networked Security Gate

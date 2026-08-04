@@ -5,7 +5,7 @@
  * Only 4 S3 tools are kept (those with no native b2_* equivalent):
  *   s3_head_bucket, s3_put_bucket_lifecycle, s3_get_bucket_location,
  *   s3_get_presigned_url. Error-path coverage for the SDK-calling ones lives in
- *   s3-coverage.test.ts.
+ *   s3-coverage.unit.test.ts.
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
@@ -39,7 +39,7 @@ const testConfig = {
   applicationKey: "test-key-secret",
   appKeyId: "test-app-key-id",
   appKey: "test-app-key-secret",
-  masterKeyId: "test-app-key-secret",
+  masterKeyId: "test-master-key-id",
   masterKey: "test-app-key-secret",
   region: "us-west-004",
   allowLocalFiles: true,

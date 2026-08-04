@@ -1,12 +1,10 @@
 /**
- * Request-level tests for the HTTP entry point. Production HTTP serving is the
- * SDK v2 per-request handler, so these tests use the 2026-07-28 envelope and
- * assert that no MCP session state or Mcp-Session-Id is required.
+ * HTTP transport and credential-mode tests for the SDK v2 per-request handler.
+ * MCP protocol-version and envelope assertions live under tests/protocol/.
  */
 
 import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
-import type { AddressInfo } from "net";
 import axios from "axios";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
@@ -14,8 +12,6 @@ import {
   buildHttpServer,
   configFromHeaders,
   createPreparedMcpServerFactory,
-  createInFlightLimiter,
-  deriveRateKey,
   HttpServerHandle,
   HttpServerOptions,
   PreparedMcpRequest,
@@ -25,45 +21,23 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
+import {
+  JSON_HEADERS,
+  type Resp,
+  closeHttpServer,
+  creds,
+  listenOnLocalhost,
+  request,
+  restoreEnv,
+  saveEnv,
+  setDefaultHttpTestEnv,
+} from "../support/http";
 
 jest.mock("axios");
 const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
   get: jest.MockedFunction<typeof axios.get>;
 };
-
-interface Resp {
-  status: number;
-  body: string;
-  headers: http.IncomingHttpHeaders;
-}
-
-function request(
-  port: number,
-  method: string,
-  pathname: string,
-  opts: { headers?: Record<string, string>; body?: string } = {},
-): Promise<Resp> {
-  return new Promise((resolve, reject) => {
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: pathname, headers: opts.headers },
-      (res) => {
-        let data = "";
-        const status = res.statusCode ?? 0;
-        const done = () => resolve({ status, body: data, headers: res.headers });
-        res.on("data", (c) => (data += c));
-        res.on("end", done);
-        res.on("close", done);
-      },
-    );
-    req.on("error", () => undefined);
-    const t = setTimeout(() => reject(new Error("request timed out")), 4000);
-    t.unref();
-    if (opts.body) req.write(opts.body);
-    req.end();
-  });
-}
 
 function postLargeBody(port: number, pathname: string): Promise<number> {
   return request(port, "POST", pathname, {
@@ -130,57 +104,35 @@ function sleep(ms: number): Promise<void> {
 let handle: HttpServerHandle;
 let port: number;
 
-const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
-const savedCredentialMode = process.env.B2_HTTP_CREDENTIAL_MODE;
-const savedMaxInFlight = process.env.B2_MAX_SESSIONS;
-const savedMaxInFlightPerKey = process.env.B2_MAX_SESSIONS_PER_KEY;
-const savedAllowedHosts = process.env.B2_ALLOWED_HOSTS;
-const savedAllowedOrigins = process.env.B2_ALLOWED_ORIGINS;
-const savedOutputFormat = process.env.B2_MCP_OUTPUT_FORMAT;
+const savedHttpEnv = saveEnv();
+const savedMutableEnv = saveEnv([
+  "B2_MAX_SESSIONS",
+  "B2_MAX_SESSIONS_PER_KEY",
+  "B2_ALLOWED_HOSTS",
+  "B2_ALLOWED_ORIGINS",
+  "B2_MCP_OUTPUT_FORMAT",
+]);
 
 beforeAll(() => {
-  process.env.B2_REGISTER_ALL_TOOLS = "true";
-  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  setDefaultHttpTestEnv();
 });
 
 afterAll(() => {
-  if (savedRegisterAll === undefined) delete process.env.B2_REGISTER_ALL_TOOLS;
-  else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
-  if (savedCredentialMode === undefined) delete process.env.B2_HTTP_CREDENTIAL_MODE;
-  else process.env.B2_HTTP_CREDENTIAL_MODE = savedCredentialMode;
-  if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
-  else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
-  if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
-  else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
-  if (savedAllowedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
-  else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
-  if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
-  else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
-  if (savedOutputFormat === undefined) delete process.env.B2_MCP_OUTPUT_FORMAT;
-  else process.env.B2_MCP_OUTPUT_FORMAT = savedOutputFormat;
+  restoreEnv(savedHttpEnv);
+  restoreEnv(savedMutableEnv);
 });
 
 beforeEach(async () => {
-  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  setDefaultHttpTestEnv();
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
-  if (savedOutputFormat === undefined) delete process.env.B2_MCP_OUTPUT_FORMAT;
-  else process.env.B2_MCP_OUTPUT_FORMAT = savedOutputFormat;
-  if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
-  else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
-  if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
-  else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
-  if (savedAllowedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
-  else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
-  if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
-  else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
+  restoreEnv(savedMutableEnv);
   invalidateCapabilityCache();
   handle = buildHttpServer();
-  await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-  port = (handle.server.address() as AddressInfo).port;
+  port = await listenOnLocalhost(handle);
 });
 
 afterEach(async () => {
@@ -189,18 +141,12 @@ afterEach(async () => {
   mockedAxios.mockReset();
   mockedAxios.get = jest.fn() as jest.MockedFunction<typeof axios.get>;
   invalidateAuthManagerCache();
-  handle.drain();
-  await new Promise<void>((r) => handle.server.close(() => r()));
+  await closeHttpServer(handle);
 });
 
-const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
 const META = {
   "io.modelcontextprotocol/protocolVersion": "2026-07-28",
   "io.modelcontextprotocol/clientCapabilities": {},
-};
-const JSON_HEADERS = {
-  "content-type": "application/json",
-  accept: "application/json, text/event-stream",
 };
 
 function modernBody(method: string, params: Record<string, unknown> = {}, id = 1): string {
@@ -221,17 +167,6 @@ function modernHeaders(method: string, name?: string): Record<string, string> {
 }
 
 const LIST_TOOLS = modernBody("tools/list");
-const LEGACY_INIT = JSON.stringify({
-  jsonrpc: "2.0",
-  id: 1,
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "test", version: "1" },
-  },
-});
-
 function jsonRpcResponse(result: unknown = {}): Response {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
     status: 200,
@@ -285,14 +220,12 @@ async function replaceHandle(
   getAuthInfo?: (req: any) => AuthInfo | null,
   overrides: Omit<HttpServerOptions, "getAuthInfo"> = {},
 ): Promise<void> {
-  handle.drain();
-  await new Promise<void>((r) => handle.server.close(() => r()));
+  await closeHttpServer(handle);
   handle = buildHttpServer({ getAuthInfo, ...overrides });
-  await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-  port = (handle.server.address() as AddressInfo).port;
+  port = await listenOnLocalhost(handle);
 }
 
-describe("HTTP handler (MCP 2026-07-28)", () => {
+describe("HTTP transport handler", () => {
   it("returns 401 on modern /mcp without credentials", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: modernHeaders("tools/list"),
@@ -329,13 +262,11 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
 
   it("fails startup on an invalid credential mode", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "session";
-    handle.drain();
-    await new Promise<void>((r) => handle.server.close(() => r()));
+    await closeHttpServer(handle);
     expect(() => buildHttpServer()).toThrow(/invalid/i);
     process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
     handle = buildHttpServer();
-    await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-    port = (handle.server.address() as AddressInfo).port;
+    port = await listenOnLocalhost(handle);
   });
 
   it("returns 404 on an unknown path", async () => {
@@ -372,87 +303,6 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(res.status).toBe(405);
   });
 
-  it("serves legacy initialize through the stateless transition fallback", async () => {
-    const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...JSON_HEADERS },
-      body: LEGACY_INIT,
-    });
-    expect(res.status).toBe(200);
-    expect(res.headers["mcp-session-id"]).toBeUndefined();
-    expect(handle.sessions.size).toBe(0);
-  });
-
-  it("does not route Mcp-Session-Id requests to stateful session storage", async () => {
-    const res = await request(port, "GET", "/mcp", {
-      headers: { ...creds, "mcp-session-id": "ghost" },
-    });
-    expect(res.status).toBe(405);
-    expect(handle.sessions.size).toBe(0);
-  });
-
-  it("returns SDK 405 for GET and DELETE before credential resolution", async () => {
-    const resolve = jest.fn(() => {
-      throw new Error("credential resolution should not run");
-    });
-    await replaceHandle(undefined, {
-      credentialProvider: {
-        name: "unused",
-        resolve,
-        validateConfiguration: () => undefined,
-      },
-    });
-
-    const getRes = await request(port, "GET", "/mcp");
-    const deleteRes = await request(port, "DELETE", "/mcp");
-    const nonJsonPost = await request(port, "POST", "/mcp", {
-      headers: { "content-type": "text/plain" },
-      body: "not-json",
-    });
-
-    expect(getRes.status).toBe(405);
-    expect(deleteRes.status).toBe(405);
-    expect(nonJsonPost.status).toBe(415);
-    expect(resolve).not.toHaveBeenCalled();
-  });
-
-  it("returns SDK protocol errors before credential resolution", async () => {
-    const resolve = jest.fn(() => {
-      throw new Error("credential resolution should not run");
-    });
-    await replaceHandle(undefined, {
-      credentialProvider: {
-        name: "unused",
-        resolve,
-        validateConfiguration: () => undefined,
-      },
-    });
-
-    const unsupported = await request(port, "POST", "/mcp", {
-      headers: modernHeaders("tools/list"),
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/list",
-        params: {
-          _meta: {
-            ...META,
-            "io.modelcontextprotocol/protocolVersion": "2099-01-01",
-          },
-        },
-      }),
-    });
-    const mismatch = await request(port, "POST", "/mcp", {
-      headers: modernHeaders("tools/call"),
-      body: LIST_TOOLS,
-    });
-
-    expect(unsupported.status).toBe(400);
-    expect(unsupported.body).toMatch(/Unsupported protocol version/i);
-    expect(mismatch.status).toBe(400);
-    expect(JSON.parse(mismatch.body).error.code).toBe(-32020);
-    expect(resolve).not.toHaveBeenCalled();
-  });
-
   it("returns 413 when the request body exceeds the cap", async () => {
     const status = await postLargeBody(port, "/mcp");
     expect(status).toBe(413);
@@ -467,17 +317,6 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     const res = await postDeclaredLargeBody(port, "/mcp");
     expect(res.status).toBe(413);
     expect(res.headers.connection).toBe("close");
-  });
-
-  it("serves a modern tools/list request without a session id", async () => {
-    const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...modernHeaders("tools/list") },
-      body: LIST_TOOLS,
-    });
-    expect(res.status).toBe(200);
-    expect(res.headers["mcp-session-id"]).toBeUndefined();
-    expect(handle.sessions.size).toBe(0);
-    expect(JSON.parse(res.body).result.tools.length).toBeGreaterThan(0);
   });
 
   it("defaults unset B2_HTTP_CREDENTIAL_MODE to header compatibility", async () => {
@@ -946,16 +785,6 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
   });
 
-  it("bounds in-flight requests globally and per credential", () => {
-    const limiter = createInFlightLimiter(2, 1);
-    expect(limiter.acquire("credential:a")).toEqual({ ok: true });
-    expect(limiter.acquire("credential:a")).toMatchObject({ ok: false, status: 429 });
-    expect(limiter.acquire("credential:b")).toEqual({ ok: true });
-    expect(limiter.acquire("credential:c")).toMatchObject({ ok: false, status: 503 });
-    limiter.release("credential:a");
-    expect(limiter.acquire("credential:c")).toEqual({ ok: true });
-  });
-
   it("server mode uses process credentials and rejects public B2 credential headers", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "server";
     process.env.B2_APPLICATION_KEY_ID = "server-key";
@@ -985,8 +814,7 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       scopes: [],
       extra: { sub: "alice" },
     }));
-    handle.drain();
-    await new Promise<void>((r) => handle.server.close(() => r()));
+    await closeHttpServer(handle);
     handle = buildHttpServer({
       getAuthInfo: () => ({
         token: "verified-token",
@@ -1001,8 +829,7 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
             : null,
       },
     });
-    await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-    port = (handle.server.address() as AddressInfo).port;
+    port = await listenOnLocalhost(handle);
 
     const spoofed = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list") },
@@ -1029,120 +856,5 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       body: LIST_TOOLS,
     });
     expect(missingAuth.status).toBe(401);
-  });
-});
-
-describe("configFromHeaders — filesystem policy", () => {
-  const baseReq = { headers: { "x-b2-key-id": "k", "x-b2-key": "s" } };
-
-  afterEach(() => {
-    delete process.env.B2_ALLOW_LOCAL_FILES;
-    delete process.env.B2_FILE_ROOT;
-  });
-
-  it("disables local file access by default on HTTP", () => {
-    const cfg = configFromHeaders(baseReq);
-    expect(cfg?.allowLocalFiles).toBe(false);
-  });
-
-  it("only enables local files when explicitly opted in AND given a root", () => {
-    process.env.B2_ALLOW_LOCAL_FILES = "true";
-    expect(configFromHeaders(baseReq)?.allowLocalFiles).toBe(false);
-    process.env.B2_FILE_ROOT = "/srv/uploads";
-    const cfg = configFromHeaders(baseReq);
-    expect(cfg?.allowLocalFiles).toBe(true);
-    expect(cfg?.fileRoot).toBe("/srv/uploads");
-  });
-});
-
-describe("configFromHeaders — credential model", () => {
-  it("application key drives native+S3; master falls back to it when unset", () => {
-    const cfg = configFromHeaders({
-      headers: { "x-b2-key-id": "app-id", "x-b2-key": "app-secret" },
-    });
-    expect(cfg?.applicationKeyId).toBe("app-id");
-    expect(cfg?.appKeyId).toBe("app-id");
-    expect(cfg?.masterKeyId).toBe("app-id");
-    expect(cfg?.masterKey).toBe("app-secret");
-  });
-
-  it("uses X-B2-Master-Key-* for the master credential when provided", () => {
-    const cfg = configFromHeaders({
-      headers: {
-        "x-b2-key-id": "app-id",
-        "x-b2-key": "app-secret",
-        "x-b2-master-key-id": "master-id",
-        "x-b2-master-key": "master-secret",
-      },
-    });
-    expect(cfg?.applicationKeyId).toBe("app-id");
-    expect(cfg?.masterKeyId).toBe("master-id");
-    expect(cfg?.masterKey).toBe("master-secret");
-  });
-
-  it("rejects partial master credential headers", () => {
-    expect(() =>
-      configFromHeaders({
-        headers: {
-          "x-b2-key-id": "app-id",
-          "x-b2-key": "app-secret",
-          "x-b2-master-key-id": "master-id",
-        },
-      }),
-    ).toThrow(/both id and secret/i);
-  });
-
-  it("still honors the deprecated X-B2-App-Key-* S3 override", () => {
-    const cfg = configFromHeaders({
-      headers: {
-        "x-b2-key-id": "master-id",
-        "x-b2-key": "master-secret",
-        "x-b2-app-key-id": "s3-id",
-        "x-b2-app-key": "s3-secret",
-      },
-    });
-    expect(cfg?.appKeyId).toBe("s3-id");
-    expect(cfg?.applicationKeyId).toBe("master-id");
-  });
-
-  it("accepts the explicit X-B2-MCP-* header names", () => {
-    const cfg = configFromHeaders({
-      headers: { "x-b2-mcp-key-id": "app-id", "x-b2-mcp-key": "app-secret" },
-    });
-    expect(cfg?.applicationKeyId).toBe("app-id");
-    expect(cfg?.appKeyId).toBe("app-id");
-  });
-});
-
-describe("deriveRateKey", () => {
-  it("is deterministic and distinct per key id", () => {
-    expect(deriveRateKey("abc")).toBe(deriveRateKey("abc"));
-    expect(deriveRateKey("abc")).not.toBe(deriveRateKey("abd"));
-    expect(deriveRateKey("abcdefgh")).not.toContain("abcdefgh");
-  });
-});
-
-describe("configFromHeaders — destructive policy default (HTTP is safe-by-default)", () => {
-  const saved = process.env.B2_DESTRUCTIVE_POLICY;
-  afterEach(() => {
-    if (saved === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;
-    else process.env.B2_DESTRUCTIVE_POLICY = saved;
-  });
-
-  it("defaults to block when B2_DESTRUCTIVE_POLICY is unset (internet-facing)", () => {
-    delete process.env.B2_DESTRUCTIVE_POLICY;
-    const cfg = configFromHeaders({ headers: creds });
-    expect(cfg).not.toBeNull();
-    expect(getDestructivePolicy(cfg!)).toBe("block");
-  });
-
-  it("honors an explicit opt-down to confirm", () => {
-    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
-    expect(getDestructivePolicy(configFromHeaders({ headers: creds })!)).toBe("confirm");
-  });
-
-  it("honors an explicit allow", () => {
-    process.env.B2_DESTRUCTIVE_POLICY = "allow";
-    expect(getDestructivePolicy(configFromHeaders({ headers: creds })!)).toBe("allow");
   });
 });
