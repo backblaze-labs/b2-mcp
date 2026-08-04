@@ -94,9 +94,10 @@ function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void
  * functions below: B2 Native API (buckets, files, large files, download URLs,
  * keys, object lock, auth), Partner API (groups + trial provisioning), and
  * S3-Compatible (buckets, objects, multipart, presigned URLs, object lock,
- * extras). The exact tool count is asserted in tests/unit/tools-schema.test.ts
- * and logged at startup ("server.ready") rather than tracked here, so this
- * comment can't drift out of date.
+ * extras). The exact tool count is asserted in
+ * tests/contract/tools-schema.contract.test.ts and logged at startup
+ * ("server.ready") rather than tracked here, so this comment can't drift out of
+ * date.
  *
  * Credential model: B2_APPLICATION_KEY_ID/KEY is the application key — the
  * workhorse for the B2 native API, S3, and key management. A single non-master

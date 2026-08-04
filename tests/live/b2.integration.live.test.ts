@@ -11,10 +11,11 @@
  *   writeBucketLogging, listKeys
  *
  * Run with:
- *   npm run test:integration
+ *   npm run test:integration:live
  *
- * Protocol-layer tests run without any credentials.
- * All live B2 API tests are skipped when credentials are absent.
+ * The npm script fails fast when credentials are absent. If this file is
+ * selected directly with Jest, live B2 API tests are skipped when credentials
+ * are absent so a local editor cannot accidentally call B2.
  */
 
 import * as fs from "fs";
@@ -81,24 +82,11 @@ let writableBucketName: string; // First non-snapshot S3 bucket (safe for writes
 let writableBucketId: string; // First non-snapshot B2 bucket ID (safe for writes)
 
 beforeAll(async () => {
-  const config = HAS_CREDS
-    ? loadConfig()
-    : {
-        applicationKeyId: "test",
-        applicationKey: "test",
-        appKeyId: "test",
-        appKey: "test",
-        masterKeyId: "test",
-        masterKey: "test",
-        region: "us-west-004",
-        allowLocalFiles: true,
-        fileRoot: null,
-      };
+  if (!HAS_CREDS) return;
+  const config = loadConfig();
   // Integration tests legitimately create AND clean up real resources, so disable
   // the destructive-op gate here (it is unit-tested separately).
   server = createServer({ ...config, destructivePolicy: "allow" });
-
-  if (!HAS_CREDS) return;
 
   // Discover a bucket and object once for use across all tests (B2 native — master key)
   const b2Buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
@@ -115,55 +103,6 @@ beforeAll(async () => {
     const writableS3 = b2Buckets.buckets.find((b: any) => isUserWritableBucket(b.bucketName));
     if (writableS3) writableBucketName = writableS3.bucketName;
   }
-});
-
-// ── Protocol layer (no credentials needed) ────────────────────────────────────
-
-describe("Protocol layer", () => {
-  it("registers 40 callable tool names total", () => {
-    const count = Object.keys(getRegisteredTools(server) ?? {}).length;
-    expect(count).toBe(40);
-  });
-
-  it("has 21 B2 native + Partner + insight b2_ tool names", () => {
-    const tools = Object.keys(getRegisteredTools(server) ?? {});
-    expect(tools.filter((t) => t.startsWith("b2_")).length).toBe(21);
-  });
-
-  it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
-    const tools = Object.keys(getRegisteredTools(server) ?? {});
-    expect(tools.filter((t) => t.startsWith("bz_")).length).toBe(0);
-  });
-
-  it("has 19 S3-compatible data-plane tools (s3_ prefix)", () => {
-    const tools = Object.keys(getRegisteredTools(server) ?? {});
-    expect(tools.filter((t) => t.startsWith("s3_")).length).toBe(19);
-  });
-
-  it("includes all expected landmark tools", () => {
-    const tools = new Set(Object.keys(getRegisteredTools(server) ?? {}));
-    for (const name of [
-      "b2_authorize_account",
-      "s3_put_object",
-      "b2_list_buckets",
-      "s3_create_multipart_upload",
-      "b2_update_file_legal_hold",
-      "s3_head_bucket",
-      "s3_put_bucket_lifecycle",
-      "s3_get_bucket_location",
-      "s3_get_presigned_url",
-      // Partner API tools
-      "b2_list_groups",
-      "b2_eject_group_member",
-      "b2_list_group_members",
-      // Durable-secret-producing compatibility stubs
-      "b2_create_key",
-      "b2_create_group_member",
-      "b2_reserve_trial_create_account",
-    ]) {
-      expect(tools.has(name)).toBe(true);
-    }
-  });
 });
 
 // ── B2 Native API — Authentication ────────────────────────────────────────────
@@ -353,15 +292,6 @@ describe("Partner API — Groups (gated: B2_PARTNER_LIVE=1)", () => {
     );
     expect(members).toHaveProperty("members");
     console.log("  Members in group", groupId, ":", members.members?.length ?? 0);
-  });
-
-  test("secret-producing Partner create tools are unavailable compatibility stubs", async () => {
-    for (const name of ["b2_create_group_member", "b2_reserve_trial_create_account"]) {
-      const result = await callTool(server, name, {});
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("tool_unavailable");
-      expect(result.content[0].text).not.toContain("authorizationToken");
-    }
   });
 });
 

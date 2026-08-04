@@ -214,8 +214,15 @@ Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitorin
 ```bash
 npm run build              # clean + compile to dist/
 npm run typecheck          # type-check src + tests (no emit)
-npm test                   # unit tests (no credentials needed)
-npm run test:integration   # live B2 tests — needs B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+npm test                   # fast unit tests (no credentials needed)
+npm run test:contract      # deterministic MCP/package/schema contracts
+npm run test:protocol      # modern + legacy MCP protocol behavior
+npm run test:coverage      # deterministic source-covering suites + coverage summary
+npm run test:slow          # deterministic high-cost tests, isolated from unit
+npm run test:package       # packed-package installation test
+npm run verify             # complete no-credential local gate
+npm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+npm run test:contract:live    # live B2 request-shape checks; requires B2 credentials
 npm start                  # stdio transport
 npm run start:http -- --port 3000   # MCP 2026-07-28 HTTP transport
 npx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspector

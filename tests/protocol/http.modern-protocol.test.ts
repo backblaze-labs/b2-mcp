@@ -221,17 +221,6 @@ function modernHeaders(method: string, name?: string): Record<string, string> {
 }
 
 const LIST_TOOLS = modernBody("tools/list");
-const LEGACY_INIT = JSON.stringify({
-  jsonrpc: "2.0",
-  id: 1,
-  method: "initialize",
-  params: {
-    protocolVersion: "2025-03-26",
-    capabilities: {},
-    clientInfo: { name: "test", version: "1" },
-  },
-});
-
 function jsonRpcResponse(result: unknown = {}): Response {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
     status: 200,
@@ -370,24 +359,6 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       headers: { origin: `http://127.0.0.1:${port}` },
     });
     expect(res.status).toBe(405);
-  });
-
-  it("serves legacy initialize through the stateless transition fallback", async () => {
-    const res = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...JSON_HEADERS },
-      body: LEGACY_INIT,
-    });
-    expect(res.status).toBe(200);
-    expect(res.headers["mcp-session-id"]).toBeUndefined();
-    expect(handle.sessions.size).toBe(0);
-  });
-
-  it("does not route Mcp-Session-Id requests to stateful session storage", async () => {
-    const res = await request(port, "GET", "/mcp", {
-      headers: { ...creds, "mcp-session-id": "ghost" },
-    });
-    expect(res.status).toBe(405);
-    expect(handle.sessions.size).toBe(0);
   });
 
   it("returns SDK 405 for GET and DELETE before credential resolution", async () => {

@@ -1,6 +1,6 @@
 name: Contract
 
-# Live request-shape contract tests (tests/integration/contract.test.ts).
+# Live request-shape contract tests (tests/live/request-shape.contract.live.test.ts).
 #
 # Mocked unit tests cannot catch a tool that sends the wrong payload SHAPE to B2 —
 # two real bugs shipped that way (notification objectNamePrefix; Object Lock
@@ -111,7 +111,7 @@ jobs:
             fi
           done
           exit "$missing"
-      - run: npm run test:contract
+      - run: npm run test:contract:live
         env:
           # Environment-scoped live B2 secrets. Do not use repo-level B2 secrets here.
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}

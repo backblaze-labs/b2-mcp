@@ -28,7 +28,7 @@ const ROOT = path.resolve(__dirname, "..");
 const OUT_DIR = path.join(ROOT, "probe-output");
 const TICKET_DIR = path.join(OUT_DIR, "tickets");
 
-// ── Tool invocation helpers (mirror tests/integration/live.test.ts) ────────────
+// ── Tool invocation helpers (mirror tests/live/b2.integration.live.test.ts) ────
 
 function getHandler(server, name) {
   const tool = getRegisteredTools(server)?.[name];

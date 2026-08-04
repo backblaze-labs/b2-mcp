@@ -11,8 +11,12 @@
  * Each test below drives the real B2 write API and asserts the contract holds, so a
  * future shape regression fails here instead of in production.
  *
- * Credentials (same as the integration suite): B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY.
- * Skipped automatically when absent, so this file is safe to run anywhere.
+ * Run with:
+ *   npm run test:contract:live
+ *
+ * The npm script fails fast when B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+ * are absent. Direct Jest selection skips this file's cases when credentials
+ * are absent so a local editor cannot accidentally call B2.
  */
 
 import { loadConfig, createServer, getRegisteredTools } from "../../src/server";

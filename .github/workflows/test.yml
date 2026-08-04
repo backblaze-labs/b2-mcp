@@ -39,7 +39,24 @@ jobs:
           cache: npm
       - run: npm ci --engine-strict
       - run: npm run build
+      - run: npm run typecheck
       - run: npm test
+      - run: npm run test:contract
+      - run: npm run test:protocol
+      - run: npm run test:slow
+      - run: npm run test:package
+      - run: npm run test:coverage
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-reports
+          path: |
+            reports/junit/*.xml
+            reports/jest/*.json
+            coverage/coverage-summary.json
+            coverage/cobertura-coverage.xml
+          if-no-files-found: warn
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green
