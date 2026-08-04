@@ -45,7 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checked from `runtime-policy.json`.
 - Aligned lint tooling to the latest ESLint 9 / typescript-eslint 8 patch set
   that can install with `--engine-strict` on the Node.js 22.3.0 SDK floor, while
-  keeping `@types/node` on Node 26 for forward-compatibility review.
+  pinning `@types/node` to the Node.js 22.3.0 runtime floor so typecheck cannot
+  rely on newer stdlib APIs that only Node 24 or 26 execution tests cover.
 - Migrated HTTP and stdio serving to the MCP TypeScript SDK v2 modern entry
   points for MCP `2026-07-28`.
 - Removed the unused `@aws-sdk/s3-presigned-post` dependency because S3 POST

@@ -10,13 +10,17 @@ const runtimePolicy = JSON.parse(readFileSync(path.join(root, "runtime-policy.js
 const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-consumer-"));
 const home = path.join(workspace, "home");
 const npmCache = path.join(workspace, "npm-cache");
-const sentinelEnv = {
+// These names intentionally look like credentials. The child-process probe below
+// verifies sanitizedEnv strips them before any npm or package process starts.
+const sanitizerBlockedEnv = {
   AWS_SECRET_ACCESS_KEY: "sentinel-aws-secret",
   B2_MASTER_KEY: "sentinel-b2-master",
   GITHUB_TOKEN: "sentinel-github-token",
   NPM_TOKEN: "sentinel-npm-token",
 };
 const secretNamePattern = /(?:^AWS_|^B2_|^GITHUB_|^NPM_|TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)/i;
+// B2_REGISTER_ALL_TOOLS is a non-secret control flag needed by the
+// missing-credential startup probe, so it is intentionally allowed through.
 const nonSecretEnvNames = new Set(["B2_REGISTER_ALL_TOOLS"]);
 
 function sanitizedEnv(extra = {}) {
@@ -46,21 +50,57 @@ function sanitizedEnv(extra = {}) {
   return env;
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function commandLine(command, args) {
+  return [command, ...args].join(" ");
+}
+
+function isRetriableNpmFailure(command, result) {
+  if (command !== "npm") return false;
+  if (result.error?.code === "ETIMEDOUT") return true;
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  return /(?:EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EPIPE|fetch failed|network socket|network timeout|registry|503|504)/i.test(
+    output,
+  );
+}
+
 function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    cwd: options.cwd ?? workspace,
-    env: sanitizedEnv(options.env),
-    encoding: "utf8",
-    timeout: options.timeout ?? 120_000,
-    stdio: options.stdio ?? "pipe",
-  });
-  if (result.error) throw result.error;
-  if (options.allowFailure !== true && result.status !== 0) {
+  const attempts = (options.retries ?? 0) + 1;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = spawnSync(command, args, {
+      cwd: options.cwd ?? workspace,
+      env: sanitizedEnv(options.env),
+      encoding: "utf8",
+      timeout: options.timeout ?? 120_000,
+      stdio: options.stdio ?? "pipe",
+    });
+    const failed = result.error || (options.allowFailure !== true && result.status !== 0);
+    if (!failed) return result;
+
+    if (attempt < attempts && isRetriableNpmFailure(command, result)) {
+      const label = options.retryLabel ?? commandLine(command, args);
+      console.warn(
+        `packed-consumer-smoke: retrying ${label} after transient registry failure (${attempt}/${attempts})`,
+      );
+      sleep((options.retryDelayMs ?? 1_000) * attempt);
+      continue;
+    }
+
+    if (result.error) {
+      throw new Error(
+        `${commandLine(command, args)} failed: ${result.error.message}\n${result.stdout ?? ""}\n${
+          result.stderr ?? ""
+        }`,
+      );
+    }
     throw new Error(
-      `${command} ${args.join(" ")} failed with ${result.status}\n${result.stdout}\n${result.stderr}`,
+      `${commandLine(command, args)} failed with ${result.status}\n${result.stdout}\n${result.stderr}`,
     );
   }
-  return result;
+  throw new Error(`${commandLine(command, args)} failed without a result`);
 }
 
 function writeConsumerLock(tarball) {
@@ -88,26 +128,25 @@ function writeConsumerLock(tarball) {
 }
 
 try {
-  const secretProbe = run(
+  run(
     process.execPath,
     [
       "-e",
       [
-        `for (const name of ${JSON.stringify(Object.keys(sentinelEnv))}) {`,
-        "  if (process.env[name]) throw new Error(`secret leaked: ${name}`);",
+        `for (const name of ${JSON.stringify(Object.keys(sanitizerBlockedEnv))}) {`,
+        "  if (process.env[name]) throw new Error(`sanitizer leaked blocked env: ${name}`);",
         "}",
       ].join("\n"),
     ],
-    { env: sentinelEnv },
+    { env: sanitizerBlockedEnv },
   );
-  if (secretProbe.status !== 0) throw new Error("sanitized environment probe failed");
 
   const packed = run(
     "npm",
     ["pack", "--json", "--ignore-scripts", "--pack-destination", workspace],
     {
       cwd: root,
-      env: sentinelEnv,
+      env: sanitizerBlockedEnv,
     },
   );
   const [{ filename }] = JSON.parse(packed.stdout);
@@ -128,23 +167,39 @@ try {
   );
   writeConsumerLock(tarball);
 
-  run("npm", ["ci", "--engine-strict", "--omit=dev", "--ignore-scripts"], { env: sentinelEnv });
+  run("npm", ["ci", "--engine-strict", "--omit=dev", "--ignore-scripts"], {
+    env: {
+      ...sanitizerBlockedEnv,
+      npm_config_fetch_retries: "3",
+      npm_config_fetch_retry_factor: "2",
+      npm_config_fetch_retry_mintimeout: "1000",
+      npm_config_fetch_retry_maxtimeout: "10000",
+    },
+    retries: 2,
+    retryDelayMs: 1_000,
+    retryLabel: "npm ci",
+    timeout: 180_000,
+  });
   run(
     process.execPath,
     [
       "-e",
       [
-        `for (const name of ${JSON.stringify(Object.keys(sentinelEnv))}) {`,
-        "  if (process.env[name]) throw new Error(`secret leaked: ${name}`);",
+        `for (const name of ${JSON.stringify(Object.keys(sanitizerBlockedEnv))}) {`,
+        "  if (process.env[name]) throw new Error(`sanitizer leaked blocked env: ${name}`);",
         "}",
+        'const fs = require("node:fs");',
+        'const path = require("node:path");',
         'const pkg = require("@backblaze-labs/b2-mcp");',
         'const meta = require("@backblaze-labs/b2-mcp/package.json");',
+        'const packageRoot = path.dirname(require.resolve("@backblaze-labs/b2-mcp/package.json"));',
         'if (typeof pkg.startStdio !== "function") throw new Error("missing startStdio export");',
         `if (meta.engines.node !== ${JSON.stringify(runtimePolicy.engineFloor)}) throw new Error("wrong package engine");`,
         'if (meta.bin["b2-mcp"] !== "dist/index.js") throw new Error("wrong b2-mcp bin");',
+        'if (fs.existsSync(path.join(packageRoot, "runtime-policy.json"))) throw new Error("runtime-policy.json should not be published");',
       ].join("\n"),
     ],
-    { env: sentinelEnv },
+    { env: sanitizerBlockedEnv },
   );
 
   const entrypoint = path.join(
@@ -158,7 +213,7 @@ try {
   const withoutCreds = run(process.execPath, [entrypoint], {
     allowFailure: true,
     env: {
-      ...sentinelEnv,
+      ...sanitizerBlockedEnv,
       B2_APPLICATION_KEY_ID: "",
       B2_APPLICATION_KEY: "",
       B2_REGISTER_ALL_TOOLS: "true",
