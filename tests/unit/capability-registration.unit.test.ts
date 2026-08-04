@@ -18,7 +18,7 @@ import {
   TOOL_CAPABILITIES,
 } from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
-import { setB2SdkClientFactoryForTests } from "../../src/auth";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import {
   authorizeResponse,
   installSdkTransport,

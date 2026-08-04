@@ -4,7 +4,8 @@ import {
   type HttpResponse,
   type HttpTransport,
 } from "@backblaze-labs/b2-sdk";
-import { RequestSignalTransport, setB2SdkClientFactoryForTests } from "../../src/auth";
+import { RequestSignalTransport } from "../../src/auth";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import { B2Config } from "../../src/utils/types";
 
 export class StaticHttpResponse implements HttpResponse {

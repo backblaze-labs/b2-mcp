@@ -198,8 +198,6 @@ export function createS3Client(config: B2Config, options: B2S3ClientOptions = {}
 
 export function createReportS3Client(config: B2Config, auth: B2AuthResponse): S3Client {
   return createS3Client(config, {
-    applicationKeyId: config.applicationKeyId,
-    applicationKey: config.applicationKey,
     authorizedS3ApiUrl: auth.s3ApiUrl,
     surface: "b2-insights-reports",
   });

@@ -1,10 +1,12 @@
 import {
+  CIRCUIT_TIMEOUT_MS,
   withCircuit,
   withReportCircuit,
   circuitBreaker,
   reportCircuitBreaker,
   isClientError,
 } from "../../src/utils/circuit-breaker";
+import { currentMcpRequestSignal } from "../../src/request-context";
 
 describe("circuit-breaker", () => {
   afterEach(() => {
@@ -58,6 +60,28 @@ describe("circuit-breaker", () => {
   it("fails fast when open", async () => {
     circuitBreaker.open();
     await expect(withCircuit(async () => 1)).rejects.toThrow(/breaker/i);
+  });
+
+  it("aborts wrapped work when the circuit timeout fires", async () => {
+    jest.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const promise = withCircuit(
+        () =>
+          new Promise((_, reject) => {
+            signal = currentMcpRequestSignal();
+            signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+          }),
+      );
+
+      await Promise.resolve();
+      expect(signal).toBeDefined();
+      jest.advanceTimersByTime(CIRCUIT_TIMEOUT_MS + 1);
+      await expect(promise).rejects.toThrow(/timed out/i);
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("keeps report S3 failures isolated from the native breaker", async () => {

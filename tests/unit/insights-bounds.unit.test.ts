@@ -9,7 +9,7 @@
  */
 
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "../../src/auth";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,

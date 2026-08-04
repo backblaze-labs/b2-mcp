@@ -22,7 +22,7 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "../../src/auth";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
 import {

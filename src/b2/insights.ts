@@ -18,7 +18,13 @@
  */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client } from "./client.js";
+import {
+  B2Client,
+  type FileVersionResult,
+  type PartInfoResult,
+  type UnfinishedLargeFileResult,
+} from "./client.js";
+import { B2ReportClient, type ReportObjectClient } from "./report-client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { dateFromTimestamp } from "../utils/date.js";
@@ -229,6 +235,10 @@ function reportScanTimedOut(startedAt: number): boolean {
   return Date.now() - startedAt > REPORT_SCAN_LIMITS.maxElapsedMs;
 }
 
+function reportScanRemainingMs(startedAt: number): number {
+  return Math.max(1, REPORT_SCAN_LIMITS.maxElapsedMs - (Date.now() - startedAt));
+}
+
 function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknown> {
   const truncated = loads.some((load) => load.truncated);
   const totals = loads.reduce(
@@ -306,7 +316,7 @@ export function selectUsageKeys(keys: string[]): string[] {
  * Returns null when the bucket does not exist (reports not enabled).
  */
 async function loadReportRows(
-  b2Client: B2Client,
+  reportClient: ReportObjectClient,
   bucketName: string,
   sinceDate: string,
 ): Promise<ReportRowsResult | null> {
@@ -321,13 +331,14 @@ async function loadReportRows(
         stopReportScan(stats, "time_budget");
         break;
       }
-      const page = await b2Client.listReportObjectKeys(bucketName, {
+      const page = await reportClient.listReportObjectKeys(bucketName, {
         // StartAfter skips every key before the window (keys are date-prefixed
         // and sort lexically), so a long-lived report bucket isn't fully scanned.
         // StartAfter applies to the first page only; ContinuationToken drives the rest.
         startAfter: sinceDate,
         continuationToken: token,
         maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
+        timeoutMs: reportScanRemainingMs(startedAt),
       });
       stats.pages++;
       stats.listed_keys += page.keys.length;
@@ -353,11 +364,11 @@ async function loadReportRows(
     throw e;
   }
 
-  return loadRowsFromReportKeys(b2Client, bucketName, keys, stats, startedAt);
+  return loadRowsFromReportKeys(reportClient, bucketName, keys, stats, startedAt);
 }
 
 async function loadRowsFromReportKeys(
-  b2Client: B2Client,
+  reportClient: ReportObjectClient,
   bucketName: string,
   keys: string[],
   stats: ReportLoadStats,
@@ -386,17 +397,14 @@ async function loadRowsFromReportKeys(
         stopDownloads = true;
         return;
       }
-      const download = await b2Client.downloadReportObjectText(bucketName, key, {
+      const download = await reportClient.downloadReportObjectText(bucketName, key, {
         maxBytes: remainingBytes,
+        timeoutMs: reportScanRemainingMs(startedAt),
       });
-      const text = typeof download === "string" ? download : download.text;
+      const { text, bytes, truncated } = download;
       stats.downloaded_keys++;
-      stats.downloaded_bytes +=
-        typeof download === "string" ? Buffer.byteLength(text, "utf8") : download.bytes;
-      if (
-        (typeof download !== "string" && download.truncated) ||
-        stats.downloaded_bytes > REPORT_SCAN_LIMITS.maxDownloadedBytes
-      ) {
+      stats.downloaded_bytes += bytes;
+      if (truncated || stats.downloaded_bytes > REPORT_SCAN_LIMITS.maxDownloadedBytes) {
         stopReportScan(stats, "max_downloaded_bytes");
         stopDownloads = true;
         return;
@@ -481,14 +489,16 @@ function is404(e: unknown): boolean {
 /** Date of the nearest available daily snapshot at or after `target`.
  *  `{ bucketMissing: true }` ⇒ reports bucket absent (not enabled). */
 async function nearestSnapshotDate(
-  b2Client: B2Client,
+  reportClient: ReportObjectClient,
   bucketName: string,
   target: string,
 ): Promise<{ date: string | null; bucketMissing: boolean }> {
+  const startedAt = Date.now();
   try {
-    const page = await b2Client.listReportObjectKeys(bucketName, {
+    const page = await reportClient.listReportObjectKeys(bucketName, {
       startAfter: target,
       maxKeys: 1,
+      timeoutMs: reportScanRemainingMs(startedAt),
     });
     return { date: snapshotDateOf(page.keys[0] ?? ""), bucketMissing: false };
   } catch (e) {
@@ -500,19 +510,21 @@ async function nearestSnapshotDate(
 /** Date of the latest available snapshot (most recent day on or before today).
  *  Lists only recent days via StartAfter, widening if reporting is stale. */
 export async function latestSnapshotDate(
-  b2Client: B2Client,
+  reportClient: ReportObjectClient,
   bucketName: string,
   today: Date,
 ): Promise<{ date: string | null; bucketMissing: boolean }> {
+  const startedAt = Date.now();
   for (const lookback of [10, 45, 180]) {
     const after = new Date(today.getTime() - lookback * 86400_000).toISOString().slice(0, 10);
     let token: string | undefined;
     let max: string | null = null;
     try {
       do {
-        const page = await b2Client.listReportObjectKeys(bucketName, {
+        const page = await reportClient.listReportObjectKeys(bucketName, {
           startAfter: after,
           continuationToken: token,
+          timeoutMs: reportScanRemainingMs(startedAt),
         });
         for (const key of page.keys) {
           const d = snapshotDateOf(key);
@@ -531,15 +543,15 @@ export async function latestSnapshotDate(
 
 /** All usage rows for a single day folder (summed across that day's region files). */
 export async function loadDayRows(
-  b2Client: B2Client,
+  reportClient: ReportObjectClient,
   bucketName: string,
   dayDate: string,
 ): Promise<ReportRow[]> {
-  return (await loadDayRowsBounded(b2Client, bucketName, dayDate)).rows;
+  return (await loadDayRowsBounded(reportClient, bucketName, dayDate)).rows;
 }
 
 async function loadDayRowsBounded(
-  b2Client: B2Client,
+  reportClient: ReportObjectClient,
   bucketName: string,
   dayDate: string,
 ): Promise<ReportRowsResult> {
@@ -552,10 +564,11 @@ async function loadDayRowsBounded(
       stopReportScan(stats, "time_budget");
       break;
     }
-    const page = await b2Client.listReportObjectKeys(bucketName, {
+    const page = await reportClient.listReportObjectKeys(bucketName, {
       prefix: `${dayDate}/`,
       continuationToken: token,
       maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
+      timeoutMs: reportScanRemainingMs(startedAt),
     });
     stats.pages++;
     stats.listed_keys += page.keys.length;
@@ -575,7 +588,7 @@ async function loadDayRowsBounded(
       break;
     }
   } while (token);
-  return loadRowsFromReportKeys(b2Client, bucketName, keys, stats, startedAt);
+  return loadRowsFromReportKeys(reportClient, bucketName, keys, stats, startedAt);
 }
 
 /** Sum stored bytes per account from a snapshot's rows (skip null storage). */
@@ -664,16 +677,40 @@ function bucketResolutionError(
   return null;
 }
 
-type UnfinishedUploadFile = Parameters<B2Client["toListedUnfinishedUpload"]>[0];
+function toListedFile(file: FileVersionResult): { name: string; size: number; uploadedAt?: Date } {
+  return {
+    name: file.fileName,
+    size: file.contentLength,
+    uploadedAt: dateFromTimestamp(file.uploadTimestamp),
+  };
+}
+
+function toListedUnfinishedUpload(file: UnfinishedLargeFileResult): {
+  fileId: string;
+  fileName: string;
+  uploadTimestamp?: number;
+} {
+  return {
+    fileId: file.fileId,
+    fileName: file.fileName,
+    uploadTimestamp: file.uploadTimestamp,
+  };
+}
+
+function toListedPart(part: PartInfoResult): { partNumber: number; size: number } {
+  return {
+    partNumber: part.partNumber,
+    size: part.contentLength,
+  };
+}
 
 function matchingUnfinishedUploads(
-  b2Client: B2Client,
-  files: readonly UnfinishedUploadFile[],
+  files: readonly UnfinishedLargeFileResult[],
   cutoff: number | null,
 ): Array<{ fileId: string; fileName: string; initiated?: Date }> {
   const matches: Array<{ fileId: string; fileName: string; initiated?: Date }> = [];
   for (const file of files) {
-    const listed = b2Client.toListedUnfinishedUpload(file);
+    const listed = toListedUnfinishedUpload(file);
     const initiated = dateFromTimestamp(listed.uploadTimestamp);
     if (cutoff != null && initiated && initiated.getTime() > cutoff) continue;
     matches.push({ fileId: listed.fileId, fileName: listed.fileName, initiated });
@@ -687,6 +724,7 @@ export function registerInsightTools(
   server: ToolRegistrar,
   b2Client: B2Client,
   auth: B2AuthManager,
+  reportClient: ReportObjectClient = new B2ReportClient(auth),
 ): void {
   // ── b2_usage_growth ───────────────────────────────────────────────────────
   server.registerTool(
@@ -732,12 +770,12 @@ export function registerInsightTools(
         const targetThen =
           args.days != null ? daysAgo(args.days) : periodStartDate(args.period, today);
 
-        const latest = await latestSnapshotDate(b2Client, bucket, today);
+        const latest = await latestSnapshotDate(reportClient, bucket, today);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
         if (!latest.date)
           return toolJson({ reports_enabled: true, note: "No usage-report snapshots found yet." });
 
-        const then = await nearestSnapshotDate(b2Client, bucket, targetThen);
+        const then = await nearestSnapshotDate(reportClient, bucket, targetThen);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
         if (!then.date || then.date >= latest.date)
           return toolJson({
@@ -749,8 +787,8 @@ export function registerInsightTools(
           });
 
         const [thenRows, nowRows] = await Promise.all([
-          loadDayRowsBounded(b2Client, bucket, then.date),
-          loadDayRowsBounded(b2Client, bucket, latest.date),
+          loadDayRowsBounded(reportClient, bucket, then.date),
+          loadDayRowsBounded(reportClient, bucket, latest.date),
         ]);
 
         let accounts = computeSnapshotGrowth(thenRows.rows, nowRows.rows);
@@ -805,7 +843,7 @@ export function registerInsightTools(
     async (args) => {
       try {
         const since = args.days != null ? daysAgo(args.days) : startOfMonthUTC();
-        const loaded = await loadReportRows(b2Client, await reportsBucketName(auth), since);
+        const loaded = await loadReportRows(reportClient, await reportsBucketName(auth), since);
         if (loaded === null) return toolJson(NOT_ENABLED);
         const leaders = computeEgressLeaders(loaded.rows, args.by);
         const total = leaders.reduce((s, l) => s + l.egress, 0);
@@ -895,7 +933,7 @@ export function registerInsightTools(
               pageExhausted = false;
               break;
             }
-            const listed = b2Client.toListedFile(file);
+            const listed = toListedFile(file);
             scanned++;
             const size = listed.size;
             if (top.length < args.limit || size > smallest) {
@@ -1001,7 +1039,7 @@ export function registerInsightTools(
             startFileId: fileIdMarker,
             maxFileCount: 100,
           });
-          const matchingUploads = matchingUnfinishedUploads(b2Client, page.files ?? [], cutoff);
+          const matchingUploads = matchingUnfinishedUploads(page.files ?? [], cutoff);
           const availableSlots = Math.max(0, args.max_uploads - uploads.length);
           uploads.push(...matchingUploads.slice(0, availableSlots));
           fileIdMarker = page.nextFileId ?? undefined;
@@ -1046,7 +1084,7 @@ export function registerInsightTools(
               startPartNumber: partMarker,
               maxPartCount: 1000,
             });
-            for (const p of parts.parts ?? []) wasted += b2Client.toListedPart(p).size;
+            for (const p of parts.parts ?? []) wasted += toListedPart(p).size;
             partMarker = parts.nextPartNumber ?? undefined;
           } while (partMarker != null);
           sizedUploads++;

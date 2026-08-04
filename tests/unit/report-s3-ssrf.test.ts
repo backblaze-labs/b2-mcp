@@ -1,7 +1,7 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "../../src/auth";
-import { B2Client } from "../../src/b2/client";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { B2ReportClient } from "../../src/b2/report-client";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,
@@ -132,7 +132,7 @@ describe("insight report S3 endpoint validation", () => {
       },
     };
     sendSpy.mockResolvedValueOnce({ Body: body });
-    const client = new B2Client({
+    const client = new B2ReportClient({
       getConfig: () => testConfig,
       getAuth: async () => reportAuth(),
     } as never);
@@ -144,6 +144,39 @@ describe("insight report S3 endpoint validation", () => {
     expect(result).toEqual({ text: "abc", bytes: 3, truncated: true });
     expect(chunksRead).toBe(1);
     expect(body.transformToString).not.toHaveBeenCalled();
+    expect(body.destroy).toHaveBeenCalled();
+  });
+
+  it("aborts a stalled report body read at the request deadline", async () => {
+    let resolveNext: ((value: IteratorResult<Buffer>) => void) | undefined;
+    const next = jest.fn(
+      () =>
+        new Promise<IteratorResult<Buffer>>((resolve) => {
+          resolveNext = resolve;
+        }),
+    );
+    const body = {
+      destroy: jest.fn(() => {
+        resolveNext?.({ done: true, value: undefined as never });
+      }),
+      [Symbol.asyncIterator]: () => ({
+        next,
+        return: jest.fn(async () => ({ done: true, value: undefined as never })),
+      }),
+    };
+    sendSpy.mockResolvedValueOnce({ Body: body });
+    const client = new B2ReportClient({
+      getConfig: () => testConfig,
+      getAuth: async () => reportAuth(),
+    } as never);
+
+    await expect(
+      client.downloadReportObjectText("b2-reports-test", "stalled.csv", {
+        timeoutMs: 5,
+      }),
+    ).rejects.toThrow(/timed out|Timeout/);
+
+    expect(next).toHaveBeenCalledTimes(1);
     expect(body.destroy).toHaveBeenCalled();
   });
 });

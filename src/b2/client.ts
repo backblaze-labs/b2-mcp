@@ -1,4 +1,3 @@
-import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import type {
   ApplicationKey,
   ApplicationKeyId,
@@ -21,10 +20,8 @@ import type {
 } from "@backblaze-labs/b2-sdk";
 import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
 import { B2AuthManager } from "../auth.js";
-import { withCircuit, withReportCircuit } from "../utils/circuit-breaker.js";
+import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
-import { createReportS3Client } from "../s3/client.js";
-import { dateFromTimestamp } from "../utils/date.js";
 import { B2AuthResponse } from "../utils/types.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
@@ -133,10 +130,21 @@ export interface NotificationRulesResult {
   eventNotificationRules: EventNotificationRuleInput[];
 }
 
-export type ApplicationKeyResult = object;
+export interface ApplicationKeyResult {
+  keyName: string;
+  applicationKeyId: string;
+  capabilities: string[];
+  accountId: string;
+  expirationTimestamp: number | null;
+  bucketIds: string[] | null;
+  bucketId: string | null;
+  namePrefix: string | null;
+  options: string[];
+}
 
 export interface ListKeysResult {
   keys: ApplicationKeyResult[];
+  nextApplicationKeyId?: string | null;
 }
 
 export interface ListKeysOptions {
@@ -181,23 +189,19 @@ export interface UpdateFileRetentionOptions {
   bypassGovernance?: boolean;
 }
 
-export type UpdateFileLegalHoldResult = object;
-export type UpdateFileRetentionResult = object;
-
-export interface ReportObjectPage {
-  keys: string[];
-  isTruncated: boolean;
-  nextContinuationToken?: string;
+export interface UpdateFileLegalHoldResult {
+  fileName: string;
+  fileId: string;
+  legalHold: "on" | "off";
 }
 
-export interface ReportObjectText {
-  text: string;
-  bytes: number;
-  truncated: boolean;
-}
-
-export interface DownloadReportObjectTextOptions {
-  maxBytes?: number;
+export interface UpdateFileRetentionResult {
+  fileName: string;
+  fileId: string;
+  fileRetention: {
+    mode: "governance" | "compliance" | null;
+    retainUntilTimestamp: number | null;
+  };
 }
 
 export interface FileVersionResult {
@@ -232,23 +236,6 @@ export interface ListPartsResult {
   nextPartNumber?: number | null;
 }
 
-export interface ListedFile {
-  name: string;
-  size: number;
-  uploadedAt?: Date;
-}
-
-export interface ListedUnfinishedUpload {
-  fileId: string;
-  fileName: string;
-  uploadTimestamp?: number;
-}
-
-export interface ListedPart {
-  partNumber: number;
-  size: number;
-}
-
 function cloneJsonResponse<T>(value: T): T {
   // SDK simulator responses can contain shared object references that the MCP
   // sanitizer would otherwise mark as circular. B2 API payloads are JSON-only,
@@ -257,7 +244,7 @@ function cloneJsonResponse<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function toPlainObject<T extends object>(value: T): object {
+function toPlainObject<T extends object>(value: T): T {
   return Object.assign({}, cloneJsonResponse(value));
 }
 
@@ -291,7 +278,18 @@ function toNotificationRulesResult(
 }
 
 function toApplicationKeyResult(value: ApplicationKey): ApplicationKeyResult {
-  return toPlainObject(value);
+  return {
+    ...toPlainObject(value),
+    keyName: value.keyName,
+    applicationKeyId: String(value.applicationKeyId),
+    capabilities: [...value.capabilities],
+    accountId: String(value.accountId),
+    expirationTimestamp: value.expirationTimestamp,
+    bucketIds: value.bucketIds ? value.bucketIds.map(String) : null,
+    bucketId: value.bucketId == null ? null : String(value.bucketId),
+    namePrefix: value.namePrefix,
+    options: [...value.options],
+  };
 }
 
 function toFileVersionResult(value: FileVersion): FileVersionResult {
@@ -317,110 +315,25 @@ function toPartInfoResult(value: PartInfo): PartInfoResult {
   });
 }
 
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return (
-    !!value &&
-    (typeof value === "object" || typeof value === "function") &&
-    Symbol.asyncIterator in value &&
-    typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
-  );
+function toFileLegalHoldResult(value: UpdateFileLegalHoldResult): UpdateFileLegalHoldResult {
+  return {
+    ...toPlainObject(value),
+    fileName: value.fileName,
+    fileId: String(value.fileId),
+    legalHold: value.legalHold,
+  };
 }
 
-function chunkToBytes(chunk: unknown): Uint8Array {
-  if (typeof chunk === "string") return new TextEncoder().encode(chunk);
-  if (chunk instanceof Uint8Array) return chunk;
-  if (chunk instanceof ArrayBuffer) return new Uint8Array(chunk);
-  throw new Error("Unsupported B2 report object body chunk.");
-}
-
-function appendReportChunk(
-  decoder: { decode(input?: Uint8Array, options?: { stream?: boolean }): string },
-  chunk: unknown,
-  state: { text: string; bytes: number; maxBytes: number; truncated: boolean },
-): boolean {
-  const bytes = chunkToBytes(chunk);
-  const remaining = state.maxBytes - state.bytes;
-  if (remaining <= 0) {
-    state.truncated = true;
-    return false;
-  }
-  if (bytes.byteLength > remaining) {
-    state.text += decoder.decode(bytes.subarray(0, remaining), { stream: true });
-    state.bytes += remaining;
-    state.truncated = true;
-    return false;
-  }
-  state.text += decoder.decode(bytes, { stream: true });
-  state.bytes += bytes.byteLength;
-  return true;
-}
-
-function destroyReportBody(body: unknown, reason: Error): void {
-  const maybeDestroy = (body as { destroy?: unknown } | null)?.destroy;
-  if (typeof maybeDestroy === "function") maybeDestroy.call(body, reason);
-}
-
-function reportObjectText(state: {
-  text: string;
-  bytes: number;
-  truncated: boolean;
-}): ReportObjectText {
-  return { text: state.text, bytes: state.bytes, truncated: state.truncated };
-}
-
-async function readReportObjectBodyText(
-  body: unknown,
-  maxBytes = Number.POSITIVE_INFINITY,
-): Promise<ReportObjectText> {
-  if (!body) throw new Error("B2 report object response did not include a body.");
-  const byteLimit = Math.max(0, maxBytes);
-  const decoder = new TextDecoder();
-  const state = { text: "", bytes: 0, maxBytes: byteLimit, truncated: false };
-  const stopReason = new Error("B2 report object exceeded the configured byte limit.");
-  if (byteLimit === 0) {
-    destroyReportBody(body, stopReason);
-    return reportObjectText(state);
-  }
-
-  if (isAsyncIterable(body)) {
-    for await (const chunk of body) {
-      if (!appendReportChunk(decoder, chunk, state)) {
-        destroyReportBody(body, stopReason);
-        break;
-      }
-    }
-    state.text += decoder.decode();
-    return reportObjectText(state);
-  }
-
-  const maybeGetReader = (body as { getReader?: unknown }).getReader;
-  if (typeof maybeGetReader === "function") {
-    const reader = maybeGetReader.call(body) as ReadableStreamDefaultReader<unknown>;
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (!appendReportChunk(decoder, value, state)) {
-          await reader.cancel(stopReason);
-          break;
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    state.text += decoder.decode();
-    return reportObjectText(state);
-  }
-
-  const maybeTransformToByteArray = (body as { transformToByteArray?: unknown })
-    .transformToByteArray;
-  if (typeof maybeTransformToByteArray === "function") {
-    appendReportChunk(decoder, await maybeTransformToByteArray.call(body), state);
-    state.text += decoder.decode();
-    return reportObjectText(state);
-  }
-
-  throw new Error("Unsupported B2 report object body.");
+function toFileRetentionResult(value: UpdateFileRetentionResult): UpdateFileRetentionResult {
+  return {
+    ...toPlainObject(value),
+    fileName: value.fileName,
+    fileId: String(value.fileId),
+    fileRetention: {
+      mode: value.fileRetention.mode,
+      retainUntilTimestamp: value.fileRetention.retainUntilTimestamp,
+    },
+  };
 }
 
 function maybeBucketId(value: string | undefined): BucketId | undefined {
@@ -642,8 +555,6 @@ function isUnauthorized(err: unknown): boolean {
  * class instead of constructing SDK clients or raw credential details.
  */
 export class B2Client {
-  private reportS3Client: S3Client | null = null;
-
   constructor(private readonly auth: B2AuthManager) {}
 
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
@@ -711,6 +622,8 @@ export class B2Client {
     );
     return Object.assign({}, toPlainObject(result), {
       keys: result.keys.map(toApplicationKeyResult),
+      nextApplicationKeyId:
+        result.nextApplicationKeyId == null ? null : String(result.nextApplicationKeyId),
     });
   }
 
@@ -726,7 +639,7 @@ export class B2Client {
     options: UpdateFileLegalHoldOptions,
   ): Promise<UpdateFileLegalHoldResult> {
     const request = { ...options, fileId: fileId(options.fileId) };
-    return toPlainObject(
+    return toFileLegalHoldResult(
       await this.withNativeCircuit((client, auth) =>
         client.raw.updateFileLegalHold(auth.apiUrl, auth.authorizationToken, request),
       ),
@@ -737,7 +650,7 @@ export class B2Client {
     options: UpdateFileRetentionOptions,
   ): Promise<UpdateFileRetentionResult> {
     const request = { ...options, fileId: fileId(options.fileId) };
-    return toPlainObject(
+    return toFileRetentionResult(
       await this.withNativeCircuit((client, auth) =>
         client.raw.updateFileRetention(auth.apiUrl, auth.authorizationToken, request),
       ),
@@ -789,99 +702,19 @@ export class B2Client {
     });
   }
 
-  async listReportObjectKeys(
-    bucketName: string,
-    options: {
-      prefix?: string;
-      startAfter?: string;
-      continuationToken?: string;
-      maxKeys?: number;
-    } = {},
-  ): Promise<ReportObjectPage> {
-    const s3 = await this.getReportS3Client();
-    return withReportCircuit(async () => {
-      const page = await s3.send(
-        new ListObjectsV2Command({
-          Bucket: bucketName,
-          Prefix: options.prefix,
-          StartAfter: options.startAfter,
-          ContinuationToken: options.continuationToken,
-          MaxKeys: options.maxKeys,
-        }),
-        { abortSignal: currentMcpRequestSignal() },
-      );
-      return {
-        keys: (page.Contents ?? []).flatMap((object) =>
-          typeof object.Key === "string" ? [object.Key] : [],
-        ),
-        isTruncated: page.IsTruncated === true,
-        nextContinuationToken: page.NextContinuationToken,
-      };
-    });
-  }
-
-  async downloadReportObjectText(
-    bucketName: string,
-    key: string,
-    options: DownloadReportObjectTextOptions = {},
-  ): Promise<ReportObjectText> {
-    const s3 = await this.getReportS3Client();
-    return withReportCircuit(async () => {
-      const obj = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: key }), {
-        abortSignal: currentMcpRequestSignal(),
-      });
-      return readReportObjectBodyText(obj.Body, options.maxBytes);
-    });
-  }
-
-  toListedFile(file: FileVersionResult): ListedFile {
-    return {
-      name: file.fileName,
-      size: file.contentLength,
-      uploadedAt: dateFromTimestamp(file.uploadTimestamp),
-    };
-  }
-
-  toListedUnfinishedUpload(file: UnfinishedLargeFileResult): ListedUnfinishedUpload {
-    return {
-      fileId: file.fileId,
-      fileName: file.fileName,
-      uploadTimestamp: file.uploadTimestamp,
-    };
-  }
-
-  toListedPart(part: PartInfoResult): ListedPart {
-    return {
-      partNumber: part.partNumber,
-      size: part.contentLength,
-    };
-  }
-
-  private async getReportS3Client(): Promise<S3Client> {
-    if (this.reportS3Client) return this.reportS3Client;
-    const config = this.auth.getConfig();
-    const auth = await this.auth.getAuth();
-    this.reportS3Client = createReportS3Client(config, auth);
-    return this.reportS3Client;
-  }
-
   private async withNativeCircuit<T>(
-    operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
-  ): Promise<T> {
-    return withCircuit(() => this.withFreshNativeAuth(operation));
-  }
-
-  private async withFreshNativeAuth<T>(
     operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
   ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const { client, auth } = await this.auth.getAuthorizedSdk();
-      assertB2ApiUrl(auth.apiUrl);
       try {
-        const result = await operation(client, auth);
-        this.auth.syncCachedAuthFromSdk();
-        return result;
+        return await withCircuit(async () => {
+          const { client, auth } = await this.auth.getAuthorizedSdk();
+          assertB2ApiUrl(auth.apiUrl);
+          const result = await operation(client, auth);
+          this.auth.syncCachedAuthFromSdk();
+          return result;
+        });
       } catch (err) {
         this.auth.syncCachedAuthFromSdk();
         lastError = err;

@@ -7,7 +7,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "../../src/auth";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,
@@ -450,6 +450,7 @@ describe("bucket notification rules", () => {
           targetType: "webhook",
           url: "https://example.com/hook",
           hmacSha256SigningSecret: "supersecret",
+          customHeaders: [{ name: "Authorization", value: "Bearer webhook-token" }],
         },
       },
     ];
@@ -461,13 +462,71 @@ describe("bucket notification rules", () => {
       }),
     );
     expect(set.eventNotificationRules[0].objectNamePrefix).toBe("");
+    expect(JSON.stringify(set)).not.toContain("webhook-token");
+    expect(set.eventNotificationRules[0].targetConfiguration.customHeaders).toEqual({
+      Authorization: "[redacted]",
+    });
 
     const get = parseResult(
       await callTool(server, "b2_get_bucket_notification_rules", { bucketId: bucket.id }),
     );
     const tc = get.eventNotificationRules[0].targetConfiguration;
     expect(tc.hmacSha256SigningSecret).toBe("[redacted]");
+    expect(tc.customHeaders).toEqual({ Authorization: "[redacted]" });
     expect(JSON.stringify(get)).not.toContain("supersecret");
+    expect(JSON.stringify(get)).not.toContain("webhook-token");
+  });
+
+  it("scrubs stored webhook URL credentials and record custom headers", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["readBucketNotifications"]));
+      }
+      if (endpoint === "b2_get_bucket_notification_rules") {
+        return new StaticHttpResponse(200, {
+          bucketId: "bucket-1",
+          eventNotificationRules: [
+            {
+              name: "stored-secret-rule",
+              eventTypes: ["b2:ObjectCreated:*"],
+              isEnabled: true,
+              isSuspended: false,
+              objectNamePrefix: "",
+              suspensionReason: "",
+              targetConfiguration: {
+                targetType: "webhook",
+                url: "https://ops:pa55w0rd@hooks.example.com/b2",
+                customHeaders: {
+                  Authorization: "Bearer stored-token",
+                  "X-Api-Key": "stored-key",
+                },
+              },
+            },
+          ],
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const get = parseResult(
+      await callTool(server, "b2_get_bucket_notification_rules", { bucketId: "bucket-1" }),
+    );
+
+    const json = JSON.stringify(get);
+    expect(json).not.toContain("pa55w0rd");
+    expect(json).not.toContain("stored-token");
+    expect(json).not.toContain("stored-key");
+    expect(get.eventNotificationRules[0].targetConfiguration.url).toBe(
+      "https://hooks.example.com/b2",
+    );
+    expect(get.eventNotificationRules[0].targetConfiguration.customHeaders).toEqual({
+      Authorization: "[redacted]",
+      "X-Api-Key": "[redacted]",
+    });
   });
 
   const ruleWith = (url: string) => ({
@@ -494,15 +553,32 @@ describe("bucket notification rules", () => {
       "https://2130706433/hook",
       "https://0x7f000001/hook",
       "https://0177.0.0.1/hook",
+      "https://100.64.0.1/hook",
+      "https://198.18.0.1/hook",
+      "https://224.0.0.1/hook",
+      "https://240.0.0.1/hook",
       "https://[::ffff:127.0.0.1]/hook",
+      "https://[fec0::1]/hook",
+      "https://[ff02::1]/hook",
     ]) {
       const res = await callTool(server, "b2_set_bucket_notification_rules", {
         bucketId: bucket.id,
         eventNotificationRules: [ruleWith(url)],
       });
       expect(res.isError).toBe(true);
-      expect(res.content[0].text).toMatch(/private|loopback|numeric|IPv6/i);
+      expect(res.content[0].text).toMatch(/private|loopback|numeric|IPv6|non-public/i);
     }
+  });
+
+  it("rejects webhook URLs with embedded credentials", async () => {
+    const bucket = await createBucket("notify-userinfo");
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: bucket.id,
+      eventNotificationRules: [ruleWith("https://ops:pa55w0rd@example.com/hook")],
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/credentials/i);
+    expect(res.content[0].text).not.toContain("pa55w0rd");
   });
 });
 

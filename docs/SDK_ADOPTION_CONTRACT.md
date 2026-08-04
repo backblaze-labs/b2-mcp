@@ -80,15 +80,15 @@ contract. The contract freeze must apply this rule:
 These are the current runtime call sites that must be migrated, wrapped by the
 official SDK, or explicitly justified as S3-material compatibility paths.
 
-| Source                | Runtime import                                        | Current purpose                                                         | Contract disposition                                                                                                                                            |
-| --------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/b2/client.ts`    | `@aws-sdk/client-s3`                                  | Usage Report CSV object reads through SDK `/s3` configuration           | Retain only for report-bucket reads anchored by `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; native/control-plane calls must use the B2 SDK facade/raw.  |
-| `src/s3/client.ts`    | `@aws-sdk/client-s3`                                  | Creates a B2 S3-compatible `S3Client` through SDK `/s3` configuration   | Endpoint and credential derivation come from `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; direct AWS client remains only as documented SDK peer usage.   |
-| `src/s3/buckets.ts`   | `@aws-sdk/client-s3`                                  | `HeadBucket`, `PutBucketLifecycleConfiguration`                         | Covered by S3-only helper issue #154; retain only for reachability and `AbortIncompleteMultipartUpload` semantics.                                              |
-| `src/s3/objects.ts`   | `@aws-sdk/client-s3`                                  | Put/Get/Delete/Head/Copy/List object commands                           | Prefer native SDK composition where semantics match; retain direct S3 peer only for a reviewed S3-material delta.                                               |
-| `src/s3/multipart.ts` | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 multipart start, part presign, finish, abort, list, upload-part-copy | Covered by SDK helper issue #154; retain as the decided S3-material multipart compatibility path; `s3_presign_upload_part` remains release-blocking until #154. |
-| `src/s3/presigned.ts` | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 GET/PUT presigned object URLs                                        | Replace GET/PUT URL signing with `presignS3GetObjectUrl` and `presignS3PutObjectUrl` from `/s3`; returned URLs remain bearer credentials.                       |
-| `src/s3/extras.ts`    | `@aws-sdk/client-s3`                                  | `GetBucketLocation` region probe                                        | Covered by SDK helper issue #154; retain only as S3 endpoint/region verification.                                                                               |
+| Source                    | Runtime import                                        | Current purpose                                                         | Contract disposition                                                                                                                                            |
+| ------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/b2/report-client.ts` | `@aws-sdk/client-s3`                                  | Usage Report CSV object reads through SDK `/s3` configuration           | Retain only for report-bucket reads anchored by `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; native/control-plane calls must use the B2 SDK facade/raw.  |
+| `src/s3/client.ts`        | `@aws-sdk/client-s3`                                  | Creates a B2 S3-compatible `S3Client` through SDK `/s3` configuration   | Endpoint and credential derivation come from `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`; direct AWS client remains only as documented SDK peer usage.   |
+| `src/s3/buckets.ts`       | `@aws-sdk/client-s3`                                  | `HeadBucket`, `PutBucketLifecycleConfiguration`                         | Covered by S3-only helper issue #154; retain only for reachability and `AbortIncompleteMultipartUpload` semantics.                                              |
+| `src/s3/objects.ts`       | `@aws-sdk/client-s3`                                  | Put/Get/Delete/Head/Copy/List object commands                           | Prefer native SDK composition where semantics match; retain direct S3 peer only for a reviewed S3-material delta.                                               |
+| `src/s3/multipart.ts`     | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 multipart start, part presign, finish, abort, list, upload-part-copy | Covered by SDK helper issue #154; retain as the decided S3-material multipart compatibility path; `s3_presign_upload_part` remains release-blocking until #154. |
+| `src/s3/presigned.ts`     | `@aws-sdk/client-s3`, `@aws-sdk/s3-request-presigner` | S3 GET/PUT presigned object URLs                                        | Replace GET/PUT URL signing with `presignS3GetObjectUrl` and `presignS3PutObjectUrl` from `/s3`; returned URLs remain bearer credentials.                       |
+| `src/s3/extras.ts`        | `@aws-sdk/client-s3`                                  | `GetBucketLocation` region probe                                        | Covered by SDK helper issue #154; retain only as S3 endpoint/region verification.                                                                               |
 
 Package note: `@aws-sdk/s3-presigned-post` is intentionally absent because there
 is no runtime source import or approved MCP tool row for S3 POST Object form
@@ -110,10 +110,11 @@ adds a supported use.
 - Retries and idempotency: native SDK clients are configured with the MCP-owned
   retry envelope formerly used by `withRetry`: 3 retries, 1s initial
   exponential backoff, 4s maximum backoff, and a 30s per-attempt timeout. The
-  SDK retries transient transport/B2 errors and refreshes expired auth tokens;
-  mutating MCP tools still need their own idempotency contract because SDK
-  retries do not make a lost-success create, copy, multipart finish, or
-  secret-producing call safe.
+  SDK retries transient transport/B2 errors and refreshes expired auth tokens.
+  Native retry sends are gated by the process-wide retry budget and circuit
+  timeouts propagate an abort signal to the SDK transport; mutating MCP tools
+  still need their own idempotency contract because SDK retries do not make a
+  lost-success create, copy, multipart finish, or secret-producing call safe.
 - Pagination: preserve the MCP tool's existing cursor names and caps unless the
   row explicitly changes them. SDK paginators may be used internally, but MCP
   responses must keep bounded output and explicit continuation fields.

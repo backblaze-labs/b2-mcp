@@ -18,6 +18,7 @@ import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
+import { B2ReportClient } from "./b2/report-client.js";
 import { createS3Client } from "./s3/client.js";
 import { DURABLE_SECRET_PRODUCING_TOOLS, isToolEnabled } from "./utils/tool-capabilities.js";
 import {
@@ -176,6 +177,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // application-key client, so a single non-master key needs no extra wiring.
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth);
+  const reportClient = new B2ReportClient(auth);
   const s3Client = createS3Client(config);
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
@@ -216,7 +218,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────
   // Phase 1 reads the daily usage-report CSVs (native bucket lookup + S3 get);
   // Phase 2 is live per-bucket S3 listing.
-  registerInsightTools(registrar, b2Client, auth);
+  registerInsightTools(registrar, b2Client, auth, reportClient);
 
   // Rolling deploy compatibility: clients can cache an older tools/list that
   // included durable-secret-producing tools. Keep those names callable, but

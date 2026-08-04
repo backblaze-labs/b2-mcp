@@ -1,10 +1,12 @@
 import type { ToolRegistrar } from "../mcp.js";
+import { isIP } from "node:net";
 import { z } from "zod";
 import {
   B2Client,
   type BucketFilters,
   type CreateBucketOptions,
   type EventNotificationRuleInput,
+  type NotificationRulesResult,
   type ServerSideEncryptionInput,
   type UpdateBucketOptions,
 } from "./client.js";
@@ -17,47 +19,145 @@ import { checkDestructive } from "../utils/destructive-gate.js";
  * the model — B2 echoes back hmacSha256SigningSecret and custom-header values on
  * get/set, and a prompt-injected model should not be able to read them.
  */
-function redactNotificationSecrets(result: unknown): unknown {
-  const r = result as { eventNotificationRules?: Array<Record<string, unknown>> } | null;
-  if (!r || !Array.isArray(r.eventNotificationRules)) return result;
-  for (const rule of r.eventNotificationRules) {
-    const tc = rule?.targetConfiguration as
-      { hmacSha256SigningSecret?: unknown; customHeaders?: Array<{ value?: unknown }> } | undefined;
-    if (!tc || typeof tc !== "object") continue;
+function redactWebhookUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  try {
+    const u = new URL(raw);
+    if (!u.username && !u.password) return raw;
+    u.username = "";
+    u.password = "";
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function redactNotificationSecrets(result: NotificationRulesResult): NotificationRulesResult {
+  for (const rule of result.eventNotificationRules) {
+    const tc = rule.targetConfiguration;
+    tc.url = redactWebhookUrl(tc.url) ?? tc.url;
     if (tc.hmacSha256SigningSecret) tc.hmacSha256SigningSecret = "[redacted]";
     if (Array.isArray(tc.customHeaders)) {
       tc.customHeaders = tc.customHeaders.map((h) =>
         h && typeof h === "object" ? { ...h, value: "[redacted]" } : h,
+      );
+    } else if (tc.customHeaders && typeof tc.customHeaders === "object") {
+      tc.customHeaders = Object.fromEntries(
+        Object.keys(tc.customHeaders).map((k) => [k, "[redacted]"]),
       );
     }
   }
   return result;
 }
 
-/**
- * True for IPv6 loopback (::1), unspecified (::), IPv4-mapped (::ffff:*), and
- * ULA / link-local ranges — including fully-expanded forms like 0:0:0:0:0:0:0:1
- * that a string-prefix check misses.
- */
-function isLocalIPv6(raw: string): boolean {
-  const h = raw.split("%")[0].toLowerCase(); // drop any zone id
-  if (/^(fc|fd|fe8|fe9|fea|feb)/.test(h)) return true; // ULA fc00::/7, link-local fe80::/10
-  if (h.startsWith("::ffff:")) return true; // IPv4-mapped
-  let groups: string[];
-  if (h.includes("::")) {
-    const [head, tail] = h.split("::");
-    const hg = head ? head.split(":") : [];
-    const tg = tail ? tail.split(":") : [];
-    groups = [...hg, ...Array(Math.max(0, 8 - hg.length - tg.length)).fill("0"), ...tg];
-  } else {
-    groups = h.split(":");
+const NON_GLOBAL_IPV4_CIDRS: Array<[string, number]> = [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+];
+
+const NON_GLOBAL_IPV6_CIDRS: Array<[string, number]> = [
+  ["::", 128],
+  ["::1", 128],
+  ["::ffff:0:0", 96],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["100::", 64],
+  ["2001::", 23],
+  ["2001:2::", 48],
+  ["2001:db8::", 32],
+  ["2002::", 16],
+  ["3fff::", 20],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["fec0::", 10],
+  ["ff00::", 8],
+];
+
+function ipv4ToInt(raw: string): number | null {
+  const parts = raw.split(".");
+  if (parts.length !== 4) return null;
+  let result = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    result = result * 256 + n;
   }
-  if (groups.length !== 8) return false;
-  const n = groups.map((g) => parseInt(g || "0", 16));
-  if (n.some((x) => Number.isNaN(x))) return false;
-  const allZero = n.every((x) => x === 0); // ::  (unspecified)
-  const loopback = n.slice(0, 7).every((x) => x === 0) && n[7] === 1; // ::1
-  return allZero || loopback;
+  return result >>> 0;
+}
+
+function ipv4InCidr(value: number, base: number, prefixLength: number): boolean {
+  const mask = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
+  return (value & mask) === (base & mask);
+}
+
+function ipv6ToBigInt(raw: string): bigint | null {
+  let h = raw.toLowerCase().split("%")[0];
+  if (h.includes(".")) {
+    const lastColon = h.lastIndexOf(":");
+    const mapped = ipv4ToInt(h.slice(lastColon + 1));
+    if (lastColon < 0 || mapped === null) return null;
+    h = `${h.slice(0, lastColon)}:${((mapped >>> 16) & 0xffff).toString(16)}:${(mapped & 0xffff).toString(16)}`;
+  }
+
+  const pieces = h.split("::");
+  if (pieces.length > 2) return null;
+  const head = pieces[0] ? pieces[0].split(":") : [];
+  const tail = pieces.length === 2 && pieces[1] ? pieces[1].split(":") : [];
+  const fill = pieces.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0) return null;
+  const groups = pieces.length === 2 ? [...head, ...Array(fill).fill("0"), ...tail] : head;
+  if (groups.length !== 8) return null;
+
+  let result = 0n;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    result = (result << 16n) + BigInt(parseInt(group, 16));
+  }
+  return result;
+}
+
+function ipv6InCidr(value: bigint, base: bigint, prefixLength: number): boolean {
+  if (prefixLength === 0) return true;
+  const shift = 128n - BigInt(prefixLength);
+  return value >> shift === base >> shift;
+}
+
+function isNonGlobalIpLiteral(host: string): boolean {
+  if (isIP(host) === 4) {
+    const value = ipv4ToInt(host);
+    return (
+      value !== null &&
+      NON_GLOBAL_IPV4_CIDRS.some(([base, prefix]) => {
+        const baseValue = ipv4ToInt(base);
+        return baseValue !== null && ipv4InCidr(value, baseValue, prefix);
+      })
+    );
+  }
+  if (isIP(host) === 6) {
+    const value = ipv6ToBigInt(host);
+    return (
+      value !== null &&
+      NON_GLOBAL_IPV6_CIDRS.some(([base, prefix]) => {
+        const baseValue = ipv6ToBigInt(base);
+        return baseValue !== null && ipv6InCidr(value, baseValue, prefix);
+      })
+    );
+  }
+  return false;
 }
 
 /**
@@ -72,6 +172,7 @@ function validateWebhookUrl(raw: string): string | null {
     return "is not a valid URL";
   }
   if (u.protocol !== "https:") return "must use https://";
+  if (u.username || u.password) return "must not include credentials";
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost")) return "must not target localhost";
   // Reject non-standard numeric IP encodings that bypass the dotted-quad check
@@ -79,23 +180,8 @@ function validateWebhookUrl(raw: string): string | null {
   if (/^0x[0-9a-f]+$/.test(host) || /^[0-9]+$/.test(host) || /^0[0-7]+(\.|$)/.test(host)) {
     return "must not target a numeric IP address";
   }
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (
-      a === 0 ||
-      a === 127 ||
-      a === 10 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
-    ) {
-      return "must not target a private/loopback/link-local address";
-    }
-  }
-  if (host.includes(":") && isLocalIPv6(host)) {
-    return "must not target a private/loopback/link-local or unspecified IPv6 address";
+  if (isNonGlobalIpLiteral(host)) {
+    return "must not target a non-public IP address";
   }
   return null;
 }
@@ -510,9 +596,8 @@ export function registerBucketTools(
         for (const rule of eventNotificationRules) {
           const reason = validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
-            return toolError(
-              new Error(`Webhook URL ${JSON.stringify(rule.targetConfiguration.url)} ${reason}.`),
-            );
+            const safeUrl = redactWebhookUrl(rule.targetConfiguration.url);
+            return toolError(new Error(`Webhook URL ${JSON.stringify(safeUrl)} ${reason}.`));
           }
         }
         const result = await client.setBucketNotificationRules(

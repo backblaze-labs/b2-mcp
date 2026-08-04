@@ -12,9 +12,10 @@ import {
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 import { currentMcpRequestSignal } from "./request-context.js";
+import { consumeRetryBudgetToken } from "./utils/retry.js";
 
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
-const API_TIMEOUT_MS = 10_000;
+const API_TIMEOUT_MS = 30_000;
 
 export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   maxRetries: 3,
@@ -36,13 +37,50 @@ interface ManagedSdkClient {
 }
 
 type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
+const SDK_CLIENT_FACTORY_HOOK = Symbol.for("@backblaze-labs/b2-mcp/sdk-client-factory");
+
+type SdkClientFactoryHook = {
+  [SDK_CLIENT_FACTORY_HOOK]?: SdkClientFactory;
+};
+
+function sdkClientFactoryHook(): SdkClientFactoryHook {
+  return globalThis as typeof globalThis & SdkClientFactoryHook;
+}
 
 export class RequestSignalTransport implements HttpTransport {
   constructor(private readonly inner: HttpTransport) {}
 
   send(request: HttpRequest): Promise<HttpResponse> {
-    const signal = request.signal ?? currentMcpRequestSignal();
+    const signal = request.signal ?? currentMcpRequestSignal() ?? new AbortController().signal;
     return this.inner.send(signal ? { ...request, signal } : request);
+  }
+}
+
+export class SharedRetryBudgetTransport implements HttpTransport {
+  private readonly attemptsBySignal = new WeakMap<AbortSignal, Map<string, number>>();
+
+  constructor(private readonly inner: HttpTransport) {}
+
+  send(request: HttpRequest): Promise<HttpResponse> {
+    const attempt = this.nextAttempt(request);
+    if (attempt > 0 && !consumeRetryBudgetToken()) {
+      throw new DOMException("B2 retry budget exhausted", "AbortError");
+    }
+    return this.inner.send(request);
+  }
+
+  private nextAttempt(request: HttpRequest): number {
+    const signal = request.signal;
+    if (!signal) return 0;
+    const key = `${request.method} ${request.url}`;
+    let attempts = this.attemptsBySignal.get(signal);
+    if (!attempts) {
+      attempts = new Map();
+      this.attemptsBySignal.set(signal, attempts);
+    }
+    const attempt = attempts.get(key) ?? 0;
+    attempts.set(key, attempt + 1);
+    return attempt;
   }
 }
 
@@ -62,10 +100,12 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
   const client = new SdkB2Client({
     applicationKeyId: config.applicationKeyId,
     applicationKey: config.applicationKey,
-    transport: new FetchTransport({
-      userAgent: buildUserAgent(config),
-      urlGuard,
-    }),
+    transport: new SharedRetryBudgetTransport(
+      new FetchTransport({
+        userAgent: buildUserAgent(config),
+        urlGuard,
+      }),
+    ),
     retry: SDK_RETRY_OPTIONS,
   });
   injectMcpSignalBeforeSdkRetry(client);
@@ -73,16 +113,6 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
     client,
     urlGuard,
   };
-}
-
-let sdkClientFactory: SdkClientFactory = defaultSdkClientFactory;
-
-/**
- * Test hook for injecting SDK public fakes such as B2Simulator transports.
- * Passing null restores the production SDK client factory.
- */
-export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null): void {
-  sdkClientFactory = factory ?? defaultSdkClientFactory;
 }
 
 function flattenAuth(data: AuthorizeAccountResponse): B2AuthResponse {
@@ -113,7 +143,7 @@ export class B2AuthManager {
 
   constructor(config: B2Config) {
     this.config = config;
-    this.sdk = sdkClientFactory(config);
+    this.sdk = (sdkClientFactoryHook()[SDK_CLIENT_FACTORY_HOOK] ?? defaultSdkClientFactory)(config);
   }
 
   getConfig(): B2Config {

@@ -285,7 +285,10 @@ function fakeReportClient(
       if (input.maxKeys) keys = keys.slice(0, input.maxKeys);
       return { keys, isTruncated: false };
     },
-    downloadReportObjectText: async (_bucketName: string, key: string) => csvByKey[key] ?? "",
+    downloadReportObjectText: async (_bucketName: string, key: string) => {
+      const text = csvByKey[key] ?? "";
+      return { text, bytes: Buffer.byteLength(text, "utf8"), truncated: false };
+    },
   } as any;
 }
 
@@ -339,12 +342,16 @@ describe("insights — report scan bounds", () => {
         keys,
         isTruncated: false,
       }),
-      downloadReportObjectText: async () => csv,
+      downloadReportObjectText: async () => ({
+        text: csv,
+        bytes: Buffer.byteLength(csv, "utf8"),
+        truncated: false,
+      }),
     };
     const auth = {
       getAuth: async () => ({ accountId: "acct" }),
     };
-    registerInsightTools(server as any, b2Client as any, auth as any);
+    registerInsightTools(server as any, b2Client as any, auth as any, b2Client as any);
 
     const result = await tools.b2_egress_leaders.execute({
       by: "account",
@@ -384,7 +391,7 @@ describe("insights — report scan bounds", () => {
     const auth = {
       getAuth: async () => ({ accountId: "acct" }),
     };
-    registerInsightTools(server as any, b2Client as any, auth as any);
+    registerInsightTools(server as any, b2Client as any, auth as any, b2Client as any);
 
     const result = await tools.b2_egress_leaders.execute({
       by: "account",

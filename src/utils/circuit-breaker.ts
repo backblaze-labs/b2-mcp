@@ -1,7 +1,8 @@
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 
-export const CIRCUIT_TIMEOUT_MS = 60_000;
+export const CIRCUIT_TIMEOUT_MS = 150_000;
 
 /**
  * Errors that should NOT count as B2 service failures.
@@ -58,7 +59,7 @@ breaker.on("close", () => logger.info("circuit.close"));
  *
  * Identical failure-tripping behaviour to the default breaker, but with the
  * per-call timeout DISABLED. A 100 MB part on a slow uplink legitimately takes
- * far longer than the default 60s; timing it out would abort a healthy upload,
+ * far longer than the default 150s; timing it out would abort a healthy upload,
  * surface a non-retryable error, and unfairly push the breaker toward open.
  * Transfer health is governed by SDK/request timeouts and the retry layer instead.
  */
@@ -99,12 +100,43 @@ reportBreaker.on("open", () => logger.warn("circuit.reportS3.open"));
 reportBreaker.on("halfOpen", () => logger.info("circuit.reportS3.halfOpen"));
 reportBreaker.on("close", () => logger.info("circuit.reportS3.close"));
 
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: unknown }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+function timeoutReason(timeoutMs: number): DOMException {
+  return new DOMException(`Circuit timed out after ${timeoutMs} ms`, "TimeoutError");
+}
+
+async function withDeadlineSignal<T>(timeoutMs: number, fn: () => Promise<T>): Promise<T> {
+  const parent = currentMcpRequestSignal();
+  const controller = new AbortController();
+  const abortFromParent = () => {
+    controller.abort(parent?.reason ?? new DOMException("Aborted", "AbortError"));
+  };
+  const timer = setTimeout(() => {
+    controller.abort(timeoutReason(timeoutMs));
+  }, timeoutMs);
+  unrefTimer(timer);
+
+  if (parent?.aborted === true) abortFromParent();
+  else parent?.addEventListener("abort", abortFromParent, { once: true });
+
+  try {
+    return await runWithMcpRequestSignal(controller.signal, fn);
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener("abort", abortFromParent);
+  }
+}
+
 /**
  * Run `fn` through the circuit breaker. When the breaker is open, this
  * throws an `EOPENBREAKER` error immediately without invoking `fn`.
  */
 export async function withCircuit<T>(fn: () => Promise<T>): Promise<T> {
-  return breaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+  return breaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
 }
 
 /**
@@ -119,7 +151,7 @@ export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
  * Run Usage Report S3 calls through their own breaker.
  */
 export async function withReportCircuit<T>(fn: () => Promise<T>): Promise<T> {
-  return reportBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+  return reportBreaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
 }
 
 export const circuitBreaker = breaker;

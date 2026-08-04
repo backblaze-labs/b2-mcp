@@ -2,10 +2,12 @@ import { B2Client as SdkB2Client, RetryTransport } from "@backblaze-labs/b2-sdk"
 import {
   B2AuthManager,
   RequestSignalTransport,
+  SharedRetryBudgetTransport,
   SDK_MAX_RETRY_BUDGET_MS,
   SDK_RETRY_OPTIONS,
-  setB2SdkClientFactoryForTests,
 } from "../../src/auth";
+import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import { CIRCUIT_TIMEOUT_MS } from "../../src/utils/circuit-breaker";
 import { B2Config } from "../../src/utils/types";
 import { runWithMcpRequestSignal } from "../../src/request-context";
@@ -45,6 +47,7 @@ function installAuthorizeTransport(
 describe("B2AuthManager", () => {
   afterEach(() => {
     setB2SdkClientFactoryForTests(null);
+    _resetRetryBudget();
     jest.restoreAllMocks();
   });
 
@@ -152,9 +155,43 @@ describe("B2AuthManager", () => {
       maxRetries: 3,
       initialRetryDelayMs: 1000,
       maxRetryDelayMs: 4000,
-      requestTimeoutMs: 10_000,
+      requestTimeoutMs: 30_000,
     });
     expect(SDK_MAX_RETRY_BUDGET_MS).toBeLessThan(CIRCUIT_TIMEOUT_MS);
+  });
+
+  it("bounds SDK retry attempts with the shared retry budget", async () => {
+    _resetRetryBudget();
+    for (let i = 0; i < 100; i++) _consumeRetryToken();
+    const inner = new RecordingTransport(
+      () =>
+        new StaticHttpResponse(503, {
+          status: 503,
+          code: "service_unavailable",
+          message: "try later",
+        }),
+    );
+    const transport = new RequestSignalTransport(
+      new RetryTransport({
+        transport: new SharedRetryBudgetTransport(inner),
+        retry: {
+          maxRetries: 1,
+          initialRetryDelayMs: 0,
+          maxRetryDelayMs: 0,
+          requestTimeoutMs: 30_000,
+        },
+      }),
+    );
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
+        method: "POST",
+        headers: { Authorization: "token" },
+        body: "{}",
+      }),
+    ).rejects.toThrow(/retry budget/i);
+    expect(inner.requests).toHaveLength(1);
   });
 
   it("passes the MCP abort signal into SDK retry backoff", async () => {
