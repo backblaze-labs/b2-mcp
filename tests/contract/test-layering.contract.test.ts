@@ -1,7 +1,20 @@
 import { execFileSync, spawnSync } from "child_process";
 import { existsSync, readFileSync, rmSync } from "fs";
 import { basename, join } from "path";
-import { listFiles, root } from "./support";
+import { listFiles, readJson, root } from "./support";
+
+const B2_CREDENTIAL_ENV = [
+  "B2_APPLICATION_KEY",
+  "B2_APPLICATION_KEY_ID",
+  "B2_APP_KEY",
+  "B2_APP_KEY_ID",
+];
+
+function envWithoutB2Credentials(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...extra };
+  for (const name of B2_CREDENTIAL_ENV) delete env[name];
+  return env;
+}
 
 describe("test layer naming", () => {
   const testFiles = listFiles(join(root, "tests"))
@@ -46,6 +59,7 @@ describe("test layer naming", () => {
 
     execFileSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive"], {
       cwd: root,
+      env: envWithoutB2Credentials(),
       stdio: "pipe",
       timeout: 30_000,
     });
@@ -65,6 +79,27 @@ describe("test layer naming", () => {
     expect(existsSync(liveJunitPath)).toBe(false);
   });
 
+  it("does not load third-party JUnit reporters when B2 credentials are present", () => {
+    const junitPath = join(root, "reports/junit/runner-fixture-nonlive.xml");
+    const summaryPath = join(root, "reports/jest/runner-fixture-nonlive.json");
+    if (existsSync(junitPath)) rmSync(junitPath);
+    if (existsSync(summaryPath)) rmSync(summaryPath);
+
+    execFileSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        B2_APPLICATION_KEY_ID: "fake-nonlive-key-id",
+        B2_APPLICATION_KEY: "fake-nonlive-key-secret",
+      },
+      stdio: "pipe",
+      timeout: 30_000,
+    });
+
+    expect(existsSync(summaryPath)).toBe(true);
+    expect(existsSync(junitPath)).toBe(false);
+  });
+
   it("rejects unknown layer names with a supported layer list", () => {
     const result = spawnSync("node", ["scripts/run-jest-layer.mjs", "typo-layer"], {
       cwd: root,
@@ -79,27 +114,65 @@ describe("test layer naming", () => {
     expect(result.stderr).toContain("protocol-modern");
   });
 
-  it("rejects custom reporters for live layers with B2 credentials", () => {
-    const result = spawnSync(
-      "node",
-      ["scripts/run-jest-layer.mjs", "runner-fixture-live", "--", "--reporters=jest-junit"],
-      {
-        cwd: root,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          B2_APPLICATION_KEY_ID: "fake-live-key-id",
-          B2_APPLICATION_KEY: "fake-live-key-secret",
+  it.each(["runner-fixture-live", "runner-fixture-nonlive"])(
+    "rejects custom reporters for %s with B2 credentials",
+    (layer) => {
+      const result = spawnSync(
+        "node",
+        ["scripts/run-jest-layer.mjs", layer, "--", "--reporters=jest-junit"],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            B2_APPLICATION_KEY_ID: "fake-live-key-id",
+            B2_APPLICATION_KEY: "fake-live-key-secret",
+          },
+          timeout: 30_000,
         },
-        timeout: 30_000,
-      },
-    );
+      );
 
-    expect(result.status).toBe(2);
-    expect(result.stderr).toContain("do not accept custom reporters");
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("do not accept custom reporters");
+    },
+  );
+
+  it("keeps live tests behind explicit live npm scripts", () => {
+    const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
+
+    expect(pkg.scripts["test:integration:live"]).toContain("require-live-env.mjs integration");
+    expect(pkg.scripts["test:integration:live"]).toContain("integration-live");
+    expect(pkg.scripts["test:contract:live"]).toContain("require-live-env.mjs contract");
+    expect(pkg.scripts["test:contract:live"]).toContain("contract-live");
+    expect(pkg.scripts["test:contract"]).not.toMatch(
+      /tests\/live|contract-live|test:contract:live/,
+    );
+    expect(pkg.scripts["test:integration"]).not.toMatch(
+      /tests\/live|integration-live|test:integration:live/,
+    );
   });
 
-  it("scrubs failure messages from live-layer JSON summaries", () => {
+  it("does not route the legacy integration alias to live tests with ambient credentials", () => {
+    const liveSummaryPath = join(root, "reports/jest/integration-live.json");
+    if (existsSync(liveSummaryPath)) rmSync(liveSummaryPath);
+
+    const result = spawnSync("npm", ["run", "test:integration", "--silent"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        B2_APPLICATION_KEY_ID: "fake-integration-key-id",
+        B2_APPLICATION_KEY: "fake-integration-key-secret",
+      },
+      timeout: 30_000,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("not a credential-free test layer");
+    expect(existsSync(liveSummaryPath)).toBe(false);
+  });
+
+  it("omits failure messages from JSON summaries", () => {
     const summaryPath = join(root, "reports/jest/runner-fixture-live.json");
     if (existsSync(summaryPath)) rmSync(summaryPath);
 
@@ -118,5 +191,19 @@ describe("test layer naming", () => {
     expect(result.status).toBe(1);
     expect(existsSync(summaryPath)).toBe(true);
     expect(readFileSync(summaryPath, "utf8")).not.toContain("fake-live-key-secret");
+  });
+
+  it("keeps live notification contracts on disposable contract buckets", () => {
+    const source = readFileSync(
+      join(root, "tests/live/request-shape.contract.live.test.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain('createContractBucket("notify")');
+    expect(source).toContain("b2_set_bucket_notification_rules");
+    expect(source).toContain("b2_delete_bucket");
+    expect(source).not.toContain("isUserWritableBucket");
+    expect(source).not.toContain("writableBucketId");
+    expect(source).not.toContain("b2_get_bucket_notification_rules");
   });
 });

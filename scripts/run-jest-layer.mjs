@@ -96,6 +96,8 @@ if (!/^[A-Za-z0-9._-]+$/.test(layer) || !layerRegistry[layer]) {
   process.exit(2);
 }
 
+// The "--" separator is documented for raw Jest args, but optional so package
+// scripts can pass only the layer name without an empty separator.
 const extraJestArgs = maybeSeparator === "--" ? rest : [maybeSeparator, ...rest].filter(Boolean);
 const layerConfig = layerRegistry[layer];
 const liveLayer = layerConfig.live;
@@ -109,10 +111,11 @@ const hasCustomReporter = extraJestArgs.some(
   (arg) => arg === "--reporters" || arg.startsWith("--reporters="),
 );
 
-if (liveLayer && hasB2CredentialEnv && hasCustomReporter) {
-  console.error("Live Jest layers with B2 credentials do not accept custom reporters.");
+if (hasB2CredentialEnv && hasCustomReporter) {
+  console.error("Jest layers with B2 credentials do not accept custom reporters.");
   process.exit(2);
 }
+const allowJunit = !liveLayer && !hasB2CredentialEnv;
 
 const summaryDir = join(root, "reports", "jest");
 const junitDir = join(root, "reports", "junit");
@@ -131,7 +134,7 @@ const result = spawnSync(
     ...jestArgs,
     "--reporters=default",
     `--reporters=${summaryReporter}`,
-    ...(!liveLayer ? ["--reporters=jest-junit"] : []),
+    ...(allowJunit ? ["--reporters=jest-junit"] : []),
   ],
   {
     cwd: root,

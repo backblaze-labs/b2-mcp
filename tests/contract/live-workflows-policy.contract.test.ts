@@ -1,7 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-
-const root = join(__dirname, "../..");
+import { root } from "./support";
 
 const liveWorkflows = [
   {
@@ -86,6 +85,16 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("Print cleanup context");
     expect(text).toContain("contract_bucket_prefix=mcp-contract-");
     expect(text).toContain("contract_key_prefix=c-v");
+  });
+
+  it("runs the explicit live contract layer with B2 credentials", () => {
+    const text = workflowText(".github/workflows/contract.yml");
+    const contractJob = text.slice(text.indexOf("  contract:"));
+
+    expect(contractJob).toContain("npm run test:contract:live");
+    expect(contractJob).not.toContain("npm run test:contract\n");
+    expect(contractJob).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
+    expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
   });
 
   it.each(liveWorkflows)(

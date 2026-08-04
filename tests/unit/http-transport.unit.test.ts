@@ -5,7 +5,6 @@
 
 import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
-import type { AddressInfo } from "net";
 import axios from "axios";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
@@ -23,53 +22,22 @@ import {
   invalidateCapabilityCache,
 } from "../../src/server";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
+import {
+  JSON_HEADERS,
+  type Resp,
+  closeHttpServer,
+  creds,
+  listenOnLocalhost,
+  request,
+  restoreEnv,
+  saveEnv,
+  setDefaultHttpTestEnv,
+} from "../support/http";
 
 jest.mock("axios");
 const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
   get: jest.MockedFunction<typeof axios.get>;
 };
-
-interface Resp {
-  status: number;
-  body: string;
-  headers: http.IncomingHttpHeaders;
-}
-
-function request(
-  port: number,
-  method: string,
-  pathname: string,
-  opts: { headers?: Record<string, string>; body?: string } = {},
-): Promise<Resp> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn();
-    };
-    const req = http.request(
-      { host: "127.0.0.1", port, method, path: pathname, headers: opts.headers },
-      (res) => {
-        let data = "";
-        const status = res.statusCode ?? 0;
-        const done = () => finish(() => resolve({ status, body: data, headers: res.headers }));
-        res.on("data", (c) => (data += c));
-        res.on("end", done);
-        res.on("close", done);
-      },
-    );
-    req.on("error", (err) => finish(() => reject(err)));
-    const timer = setTimeout(() => {
-      req.destroy();
-      finish(() => reject(new Error("request timed out")));
-    }, 4000);
-    timer.unref();
-    if (opts.body) req.write(opts.body);
-    req.end();
-  });
-}
 
 function postLargeBody(port: number, pathname: string): Promise<number> {
   return request(port, "POST", pathname, {
@@ -136,52 +104,35 @@ function sleep(ms: number): Promise<void> {
 let handle: HttpServerHandle;
 let port: number;
 
-const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
-const savedCredentialMode = process.env.B2_HTTP_CREDENTIAL_MODE;
-const savedMaxInFlight = process.env.B2_MAX_SESSIONS;
-const savedMaxInFlightPerKey = process.env.B2_MAX_SESSIONS_PER_KEY;
-const savedAllowedHosts = process.env.B2_ALLOWED_HOSTS;
-const savedAllowedOrigins = process.env.B2_ALLOWED_ORIGINS;
+const savedHttpEnv = saveEnv();
+const savedMutableEnv = saveEnv([
+  "B2_MAX_SESSIONS",
+  "B2_MAX_SESSIONS_PER_KEY",
+  "B2_ALLOWED_HOSTS",
+  "B2_ALLOWED_ORIGINS",
+  "B2_MCP_OUTPUT_FORMAT",
+]);
 
 beforeAll(() => {
-  process.env.B2_REGISTER_ALL_TOOLS = "true";
-  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  setDefaultHttpTestEnv();
 });
 
 afterAll(() => {
-  if (savedRegisterAll === undefined) delete process.env.B2_REGISTER_ALL_TOOLS;
-  else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
-  if (savedCredentialMode === undefined) delete process.env.B2_HTTP_CREDENTIAL_MODE;
-  else process.env.B2_HTTP_CREDENTIAL_MODE = savedCredentialMode;
-  if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
-  else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
-  if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
-  else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
-  if (savedAllowedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
-  else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
-  if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
-  else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
+  restoreEnv(savedHttpEnv);
+  restoreEnv(savedMutableEnv);
 });
 
 beforeEach(async () => {
-  process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+  setDefaultHttpTestEnv();
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
-  if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
-  else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
-  if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
-  else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
-  if (savedAllowedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
-  else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
-  if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
-  else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
+  restoreEnv(savedMutableEnv);
   invalidateCapabilityCache();
   handle = buildHttpServer();
-  await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-  port = (handle.server.address() as AddressInfo).port;
+  port = await listenOnLocalhost(handle);
 });
 
 afterEach(async () => {
@@ -190,18 +141,12 @@ afterEach(async () => {
   mockedAxios.mockReset();
   mockedAxios.get = jest.fn() as jest.MockedFunction<typeof axios.get>;
   invalidateAuthManagerCache();
-  handle.drain();
-  await new Promise<void>((r) => handle.server.close(() => r()));
+  await closeHttpServer(handle);
 });
 
-const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
 const META = {
   "io.modelcontextprotocol/protocolVersion": "2026-07-28",
   "io.modelcontextprotocol/clientCapabilities": {},
-};
-const JSON_HEADERS = {
-  "content-type": "application/json",
-  accept: "application/json, text/event-stream",
 };
 
 function modernBody(method: string, params: Record<string, unknown> = {}, id = 1): string {
@@ -275,11 +220,9 @@ async function replaceHandle(
   getAuthInfo?: (req: any) => AuthInfo | null,
   overrides: Omit<HttpServerOptions, "getAuthInfo"> = {},
 ): Promise<void> {
-  handle.drain();
-  await new Promise<void>((r) => handle.server.close(() => r()));
+  await closeHttpServer(handle);
   handle = buildHttpServer({ getAuthInfo, ...overrides });
-  await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-  port = (handle.server.address() as AddressInfo).port;
+  port = await listenOnLocalhost(handle);
 }
 
 describe("HTTP transport handler", () => {
@@ -300,6 +243,15 @@ describe("HTTP transport handler", () => {
     expect(JSON.parse(res.body).status).toBe("ok");
   });
 
+  it("returns 503 on /health when output format is invalid in header mode", async () => {
+    delete process.env.B2_HTTP_CREDENTIAL_MODE;
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    await replaceHandle();
+    const res = await request(port, "GET", "/health");
+    expect(res.status).toBe(503);
+    expect(JSON.parse(res.body).status).toBe("error");
+  });
+
   it("returns 503 on /health when server mode is missing static credentials", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "server";
     await replaceHandle();
@@ -310,13 +262,11 @@ describe("HTTP transport handler", () => {
 
   it("fails startup on an invalid credential mode", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "session";
-    handle.drain();
-    await new Promise<void>((r) => handle.server.close(() => r()));
+    await closeHttpServer(handle);
     expect(() => buildHttpServer()).toThrow(/invalid/i);
     process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
     handle = buildHttpServer();
-    await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-    port = (handle.server.address() as AddressInfo).port;
+    port = await listenOnLocalhost(handle);
   });
 
   it("returns 404 on an unknown path", async () => {
@@ -864,8 +814,7 @@ describe("HTTP transport handler", () => {
       scopes: [],
       extra: { sub: "alice" },
     }));
-    handle.drain();
-    await new Promise<void>((r) => handle.server.close(() => r()));
+    await closeHttpServer(handle);
     handle = buildHttpServer({
       getAuthInfo: () => ({
         token: "verified-token",
@@ -880,8 +829,7 @@ describe("HTTP transport handler", () => {
             : null,
       },
     });
-    await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
-    port = (handle.server.address() as AddressInfo).port;
+    port = await listenOnLocalhost(handle);
 
     const spoofed = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list") },

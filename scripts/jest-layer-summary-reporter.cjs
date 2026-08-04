@@ -25,6 +25,8 @@ class JestLayerSummaryReporter {
         numFailingTests: suite.numFailingTests,
         numPassingTests: suite.numPassingTests,
         numPendingTests: suite.numPendingTests,
+        // Intentionally omit failureMessages so credential-bearing failures
+        // cannot be serialized into machine-readable layer summaries.
         assertionResults: suite.testResults.map((test) => ({
           ancestorTitles: test.ancestorTitles,
           duration: test.duration,

@@ -59,9 +59,9 @@ import `src/`; only the slow/package layers may build or inspect `dist/`.
 
 All npm Jest layer commands run through `scripts/run-jest-layer.mjs`. The runner
 preserves the normal terminal reporter and writes machine-readable summaries
-without raw failure messages. Deterministic layers also write JUnit XML. Live
-layers do not load the third-party JUnit reporter because they run with B2
-credentials in the environment.
+without raw failure messages. Deterministic layers write JUnit XML only when no
+B2 credential environment variables are present. Any layer running with B2
+credentials suppresses the third-party JUnit reporter.
 
 - JUnit XML: `reports/junit/<layer>.xml`
 - Jest JSON summary: `reports/jest/<layer>.json`
