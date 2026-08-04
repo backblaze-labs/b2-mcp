@@ -11,8 +11,15 @@ import {
   invalidateCapabilityCache,
 } from "../../src/server";
 import { verificationFingerprintConfig } from "../../src/credentials";
-import { isToolEnabled, TOOL_CAPABILITIES } from "../../src/utils/tool-capabilities";
+import { logger } from "../../src/utils/logger";
+import {
+  DURABLE_SECRET_PRODUCING_TOOLS,
+  isToolEnabled,
+  TOOL_CAPABILITIES,
+} from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
+
+const CANARY = "B2_MCP_CANARY_SECRET_capability_do_not_leak";
 
 const baseConfig = {
   applicationKeyId: "k",
@@ -38,6 +45,13 @@ describe("isToolEnabled", () => {
     expect(isToolEnabled("b2_authorize_account", new Set())).toBe(true);
   });
 
+  it("always excludes durable-secret-producing tools", () => {
+    for (const tool of DURABLE_SECRET_PRODUCING_TOOLS) {
+      expect(isToolEnabled(tool, null)).toBe(false);
+      expect(isToolEnabled(tool, new Set(Object.values(TOOL_CAPABILITIES).flat()))).toBe(false);
+    }
+  });
+
   it("gates a mapped tool on its capability", () => {
     expect(isToolEnabled("s3_delete_object", new Set(["readFiles"]))).toBe(false);
     expect(isToolEnabled("s3_delete_object", new Set(["deleteFiles"]))).toBe(true);
@@ -51,7 +65,7 @@ describe("isToolEnabled", () => {
 });
 
 describe("capability-aware registration", () => {
-  it("null capabilities → full surface, no filtering (40 tools)", () => {
+  it("null capabilities → full surface plus compatibility stubs, no filtering (40 tools)", () => {
     expect(toolNames(null).length).toBe(40);
   });
 
@@ -59,6 +73,7 @@ describe("capability-aware registration", () => {
     const names = toolNames([]);
     expect(names.length).toBeLessThan(40);
     expect(names).toContain("b2_authorize_account");
+    expect(names).toContain("b2_create_key");
     expect(names).not.toContain("b2_usage_growth");
   });
 
@@ -81,14 +96,19 @@ describe("capability-aware registration", () => {
       "s3_delete_objects",
       "s3_put_object",
       "b2_delete_bucket",
-      "b2_create_key",
       "b2_delete_key",
       "b2_update_file_retention",
       "b2_update_file_legal_hold",
-      "b2_create_group_member",
       "b2_list_groups",
     ]) {
       expect(names).not.toContain(t);
+    }
+    for (const t of [
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
+    ]) {
+      expect(names).toContain(t);
     }
     expect(names.length).toBeLessThan(40);
   });
@@ -123,7 +143,10 @@ describe("capability-aware registration", () => {
     } as B2Config;
     const names = toolNames(["listBuckets"], withMaster);
     expect(names).toContain("b2_list_groups");
+    expect(names).toContain("b2_eject_group_member");
+    expect(names).toContain("b2_list_group_members");
     expect(names).toContain("b2_create_group_member");
+    expect(names).toContain("b2_reserve_trial_create_account");
   });
 });
 
@@ -182,6 +205,41 @@ describe("fetchCapabilities", () => {
       status: 503,
       code: "capability_upstream_unavailable",
     });
+  });
+
+  it("sanitizes capability fetch failure log text, code, and request id", async () => {
+    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const configWithSecrets = {
+      ...baseConfig,
+      applicationKey: "configured-capability-secret",
+      appKey: "configured-app-capability-secret",
+      masterKey: "configured-master-capability-secret",
+    } as B2Config;
+    jest.spyOn(axios, "get").mockRejectedValue(
+      Object.assign(new Error(`authorizationToken=${CANARY} ${configWithSecrets.applicationKey}`), {
+        code: `bad_${CANARY}`,
+        response: { status: 500, headers: { "x-bz-request-id": `req-${CANARY}` } },
+      }),
+    );
+
+    await expect(
+      fetchCapabilities(configWithSecrets, "credential:capability-leak", "credential:non-secret"),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "capability_upstream_unavailable",
+    });
+
+    const logText = JSON.stringify(warnSpy.mock.calls);
+    expect(logText).not.toContain(CANARY);
+    expect(logText).not.toContain(configWithSecrets.applicationKey);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        upstreamCode: "[redacted]",
+        requestId: "[redacted]",
+        message: expect.not.stringContaining(CANARY),
+      }),
+      "capability.fetch.failed",
+    );
   });
 
   it("returns null without any network call when B2_REGISTER_ALL_TOOLS=true", async () => {

@@ -14,10 +14,18 @@ describe("smoke script release contract", () => {
     expect(smokeScript).not.toContain("https://mcp.example.com/sse");
   });
 
-  it("asserts the Phase 1 full tool surface, not the inherited 85-tool surface", () => {
-    expect(smokeScript).toContain("EXPECTED_FULL_TOOL_COUNT = 40");
+  it("uses profile-aware tool checks rather than a universal full-surface count", () => {
+    expect(smokeScript).toContain('toolNames.has("b2_authorize_account")');
+    expect(smokeScript).toContain("not exposed for this credential profile");
+    expect(smokeScript).not.toContain("EXPECTED_FULL_TOOL_COUNT");
     expect(smokeScript).not.toContain("85 tools");
     expect(smokeScript).not.toContain(">= 85");
     expect(smokeScript).not.toContain("≥ 85");
+  });
+
+  it("uses the registered S3 bucket probe with an explicit smoke bucket", () => {
+    expect(smokeScript).toContain("B2_SMOKE_BUCKET");
+    expect(smokeScript).toContain("s3_head_bucket");
+    expect(smokeScript).not.toContain("s3_list_buckets");
   });
 });

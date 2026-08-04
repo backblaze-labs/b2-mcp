@@ -1,5 +1,5 @@
 /**
- * Schema validation tests for all 40 registered MCP tools.
+ * Schema validation tests for all registered MCP tools.
  *
  * These tests run without any credentials and verify that every tool:
  *   - Is registered with a unique name
@@ -64,7 +64,7 @@ beforeAll(() => {
 // ── Inventory ─────────────────────────────────────────────────────────────────
 
 describe("Tool inventory", () => {
-  it("registers exactly 40 tools", () => {
+  it("registers exactly 40 callable tool names", () => {
     expect(toolNames.length).toBe(40);
   });
 
@@ -80,7 +80,7 @@ describe("Tool inventory", () => {
     expect(invalid).toEqual([]);
   });
 
-  it("has 21 B2 native + Partner + insight b2_ tools (control plane)", () => {
+  it("has 21 B2 native + Partner + insight b2_ tool names", () => {
     expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(21);
   });
 
@@ -198,11 +198,20 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("key");
   });
 
-  it("b2_create_key requires capabilities and keyName", () => {
-    const schema = tools["b2_create_key"]?.inputSchema;
-    const required = requiredKeys(schema);
-    expect(required).toContain("capabilities");
-    expect(required).toContain("keyName");
+  it("registers durable-secret-producing names only as unavailable compatibility stubs", async () => {
+    for (const name of [
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
+    ]) {
+      const tool = tools[name];
+      expect(tool).toBeDefined();
+      const handler = tool.handler ?? tool.callback ?? tool.execute;
+      const result = await handler({}, {});
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("tool_unavailable");
+      expect(result.content[0].text).not.toContain("applicationKey");
+    }
   });
 });
 

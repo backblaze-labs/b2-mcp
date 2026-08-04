@@ -16,6 +16,7 @@
  * Optional env (enables S3 tool checks):
  *   B2_APP_KEY_ID — value for the X-B2-App-Key-Id header
  *   B2_APP_KEY    — value for the X-B2-App-Key header
+ *   B2_SMOKE_BUCKET — known bucket to probe with s3_head_bucket
  *
  * Optional env for a customer OAuth/resource-server edge:
  *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
@@ -24,8 +25,15 @@
  * printed.
  */
 
-const { MCP_URL, B2_KEY_ID, B2_KEY, B2_APP_KEY_ID, B2_APP_KEY, MCP_AUTHORIZATION } = process.env;
-const EXPECTED_FULL_TOOL_COUNT = 40;
+const {
+  MCP_URL,
+  B2_KEY_ID,
+  B2_KEY,
+  B2_APP_KEY_ID,
+  B2_APP_KEY,
+  B2_SMOKE_BUCKET,
+  MCP_AUTHORIZATION,
+} = process.env;
 
 if (!MCP_URL) {
   console.error("Missing required env: MCP_URL");
@@ -103,16 +111,18 @@ async function main() {
   console.log(`Connecting: ${MCP_URL}`);
 
   const tools = await mcp("tools/list");
+  const toolNames = new Set((tools.tools ?? []).map((tool) => tool?.name).filter(Boolean));
   const info = tools?._meta?.["io.modelcontextprotocol/serverInfo"];
   check(
     "tools/list returns server info",
     !!info?.version,
     `server=${info?.name} v${info?.version}`,
   );
+  check("tools/list returns registered tools", toolNames.size > 0, `${toolNames.size} tools`);
   check(
-    `tools/list returns at least ${EXPECTED_FULL_TOOL_COUNT} tools`,
-    tools.tools.length >= EXPECTED_FULL_TOOL_COUNT,
-    `${tools.tools.length} tools`,
+    "tools/list includes b2_authorize_account",
+    toolNames.has("b2_authorize_account"),
+    `${toolNames.size} tools`,
   );
 
   // b2_authorize_account — exercises the primary key path
@@ -124,26 +134,31 @@ async function main() {
     check("b2_authorize_account returns accountId", false, e.message);
   }
 
-  // b2_list_buckets — exercises a B2 native read
-  try {
-    const r = await mcp("tools/call", { name: "b2_list_buckets", arguments: {} });
-    const parsed = parseToolJson(r);
-    check("b2_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
-  } catch (e) {
-    check("b2_list_buckets returns a buckets array", false, e.message);
-  }
-
-  // s3_list_buckets — only when the app key was supplied
-  if (B2_APP_KEY_ID && B2_APP_KEY) {
+  // b2_list_buckets — exercises a B2 native read when this credential exposes it
+  if (toolNames.has("b2_list_buckets")) {
     try {
-      const r = await mcp("tools/call", { name: "s3_list_buckets", arguments: {} });
+      const r = await mcp("tools/call", { name: "b2_list_buckets", arguments: {} });
       const parsed = parseToolJson(r);
-      check("s3_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
+      check("b2_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
     } catch (e) {
-      check("s3_list_buckets returns a buckets array", false, e.message);
+      check("b2_list_buckets returns a buckets array", false, e.message);
     }
   } else {
-    console.log("  [SKIP] s3_list_buckets — set B2_APP_KEY_ID / B2_APP_KEY to enable");
+    console.log("  [SKIP] b2_list_buckets — not exposed for this credential profile");
+  }
+
+  // s3_head_bucket — only when an app key and known smoke bucket were supplied
+  if (B2_APP_KEY_ID && B2_APP_KEY && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
+    try {
+      await mcp("tools/call", { name: "s3_head_bucket", arguments: { bucket: B2_SMOKE_BUCKET } });
+      check("s3_head_bucket confirms smoke bucket", true);
+    } catch (e) {
+      check("s3_head_bucket confirms smoke bucket", false, e.message);
+    }
+  } else {
+    console.log(
+      "  [SKIP] s3_head_bucket — set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable",
+    );
   }
 
   console.log();

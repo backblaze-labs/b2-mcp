@@ -1,3 +1,10 @@
+import {
+  sanitizeForMcpOutput,
+  sanitizeProviderCode,
+  sanitizeProviderRequestId,
+  sanitizeText,
+} from "./secret-sanitizer.js";
+
 export interface B2ApiError {
   status: number;
   code: string;
@@ -14,6 +21,26 @@ function headerRequestId(headers: unknown): string | undefined {
   const h = headers as Record<string, unknown>;
   const id = h["x-bz-request-id"] ?? h["x-amz-request-id"] ?? h["x-amz-id-2"] ?? h["x-request-id"];
   return typeof id === "string" ? id : undefined;
+}
+
+function stringOrFallback(value: unknown, fallback: string): string {
+  return typeof value === "string" && value ? value : fallback;
+}
+
+function messageOrFallback(value: unknown, fallback: string): string {
+  if (typeof value === "string") return value;
+  if (value === undefined || value === null) return fallback;
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json === "string") return json;
+  } catch {
+    // Fall through to String(value).
+  }
+  return String(value);
+}
+
+function numberOrFallback(value: unknown, fallback: number): number {
+  return typeof value === "number" ? value : fallback;
 }
 
 /**
@@ -42,7 +69,7 @@ export function parseB2Error(err: unknown): B2ApiError {
       return {
         status,
         code,
-        message: typeof e.message === "string" ? e.message : "An unknown error occurred",
+        message: messageOrFallback(e.message, "An unknown error occurred"),
         requestId: typeof meta.requestId === "string" ? meta.requestId : undefined,
         extendedRequestId:
           typeof meta.extendedRequestId === "string" ? meta.extendedRequestId : undefined,
@@ -52,11 +79,12 @@ export function parseB2Error(err: unknown): B2ApiError {
     // Axios-style error with a response body (B2 native API).
     if (e.response && typeof e.response === "object") {
       const resp = e.response as Record<string, unknown>;
-      const data = (resp.data ?? {}) as Record<string, unknown>;
+      const data =
+        resp.data && typeof resp.data === "object" ? (resp.data as Record<string, unknown>) : {};
       return {
-        status: (resp.status as number) ?? 500,
-        code: (data.code as string) ?? "unknown_error",
-        message: (data.message as string) ?? "An unknown error occurred",
+        status: numberOrFallback(resp.status, 500),
+        code: stringOrFallback(data.code, "unknown_error"),
+        message: messageOrFallback(data.message, "An unknown error occurred"),
         requestId: headerRequestId(resp.headers),
       };
     }
@@ -65,7 +93,11 @@ export function parseB2Error(err: unknown): B2ApiError {
       return { status: (e.status as number) ?? 500, code: e.code, message: e.message };
     }
     if (e.message) {
-      return { status: 500, code: "internal_error", message: String(e.message) };
+      return {
+        status: 500,
+        code: "internal_error",
+        message: messageOrFallback(e.message, "An unknown error occurred"),
+      };
     }
   }
   return { status: 500, code: "internal_error", message: String(err) };
@@ -81,7 +113,7 @@ export function parseErrorText(
   text: string | undefined,
 ): { code: string; status: number; requestId?: string } | null {
   if (!text) return null;
-  const m = text.match(/^B2 Error \[(.+?)\] \(HTTP (\d+)\): [\s\S]*?(?: \(requestId: (.+?)\))?$/);
+  const m = text.match(/^B2 Error \[(.+)\] \(HTTP (\d+)\): [\s\S]*?(?: \(requestId: (.+?)\))?$/);
   if (!m) return null;
   return { code: m[1], status: Number(m[2]), requestId: m[3] };
 }
@@ -93,8 +125,10 @@ export function parseErrorText(
  */
 export function formatB2Error(err: unknown): string {
   const parsed = parseB2Error(err);
-  const base = `B2 Error [${parsed.code}] (HTTP ${parsed.status}): ${parsed.message}${errorHint(parsed)}`;
-  return parsed.requestId ? `${base} (requestId: ${parsed.requestId})` : base;
+  const code = sanitizeProviderCode(parsed.code);
+  const requestId = sanitizeProviderRequestId(parsed.requestId);
+  const base = `B2 Error [${code}] (HTTP ${parsed.status}): ${sanitizeText(parsed.message)}${errorHint(parsed)}`;
+  return requestId ? `${base} (requestId: ${requestId})` : base;
 }
 
 /**
@@ -134,12 +168,12 @@ export function toolError(err: unknown): {
  * Return a successful tool response with text content.
  */
 export function toolSuccess(text: string): { content: Array<{ type: "text"; text: string }> } {
-  return { content: [{ type: "text", text }] };
+  return { content: [{ type: "text", text: sanitizeText(text) }] };
 }
 
 /**
  * Return a successful tool response with a JSON object.
  */
 export function toolJson(data: unknown): { content: Array<{ type: "text"; text: string }> } {
-  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+  return { content: [{ type: "text", text: JSON.stringify(sanitizeForMcpOutput(data), null, 2) }] };
 }

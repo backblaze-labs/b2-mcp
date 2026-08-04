@@ -59,7 +59,7 @@ export function registerS3MultipartTools(server: McpServer, s3: S3Client, config
 
   server.tool(
     "s3_presign_upload_part",
-    "Generate presigned PUT URLs for the parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2 — part bytes never pass through the MCP server. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
+    "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
     {
       bucket: z.string().describe("The bucket name."),
       key: z.string().describe("The object key."),

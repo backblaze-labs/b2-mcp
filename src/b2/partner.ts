@@ -71,58 +71,10 @@ export function registerPartnerTools(
     },
   );
 
-  // ── b2_create_group_member ──────────────────────────────────────────────────
-  server.tool(
-    "b2_create_group_member",
-    "Create a new Backblaze account and add it to a managed (B2-enabled) Group. Email must not already be a Backblaze account. Returns the new account's applicationKeyId + applicationKey (returned ONCE — store it). Max 5,000 members/Group.",
-    {
-      adminAccountId: z
-        .string()
-        .describe("The accountId of the Group admin. Must be authorized for the Partner API."),
-      groupId: z
-        .string()
-        .describe(
-          "The Group ID to add the new account to. Must be a managed Group with B2 enabled.",
-        ),
-      memberEmail: z
-        .string()
-        .email()
-        .describe(
-          "Email address for the new Group member. Must not already be a Backblaze account.",
-        ),
-      region: z
-        .enum(["us-east", "us-west", "eu-central", "ca-east"])
-        .optional()
-        .describe(
-          "Region for the new account's data. Defaults to the current default region if omitted.",
-        ),
-      confirm: z
-        .boolean()
-        .optional()
-        .describe(
-          "Confirm this irreversible account creation. Required when the server destructive policy is 'confirm' (the default). The created account is real, billable, and cannot be removed via API.",
-        ),
-    },
-    async (args) => {
-      try {
-        const gate = checkDestructive("b2_create_group_member", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
-        const payload: Record<string, unknown> = {
-          adminAccountId: args.adminAccountId,
-          groupId: args.groupId,
-          memberEmail: args.memberEmail,
-        };
-        if (args.region) payload.region = args.region;
-
-        const result = await client.call("b2_create_group_member", payload, {
-          apiPath: "b2api/v3",
-        });
-        return toolJson(result);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
+  // Phase 1 deliberately does not register the real b2_create_group_member
+  // handler here. The response includes a one-time application key secret, and
+  // this server has no out-of-band secret sink for durable credentials.
+  // createServer registers a non-secret compatibility stub for stale clients.
 
   // ── b2_eject_group_member ───────────────────────────────────────────────────
   server.tool(
@@ -218,56 +170,8 @@ export function registerPartnerTools(
     },
   );
 
-  // ── b2_reserve_trial_create_account ────────────────────────────────────────
-  server.tool(
-    "b2_reserve_trial_create_account",
-    "Create a new Backblaze B2 account on a time-limited B2 Reserve Trial. The account gets a password-reset invite email and is immediately functional. Returns credentials and a pre-created bucket. Email must not already be a Backblaze account.",
-    {
-      email: z
-        .string()
-        .email()
-        .describe("Email for the new B2 trial account. Must not already be a Backblaze account."),
-      term: z
-        .number()
-        .int()
-        .min(7)
-        .max(30)
-        .describe("Duration of the trial in days (7-30 inclusive)."),
-      storage: z
-        .number()
-        .int()
-        .min(1)
-        .max(50)
-        .describe("Storage capacity for the trial in TB (1-50 inclusive)."),
-      region: z
-        .enum(["us-east", "us-west", "eu-central", "ca-east"])
-        .optional()
-        .describe("Region for the new account's data. Backblaze picks a region if not specified."),
-      confirm: z
-        .boolean()
-        .optional()
-        .describe(
-          "Confirm this irreversible account creation. Required when the server destructive policy is 'confirm' (the default). The created trial account is real and billable.",
-        ),
-    },
-    async (args) => {
-      try {
-        const gate = checkDestructive("b2_reserve_trial_create_account", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
-        const payload: Record<string, unknown> = {
-          email: args.email,
-          term: args.term,
-          storage: args.storage,
-        };
-        if (args.region) payload.region = args.region;
-
-        const result = await client.call("b2_reserve_trial_create_account", payload, {
-          apiPath: "b2api/v3",
-        });
-        return toolJson(result);
-      } catch (err) {
-        return toolError(err);
-      }
-    },
-  );
+  // Phase 1 deliberately does not register the real
+  // b2_reserve_trial_create_account handler for the same reason: trial account
+  // creation returns durable credential material. createServer registers a
+  // non-secret compatibility stub for stale clients.
 }

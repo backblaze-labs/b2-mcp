@@ -6,6 +6,9 @@ import {
   toolSuccess,
   toolJson,
 } from "../../src/utils/errors";
+import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
+
+const CANARY = "B2_MCP_CANARY_SECRET_errors_do_not_leak";
 
 describe("parseB2Error", () => {
   it("should parse axios-style error with response body", () => {
@@ -87,6 +90,21 @@ describe("parseB2Error", () => {
     };
     expect(parseB2Error(err).requestId).toBe("bz-req-9");
   });
+
+  it("stringifies non-string axios response messages", () => {
+    const parsed = parseB2Error({
+      response: {
+        status: 400,
+        data: {
+          code: "bad_request",
+          message: { applicationKey: CANARY, reason: "bad" },
+        },
+      },
+    });
+
+    expect(parsed.message).toContain("applicationKey");
+    expect(parsed.message).toContain(CANARY);
+  });
 });
 
 describe("formatB2Error", () => {
@@ -129,6 +147,63 @@ describe("formatB2Error", () => {
     const err = { response: { status: 404, data: { code: "file_not_present", message: "gone" } } };
     expect(formatB2Error(err)).not.toContain("application key");
   });
+
+  it("redacts malicious provider error codes before formatting", () => {
+    const formatted = formatB2Error({
+      response: {
+        status: 500,
+        data: { code: `bad_${CANARY}`, message: "provider failed" },
+      },
+    });
+    expect(formatted).not.toContain(CANARY);
+    expect(formatted).toContain(`B2 Error [${SECRET_SANITIZER_REDACTION}]`);
+  });
+
+  it("redacts malicious B2 request ids before formatting", () => {
+    const formatted = formatB2Error({
+      response: {
+        status: 500,
+        data: { code: "internal_error", message: "provider failed" },
+        headers: { "x-bz-request-id": CANARY },
+      },
+    });
+    expect(formatted).not.toContain(CANARY);
+    expect(formatted).toContain(`requestId: ${SECRET_SANITIZER_REDACTION}`);
+  });
+
+  it("redacts configured secret values from AWS request ids before formatting", () => {
+    const old = process.env.B2_APPLICATION_KEY;
+    process.env.B2_APPLICATION_KEY = "configured-request-secret";
+    try {
+      const formatted = formatB2Error({
+        name: "UnknownError",
+        message: "UnknownError",
+        $metadata: { httpStatusCode: 500, requestId: "configured-request-secret" },
+      });
+      expect(formatted).not.toContain("configured-request-secret");
+      expect(formatted).toContain(`requestId: ${SECRET_SANITIZER_REDACTION}`);
+    } finally {
+      if (old === undefined) delete process.env.B2_APPLICATION_KEY;
+      else process.env.B2_APPLICATION_KEY = old;
+    }
+  });
+
+  it("formats and sanitizes object-valued provider messages without throwing", () => {
+    const formatted = formatB2Error({
+      response: {
+        status: 400,
+        data: {
+          code: "bad_request",
+          message: { applicationKey: CANARY, authorizationToken: CANARY, reason: "bad" },
+        },
+      },
+    });
+
+    expect(formatted).toContain("bad_request");
+    expect(formatted).toContain("400");
+    expect(formatted).not.toContain(CANARY);
+    expect(formatted).toContain(SECRET_SANITIZER_REDACTION);
+  });
 });
 
 describe("parseErrorText (round-trips formatB2Error for the audit layer)", () => {
@@ -139,6 +214,22 @@ describe("parseErrorText (round-trips formatB2Error for the audit layer)", () =>
       $metadata: { httpStatusCode: 404, requestId: "req-9" },
     });
     expect(parseErrorText(text)).toEqual({ code: "NoSuchKey", status: 404, requestId: "req-9" });
+  });
+
+  it("round-trips a bracketed redaction placeholder", () => {
+    const text = formatB2Error({
+      response: {
+        status: 500,
+        data: { code: `bad_${CANARY}`, message: "provider failed" },
+      },
+    });
+
+    expect(text).toContain(`B2 Error [${SECRET_SANITIZER_REDACTION}]`);
+    expect(parseErrorText(text)).toEqual({
+      code: SECRET_SANITIZER_REDACTION,
+      status: 500,
+      requestId: undefined,
+    });
   });
 
   it("works without a requestId", () => {
@@ -162,6 +253,22 @@ describe("toolError", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].type).toBe("text");
     expect(result.content[0].text).toContain("test error");
+  });
+
+  it("returns a sanitized structured error for object-valued provider messages", () => {
+    const result = toolError({
+      response: {
+        status: 400,
+        data: {
+          code: "bad_request",
+          message: { applicationKey: CANARY, authorizationToken: CANARY, reason: "bad" },
+        },
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("bad_request");
+    expect(result.content[0].text).not.toContain(CANARY);
   });
 });
 

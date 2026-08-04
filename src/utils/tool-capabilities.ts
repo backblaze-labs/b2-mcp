@@ -5,12 +5,16 @@
  * the server reads the key's `allowed.capabilities` (from b2_authorize_account)
  * and only registers the tools the key can actually use — so the surface auto-right-sizes
  * to the credential: smaller context, no dead tools, and a surface that matches
- * the key's real power. This is a layer below the destructive gate (the key
- * decides what is *possible*; the gate decides what is *permitted*).
+ * the key's real power. This is a layer below the destructive gate and the
+ * durable-secret exclusion (the key decides what is *possible*; the other
+ * guards decide what is *permitted*).
  *
  * Semantics: a tool registers when the key holds ANY of its listed capabilities.
  * A tool NOT in this map is always registered (e.g. b2_authorize_account, and the
- * Partner tools, which are gated separately on a configured master key).
+ * Partner tools, which are gated separately on a configured master key). Durable
+ * secret-producing handlers are disabled until a reviewed out-of-band secret
+ * sink exists; createServer adds non-secret compatibility stubs for stale
+ * tools/list clients.
  */
 export const TOOL_CAPABILITIES: Record<string, string[]> = {
   // ── B2 native control plane ──────────────────────────────────────────────
@@ -21,7 +25,6 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   b2_get_bucket_notification_rules: ["readBucketNotifications", "writeBucketNotifications"],
   b2_set_bucket_notification_rules: ["writeBucketNotifications"],
   b2_list_keys: ["listKeys"],
-  b2_create_key: ["writeKeys"],
   b2_delete_key: ["deleteKeys"],
   b2_update_file_retention: ["writeFileRetentions"],
   b2_update_file_legal_hold: ["writeFileLegalHolds"],
@@ -53,24 +56,33 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_put_bucket_lifecycle: ["writeBuckets"],
 };
 
+/** Durable-secret-producing tool handlers excluded from Phase 1 registration. */
+export const DURABLE_SECRET_PRODUCING_TOOLS = new Set<string>([
+  "b2_create_key",
+  "b2_create_group_member",
+  "b2_reserve_trial_create_account",
+]);
+
 /** Partner/Groups tools — registered only when a distinct master key is
  *  configured (they need Partner-API entitlement, not a standard capability),
  *  so they are exempt from capability filtering and gated in createServer. */
 export const PARTNER_TOOLS = new Set<string>([
   "b2_list_groups",
-  "b2_create_group_member",
   "b2_eject_group_member",
   "b2_list_group_members",
-  "b2_reserve_trial_create_account",
 ]);
 
 /**
  * Whether a tool should be registered for a key with the given capabilities.
- * Unmapped tools register unconditionally (conservative: never hide a tool we
- * did not explicitly classify). Mapped tools register when the key holds any of
- * the required capabilities.
+ * Durable-secret-producing handlers are always disabled until a reviewed secret
+ * sink exists. Unmapped tools otherwise register unconditionally (conservative:
+ * never hide a tool we did not explicitly classify). Mapped tools register when
+ * the key holds any of the required capabilities. A null capability set is the
+ * explicit full-surface mode and still honors durable-secret handler exclusion.
  */
-export function isToolEnabled(name: string, caps: ReadonlySet<string>): boolean {
+export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): boolean {
+  if (DURABLE_SECRET_PRODUCING_TOOLS.has(name)) return false;
+  if (caps === null) return true;
   const required = TOOL_CAPABILITIES[name];
   if (!required || required.length === 0) return true;
   return required.some((c) => caps.has(c));
