@@ -22,7 +22,7 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
 import {
@@ -42,7 +42,7 @@ import {
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
-} from "./sdk-test-helpers";
+} from "../support/sdk-test-helpers";
 
 function postLargeBody(port: number, pathname: string): Promise<number> {
   return request(port, "POST", pathname, {

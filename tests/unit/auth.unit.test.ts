@@ -6,7 +6,7 @@ import {
   SDK_MAX_RETRY_BUDGET_MS,
   SDK_RETRY_OPTIONS,
 } from "../../src/auth";
-import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import { CIRCUIT_TIMEOUT_MS } from "../../src/utils/circuit-breaker";
 import { B2Config } from "../../src/utils/types";
@@ -16,7 +16,7 @@ import {
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
-} from "./sdk-test-helpers";
+} from "../support/sdk-test-helpers";
 
 const mockConfig: B2Config = {
   applicationKeyId: "test-key-id",

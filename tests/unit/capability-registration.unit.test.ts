@@ -18,13 +18,13 @@ import {
   TOOL_CAPABILITIES,
 } from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
-import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   authorizeResponse,
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
-} from "./sdk-test-helpers";
+} from "../support/sdk-test-helpers";
 
 const CANARY = "B2_MCP_CANARY_SECRET_capability_do_not_leak";
 

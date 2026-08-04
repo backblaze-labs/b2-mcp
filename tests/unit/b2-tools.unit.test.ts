@@ -7,7 +7,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,
@@ -15,7 +15,7 @@ import {
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
-} from "./sdk-test-helpers";
+} from "../support/sdk-test-helpers";
 
 async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
   const tool = getRegisteredTools(server)?.[name];

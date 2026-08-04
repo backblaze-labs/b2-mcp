@@ -5,8 +5,12 @@
 
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { invalidateCapabilityCache } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
-import { installSdkTransport, RecordingTransport, StaticHttpResponse } from "./sdk-test-helpers";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import {
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "../support/sdk-test-helpers";
 
 jest.mock("@modelcontextprotocol/server/stdio", () => ({
   serveStdio: jest.fn(),

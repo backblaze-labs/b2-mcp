@@ -9,7 +9,7 @@
  */
 
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
-import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,
@@ -18,7 +18,7 @@ import {
   RecordingTransport,
   requestJson,
   StaticHttpResponse,
-} from "./sdk-test-helpers";
+} from "../support/sdk-test-helpers";
 
 const testConfig = {
   applicationKeyId: "test-key-id",
