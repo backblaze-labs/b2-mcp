@@ -21,6 +21,7 @@ if (missing.length > 0) {
 const jestBin = path.join(root, "node_modules", "jest", "bin", "jest.js");
 const result = spawnSync(process.execPath, [jestBin, "--runTestsByPath", ...tests], {
   cwd: root,
+  env: { ...process.env, NODE_ENV: "test" },
   stdio: "inherit",
 });
 

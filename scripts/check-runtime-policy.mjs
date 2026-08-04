@@ -104,7 +104,7 @@ function requireNoLegacyRuntimeJobs(policy) {
     if (text.includes("node-version-file:")) fail(`${workflow}: node-version-file is not allowed`);
     for (const match of text.matchAll(/node-version:\s*([^\n]+)/g)) {
       const versions = match[1]
-        .replace(/[${}{},[\]]/g, " ")
+        .replace(/[$\{\},\[\]]/g, " ")
         .split(/\s+/)
         .map((part) => part.trim())
         .filter(Boolean);
