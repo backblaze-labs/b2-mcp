@@ -38,12 +38,37 @@ jobs:
       - run: npm ci --engine-strict
       - run: npm run format:check
       - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:coverage
-      - run: npm run test:integration
-      - run: npm run test:contract
       - run: npm run build
-      - run: npm run smoke:package
+      - id: typecheck
+        continue-on-error: true
+        run: npm run typecheck
+      - id: coverage
+        continue-on-error: true
+        run: npm run test:coverage
+      - id: slow
+        continue-on-error: true
+        run: npm run test:slow
+      - id: package-smoke
+        continue-on-error: true
+        run: npm run smoke:package
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-reports-node-${{ matrix.node-version }}
+          path: |
+            reports/junit/*.xml
+            reports/jest/*.json
+            coverage/coverage-summary.json
+            coverage/cobertura-coverage.xml
+          if-no-files-found: error
+      - name: Fail on test errors
+        if: >-
+          steps.typecheck.outcome == 'failure' ||
+          steps.coverage.outcome == 'failure' ||
+          steps.slow.outcome == 'failure' ||
+          steps.package-smoke.outcome == 'failure'
+        run: exit 1
 
   deterministic-linux-current:
     name: deterministic linux current / Node ${{ matrix.node-version }}
@@ -63,12 +88,37 @@ jobs:
       - run: npm ci --engine-strict
       - run: npm run format:check
       - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:coverage
-      - run: npm run test:integration
-      - run: npm run test:contract
       - run: npm run build
-      - run: npm run smoke:package
+      - id: typecheck
+        continue-on-error: true
+        run: npm run typecheck
+      - id: coverage
+        continue-on-error: true
+        run: npm run test:coverage
+      - id: slow
+        continue-on-error: true
+        run: npm run test:slow
+      - id: package-smoke
+        continue-on-error: true
+        run: npm run smoke:package
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-reports-node-${{ matrix.node-version }}
+          path: |
+            reports/junit/*.xml
+            reports/jest/*.json
+            coverage/coverage-summary.json
+            coverage/cobertura-coverage.xml
+          if-no-files-found: error
+      - name: Fail on test errors
+        if: >-
+          steps.typecheck.outcome == 'failure' ||
+          steps.coverage.outcome == 'failure' ||
+          steps.slow.outcome == 'failure' ||
+          steps.package-smoke.outcome == 'failure'
+        run: exit 1
 
   cross-platform-minimum:
     name: cross-platform minimum / ${{ matrix.os }}

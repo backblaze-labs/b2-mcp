@@ -17,16 +17,24 @@ describe("CI workflow policy", () => {
     expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
   });
 
-  it("keeps package verification off the ci-green dependency path", () => {
+  it("keeps the package layer separate from the ci-green dependency path", () => {
     const markGreen = workflowJob(ci, "mark-green");
-    const testJob = workflowJob(ci, "test");
+    const productionJob = workflowJob(ci, "deterministic-linux-production");
+    const currentJob = workflowJob(ci, "deterministic-linux-current");
     const packageJob = workflowJob(ci, "package");
 
-    expect(markGreen).toContain("needs: [engine-floor, lint, test]");
+    expect(markGreen).toContain(
+      "needs: [runtime-policy, deterministic-linux-production, supply-chain-audit]",
+    );
     expect(markGreen).not.toContain("package");
-    expect(testJob).toContain("npm run build");
-    expect(testJob).not.toContain("test:package");
-    expect(testJob).not.toContain("smoke:package");
+    expect(productionJob).toContain("npm run build");
+    expect(productionJob).toContain("npm run test:coverage");
+    expect(productionJob).toContain("npm run test:slow");
+    expect(productionJob).toContain("npm run smoke:package");
+    expect(productionJob).not.toContain("test:package");
+    expect(currentJob).toContain("npm run test:coverage");
+    expect(currentJob).toContain("npm run test:slow");
+    expect(currentJob).not.toContain("test:package");
     expect(packageJob).toContain("continue-on-error: true");
     expect(packageJob).toContain("npm run test:package");
   });

@@ -30,10 +30,9 @@ individual deterministic layers are:
 | `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
 | `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.     |
 
-Local scripts can call each deterministic layer independently. The deploy-gating
-CI `test` job runs the bundled coverage layer plus slow deterministic lifecycle
-checks once; `test:package` runs in a separate non-blocking package job so npm
-registry availability cannot stall `ci-green`.
+Local scripts can call each deterministic layer independently. The Linux Node
+matrix runs the bundled coverage and slow deterministic lifecycle layers, while
+`test:package` runs in a separate non-blocking package job.
 CI runs the credential-free deterministic gate on Linux for Node.js 22.3.0, 24,
 and 26. It also runs `npm run check:runtime-policy`, which fails if workflow or
 metadata runtime policy drifts. Cross-platform coverage stays lean: the fast
