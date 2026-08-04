@@ -11,14 +11,14 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { runWithMcpRequestSignal } from "../../src/request-context";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
   const tool = getRegisteredTools(server)?.[name];
   if (!tool) throw new Error(`Tool not found: ${name}`);
-  const handler = tool.handler ?? tool.callback ?? tool.execute;
-  return handler(args, {} as any);
+  return tool.execute(args, {} as any);
 }
 
 function parseResult(result: any) {
@@ -50,9 +50,9 @@ let server: McpServer;
 let sendSpy: jest.SpyInstance;
 
 beforeEach(() => {
-  server = createServer(testConfig);
   // S3Client.prototype.send is a generic overloaded method; cast to bypass TS strictness
   sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
+  server = createServer(testConfig);
 });
 
 afterEach(() => {
@@ -94,6 +94,17 @@ describe("s3_list_objects_v2", () => {
 
     expect(result.isTruncated).toBe(true);
     expect(result.nextContinuationToken).toBe("usable-page-cursor");
+  });
+
+  it("passes the current MCP request abort signal to S3 API calls", async () => {
+    sendSpy.mockResolvedValue({ Contents: [] });
+    const abort = new AbortController();
+
+    await runWithMcpRequestSignal(abort.signal, () =>
+      callTool(server, "s3_list_objects_v2", { bucket: "b" }),
+    );
+
+    expect(sendSpy).toHaveBeenCalledWith(expect.anything(), { abortSignal: abort.signal });
   });
 });
 

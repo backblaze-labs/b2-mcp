@@ -151,6 +151,8 @@ detection. It is not the default user profile.
 
 - `b2_authorize_account`
 - `b2_create_bucket`
+- `b2_create_group_member`
+- `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
 - `b2_egress_leaders`
@@ -161,6 +163,7 @@ detection. It is not the default user profile.
 - `b2_list_group_members`
 - `b2_list_groups`
 - `b2_list_keys`
+- `b2_reserve_trial_create_account`
 - `b2_set_bucket_notification_rules`
 - `b2_unfinished_uploads`
 - `b2_update_bucket`
@@ -196,21 +199,23 @@ detection. It is not the default user profile.
 customer-hosted deployment with a standard B2 application key, no distinct
 Partner/master credential, and no configured out-of-band secret sink.
 
-It excludes all Partner/Groups tools:
+It excludes real Partner/Groups handlers:
 
-- `b2_create_group_member`
 - `b2_eject_group_member`
 - `b2_list_group_members`
 - `b2_list_groups`
-- `b2_reserve_trial_create_account`
 
-It also excludes `b2_create_key`, because that tool produces a durable B2
-application-key secret.
+The durable-secret-producing names `b2_create_key`, `b2_create_group_member`,
+and `b2_reserve_trial_create_account` are included only as unavailable
+compatibility stubs. Their real handlers are excluded because they produce
+durable credential material.
 
 `b2_*` tools in `phase1-default`:
 
 - `b2_authorize_account`
 - `b2_create_bucket`
+- `b2_create_group_member`
+- `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
 - `b2_egress_leaders`
@@ -218,6 +223,7 @@ application-key secret.
 - `b2_largest_files`
 - `b2_list_buckets`
 - `b2_list_keys`
+- `b2_reserve_trial_create_account`
 - `b2_set_bucket_notification_rules`
 - `b2_unfinished_uploads`
 - `b2_update_bucket`
@@ -266,11 +272,14 @@ capabilities:
 `b2_*` tools in `read-only`:
 
 - `b2_authorize_account`
+- `b2_create_group_member`
+- `b2_create_key`
 - `b2_egress_leaders`
 - `b2_get_bucket_notification_rules`
 - `b2_largest_files`
 - `b2_list_buckets`
 - `b2_list_keys`
+- `b2_reserve_trial_create_account`
 - `b2_unfinished_uploads`
 - `b2_usage_growth`
 
@@ -576,7 +585,9 @@ The Phase 1 tool contract must satisfy these requirements directly:
 - Assert the fixed named-profile counts for `full`, `phase1-default`, and
   `read-only`; test credential-resolved subsets separately with derived profile
   identifiers, derived counts, ordered tool lists, and hashes.
-- Verify no default profile includes a durable-secret-producing tool.
+- Verify no default profile includes a durable-secret-producing handler; any
+  durable-secret-producing name present in the profile must be an unavailable
+  compatibility stub.
 - Verify per-operation authorization for `s3_get_presigned_url`, including the
   `read-only` prohibition on `PutObject` URLs.
 - Verify target-scoped authorization for destructive and protection-weakening

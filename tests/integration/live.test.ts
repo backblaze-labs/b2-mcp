@@ -44,11 +44,7 @@ const truncIt = HAS_S3_CREDS && TRUNC_BUCKET ? test : test.skip;
 async function callTool(server: McpServer, toolName: string, args: Record<string, unknown>) {
   const tool = getRegisteredTools(server)?.[toolName];
   if (!tool) throw new Error(`Tool not found: ${toolName}`);
-  const handler = tool.handler ?? tool.callback ?? tool.execute;
-  if (typeof handler !== "function") {
-    throw new Error(`No callable handler on '${toolName}' (keys: ${Object.keys(tool).join(", ")})`);
-  }
-  return handler(args, {} as any);
+  return tool.execute(args, {} as any);
 }
 
 function parseResult(result: any): any {

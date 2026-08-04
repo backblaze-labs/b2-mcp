@@ -2,6 +2,7 @@ import axios, { AxiosRequestConfig } from "axios";
 import { B2AuthManager } from "../auth.js";
 import { withRetry } from "../utils/retry.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
+import { currentMcpRequestSignal } from "../request-context.js";
 
 /** Timeout for ordinary (non-transfer) B2 API requests. */
 const API_TIMEOUT_MS = 30_000;
@@ -57,6 +58,7 @@ export class B2Client {
                 "User-Agent": this.userAgent,
               },
               timeout: API_TIMEOUT_MS,
+              signal: currentMcpRequestSignal(),
               ...(data !== undefined && { data }),
               ...(options.params !== undefined && { params: options.params }),
             };

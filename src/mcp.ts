@@ -1,8 +1,4 @@
-import {
-  McpServer as V2McpServer,
-  type McpRequestContext,
-  type RegisteredTool,
-} from "@modelcontextprotocol/server";
+import { McpServer as V2McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 export type McpServer = V2McpServer;
@@ -12,16 +8,14 @@ export type ToolCallback<TArgs = any> = (args: TArgs, extra: any) => any | Promi
 export interface ToolRegistrationConfig {
   title?: string;
   description?: string;
-  inputSchema?: Record<string, unknown>;
+  inputSchema?: z.ZodRawShape;
   force?: boolean;
 }
 
 export interface RegisteredToolRecord {
   name: string;
   description?: string;
-  inputSchema?: Record<string, unknown>;
-  callback: ToolCallback;
-  handler: ToolCallback;
+  inputSchema?: z.ZodObject<z.ZodRawShape>;
   execute: ToolCallback;
 }
 
@@ -32,7 +26,7 @@ export interface ToolRegistrar {
     name: string,
     config: ToolRegistrationConfig,
     cb: ToolCallback<TArgs>,
-  ): RegisteredTool | undefined;
+  ): void;
 }
 
 interface PendingTool {
@@ -66,10 +60,10 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
     name: string,
     config: ToolRegistrationConfig,
     cb: ToolCallback<TArgs>,
-  ): RegisteredTool | undefined {
+  ): void {
     if (this.committed) throw new Error(`Tool registered after commit: ${name}`);
     if (!config.force && this.options.shouldRegister && !this.options.shouldRegister(name)) {
-      return undefined;
+      return;
     }
     if (this.records[name]) throw new Error(`Duplicate MCP tool registration: ${name}`);
 
@@ -77,13 +71,10 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
     this.records[name] = {
       name,
       description: config.description,
-      inputSchema: z.object((config.inputSchema ?? {}) as any) as any,
-      callback,
-      handler: callback,
+      inputSchema: z.object(config.inputSchema ?? {}),
       execute: callback,
     };
     this.pending.push({ name, config, callback });
-    return undefined;
   }
 
   commit(): number {

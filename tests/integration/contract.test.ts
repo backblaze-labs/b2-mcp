@@ -24,8 +24,7 @@ const liveIt = HAS_CREDS ? test : test.skip;
 async function callTool(server: McpServer, toolName: string, args: Record<string, unknown>) {
   const tool = getRegisteredTools(server)?.[toolName];
   if (!tool) throw new Error(`Tool not found: ${toolName}`);
-  const handler = tool.handler ?? tool.callback ?? tool.execute;
-  return handler(args, {} as any);
+  return tool.execute(args, {} as any);
 }
 function parseResult(result: any): any {
   const text = result?.content?.[0]?.text;

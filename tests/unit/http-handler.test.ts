@@ -13,12 +13,16 @@ import {
   configFromHeaders,
   createInFlightLimiter,
   deriveRateKey,
-  headersFromNode,
   HttpServerHandle,
-  toWebRequest,
+  HttpServerOptions,
 } from "../../src/http-server";
-import { invalidateAuthManagerCache } from "../../src/server";
+import {
+  createServer,
+  invalidateAuthManagerCache,
+  invalidateCapabilityCache,
+} from "../../src/server";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
 
 jest.mock("axios");
 const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
@@ -91,6 +95,7 @@ let port: number;
 
 const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
 const savedCredentialMode = process.env.B2_HTTP_CREDENTIAL_MODE;
+const savedMaxInFlightPerKey = process.env.B2_MAX_SESSIONS_PER_KEY;
 
 beforeAll(() => {
   process.env.B2_REGISTER_ALL_TOOLS = "true";
@@ -102,6 +107,8 @@ afterAll(() => {
   else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
   if (savedCredentialMode === undefined) delete process.env.B2_HTTP_CREDENTIAL_MODE;
   else process.env.B2_HTTP_CREDENTIAL_MODE = savedCredentialMode;
+  if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
+  else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
 });
 
 beforeEach(async () => {
@@ -111,6 +118,9 @@ beforeEach(async () => {
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
+  if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
+  else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
+  invalidateCapabilityCache();
   handle = buildHttpServer();
   await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
   port = (handle.server.address() as AddressInfo).port;
@@ -164,6 +174,32 @@ const LEGACY_INIT = JSON.stringify({
   },
 });
 
+function jsonRpcResponse(result: unknown = {}): Response {
+  return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function credentialProviderFromHeaders(): CredentialProvider {
+  return {
+    name: "test-headers",
+    resolve: (context) => {
+      const req = context?.req;
+      const config = req ? configFromHeaders(req) : null;
+      if (!config) {
+        throw new CredentialResolutionError("B2 application credentials are required", 401);
+      }
+      return {
+        config,
+        cacheKey: `credential:${config.applicationKeyId}`,
+        capabilityCacheKey: `capability:${config.applicationKeyId}`,
+      };
+    },
+    validateConfiguration: () => undefined,
+  };
+}
+
 function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
   return modernBody("tools/call", { name, arguments: args }, id);
 }
@@ -187,10 +223,13 @@ function authData() {
   };
 }
 
-async function replaceHandle(getAuthInfo?: (req: any) => AuthInfo | null): Promise<void> {
+async function replaceHandle(
+  getAuthInfo?: (req: any) => AuthInfo | null,
+  overrides: Omit<HttpServerOptions, "getAuthInfo"> = {},
+): Promise<void> {
   handle.drain();
   await new Promise<void>((r) => handle.server.close(() => r()));
-  handle = buildHttpServer({ getAuthInfo });
+  handle = buildHttpServer({ getAuthInfo, ...overrides });
   await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
   port = (handle.server.address() as AddressInfo).port;
 }
@@ -257,8 +296,66 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     const res = await request(port, "GET", "/mcp", {
       headers: { ...creds, "mcp-session-id": "ghost" },
     });
-    expect(res.status).not.toBe(200);
+    expect(res.status).toBe(405);
     expect(handle.sessions.size).toBe(0);
+  });
+
+  it("returns SDK 405 for GET and DELETE before credential resolution", async () => {
+    const resolve = jest.fn(() => {
+      throw new Error("credential resolution should not run");
+    });
+    await replaceHandle(undefined, {
+      credentialProvider: {
+        name: "unused",
+        resolve,
+        validateConfiguration: () => undefined,
+      },
+    });
+
+    const getRes = await request(port, "GET", "/mcp");
+    const deleteRes = await request(port, "DELETE", "/mcp");
+
+    expect(getRes.status).toBe(405);
+    expect(deleteRes.status).toBe(405);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("returns SDK protocol errors before credential resolution", async () => {
+    const resolve = jest.fn(() => {
+      throw new Error("credential resolution should not run");
+    });
+    await replaceHandle(undefined, {
+      credentialProvider: {
+        name: "unused",
+        resolve,
+        validateConfiguration: () => undefined,
+      },
+    });
+
+    const unsupported = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/list"),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+        params: {
+          _meta: {
+            ...META,
+            "io.modelcontextprotocol/protocolVersion": "2099-01-01",
+          },
+        },
+      }),
+    });
+    const mismatch = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call"),
+      body: LIST_TOOLS,
+    });
+
+    expect(unsupported.status).toBe(400);
+    expect(unsupported.body).toMatch(/Unsupported protocol version/i);
+    expect(mismatch.status).toBe(400);
+    expect(JSON.parse(mismatch.body).error.code).toBe(-32020);
+    expect(resolve).not.toHaveBeenCalled();
   });
 
   it("returns 413 when the request body exceeds the cap", async () => {
@@ -301,31 +398,192 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(missing.status).toBe(401);
   });
 
-  it("does not forward B2 credential or Authorization headers to the SDK request", () => {
-    const req = {
-      method: "POST",
-      url: "/mcp",
+  it("keeps concurrent header credentials isolated through the shared handler", async () => {
+    const seenConfigs: string[] = [];
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      createServer: (config, capabilities, ctx) => {
+        seenConfigs.push(config.applicationKeyId);
+        return createServer(config, capabilities, ctx);
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      request(port, "POST", "/mcp", {
+        headers: {
+          "x-b2-key-id": "tenant-a",
+          "x-b2-key": "secret-a",
+          ...modernHeaders("tools/list"),
+        },
+        body: LIST_TOOLS,
+      }),
+      request(port, "POST", "/mcp", {
+        headers: {
+          "x-b2-key-id": "tenant-b",
+          "x-b2-key": "secret-b",
+          ...modernHeaders("tools/list"),
+        },
+        body: LIST_TOOLS,
+      }),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(seenConfigs.sort()).toEqual(["tenant-a", "tenant-b"]);
+  });
+
+  it("disposes per-request server instances after stateless requests", async () => {
+    const closeSpies: jest.Mock[] = [];
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      createServer: (config, capabilities, ctx) => {
+        const server = createServer(config, capabilities, ctx);
+        const originalClose = server.close.bind(server);
+        const closeSpy = jest.fn(() => originalClose());
+        server.close = closeSpy as typeof server.close;
+        closeSpies.push(closeSpy);
+        return server;
+      },
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(res.status).toBe(200);
+    expect(closeSpies).toHaveLength(1);
+    expect(closeSpies[0]).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets an accepted MCP request finish after drain starts", async () => {
+    let markCapabilitiesStarted!: () => void;
+    const capabilitiesStarted = new Promise<void>((resolve) => {
+      markCapabilitiesStarted = resolve;
+    });
+    let resolveCapabilities!: (caps: string[] | null) => void;
+    const blockedCapabilities = new Promise<string[] | null>((resolve) => {
+      resolveCapabilities = resolve;
+    });
+    const fetchCapabilities = jest.fn(() => {
+      markCapabilitiesStarted();
+      return blockedCapabilities;
+    });
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities,
+    });
+
+    const pending = request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    await capabilitiesStarted;
+
+    handle.drain();
+    const rejected = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    resolveCapabilities(null);
+    const completed = await pending;
+
+    expect(rejected.status).toBe(503);
+    expect(completed.status).toBe(200);
+  });
+
+  it("holds in-flight permits until a streamed response finishes", async () => {
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    let streamReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      streamReady = resolve;
+    });
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      mcpHandler: {
+        fetch: jest.fn(async () => {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+              controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+              streamReady();
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }),
+        close: jest.fn(),
+      },
+    });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    await ready;
+
+    const limited = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    streamController.close();
+    const completed = await first;
+
+    expect(limited.status).toBe(429);
+    expect(completed.status).toBe(200);
+  });
+
+  it("does not pass B2 credential or Authorization headers into the live MCP adapter path", async () => {
+    let captured: Headers | null = null;
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      mcpHandler: {
+        fetch: async (req) => {
+          captured = req.headers;
+          return jsonRpcResponse({ ok: true });
+        },
+        close: jest.fn(),
+      },
+    });
+
+    const res = await request(port, "POST", "/mcp", {
       headers: {
-        ...creds,
+        "x-b2-key-id": "key",
+        "x-b2-key": "secret",
         "x-b2-mcp-key-id": "key",
         "x-b2-mcp-key": "secret",
+        "x-b2-app-key-id": "app-key",
+        "x-b2-app-key": "app-secret",
         "x-b2-mcp-app-key-id": "app-key",
         "x-b2-mcp-app-key": "app-secret",
+        "x-b2-master-key-id": "master-key",
+        "x-b2-master-key": "master-secret",
         "x-b2-mcp-master-key-id": "master-key",
         "x-b2-mcp-master-key": "master-secret",
         authorization: "Bearer caller-token",
-        "content-type": "application/json",
-        accept: "application/json",
-        "mcp-method": "tools/list",
+        ...modernHeaders("tools/list"),
       },
-    } as unknown as http.IncomingMessage;
+      body: LIST_TOOLS,
+    });
 
-    const webReq = toWebRequest(req, LIST_TOOLS);
-    expect(webReq.headers.get("content-type")).toBe("application/json");
-    expect(webReq.headers.get("mcp-method")).toBe("tools/list");
+    expect(res.status).toBe(200);
+    expect(captured).not.toBeNull();
+    const sdkHeaders = captured as unknown as Headers;
+    expect(sdkHeaders.get("content-type")).toBe("application/json");
+    expect(sdkHeaders.get("mcp-method")).toBe("tools/list");
     for (const name of [
       "x-b2-key-id",
       "x-b2-key",
+      "x-b2-app-key-id",
+      "x-b2-app-key",
+      "x-b2-master-key-id",
+      "x-b2-master-key",
       "x-b2-mcp-key-id",
       "x-b2-mcp-key",
       "x-b2-mcp-app-key-id",
@@ -334,9 +592,60 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       "x-b2-mcp-master-key",
       "authorization",
     ]) {
-      expect(webReq.headers.has(name)).toBe(false);
+      expect(sdkHeaders.has(name)).toBe(false);
     }
-    expect(headersFromNode(req.headers).has("authorization")).toBe(false);
+  });
+
+  it("aborts the adapter Request signal when the client disconnects", async () => {
+    let markFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    let markAborted!: () => void;
+    const aborted = new Promise<void>((resolve) => {
+      markAborted = resolve;
+    });
+    const captured: { signal?: AbortSignal } = {};
+
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      mcpHandler: {
+        fetch: jest.fn(
+          (req) =>
+            new Promise<Response>((resolve) => {
+              captured.signal = req.signal;
+              markFetchStarted();
+              req.signal.addEventListener(
+                "abort",
+                () => {
+                  markAborted();
+                  resolve(new Response(null, { status: 499 }));
+                },
+                { once: true },
+              );
+            }),
+        ),
+        close: jest.fn(),
+      },
+    });
+
+    const client = http.request({
+      host: "127.0.0.1",
+      port,
+      method: "POST",
+      path: "/mcp",
+      headers: { ...creds, ...modernHeaders("tools/list") },
+    });
+    client.on("error", () => undefined);
+    client.write(LIST_TOOLS);
+    client.end();
+
+    await fetchStarted;
+    client.destroy();
+    await aborted;
+
+    expect(captured.signal?.aborted).toBe(true);
   });
 
   it("reuses a B2 auth manager across stateless requests for the same credential", async () => {

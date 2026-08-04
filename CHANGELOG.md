@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   smoke helper contract.
 - Added explicit environment, per-request header, server-managed, and
   verified-principal B2 credential providers.
+- Added central recursive MCP response sanitization for secret-bearing field
+  names, labeled tokens, configured B2 credentials, and audit/error paths.
 
 ### Changed
 - Canonicalized repository, package, workflow, security, and setup metadata for
@@ -37,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
   disallowed refs, validate environment secrets before live calls, and avoid
   recurring scheduled contract writes until cleanup automation exists.
+- Replaced `b2_create_key`, `b2_create_group_member`, and
+  `b2_reserve_trial_create_account` with unavailable compatibility stubs until a
+  reviewed out-of-band secret sink exists.
+
+### Removed
+- Removed the `b2_create_key` lockdown toggles
+  `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, and
+  `B2_MAX_KEY_DURATION_SECONDS` because the durable-secret-producing handler is
+  no longer exposed in Phase 1.
 
 ## [2.3.0] - 2026-06-29
 

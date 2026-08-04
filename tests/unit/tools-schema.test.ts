@@ -206,8 +206,7 @@ describe("S3 object tools require bucket and key where expected", () => {
     ]) {
       const tool = tools[name];
       expect(tool).toBeDefined();
-      const handler = tool.handler ?? tool.callback ?? tool.execute;
-      const result = await handler({}, {});
+      const result = await tool.execute({}, {});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("tool_unavailable");
       expect(result.content[0].text).not.toContain("applicationKey");

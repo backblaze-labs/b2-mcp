@@ -43,6 +43,15 @@ rate/concurrency limits, body-size limits, drain, and shutdown checks run
 outside the SDK handler; protocol header/body validation remains inside
 `createMcpHandler`.
 
+The Node request adapter receives only an allowlisted MCP/header set; B2
+credential headers and caller `Authorization` are consumed by repository-owned
+credential resolution before the adapter boundary. Per-request credential state
+is then carried into the SDK factory by `AsyncLocalStorage` and fails closed when
+absent. The repository tracks each SDK server built for the request and closes
+it after the Node response lifecycle completes; local HTTP tests cover
+credential-header stripping, concurrent tenant isolation, per-request disposal,
+and drain survival for this model.
+
 Supported revision matrix:
 
 | Transport | Modern path                                | Compatibility path                                                        |

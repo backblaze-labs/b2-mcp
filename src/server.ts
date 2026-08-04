@@ -11,7 +11,7 @@ import {
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
-import { parseErrorText, toolError } from "./utils/errors.js";
+import { isSanitizedMcpResponse, parseErrorText, toolError } from "./utils/errors.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
@@ -20,11 +20,12 @@ import { createS3Client } from "./s3/client.js";
 import { DURABLE_SECRET_PRODUCING_TOOLS, isToolEnabled } from "./utils/tool-capabilities.js";
 import {
   sanitizeError,
-  sanitizerOptionsFromConfig,
   sanitizeMcpResponse,
+  sanitizerOptionsFromConfig,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
   sanitizeText,
+  runWithSanitizerOptions,
 } from "./utils/secret-sanitizer.js";
 import {
   CredentialResolutionError,
@@ -32,6 +33,7 @@ import {
   StdioEnvCredentialProvider,
   verificationFingerprintConfig,
 } from "./credentials.js";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 
 import { registerBucketTools } from "./b2/buckets.js";
 import { registerKeyTools } from "./b2/keys.js";
@@ -478,7 +480,13 @@ export function createAuditedToolCallback(
       args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
     try {
       const sanitizerOptions = sanitizerOptionsFromConfig(config);
-      const result = sanitizeMcpResponse(await original(args, extra), sanitizerOptions);
+      const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
+      const rawResult = await runWithMcpRequestSignal(signal, () =>
+        runWithSanitizerOptions(sanitizerOptions, () => original(args, extra)),
+      );
+      const result = isSanitizedMcpResponse(rawResult)
+        ? rawResult
+        : sanitizeMcpResponse(rawResult, sanitizerOptions);
       const durationMs = Date.now() - start;
       const isError = result?.isError === true;
       // When the tool returned a structured error, surface the classified

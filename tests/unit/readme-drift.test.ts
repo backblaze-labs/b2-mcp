@@ -16,6 +16,7 @@ import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilitie
 
 let toolNames: string[];
 let readme: string;
+let v1Scope: string;
 
 beforeAll(() => {
   const config = {
@@ -32,6 +33,7 @@ beforeAll(() => {
   const server = createServer(config);
   toolNames = Object.keys(getRegisteredTools(server) ?? {}).sort();
   readme = readFileSync(join(__dirname, "../../README.md"), "utf8");
+  v1Scope = readFileSync(join(__dirname, "../../docs/V1_SCOPE.md"), "utf8");
 });
 
 describe("README tool-surface drift", () => {
@@ -61,5 +63,57 @@ describe("README tool-surface drift", () => {
     expect(readme).toContain(
       `**${total} total — ${native} native (\`b2_*\`) + ${s3} data-plane (\`s3_*\`).**`,
     );
+  });
+});
+
+describe("V1 scope profile drift", () => {
+  function profileSection(profile: string): string {
+    const start = v1Scope.indexOf(`### \`${profile}\``);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const next = v1Scope.indexOf("\n### ", start + 1);
+    return v1Scope.slice(start, next === -1 ? undefined : next);
+  }
+
+  function listedTools(profile: string, prefix: "b2" | "s3"): string[] {
+    const section = profileSection(profile);
+    const marker = `\`${prefix}_*\` tools in \`${profile}\`:`;
+    const start = section.indexOf(marker);
+    expect(start).toBeGreaterThanOrEqual(0);
+    const afterMarker = section.slice(start + marker.length);
+    const endMatch = afterMarker.search(/\n(?:`[bs]3_\*` tools|Destructive|For `read-only`|## )/);
+    const listText = afterMarker.slice(0, endMatch === -1 ? undefined : endMatch);
+    return [...listText.matchAll(new RegExp("- `(" + prefix + "_[^`]+)`", "g"))]
+      .map((match) => match[1])
+      .sort();
+  }
+
+  function tableCounts(profile: string): { total: number; b2: number; s3: number } {
+    const escaped = profile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = v1Scope.match(
+      new RegExp("\\| `" + escaped + "`\\s+\\|\\s+(\\d+)\\s+\\|\\s+(\\d+)\\s+\\|\\s+(\\d+)\\s+\\|"),
+    );
+    expect(match).not.toBeNull();
+    return {
+      total: Number(match![1]),
+      b2: Number(match![2]),
+      s3: Number(match![3]),
+    };
+  }
+
+  it.each(["full", "phase1-default", "read-only"])(
+    "%s count table matches the enumerated profile lists",
+    (profile) => {
+      const b2 = listedTools(profile, "b2");
+      const s3 = listedTools(profile, "s3");
+      const counts = tableCounts(profile);
+      expect(b2).toHaveLength(counts.b2);
+      expect(s3).toHaveLength(counts.s3);
+      expect([...b2, ...s3]).toHaveLength(counts.total);
+    },
+  );
+
+  it("full profile list matches actual registration", () => {
+    const listed = [...listedTools("full", "b2"), ...listedTools("full", "s3")].sort();
+    expect(listed).toEqual(toolNames);
   });
 });

@@ -61,8 +61,7 @@ const testConfig = {
 async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
   const tool = getRegisteredTools(server)?.[name];
   if (!tool) throw new Error(`Tool not found: ${name}`);
-  const handler = tool.handler ?? tool.callback ?? tool.execute;
-  return handler(args, {} as any);
+  return tool.execute(args, {} as any);
 }
 
 function parseResult(result: any) {
@@ -79,13 +78,13 @@ let server: McpServer;
 let sendSpy: jest.SpyInstance;
 
 beforeEach(() => {
-  server = createServer(testConfig);
   // Auth + bucket resolution: resolveBucketName resolves "test-bucket" by name.
   mockedAxios.get = jest.fn().mockResolvedValue({ data: mockAuthData });
   mockedAxios.mockResolvedValue({
     data: { buckets: [{ bucketName: "test-bucket", bucketId: "bucket-1" }] },
   } as any);
   sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
+  server = createServer(testConfig);
 });
 
 afterEach(() => jest.restoreAllMocks());

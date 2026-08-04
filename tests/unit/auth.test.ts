@@ -7,6 +7,7 @@
 import axios from "axios";
 import { B2AuthManager } from "../../src/auth";
 import { B2Config } from "../../src/utils/types";
+import { runWithMcpRequestSignal } from "../../src/request-context";
 
 const mockConfig: B2Config = {
   applicationKeyId: "test-key-id",
@@ -101,6 +102,18 @@ describe("B2AuthManager", () => {
     expect(getSpy).toHaveBeenCalledTimes(1); // In-flight dedup
     expect(auth1.authorizationToken).toBe(auth2.authorizationToken);
     expect(auth2.authorizationToken).toBe(auth3.authorizationToken);
+  });
+
+  it("passes the current MCP request abort signal to authorize_account", async () => {
+    const manager = new B2AuthManager(mockConfig);
+    const abort = new AbortController();
+
+    await runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
+
+    expect(getSpy).toHaveBeenCalledWith(
+      expect.stringContaining("b2_authorize_account"),
+      expect.objectContaining({ signal: abort.signal }),
+    );
   });
 
   it("should not expose auth token in forceRefresh result (handled by tool layer)", async () => {

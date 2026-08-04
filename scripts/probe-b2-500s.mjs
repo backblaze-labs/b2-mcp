@@ -21,7 +21,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { loadConfig, createServer } from "../dist/server.js";
+import { loadConfig, createServer, getRegisteredTools } from "../dist/server.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -31,9 +31,9 @@ const TICKET_DIR = path.join(OUT_DIR, "tickets");
 // ── Tool invocation helpers (mirror tests/integration/live.test.ts) ────────────
 
 function getHandler(server, name) {
-  const tool = server._registeredTools?.[name];
+  const tool = getRegisteredTools(server)?.[name];
   if (!tool) return null;
-  return tool.handler ?? tool.callback ?? tool.execute ?? null;
+  return tool.execute ?? null;
 }
 
 async function callTool(server, name, args) {
