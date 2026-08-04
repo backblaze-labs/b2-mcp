@@ -24,20 +24,30 @@ function request(
   opts: { headers?: Record<string, string>; body?: string } = {},
 ): Promise<Resp> {
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
     const req = http.request(
       { host: "127.0.0.1", port, method, path: pathname, headers: opts.headers },
       (res) => {
         let data = "";
         const status = res.statusCode ?? 0;
-        const done = () => resolve({ status, body: data, headers: res.headers });
+        const done = () => finish(() => resolve({ status, body: data, headers: res.headers }));
         res.on("data", (c) => (data += c));
         res.on("end", done);
         res.on("close", done);
       },
     );
-    req.on("error", () => undefined);
-    const t = setTimeout(() => reject(new Error("request timed out")), 4000);
-    t.unref();
+    req.on("error", (err) => finish(() => reject(err)));
+    const timer = setTimeout(() => {
+      req.destroy();
+      finish(() => reject(new Error("request timed out")));
+    }, 4000);
+    timer.unref();
     if (opts.body) req.write(opts.body);
     req.end();
   });

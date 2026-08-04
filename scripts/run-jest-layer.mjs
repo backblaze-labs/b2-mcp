@@ -20,31 +20,33 @@ const layerGlobs = {
   "runner-fixture": "tests/contract/run-jest-layer-fixture.contract.test.ts",
 };
 
+const testMatchArgs = (...patterns) => patterns.flatMap((pattern) => ["--testMatch", pattern]);
+
 const layerRegistry = {
-  unit: { args: ["--testMatch", layerGlobs.unit], live: false },
-  contract: { args: ["--testMatch", layerGlobs.contract], live: false },
+  unit: { args: testMatchArgs(layerGlobs.unit), live: false },
+  contract: { args: testMatchArgs(layerGlobs.contract), live: false },
   "protocol-modern": {
-    args: ["--testMatch", layerGlobs["protocol-modern"], "--runInBand", "--testTimeout=30000"],
+    args: [...testMatchArgs(layerGlobs["protocol-modern"]), "--runInBand", "--testTimeout=30000"],
     live: false,
   },
   "protocol-legacy": {
-    args: ["--testMatch", layerGlobs["protocol-legacy"], "--runInBand", "--testTimeout=30000"],
+    args: [...testMatchArgs(layerGlobs["protocol-legacy"]), "--runInBand", "--testTimeout=30000"],
     live: false,
   },
   slow: {
-    args: ["--testMatch", layerGlobs.slow, "--runInBand", "--testTimeout=120000"],
+    args: [...testMatchArgs(layerGlobs.slow), "--runInBand", "--testTimeout=120000"],
     live: false,
   },
   package: {
-    args: ["--testMatch", layerGlobs.package, "--runInBand", "--testTimeout=120000"],
+    args: [...testMatchArgs(layerGlobs.package), "--runInBand", "--testTimeout=120000"],
     live: false,
   },
   "integration-live": {
-    args: ["--testMatch", layerGlobs["integration-live"], "--runInBand", "--testTimeout=120000"],
+    args: [...testMatchArgs(layerGlobs["integration-live"]), "--runInBand", "--testTimeout=120000"],
     live: true,
   },
   "contract-live": {
-    args: ["--testMatch", layerGlobs["contract-live"], "--runInBand", "--testTimeout=120000"],
+    args: [...testMatchArgs(layerGlobs["contract-live"]), "--runInBand", "--testTimeout=120000"],
     live: true,
   },
   coverage: {
@@ -56,11 +58,12 @@ const layerRegistry = {
       "--coverageDirectory=coverage",
       "--runInBand",
       "--testTimeout=30000",
-      "--testMatch",
-      layerGlobs.unit,
-      layerGlobs.contract,
-      layerGlobs["protocol-modern"],
-      layerGlobs["protocol-legacy"],
+      ...testMatchArgs(
+        layerGlobs.unit,
+        layerGlobs.contract,
+        layerGlobs["protocol-modern"],
+        layerGlobs["protocol-legacy"],
+      ),
     ],
     live: false,
   },
