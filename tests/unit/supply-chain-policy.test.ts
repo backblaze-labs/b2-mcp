@@ -1,4 +1,5 @@
-import { readFileSync } from "fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
 
@@ -68,27 +69,115 @@ describe("supply-chain audit policy", () => {
     };
   }
 
-  function runAudit(report: unknown) {
+  function runAudit(report: unknown, extraEnv: Record<string, string> = {}) {
     return spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
       cwd: root,
-      env: { ...process.env, B2_MCP_AUDIT_REPORT_JSON: JSON.stringify(report) },
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        B2_MCP_AUDIT_REPORT_JSON: JSON.stringify(report),
+        ...extraEnv,
+      },
       encoding: "utf8",
     });
   }
 
   it("runs the full lockfile audit on the ci-green deploy-gating path", () => {
-    const deterministicJob = jobBlock("deterministic-linux");
+    const productionJob = jobBlock("deterministic-linux-production");
+    const currentJob = jobBlock("deterministic-linux-current");
     const auditJob = jobBlock("supply-chain-audit");
     const markGreenJob = jobBlock("mark-green");
     expect(workflow).toContain("supply-chain-audit:");
     expect(workflow).toContain("npm run audit:supply-chain");
     expect(workflow).not.toContain("npm audit --omit=dev");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
-    expect(deterministicJob).not.toContain("npm run audit:supply-chain");
+    expect(auditJob).toContain("Reject injected audit fixtures");
+    expect(auditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
+    expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE");
+    expect(productionJob).not.toContain("npm run audit:supply-chain");
+    expect(currentJob).not.toContain("npm run audit:supply-chain");
     expect(markGreenJob).toContain(
-      "needs: [runtime-policy, deterministic-linux, supply-chain-audit]",
+      "needs: [runtime-policy, deterministic-linux-production, supply-chain-audit]",
     );
+    expect(markGreenJob).not.toContain("deterministic-linux-current");
     expect(markGreenJob).not.toContain("cross-platform-minimum");
+  });
+
+  it("guards ci-green against stale main workflow runs", () => {
+    const markGreenJob = jobBlock("mark-green");
+    expect(markGreenJob).toContain("group: ci-green-${{ github.repository }}-main");
+    expect(markGreenJob).toContain("cancel-in-progress: false");
+    expect(markGreenJob).toContain("current_main_sha");
+    expect(markGreenJob).toContain("git ls-remote origin refs/heads/main");
+    expect(markGreenJob).toContain("Skipping ci-green update for stale run");
+    expect(markGreenJob).toContain('git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force');
+    expect(markGreenJob).toContain("Advanced ci-green to");
+  });
+
+  it("refuses environment-injected audit fixtures outside tests", () => {
+    const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        GITHUB_ACTIONS: "true",
+        NODE_ENV: "production",
+        B2_MCP_AUDIT_REPORT_JSON: JSON.stringify({
+          auditReportVersion: 2,
+          vulnerabilities: {},
+        }),
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("refusing B2_MCP_AUDIT_REPORT_JSON outside NODE_ENV=test");
+  });
+
+  it("retries transient npm audit registry failures before evaluating advisories", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-npm-"));
+    const state = join(dir, "attempts");
+    const fakeNpm = join(dir, "npm");
+    writeFileSync(
+      fakeNpm,
+      [
+        "#!/usr/bin/env node",
+        'const fs = require("node:fs");',
+        `const report = ${JSON.stringify(scopedAuditReport())};`,
+        "const state = process.env.B2_MCP_FAKE_NPM_STATE;",
+        "let attempt = 0;",
+        'try { attempt = Number(fs.readFileSync(state, "utf8")); } catch {}',
+        "attempt += 1;",
+        "fs.writeFileSync(state, String(attempt));",
+        "if (attempt === 1) {",
+        '  console.error("npm ERR! code EAI_AGAIN");',
+        '  console.error("npm ERR! registry network timeout");',
+        "  process.exit(1);",
+        "}",
+        "console.log(JSON.stringify(report));",
+        "process.exit(1);",
+      ].join("\n"),
+    );
+    chmodSync(fakeNpm, 0o755);
+
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        B2_MCP_FAKE_NPM_STATE: state,
+      };
+      delete env.B2_MCP_AUDIT_REPORT_JSON;
+      const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
+        cwd: root,
+        env,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("transient non-report response");
+      expect(readFileSync(state, "utf8")).toBe("2");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("tracks tightly scoped exceptions for known moderate advisories", () => {

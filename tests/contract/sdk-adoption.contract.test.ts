@@ -8,6 +8,7 @@
 
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
+import { spawnSync } from "child_process";
 import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 import { readJson, root as ROOT } from "./support";
@@ -152,48 +153,13 @@ describe("SDK adoption contract", () => {
   });
 
   it("keeps the effective Node runtime floor aligned with the SDK", () => {
-    const policy = readJson<{
-      engineFloor: string;
-      minimumEvidenceNode: string;
-      node22Pinned: string;
-      deterministicLinuxMatrix: string[];
-      crossPlatformNode: string;
-      typesNodeVersion: string;
-    }>("runtime-policy.json");
-    const pkg = readJson<{
-      engines: { node: string };
-      devDependencies: Record<string, string>;
-    }>("package.json");
-    const lock = readJson<{
-      packages: Record<string, { version?: string; engines?: { node?: string } }>;
-    }>("package-lock.json");
-    const nvmrc = readFileSync(join(ROOT, ".nvmrc"), "utf8").trim();
-    const environment = readFileSync(join(ROOT, "environment.yml"), "utf8");
-    const v1Scope = readFileSync(join(ROOT, "docs/V1_SCOPE.md"), "utf8");
-    const deploy = readFileSync(join(ROOT, "docs/DEPLOY.md"), "utf8");
-    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-    const ci = readFileSync(join(ROOT, ".github/workflows/test.yml"), "utf8");
+    const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
 
-    expect(pkg.engines.node).toBe(policy.engineFloor);
-    expect(lock.packages[""]?.engines?.node).toBe(policy.engineFloor);
-    expect(
-      compareFloor(
-        pkg.engines.node,
-        lock.packages["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node ?? "",
-      ),
-    ).toBeGreaterThanOrEqual(0);
-    expect(policy.deterministicLinuxMatrix[0]).toBe(policy.minimumEvidenceNode);
-    expect(policy.crossPlatformNode).toBe(policy.node22Pinned);
-    expect(nvmrc).toBe(policy.node22Pinned);
-    expect(environment).toContain(`nodejs=${policy.node22Pinned}`);
-    expect(pkg.devDependencies["@types/node"]).toBe(policy.typesNodeVersion);
-    expect(lock.packages["node_modules/@types/node"]?.version).toBe(policy.typesNodeVersion);
-    expect(v1Scope).toContain(policy.engineFloor);
-    expect(deploy).toContain(policy.crossPlatformNode);
-    expect(readme).toContain(policy.crossPlatformNode);
-    expect(ci).toContain(`node-version: [${policy.deterministicLinuxMatrix.join(", ")}]`);
-    expect(ci).toContain(`node-version: ${policy.crossPlatformNode}`);
-    expect(ci).toContain("npm ci --engine-strict");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("runtime-policy:");
   });
 
   it("keeps unsupported S3 POST presigning out of runtime dependencies", () => {

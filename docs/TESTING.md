@@ -79,6 +79,10 @@ If a selected layer has zero executed tests because every case was skipped, the
 runner exits nonzero and prints the summary path. A skipped-only run is visible
 evidence, not an authoritative pass.
 
+The `ci-green` production deploy marker depends on the Node 22 deterministic
+gate only. Node.js 24 and 26 remain required PR checks, but a regression isolated
+to those non-production current lines does not freeze the production deploy ref.
+
 ## MCP Protocol Matrix
 
 Protocol tests cover the SDK v2 serving matrix used in production:
@@ -144,6 +148,17 @@ Known exceptions must live in `audit-policy.json` with an expiry, maximum
 severity, dependency path, lockfile version/integrity, and rationale. The stable
 MCP Node adapter currently pulls a moderate `@hono/node-server` advisory with no
 fixed stable MCP v2 package available.
+
+`scripts/audit-supply-chain.mjs` always runs a real `npm audit` outside
+`NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded
+npm fetch retry options, and retries transient registry/network failures before
+evaluating advisories. On pull requests, expired advisory exceptions fail the
+audit. On `main` deploy-gating runs, the workflow sets
+`B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn` so an expired bookkeeping exception
+does not silently freeze `ci-green`; untracked advisories, severity drift, path
+drift, and lockfile drift still fail. To unblock an on-call deploy after an
+expiry warning, either remove the no-longer-needed exception or refresh the
+documented expiry/rationale in `audit-policy.json` through a normal PR.
 
 ## Live B2 Smoke Gate
 

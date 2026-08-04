@@ -20,15 +20,40 @@ jobs:
           node-version: 22.23.1
       - run: npm run check:runtime-policy
 
-  deterministic-linux:
-    name: deterministic linux / Node ${{ matrix.node-version }}
+  deterministic-linux-production:
+    name: deterministic linux production / Node ${{ matrix.node-version }}
     needs: runtime-policy
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22.3.0, 24, 26]
+        node-version: [22.3.0]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci --engine-strict
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:coverage
+      - run: npm run test:integration
+      - run: npm run test:contract
+      - run: npm run build
+      - run: npm run smoke:package
+
+  deterministic-linux-current:
+    name: deterministic linux current / Node ${{ matrix.node-version }}
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [24, 26]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
@@ -96,17 +121,49 @@ jobs:
           node-version: 22.23.1
           cache: npm
       - run: npm ci --engine-strict
+      - name: Reject injected audit fixtures
+        run: |
+          set -euo pipefail
+          if [[ -n "${B2_MCP_AUDIT_REPORT_JSON:-}" ]]; then
+            echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
+            exit 1
+          fi
       - run: npm run audit:supply-chain
+        env:
+          B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'warn' || 'fail' }}
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green
   # commits ever reach production. Runs only on a successful main push.
   mark-green:
-    needs: [runtime-policy, deterministic-linux, supply-chain-audit]
+    needs: [runtime-policy, deterministic-linux-production, supply-chain-audit]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-green-${{ github.repository }}-main
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v6
-      - run: git push origin "HEAD:refs/heads/ci-green" --force
+      - name: Advance ci-green if main is current
+        run: |
+          set -euo pipefail
+          tested_sha="$(git rev-parse HEAD)"
+          current_main_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+
+          if [[ "$tested_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Checked-out HEAD ${tested_sha} does not match GITHUB_SHA ${GITHUB_SHA}"
+            exit 1
+          fi
+          if [[ -z "$current_main_sha" ]]; then
+            echo "::error::Could not resolve remote refs/heads/main"
+            exit 1
+          fi
+          if [[ "$current_main_sha" != "$GITHUB_SHA" ]]; then
+            echo "::notice::Skipping ci-green update for stale run ${GITHUB_SHA}; current main is ${current_main_sha}"
+            exit 0
+          fi
+
+          git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force
+          echo "::notice::Advanced ci-green to ${GITHUB_SHA}"

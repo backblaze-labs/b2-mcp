@@ -13,53 +13,175 @@ const allowed = new Map(
 );
 const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const minimumRank = severityRank.moderate;
+const injectedReportJson = process.env.B2_MCP_AUDIT_REPORT_JSON;
+const allowInjectedReport = process.env.NODE_ENV === "test";
+const expiredExceptionMode = process.env.B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE ?? "fail";
 
-const audit = process.env.B2_MCP_AUDIT_REPORT_JSON
-  ? { status: 1, stdout: process.env.B2_MCP_AUDIT_REPORT_JSON, stderr: "" }
-  : spawnSync("npm", ["audit", "--json"], {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-if (audit.error) throw audit.error;
-
-let report;
-try {
-  report = JSON.parse(audit.stdout || "{}");
-} catch (error) {
-  console.error(audit.stdout);
-  console.error(audit.stderr);
-  throw error;
+if (!["fail", "warn"].includes(expiredExceptionMode)) {
+  throw new Error(
+    `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE must be "fail" or "warn", got ${expiredExceptionMode}`,
+  );
 }
-
-if (audit.status && audit.status > 1) {
-  console.error(audit.stderr);
-  process.exit(audit.status);
-}
-if (!report.auditReportVersion) {
-  console.error(audit.stdout);
-  console.error(audit.stderr);
-  throw new Error("npm audit did not return an audit report");
+if (injectedReportJson && !allowInjectedReport) {
+  console.error(
+    "audit-policy: refusing B2_MCP_AUDIT_REPORT_JSON outside NODE_ENV=test; CI must run real npm audit",
+  );
+  process.exit(1);
 }
 
 const failures = [];
+const warnings = [];
 const allowedFindings = [];
 const matchedAllowed = new Set();
+const expiryWarningDays = 30;
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function auditEnv() {
+  const env = {
+    ...process.env,
+    npm_config_fetch_retries: process.env.npm_config_fetch_retries ?? "3",
+    npm_config_fetch_retry_factor: process.env.npm_config_fetch_retry_factor ?? "2",
+    npm_config_fetch_retry_mintimeout: process.env.npm_config_fetch_retry_mintimeout ?? "1000",
+    npm_config_fetch_retry_maxtimeout: process.env.npm_config_fetch_retry_maxtimeout ?? "10000",
+  };
+  delete env.B2_MCP_AUDIT_REPORT_JSON;
+  return env;
+}
+
+function isTransientAuditFailure(audit, parseError = null) {
+  if (audit.error?.code === "ETIMEDOUT") return true;
+  const output = `${audit.stdout ?? ""}\n${audit.stderr ?? ""}\n${parseError?.message ?? ""}`;
+  return /(?:EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EPIPE|fetch failed|network socket|network timeout|registry|rate limit|429|503|504)/i.test(
+    output,
+  );
+}
+
+function parseAuditReport(audit) {
+  try {
+    return JSON.parse(audit.stdout || "{}");
+  } catch (error) {
+    return { error };
+  }
+}
+
+function logAuditFailure(audit, message) {
+  console.error(`audit-policy: ${message}`);
+  if (audit.stdout) console.error(audit.stdout);
+  if (audit.stderr) console.error(audit.stderr);
+}
+
+function runNpmAudit() {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const audit = spawnSync("npm", ["audit", "--json"], {
+      cwd: root,
+      encoding: "utf8",
+      env: auditEnv(),
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 120_000,
+    });
+
+    if (audit.error) {
+      if (attempt < attempts && isTransientAuditFailure(audit)) {
+        console.warn(
+          `audit-policy: npm audit registry/network failure on attempt ${attempt}/${attempts}; retrying`,
+        );
+        sleep(1_000 * attempt);
+        continue;
+      }
+      throw audit.error;
+    }
+
+    const parsed = parseAuditReport(audit);
+    if (parsed.error) {
+      if (attempt < attempts && isTransientAuditFailure(audit, parsed.error)) {
+        console.warn(
+          `audit-policy: npm audit returned a transient non-report response on attempt ${attempt}/${attempts}; retrying`,
+        );
+        sleep(1_000 * attempt);
+        continue;
+      }
+      logAuditFailure(audit, "npm audit did not return parseable JSON");
+      throw parsed.error;
+    }
+
+    if (audit.status && audit.status > 1) {
+      if (attempt < attempts && isTransientAuditFailure(audit)) {
+        console.warn(
+          `audit-policy: npm audit registry/network failure on attempt ${attempt}/${attempts}; retrying`,
+        );
+        sleep(1_000 * attempt);
+        continue;
+      }
+      logAuditFailure(
+        audit,
+        "npm audit failed before advisory evaluation; registry/network failures are logged separately when retried",
+      );
+      process.exit(audit.status);
+    }
+
+    if (!parsed.auditReportVersion) {
+      if (attempt < attempts && isTransientAuditFailure(audit)) {
+        console.warn(
+          `audit-policy: npm audit returned a transient non-report response on attempt ${attempt}/${attempts}; retrying`,
+        );
+        sleep(1_000 * attempt);
+        continue;
+      }
+      logAuditFailure(audit, "npm audit did not return an audit report");
+      throw new Error("npm audit did not return an audit report");
+    }
+
+    return parsed;
+  }
+  throw new Error("npm audit failed without returning a result");
+}
+
+function fixtureAuditReport() {
+  const audit = { status: 1, stdout: injectedReportJson, stderr: "" };
+  const parsed = parseAuditReport(audit);
+  if (parsed.error) throw parsed.error;
+  if (!parsed.auditReportVersion)
+    throw new Error("test audit fixture did not include an audit report");
+  return parsed;
+}
+
+const report = injectedReportJson ? fixtureAuditReport() : runNpmAudit();
 
 function sortedJson(value) {
   return JSON.stringify([...(value ?? [])].sort());
 }
 
-function exceptionFailures(exception, vulnerability, via) {
+function daysUntil(date) {
+  const expiresAt = Date.parse(`${date}T00:00:00Z`);
+  const todayAt = Date.parse(`${today}T00:00:00Z`);
+  return Math.ceil((expiresAt - todayAt) / 86_400_000);
+}
+
+function recordExpiryFinding(key, exception, details) {
+  const days = daysUntil(exception.expires);
+  if (exception.expires < today) {
+    const message =
+      `exception expired on ${exception.expires}; PR checks fail, while main deploy-gating ` +
+      "jobs may warn with B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn so ci-green can still advance";
+    if (expiredExceptionMode === "warn") warnings.push(`${key}: ${message}`);
+    else details.push(`${message}; update audit-policy.json or remove the exception`);
+  } else if (days <= expiryWarningDays) {
+    warnings.push(
+      `${key}: exception expires in ${days} day${days === 1 ? "" : "s"} on ${exception.expires}`,
+    );
+  }
+}
+
+function exceptionFailures(key, exception, vulnerability, via) {
   const details = [];
   const packageEntry = lock.packages?.[`node_modules/${exception.name}`];
   const viaEntry = lock.packages?.[exception.via?.path];
 
-  if (exception.expires < today) {
-    details.push(
-      `exception expired on ${exception.expires}; update audit-policy.json or remove the exception`,
-    );
-  }
+  recordExpiryFinding(key, exception, details);
   if (severityRank[exception.maxSeverity] === undefined) {
     details.push(`exception maxSeverity is invalid: ${exception.maxSeverity}`);
   } else if (severityRank[via.severity] > severityRank[exception.maxSeverity]) {
@@ -112,7 +234,7 @@ for (const vulnerability of Object.values(report.vulnerabilities ?? {})) {
     const exception = allowed.get(key);
     if (exception) {
       matchedAllowed.add(key);
-      const details = exceptionFailures(exception, vulnerability, via);
+      const details = exceptionFailures(key, exception, vulnerability, via);
       if (details.length > 0) {
         failures.push(`${key}: ${details.join("; ")}`);
         continue;
@@ -132,6 +254,9 @@ for (const key of [...allowed.keys()].sort()) {
 
 for (const finding of allowedFindings.sort()) {
   console.warn(`audit-policy: ${finding}`);
+}
+for (const warning of warnings.sort()) {
+  console.warn(`audit-policy: ${warning}`);
 }
 
 if (failures.length > 0) {

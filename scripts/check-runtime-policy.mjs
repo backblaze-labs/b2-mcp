@@ -35,6 +35,93 @@ function requireEqual(label, actual, expected) {
   if (actual !== expected) fail(`${label}: expected ${expected}, got ${actual ?? "missing"}`);
 }
 
+function requireContains(relativePath, needle, label) {
+  if (!read(relativePath).includes(needle)) fail(`${relativePath}: missing ${label} ${needle}`);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripInlineComment(value) {
+  return value.replace(/\s+#.*$/, "").trim();
+}
+
+function unquoteYamlScalar(value) {
+  const trimmed = stripInlineComment(value);
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function parseInlineYamlList(value) {
+  const trimmed = stripInlineComment(value);
+  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) return null;
+  return trimmed
+    .slice(1, -1)
+    .split(",")
+    .map((item) => unquoteYamlScalar(item))
+    .filter(Boolean);
+}
+
+function yamlValuesForKey(text, key) {
+  const lines = text.split(/\r?\n/);
+  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(.*)$`);
+  const values = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(keyPattern);
+    if (!match) continue;
+
+    const indent = match[1].length;
+    const rawValue = match[2].trim();
+    const inlineList = parseInlineYamlList(rawValue);
+    if (inlineList) {
+      values.push(inlineList);
+      continue;
+    }
+    if (rawValue) {
+      values.push(unquoteYamlScalar(rawValue));
+      continue;
+    }
+
+    const blockValues = [];
+    for (let child = index + 1; child < lines.length; child += 1) {
+      const childLine = lines[child];
+      if (!childLine.trim() || childLine.trim().startsWith("#")) continue;
+      const childIndent = childLine.match(/^\s*/)?.[0].length ?? 0;
+      if (childIndent <= indent) break;
+      const item = childLine.trim().match(/^-\s+(.+)$/);
+      if (item) blockValues.push(unquoteYamlScalar(item[1]));
+    }
+    if (blockValues.length > 0) values.push(blockValues);
+  }
+
+  return values;
+}
+
+function valuesEqual(actual, expected) {
+  return (
+    actual.length === expected.length && actual.every((value, index) => value === expected[index])
+  );
+}
+
+function workflowJobBlock(relativePath, jobName) {
+  const text = read(relativePath);
+  const start = text.search(new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, "m"));
+  if (start === -1) {
+    fail(`${relativePath}: missing job ${jobName}`);
+    return "";
+  }
+  const rest = text.slice(start + 1);
+  const next = rest.search(/\n {2}[a-zA-Z0-9_-]+:\s*$/m);
+  return next === -1 ? text.slice(start) : text.slice(start, start + 1 + next);
+}
+
 function parseNodeVersion(value) {
   const match = String(value)
     .trim()
@@ -76,20 +163,31 @@ function requireExactNode22Pin(label, version, policy) {
   requireNode22LtsPatch(label, version, policy);
 }
 
-function matrixLiteral(values) {
-  return `[${values.join(", ")}]`;
+function requireWorkflowMatrixInJob(relativePath, jobName, matrixKey, expectedValues) {
+  const matrices = yamlValuesForKey(workflowJobBlock(relativePath, jobName), matrixKey).filter(
+    Array.isArray,
+  );
+  if (!matrices.some((values) => valuesEqual(values, expectedValues))) {
+    fail(
+      `${relativePath}: job ${jobName} missing ${matrixKey} matrix [${expectedValues.join(", ")}]`,
+    );
+  }
 }
 
-function requireWorkflowMatrix(relativePath, matrixKey, expectedValues) {
-  const text = read(relativePath);
-  const expected = `${matrixKey}: ${matrixLiteral(expectedValues)}`;
-  if (!text.includes(expected)) fail(`${relativePath}: missing ${expected}`);
+function requireWorkflowNodeVersionInJob(relativePath, jobName, expectedValue, label) {
+  const values = yamlValuesForKey(workflowJobBlock(relativePath, jobName), "node-version").flatMap(
+    (value) => (Array.isArray(value) ? value : [value]),
+  );
+  if (!values.includes(expectedValue)) {
+    fail(`${relativePath}: job ${jobName} missing ${label} node-version ${expectedValue}`);
+  }
 }
 
-function requireWorkflowNodeVersion(relativePath, expectedValue, label) {
-  const text = read(relativePath);
-  const needle = `node-version: ${expectedValue}`;
-  if (!text.includes(needle)) fail(`${relativePath}: missing ${label} ${needle}`);
+function requireWorkflowScalar(relativePath, key, expectedValue, label) {
+  const values = yamlValuesForKey(read(relativePath), key).filter((value) => !Array.isArray(value));
+  if (!values.includes(expectedValue)) {
+    fail(`${relativePath}: missing ${label} ${key}: ${expectedValue}`);
+  }
 }
 
 function parseEnvironmentNodeVersion() {
@@ -102,17 +200,13 @@ function requireNoLegacyRuntimeJobs(policy) {
   for (const workflow of listFiles(".github/workflows")) {
     const text = read(workflow);
     if (text.includes("node-version-file:")) fail(`${workflow}: node-version-file is not allowed`);
-    for (const match of text.matchAll(/node-version:\s*([^\n]+)/g)) {
-      const versions = match[1]
-        .replace(/[$\{\},\[\]]/g, " ")
-        .split(/\s+/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-      for (const version of versions) {
-        const parsed = parseNodeVersion(version);
-        if (parsed && unsupported.has(String(parsed.major))) {
-          fail(`${workflow}: unsupported Node ${parsed.major} is present`);
-        }
+    const versions = yamlValuesForKey(text, "node-version").flatMap((value) =>
+      Array.isArray(value) ? value : [value],
+    );
+    for (const version of versions) {
+      const parsed = parseNodeVersion(version);
+      if (parsed && unsupported.has(String(parsed.major))) {
+        fail(`${workflow}: unsupported Node ${parsed.major} is present`);
       }
     }
   }
@@ -157,28 +251,55 @@ if (
   fail(`package-lock @types/node must resolve to ${policy.typesNodeVersion}`);
 }
 
-requireWorkflowMatrix(
-  ".github/workflows/test.yml",
-  "node-version",
-  policy.deterministicLinuxMatrix,
+const deterministicCurrentMatrix = policy.deterministicLinuxMatrix.filter(
+  (version) => version !== policy.minimumEvidenceNode,
 );
-requireWorkflowMatrix(".github/workflows/test.yml", "os", [
+requireWorkflowMatrixInJob(
+  ".github/workflows/test.yml",
+  "deterministic-linux-production",
+  "node-version",
+  [policy.minimumEvidenceNode],
+);
+if (deterministicCurrentMatrix.length > 0) {
+  requireWorkflowMatrixInJob(
+    ".github/workflows/test.yml",
+    "deterministic-linux-current",
+    "node-version",
+    deterministicCurrentMatrix,
+  );
+}
+requireWorkflowMatrixInJob(".github/workflows/test.yml", "cross-platform-minimum", "os", [
   "ubuntu-latest",
   "windows-latest",
   "macos-latest",
 ]);
-requireWorkflowNodeVersion(
+requireWorkflowNodeVersionInJob(
   ".github/workflows/test.yml",
+  "cross-platform-minimum",
   policy.crossPlatformNode,
   "cross-platform minimum",
 );
-requireWorkflowMatrix(".github/workflows/contract.yml", "node-version", policy.liveNodeMatrix);
-requireWorkflowMatrix(".github/workflows/smoke.yml", "node-version", policy.liveNodeMatrix);
+requireWorkflowMatrixInJob(
+  ".github/workflows/contract.yml",
+  "contract",
+  "node-version",
+  policy.liveNodeMatrix,
+);
+requireWorkflowMatrixInJob(
+  ".github/workflows/smoke.yml",
+  "smoke",
+  "node-version",
+  policy.liveNodeMatrix,
+);
 requireNoLegacyRuntimeJobs(policy);
 
 for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smoke.yml"]) {
-  if (!read(workflow).includes("max-parallel: 1")) fail(`${workflow}: live matrix must serialize`);
+  requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");
 }
+
+requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
+requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");
 
 if (errors.length > 0) {
   for (const error of errors) console.error(`runtime-policy: ${error}`);
