@@ -188,7 +188,8 @@ const REPORT_SCAN_LIMITS = {
   maxRows: 100_000,
   maxElapsedMs: 12_000,
   maxKeysPerPage: 1000,
-  concurrency: 4,
+  // Keep downloads serial so the global maxDownloadedBytes budget is strict.
+  concurrency: 1,
 };
 
 interface ReportLoadStats {

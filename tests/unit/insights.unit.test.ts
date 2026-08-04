@@ -359,4 +359,44 @@ describe("insights — report scan bounds", () => {
     expect(body.report_scan.downloaded_keys).toBe(1000);
     expect(body.report_scan.stop_reasons).toContain("max_selected_keys");
   });
+
+  it("stops before starting another report download at the byte cap", async () => {
+    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+    const server = {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const keys = [`${today}/usage.account-0001.csv`, `${today}/usage.account-0002.csv`];
+    const downloadReportObjectText = jest.fn(async () => ({
+      text: "",
+      bytes: 25 * 1024 * 1024,
+      truncated: false,
+    }));
+    const b2Client = {
+      listReportObjectKeys: async () => ({
+        keys,
+        isTruncated: false,
+      }),
+      downloadReportObjectText,
+    };
+    const auth = {
+      getAuth: async () => ({ accountId: "acct" }),
+    };
+    registerInsightTools(server as any, b2Client as any, auth as any);
+
+    const result = await tools.b2_egress_leaders.execute({
+      by: "account",
+      days: 90,
+      limit: 1,
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.partial).toBe(true);
+    expect(body.report_scan.downloaded_keys).toBe(1);
+    expect(body.report_scan.downloaded_mb).toBe(25);
+    expect(body.report_scan.stop_reasons).toContain("max_downloaded_bytes");
+    expect(downloadReportObjectText).toHaveBeenCalledTimes(1);
+  });
 });
