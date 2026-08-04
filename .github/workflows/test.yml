@@ -87,7 +87,6 @@ jobs:
 
   supply-chain-audit:
     name: supply-chain audit
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -103,7 +102,7 @@ jobs:
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green
   # commits ever reach production. Runs only on a successful main push.
   mark-green:
-    needs: [runtime-policy, deterministic-linux, cross-platform-minimum]
+    needs: [runtime-policy, deterministic-linux, supply-chain-audit]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:

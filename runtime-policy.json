@@ -7,5 +7,5 @@
   "crossPlatformNode": "22.23.1",
   "liveNodeMatrix": ["22.23.1", "24", "26"],
   "unsupportedMajors": [18, 20],
-  "typesNodeMajor": 26
+  "typesNodeVersion": "22.3.0"
 }

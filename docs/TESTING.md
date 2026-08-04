@@ -133,17 +133,17 @@ npm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_
 
 ## Networked Security Gate
 
-The full lockfile audit is release-gate evidence and a pull-request CI gate.
-It runs outside the `mark-green` deploy path so a newly published advisory does
-not stall auto-deploy without a code change:
+The full lockfile audit is release-gate evidence, a pull-request CI gate, and
+part of the `mark-green` deploy gate on `main` pushes:
 
 ```bash
 npm run audit:supply-chain
 ```
 
-Known exceptions must live in `audit-policy.json` with an expiry and rationale.
-The stable MCP Node adapter currently pulls a moderate `@hono/node-server`
-advisory with no fixed stable MCP v2 package available.
+Known exceptions must live in `audit-policy.json` with an expiry, maximum
+severity, dependency path, lockfile version/integrity, and rationale. The stable
+MCP Node adapter currently pulls a moderate `@hono/node-server` advisory with no
+fixed stable MCP v2 package available.
 
 ## Live B2 Smoke Gate
 

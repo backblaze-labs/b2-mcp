@@ -71,6 +71,11 @@ function requireNode22LtsPatch(label, version, policy) {
   }
 }
 
+function requireExactNode22Pin(label, version, policy) {
+  requireEqual(label, version, policy.node22Pinned);
+  requireNode22LtsPatch(label, version, policy);
+}
+
 function matrixLiteral(values) {
   return `[${values.join(", ")}]`;
 }
@@ -130,22 +135,26 @@ requireEqual(
 );
 
 const nvmrc = read(".nvmrc").trim();
-requireNode22LtsPatch(".nvmrc", nvmrc, policy);
-requireNode22LtsPatch("environment.yml nodejs", parseEnvironmentNodeVersion(), policy);
+requireExactNode22Pin(".nvmrc", nvmrc, policy);
+requireExactNode22Pin("environment.yml nodejs", parseEnvironmentNodeVersion(), policy);
+requireEqual("runtime-policy crossPlatformNode", policy.crossPlatformNode, policy.node22Pinned);
+requireEqual("runtime-policy liveNodeMatrix[0]", policy.liveNodeMatrix?.[0], policy.node22Pinned);
+requireEqual(
+  "runtime-policy deterministicLinuxMatrix[0]",
+  policy.deterministicLinuxMatrix?.[0],
+  policy.minimumEvidenceNode,
+);
+if (comparePatch(policy.node22Pinned, policy.node22LtsMinimum) < 0) {
+  fail(`runtime-policy node22Pinned must be >=${policy.node22LtsMinimum}`);
+}
 
-if (
-  !String(packageJson.devDependencies?.["@types/node"] ?? "").startsWith(
-    `^${policy.typesNodeMajor}.`,
-  )
-) {
-  fail(`package.json devDependencies.@types/node must track Node ${policy.typesNodeMajor}`);
+if (String(packageJson.devDependencies?.["@types/node"] ?? "") !== policy.typesNodeVersion) {
+  fail(`package.json devDependencies.@types/node must be ${policy.typesNodeVersion}`);
 }
 if (
-  !String(lock.packages?.["node_modules/@types/node"]?.version ?? "").startsWith(
-    `${policy.typesNodeMajor}.`,
-  )
+  String(lock.packages?.["node_modules/@types/node"]?.version ?? "") !== policy.typesNodeVersion
 ) {
-  fail(`package-lock @types/node must resolve to Node ${policy.typesNodeMajor} types`);
+  fail(`package-lock @types/node must resolve to ${policy.typesNodeVersion}`);
 }
 
 requireWorkflowMatrix(

@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const runtimePolicy = JSON.parse(readFileSync(path.join(root, "runtime-policy.json"), "utf8"));
 const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-consumer-"));
 const home = path.join(workspace, "home");
 const npmCache = path.join(workspace, "npm-cache");
@@ -16,6 +17,7 @@ const sentinelEnv = {
   NPM_TOKEN: "sentinel-npm-token",
 };
 const secretNamePattern = /(?:^AWS_|^B2_|^GITHUB_|^NPM_|TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)/i;
+const nonSecretEnvNames = new Set(["B2_REGISTER_ALL_TOOLS"]);
 
 function sanitizedEnv(extra = {}) {
   const keep = new Set([
@@ -33,7 +35,7 @@ function sanitizedEnv(extra = {}) {
     if (process.env[name]) env[name] = process.env[name];
   }
   for (const [name, value] of Object.entries(extra)) {
-    if (secretNamePattern.test(name)) continue;
+    if (secretNamePattern.test(name) && !nonSecretEnvNames.has(name)) continue;
     env[name] = value;
   }
   env.HOME = home;
@@ -64,6 +66,8 @@ function run(command, args, options = {}) {
 function writeConsumerLock(tarball) {
   const sourceLock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
   const sourceRoot = sourceLock.packages[""];
+  // Reuse the root package entry as the installed package shape, but strip dev
+  // dependencies so the synthetic consumer lock represents a production install.
   const packageEntry = {
     ...sourceRoot,
     resolved: `file:${tarball}`,
@@ -136,7 +140,7 @@ try {
         'const pkg = require("@backblaze-labs/b2-mcp");',
         'const meta = require("@backblaze-labs/b2-mcp/package.json");',
         'if (typeof pkg.startStdio !== "function") throw new Error("missing startStdio export");',
-        'if (meta.engines.node !== ">=22.3.0") throw new Error("wrong package engine");',
+        `if (meta.engines.node !== ${JSON.stringify(runtimePolicy.engineFloor)}) throw new Error("wrong package engine");`,
         'if (meta.bin["b2-mcp"] !== "dist/index.js") throw new Error("wrong b2-mcp bin");',
       ].join("\n"),
     ],

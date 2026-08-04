@@ -76,10 +76,9 @@ upstream advisories, including the current moderate `@hono/node-server` finding
 from stable MCP SDK v2. Do not add untracked high or critical production or
 development-toolchain findings.
 
-`@types/node` intentionally tracks Node 26 for forward-compatibility review,
-while the runtime floor remains `>=22.3.0`. Source code must stay compatible
-with the floor; the Node 22.3.0 CI leg builds and runs the deterministic suite
-as the runtime backstop for APIs that TypeScript 26 types would otherwise allow.
+`@types/node` tracks the Node 22.3.0 runtime floor so TypeScript does not allow
+newer Node standard-library APIs that would fail for minimum-supported
+consumers. Node 24 and 26 remain covered by execution tests in CI.
 
 ## Reporting security issues
 

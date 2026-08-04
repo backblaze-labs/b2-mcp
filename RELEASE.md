@@ -34,8 +34,8 @@ Before publishing `v0.1.0`:
    `npm run format:check`, `npm test`, `npm run test:integration`,
    `npm run test:contract`, `npm run smoke:package`, and
    `npm run audit:supply-chain`.
-3. Review `audit-policy.json` and risk-accept only unexpired, documented
-   upstream advisories that have no fixed stable package.
+3. Review `audit-policy.json` and risk-accept only unexpired, documented,
+   tightly scoped upstream advisories that have no fixed stable package.
 4. Run the secret scan and legal/provenance review in
    `docs/SECURITY_REVIEW.md`.
 5. Confirm the live B2 smoke evidence required by `docs/TESTING.md`.

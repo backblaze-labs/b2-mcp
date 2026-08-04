@@ -5,6 +5,8 @@
 
 import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
+import { ReadableStream } from "node:stream/web";
+import type { ReadableStreamDefaultController } from "node:stream/web";
 import axios from "axios";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";

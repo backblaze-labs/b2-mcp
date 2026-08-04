@@ -154,15 +154,21 @@ describe("SDK adoption contract", () => {
   it("keeps the effective Node runtime floor aligned with the SDK", () => {
     const policy = readJson<{
       engineFloor: string;
+      minimumEvidenceNode: string;
+      node22Pinned: string;
       deterministicLinuxMatrix: string[];
       crossPlatformNode: string;
+      typesNodeVersion: string;
     }>("runtime-policy.json");
     const pkg = readJson<{
       engines: { node: string };
+      devDependencies: Record<string, string>;
     }>("package.json");
     const lock = readJson<{
-      packages: Record<string, { engines?: { node?: string } }>;
+      packages: Record<string, { version?: string; engines?: { node?: string } }>;
     }>("package-lock.json");
+    const nvmrc = readFileSync(join(ROOT, ".nvmrc"), "utf8").trim();
+    const environment = readFileSync(join(ROOT, "environment.yml"), "utf8");
     const v1Scope = readFileSync(join(ROOT, "docs/V1_SCOPE.md"), "utf8");
     const deploy = readFileSync(join(ROOT, "docs/DEPLOY.md"), "utf8");
     const readme = readFileSync(join(ROOT, "README.md"), "utf8");
@@ -176,6 +182,12 @@ describe("SDK adoption contract", () => {
         lock.packages["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node ?? "",
       ),
     ).toBeGreaterThanOrEqual(0);
+    expect(policy.deterministicLinuxMatrix[0]).toBe(policy.minimumEvidenceNode);
+    expect(policy.crossPlatformNode).toBe(policy.node22Pinned);
+    expect(nvmrc).toBe(policy.node22Pinned);
+    expect(environment).toContain(`nodejs=${policy.node22Pinned}`);
+    expect(pkg.devDependencies["@types/node"]).toBe(policy.typesNodeVersion);
+    expect(lock.packages["node_modules/@types/node"]?.version).toBe(policy.typesNodeVersion);
     expect(v1Scope).toContain(policy.engineFloor);
     expect(deploy).toContain(policy.crossPlatformNode);
     expect(readme).toContain(policy.crossPlatformNode);
