@@ -205,6 +205,10 @@ function resolveOutputFormat() {
   }
 }
 
+function validateOutputFormatConfiguration(): void {
+  resolveOutputFormat();
+}
+
 function envMaterial(prefix = "B2"): CredentialMaterial {
   return {
     applicationKeyId: process.env[`${prefix}_APPLICATION_KEY_ID`],
@@ -487,6 +491,7 @@ export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProv
 export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
+  validateOutputFormatConfiguration();
   provider.validateConfiguration?.();
 }
 

@@ -74,12 +74,14 @@ Structured successful tool results flow through the repository-owned result
 serializer in `src/utils/result-serializer.ts`. Tool handlers continue to return
 sanitized JSON-compatible values through `toolJson`; the serializer keeps that
 value in MCP `structuredContent` and emits exactly one LLM-facing
-`TextContent.text` representation. `B2_MCP_OUTPUT_FORMAT=toon` is the default
-and uses the official `@toon-format/toon` encoder pinned at `4.1.0` against
-TOON spec `4.1`; `B2_MCP_OUTPUT_FORMAT=json` emits compact JSON for
-compatibility. Protocol envelopes, HTTP `Content-Type`, and MCP
+`TextContent.text` representation. `B2_MCP_OUTPUT_FORMAT=json` is the default
+contract-preserving mode and emits compact JSON; `B2_MCP_OUTPUT_FORMAT=toon`
+opts into the official `@toon-format/toon` encoder pinned at `4.1.0` against
+TOON spec `4.1`. Protocol envelopes, HTTP `Content-Type`, and MCP
 `structuredContent` remain JSON. The server does not claim TOON negotiation or
-add an MCP extension because `TextContent` has no media-type field.
+add an MCP extension because `TextContent` has no media-type field, so rolling
+deploys must not mix JSON- and TOON-configured pods unless clients are prepared
+for both text shapes.
 
 The serializer runs after tool-specific bounds and the central sanitizer. It
 normalizes through JSON serialization before TOON/JSON text emission, so Dates,
@@ -87,7 +89,10 @@ non-finite numbers, omitted fields, pagination tokens, request IDs, metadata,
 and B2-controlled object names follow the same JSON data model as
 `structuredContent`. Field order is the JavaScript insertion order produced by
 the B2/S3 SDKs and repository payload builders; the TOON encoder preserves that
-order and performs no repository-side key sorting.
+order and performs no repository-side key sorting. Serialization is synchronous
+on the Node event loop, but `toolJson` is reserved for bounded control-plane
+results after list limits and inline payload caps; bulk object bytes stay on the
+streaming, local-file, base64, or presigned-URL paths instead.
 
 ## S3-Compatible Surface
 

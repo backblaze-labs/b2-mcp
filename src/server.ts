@@ -58,11 +58,11 @@ export function loadConfig(): B2Config {
     return new StdioEnvCredentialProvider().resolve().config;
   } catch (err) {
     if (!(err instanceof CredentialResolutionError)) throw err;
-    const message =
-      err.code === "missing_credentials"
-        ? "B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"
-        : err.message;
-    logger.fatal(`config.invalid: ${message}`);
+    if (err.code === "missing_credentials") {
+      logger.fatal("config.missing: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required");
+    } else {
+      logger.fatal(`config.invalid: ${err.message}`);
+    }
     process.exit(1);
   }
 }

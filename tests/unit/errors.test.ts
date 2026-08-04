@@ -7,12 +7,15 @@ import {
   toolJson,
 } from "../../src/utils/errors";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
-import {
-  decodeToonForTests,
-  runWithResultSerializationOptions,
-} from "../../src/utils/result-serializer";
+import { runWithResultSerializationOptions } from "../../src/utils/result-serializer";
+import type { JsonCompatible } from "../../src/utils/result-serializer";
 
 const CANARY = "B2_MCP_CANARY_SECRET_errors_do_not_leak";
+
+async function decodeToon(text: string): Promise<JsonCompatible> {
+  const { decode } = await import("@toon-format/toon");
+  return decode(text) as JsonCompatible;
+}
 
 describe("parseB2Error", () => {
   it("should parse axios-style error with response body", () => {
@@ -285,20 +288,20 @@ describe("toolSuccess", () => {
 });
 
 describe("toolJson", () => {
-  it("serializes structured successes as TOON text by default", () => {
+  it("serializes structured successes as compact JSON text by default", () => {
     const data = { bucketId: "abc123", bucketName: "my-bucket" };
     const result = toolJson(data);
     expect(result.structuredContent).toEqual(data);
-    expect(result.content[0].text).toContain("bucketId: abc123");
-    expect(decodeToonForTests(result.content[0].text)).toEqual(data);
+    expect(result.content[0].text).toBe('{"bucketId":"abc123","bucketName":"my-bucket"}');
   });
 
-  it("supports compact JSON compatibility mode", () => {
+  it("supports TOON output mode", async () => {
     const data = { bucketId: "abc123", bucketName: "my-bucket" };
-    const result = runWithResultSerializationOptions({ outputFormat: "json" }, () =>
+    const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson(data),
     );
-    expect(result.content[0].text).toBe('{"bucketId":"abc123","bucketName":"my-bucket"}');
+    expect(result.content[0].text).toContain("bucketId: abc123");
+    await expect(decodeToon(result.content[0].text)).resolves.toEqual(data);
     expect(result.structuredContent).toEqual(data);
   });
 });

@@ -33,15 +33,17 @@ compliant JSON. For structured successful tool results, `structuredContent` is
 the canonical sanitized JSON-compatible value; the single `TextContent.text`
 block is selected once at server startup by `B2_MCP_OUTPUT_FORMAT`:
 
-| Value  | Text block format | Notes                                                    |
-| ------ | ----------------- | -------------------------------------------------------- |
-| `toon` | TOON              | Default. Official `@toon-format/toon@4.1.0`, spec `4.1`. |
-| `json` | Compact JSON      | Compatibility mode for clients that parse text as JSON.  |
+| Value  | Text block format | Notes                                                   |
+| ------ | ----------------- | ------------------------------------------------------- |
+| `json` | Compact JSON      | Default contract-preserving mode for text parsers.      |
+| `toon` | TOON              | Opt-in. Official `@toon-format/toon@4.1.0`, spec `4.1`. |
 
 Unknown values are startup/config errors. Errors, validation failures, and
 concise status messages remain plain text. The server does not change HTTP
 `Content-Type`, add a media-type field to `TextContent`, add per-result format
 prefixes, or advertise an unregistered MCP extension.
+During rolling deploys, keep all pods on compact JSON unless clients prefer
+`structuredContent` or explicitly support both configured text shapes.
 
 The repository-owned serializer runs after tool-specific result bounds and
 central secret sanitization. It normalizes the sanitized value through the JSON
@@ -59,6 +61,9 @@ changes.
   capability behavior.
 - Tests for TOON/JSON result text selection, hostile-string round trips, and
   JSON-compatible `structuredContent` preservation.
+- A checked-in representative result corpus and benchmark comparing pretty JSON,
+  compact JSON, and TOON byte/character/token counts before any future change
+  makes TOON the default.
 
 Blocking follow-up coverage is tracked in #49 and #61. Until those land, the
 remaining fixture and authorization guarantees above are contract requirements

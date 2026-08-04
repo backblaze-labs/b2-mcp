@@ -8,6 +8,7 @@ import {
   HttpPrincipalCredentialProvider,
   HttpServerCredentialProvider,
   StdioEnvCredentialProvider,
+  validateHttpCredentialConfiguration,
   verificationFingerprintConfig,
 } from "../../src/credentials";
 
@@ -40,7 +41,7 @@ describe("credential providers", () => {
     expect(resolved.config.applicationKeyId).toBe("stdio-id");
     expect(resolved.config.applicationKey).toBe("stdio-secret");
     expect(resolved.config.transport).toBe("stdio");
-    expect(resolved.config.outputFormat).toBe("toon");
+    expect(resolved.config.outputFormat).toBe("json");
     expect(resolved.config.credentialFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("stdio-id");
     expect(resolved.capabilityCacheKey).toMatch(/^credential:[a-f0-9]{16}$/);
@@ -58,6 +59,14 @@ describe("credential providers", () => {
     expect(resolved.config.outputFormat).toBe("json");
   });
 
+  it("honors TOON output mode", () => {
+    process.env.B2_APPLICATION_KEY_ID = "stdio-id";
+    process.env.B2_APPLICATION_KEY = "stdio-secret";
+    process.env.B2_MCP_OUTPUT_FORMAT = "toon";
+    const resolved = new StdioEnvCredentialProvider().resolve();
+    expect(resolved.config.outputFormat).toBe("toon");
+  });
+
   it("rejects unknown output formats during config resolution", () => {
     process.env.B2_APPLICATION_KEY_ID = "stdio-id";
     process.env.B2_APPLICATION_KEY = "stdio-secret";
@@ -65,6 +74,18 @@ describe("credential providers", () => {
     let caught: unknown;
     try {
       new StdioEnvCredentialProvider().resolve();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toMatchObject({ code: "invalid_output_format" });
+  });
+
+  it("rejects unknown output formats during HTTP header-mode readiness", () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+    process.env.B2_MCP_OUTPUT_FORMAT = "yaml";
+    let caught: unknown;
+    try {
+      validateHttpCredentialConfiguration();
     } catch (err) {
       caught = err;
     }

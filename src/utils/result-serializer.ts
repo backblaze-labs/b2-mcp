@@ -4,18 +4,20 @@ import type { decode as decodeType, encode as encodeType } from "@toon-format/to
 import { sanitizeForMcpOutput, type SanitizerOptions } from "./secret-sanitizer.js";
 
 const nodeRequire = createRequire(__filename);
-const toon = nodeRequire("@toon-format/toon") as {
+interface ToonModule {
   encode: typeof encodeType;
   decode: typeof decodeType;
-};
+}
+
+let toonModule: ToonModule | null = null;
 
 export const TOON_PACKAGE_VERSION = "4.1.0";
 export const TOON_SPEC_VERSION = "4.1";
 
-export const MCP_OUTPUT_FORMATS = ["toon", "json"] as const;
+export const MCP_OUTPUT_FORMATS = ["json", "toon"] as const;
 export type McpOutputFormat = (typeof MCP_OUTPUT_FORMATS)[number];
 
-export const DEFAULT_MCP_OUTPUT_FORMAT: McpOutputFormat = "toon";
+export const DEFAULT_MCP_OUTPUT_FORMAT: McpOutputFormat = "json";
 
 export type JsonCompatible =
   null | boolean | number | string | JsonCompatible[] | { [key: string]: JsonCompatible };
@@ -37,7 +39,7 @@ export function parseMcpOutputFormat(raw: string | undefined): McpOutputFormat {
   if (raw === undefined || raw.trim() === "") return DEFAULT_MCP_OUTPUT_FORMAT;
   const normalized = raw.trim().toLowerCase();
   if (normalized === "toon" || normalized === "json") return normalized;
-  throw new Error('Invalid B2_MCP_OUTPUT_FORMAT. Expected "toon" or "json".');
+  throw new Error('Invalid B2_MCP_OUTPUT_FORMAT. Expected "json" or "toon".');
 }
 
 export function runWithResultSerializationOptions<T>(
@@ -77,13 +79,10 @@ export function serializeStructuredToolResult(
   };
 }
 
-export function decodeToonForTests(text: string): JsonCompatible {
-  return toon.decode(text) as JsonCompatible;
-}
-
 function serializeStructuredText(value: JsonCompatible, format: McpOutputFormat): string {
   if (format === "json") return JSON.stringify(value);
-  return toon.encode(value);
+  const text = loadToonModule().encode(value);
+  return text === "" && isEmptyObject(value) ? "{}" : text;
 }
 
 function sanitizeJsonCompatible(data: unknown, sanitizerOptions: SanitizerOptions): JsonCompatible {
@@ -93,4 +92,19 @@ function sanitizeJsonCompatible(data: unknown, sanitizerOptions: SanitizerOption
     throw new TypeError("MCP structured tool output must be JSON-compatible");
   }
   return JSON.parse(json) as JsonCompatible;
+}
+
+function isEmptyObject(value: JsonCompatible): value is { [key: string]: JsonCompatible } {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? Object.keys(value).length === 0
+    : false;
+}
+
+function loadToonModule(): ToonModule {
+  if (toonModule) return toonModule;
+  // @toon-format/toon 4.1.0 is ESM-only while this project still emits and
+  // tests CommonJS, so static importing would compile to an incompatible
+  // require(). Keep the runtime load lazy so JSON mode never executes it.
+  toonModule = nodeRequire("@toon-format/toon") as ToonModule;
+  return toonModule;
 }

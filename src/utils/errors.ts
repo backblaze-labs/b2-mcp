@@ -199,7 +199,5 @@ export function toolSuccess(text: string): { content: Array<{ type: "text"; text
  * Return a successful tool response with a JSON object.
  */
 export function toolJson(data: unknown): StructuredToolResult {
-  return markSanitizedMcpResponse(
-    serializeStructuredToolResult(data, currentSanitizerOptions()),
-  ) as StructuredToolResult;
+  return markSanitizedMcpResponse(serializeStructuredToolResult(data, currentSanitizerOptions()));
 }

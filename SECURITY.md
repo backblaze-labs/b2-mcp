@@ -63,6 +63,15 @@ it is generated only after the same sanitization and tool-specific result bounds
 have run. TOON is not a protocol content type and must not be used to bypass
 JSON validation, redaction, or output-size controls.
 
+`@toon-format/toon@4.1.0` is an exact-pinned runtime dependency only on the
+explicit `B2_MCP_OUTPUT_FORMAT=toon` tool-result path; default compact JSON
+mode does not load it. The 4.1.0 trust basis is the upstream MIT-licensed
+package release, the checked-in npm lockfile integrity
+`sha512-dBB3pkEx9QYvHnHR6rtkaBAh+7x4W/oA5ONur4G0fh7Ow69PbPuM7OFxzNRABqyxC0t6SZ3RixiGbCuaFjPDAQ==`,
+a manual review of the 4.1.0 encoder/decoder API used here, and release policy
+requiring explicit review for format-major upgrades instead of routine
+dependency drift.
+
 Presigned S3 URLs are short-lived bearer capabilities, not durable B2
 application keys. Tools may return them only with operation and expiry metadata;
 operators and clients must treat the URL as sensitive until `expiresAt`.

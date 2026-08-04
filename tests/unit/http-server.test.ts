@@ -67,15 +67,15 @@ describe("configFromHeaders", () => {
     expect(config.region).toBe("eu-central-003");
   });
 
-  it("defaults structured tool-result text output to TOON", () => {
-    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
-    expect(configFromHeaders(req)?.outputFormat).toBe("toon");
-  });
-
-  it("honors compact JSON structured tool-result text output mode", () => {
-    process.env.B2_MCP_OUTPUT_FORMAT = "json";
+  it("defaults structured tool-result text output to compact JSON", () => {
     const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
     expect(configFromHeaders(req)?.outputFormat).toBe("json");
+  });
+
+  it("honors TOON structured tool-result text output mode", () => {
+    process.env.B2_MCP_OUTPUT_FORMAT = "toon";
+    const req = { headers: { "x-b2-key-id": "id", "x-b2-key": "secret" } };
+    expect(configFromHeaders(req)?.outputFormat).toBe("toon");
   });
 
   it("rejects unknown structured tool-result text output modes", () => {

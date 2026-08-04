@@ -1,8 +1,9 @@
 // ── Shared Types ─────────────────────────────────────────────────────────────
+import type { McpOutputFormat } from "./result-serializer.js";
 
 /** Policy for the destructive-operation gate (see utils/destructive-gate.ts). */
 export type DestructivePolicy = "allow" | "confirm" | "block";
-export type McpOutputFormat = "toon" | "json";
+export type { McpOutputFormat };
 
 export interface B2Config {
   /** The application key — the workhorse credential. Used for the B2 native API,
