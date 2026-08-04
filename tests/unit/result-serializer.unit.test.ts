@@ -14,14 +14,58 @@ import {
 } from "../../src/utils/secret-sanitizer";
 import { toolJson } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
+import { execFileSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 
 const CANARY = "B2_MCP_CANARY_SECRET_result_serializer";
 
 async function decodeToon(text: string): Promise<JsonCompatible> {
-  const { decode } = await import("@toon-format/toon");
-  return decode(text) as JsonCompatible;
+  return decodeToonWithEnv(text, process.env);
+}
+
+function decodeToonWithEnv(text: string, env: NodeJS.ProcessEnv): JsonCompatible {
+  const decoded = execFileSync(
+    process.execPath,
+    [
+      "-e",
+      [
+        "const fs = require('fs');",
+        "const canary = 'B2_MCP_CANARY';",
+        "if (Object.values(process.env).some((value) => String(value).includes(canary))) {",
+        "  throw new Error('B2 credential canary reached TOON oracle subprocess');",
+        "}",
+        "const { decode } = require('@toon-format/toon');",
+        "process.stdout.write(JSON.stringify(decode(fs.readFileSync(0, 'utf8'))));",
+      ].join("\n"),
+    ],
+    {
+      cwd: join(__dirname, "../.."),
+      encoding: "utf8",
+      input: text,
+      env: envWithoutB2Credentials(env),
+    },
+  );
+  return JSON.parse(decoded) as JsonCompatible;
+}
+
+function envWithoutB2Credentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const policy = JSON.parse(
+    readFileSync(join(__dirname, "../../scripts/b2-credential-env.json"), "utf8"),
+  ) as {
+    exact: string[];
+    patterns: string[];
+  };
+  const exact = new Set(policy.exact);
+  const patterns = policy.patterns.map((pattern) => new RegExp(pattern));
+  const scrubbed = { ...env };
+  for (const name of Object.keys(scrubbed)) {
+    const upper = name.toUpperCase();
+    if (exact.has(upper) || patterns.some((pattern) => pattern.test(upper))) {
+      delete scrubbed[name];
+    }
+  }
+  return scrubbed;
 }
 
 describe("result serializer", () => {
@@ -236,6 +280,16 @@ describe("result serializer", () => {
       if (originalMasterKey === undefined) delete process.env.B2_MASTER_KEY;
       else process.env.B2_MASTER_KEY = originalMasterKey;
     }
+  });
+
+  it("scrubs B2 credential env before executing the TOON test oracle", () => {
+    expect(
+      decodeToonWithEnv("ok: true", {
+        ...process.env,
+        B2_APPLICATION_KEY: "B2_MCP_CANARY_APPLICATION_KEY",
+        B2_MASTER_KEY: "B2_MCP_CANARY_MASTER_KEY",
+      }),
+    ).toEqual({ ok: true });
   });
 
   it("validates output format values", () => {

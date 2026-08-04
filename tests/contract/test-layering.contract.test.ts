@@ -2,7 +2,16 @@ import { execFileSync, spawnSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { basename, join } from "path";
 import { listFiles, readJson, root } from "./support";
-import { contractBucketName, isContractBucketName } from "../live/support/contract-buckets";
+import {
+  contractBucketName,
+  isContractBucketName,
+  isExpiredContractBucketName,
+  STALE_CONTRACT_BUCKET_AGE_MS,
+} from "../live/support/contract-buckets";
+import {
+  cleanupExpiredContractBuckets,
+  deleteContractBucketWithRetry,
+} from "../live/support/contract-cleanup";
 
 interface B2CredentialPolicy {
   exact: string[];
@@ -125,6 +134,7 @@ describe("test layer naming", () => {
     ["B2_KEY", "fake-smoke-key-secret"],
     ["B2_MASTER_KEY", "fake-master-key-secret"],
     ["B2_CREDENTIAL_TENANT_A_APPLICATION_KEY", "fake-principal-key-secret"],
+    ["B2_PARTNER_TEST_EMAIL", "partner@example.invalid"],
     ["LIVE_B2_KEY", "fake-live-b2-key-secret"],
   ])("keeps %s out of credential-bearing runner output and artifacts", (name, secret) => {
     const { summaryPath, junitPath } = removeLayerReports("runner-fixture-nonlive");
@@ -229,9 +239,44 @@ describe("test layer naming", () => {
       );
 
       expect(result.status).toBe(2);
-      expect(result.stderr).toContain("do not accept custom reporters");
+      expect(result.stderr).toContain("do not accept --reporters");
     },
   );
+
+  it.each([
+    ["--json", ["--json"]],
+    ["--outputFile", ["--outputFile", join(root, "reports/jest/raw-leak.json")]],
+    ["--outputFile=", [`--outputFile=${join(root, "reports/jest/raw-leak.json")}`]],
+    ["--testResultsProcessor", ["--testResultsProcessor", "./scripts/noop-processor.cjs"]],
+    ["--config", ["--config", "{}"]],
+    ["--config=", ['--config={"reporters":["default"]}']],
+  ])("rejects credential-bearing raw Jest output hook %s", (_name, args) => {
+    const leakPath = join(root, "reports/jest/raw-leak.json");
+    rmSync(leakPath, { force: true });
+
+    const result = spawnSync(
+      "node",
+      ["scripts/run-jest-layer.mjs", "runner-fixture-live", "--", ...args],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: {
+          ...envWithoutB2Credentials(),
+          B2_APPLICATION_KEY_ID: "fake-live-key-id",
+          B2_APPLICATION_KEY: "fake-live-key-secret",
+          B2_MASTER_KEY: "fake-master-key-secret",
+          B2_JEST_LAYER_FIXTURE_FAIL_WITH_SECRET: "true",
+        },
+        timeout: 30_000,
+      },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stdout).not.toContain("fake-live-key-secret");
+    expect(result.stderr).not.toContain("fake-live-key-secret");
+    expect(result.stderr).toContain("Jest layers with B2 credentials do not accept");
+    expect(existsSync(leakPath)).toBe(false);
+  });
 
   it("keeps live tests behind explicit live npm scripts", () => {
     const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
@@ -294,5 +339,68 @@ describe("test layer naming", () => {
     expect(bucketName).toMatch(/^mcp-contract-notify-[a-z0-9]+-[a-z0-9]+$/);
     expect(isContractBucketName(bucketName, "notify")).toBe(true);
     expect(isContractBucketName("user-production-bucket", "notify")).toBe(false);
+  });
+
+  it("recognizes stale disposable contract buckets by encoded creation time", () => {
+    const nowMs = Date.UTC(2026, 7, 4, 12);
+    const staleName = `mcp-contract-notify-${(nowMs - STALE_CONTRACT_BUCKET_AGE_MS - 1).toString(36)}-abc123`;
+    const freshName = `mcp-contract-notify-${(nowMs - STALE_CONTRACT_BUCKET_AGE_MS + 1).toString(36)}-abc123`;
+
+    expect(isExpiredContractBucketName(staleName, nowMs)).toBe(true);
+    expect(isExpiredContractBucketName(freshName, nowMs)).toBe(false);
+    expect(isExpiredContractBucketName("user-production-bucket", nowMs)).toBe(false);
+  });
+
+  it("reports structured cleanup failures after bounded delete retries", async () => {
+    const log = { error: jest.fn() };
+    const callTool = jest.fn().mockResolvedValue({
+      isError: true,
+      content: [{ text: "requestId=req-123 status=503 transient provider failure" }],
+    });
+
+    await expect(
+      deleteContractBucketWithRetry(
+        callTool,
+        { bucketId: "bucket-1", bucketName: "mcp-contract-notify-mh6k-abc123" },
+        "notify",
+        { attempts: 2, delayMs: 1, sleep: async () => undefined, log },
+      ),
+    ).rejects.toThrow(/bucketId=bucket-1/);
+
+    expect(callTool).toHaveBeenCalledTimes(2);
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining("requestId=req-123"));
+  });
+
+  it("reclaims only expired disposable contract buckets", async () => {
+    const nowMs = Date.UTC(2026, 7, 4, 12);
+    const staleName = `mcp-contract-notify-${(nowMs - STALE_CONTRACT_BUCKET_AGE_MS - 1).toString(36)}-abc123`;
+    const freshName = `mcp-contract-notify-${(nowMs - STALE_CONTRACT_BUCKET_AGE_MS + 1).toString(36)}-abc123`;
+    const deleted: unknown[] = [];
+    const callTool = jest.fn(async (toolName: string, args: Record<string, unknown>) => {
+      if (toolName === "b2_list_buckets") {
+        return {
+          structuredContent: {
+            buckets: [
+              { bucketId: "stale-id", bucketName: staleName },
+              { bucketId: "fresh-id", bucketName: freshName },
+              { bucketId: "prod-id", bucketName: "user-production-bucket" },
+            ],
+          },
+        };
+      }
+      if (toolName === "b2_delete_bucket") {
+        deleted.push(args.bucketId);
+        return { structuredContent: { bucketId: args.bucketId } };
+      }
+      throw new Error(`Unexpected tool: ${toolName}`);
+    });
+
+    await cleanupExpiredContractBuckets(callTool, {
+      nowMs,
+      sleep: async () => undefined,
+      log: { error: jest.fn() },
+    });
+
+    expect(deleted).toEqual(["stale-id"]);
   });
 });

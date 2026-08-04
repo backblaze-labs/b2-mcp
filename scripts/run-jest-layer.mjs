@@ -113,12 +113,29 @@ const extraJestArgs = maybeSeparator === "--" ? rest : [maybeSeparator, ...rest]
 const layerConfig = layerRegistry[layer];
 const liveLayer = layerConfig.live;
 const hasB2CredentialEnv = b2CredentialEnvNames(process.env).length > 0;
-const hasCustomReporter = extraJestArgs.some(
-  (arg) => arg === "--reporters" || arg.startsWith("--reporters="),
-);
+const credentialBlockedJestOptions = new Map([
+  ["--reporters", "custom reporters"],
+  ["--json", "raw JSON result output"],
+  ["--outputFile", "raw result output files"],
+  ["--testResultsProcessor", "test result processors"],
+  ["--config", "Jest config overrides"],
+  ["-c", "Jest config overrides"],
+]);
 
-if (hasB2CredentialEnv && hasCustomReporter) {
-  console.error("Jest layers with B2 credentials do not accept custom reporters.");
+function credentialBlockedJestArg(args) {
+  for (const arg of args) {
+    const flag = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+    const reason = credentialBlockedJestOptions.get(flag);
+    if (reason) return { arg, reason };
+  }
+  return undefined;
+}
+
+const blockedCredentialArg = credentialBlockedJestArg(extraJestArgs);
+if (hasB2CredentialEnv && blockedCredentialArg) {
+  console.error(
+    `Jest layers with B2 credentials do not accept ${blockedCredentialArg.arg} (${blockedCredentialArg.reason}).`,
+  );
   process.exit(2);
 }
 const allowJunit = !liveLayer && !hasB2CredentialEnv;

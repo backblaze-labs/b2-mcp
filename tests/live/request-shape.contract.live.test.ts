@@ -22,6 +22,11 @@
 import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 import { contractBucketName } from "./support/contract-buckets";
+import {
+  cleanupExpiredContractBuckets,
+  deleteContractBucketWithRetry,
+  type ContractBucketRef,
+} from "./support/contract-cleanup";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 const liveIt = HAS_CREDS ? test : test.skip;
@@ -51,11 +56,6 @@ function failContractPrerequisite(message: string, detail?: unknown): never {
   throw new Error(`Live contract prerequisite failed - ${message}${suffix}`);
 }
 
-interface ContractBucketRef {
-  bucketId: string;
-  bucketName?: string;
-}
-
 async function createContractBucket(label: string): Promise<any> {
   const bucketName = contractBucketName(label);
   console.log(`  Contract bucketName=${bucketName}`);
@@ -69,32 +69,12 @@ async function createContractBucket(label: string): Promise<any> {
   return parseResult(created);
 }
 
-async function deleteContractBucket(bucket: ContractBucketRef, label: string): Promise<void> {
-  if (!bucket.bucketId) return;
-  const deleted = await callTool(server, "b2_delete_bucket", { bucketId: bucket.bucketId });
-  if (!isError(deleted)) return;
-
-  const detail = errText(deleted);
-  console.error(
-    [
-      `Live contract cleanup failed for ${label} bucket.`,
-      `bucketId=${bucket.bucketId}`,
-      bucket.bucketName ? `bucketName=${bucket.bucketName}` : "",
-      detail ? `providerError=${detail}` : "",
-    ]
-      .filter(Boolean)
-      .join(" "),
-  );
-  throw new Error(
-    `Live contract cleanup failed for ${label} bucket ${bucket.bucketName ?? bucket.bucketId}: ${detail}`,
-  );
-}
-
 beforeAll(async () => {
   if (!HAS_CREDS) return;
   // Integration tests create AND clean up real resources, so disable the
   // destructive-op gate here (it is unit-tested separately).
   server = createServer({ ...loadConfig(), destructivePolicy: "allow" });
+  await cleanupExpiredContractBuckets((toolName, args) => callTool(server, toolName, args));
 });
 
 // ── Notification rule write-shape contract ────────────────────────────────────
@@ -131,7 +111,11 @@ describe("Contract: notification rules objectNamePrefix", () => {
         }
         expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
       } finally {
-        await deleteContractBucket(cleanupBucket, "notify");
+        await deleteContractBucketWithRetry(
+          (toolName, args) => callTool(server, toolName, args),
+          cleanupBucket,
+          "notify",
+        );
       }
     },
     30_000,
@@ -174,7 +158,11 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
         expect(back?.mode).toBe("governance");
         expect(back?.period).toEqual({ duration: 7, unit: "days" });
       } finally {
-        await deleteContractBucket(cleanupBucket, "retrofit");
+        await deleteContractBucketWithRetry(
+          (toolName, args) => callTool(server, toolName, args),
+          cleanupBucket,
+          "retrofit",
+        );
       }
     },
     90_000,
@@ -217,7 +205,11 @@ describe("Contract: v4 tool-surface alignment", () => {
         });
         expect(isError(life)).toBe(false);
       } finally {
-        await deleteContractBucket(cleanupBucket, "pathb");
+        await deleteContractBucketWithRetry(
+          (toolName, args) => callTool(server, toolName, args),
+          cleanupBucket,
+          "pathb",
+        );
       }
     },
     90_000,
