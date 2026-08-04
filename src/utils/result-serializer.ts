@@ -1,23 +1,13 @@
 import { AsyncLocalStorage } from "async_hooks";
-import { createRequire } from "module";
-import type { decode as decodeType, encode as encodeType } from "@toon-format/toon";
 import { sanitizeForMcpOutput, type SanitizerOptions } from "./secret-sanitizer.js";
+import { encodeToon } from "./toon-encoder.js";
+import { logger } from "./logger.js";
 
-const nodeRequire = createRequire(__filename);
-
-interface ToonModule {
-  encode: typeof encodeType;
-  decode: typeof decodeType;
-}
-
-type ToonDynamicImport = (specifier: string) => Promise<ToonModule>;
-
-const importToonModule = new Function("specifier", "return import(specifier)") as ToonDynamicImport;
-
-let toonModulePromise: Promise<ToonModule> | null = null;
-
-export const TOON_PACKAGE_VERSION = "4.1.0";
 export const TOON_SPEC_VERSION = "4.1";
+export const TOON_IMPLEMENTATION = "repo-owned";
+export const MAX_TOON_INPUT_JSON_CHARS = 200_000;
+export const MAX_TOON_INPUT_DEPTH = 64;
+export const MAX_TOON_INPUT_NODES = 50_000;
 
 export const MCP_OUTPUT_FORMATS = ["json", "toon"] as const;
 export type McpOutputFormat = (typeof MCP_OUTPUT_FORMATS)[number];
@@ -40,11 +30,21 @@ export interface StructuredToolResult {
   structuredContent: JsonCompatible;
 }
 
+const loggedToonFallbackReasons = new Set<string>();
+
 export function parseMcpOutputFormat(raw: string | undefined): McpOutputFormat {
   if (raw === undefined || raw.trim() === "") return DEFAULT_MCP_OUTPUT_FORMAT;
   const normalized = raw.trim().toLowerCase();
   if (normalized === "toon" || normalized === "json") return normalized;
   throw new Error('Invalid B2_MCP_OUTPUT_FORMAT. Expected "json" or "toon".');
+}
+
+export function preflightMcpOutputFormat(format: McpOutputFormat): void {
+  if (format !== "toon") return;
+  const text = encodeToon({ ok: true });
+  if (text !== "ok: true") {
+    throw new Error("TOON serializer preflight failed");
+  }
 }
 
 export function runWithResultSerializationOptions<T>(
@@ -66,30 +66,44 @@ export function outputFormatInstructions(format: McpOutputFormat): string {
     ].join(" ");
   }
   return [
-    `Structured successful tool results include canonical JSON in structuredContent and one TOON TextContent block in content (TOON package ${TOON_PACKAGE_VERSION}, spec ${TOON_SPEC_VERSION}).`,
+    `Structured successful tool results include canonical JSON in structuredContent and one TOON TextContent block in content (repo-owned encoder, spec ${TOON_SPEC_VERSION}).`,
     "TextContent has no media-type field, so this is not protocol-level TOON negotiation; MCP messages remain JSON-RPC JSON.",
     "Errors and concise status messages remain plain text.",
   ].join(" ");
 }
 
-export async function serializeStructuredToolResult(
+export function serializeStructuredToolResult(
   data: unknown,
   sanitizerOptions: SanitizerOptions = {},
   format: McpOutputFormat = currentMcpOutputFormat(),
-): Promise<StructuredToolResult> {
+): StructuredToolResult {
   const structuredContent = sanitizeJsonCompatible(data, sanitizerOptions);
+  const jsonText = JSON.stringify(structuredContent);
   return {
-    content: [{ type: "text", text: await serializeStructuredText(structuredContent, format) }],
+    content: [{ type: "text", text: serializeStructuredText(structuredContent, jsonText, format) }],
     structuredContent,
   };
 }
 
-async function serializeStructuredText(
+function serializeStructuredText(
   value: JsonCompatible,
+  jsonText: string,
   format: McpOutputFormat,
-): Promise<string> {
-  if (format === "json") return JSON.stringify(value);
-  const text = (await loadToonModule()).encode(value);
+): string {
+  if (format === "json") return jsonText;
+  if (!withinToonEncodingBounds(value, jsonText)) {
+    logToonFallback("bounds");
+    return jsonText;
+  }
+  let text: string;
+  try {
+    text = encodeToon(value);
+  } catch {
+    logToonFallback("encode_error");
+    return jsonText;
+  }
+  // The TOON 4.1 empty object representation is an empty string; keep the
+  // MCP text block visible and unambiguous by emitting JSON's "{}" spelling.
   return text === "" && isEmptyObject(value) ? "{}" : text;
 }
 
@@ -108,30 +122,33 @@ function isEmptyObject(value: JsonCompatible): value is { [key: string]: JsonCom
     : false;
 }
 
-async function loadToonModule(): Promise<ToonModule> {
-  if (toonModulePromise) return toonModulePromise;
-  // TypeScript rewrites import("@toon-format/toon") to require() for this
-  // CommonJS build. Use an indirect import expression so production dist/ loads
-  // the package through Node's ESM loader while JSON mode keeps it untouched.
-  try {
-    toonModulePromise = importToonModule("@toon-format/toon").catch((err: unknown) =>
-      recoverFromJestVmDynamicImportError(err),
-    );
-  } catch (err) {
-    toonModulePromise = recoverFromJestVmDynamicImportError(err);
+function withinToonEncodingBounds(value: JsonCompatible, jsonText: string): boolean {
+  if (jsonText.length > MAX_TOON_INPUT_JSON_CHARS) return false;
+
+  let nodes = 0;
+  const stack: Array<{ value: JsonCompatible; depth: number }> = [{ value, depth: 0 }];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+    nodes++;
+    if (nodes > MAX_TOON_INPUT_NODES || current.depth > MAX_TOON_INPUT_DEPTH) return false;
+    const currentValue = current.value;
+    if (currentValue === null || typeof currentValue !== "object") continue;
+    const children = Array.isArray(currentValue) ? currentValue : Object.values(currentValue);
+    for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
   }
-  return toonModulePromise;
+  return true;
 }
 
-function recoverFromJestVmDynamicImportError(err: unknown): Promise<ToonModule> {
-  if (isJestVmDynamicImportError(err)) {
-    return Promise.resolve(nodeRequire("@toon-format/toon") as ToonModule);
-  }
-  toonModulePromise = null;
-  throw err;
-}
-
-function isJestVmDynamicImportError(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return process.env.NODE_ENV === "test" && message.includes("--experimental-vm-modules");
+function logToonFallback(reason: "bounds" | "encode_error"): void {
+  if (loggedToonFallbackReasons.has(reason)) return;
+  loggedToonFallbackReasons.add(reason);
+  logger.warn(
+    {
+      outputFormat: "toon",
+      fallbackOutputFormat: "json",
+      reason,
+    },
+    "tool.output_format.toon_fallback",
+  );
 }

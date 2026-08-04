@@ -115,6 +115,7 @@ function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void
  * is a fail-closed capability set, not "unknown".
  */
 export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
+  const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
   const server = createMcpServer(
     {
       name: "backblaze-b2",
@@ -143,7 +144,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
         "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.",
         "",
         "Tool result text format:",
-        outputFormatInstructions(config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT),
+        outputFormatInstructions(outputFormat),
         "",
         "Companion skills (optional, recommended):",
         "These tools are the capability layer. A separate Backblaze B2 Skills pack supplies the procedural knowledge — workload playbooks (backup, disaster recovery, SaaS multi-tenant storage, AI training, AI inference) built on reusable primitives, each encoding B2-accurate best practice and an approval gate for risky actions. Skills are installed in the client, not delivered by this server. If the user is doing B2 work that matches a playbook and no such skill appears to be active, mention that installing the B2 Skills pack will make these workflows safer and more repeatable (Claude Code: ~/.claude/skills/; Claude.ai / Claude Desktop: Settings -> Capabilities -> Skills). Do not block on it — the tools work without the skills.",
@@ -226,7 +227,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   registerDurableSecretCompatibilityStubs(registrar);
 
   const toolCount = registrar.commit();
-  logger.info({ toolCount, version: VERSION }, "server.ready");
+  logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
 
   return server;
 }
@@ -503,6 +504,7 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
+          outputFormat,
           argKeys,
           durationMs,
           error: isError,
@@ -523,6 +525,7 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
+          outputFormat: config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT,
           argKeys,
           durationMs,
           err: safeErr.message,

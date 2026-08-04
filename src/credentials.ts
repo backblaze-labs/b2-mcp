@@ -3,7 +3,7 @@ import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { logger } from "./utils/logger.js";
 import { B2Config, DestructivePolicy } from "./utils/types.js";
-import { parseMcpOutputFormat } from "./utils/result-serializer.js";
+import { parseMcpOutputFormat, preflightMcpOutputFormat } from "./utils/result-serializer.js";
 
 const DEFAULT_REGION = "us-west-004";
 
@@ -195,7 +195,9 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
 
 function resolveOutputFormat() {
   try {
-    return parseMcpOutputFormat(process.env.B2_MCP_OUTPUT_FORMAT);
+    const outputFormat = parseMcpOutputFormat(process.env.B2_MCP_OUTPUT_FORMAT);
+    preflightMcpOutputFormat(outputFormat);
+    return outputFormat;
   } catch (err) {
     throw new CredentialResolutionError(
       err instanceof Error ? err.message : "Invalid B2_MCP_OUTPUT_FORMAT",
@@ -203,10 +205,6 @@ function resolveOutputFormat() {
       "invalid_output_format",
     );
   }
-}
-
-function validateOutputFormatConfiguration(): void {
-  resolveOutputFormat();
 }
 
 function envMaterial(prefix = "B2"): CredentialMaterial {
@@ -491,7 +489,7 @@ export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProv
 export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
-  validateOutputFormatConfiguration();
+  resolveOutputFormat();
   provider.validateConfiguration?.();
 }
 

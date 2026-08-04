@@ -31,12 +31,13 @@ Issue #82 adds the pre-release structured-result text contract. MCP transport
 messages, JSON-RPC envelopes, and `structuredContent` remain specification
 compliant JSON. For structured successful tool results, `structuredContent` is
 the canonical sanitized JSON-compatible value; the single `TextContent.text`
-block is selected once at server startup by `B2_MCP_OUTPUT_FORMAT`:
+block is selected from process configuration during server/request config
+resolution by `B2_MCP_OUTPUT_FORMAT`:
 
-| Value  | Text block format | Notes                                                   |
-| ------ | ----------------- | ------------------------------------------------------- |
-| `json` | Compact JSON      | Default contract-preserving mode for text parsers.      |
-| `toon` | TOON              | Opt-in. Official `@toon-format/toon@4.1.0`, spec `4.1`. |
+| Value  | Text block format | Notes                                                                                               |
+| ------ | ----------------- | --------------------------------------------------------------------------------------------------- |
+| `json` | Compact JSON      | Default mode for text parsers. Before this contract, text JSON was pretty-printed with 2 spaces.    |
+| `toon` | TOON              | Opt-in. Repo-owned encoder for TOON spec `4.1`; preflighted before readiness reports the server up. |
 
 Unknown values are startup/config errors. Errors, validation failures, and
 concise status messages remain plain text. The server does not change HTTP
@@ -49,8 +50,10 @@ The repository-owned serializer runs after tool-specific result bounds and
 central secret sanitization. It normalizes the sanitized value through the JSON
 data model before text emission and preserves insertion-order field ordering;
 the TOON encoder performs no repository-owned key sorting. Format-major TOON
-upgrades require explicit contract review before the pinned package/spec version
-changes.
+upgrades require explicit contract review before the repo-owned encoder/spec
+version changes. In TOON mode, oversized/deep inputs or encode failures degrade
+the text block to compact JSON while preserving the canonical
+`structuredContent`.
 
 ## Required Evidence
 

@@ -50,13 +50,15 @@ private fields. The registry is sorted by tool name and mirrors the public
 Credential-free unit tests cover the structured result serializer:
 
 - default compact JSON text output preserves the same `structuredContent`;
-- `B2_MCP_OUTPUT_FORMAT=toon` round-trips with the official
-  `@toon-format/toon@4.1.0` decoder while preserving the same
+- `B2_MCP_OUTPUT_FORMAT=toon` round-trips through the repo-owned encoder and
+  official `@toon-format/toon@4.1.0` dev/test decoder while preserving the same
   `structuredContent`;
 - unknown output formats fail during config resolution;
-- HTTP header-mode readiness rejects unknown output formats before serving
-  traffic;
-- compact JSON mode does not load the TOON runtime dependency;
+- HTTP header-mode readiness rejects unknown output formats and TOON preflight
+  failures before serving traffic;
+- production serialization does not load the npm TOON package, including in
+  TOON mode;
+- TOON encode failures and input-bound violations fall back to compact JSON;
 - redaction runs before text serialization;
 - delimiters, indentation, quotes, backslashes, tabs, CR/LF, Unicode,
   formula-like prefixes, hostile keys, and strings resembling TOON

@@ -11,8 +11,8 @@ updates:
       b2-sdk:
         patterns:
           - "@backblaze-labs/b2-sdk"
-      # TOON format bumps can change the LLM-facing text contract. Keep them
-      # isolated from routine dependency drift.
+      # TOON dev/test decoder bumps can change contract-oracle behavior. Keep
+      # them isolated from routine dependency drift.
       toon-format:
         patterns:
           - "@toon-format/toon"

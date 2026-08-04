@@ -92,6 +92,35 @@ describe("credential providers", () => {
     expect(caught).toMatchObject({ code: "invalid_output_format" });
   });
 
+  it("rejects TOON mode during HTTP readiness when the encoder preflight fails", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+    process.env.B2_MCP_OUTPUT_FORMAT = "toon";
+
+    await jest.isolateModulesAsync(async () => {
+      jest.doMock("../../src/utils/toon-encoder", () => ({
+        encodeToon: () => {
+          throw new Error("encoder unavailable");
+        },
+      }));
+      try {
+        const { validateHttpCredentialConfiguration: validate } =
+          await import("../../src/credentials");
+        let caught: unknown;
+        try {
+          validate();
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toMatchObject({
+          code: "invalid_output_format",
+          message: "encoder unavailable",
+        });
+      } finally {
+        jest.dontMock("../../src/utils/toon-encoder");
+      }
+    });
+  });
+
   it("ignores partial optional stdio master credentials and falls back to the app key", () => {
     process.env.B2_APPLICATION_KEY_ID = "stdio-id";
     process.env.B2_APPLICATION_KEY = "stdio-secret";

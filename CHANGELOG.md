@@ -21,9 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added central recursive MCP response sanitization for secret-bearing field
   names, labeled tokens, configured B2 credentials, and audit/error paths.
 - Added opt-in token-efficient TOON tool-result text for structured successes
-  via exact `@toon-format/toon@4.1.0` / spec `4.1`, while preserving compact
-  JSON as the unset/default mode (`B2_MCP_OUTPUT_FORMAT=json` for explicit
-  config).
+  via a repo-owned encoder for spec `4.1`, while using compact JSON as the
+  unset/default mode (`B2_MCP_OUTPUT_FORMAT=json` for explicit config).
 
 ### Changed
 - Canonicalized repository, package, workflow, security, and setup metadata for
@@ -48,9 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reviewed out-of-band secret sink exists.
 - Structured successful tool results now keep canonical sanitized JSON in
   `structuredContent` while emitting only one selected text serialization in
-  `content`; errors and concise status strings remain plain text.
-- HTTP readiness now rejects unsupported `B2_MCP_OUTPUT_FORMAT` values in every
-  credential mode before serving traffic.
+  `content`; the default text JSON changed from 2-space pretty-printed JSON to
+  compact JSON, and errors and concise status strings remain plain text.
+- HTTP readiness now rejects unsupported `B2_MCP_OUTPUT_FORMAT` values and TOON
+  preflight failures in every credential mode before serving traffic.
 
 ### Removed
 - Removed the `b2_create_key` lockdown toggles

@@ -47,6 +47,10 @@ describe("getRegisteredTools", () => {
     const names = Object.keys(getRegisteredTools(server) ?? {});
     expect(names.length).toBe(40);
     expect(names).toEqual([...names].sort());
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ toolCount: 40, outputFormat: "json" }),
+      "server.ready",
+    );
   });
 
   it("passes Zod object schemas to the SDK registration API", () => {
@@ -82,7 +86,12 @@ describe("createAuditedToolCallback", () => {
     expect(result).toEqual({ isError: false, ok: true });
     expect(original).toHaveBeenCalled();
     expect(infoSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ tool: "t", argKeys: ["bucketId"], error: false }),
+      expect.objectContaining({
+        tool: "t",
+        outputFormat: "json",
+        argKeys: ["bucketId"],
+        error: false,
+      }),
       "tool.call",
     );
   });
@@ -100,6 +109,7 @@ describe("createAuditedToolCallback", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: "s3_get_object",
+        outputFormat: "json",
         error: true,
         code: "NoSuchKey",
         status: 404,
