@@ -379,10 +379,23 @@ async function loadRowsFromReportKeys(
         return;
       }
       const key = boundedKeys[next++];
-      const text = await b2Client.downloadReportObjectText(bucketName, key);
+      const remainingBytes = REPORT_SCAN_LIMITS.maxDownloadedBytes - stats.downloaded_bytes;
+      if (remainingBytes <= 0) {
+        stopReportScan(stats, "max_downloaded_bytes");
+        stopDownloads = true;
+        return;
+      }
+      const download = await b2Client.downloadReportObjectText(bucketName, key, {
+        maxBytes: remainingBytes,
+      });
+      const text = typeof download === "string" ? download : download.text;
       stats.downloaded_keys++;
-      stats.downloaded_bytes += Buffer.byteLength(text, "utf8");
-      if (stats.downloaded_bytes > REPORT_SCAN_LIMITS.maxDownloadedBytes) {
+      stats.downloaded_bytes +=
+        typeof download === "string" ? Buffer.byteLength(text, "utf8") : download.bytes;
+      if (
+        (typeof download !== "string" && download.truncated) ||
+        stats.downloaded_bytes > REPORT_SCAN_LIMITS.maxDownloadedBytes
+      ) {
         stopReportScan(stats, "max_downloaded_bytes");
         stopDownloads = true;
         return;

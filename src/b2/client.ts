@@ -190,6 +190,16 @@ export interface ReportObjectPage {
   nextContinuationToken?: string;
 }
 
+export interface ReportObjectText {
+  text: string;
+  bytes: number;
+  truncated: boolean;
+}
+
+export interface DownloadReportObjectTextOptions {
+  maxBytes?: number;
+}
+
 export interface FileVersionResult {
   fileName: string;
   contentLength: number;
@@ -305,6 +315,112 @@ function toPartInfoResult(value: PartInfo): PartInfoResult {
     partNumber: value.partNumber,
     contentLength: value.contentLength,
   });
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Symbol.asyncIterator in value &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === "function"
+  );
+}
+
+function chunkToBytes(chunk: unknown): Uint8Array {
+  if (typeof chunk === "string") return new TextEncoder().encode(chunk);
+  if (chunk instanceof Uint8Array) return chunk;
+  if (chunk instanceof ArrayBuffer) return new Uint8Array(chunk);
+  throw new Error("Unsupported B2 report object body chunk.");
+}
+
+function appendReportChunk(
+  decoder: { decode(input?: Uint8Array, options?: { stream?: boolean }): string },
+  chunk: unknown,
+  state: { text: string; bytes: number; maxBytes: number; truncated: boolean },
+): boolean {
+  const bytes = chunkToBytes(chunk);
+  const remaining = state.maxBytes - state.bytes;
+  if (remaining <= 0) {
+    state.truncated = true;
+    return false;
+  }
+  if (bytes.byteLength > remaining) {
+    state.text += decoder.decode(bytes.subarray(0, remaining), { stream: true });
+    state.bytes += remaining;
+    state.truncated = true;
+    return false;
+  }
+  state.text += decoder.decode(bytes, { stream: true });
+  state.bytes += bytes.byteLength;
+  return true;
+}
+
+function destroyReportBody(body: unknown, reason: Error): void {
+  const maybeDestroy = (body as { destroy?: unknown } | null)?.destroy;
+  if (typeof maybeDestroy === "function") maybeDestroy.call(body, reason);
+}
+
+function reportObjectText(state: {
+  text: string;
+  bytes: number;
+  truncated: boolean;
+}): ReportObjectText {
+  return { text: state.text, bytes: state.bytes, truncated: state.truncated };
+}
+
+async function readReportObjectBodyText(
+  body: unknown,
+  maxBytes = Number.POSITIVE_INFINITY,
+): Promise<ReportObjectText> {
+  if (!body) throw new Error("B2 report object response did not include a body.");
+  const byteLimit = Math.max(0, maxBytes);
+  const decoder = new TextDecoder();
+  const state = { text: "", bytes: 0, maxBytes: byteLimit, truncated: false };
+  const stopReason = new Error("B2 report object exceeded the configured byte limit.");
+  if (byteLimit === 0) {
+    destroyReportBody(body, stopReason);
+    return reportObjectText(state);
+  }
+
+  if (isAsyncIterable(body)) {
+    for await (const chunk of body) {
+      if (!appendReportChunk(decoder, chunk, state)) {
+        destroyReportBody(body, stopReason);
+        break;
+      }
+    }
+    state.text += decoder.decode();
+    return reportObjectText(state);
+  }
+
+  const maybeGetReader = (body as { getReader?: unknown }).getReader;
+  if (typeof maybeGetReader === "function") {
+    const reader = maybeGetReader.call(body) as ReadableStreamDefaultReader<unknown>;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!appendReportChunk(decoder, value, state)) {
+          await reader.cancel(stopReason);
+          break;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    state.text += decoder.decode();
+    return reportObjectText(state);
+  }
+
+  const maybeTransformToByteArray = (body as { transformToByteArray?: unknown })
+    .transformToByteArray;
+  if (typeof maybeTransformToByteArray === "function") {
+    appendReportChunk(decoder, await maybeTransformToByteArray.call(body), state);
+    state.text += decoder.decode();
+    return reportObjectText(state);
+  }
+
+  throw new Error("Unsupported B2 report object body.");
 }
 
 function maybeBucketId(value: string | undefined): BucketId | undefined {
@@ -704,13 +820,17 @@ export class B2Client {
     });
   }
 
-  async downloadReportObjectText(bucketName: string, key: string): Promise<string> {
+  async downloadReportObjectText(
+    bucketName: string,
+    key: string,
+    options: DownloadReportObjectTextOptions = {},
+  ): Promise<ReportObjectText> {
     const s3 = await this.getReportS3Client();
     return withReportCircuit(async () => {
       const obj = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: key }), {
         abortSignal: currentMcpRequestSignal(),
       });
-      return obj.Body!.transformToString("utf-8");
+      return readReportObjectBodyText(obj.Body, options.maxBytes);
     });
   }
 

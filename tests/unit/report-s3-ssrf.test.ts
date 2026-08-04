@@ -1,6 +1,7 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../../src/auth";
+import { B2Client } from "../../src/b2/client";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,
@@ -39,6 +40,19 @@ function maliciousAuthorizeResponse(overrides: { s3ApiUrl?: string; apiUrl?: str
         ...(overrides.apiUrl !== undefined ? { apiUrl: overrides.apiUrl } : {}),
       },
     },
+  };
+}
+
+function reportAuth() {
+  return {
+    accountId: "test-account-123",
+    authorizationToken: "mock-token-xyz",
+    apiUrl: "https://api005.backblazeb2.com",
+    downloadUrl: "https://f005.backblazeb2.com",
+    s3ApiUrl: "https://s3.us-west-004.backblazeb2.com",
+    recommendedPartSize: 100 * 1024 * 1024,
+    absoluteMinimumPartSize: 5 * 1024 * 1024,
+    capabilities: ["readFiles"],
   };
 }
 
@@ -101,5 +115,35 @@ describe("insight report S3 endpoint validation", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Authorized B2 API endpoint");
     expect(transport.requests).toHaveLength(1);
+  });
+
+  it("streams report downloads and stops at the configured byte cap", async () => {
+    let chunksRead = 0;
+    const body = {
+      transformToString: jest.fn(() => {
+        throw new Error("should not buffer the whole object");
+      }),
+      destroy: jest.fn(),
+      async *[Symbol.asyncIterator]() {
+        chunksRead++;
+        yield Buffer.from("abcdef");
+        chunksRead++;
+        yield Buffer.from("ghijkl");
+      },
+    };
+    sendSpy.mockResolvedValueOnce({ Body: body });
+    const client = new B2Client({
+      getConfig: () => testConfig,
+      getAuth: async () => reportAuth(),
+    } as never);
+
+    const result = await client.downloadReportObjectText("b2-reports-test", "large.csv", {
+      maxBytes: 3,
+    });
+
+    expect(result).toEqual({ text: "abc", bytes: 3, truncated: true });
+    expect(chunksRead).toBe(1);
+    expect(body.transformToString).not.toHaveBeenCalled();
+    expect(body.destroy).toHaveBeenCalled();
   });
 });
