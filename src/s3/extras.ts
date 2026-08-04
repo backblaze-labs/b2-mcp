@@ -1,5 +1,5 @@
 import { S3Client, GetBucketLocationCommand } from "@aws-sdk/client-s3";
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";
 
@@ -9,12 +9,15 @@ import { toolJson, toolError } from "../utils/errors.js";
  * the bucket/S3-compatibility validator skill). Everything else here duplicated
  * native b2_* tools and was removed.
  */
-export function registerS3ExtraTools(server: McpServer, s3: S3Client): void {
-  server.tool(
+export function registerS3ExtraTools(server: ToolRegistrar, s3: S3Client): void {
+  server.registerTool(
     "s3_get_bucket_location",
-    "Get the region (location constraint) of a B2 bucket via the S3-compatible API. No native b2_* equivalent — used to verify region/endpoint pairing.",
     {
-      bucket: z.string().describe("The bucket name."),
+      description:
+        "Get the region (location constraint) of a B2 bucket via the S3-compatible API. No native b2_* equivalent — used to verify region/endpoint pairing.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+      },
     },
     async (args) => {
       try {

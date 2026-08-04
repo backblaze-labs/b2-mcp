@@ -27,14 +27,48 @@ unpublished branches.
 
 ## MCP Runtime Boundary
 
-The target MCP revision is `2026-07-28`. The target modern MCP runtime must use
-the stable v2 package split through `createMcpHandler` for Streamable HTTP and
-`serveStdio` for stdio. Issue
-[#59](https://github.com/backblaze-labs/b2-mcp/issues/59) tracks that migration.
+The MCP runtime targets the `2026-07-28` serving model. The implementation uses
+the stable SDK v2 package split pinned at `2.0.0`:
 
-Until #59 lands, the current monolithic `@modelcontextprotocol/sdk` v1 imports
-and session-bound modern behavior are migration debt, not an allowed final Phase
-1 architecture.
+- `@modelcontextprotocol/server` for `McpServer`, `createMcpHandler`, and
+  `serveStdio`;
+- `@modelcontextprotocol/node` for the single Node HTTP adapter wrapping the MCP
+  handler with `toNodeHandler`;
+- `@modelcontextprotocol/client` for protocol/package tests.
+
+The monolithic `@modelcontextprotocol/sdk` v1 package is not a dependency and
+must not be imported by production or test code. HTTP serving is stateless and
+per request: Host, Origin, caller authentication, B2 credential resolution,
+rate/concurrency limits, body-size limits, drain, and shutdown checks run
+outside the SDK handler; protocol header/body validation remains inside
+`createMcpHandler`.
+
+The Node request adapter receives only an allowlisted MCP/header set; B2
+credential headers and caller `Authorization` are consumed by repository-owned
+credential resolution before the adapter boundary. Per-request credential state
+is then carried into the SDK factory by `AsyncLocalStorage` and fails closed when
+absent. The repository tracks each SDK server built for the request and closes
+it after the Node response lifecycle completes; local HTTP tests cover
+credential-header stripping, concurrent tenant isolation, per-request disposal,
+and drain survival for this model.
+
+Supported revision matrix:
+
+| Transport | Modern path                                | Compatibility path                                                        |
+| --------- | ------------------------------------------ | ------------------------------------------------------------------------- |
+| HTTP      | `2026-07-28` via `createMcpHandler` + POST | SDK v2 `legacy: "stateless"` for supported 2025-era Streamable HTTP POSTs |
+| stdio     | `2026-07-28` via `serveStdio`              | SDK v2 stdio legacy serving for supported 2025-era `initialize` clients   |
+
+No production path relies on `initialize`, `notifications/initialized`,
+`Mcp-Session-Id`, GET streams, DELETE session termination, `Last-Event-ID`, or
+event replay. Legacy initialization is handled only inside the SDK's explicit
+compatibility path.
+
+Tool registration is repository-owned: tool modules register through a local
+adapter that buffers definitions, wraps callbacks for audit/sanitization, sorts
+names deterministically, and then calls the public SDK `registerTool()` API. The
+adapter also exposes the test/diagnostic registry; production code never reads
+SDK private tool storage.
 
 ## S3-Compatible Surface
 

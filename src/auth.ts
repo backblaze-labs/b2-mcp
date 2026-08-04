@@ -2,6 +2,7 @@ import axios from "axios";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { withRetry } from "./utils/retry.js";
 import { buildUserAgent } from "./utils/user-agent.js";
+import { currentMcpRequestSignal } from "./request-context.js";
 
 /** Timeout for the authorize_account request. */
 const AUTH_TIMEOUT_MS = 30_000;
@@ -104,6 +105,7 @@ export class B2AuthManager {
           "User-Agent": buildUserAgent(this.config),
         },
         timeout: AUTH_TIMEOUT_MS,
+        signal: currentMcpRequestSignal(),
       }),
     );
 

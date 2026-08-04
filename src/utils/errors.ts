@@ -1,9 +1,13 @@
 import {
+  currentSanitizerOptions,
+  hasCurrentSanitizerOptions,
   sanitizeForMcpOutput,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
   sanitizeText,
 } from "./secret-sanitizer.js";
+
+const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
 
 export interface B2ApiError {
   status: number;
@@ -125,10 +129,28 @@ export function parseErrorText(
  */
 export function formatB2Error(err: unknown): string {
   const parsed = parseB2Error(err);
-  const code = sanitizeProviderCode(parsed.code);
-  const requestId = sanitizeProviderRequestId(parsed.requestId);
-  const base = `B2 Error [${code}] (HTTP ${parsed.status}): ${sanitizeText(parsed.message)}${errorHint(parsed)}`;
+  const sanitizerOptions = currentSanitizerOptions();
+  const code = sanitizeProviderCode(parsed.code, sanitizerOptions);
+  const requestId = sanitizeProviderRequestId(parsed.requestId, sanitizerOptions);
+  const base = `B2 Error [${code}] (HTTP ${parsed.status}): ${sanitizeText(parsed.message, sanitizerOptions)}${errorHint(parsed)}`;
   return requestId ? `${base} (requestId: ${requestId})` : base;
+}
+
+function markSanitizedMcpResponse<T extends object>(response: T): T {
+  if (!hasCurrentSanitizerOptions()) return response;
+  Object.defineProperty(response, SANITIZED_MCP_RESPONSE, {
+    value: true,
+    enumerable: false,
+  });
+  return response;
+}
+
+export function isSanitizedMcpResponse(response: unknown): boolean {
+  return !!(
+    response &&
+    typeof response === "object" &&
+    (response as Record<PropertyKey, unknown>)[SANITIZED_MCP_RESPONSE] === true
+  );
 }
 
 /**
@@ -158,22 +180,31 @@ export function toolError(err: unknown): {
   isError: true;
   content: Array<{ type: "text"; text: string }>;
 } {
-  return {
+  return markSanitizedMcpResponse({
     isError: true,
     content: [{ type: "text", text: formatB2Error(err) }],
-  };
+  });
 }
 
 /**
  * Return a successful tool response with text content.
  */
 export function toolSuccess(text: string): { content: Array<{ type: "text"; text: string }> } {
-  return { content: [{ type: "text", text: sanitizeText(text) }] };
+  return markSanitizedMcpResponse({
+    content: [{ type: "text", text: sanitizeText(text, currentSanitizerOptions()) }],
+  });
 }
 
 /**
  * Return a successful tool response with a JSON object.
  */
 export function toolJson(data: unknown): { content: Array<{ type: "text"; text: string }> } {
-  return { content: [{ type: "text", text: JSON.stringify(sanitizeForMcpOutput(data), null, 2) }] };
+  return markSanitizedMcpResponse({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(sanitizeForMcpOutput(data, currentSanitizerOptions()), null, 2),
+      },
+    ],
+  });
 }

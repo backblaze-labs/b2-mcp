@@ -1,6 +1,6 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
 
@@ -12,32 +12,35 @@ import { toolError, toolJson } from "../utils/errors.js";
  * and PUT URLs are supported. s3_get_presigned_post has been intentionally
  * omitted for this reason.
  */
-export function registerS3PresignedTools(server: McpServer, s3: S3Client): void {
-  server.tool(
+export function registerS3PresignedTools(server: ToolRegistrar, s3: S3Client): void {
+  server.registerTool(
     "s3_get_presigned_url",
-    "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
     {
-      bucket: z.string().describe("The bucket name."),
-      key: z.string().describe("The object key."),
-      operation: z
-        .enum(["GetObject", "PutObject"])
-        .describe("The operation the URL allows: GetObject to download, PutObject to upload."),
-      expiresIn: z
-        .number()
-        .int()
-        .min(1)
-        .max(604800)
-        .optional()
-        .default(3600)
-        .describe("URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days)."),
-      versionId: z
-        .string()
-        .optional()
-        .describe("For GetObject: the specific version ID to target."),
-      contentType: z
-        .string()
-        .optional()
-        .describe("For PutObject: restrict the upload to this content type."),
+      description:
+        "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
+      inputSchema: {
+        bucket: z.string().describe("The bucket name."),
+        key: z.string().describe("The object key."),
+        operation: z
+          .enum(["GetObject", "PutObject"])
+          .describe("The operation the URL allows: GetObject to download, PutObject to upload."),
+        expiresIn: z
+          .number()
+          .int()
+          .min(1)
+          .max(604800)
+          .optional()
+          .default(3600)
+          .describe("URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days)."),
+        versionId: z
+          .string()
+          .optional()
+          .describe("For GetObject: the specific version ID to target."),
+        contentType: z
+          .string()
+          .optional()
+          .describe("For PutObject: restrict the upload to this content type."),
+      },
     },
     async (args) => {
       try {

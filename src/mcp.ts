@@ -1,36 +1,121 @@
-import { McpServer as V2McpServer } from "@modelcontextprotocol/server";
+import { McpServer as V2McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
+import { z } from "zod";
 
-type LegacyToolCallback<TArgs = any> = (args: TArgs, extra: unknown) => unknown | Promise<unknown>;
-type LegacyToolArgs<TArgs = any> = [
-  string,
-  string,
-  Record<string, unknown>,
-  LegacyToolCallback<TArgs>,
-];
+export type McpServer = V2McpServer;
 
-export type McpServer = V2McpServer & {
-  tool<TArgs = any>(
+export type ToolCallback<TArgs = any> = (args: TArgs, extra: any) => any | Promise<any>;
+
+export interface ToolRegistrationConfig {
+  title?: string;
+  description?: string;
+  inputSchema?: z.ZodRawShape;
+  force?: boolean;
+}
+
+export interface RegisteredToolRecord {
+  name: string;
+  description?: string;
+  inputSchema?: z.ZodObject<z.ZodRawShape>;
+  execute: ToolCallback;
+}
+
+export type RegisteredToolMap = Record<string, RegisteredToolRecord>;
+
+export interface ToolRegistrar {
+  registerTool<TArgs = any>(
     name: string,
-    description: string,
-    inputSchema: Record<string, unknown>,
-    cb: LegacyToolCallback<TArgs>,
-  ): unknown;
+    config: ToolRegistrationConfig,
+    cb: ToolCallback<TArgs>,
+  ): void;
+}
+
+interface PendingTool {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema: z.ZodObject<z.ZodRawShape>;
+  callback: ToolCallback;
+}
+
+interface ToolRegistrationAdapterOptions {
+  shouldRegister?: (name: string) => boolean;
+  wrapCallback?: (name: string, cb: ToolCallback) => ToolCallback;
+}
+
+const REGISTERED_TOOLS = Symbol("b2-mcp.registeredTools");
+
+type ServerWithRegistry = McpServer & {
+  [REGISTERED_TOOLS]?: RegisteredToolMap;
 };
 
-/**
- * Keep the local tool modules on their v1-style `server.tool(...)` registration
- * shape while the production transports use the MCP SDK v2 entry points.
- */
+export class ToolRegistrationAdapter implements ToolRegistrar {
+  private readonly pending: PendingTool[] = [];
+  private readonly records: RegisteredToolMap = {};
+  private committed = false;
+
+  constructor(
+    private readonly server: McpServer,
+    private readonly options: ToolRegistrationAdapterOptions = {},
+  ) {}
+
+  registerTool<TArgs = any>(
+    name: string,
+    config: ToolRegistrationConfig,
+    cb: ToolCallback<TArgs>,
+  ): void {
+    if (this.committed) throw new Error(`Tool registered after commit: ${name}`);
+    if (!config.force && this.options.shouldRegister && !this.options.shouldRegister(name)) {
+      return;
+    }
+    if (this.records[name]) throw new Error(`Duplicate MCP tool registration: ${name}`);
+
+    const callback = this.options.wrapCallback?.(name, cb as ToolCallback) ?? (cb as ToolCallback);
+    const inputSchema = z.object(config.inputSchema ?? {});
+    this.records[name] = {
+      name,
+      description: config.description,
+      inputSchema,
+      execute: callback,
+    };
+    this.pending.push({
+      name,
+      title: config.title,
+      description: config.description,
+      inputSchema,
+      callback,
+    });
+  }
+
+  commit(): number {
+    if (this.committed) return Object.keys(this.records).length;
+    this.committed = true;
+    for (const { name, title, description, inputSchema, callback } of [...this.pending].sort(
+      (a, b) => a.name.localeCompare(b.name),
+    )) {
+      this.server.registerTool(
+        name,
+        {
+          title,
+          description,
+          inputSchema,
+        },
+        callback as any,
+      );
+    }
+    (this.server as ServerWithRegistry)[REGISTERED_TOOLS] = Object.fromEntries(
+      Object.entries(this.records).sort(([a], [b]) => a.localeCompare(b)),
+    );
+    return Object.keys(this.records).length;
+  }
+}
+
 export function createMcpServer(...args: ConstructorParameters<typeof V2McpServer>): McpServer {
-  const server = new V2McpServer(...args) as McpServer;
-  server.tool = <TArgs = any>(...toolArgs: LegacyToolArgs<TArgs>) => {
-    const [name, description, inputSchema, cb] = toolArgs;
-    // The SDK v2 registerTool surface accepts its own schema representation.
-    // This adapter is the only place that bridges the repo's legacy zod-shaped
-    // tool declarations into that surface.
-    return server.registerTool(name, { description, inputSchema: inputSchema as any }, cb as any);
-  };
-  return server;
+  return new V2McpServer(...args);
+}
+
+export function getRegisteredTools(server: McpServer): RegisteredToolMap | null {
+  return (server as ServerWithRegistry)[REGISTERED_TOOLS] ?? null;
 }
 
 export { V2McpServer };
+export type { McpRequestContext };

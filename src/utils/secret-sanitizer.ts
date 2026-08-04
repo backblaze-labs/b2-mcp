@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "async_hooks";
+
 const REDACTED = "[redacted]";
 
 const MIN_CONFIGURED_SECRET_LENGTH = 8;
@@ -26,11 +28,11 @@ export const STRUCTURED_SECRET_FIELD_NAMES = [
   "uploadUrl",
 ] as const;
 
-export const SENSITIVE_FIELD_NAMES = new Set(
+const SENSITIVE_FIELD_NAMES = new Set(
   STRUCTURED_SECRET_FIELD_NAMES.map((name) => normalizeKey(name)),
 );
 
-export const SECRET_HEADER_NAMES = new Set([
+const SECRET_HEADER_NAMES = new Set([
   "authorization",
   "cookie",
   "set-cookie",
@@ -42,14 +44,14 @@ export const SECRET_HEADER_NAMES = new Set([
   "x-b2-mcp-master-key",
 ]);
 
-export const SECRET_ENV_VAR_NAMES = new Set([
+const SECRET_ENV_VAR_NAMES = new Set([
   "AWS_SECRET_ACCESS_KEY",
   "B2_APP_KEY",
   "B2_APPLICATION_KEY",
   "B2_MASTER_KEY",
 ]);
 
-export const LOGGER_SECRET_FIELD_NAMES = [
+const LOGGER_SECRET_FIELD_NAMES = [
   ...STRUCTURED_SECRET_FIELD_NAMES,
   // Intentional logger-only identifiers: not durable credential material, but
   // they are credential handles operators do not need in logs.
@@ -134,6 +136,23 @@ export interface SanitizerOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+const sanitizerOptionsStorage = new AsyncLocalStorage<SanitizerOptions | undefined>();
+
+export function runWithSanitizerOptions<T>(
+  options: SanitizerOptions | undefined,
+  callback: () => T,
+): T {
+  return sanitizerOptionsStorage.run(options, callback);
+}
+
+export function currentSanitizerOptions(): SanitizerOptions {
+  return sanitizerOptionsStorage.getStore() ?? {};
+}
+
+export function hasCurrentSanitizerOptions(): boolean {
+  return sanitizerOptionsStorage.getStore() !== undefined;
+}
+
 function secretCandidate(value: unknown): string | null {
   if (typeof value !== "string") return null;
   if (value.length < MIN_CONFIGURED_SECRET_LENGTH) return null;
@@ -149,7 +168,7 @@ function isSecretEnvName(name: string): boolean {
   );
 }
 
-export function configuredSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+function configuredSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
   return Object.entries(env)
     .filter(([name]) => isSecretEnvName(name))
     .map(([, value]) => secretCandidate(value))

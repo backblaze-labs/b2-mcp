@@ -29,12 +29,10 @@ for Phase 1 migration and for the public MCP tool contract freeze.
 - Missing SDK capabilities must be tracked upstream and must land in a stable
   SDK release before the MCP release can claim that capability as an SDK-backed
   contract.
-- The MCP protocol baseline remains `2026-07-28`. The target modern MCP runtime
-  must use the stable v2 package split through `createMcpHandler` and
-  `serveStdio`. Issue [#59](https://github.com/backblaze-labs/b2-mcp/issues/59)
-  tracks that migration. Until #59 lands, the current monolithic
-  `@modelcontextprotocol/sdk` v1 imports are compatibility debt, not an allowed
-  final modern architecture.
+- The MCP protocol baseline remains `2026-07-28`. The modern MCP runtime uses
+  the stable v2 package split through `createMcpHandler`, `toNodeHandler`, and
+  `serveStdio`. The monolithic `@modelcontextprotocol/sdk` v1 package is not an
+  allowed dependency.
 
 ## Package Policy
 

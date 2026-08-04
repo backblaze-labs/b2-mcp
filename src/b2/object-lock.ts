@@ -1,4 +1,4 @@
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { toolJson, toolError } from "../utils/errors.js";
@@ -17,26 +17,29 @@ const CONFIRM_DESC =
  * delete), so those calls are routed through the destructive-operation gate.
  */
 export function registerObjectLockTools(
-  server: McpServer,
+  server: ToolRegistrar,
   client: B2Client,
   config: B2Config,
 ): void {
   // ── b2_update_file_legal_hold ─────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_update_file_legal_hold",
-    "Set or clear a legal hold on a specific file version in B2. When a legal hold is active, the file cannot be deleted regardless of retention settings. Requires the writeFileLegalHolds capability on the application key.",
     {
-      fileId: z.string().describe("The B2 file ID of the file to update."),
-      fileName: z
-        .string()
-        .describe("The name of the file (required by the B2 API alongside fileId)."),
-      legalHold: z
-        .enum(["on", "off"])
-        .describe(
-          "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare " +
-            "string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns.",
-        ),
-      confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      description:
+        "Set or clear a legal hold on a specific file version in B2. When a legal hold is active, the file cannot be deleted regardless of retention settings. Requires the writeFileLegalHolds capability on the application key.",
+      inputSchema: {
+        fileId: z.string().describe("The B2 file ID of the file to update."),
+        fileName: z
+          .string()
+          .describe("The name of the file (required by the B2 API alongside fileId)."),
+        legalHold: z
+          .enum(["on", "off"])
+          .describe(
+            "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare " +
+              "string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns.",
+          ),
+        confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      },
     },
     async (args) => {
       try {
@@ -55,41 +58,44 @@ export function registerObjectLockTools(
   );
 
   // ── b2_update_file_retention ──────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_update_file_retention",
-    "Set or modify the retention policy on a specific file version in B2. Supports governance and compliance retention modes. In compliance mode, the retain-until date can only be extended. Requires the writeFileRetentions capability.",
     {
-      fileId: z.string().describe("The B2 file ID of the file to update."),
-      fileName: z
-        .string()
-        .describe("The name of the file (required by the B2 API alongside fileId)."),
-      fileRetention: z
-        .object({
-          mode: z
-            .enum(["governance", "compliance"])
-            .nullable()
-            .describe(
-              "Retention mode. null clears the retention policy (governance mode only, with bypassGovernance).",
-            ),
-          retainUntilTimestamp: z
-            .number()
-            .nullable()
-            .describe(
-              "Unix timestamp (ms) until which the file is retained. null when mode is null.",
-            ),
-        })
-        .describe(
-          "Retention policy to apply, or { mode: null, retainUntilTimestamp: null } to clear. " +
-            "This is the flat shape B2's write API expects — do NOT include the read-only " +
-            "isClientAuthorizedToRead/value wrapper that b2_get_file_info returns.",
-        ),
-      bypassGovernance: z
-        .boolean()
-        .optional()
-        .describe(
-          "If true, allows overriding governance-mode retention. Requires bypassGovernance capability.",
-        ),
-      confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      description:
+        "Set or modify the retention policy on a specific file version in B2. Supports governance and compliance retention modes. In compliance mode, the retain-until date can only be extended. Requires the writeFileRetentions capability.",
+      inputSchema: {
+        fileId: z.string().describe("The B2 file ID of the file to update."),
+        fileName: z
+          .string()
+          .describe("The name of the file (required by the B2 API alongside fileId)."),
+        fileRetention: z
+          .object({
+            mode: z
+              .enum(["governance", "compliance"])
+              .nullable()
+              .describe(
+                "Retention mode. null clears the retention policy (governance mode only, with bypassGovernance).",
+              ),
+            retainUntilTimestamp: z
+              .number()
+              .nullable()
+              .describe(
+                "Unix timestamp (ms) until which the file is retained. null when mode is null.",
+              ),
+          })
+          .describe(
+            "Retention policy to apply, or { mode: null, retainUntilTimestamp: null } to clear. " +
+              "This is the flat shape B2's write API expects — do NOT include the read-only " +
+              "isClientAuthorizedToRead/value wrapper that b2_get_file_info returns.",
+          ),
+        bypassGovernance: z
+          .boolean()
+          .optional()
+          .describe(
+            "If true, allows overriding governance-mode retention. Requires bypassGovernance capability.",
+          ),
+        confirm: z.boolean().optional().describe(CONFIRM_DESC),
+      },
     },
     async (args) => {
       try {

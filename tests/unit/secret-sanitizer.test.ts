@@ -1,5 +1,4 @@
-import { wrapToolsWithAudit } from "../../src/server";
-import type { McpServer } from "../../src/mcp";
+import { createAuditedToolCallback } from "../../src/server";
 import { logger } from "../../src/utils/logger";
 import { toolError, toolJson } from "../../src/utils/errors";
 import {
@@ -185,8 +184,9 @@ describe("secret sanitizer canary policy", () => {
 
   it("redacts configured secret values from wrapped tool results", async () => {
     const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
-    const tool: Record<string, unknown> = {
-      callback: jest.fn().mockResolvedValue({
+    const wrapped = createAuditedToolCallback(
+      "t",
+      jest.fn().mockResolvedValue({
         content: [
           {
             type: "text",
@@ -194,11 +194,10 @@ describe("secret sanitizer canary policy", () => {
           },
         ],
       }),
-    };
-    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+      cfg,
+    );
 
-    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)({}, {});
+    const result = await wrapped({}, {});
 
     expect(JSON.stringify(result)).not.toContain(CONFIGURED_APPLICATION_KEY);
     expect(JSON.stringify(result)).not.toContain(CONFIGURED_APP_KEY);
@@ -208,8 +207,9 @@ describe("secret sanitizer canary policy", () => {
 
   it("redacts JSON-formatted sensitive fields from wrapped response strings", async () => {
     const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
-    const tool: Record<string, unknown> = {
-      callback: jest.fn().mockResolvedValue({
+    const wrapped = createAuditedToolCallback(
+      "t",
+      jest.fn().mockResolvedValue({
         content: [
           {
             type: "text",
@@ -217,11 +217,10 @@ describe("secret sanitizer canary policy", () => {
           },
         ],
       }),
-    };
-    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+      cfg,
+    );
 
-    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)({}, {});
+    const result = await wrapped({}, {});
 
     expectNoCanary(result);
     expect(JSON.stringify(result)).not.toContain(CONFIGURED_APPLICATION_KEY);
@@ -230,15 +229,15 @@ describe("secret sanitizer canary policy", () => {
 
   it("redacts configured secret values from wrapped tool errors", async () => {
     const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
-    const tool: Record<string, unknown> = {
-      callback: jest
+    const wrapped = createAuditedToolCallback(
+      "t",
+      jest
         .fn()
         .mockResolvedValue(toolError(new Error(`failed with ${CONFIGURED_APPLICATION_KEY}`))),
-    };
-    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+      cfg,
+    );
 
-    const result = await (tool.callback as (...a: unknown[]) => Promise<unknown>)({}, {});
+    const result = await wrapped({}, {});
 
     expect(JSON.stringify(result)).not.toContain(CONFIGURED_APPLICATION_KEY);
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(CONFIGURED_APPLICATION_KEY);
@@ -246,20 +245,20 @@ describe("secret sanitizer canary policy", () => {
 
   it("redacts structured logs and rethrown handler errors", async () => {
     const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
-    const tool: Record<string, unknown> = {
-      callback: jest
+    const wrapped = createAuditedToolCallback(
+      "t",
+      jest
         .fn()
         .mockRejectedValue(
           new Error(
             `{"applicationKey":"${CANARY}","authorizationToken":"${CONFIGURED_APPLICATION_KEY}"}`,
           ),
         ),
-    };
-    const server = { _registeredTools: { t: tool } } as unknown as McpServer;
-    wrapToolsWithAudit(server, cfg);
+      cfg,
+    );
 
     try {
-      await (tool.callback as (...a: unknown[]) => Promise<unknown>)({}, {});
+      await wrapped({}, {});
       throw new Error("expected handler to throw");
     } catch (err) {
       expect(err).toBeInstanceOf(Error);

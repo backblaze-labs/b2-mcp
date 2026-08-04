@@ -1,4 +1,4 @@
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -7,7 +7,7 @@ import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
 export function registerKeyTools(
-  server: McpServer,
+  server: ToolRegistrar,
   client: B2Client,
   auth: B2AuthManager,
   config: B2Config,
@@ -19,22 +19,25 @@ export function registerKeyTools(
   // contract that returns non-secret metadata.
 
   // ── b2_list_keys ──────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_list_keys",
-    "List the application keys associated with the B2 account. Does not return the actual key secrets — only key IDs, names, capabilities, and restrictions.",
     {
-      maxKeyCount: z
-        .number()
-        .int()
-        .min(1)
-        .max(1000)
-        .optional()
-        .default(100)
-        .describe("Maximum number of keys to return (1-1000)."),
-      startApplicationKeyId: z
-        .string()
-        .optional()
-        .describe("Pagination cursor from a previous response's nextApplicationKeyId."),
+      description:
+        "List the application keys associated with the B2 account. Does not return the actual key secrets — only key IDs, names, capabilities, and restrictions.",
+      inputSchema: {
+        maxKeyCount: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .default(100)
+          .describe("Maximum number of keys to return (1-1000)."),
+        startApplicationKeyId: z
+          .string()
+          .optional()
+          .describe("Pagination cursor from a previous response's nextApplicationKeyId."),
+      },
     },
     async (args) => {
       try {
@@ -54,17 +57,20 @@ export function registerKeyTools(
   );
 
   // ── b2_delete_key ─────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_delete_key",
-    "Permanently delete a B2 application key. This action is irreversible. Any system using the deleted key will lose access immediately.",
     {
-      applicationKeyId: z.string().describe("The ID of the application key to delete."),
-      confirm: z
-        .boolean()
-        .optional()
-        .describe(
-          "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
-        ),
+      description:
+        "Permanently delete a B2 application key. This action is irreversible. Any system using the deleted key will lose access immediately.",
+      inputSchema: {
+        applicationKeyId: z.string().describe("The ID of the application key to delete."),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe(
+            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -81,10 +87,13 @@ export function registerKeyTools(
   );
 
   // ── b2_authorize_account (exposed as tool) ────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_authorize_account",
-    "Authorize with B2 and return account info including accountId, apiUrl, and downloadUrl. The server handles authorization automatically, but this tool is useful for verifying credentials and retrieving account details.",
-    {},
+    {
+      description:
+        "Authorize with B2 and return account info including accountId, apiUrl, and downloadUrl. The server handles authorization automatically, but this tool is useful for verifying credentials and retrieving account details.",
+      inputSchema: {},
+    },
     async (_args) => {
       try {
         const result = await auth.forceRefresh();

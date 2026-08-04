@@ -1,4 +1,4 @@
-import type { McpServer } from "../mcp.js";
+import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client } from "./client.js";
 import { B2AuthManager } from "../auth.js";
@@ -107,32 +107,35 @@ function validateWebhookUrl(raw: string): string | null {
 }
 
 export function registerBucketTools(
-  server: McpServer,
+  server: ToolRegistrar,
   client: B2Client,
   auth: B2AuthManager,
   config: B2Config,
 ): void {
   // ── b2_list_buckets ───────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_list_buckets",
-    "List B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket. Capped to `limit` buckets (default 100, max 1000) to keep the response small for accounts with many buckets; if more exist the result is truncated with total_bucket_count and a note — raise limit or filter to target specific buckets.",
     {
-      bucketId: z.string().optional().describe("Filter to a specific bucket by its ID"),
-      bucketName: z.string().optional().describe("Filter to a specific bucket by its name"),
-      bucketTypes: z
-        .array(z.enum(["allPublic", "allPrivate", "snapshot", "all"]))
-        .optional()
-        .describe("Filter by bucket types. Defaults to all types."),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(1000)
-        .optional()
-        .default(100)
-        .describe(
-          "Maximum number of buckets to return (default 100, max 1000). The B2 API returns every bucket in one response; this caps how many are surfaced to keep the payload and token cost bounded. If the account has more buckets than the limit, the result is truncated with total_bucket_count and a note — raise limit (up to 1000) or filter by bucketName / bucketId / bucketTypes.",
-        ),
+      description:
+        "List B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket. Capped to `limit` buckets (default 100, max 1000) to keep the response small for accounts with many buckets; if more exist the result is truncated with total_bucket_count and a note — raise limit or filter to target specific buckets.",
+      inputSchema: {
+        bucketId: z.string().optional().describe("Filter to a specific bucket by its ID"),
+        bucketName: z.string().optional().describe("Filter to a specific bucket by its name"),
+        bucketTypes: z
+          .array(z.enum(["allPublic", "allPrivate", "snapshot", "all"]))
+          .optional()
+          .describe("Filter by bucket types. Defaults to all types."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(1000)
+          .optional()
+          .default(100)
+          .describe(
+            "Maximum number of buckets to return (default 100, max 1000). The B2 API returns every bucket in one response; this caps how many are surfaced to keep the payload and token cost bounded. If the account has more buckets than the limit, the result is truncated with total_bucket_count and a note — raise limit (up to 1000) or filter by bucketName / bucketId / bucketTypes.",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -172,57 +175,62 @@ export function registerBucketTools(
   );
 
   // ── b2_create_bucket ──────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_create_bucket",
-    "Create a new B2 bucket. Bucket names must be globally unique, 6-63 characters, and contain letters, digits, hyphens, and periods (names are not case-sensitive and cannot start with 'b2-').",
     {
-      bucketName: z.string().describe("The name for the new bucket. Must be globally unique."),
-      bucketType: z
-        .enum(["allPublic", "allPrivate"])
-        .describe("allPublic allows unauthenticated downloads; allPrivate requires authorization."),
-      bucketInfo: z
-        .record(z.string(), z.string())
-        .optional()
-        .describe("Up to 10 custom key-value pairs stored with the bucket."),
-      corsRules: z
-        .array(
-          z.object({
-            corsRuleName: z.string(),
-            allowedOrigins: z.array(z.string()),
-            allowedHeaders: z.array(z.string()),
-            allowedOperations: z.array(z.string()),
-            exposeHeaders: z.array(z.string()).optional(),
-            maxAgeSeconds: z.number(),
-          }),
-        )
-        .optional()
-        .describe("CORS rules for browser-based access."),
-      lifecycleRules: z
-        .array(
-          z.object({
-            fileNamePrefix: z.string(),
-            daysFromHidingToDeleting: z.number().optional(),
-            daysFromUploadingToHiding: z.number().optional(),
-            daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
-          }),
-        )
-        .optional()
-        .describe("Lifecycle rules for automatic file management."),
-      defaultServerSideEncryption: z
-        .object({
-          mode: z.enum(["none", "SSE-B2"]),
-          algorithm: z.string().optional(),
-        })
-        .optional()
-        .describe("Default server-side encryption for new files in this bucket."),
-      fileLockEnabled: z
-        .boolean()
-        .optional()
-        .describe(
-          "Enable Object Lock (file lock) on the bucket at creation. (Object Lock can also be " +
-            "enabled later on an existing bucket via b2_update_bucket.) Must be true before any " +
-            "retention or legal hold can be applied to files in this bucket.",
-        ),
+      description:
+        "Create a new B2 bucket. Bucket names must be globally unique, 6-63 characters, and contain letters, digits, hyphens, and periods (names are not case-sensitive and cannot start with 'b2-').",
+      inputSchema: {
+        bucketName: z.string().describe("The name for the new bucket. Must be globally unique."),
+        bucketType: z
+          .enum(["allPublic", "allPrivate"])
+          .describe(
+            "allPublic allows unauthenticated downloads; allPrivate requires authorization.",
+          ),
+        bucketInfo: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Up to 10 custom key-value pairs stored with the bucket."),
+        corsRules: z
+          .array(
+            z.object({
+              corsRuleName: z.string(),
+              allowedOrigins: z.array(z.string()),
+              allowedHeaders: z.array(z.string()),
+              allowedOperations: z.array(z.string()),
+              exposeHeaders: z.array(z.string()).optional(),
+              maxAgeSeconds: z.number(),
+            }),
+          )
+          .optional()
+          .describe("CORS rules for browser-based access."),
+        lifecycleRules: z
+          .array(
+            z.object({
+              fileNamePrefix: z.string(),
+              daysFromHidingToDeleting: z.number().optional(),
+              daysFromUploadingToHiding: z.number().optional(),
+              daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
+            }),
+          )
+          .optional()
+          .describe("Lifecycle rules for automatic file management."),
+        defaultServerSideEncryption: z
+          .object({
+            mode: z.enum(["none", "SSE-B2"]),
+            algorithm: z.string().optional(),
+          })
+          .optional()
+          .describe("Default server-side encryption for new files in this bucket."),
+        fileLockEnabled: z
+          .boolean()
+          .optional()
+          .describe(
+            "Enable Object Lock (file lock) on the bucket at creation. (Object Lock can also be " +
+              "enabled later on an existing bucket via b2_update_bucket.) Must be true before any " +
+              "retention or legal hold can be applied to files in this bucket.",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -256,17 +264,20 @@ export function registerBucketTools(
   );
 
   // ── b2_delete_bucket ──────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_delete_bucket",
-    "Delete a B2 bucket. The bucket must be empty — all files and file versions must be deleted first.",
     {
-      bucketId: z.string().describe("The ID of the bucket to delete."),
-      confirm: z
-        .boolean()
-        .optional()
-        .describe(
-          "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
-        ),
+      description:
+        "Delete a B2 bucket. The bucket must be empty — all files and file versions must be deleted first.",
+      inputSchema: {
+        bucketId: z.string().describe("The ID of the bucket to delete."),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe(
+            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -285,104 +296,107 @@ export function registerBucketTools(
   );
 
   // ── b2_update_bucket ──────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_update_bucket",
-    "Update the settings of an existing B2 bucket, including type, CORS rules, lifecycle rules, encryption, and replication configuration.",
     {
-      bucketId: z.string().describe("The ID of the bucket to update."),
-      bucketType: z.enum(["allPublic", "allPrivate"]).optional(),
-      bucketInfo: z.record(z.string(), z.string()).optional(),
-      corsRules: z
-        .array(
-          z.object({
-            corsRuleName: z.string(),
-            allowedOrigins: z.array(z.string()),
-            allowedHeaders: z.array(z.string()),
-            allowedOperations: z.array(z.string()),
-            exposeHeaders: z.array(z.string()).optional(),
-            maxAgeSeconds: z.number(),
-          }),
-        )
-        .optional(),
-      lifecycleRules: z
-        .array(
-          z.object({
-            fileNamePrefix: z.string(),
-            daysFromHidingToDeleting: z.number().optional(),
-            daysFromUploadingToHiding: z.number().optional(),
-            daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
-          }),
-        )
-        .optional(),
-      defaultServerSideEncryption: z
-        .object({
-          mode: z.enum(["none", "SSE-B2"]),
-          algorithm: z.string().optional(),
-        })
-        .optional(),
-      replicationConfiguration: z
-        .object({
-          asReplicationSource: z
-            .object({
-              replicationRules: z.array(
-                z.object({
-                  replicationRuleName: z.string(),
-                  destinationBucketId: z.string(),
-                  fileNamePrefix: z.string().optional(),
-                  includeExistingFiles: z.boolean().optional(),
-                  isEnabled: z.boolean(),
-                  priority: z.number(),
-                }),
+      description:
+        "Update the settings of an existing B2 bucket, including type, CORS rules, lifecycle rules, encryption, and replication configuration.",
+      inputSchema: {
+        bucketId: z.string().describe("The ID of the bucket to update."),
+        bucketType: z.enum(["allPublic", "allPrivate"]).optional(),
+        bucketInfo: z.record(z.string(), z.string()).optional(),
+        corsRules: z
+          .array(
+            z.object({
+              corsRuleName: z.string(),
+              allowedOrigins: z.array(z.string()),
+              allowedHeaders: z.array(z.string()),
+              allowedOperations: z.array(z.string()),
+              exposeHeaders: z.array(z.string()).optional(),
+              maxAgeSeconds: z.number(),
+            }),
+          )
+          .optional(),
+        lifecycleRules: z
+          .array(
+            z.object({
+              fileNamePrefix: z.string(),
+              daysFromHidingToDeleting: z.number().optional(),
+              daysFromUploadingToHiding: z.number().optional(),
+              daysFromStartingToCancelingUnfinishedLargeFiles: z.number().optional(),
+            }),
+          )
+          .optional(),
+        defaultServerSideEncryption: z
+          .object({
+            mode: z.enum(["none", "SSE-B2"]),
+            algorithm: z.string().optional(),
+          })
+          .optional(),
+        replicationConfiguration: z
+          .object({
+            asReplicationSource: z
+              .object({
+                replicationRules: z.array(
+                  z.object({
+                    replicationRuleName: z.string(),
+                    destinationBucketId: z.string(),
+                    fileNamePrefix: z.string().optional(),
+                    includeExistingFiles: z.boolean().optional(),
+                    isEnabled: z.boolean(),
+                    priority: z.number(),
+                  }),
+                ),
+                sourceApplicationKeyId: z.string(),
+              })
+              .optional(),
+            asReplicationDestination: z
+              .object({
+                sourceToDestinationKeyMapping: z.record(z.string(), z.string()),
+              })
+              .optional(),
+          })
+          .optional(),
+        fileLockEnabled: z
+          .boolean()
+          .optional()
+          .describe(
+            "Enable Object Lock on the bucket. Unlike S3's PutObjectLockConfiguration (which only " +
+              "enables lock at bucket creation), the B2 native API allows enabling Object Lock on an " +
+              "existing bucket here. Requires the writeBucketRetentions capability.",
+          ),
+        defaultRetention: z
+          .object({
+            mode: z
+              .enum(["governance", "compliance"])
+              .nullable()
+              .describe("Retention mode applied to new objects. null clears the default."),
+            period: z
+              .object({
+                duration: z.number().int().positive(),
+                unit: z.enum(["days", "years"]),
+              })
+              .nullable()
+              .describe(
+                "Retention period, e.g. { duration: 7, unit: 'days' }. null clears the default.",
               ),
-              sourceApplicationKeyId: z.string(),
-            })
-            .optional(),
-          asReplicationDestination: z
-            .object({
-              sourceToDestinationKeyMapping: z.record(z.string(), z.string()),
-            })
-            .optional(),
-        })
-        .optional(),
-      fileLockEnabled: z
-        .boolean()
-        .optional()
-        .describe(
-          "Enable Object Lock on the bucket. Unlike S3's PutObjectLockConfiguration (which only " +
-            "enables lock at bucket creation), the B2 native API allows enabling Object Lock on an " +
-            "existing bucket here. Requires the writeBucketRetentions capability.",
-        ),
-      defaultRetention: z
-        .object({
-          mode: z
-            .enum(["governance", "compliance"])
-            .nullable()
-            .describe("Retention mode applied to new objects. null clears the default."),
-          period: z
-            .object({
-              duration: z.number().int().positive(),
-              unit: z.enum(["days", "years"]),
-            })
-            .nullable()
-            .describe(
-              "Retention period, e.g. { duration: 7, unit: 'days' }. null clears the default.",
-            ),
-        })
-        .optional()
-        .describe(
-          "Default Object Lock retention for newly uploaded objects. Requires Object Lock enabled " +
-            "on the bucket. Send { mode: null, period: null } to clear.",
-        ),
-      ifRevisionIs: z
-        .number()
-        .optional()
-        .describe("Conditional update — only update if the bucket revision matches this value."),
-      confirm: z
-        .boolean()
-        .optional()
-        .describe(
-          "Confirm a destructive change (making the bucket public, or disabling/clearing Object Lock). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
-        ),
+          })
+          .optional()
+          .describe(
+            "Default Object Lock retention for newly uploaded objects. Requires Object Lock enabled " +
+              "on the bucket. Send { mode: null, period: null } to clear.",
+          ),
+        ifRevisionIs: z
+          .number()
+          .optional()
+          .describe("Conditional update — only update if the bucket revision matches this value."),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe(
+            "Confirm a destructive change (making the bucket public, or disabling/clearing Object Lock). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -417,11 +431,13 @@ export function registerBucketTools(
   );
 
   // ── b2_get_bucket_notification_rules ────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_get_bucket_notification_rules",
-    "Get the event notification rules (webhooks) configured for a B2 bucket.",
     {
-      bucketId: z.string().describe("The bucket ID to get notification rules for."),
+      description: "Get the event notification rules (webhooks) configured for a B2 bucket.",
+      inputSchema: {
+        bucketId: z.string().describe("The bucket ID to get notification rules for."),
+      },
     },
     async (args) => {
       try {
@@ -436,38 +452,41 @@ export function registerBucketTools(
   );
 
   // ── b2_set_bucket_notification_rules ─────────────────────────────────────
-  server.tool(
+  server.registerTool(
     "b2_set_bucket_notification_rules",
-    "Set event notification rules (webhooks) for a B2 bucket. Replaces any existing rules.",
     {
-      bucketId: z.string().describe("The bucket ID to set notification rules for."),
-      eventNotificationRules: z.array(
-        z.object({
-          name: z.string().describe("A name for this notification rule."),
-          objectNamePrefix: z
-            .string()
-            .optional()
-            .default("")
-            .describe(
-              "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
-            ),
-          eventTypes: z
-            .array(z.string())
-            .describe(
-              "Event types to trigger notification, e.g. b2:ObjectCreated:*, b2:ObjectDeleted:*.",
-            ),
-          targetConfiguration: z.object({
-            targetType: z.literal("webhook"),
-            url: z.string().describe("The HTTPS URL to deliver notifications to."),
-            hmacSha256SigningSecret: z
+      description:
+        "Set event notification rules (webhooks) for a B2 bucket. Replaces any existing rules.",
+      inputSchema: {
+        bucketId: z.string().describe("The bucket ID to set notification rules for."),
+        eventNotificationRules: z.array(
+          z.object({
+            name: z.string().describe("A name for this notification rule."),
+            objectNamePrefix: z
               .string()
               .optional()
-              .describe("Optional secret for HMAC-SHA256 request signing."),
-            customHeaders: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+              .default("")
+              .describe(
+                "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
+              ),
+            eventTypes: z
+              .array(z.string())
+              .describe(
+                "Event types to trigger notification, e.g. b2:ObjectCreated:*, b2:ObjectDeleted:*.",
+              ),
+            targetConfiguration: z.object({
+              targetType: z.literal("webhook"),
+              url: z.string().describe("The HTTPS URL to deliver notifications to."),
+              hmacSha256SigningSecret: z
+                .string()
+                .optional()
+                .describe("Optional secret for HMAC-SHA256 request signing."),
+              customHeaders: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
+            }),
+            isEnabled: z.boolean().describe("Whether this rule is active."),
           }),
-          isEnabled: z.boolean().describe("Whether this rule is active."),
-        }),
-      ),
+        ),
+      },
     },
     async (args) => {
       try {

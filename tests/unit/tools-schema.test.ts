@@ -14,7 +14,7 @@
  * neither "optional" nor "default".
  */
 
-import { createServer } from "../../src/server";
+import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 
 // ── Zod-mini schema helpers ───────────────────────────────────────────────────
@@ -57,7 +57,7 @@ beforeAll(() => {
     fileRoot: null,
   };
   server = createServer(config);
-  tools = (server as any)._registeredTools ?? {};
+  tools = getRegisteredTools(server) ?? {};
   toolNames = Object.keys(tools).sort();
 });
 
@@ -206,8 +206,7 @@ describe("S3 object tools require bucket and key where expected", () => {
     ]) {
       const tool = tools[name];
       expect(tool).toBeDefined();
-      const handler = tool.handler ?? tool.callback ?? tool.execute;
-      const result = await handler({}, {});
+      const result = await tool.execute({}, {});
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("tool_unavailable");
       expect(result.content[0].text).not.toContain("applicationKey");
