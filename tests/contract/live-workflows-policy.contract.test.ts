@@ -1,7 +1,12 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createRequire } from "module";
 import { root } from "./support";
 
+const nodeRequire = createRequire(__filename);
+const { yamlValuesForKey } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
+};
 const runtimePolicy = JSON.parse(readFileSync(join(root, "runtime-policy.json"), "utf8")) as {
   liveNodeMatrix: string[];
 };
@@ -24,46 +29,6 @@ const liveWorkflows = [
 ];
 
 const workflowText = (path: string) => readFileSync(join(root, path), "utf8");
-
-function yamlValuesForKey(text: string, key: string): Array<string | string[]> {
-  const lines = text.split(/\r?\n/);
-  const values: Array<string | string[]> = [];
-  const keyRe = new RegExp(`^(\\s*)${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s*(.*)$`);
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(keyRe);
-    if (!match) continue;
-    const indent = match[1].length;
-    const raw = match[2].replace(/\s+#.*$/, "").trim();
-    if (raw.startsWith("[") && raw.endsWith("]")) {
-      values.push(
-        raw
-          .slice(1, -1)
-          .split(",")
-          .map((item) => item.trim().replace(/^["']|["']$/g, ""))
-          .filter(Boolean),
-      );
-      continue;
-    }
-    if (raw) {
-      values.push(raw.replace(/^["']|["']$/g, ""));
-      continue;
-    }
-
-    const blockValues: string[] = [];
-    for (let child = index + 1; child < lines.length; child += 1) {
-      const childLine = lines[child];
-      if (!childLine.trim() || childLine.trim().startsWith("#")) continue;
-      const childIndent = childLine.match(/^\s*/)?.[0].length ?? 0;
-      if (childIndent <= indent) break;
-      const item = childLine.trim().match(/^-\s+(.+)$/);
-      if (item) blockValues.push(item[1].replace(/\s+#.*$/, "").trim());
-    }
-    if (blockValues.length > 0) values.push(blockValues);
-  }
-
-  return values;
-}
 
 function expectYamlList(text: string, key: string, expected: string[]) {
   const lists = yamlValuesForKey(text, key).filter(Array.isArray);

@@ -8,14 +8,9 @@ import {
 } from "../../src/utils/errors";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
 import { runWithResultSerializationOptions } from "../../src/utils/result-serializer";
-import type { JsonCompatible } from "../../src/utils/result-serializer";
+import { decodeToon } from "./toon-decoder-helper";
 
 const CANARY = "B2_MCP_CANARY_SECRET_errors_do_not_leak";
-
-async function decodeToon(text: string): Promise<JsonCompatible> {
-  const { decode } = await import("@toon-format/toon");
-  return decode(text) as JsonCompatible;
-}
 
 describe("parseB2Error", () => {
   it("should parse axios-style error with response body", () => {

@@ -15,9 +15,8 @@ describe("package surface policy", () => {
   const smoke = readFileSync(join(root, "scripts/packed-consumer-smoke.mjs"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
-    expect(pkg.files).not.toEqual(
-      expect.arrayContaining(["runtime-policy.json", "audit-policy.json"]),
-    );
+    expect(pkg.files).not.toContain("runtime-policy.json");
+    expect(pkg.files).not.toContain("audit-policy.json");
     expect(smoke).toContain('["runtime-policy.json", "audit-policy.json"]');
     expect(smoke).toContain("should not be published");
   });

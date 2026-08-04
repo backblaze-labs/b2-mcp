@@ -2,8 +2,13 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
+import { createRequire } from "module";
 
 const root = join(__dirname, "../..");
+const nodeRequire = createRequire(__filename);
+const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  workflowJobBlock: (text: string, jobName: string) => string | null;
+};
 
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
@@ -22,11 +27,7 @@ describe("supply-chain audit policy", () => {
   };
 
   function jobBlock(name: string): string {
-    const start = workflow.indexOf(`  ${name}:`);
-    if (start === -1) return "";
-    const rest = workflow.slice(start + 1);
-    const next = rest.search(/\n {2}[a-zA-Z0-9_-]+:/);
-    return next === -1 ? workflow.slice(start) : workflow.slice(start, start + 1 + next);
+    return workflowJobBlock(workflow, name) ?? "";
   }
 
   function scopedAuditReport(overrides: Record<string, unknown> = {}) {
@@ -69,6 +70,35 @@ describe("supply-chain audit policy", () => {
     };
   }
 
+  function unallowedAuditReport() {
+    return {
+      auditReportVersion: 2,
+      vulnerabilities: {
+        "new-vulnerable-package": {
+          name: "new-vulnerable-package",
+          severity: "high",
+          isDirect: true,
+          via: [
+            {
+              source: 999001,
+              name: "new-vulnerable-package",
+              dependency: "new-vulnerable-package",
+              title: "New untracked advisory",
+              url: "https://github.com/advisories/example",
+              severity: "high",
+              range: "<1.0.1",
+            },
+          ],
+          effects: [],
+          range: "<1.0.1",
+          nodes: ["node_modules/new-vulnerable-package"],
+          fixAvailable: false,
+        },
+      },
+      metadata: { vulnerabilities: { high: 1, total: 1 } },
+    };
+  }
+
   function runAudit(report: unknown, extraEnv: Record<string, string> = {}) {
     return spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
       cwd: root,
@@ -76,6 +106,7 @@ describe("supply-chain audit policy", () => {
         ...process.env,
         NODE_ENV: "test",
         B2_MCP_AUDIT_REPORT_JSON: JSON.stringify(report),
+        B2_MCP_AUDIT_TODAY: "2026-09-30",
         ...extraEnv,
       },
       encoding: "utf8",
@@ -93,7 +124,8 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
     expect(auditJob).toContain("Reject injected audit fixtures");
     expect(auditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
-    expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE");
+    expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail");
+    expect(auditJob).not.toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: warn");
     expect(productionJob).not.toContain("npm run audit:supply-chain");
     expect(currentJob).not.toContain("npm run audit:supply-chain");
     expect(markGreenJob).toContain(
@@ -178,6 +210,35 @@ describe("supply-chain audit policy", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("fails closed for expired advisory exceptions by default", () => {
+    const result = runAudit(scopedAuditReport(), { B2_MCP_AUDIT_TODAY: "2026-10-02" });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("::error::audit-policy: @hono/node-server:1124006");
+    expect(result.stderr).toContain("exception expired on 2026-10-01");
+  });
+
+  it("supports warn mode only as a non-gating expired-exception reminder", () => {
+    const result = runAudit(scopedAuditReport(), {
+      B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: "warn",
+      B2_MCP_AUDIT_TODAY: "2026-10-02",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("::warning::audit-policy: @hono/node-server:1124006");
+    expect(result.stderr).toContain("exception expired on 2026-10-01");
+  });
+
+  it("still fails for unallowed advisories in warn mode", () => {
+    const result = runAudit(unallowedAuditReport(), {
+      B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: "warn",
+      B2_MCP_AUDIT_TODAY: "2026-10-02",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("::error::audit-policy: new-vulnerable-package:999001");
   });
 
   it("tracks tightly scoped exceptions for known moderate advisories", () => {

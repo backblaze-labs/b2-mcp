@@ -4,12 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import retryUtils from "./lib/retry-utils.cjs";
+import envUtils from "./lib/sanitized-env.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimePolicy = JSON.parse(readFileSync(path.join(root, "runtime-policy.json"), "utf8"));
 const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-consumer-"));
 const home = path.join(workspace, "home");
 const npmCache = path.join(workspace, "npm-cache");
+const { commandLine, isTransientNpmFailure, sleep } = retryUtils;
+const { sanitizedEnv: baseSanitizedEnv } = envUtils;
 // These names intentionally look like credentials. The child-process probe below
 // verifies sanitizedEnv strips them before any npm or package process starts.
 const sanitizerBlockedEnv = {
@@ -18,30 +22,9 @@ const sanitizerBlockedEnv = {
   GITHUB_TOKEN: "sentinel-github-token",
   NPM_TOKEN: "sentinel-npm-token",
 };
-const secretNamePattern = /(?:^AWS_|^B2_|^GITHUB_|^NPM_|TOKEN|SECRET|PASSWORD|CREDENTIAL|KEY)/i;
-// B2_REGISTER_ALL_TOOLS is a non-secret control flag needed by the
-// missing-credential startup probe, so it is intentionally allowed through.
-const nonSecretEnvNames = new Set(["B2_REGISTER_ALL_TOOLS"]);
 
 function sanitizedEnv(extra = {}) {
-  const keep = new Set([
-    "PATH",
-    "Path",
-    "SystemRoot",
-    "COMSPEC",
-    "PATHEXT",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-  ]);
-  const env = {};
-  for (const name of keep) {
-    if (process.env[name]) env[name] = process.env[name];
-  }
-  for (const [name, value] of Object.entries(extra)) {
-    if (secretNamePattern.test(name) && !nonSecretEnvNames.has(name)) continue;
-    env[name] = value;
-  }
+  const env = baseSanitizedEnv(extra);
   env.HOME = home;
   env.USERPROFILE = home;
   env.npm_config_cache = npmCache;
@@ -50,21 +33,9 @@ function sanitizedEnv(extra = {}) {
   return env;
 }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function commandLine(command, args) {
-  return [command, ...args].join(" ");
-}
-
 function isRetriableNpmFailure(command, result) {
   if (command !== "npm") return false;
-  if (result.error?.code === "ETIMEDOUT") return true;
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-  return /(?:EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EPIPE|fetch failed|network socket|network timeout|registry|503|504)/i.test(
-    output,
-  );
+  return isTransientNpmFailure(result);
 }
 
 function run(command, args, options = {}) {

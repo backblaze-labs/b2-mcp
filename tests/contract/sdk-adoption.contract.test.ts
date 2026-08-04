@@ -152,7 +152,7 @@ describe("SDK adoption contract", () => {
     expect(unresolved).toEqual([]);
   });
 
-  it("keeps the effective Node runtime floor aligned with the SDK", () => {
+  it("delegates Node runtime and SDK floor policy to check-runtime-policy", () => {
     const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
       cwd: ROOT,
       encoding: "utf8",

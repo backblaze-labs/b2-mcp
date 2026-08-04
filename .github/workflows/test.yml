@@ -130,7 +130,7 @@ jobs:
           fi
       - run: npm run audit:supply-chain
         env:
-          B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'warn' || 'fail' }}
+          B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green

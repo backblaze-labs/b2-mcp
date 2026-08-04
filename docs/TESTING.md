@@ -82,6 +82,9 @@ evidence, not an authoritative pass.
 The `ci-green` production deploy marker depends on the Node 22 deterministic
 gate only. Node.js 24 and 26 remain required PR checks, but a regression isolated
 to those non-production current lines does not freeze the production deploy ref.
+The production host is pinned to the patched Node 22 LTS line from `.nvmrc`, so
+the deploy gate covers the production runtime major and the Node 22.3.0
+minimum-consumer floor.
 
 ## MCP Protocol Matrix
 
@@ -112,8 +115,8 @@ Credential-free unit tests cover the structured result serializer:
 
 - default compact JSON text output preserves the same `structuredContent`;
 - `B2_MCP_OUTPUT_FORMAT=toon` round-trips through the repo-owned encoder and
-  official `@toon-format/toon@4.1.0` dev/test decoder while preserving the same
-  `structuredContent`;
+  official `@toon-format/toon@4.1.0` dev/test decoder in a sanitized child
+  process while preserving the same `structuredContent`;
 - unknown output formats fail during config resolution;
 - HTTP header-mode readiness rejects unknown output formats and TOON preflight
   failures before serving traffic;
@@ -152,13 +155,23 @@ fixed stable MCP v2 package available.
 `scripts/audit-supply-chain.mjs` always runs a real `npm audit` outside
 `NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded
 npm fetch retry options, and retries transient registry/network failures before
-evaluating advisories. On pull requests, expired advisory exceptions fail the
-audit. On `main` deploy-gating runs, the workflow sets
-`B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn` so an expired bookkeeping exception
-does not silently freeze `ci-green`; untracked advisories, severity drift, path
-drift, and lockfile drift still fail. To unblock an on-call deploy after an
-expiry warning, either remove the no-longer-needed exception or refresh the
-documented expiry/rationale in `audit-policy.json` through a normal PR.
+evaluating advisories. Expired advisory exceptions fail the audit on pull
+requests and on the `main` deploy-gating path required by `mark-green`; the
+`ci-green` ref must not advance after an exception expiry without an affirmative
+policy update or exception removal. `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn`
+is reserved for non-gating reminder jobs or local operator checks and emits a
+GitHub `::warning` annotation.
+
+`mark-green` intentionally fail-closes on npm registry/advisory-service
+availability because `supply-chain-audit` makes a live `npm audit` call and
+`smoke:package` performs a cold consumer `npm ci`. If a sustained npm outage
+blocks an urgent unrelated production hotfix, the emergency path is: get
+release-owner and security-owner approval in the incident record, verify the
+same commit passed every non-registry gate locally or in CI, confirm the commit
+is still `refs/heads/main`, then have a maintainer with write access advance
+`ci-green` to that exact SHA and immediately open a follow-up PR or issue that
+records the override. Do not use this path for new dependency changes or any
+audit-policy expiry.
 
 ## Live B2 Smoke Gate
 

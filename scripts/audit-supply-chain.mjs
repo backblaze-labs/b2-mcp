@@ -3,24 +3,30 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import retryUtils from "./lib/retry-utils.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const policy = JSON.parse(readFileSync(path.join(root, "audit-policy.json"), "utf8"));
 const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
-const today = new Date().toISOString().slice(0, 10);
 const allowed = new Map(
   policy.allowedAdvisories.map((entry) => [`${entry.name}:${entry.source}`, entry]),
 );
 const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const minimumRank = severityRank.moderate;
+const { isTransientNpmFailure, sleep } = retryUtils;
 const injectedReportJson = process.env.B2_MCP_AUDIT_REPORT_JSON;
 const allowInjectedReport = process.env.NODE_ENV === "test";
 const expiredExceptionMode = process.env.B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE ?? "fail";
+const injectedToday = process.env.B2_MCP_AUDIT_TODAY;
 
 if (!["fail", "warn"].includes(expiredExceptionMode)) {
   throw new Error(
     `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE must be "fail" or "warn", got ${expiredExceptionMode}`,
   );
+}
+if (injectedToday && !allowInjectedReport) {
+  console.error("audit-policy: refusing B2_MCP_AUDIT_TODAY outside NODE_ENV=test");
+  process.exit(1);
 }
 if (injectedReportJson && !allowInjectedReport) {
   console.error(
@@ -29,15 +35,20 @@ if (injectedReportJson && !allowInjectedReport) {
   process.exit(1);
 }
 
+function referenceDate() {
+  if (!injectedToday) return new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(injectedToday)) {
+    throw new Error(`B2_MCP_AUDIT_TODAY must be YYYY-MM-DD, got ${injectedToday}`);
+  }
+  return injectedToday;
+}
+
+const today = referenceDate();
 const failures = [];
 const warnings = [];
 const allowedFindings = [];
 const matchedAllowed = new Set();
 const expiryWarningDays = 30;
-
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
 
 function auditEnv() {
   const env = {
@@ -52,11 +63,7 @@ function auditEnv() {
 }
 
 function isTransientAuditFailure(audit, parseError = null) {
-  if (audit.error?.code === "ETIMEDOUT") return true;
-  const output = `${audit.stdout ?? ""}\n${audit.stderr ?? ""}\n${parseError?.message ?? ""}`;
-  return /(?:EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EPIPE|fetch failed|network socket|network timeout|registry|rate limit|429|503|504)/i.test(
-    output,
-  );
+  return isTransientNpmFailure(audit, parseError);
 }
 
 function parseAuditReport(audit) {
@@ -165,8 +172,8 @@ function recordExpiryFinding(key, exception, details) {
   const days = daysUntil(exception.expires);
   if (exception.expires < today) {
     const message =
-      `exception expired on ${exception.expires}; PR checks fail, while main deploy-gating ` +
-      "jobs may warn with B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn so ci-green can still advance";
+      `exception expired on ${exception.expires}; deploy-gating and PR checks must fail closed ` +
+      "until audit-policy.json is updated or the exception is removed";
     if (expiredExceptionMode === "warn") warnings.push(`${key}: ${message}`);
     else details.push(`${message}; update audit-policy.json or remove the exception`);
   } else if (days <= expiryWarningDays) {
@@ -256,11 +263,11 @@ for (const finding of allowedFindings.sort()) {
   console.warn(`audit-policy: ${finding}`);
 }
 for (const warning of warnings.sort()) {
-  console.warn(`audit-policy: ${warning}`);
+  console.warn(`::warning::audit-policy: ${warning}`);
 }
 
 if (failures.length > 0) {
-  for (const failure of failures.sort()) console.error(`audit-policy: ${failure}`);
+  for (const failure of failures.sort()) console.error(`::error::audit-policy: ${failure}`);
   process.exit(1);
 }
 
