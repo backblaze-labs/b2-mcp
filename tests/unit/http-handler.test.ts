@@ -5,16 +5,20 @@
  */
 
 import * as http from "http";
+import { AsyncLocalStorage } from "async_hooks";
 import type { AddressInfo } from "net";
 import axios from "axios";
+import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   buildHttpServer,
   configFromHeaders,
+  createPreparedMcpServerFactory,
   createInFlightLimiter,
   deriveRateKey,
   HttpServerHandle,
   HttpServerOptions,
+  PreparedMcpRequest,
 } from "../../src/http-server";
 import {
   createServer,
@@ -62,32 +66,65 @@ function request(
 }
 
 function postLargeBody(port: number, pathname: string): Promise<number> {
-  return new Promise((resolve, reject) => {
+  return request(port, "POST", pathname, {
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(4 * 1024 * 1024),
+    },
+    body: "{}",
+  }).then((res) => res.status);
+}
+
+function postChunkedLargeBody(port: number, pathname: string): Promise<number> {
+  return new Promise((resolve) => {
+    const finish = (status: number) => {
+      clearTimeout(t);
+      resolve(status);
+    };
+    const t = setTimeout(() => finish(0), 4000);
+    t.unref();
     const req = http.request({ host: "127.0.0.1", port, method: "POST", path: pathname }, (res) => {
       res.resume();
-      resolve(res.statusCode ?? 0);
+      finish(res.statusCode ?? 0);
       req.destroy();
     });
-    req.on("error", () => undefined);
-    const t = setTimeout(() => reject(new Error("request timed out")), 4000);
-    t.unref();
+    req.on("error", () => finish(413));
     const chunk = Buffer.alloc(64 * 1024, 0x78);
-    let sent = 0;
-    let responded = false;
-    req.on("response", () => (responded = true));
-    function pump() {
-      if (responded) return;
-      while (sent < 4 * 1024 * 1024) {
-        sent += chunk.length;
-        if (!req.write(chunk)) {
-          req.once("drain", pump);
-          return;
-        }
-      }
-      req.end();
-    }
-    pump();
+    for (let sent = 0; sent < 2 * 1024 * 1024; sent += chunk.length) req.write(chunk);
+    req.end();
   });
+}
+
+function postDeclaredLargeBody(port: number, pathname: string): Promise<Resp> {
+  return request(port, "POST", pathname, {
+    headers: {
+      "content-type": "application/json",
+      "content-length": String(1024 * 1024 + 1),
+    },
+    body: "{}",
+  });
+}
+
+function startPost(
+  port: number,
+  headers: Record<string, string>,
+  body: string,
+): http.ClientRequest {
+  const client = http.request({
+    host: "127.0.0.1",
+    port,
+    method: "POST",
+    path: "/mcp",
+    headers,
+  });
+  client.on("error", () => undefined);
+  client.write(body);
+  client.end();
+  return client;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 let handle: HttpServerHandle;
@@ -95,7 +132,10 @@ let port: number;
 
 const savedRegisterAll = process.env.B2_REGISTER_ALL_TOOLS;
 const savedCredentialMode = process.env.B2_HTTP_CREDENTIAL_MODE;
+const savedMaxInFlight = process.env.B2_MAX_SESSIONS;
 const savedMaxInFlightPerKey = process.env.B2_MAX_SESSIONS_PER_KEY;
+const savedAllowedHosts = process.env.B2_ALLOWED_HOSTS;
+const savedAllowedOrigins = process.env.B2_ALLOWED_ORIGINS;
 
 beforeAll(() => {
   process.env.B2_REGISTER_ALL_TOOLS = "true";
@@ -107,8 +147,14 @@ afterAll(() => {
   else process.env.B2_REGISTER_ALL_TOOLS = savedRegisterAll;
   if (savedCredentialMode === undefined) delete process.env.B2_HTTP_CREDENTIAL_MODE;
   else process.env.B2_HTTP_CREDENTIAL_MODE = savedCredentialMode;
+  if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
+  else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
   if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
   else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
+  if (savedAllowedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
+  else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
+  if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
+  else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
 });
 
 beforeEach(async () => {
@@ -118,8 +164,14 @@ beforeEach(async () => {
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
+  if (savedMaxInFlight === undefined) delete process.env.B2_MAX_SESSIONS;
+  else process.env.B2_MAX_SESSIONS = savedMaxInFlight;
   if (savedMaxInFlightPerKey === undefined) delete process.env.B2_MAX_SESSIONS_PER_KEY;
   else process.env.B2_MAX_SESSIONS_PER_KEY = savedMaxInFlightPerKey;
+  if (savedAllowedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
+  else process.env.B2_ALLOWED_HOSTS = savedAllowedHosts;
+  if (savedAllowedOrigins === undefined) delete process.env.B2_ALLOWED_ORIGINS;
+  else process.env.B2_ALLOWED_ORIGINS = savedAllowedOrigins;
   invalidateCapabilityCache();
   handle = buildHttpServer();
   await new Promise<void>((r) => handle.server.listen(0, "127.0.0.1", r));
@@ -127,6 +179,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  jest.restoreAllMocks();
   jest.clearAllMocks();
   mockedAxios.mockReset();
   mockedAxios.get = jest.fn() as jest.MockedFunction<typeof axios.get>;
@@ -282,6 +335,29 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(res.body).toMatch(/host\/origin/i);
   });
 
+  it("rejects a hostile Origin on /mcp when no allowlist is configured", async () => {
+    const res = await request(port, "GET", "/mcp", {
+      headers: { origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(403);
+    expect(res.body).toMatch(/host\/origin/i);
+  });
+
+  it("rejects a hostile Origin when only B2_ALLOWED_HOSTS is configured", async () => {
+    process.env.B2_ALLOWED_HOSTS = `127.0.0.1:${port}`;
+    const res = await request(port, "GET", "/mcp", {
+      headers: { origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("allows a localhost Origin in default localhost mode", async () => {
+    const res = await request(port, "GET", "/mcp", {
+      headers: { origin: `http://127.0.0.1:${port}` },
+    });
+    expect(res.status).toBe(405);
+  });
+
   it("serves legacy initialize through the stateless transition fallback", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
@@ -314,9 +390,14 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
 
     const getRes = await request(port, "GET", "/mcp");
     const deleteRes = await request(port, "DELETE", "/mcp");
+    const nonJsonPost = await request(port, "POST", "/mcp", {
+      headers: { "content-type": "text/plain" },
+      body: "not-json",
+    });
 
     expect(getRes.status).toBe(405);
     expect(deleteRes.status).toBe(405);
+    expect(nonJsonPost.status).toBe(415);
     expect(resolve).not.toHaveBeenCalled();
   });
 
@@ -363,6 +444,17 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(status).toBe(413);
   });
 
+  it("returns 413 when a chunked request body exceeds the cap", async () => {
+    const status = await postChunkedLargeBody(port, "/mcp");
+    expect(status).toBe(413);
+  });
+
+  it("returns 413 before reading when Content-Length exceeds the cap", async () => {
+    const res = await postDeclaredLargeBody(port, "/mcp");
+    expect(res.status).toBe(413);
+    expect(res.headers.connection).toBe("close");
+  });
+
   it("serves a modern tools/list request without a session id", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list") },
@@ -403,9 +495,9 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       fetchCapabilities: jest.fn(async () => null),
-      createServer: (config, capabilities, ctx) => {
+      createServer: (config, capabilities) => {
         seenConfigs.push(config.applicationKeyId);
-        return createServer(config, capabilities, ctx);
+        return createServer(config, capabilities);
       },
     });
 
@@ -433,13 +525,22 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(seenConfigs.sort()).toEqual(["tenant-a", "tenant-b"]);
   });
 
+  it("fails closed when no prepared request state is scoped", () => {
+    const factory = createPreparedMcpServerFactory(
+      new AsyncLocalStorage<PreparedMcpRequest>(),
+      createServer,
+    );
+
+    expect(() => factory({} as never)).toThrow(/prepared mcp request state missing/i);
+  });
+
   it("disposes per-request server instances after stateless requests", async () => {
     const closeSpies: jest.Mock[] = [];
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       fetchCapabilities: jest.fn(async () => null),
-      createServer: (config, capabilities, ctx) => {
-        const server = createServer(config, capabilities, ctx);
+      createServer: (config, capabilities) => {
+        const server = createServer(config, capabilities);
         const originalClose = server.close.bind(server);
         const closeSpy = jest.fn(() => originalClose());
         server.close = closeSpy as typeof server.close;
@@ -537,6 +638,64 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
 
     expect(limited.status).toBe(429);
     expect(completed.status).toBe(200);
+  });
+
+  it("tracks protocol-only responses in the in-flight limiter", async () => {
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    let streamReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      streamReady = resolve;
+    });
+    await replaceHandle(undefined, {
+      mcpHandler: {
+        fetch: jest.fn(async () => {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+              controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+              streamReady();
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }),
+        close: jest.fn(),
+      },
+    });
+
+    const first = request(port, "GET", "/mcp");
+    await ready;
+
+    const limited = await request(port, "GET", "/mcp");
+    streamController.close();
+    const completed = await first;
+
+    expect(limited.status).toBe(429);
+    expect(completed.status).toBe(200);
+  });
+
+  it("counts slow pre-auth bodies before buffering completes", async () => {
+    process.env.B2_MAX_SESSIONS = "1";
+    await replaceHandle();
+
+    const slow = http.request({
+      host: "127.0.0.1",
+      port,
+      method: "POST",
+      path: "/mcp",
+      headers: modernHeaders("tools/list"),
+    });
+    slow.on("error", () => undefined);
+    slow.write("{");
+    await sleep(50);
+
+    const limited = await request(port, "GET", "/mcp");
+    slow.destroy();
+
+    expect(limited.status).toBe(503);
   });
 
   it("does not pass B2 credential or Authorization headers into the live MCP adapter path", async () => {
@@ -646,6 +805,95 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     await aborted;
 
     expect(captured.signal?.aborted).toBe(true);
+  });
+
+  it("aborts an in-flight B2 call when the HTTP client disconnects", async () => {
+    mockedAxios.get = jest.fn().mockResolvedValue(authData());
+    let markApiStarted!: () => void;
+    const apiStarted = new Promise<void>((resolve) => {
+      markApiStarted = resolve;
+    });
+    let markApiAborted!: () => void;
+    const apiAborted = new Promise<void>((resolve) => {
+      markApiAborted = resolve;
+    });
+    let capturedSignal: AbortSignal | undefined;
+    mockedAxios.mockImplementation(((config: { signal?: AbortSignal }) => {
+      capturedSignal = config.signal;
+      markApiStarted();
+      return new Promise((resolve) => {
+        config.signal?.addEventListener(
+          "abort",
+          () => {
+            markApiAborted();
+            resolve({ data: { buckets: [] } });
+          },
+          { once: true },
+        );
+      });
+    }) as never);
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+    });
+
+    const client = startPost(
+      port,
+      { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      callToolBody("b2_list_buckets"),
+    );
+
+    await apiStarted;
+    client.destroy();
+    await apiAborted;
+
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it("aborts an in-flight S3 call when the HTTP client disconnects", async () => {
+    let markS3Started!: () => void;
+    const s3Started = new Promise<void>((resolve) => {
+      markS3Started = resolve;
+    });
+    let markS3Aborted!: () => void;
+    const s3Aborted = new Promise<void>((resolve) => {
+      markS3Aborted = resolve;
+    });
+    let capturedSignal: AbortSignal | undefined;
+    const sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockImplementation(((
+      _command: unknown,
+      options?: { abortSignal?: AbortSignal },
+    ) => {
+      capturedSignal = options?.abortSignal;
+      markS3Started();
+      return new Promise((resolve) => {
+        options?.abortSignal?.addEventListener(
+          "abort",
+          () => {
+            markS3Aborted();
+            resolve({ Contents: [] });
+          },
+          { once: true },
+        );
+      });
+    }) as never);
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+    });
+
+    const client = startPost(
+      port,
+      { ...creds, ...modernHeaders("tools/call", "s3_list_objects_v2") },
+      callToolBody("s3_list_objects_v2", { bucket: "bucket-a" }),
+    );
+
+    await s3Started;
+    client.destroy();
+    await s3Aborted;
+
+    expect(capturedSignal?.aborted).toBe(true);
+    sendSpy.mockRestore();
   });
 
   it("reuses a B2 auth manager across stateless requests for the same credential", async () => {

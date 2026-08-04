@@ -1,13 +1,11 @@
 import {
   createMcpServer,
-  getRegisteredTools as getRepoRegisteredTools,
   ToolRegistrationAdapter,
-  type McpRequestContext,
   type McpServer,
-  type RegisteredToolMap,
   type ToolCallback,
   type ToolRegistrar,
 } from "./mcp.js";
+export { getRegisteredTools } from "./mcp.js";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { buildUserAgent } from "./utils/user-agent.js";
@@ -107,11 +105,7 @@ function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void
  * reserved for explicit operator override and legacy unit tests. An empty array
  * is a fail-closed capability set, not "unknown".
  */
-export function createServer(
-  config: B2Config,
-  capabilities?: string[] | null,
-  _requestContext?: McpRequestContext,
-): McpServer {
+export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
   const server = createMcpServer(
     {
       name: "backblaze-b2",
@@ -450,15 +444,6 @@ export async function fetchCapabilities(
   } finally {
     capabilityInflight.delete(resolvedCacheKey);
   }
-}
-
-/**
- * Repository-owned view of registered tools. This intentionally reads the
- * adapter registry populated before SDK registration rather than any SDK
- * private field.
- */
-export function getRegisteredTools(server: McpServer): RegisteredToolMap | null {
-  return getRepoRegisteredTools(server);
 }
 
 /**

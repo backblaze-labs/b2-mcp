@@ -49,6 +49,9 @@ const IDLE_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
 const SHUTDOWN_DRAIN_MS = 10 * 1000; // 10 seconds to drain on SIGTERM
 const DEFAULT_MAX_IN_FLIGHT = 1000;
 const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
+const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
+const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
+const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** Comma-separated allowlists for DNS-rebinding protection (empty = unset). */
 function csvEnv(name: string): string[] {
@@ -58,8 +61,58 @@ function csvEnv(name: string): string[] {
     .filter(Boolean);
 }
 
-const ALLOWED_HOSTS = csvEnv("B2_ALLOWED_HOSTS");
-const ALLOWED_ORIGINS = csvEnv("B2_ALLOWED_ORIGINS");
+function hostWithoutPort(host: string): string {
+  const trimmed = host.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("[")) return trimmed.replace(/:\d+$/, "");
+  const colonCount = (trimmed.match(/:/g) ?? []).length;
+  if (colonCount > 1) return trimmed;
+  return trimmed.replace(/:\d+$/, "");
+}
+
+function hostIncludesPort(host: string): boolean {
+  const trimmed = host.trim();
+  if (trimmed.startsWith("[")) return /\]:\d+$/.test(trimmed);
+  return /^[^:]+:\d+$/.test(trimmed);
+}
+
+function originHostname(origin: string): string {
+  try {
+    const parsed = new URL(origin);
+    return parsed.hostname || "";
+  } catch {
+    return "";
+  }
+}
+
+function originHostWithOptionalPort(origin: string): string {
+  try {
+    const parsed = new URL(origin);
+    if (!parsed.hostname) return "";
+    return parsed.port ? `${parsed.hostname}:${parsed.port}` : parsed.hostname;
+  } catch {
+    return "";
+  }
+}
+
+function hostMatchesAllowed(host: string, allowedHosts: string[]): boolean {
+  const hostname = hostWithoutPort(host);
+  return allowedHosts.some(
+    (allowed) =>
+      allowed === host || (!hostIncludesPort(allowed) && hostWithoutPort(allowed) === hostname),
+  );
+}
+
+function originMatchesAllowedHost(origin: string, allowedHosts: string[]): boolean {
+  const parsedHost = originHostWithOptionalPort(origin);
+  const parsedHostname = hostWithoutPort(parsedHost);
+  if (!parsedHost || !parsedHostname) return false;
+  return allowedHosts.some(
+    (allowed) =>
+      allowed === parsedHost ||
+      (!hostIncludesPort(allowed) && hostWithoutPort(allowed) === parsedHostname),
+  );
+}
 
 /**
  * DNS-rebinding protection. Validates Host / Origin against the configured
@@ -67,16 +120,22 @@ const ALLOWED_ORIGINS = csvEnv("B2_ALLOWED_ORIGINS");
  * accepted; internet-facing deployments must set B2_ALLOWED_HOSTS.
  */
 function hostOriginAllowed(req: { headers: http.IncomingHttpHeaders }): boolean {
+  const allowedHosts = csvEnv("B2_ALLOWED_HOSTS");
+  const allowedOrigins = csvEnv("B2_ALLOWED_ORIGINS");
   const host = Array.isArray(req.headers.host) ? "" : (req.headers.host ?? "");
   const origin = Array.isArray(req.headers.origin) ? "" : (req.headers.origin ?? "");
+  const hostname = hostWithoutPort(host);
 
-  if (ALLOWED_HOSTS.length > 0 && !ALLOWED_HOSTS.includes(host)) return false;
-  if (ALLOWED_ORIGINS.length > 0 && origin && !ALLOWED_ORIGINS.includes(origin)) return false;
+  if (allowedHosts.length > 0 && !hostMatchesAllowed(host, allowedHosts)) return false;
 
-  if (ALLOWED_HOSTS.length === 0 && ALLOWED_ORIGINS.length === 0) {
-    const hostname = host.replace(/:\d+$/, "");
-    return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(hostname);
+  if (origin) {
+    if (allowedOrigins.length > 0) return allowedOrigins.includes(origin);
+    if (allowedHosts.length > 0) return originMatchesAllowedHost(origin, allowedHosts);
+    return LOCALHOST_NAMES.has(originHostname(origin));
   }
+
+  if (allowedHosts.length === 0 && allowedOrigins.length === 0)
+    return LOCALHOST_NAMES.has(hostname);
   return true;
 }
 
@@ -101,9 +160,29 @@ export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B
   return configFromHttpHeaders(req);
 }
 
-function writeJson(res: http.ServerResponse, status: number, body: unknown, headers = {}): void {
+function writeJson(
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): void {
   res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(body));
+}
+
+function writeJsonAndClose(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  status: number,
+  body: unknown,
+): void {
+  res.shouldKeepAlive = false;
+  res.writeHead(status, { "Content-Type": "application/json", Connection: "close" });
+  res.end(JSON.stringify(body));
+  req.resume();
+  const destroyTimer = setTimeout(() => req.destroy(), 1000);
+  destroyTimer.unref();
+  req.once("close", () => clearTimeout(destroyTimer));
 }
 
 function jsonResponse(
@@ -154,9 +233,24 @@ function intEnv(name: string, fallback: number): number {
   return Math.max(1, parseIntEnv(process.env[name], fallback));
 }
 
+function requestLimitKey(req: http.IncomingMessage): string {
+  return `http:${req.socket.remoteAddress ?? "unknown"}`;
+}
+
+function contentLengthExceedsLimit(headers: http.IncomingHttpHeaders): boolean {
+  const raw = firstHeaderValue(headers["content-length"]);
+  if (!raw) return false;
+  const contentLength = Number(raw);
+  return Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES;
+}
+
 export interface InFlightLimiter {
   readonly active: number;
   acquire(cacheKey: string): { ok: true } | { ok: false; status: number; error: string };
+  rekey(
+    fromCacheKey: string,
+    toCacheKey: string,
+  ): { ok: true } | { ok: false; status: number; error: string };
   release(cacheKey: string): void;
 }
 
@@ -180,6 +274,18 @@ export function createInFlightLimiter(
       }
       active++;
       byKey.set(cacheKey, current + 1);
+      return { ok: true };
+    },
+    rekey(fromCacheKey: string, toCacheKey: string) {
+      if (fromCacheKey === toCacheKey) return { ok: true };
+      const nextCurrent = byKey.get(toCacheKey) ?? 0;
+      if (nextCurrent >= maxPerKey) {
+        return { ok: false, status: 429, error: "Too many in-flight MCP requests for credential" };
+      }
+      const fromCurrent = byKey.get(fromCacheKey) ?? 0;
+      if (fromCurrent <= 1) byKey.delete(fromCacheKey);
+      else byKey.set(fromCacheKey, fromCurrent - 1);
+      byKey.set(toCacheKey, nextCurrent + 1);
       return { ok: true };
     },
     release(cacheKey: string) {
@@ -234,10 +340,28 @@ function logCredentialResolutionFailure(
   );
 }
 
-interface PreparedMcpRequest {
+export interface PreparedMcpRequest {
   resolved: CredentialResolution;
   capabilities: string[] | null;
   servers: Set<ReturnType<typeof createMcpServerDefinition>>;
+}
+
+export function createPreparedMcpServerFactory(
+  preparedRequestScope: AsyncLocalStorage<PreparedMcpRequest>,
+  createServerForRequest: typeof createMcpServerDefinition,
+): (ctx: McpRequestContext) => ReturnType<typeof createMcpServerDefinition> {
+  return () => {
+    // Prepared request state is carried only by AsyncLocalStorage. If the SDK
+    // ever invokes this factory outside the scoped adapter call, fail closed
+    // instead of guessing or reusing another request's credentials.
+    const prepared = preparedRequestScope.getStore();
+    if (!prepared) {
+      throw new Error("Prepared MCP request state missing");
+    }
+    const server = createServerForRequest(prepared.resolved.config, prepared.capabilities);
+    prepared.servers.add(server);
+    return server;
+  };
 }
 
 const MODERN_MCP_PROTOCOL_VERSION = "2026-07-28";
@@ -368,7 +492,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
         bytes += chunk.length;
         if (bytes > MAX_BODY_BYTES) {
           aborted = true;
-          writeJson(res, 413, { error: "Request body too large" });
+          writeJsonAndClose(req, res, 413, { error: "Request body too large" });
           resolve(null);
           return;
         }
@@ -388,18 +512,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
 
   const preparedRequestScope = new AsyncLocalStorage<PreparedMcpRequest>();
   const defaultMcpHandler = createMcpHandler(
-    (ctx: McpRequestContext) => {
-      // Prepared request state is carried only by AsyncLocalStorage. If the SDK
-      // ever invokes this factory outside the scoped adapter call, fail closed
-      // instead of guessing or reusing another request's credentials.
-      const prepared = preparedRequestScope.getStore();
-      if (!prepared) {
-        throw new Error("Prepared MCP request state missing");
-      }
-      const server = createServerForRequest(prepared.resolved.config, prepared.capabilities, ctx);
-      prepared.servers.add(server);
-      return server;
-    },
+    createPreparedMcpServerFactory(preparedRequestScope, createServerForRequest),
     {
       legacy: "stateless",
       onerror: (error) => logger.warn({ err: error.message }, "mcp.http.error"),
@@ -487,44 +600,59 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       return;
     }
 
-    const rawBody = req.method === "POST" ? await readCappedBody(req, res) : undefined;
-    if (rawBody === null) return;
+    if (req.method === "POST" && contentLengthExceedsLimit(req.headers)) {
+      writeJsonAndClose(req, res, 413, { error: "Request body too large" });
+      return;
+    }
 
-    const sanitizedHeaders = sanitizedHeadersFromNode(req.headers);
-    if (isProtocolOnlyRejection(req, sanitizedHeaders, rawBody)) {
-      try {
-        await nodeMcpHandler(nodeRequestWithBody(req, rawBody, authInfo), res);
-      } catch (err) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
-        if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
+    const initialLimitKey = requestLimitKey(req);
+    let limitKey: string | null = initialLimitKey;
+    const initialPermit = inFlight.acquire(initialLimitKey);
+    if (!initialPermit.ok) {
+      writeJson(res, initialPermit.status, { error: initialPermit.error }, { "Retry-After": "1" });
+      return;
+    }
+
+    try {
+      const initialRateKey = deriveRateKey(initialLimitKey);
+      if (!allowRequest(initialRateKey)) {
+        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+        return;
       }
-      return;
-    }
 
-    let resolved: CredentialResolution;
-    try {
-      resolved = credentialProvider.resolve({ req: authedReq });
-    } catch (err) {
-      logCredentialResolutionFailure(credentialProvider, authedReq, authInfo, err);
-      const response = credentialErrorResponse(err);
-      writeJson(res, response.status, await response.json());
-      return;
-    }
+      const rawBody = req.method === "POST" ? await readCappedBody(req, res) : undefined;
+      if (rawBody === null) return;
 
-    const inFlightPermit = inFlight.acquire(resolved.cacheKey);
-    if (!inFlightPermit.ok) {
-      writeJson(
-        res,
-        inFlightPermit.status,
-        { error: inFlightPermit.error },
-        { "Retry-After": "1" },
-      );
-      return;
-    }
+      const sanitizedHeaders = sanitizedHeadersFromNode(req.headers);
+      if (isProtocolOnlyRejection(req, sanitizedHeaders, rawBody)) {
+        await nodeMcpHandler(nodeRequestWithBody(req, rawBody, authInfo), res);
+        return;
+      }
 
-    try {
-      const rateKey = deriveRateKey(resolved.cacheKey);
-      if (!allowRequest(rateKey)) {
+      let resolved: CredentialResolution;
+      try {
+        resolved = credentialProvider.resolve({ req: authedReq });
+      } catch (err) {
+        logCredentialResolutionFailure(credentialProvider, authedReq, authInfo, err);
+        const response = credentialErrorResponse(err);
+        writeJson(res, response.status, await response.json());
+        return;
+      }
+
+      const credentialPermit = inFlight.rekey(limitKey, resolved.cacheKey);
+      if (!credentialPermit.ok) {
+        writeJson(
+          res,
+          credentialPermit.status,
+          { error: credentialPermit.error },
+          { "Retry-After": "1" },
+        );
+        return;
+      }
+      limitKey = resolved.cacheKey;
+
+      const credentialRateKey = deriveRateKey(resolved.cacheKey);
+      if (!allowRequest(credentialRateKey)) {
         writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
         return;
       }
@@ -554,10 +682,16 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
       if (!res.headersSent) writeJson(res, 500, { error: "Internal server error" });
     } finally {
-      inFlight.release(resolved.cacheKey);
+      if (limitKey) inFlight.release(limitKey);
       maybeCloseMcpHandlerAfterDrain();
     }
   });
+  httpServer.requestTimeout = intEnv("B2_HTTP_REQUEST_TIMEOUT_MS", DEFAULT_HTTP_REQUEST_TIMEOUT_MS);
+  httpServer.headersTimeout = Math.min(
+    httpServer.requestTimeout,
+    intEnv("B2_HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HTTP_HEADERS_TIMEOUT_MS),
+  );
+  httpServer.timeout = httpServer.requestTimeout;
 
   function drain(): void {
     if (shuttingDown) return;
