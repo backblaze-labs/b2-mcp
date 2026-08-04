@@ -31,7 +31,9 @@ export interface ToolRegistrar {
 
 interface PendingTool {
   name: string;
-  config: ToolRegistrationConfig;
+  title?: string;
+  description?: string;
+  inputSchema: z.ZodObject<z.ZodRawShape>;
   callback: ToolCallback;
 }
 
@@ -68,27 +70,34 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
     if (this.records[name]) throw new Error(`Duplicate MCP tool registration: ${name}`);
 
     const callback = this.options.wrapCallback?.(name, cb as ToolCallback) ?? (cb as ToolCallback);
+    const inputSchema = z.object(config.inputSchema ?? {});
     this.records[name] = {
       name,
       description: config.description,
-      inputSchema: z.object(config.inputSchema ?? {}),
+      inputSchema,
       execute: callback,
     };
-    this.pending.push({ name, config, callback });
+    this.pending.push({
+      name,
+      title: config.title,
+      description: config.description,
+      inputSchema,
+      callback,
+    });
   }
 
   commit(): number {
     if (this.committed) return Object.keys(this.records).length;
     this.committed = true;
-    for (const { name, config, callback } of [...this.pending].sort((a, b) =>
-      a.name.localeCompare(b.name),
+    for (const { name, title, description, inputSchema, callback } of [...this.pending].sort(
+      (a, b) => a.name.localeCompare(b.name),
     )) {
       this.server.registerTool(
         name,
         {
-          title: config.title,
-          description: config.description,
-          inputSchema: config.inputSchema as any,
+          title,
+          description,
+          inputSchema,
         },
         callback as any,
       );

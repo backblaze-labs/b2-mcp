@@ -3,10 +3,12 @@
  */
 
 import { createAuditedToolCallback, createServer, getRegisteredTools } from "../../src/server";
+import { ToolRegistrationAdapter, type McpServer } from "../../src/mcp";
 import { formatB2Error } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
+import { z } from "zod";
 
 const CONFIGURED_APPLICATION_KEY = "configured-audit-secret-value";
 const CANARY = "B2_MCP_CANARY_SECRET_audit_do_not_leak";
@@ -45,6 +47,29 @@ describe("getRegisteredTools", () => {
     const names = Object.keys(getRegisteredTools(server) ?? {});
     expect(names.length).toBe(40);
     expect(names).toEqual([...names].sort());
+  });
+
+  it("passes Zod object schemas to the SDK registration API", () => {
+    const registerTool = jest.fn();
+    const callback = jest.fn();
+    const adapter = new ToolRegistrationAdapter({ registerTool } as unknown as McpServer);
+
+    adapter.registerTool(
+      "example",
+      {
+        description: "Example tool",
+        inputSchema: { bucketName: z.string() },
+      },
+      callback,
+    );
+    adapter.commit();
+
+    expect(registerTool).toHaveBeenCalledTimes(1);
+    const [, sdkConfig, sdkCallback] = registerTool.mock.calls[0];
+    expect(sdkConfig.inputSchema).toBeInstanceOf(z.ZodObject);
+    expect(sdkConfig.inputSchema.safeParse({ bucketName: "bucket" }).success).toBe(true);
+    expect(sdkConfig.inputSchema.safeParse({ bucketName: 123 }).success).toBe(false);
+    expect(sdkCallback).toBe(callback);
   });
 });
 
