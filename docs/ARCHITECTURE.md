@@ -30,11 +30,15 @@ unpublished branches.
 The server keeps normal npm package semantics and is not bundled to hide package
 count or dependency ownership. `package-budget.json` is the reviewed Phase 1
 runtime budget and records each direct production dependency, its purpose, the
-current package-footprint baseline, and the ceiling that CI enforces.
+reviewed version, npm registry URL, integrity, current package-footprint
+baseline, and the ceiling that CI enforces. Clean consumer install measurements
+are generated from the committed production lock graph so an unchanged SHA does
+not drift with new registry releases.
 
 The package-budget gate rejects unapproved direct production dependencies, Axios
 runtime imports, SDK private or unpublished imports, Git/path SDK dependencies,
-and AWS runtime imports outside `src/s3/aws-sdk-adapter.ts`. The AWS adapter is a
+unpinned or provenance-mismatched direct dependencies, and AWS runtime imports
+outside `src/s3/aws-sdk-adapter.ts`. The AWS adapter is a
 temporary S3-material compatibility boundary tracked by
 [backblaze-labs/b2-sdk-typescript#154](https://github.com/backblaze-labs/b2-sdk-typescript/issues/154).
 It may remain only for report-object reads, S3 endpoint probes, lifecycle

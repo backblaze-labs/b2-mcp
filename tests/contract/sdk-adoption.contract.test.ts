@@ -176,6 +176,10 @@ describe("SDK adoption contract", () => {
     const partner = readFileSync(join(ROOT, "src/b2/partner.ts"), "utf8");
     const s3Objects = readFileSync(join(ROOT, "src/s3/objects.ts"), "utf8");
     const s3Presigned = readFileSync(join(ROOT, "src/s3/presigned.ts"), "utf8");
+    const s3Adapter = readFileSync(join(ROOT, "src/s3/aws-sdk-adapter.ts"), "utf8");
+    const s3Buckets = readFileSync(join(ROOT, "src/s3/buckets.ts"), "utf8");
+    const s3Extras = readFileSync(join(ROOT, "src/s3/extras.ts"), "utf8");
+    const s3Multipart = readFileSync(join(ROOT, "src/s3/multipart.ts"), "utf8");
     const reportClient = readFileSync(join(ROOT, "src/b2/report-client.ts"), "utf8");
 
     function expectMatrixPath(tool: string, className: string, path: string): void {
@@ -222,6 +226,11 @@ describe("SDK adoption contract", () => {
     expectMatrixPath("b2_usage_growth", "compose", "createReportS3Client");
     expectMatrixPath("b2_egress_leaders", "compose", "createReportS3Client");
     expect(reportClient).toContain("createReportS3Client");
+    expect(s3Adapter).toContain("export class B2S3PeerClient");
+    for (const caller of [s3Buckets, s3Extras, s3Multipart, reportClient]) {
+      expect(caller).not.toMatch(/\b[A-Z][A-Za-z0-9]*Command\b/);
+      expect(caller).not.toContain("getSignedUrl");
+    }
   });
 
   it("delegates Node runtime and SDK floor policy to check-runtime-policy", () => {

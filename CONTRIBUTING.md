@@ -88,15 +88,18 @@ The budget records every direct production dependency and the approved limits fo
 total production packages, packed tarball size, unpacked package size, clean
 consumer install footprint, and duplicate runtime package versions. CI rejects an
 unapproved direct dependency, Axios runtime import, SDK private/unpublished
-import, Git/path SDK dependency, or AWS import outside the temporary
-`src/s3/aws-sdk-adapter.ts` boundary.
+import, Git/path SDK dependency, unpinned or provenance-mismatched direct
+dependency, or AWS import outside the temporary `src/s3/aws-sdk-adapter.ts`
+boundary. The clean consumer install is measured from the committed production
+lock graph, not from lockfile-less semver resolution.
 
 To intentionally raise the budget, update `package-budget.json` in the same PR,
-include the reason and owner for any new direct dependency, link an upstream SDK
-gap for temporary adapters, run the package-budget check, and call out the
-metric delta in the PR. Do not add compatibility packages for Node.js 18/20,
-browsers, Bun, Deno, HTTP, stream, abort, retry, or schema wrapping when Node
-22+ built-ins, the MCP server package, or public B2 SDK exports cover the need.
+include the reason, policy, reviewed version, resolved URL, integrity, and owner
+for any new direct dependency, link an upstream SDK gap for temporary adapters,
+run the package-budget check, and call out the metric delta in the PR. Do not
+add compatibility packages for Node.js 18/20, browsers, Bun, Deno, HTTP, stream,
+abort, retry, or schema wrapping when Node 22+ built-ins, the MCP server
+package, or public B2 SDK exports cover the need.
 
 `@types/node` tracks the Node 22.3.0 runtime floor so TypeScript does not allow
 newer Node standard-library APIs that would fail for minimum-supported

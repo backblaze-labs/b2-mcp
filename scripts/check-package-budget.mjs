@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -13,11 +14,17 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import retryUtils from "./lib/retry-utils.cjs";
 import envUtils from "./lib/sanitized-env.cjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = path.resolve(process.env.B2_MCP_PACKAGE_BUDGET_ROOT ?? scriptRoot);
 const reportsDir = path.join(root, "reports", "package-budget");
+const policyOnly = process.argv.includes("--policy-only");
+mkdirSync(reportsDir, { recursive: true });
+rmSync(path.join(reportsDir, "npm-ls-production.json"), { force: true });
+writeFileSync(path.join(reportsDir, "summary.md"), "# Package Budget\n\nStatus: started.\n");
 const budget = readJson("package-budget.json");
 const packageJson = readJson("package.json");
 const packageLock = readJson("package-lock.json");
@@ -37,6 +44,9 @@ function relativePath(absolutePath) {
   return path.relative(root, absolutePath).split(path.sep).join("/");
 }
 
+// This policy script intentionally walks absolute paths with lstatSync so a
+// symlinked src tree cannot pull generated/vendor files into the runtime import
+// inventory. check-runtime-policy.mjs walks repo-relative workflow/doc paths.
 function listFiles(dir) {
   const entries = readdirSync(dir)
     .map((name) => path.join(dir, name))
@@ -48,6 +58,43 @@ function listFiles(dir) {
     else files.push(entry);
   }
   return files;
+}
+
+function stringLiteralText(node) {
+  if (!node) return null;
+  if (ts.isStringLiteral(node) || node.kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
+    return node.text;
+  }
+  return null;
+}
+
+function importKindLocation(sourceFile, node) {
+  const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+  return { line: line + 1, column: character + 1 };
+}
+
+function recordImport(imports, sourceFile, source, kind, specifierNode) {
+  const specifier = stringLiteralText(specifierNode);
+  const location = importKindLocation(sourceFile, specifierNode ?? sourceFile);
+  if (specifier === null) {
+    imports.push({ source, kind, specifier: null, nonLiteral: true, ...location });
+    return;
+  }
+  imports.push({ source, kind, specifier, ...location });
+}
+
+function isNodeModuleSpecifier(specifier) {
+  return specifier === "module" || specifier === "node:module";
+}
+
+function isCreateRequireExpression(expression, createRequireNames, moduleNamespaceNames) {
+  if (ts.isIdentifier(expression)) return createRequireNames.has(expression.text);
+  return (
+    ts.isPropertyAccessExpression(expression) &&
+    expression.name.text === "createRequire" &&
+    ts.isIdentifier(expression.expression) &&
+    moduleNamespaceNames.has(expression.expression.text)
+  );
 }
 
 function packageNameFromNodeModulesPath(lockPath) {
@@ -94,23 +141,200 @@ function duplicatePackageVersions(productionPackages) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function requireNonEmptyString(value, label) {
+  if (typeof value !== "string" || value.trim() === "") fail(`${label} is required`);
+}
+
+function directLockEntry(name) {
+  return packageLock.packages?.[`node_modules/${name}`];
+}
+
+function assertBudgetMetadata() {
+  const directDependencies = budget.directProductionDependencies ?? {};
+  for (const [name, record] of Object.entries(directDependencies)) {
+    requireNonEmptyString(record?.purpose, `direct dependency ${name} purpose`);
+    requireNonEmptyString(record?.policy, `direct dependency ${name} policy`);
+    requireNonEmptyString(record?.version, `direct dependency ${name} reviewed version`);
+    requireNonEmptyString(record?.resolved, `direct dependency ${name} reviewed resolved URL`);
+    requireNonEmptyString(record?.integrity, `direct dependency ${name} reviewed integrity`);
+    if (record?.upstreamIssue && !String(record.upstreamIssue).startsWith("https://")) {
+      fail(`direct dependency ${name} upstreamIssue must be an https URL`);
+    }
+  }
+
+  const allowedAwsImports = new Set(
+    (budget.runtimeImportPolicy?.allowedAwsRuntimeImports ?? []).map(
+      (entry) => `${entry.source}|${entry.specifier}`,
+    ),
+  );
+  const adapterImports = new Set();
+  for (const adapter of budget.temporaryAdapters ?? []) {
+    requireNonEmptyString(adapter?.name, "temporary adapter name");
+    requireNonEmptyString(
+      adapter?.owner,
+      `temporary adapter ${adapter?.name ?? "<unknown>"} owner`,
+    );
+    requireNonEmptyString(
+      adapter?.upstreamIssue,
+      `temporary adapter ${adapter?.name ?? "<unknown>"} upstreamIssue`,
+    );
+    requireNonEmptyString(
+      adapter?.removalCondition,
+      `temporary adapter ${adapter?.name ?? "<unknown>"} removalCondition`,
+    );
+    requireNonEmptyString(
+      adapter?.source,
+      `temporary adapter ${adapter?.name ?? "<unknown>"} source`,
+    );
+    if (adapter?.source && !existsSync(path.join(root, adapter.source))) {
+      fail(`temporary adapter ${adapter.name} source is missing: ${adapter.source}`);
+    }
+    if (!String(adapter?.upstreamIssue ?? "").startsWith("https://")) {
+      fail(`temporary adapter ${adapter?.name ?? "<unknown>"} upstreamIssue must be an https URL`);
+    }
+
+    if (!Array.isArray(adapter?.dependencies) || adapter.dependencies.length === 0) {
+      fail(`temporary adapter ${adapter?.name ?? "<unknown>"} dependencies are required`);
+    } else {
+      for (const dependency of adapter.dependencies) {
+        if (!directDependencies[dependency]) {
+          fail(
+            `temporary adapter ${adapter.name} dependency ${dependency} is not a direct dependency`,
+          );
+        }
+        adapterImports.add(`${adapter.source}|${dependency}`);
+      }
+    }
+
+    if (!Array.isArray(adapter?.tests) || adapter.tests.length === 0) {
+      fail(`temporary adapter ${adapter?.name ?? "<unknown>"} tests are required`);
+    } else {
+      for (const testPath of adapter.tests) {
+        if (!existsSync(path.join(root, testPath))) {
+          fail(`temporary adapter ${adapter.name} test path is missing: ${testPath}`);
+        }
+      }
+    }
+  }
+
+  for (const key of adapterImports) {
+    if (!allowedAwsImports.has(key)) {
+      fail(`temporary adapter import is not listed in allowedAwsRuntimeImports: ${key}`);
+    }
+  }
+  for (const key of allowedAwsImports) {
+    if (!adapterImports.has(key)) {
+      fail(`allowedAwsRuntimeImports entry is not backed by a temporary adapter: ${key}`);
+    }
+  }
+}
+
 function inventoryRuntimeImports() {
-  const importRe =
-    /\b(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+from\s+)?["']([^"']+)["']|\brequire\(\s*["']([^"']+)["']\s*\)/g;
+  // AST coverage: static import/export declarations, dynamic import("x"),
+  // require("x"), and createRequire(...)( "x" ) or aliased createRequire calls.
+  // Non-literal runtime import specifiers are inventoried and rejected below.
   return listFiles(path.join(root, "src"))
     .filter((file) => !file.endsWith(".d.ts"))
-    .filter((file) => /\.(?:c|m)?tsx?$|\.js$/.test(file))
+    .filter((file) => /\.(?:c|m)?tsx?$/.test(file))
     .flatMap((file) => {
       const text = readFileSync(file, "utf8");
+      const source = relativePath(file);
+      const sourceFile = ts.createSourceFile(
+        file,
+        text,
+        ts.ScriptTarget.Latest,
+        true,
+        ts.ScriptKind.TS,
+      );
+      const createRequireNames = new Set();
+      const moduleNamespaceNames = new Set();
+      const requireAliases = new Set();
       const imports = [];
-      for (const match of text.matchAll(importRe)) {
-        const specifier = match[1] ?? match[2];
-        imports.push({ source: relativePath(file), specifier });
+
+      for (const statement of sourceFile.statements) {
+        if (!ts.isImportDeclaration(statement)) continue;
+        const moduleSpecifier = stringLiteralText(statement.moduleSpecifier);
+        if (!isNodeModuleSpecifier(moduleSpecifier)) continue;
+        const bindings = statement.importClause?.namedBindings;
+        if (bindings && ts.isNamedImports(bindings)) {
+          for (const element of bindings.elements) {
+            const importedName = element.propertyName?.text ?? element.name.text;
+            if (importedName === "createRequire") createRequireNames.add(element.name.text);
+          }
+        } else if (bindings && ts.isNamespaceImport(bindings)) {
+          moduleNamespaceNames.add(bindings.name.text);
+        }
       }
+
+      function visit(node) {
+        if (ts.isImportDeclaration(node)) {
+          recordImport(imports, sourceFile, source, "static-import", node.moduleSpecifier);
+          const moduleSpecifier = stringLiteralText(node.moduleSpecifier);
+          if (isNodeModuleSpecifier(moduleSpecifier)) {
+            const bindings = node.importClause?.namedBindings;
+            if (bindings && ts.isNamedImports(bindings)) {
+              for (const element of bindings.elements) {
+                const importedName = element.propertyName?.text ?? element.name.text;
+                if (importedName === "createRequire") createRequireNames.add(element.name.text);
+              }
+            } else if (bindings && ts.isNamespaceImport(bindings)) {
+              moduleNamespaceNames.add(bindings.name.text);
+            }
+          }
+        } else if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
+          recordImport(imports, sourceFile, source, "static-export", node.moduleSpecifier);
+        } else if (
+          ts.isImportEqualsDeclaration(node) &&
+          ts.isExternalModuleReference(node.moduleReference)
+        ) {
+          recordImport(
+            imports,
+            sourceFile,
+            source,
+            "import-equals",
+            node.moduleReference.expression,
+          );
+        } else if (
+          ts.isVariableDeclaration(node) &&
+          ts.isIdentifier(node.name) &&
+          node.initializer &&
+          ts.isCallExpression(node.initializer) &&
+          isCreateRequireExpression(
+            node.initializer.expression,
+            createRequireNames,
+            moduleNamespaceNames,
+          )
+        ) {
+          requireAliases.add(node.name.text);
+        } else if (ts.isCallExpression(node)) {
+          const expression = node.expression;
+          if (expression.kind === ts.SyntaxKind.ImportKeyword) {
+            recordImport(imports, sourceFile, source, "dynamic-import", node.arguments[0]);
+          } else if (ts.isIdentifier(expression) && expression.text === "require") {
+            recordImport(imports, sourceFile, source, "require", node.arguments[0]);
+          } else if (ts.isIdentifier(expression) && requireAliases.has(expression.text)) {
+            recordImport(imports, sourceFile, source, "create-require", node.arguments[0]);
+          } else if (
+            ts.isCallExpression(expression) &&
+            isCreateRequireExpression(
+              expression.expression,
+              createRequireNames,
+              moduleNamespaceNames,
+            )
+          ) {
+            recordImport(imports, sourceFile, source, "create-require", node.arguments[0]);
+          }
+        }
+        ts.forEachChild(node, visit);
+      }
+
+      visit(sourceFile);
       return imports;
     })
     .sort((left, right) =>
-      `${left.source}\0${left.specifier}`.localeCompare(`${right.source}\0${right.specifier}`),
+      `${left.source}\0${left.specifier ?? ""}\0${left.kind ?? ""}`.localeCompare(
+        `${right.source}\0${right.specifier ?? ""}\0${right.kind ?? ""}`,
+      ),
     );
 }
 
@@ -131,7 +355,41 @@ function assertDirectDependencyPolicy() {
   for (const name of missing) fail(`approved direct production dependency missing: ${name}`);
 
   for (const [name, record] of Object.entries(budget.directProductionDependencies ?? {})) {
-    if (!record?.purpose?.trim()) fail(`direct dependency ${name} is missing a reviewed purpose`);
+    const packageSpec = packageJson.dependencies?.[name];
+    if (packageSpec !== record.version) {
+      fail(
+        `direct dependency ${name} must be exact-pinned to reviewed version ${
+          record.version ?? "missing"
+        }, got ${packageSpec ?? "missing"}`,
+      );
+    }
+    const rootLockSpec = packageLock.packages?.[""]?.dependencies?.[name];
+    if (rootLockSpec !== record.version) {
+      fail(
+        `package-lock root dependency ${name} must be exact-pinned to ${
+          record.version ?? "missing"
+        }, got ${rootLockSpec ?? "missing"}`,
+      );
+    }
+    const lockEntry = directLockEntry(name);
+    if (!lockEntry) {
+      fail(`package-lock.json is missing node_modules/${name}`);
+      continue;
+    }
+    for (const field of ["version", "resolved", "integrity"]) {
+      if (lockEntry[field] !== record[field]) {
+        fail(
+          `direct dependency ${name} ${field} expected ${record[field] ?? "missing"}, got ${
+            lockEntry[field] ?? "missing"
+          }`,
+        );
+      }
+    }
+    if (!String(lockEntry.resolved ?? "").startsWith("https://registry.npmjs.org/")) {
+      fail(
+        `direct dependency ${name} must resolve from the npm registry, got ${lockEntry.resolved}`,
+      );
+    }
   }
 
   for (const name of budget.runtimeImportPolicy?.forbiddenRuntimeDependencies ?? []) {
@@ -145,11 +403,11 @@ function assertDirectDependencyPolicy() {
 }
 
 function assertSdkDependencyPolicy() {
-  const sdkSpec = packageJson.dependencies?.["@backblaze-labs/b2-sdk"];
+  const sdkSpec = budget.directProductionDependencies?.["@backblaze-labs/b2-sdk"]?.version;
   if (!/^\d+\.\d+\.\d+$/.test(String(sdkSpec ?? ""))) {
-    fail(`@backblaze-labs/b2-sdk must be pinned to an exact stable npm version, got ${sdkSpec}`);
+    fail(`@backblaze-labs/b2-sdk must record an exact stable npm version, got ${sdkSpec}`);
   }
-  const lockSdk = packageLock.packages?.["node_modules/@backblaze-labs/b2-sdk"];
+  const lockSdk = directLockEntry("@backblaze-labs/b2-sdk");
   if (!lockSdk) {
     fail("package-lock.json is missing node_modules/@backblaze-labs/b2-sdk");
     return;
@@ -172,15 +430,20 @@ function assertRuntimeImportPolicy(imports) {
     ),
   );
 
-  for (const { source, specifier } of imports) {
+  for (const { source, specifier, kind, line, column } of imports) {
+    const location = line && column ? `${source}:${line}:${column}` : source;
+    if (specifier === null) {
+      fail(`${location}: non-literal ${kind ?? "runtime import"} specifier is forbidden`);
+      continue;
+    }
     if (specifier === "axios") {
-      fail(`${source}: direct Axios runtime import is forbidden`);
+      fail(`${location}: direct Axios runtime import is forbidden`);
     }
     if (specifier.startsWith("@aws-sdk/") && !allowedAwsImports.has(`${source}|${specifier}`)) {
-      fail(`${source}: AWS SDK import ${specifier} is outside the approved adapter`);
+      fail(`${location}: AWS SDK import ${specifier} is outside the approved adapter`);
     }
     if (specifier.startsWith("@backblaze-labs/b2-sdk/") && !allowedSdkSpecifiers.has(specifier)) {
-      fail(`${source}: SDK private or unpublished import is forbidden: ${specifier}`);
+      fail(`${location}: SDK private or unpublished import is forbidden: ${specifier}`);
     }
   }
 }
@@ -241,9 +504,90 @@ function sumFileBytes(dir) {
   return { bytes, files, directories };
 }
 
+function committedProductionGraphMismatches(repoLock, consumerLock) {
+  return Object.entries(repoLock.packages ?? {})
+    .filter(
+      ([lockPath, entry]) => lockPath.startsWith("node_modules/") && !entry.dev && entry.version,
+    )
+    .flatMap(([lockPath, entry]) => {
+      const installed = consumerLock.packages?.[lockPath];
+      if (!installed) return [`${lockPath} missing from clean consumer lock`];
+      if (installed.version !== entry.version) {
+        return [`${lockPath} expected ${entry.version}, got ${installed.version ?? "missing"}`];
+      }
+      if (entry.integrity && installed.integrity !== entry.integrity) {
+        return [`${lockPath} integrity mismatch`];
+      }
+      if (entry.resolved && installed.resolved !== entry.resolved) {
+        return [`${lockPath} resolved URL mismatch`];
+      }
+      return [];
+    });
+}
+
+function writeConsumerLock(appDir, tarball, packResult) {
+  const tarballSpec = `file:${path.relative(appDir, tarball)}`;
+  const packages = {
+    "": {
+      name: "b2-mcp-package-budget-consumer",
+      private: true,
+      dependencies: { [packageJson.name]: tarballSpec },
+    },
+    [`node_modules/${packageJson.name}`]: {
+      version: packageJson.version,
+      resolved: tarballSpec,
+      integrity: packResult.integrity,
+      license: packageJson.license,
+      dependencies: packageJson.dependencies,
+      bin: packageJson.bin,
+      engines: packageJson.engines,
+    },
+  };
+
+  for (const [lockPath, entry] of Object.entries(packageLock.packages ?? {})) {
+    if (lockPath.startsWith("node_modules/") && !entry.dev && entry.version) {
+      packages[lockPath] = entry;
+    }
+  }
+
+  writeFileSync(
+    path.join(appDir, "package-lock.json"),
+    JSON.stringify(
+      {
+        name: "b2-mcp-package-budget-consumer",
+        lockfileVersion: 3,
+        requires: true,
+        packages,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
 function cleanConsumerInstallMetrics(packResult, tarball, workspace) {
   const appDir = path.join(workspace, "consumer");
+  const seedDir = path.join(workspace, "seed");
   mkdirSync(appDir, { recursive: true });
+  mkdirSync(seedDir, { recursive: true });
+  copyFileSync(path.join(root, "package.json"), path.join(seedDir, "package.json"));
+  copyFileSync(path.join(root, "package-lock.json"), path.join(seedDir, "package-lock.json"));
+  run("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    retries: 2,
+    retryLabel: "npm ci seed",
+    retryDelayMs: 1_000,
+    spawnOptions: {
+      cwd: seedDir,
+      encoding: "utf8",
+      timeout: 180_000,
+      env: npmEnv(workspace, {
+        npm_config_fetch_retries: "3",
+        npm_config_fetch_retry_factor: "2",
+        npm_config_fetch_retry_mintimeout: "1000",
+        npm_config_fetch_retry_maxtimeout: "10000",
+      }),
+    },
+  });
   writeFileSync(
     path.join(appDir, "package.json"),
     JSON.stringify(
@@ -259,28 +603,20 @@ function cleanConsumerInstallMetrics(packResult, tarball, workspace) {
       2,
     ),
   );
-  run(
-    "npm",
-    ["install", "--engine-strict", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"],
-    {
-      retries: 2,
-      retryLabel: "npm install",
-      retryDelayMs: 1_000,
-      spawnOptions: {
-        cwd: appDir,
-        encoding: "utf8",
-        timeout: 180_000,
-        env: npmEnv(workspace, {
-          npm_config_fetch_retries: "3",
-          npm_config_fetch_retry_factor: "2",
-          npm_config_fetch_retry_mintimeout: "1000",
-          npm_config_fetch_retry_maxtimeout: "10000",
-        }),
-      },
+  writeConsumerLock(appDir, tarball, packResult);
+  run("npm", ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    spawnOptions: {
+      cwd: appDir,
+      encoding: "utf8",
+      timeout: 120_000,
+      env: npmEnv(workspace),
     },
-  );
+  });
 
   const consumerLock = JSON.parse(readFileSync(path.join(appDir, "package-lock.json"), "utf8"));
+  for (const mismatch of committedProductionGraphMismatches(packageLock, consumerLock)) {
+    fail(mismatch);
+  }
   const productionPackages = productionPackagesFromLock(consumerLock);
   const footprint = sumFileBytes(path.join(appDir, "node_modules"));
   return {
@@ -367,11 +703,57 @@ function markdownSummary(metrics) {
   ].join("\n");
 }
 
-function writeReports(metrics, npmLs, runtimeImports) {
+function productionLockInventoryReport() {
+  return {
+    source: "package-lock.json",
+    packages: productionPackagesFromLock(packageLock),
+  };
+}
+
+function appendStepSummary(summary) {
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    writeFileSync(process.env.GITHUB_STEP_SUMMARY, summary, { flag: "a" });
+  }
+}
+
+function writePolicyReports(productionInventory, runtimeImports, status) {
+  mkdirSync(reportsDir, { recursive: true });
+  const summary = ["# Package Budget", "", `Status: ${status}.`, ""].join("\n");
+  writeFileSync(path.join(reportsDir, "summary.md"), summary);
+  writeFileSync(
+    path.join(reportsDir, "production-lock-inventory.json"),
+    JSON.stringify(productionInventory, null, 2),
+  );
+  writeFileSync(
+    path.join(reportsDir, "runtime-imports.json"),
+    JSON.stringify(runtimeImports, null, 2),
+  );
+  writeFileSync(
+    path.join(reportsDir, "metrics.json"),
+    JSON.stringify(
+      {
+        issue: budget.issue,
+        status,
+        directProductionDependencies: budget.directProductionDependencies,
+        temporaryAdapters: budget.temporaryAdapters,
+        errors,
+      },
+      null,
+      2,
+    ),
+  );
+  appendStepSummary(summary);
+  return summary;
+}
+
+function writeReports(metrics, productionInventory, runtimeImports) {
   mkdirSync(reportsDir, { recursive: true });
   const summary = markdownSummary(metrics);
   writeFileSync(path.join(reportsDir, "summary.md"), summary);
-  writeFileSync(path.join(reportsDir, "npm-ls-production.json"), JSON.stringify(npmLs, null, 2));
+  writeFileSync(
+    path.join(reportsDir, "production-lock-inventory.json"),
+    JSON.stringify(productionInventory, null, 2),
+  );
   writeFileSync(
     path.join(reportsDir, "runtime-imports.json"),
     JSON.stringify(runtimeImports, null, 2),
@@ -401,10 +783,27 @@ function writeReports(metrics, npmLs, runtimeImports) {
       2,
     ),
   );
-  if (process.env.GITHUB_STEP_SUMMARY) {
-    writeFileSync(process.env.GITHUB_STEP_SUMMARY, summary, { flag: "a" });
-  }
+  appendStepSummary(summary);
   return summary;
+}
+
+function writeFailureReport(err) {
+  const message = err instanceof Error ? err.message : String(err);
+  const summary = [
+    "# Package Budget",
+    "",
+    "Status: failed before complete metrics.",
+    "",
+    `Error: ${message}`,
+    "",
+  ].join("\n");
+  mkdirSync(reportsDir, { recursive: true });
+  writeFileSync(path.join(reportsDir, "summary.md"), summary);
+  writeFileSync(
+    path.join(reportsDir, "failure.json"),
+    JSON.stringify({ issue: budget.issue, error: message, errors }, null, 2),
+  );
+  appendStepSummary(summary);
 }
 
 function verifyBuiltEntrypoints() {
@@ -416,22 +815,34 @@ function verifyBuiltEntrypoints() {
 }
 
 async function main() {
-  verifyBuiltEntrypoints();
+  if (!policyOnly) verifyBuiltEntrypoints();
+  assertBudgetMetadata();
   assertDirectDependencyPolicy();
   assertSdkDependencyPolicy();
 
   const runtimeImports = inventoryRuntimeImports();
   assertRuntimeImportPolicy(runtimeImports);
+  const productionInventory = productionLockInventoryReport();
 
-  const npmLsResult = run("npm", ["ls", "--omit=dev", "--all", "--json"], {
-    spawnOptions: {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 60_000,
-      env: baseSanitizedEnv({ NO_COLOR: "1", npm_config_color: "false" }),
-    },
-  });
-  const npmLs = JSON.parse(npmLsResult.stdout);
+  if (policyOnly) {
+    const summary = writePolicyReports(
+      productionInventory,
+      runtimeImports,
+      errors.length === 0 ? "policy checks passed" : "policy checks failed",
+    );
+    process.stdout.write(summary);
+    if (errors.length > 0) {
+      for (const error of errors) console.error(`package-budget: ${error}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  if (errors.length > 0) {
+    writePolicyReports(productionInventory, runtimeImports, "policy checks failed");
+    for (const error of errors) console.error(`package-budget: ${error}`);
+    process.exit(1);
+  }
 
   const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-package-budget-"));
   try {
@@ -449,7 +860,7 @@ async function main() {
     const tarball = path.join(packDir, packResult.filename);
     const metrics = cleanConsumerInstallMetrics(packResult, tarball, workspace);
     assertBudget(metrics);
-    const summary = writeReports(metrics, npmLs, runtimeImports);
+    const summary = writeReports(metrics, productionInventory, runtimeImports);
     process.stdout.write(summary);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
@@ -462,6 +873,7 @@ async function main() {
 }
 
 main().catch((err) => {
+  writeFailureReport(err);
   console.error(`package-budget: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });

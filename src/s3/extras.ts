@@ -1,4 +1,4 @@
-import { S3Client, GetBucketLocationCommand } from "./aws-sdk-adapter.js";
+import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";
@@ -9,7 +9,7 @@ import { toolJson, toolError } from "../utils/errors.js";
  * the bucket/S3-compatibility validator skill). Everything else here duplicated
  * native b2_* tools and was removed.
  */
-export function registerS3ExtraTools(server: ToolRegistrar, s3: S3Client): void {
+export function registerS3ExtraTools(server: ToolRegistrar, s3: B2S3PeerClient): void {
   server.registerTool(
     "s3_get_bucket_location",
     {
@@ -21,8 +21,8 @@ export function registerS3ExtraTools(server: ToolRegistrar, s3: S3Client): void 
     },
     async (args) => {
       try {
-        const result = await s3.send(new GetBucketLocationCommand({ Bucket: args.bucket }));
-        return toolJson({ locationConstraint: result.LocationConstraint });
+        const result = await s3.getBucketLocation(args.bucket);
+        return toolJson({ locationConstraint: result.locationConstraint });
       } catch (err) {
         return toolError(err);
       }

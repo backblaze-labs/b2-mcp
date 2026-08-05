@@ -1,28 +1,13 @@
-import {
-  S3Client,
-  CreateMultipartUploadCommand,
-  UploadPartCommand,
-  CompleteMultipartUploadCommand,
-  AbortMultipartUploadCommand,
-  ListMultipartUploadsCommand,
-  ListPartsCommand,
-  UploadPartCopyCommand,
-  getSignedUrl,
-} from "./aws-sdk-adapter.js";
+import type { B2S3CompletedMultipartPart, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
-interface CompletedMultipartPart {
-  partNumber: number;
-  etag: string;
-}
-
 export function registerS3MultipartTools(
   server: ToolRegistrar,
-  s3: S3Client,
+  s3: B2S3PeerClient,
   config: B2Config,
 ): void {
   server.registerTool(
@@ -47,17 +32,15 @@ export function registerS3MultipartTools(
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new CreateMultipartUploadCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            ContentType: args.contentType,
-            Metadata: args.metadata,
-            ACL: args.acl,
-            ServerSideEncryption: args.serverSideEncryption as any,
-          }),
-        );
-        return toolJson({ uploadId: result.UploadId, bucket: result.Bucket, key: result.Key });
+        const result = await s3.createMultipartUpload({
+          bucket: args.bucket,
+          key: args.key,
+          contentType: args.contentType,
+          metadata: args.metadata,
+          acl: args.acl,
+          serverSideEncryption: args.serverSideEncryption,
+        });
+        return toolJson({ uploadId: result.uploadId, bucket: result.bucket, key: result.key });
       } catch (err) {
         return toolError(err);
       }
@@ -94,19 +77,15 @@ export function registerS3MultipartTools(
       try {
         const expiresIn = args.expiresIn ?? 3600;
         const parts = await Promise.all(
-          args.partNumbers.map(async (partNumber: number) => {
-            const url = await getSignedUrl(
-              s3,
-              new UploadPartCommand({
-                Bucket: args.bucket,
-                Key: args.key,
-                UploadId: args.uploadId,
-                PartNumber: partNumber,
-              }),
-              { expiresIn },
-            );
-            return { partNumber, url };
-          }),
+          args.partNumbers.map((partNumber: number) =>
+            s3.presignUploadPart({
+              bucket: args.bucket,
+              key: args.key,
+              uploadId: args.uploadId,
+              partNumber,
+              expiresIn,
+            }),
+          ),
         );
         return toolJson({
           bucket: args.bucket,
@@ -147,24 +126,17 @@ export function registerS3MultipartTools(
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new CompleteMultipartUploadCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            UploadId: args.uploadId,
-            MultipartUpload: {
-              Parts: (args.parts as CompletedMultipartPart[]).map((p) => ({
-                PartNumber: p.partNumber,
-                ETag: p.etag,
-              })),
-            },
-          }),
-        );
+        const result = await s3.completeMultipartUpload({
+          bucket: args.bucket,
+          key: args.key,
+          uploadId: args.uploadId,
+          parts: args.parts as B2S3CompletedMultipartPart[],
+        });
         return toolJson({
-          location: result.Location,
-          bucket: result.Bucket,
-          key: result.Key,
-          etag: result.ETag,
+          location: result.location,
+          bucket: result.bucket,
+          key: result.key,
+          etag: result.etag,
         });
       } catch (err) {
         return toolError(err);
@@ -193,13 +165,11 @@ export function registerS3MultipartTools(
       try {
         const gate = checkDestructive("s3_abort_multipart_upload", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        await s3.send(
-          new AbortMultipartUploadCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            UploadId: args.uploadId,
-          }),
-        );
+        await s3.abortMultipartUpload({
+          bucket: args.bucket,
+          key: args.key,
+          uploadId: args.uploadId,
+        });
         return toolSuccess(
           `Multipart upload aborted for '${args.key}' (UploadId: ${args.uploadId}).`,
         );
@@ -224,21 +194,19 @@ export function registerS3MultipartTools(
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new ListMultipartUploadsCommand({
-            Bucket: args.bucket,
-            Prefix: args.prefix,
-            Delimiter: args.delimiter,
-            MaxUploads: args.maxUploads ?? 100,
-            KeyMarker: args.keyMarker,
-            UploadIdMarker: args.uploadIdMarker,
-          }),
-        );
+        const result = await s3.listMultipartUploads({
+          bucket: args.bucket,
+          prefix: args.prefix,
+          delimiter: args.delimiter,
+          maxUploads: args.maxUploads ?? 100,
+          keyMarker: args.keyMarker,
+          uploadIdMarker: args.uploadIdMarker,
+        });
         return toolJson({
-          uploads: result.Uploads ?? [],
-          isTruncated: result.IsTruncated,
-          nextKeyMarker: result.NextKeyMarker,
-          nextUploadIdMarker: result.NextUploadIdMarker,
+          uploads: result.uploads,
+          isTruncated: result.isTruncated,
+          nextKeyMarker: result.nextKeyMarker,
+          nextUploadIdMarker: result.nextUploadIdMarker,
         });
       } catch (err) {
         return toolError(err);
@@ -261,20 +229,17 @@ export function registerS3MultipartTools(
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new ListPartsCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            UploadId: args.uploadId,
-            MaxParts: args.maxParts ?? 100,
-            PartNumberMarker:
-              args.partNumberMarker !== undefined ? String(args.partNumberMarker) : undefined,
-          }),
-        );
+        const result = await s3.listParts({
+          bucket: args.bucket,
+          key: args.key,
+          uploadId: args.uploadId,
+          maxParts: args.maxParts ?? 100,
+          partNumberMarker: args.partNumberMarker,
+        });
         return toolJson({
-          parts: result.Parts ?? [],
-          isTruncated: result.IsTruncated,
-          nextPartNumberMarker: result.NextPartNumberMarker,
+          parts: result.parts,
+          isTruncated: result.isTruncated,
+          nextPartNumberMarker: result.nextPartNumberMarker,
         });
       } catch (err) {
         return toolError(err);
@@ -316,20 +281,18 @@ export function registerS3MultipartTools(
         const copySource = args.copySourceVersionId
           ? `${args.copySource}?versionId=${args.copySourceVersionId}`
           : args.copySource;
-        const result = await s3.send(
-          new UploadPartCopyCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            UploadId: args.uploadId,
-            PartNumber: args.partNumber,
-            CopySource: copySource,
-            CopySourceRange: args.copySourceRange,
-          }),
-        );
+        const result = await s3.uploadPartCopy({
+          bucket: args.bucket,
+          key: args.key,
+          uploadId: args.uploadId,
+          partNumber: args.partNumber,
+          copySource,
+          copySourceRange: args.copySourceRange,
+        });
         return toolJson({
           partNumber: args.partNumber,
-          etag: result.CopyPartResult?.ETag,
-          lastModified: result.CopyPartResult?.LastModified,
+          etag: result.etag,
+          lastModified: result.lastModified,
         });
       } catch (err) {
         return toolError(err);

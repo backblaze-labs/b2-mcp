@@ -4,7 +4,10 @@ import { createRequire } from "module";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
-const { yamlValuesForKey } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+const { workflowJobBlock, yamlValuesForKey } = nodeRequire(
+  "../../scripts/lib/workflow-yaml.cjs",
+) as {
+  workflowJobBlock: (text: string, jobName: string) => string | null;
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
 const runtimePolicy = JSON.parse(readFileSync(join(root, "runtime-policy.json"), "utf8")) as {
@@ -109,6 +112,14 @@ describe("live secret workflow policy", () => {
     const text = workflowText(".github/workflows/contract.yml");
     expect(text).not.toMatch(/^\s{2}schedule:\s*$/m);
     expect(text).not.toContain("cron:");
+  });
+
+  it("keeps package-budget off the live contract dependency chain", () => {
+    const text = workflowText(".github/workflows/contract.yml");
+    const contractJob = workflowJobBlock(text, "contract") ?? "";
+
+    expect(contractJob).toContain("needs: guard");
+    expect(contractJob).not.toContain("package-budget");
   });
 
   it("keeps live contract cleanup context visible in logs", () => {

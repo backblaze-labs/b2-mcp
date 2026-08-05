@@ -1,10 +1,3 @@
-import {
-  S3Client,
-  type AwsS3ClientConfig,
-  type S3ClientResolvedConfig,
-  type ServiceInputTypes,
-  type ServiceOutputTypes,
-} from "./aws-sdk-adapter.js";
 import type {
   AccountInfo,
   AuthorizeAccountResponse,
@@ -12,57 +5,13 @@ import type {
   UploadUrlEntry,
 } from "@backblaze-labs/b2-sdk";
 import { createS3ClientConfig } from "@backblaze-labs/b2-sdk/s3";
-import type { Command, HttpHandlerOptions } from "@smithy/types";
 import type { B2AuthResponse, B2Config } from "../utils/types.js";
 import { VERSION } from "../version.js";
-import { currentMcpRequestSignal } from "../request-context.js";
-
-type S3SendCommand<
-  InputType extends ServiceInputTypes,
-  OutputType extends ServiceOutputTypes,
-> = Command<ServiceInputTypes, InputType, ServiceOutputTypes, OutputType, S3ClientResolvedConfig>;
-
-type S3SendCallback<OutputType extends ServiceOutputTypes> = (
-  err: unknown,
-  data?: OutputType,
-) => void;
-
-class RequestAbortS3Client extends S3Client {
-  private optionsWithRequestSignal(options?: HttpHandlerOptions): HttpHandlerOptions | undefined {
-    const signal = currentMcpRequestSignal();
-    if (!signal) return options;
-    if (options?.abortSignal !== undefined) return options;
-    return { ...(options ?? {}), abortSignal: signal };
-  }
-
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    options?: HttpHandlerOptions,
-  ): Promise<OutputType>;
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    cb: S3SendCallback<OutputType>,
-  ): void;
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    options: HttpHandlerOptions,
-    cb: S3SendCallback<OutputType>,
-  ): void;
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    optionsOrCb?: HttpHandlerOptions | S3SendCallback<OutputType>,
-    cb?: S3SendCallback<OutputType>,
-  ): Promise<OutputType> | void {
-    if (typeof optionsOrCb === "function") {
-      const options = this.optionsWithRequestSignal();
-      if (options) return super.send(command, options, optionsOrCb);
-      return super.send(command, optionsOrCb);
-    }
-    const options = this.optionsWithRequestSignal(optionsOrCb);
-    if (cb) return super.send(command, options ?? {}, cb);
-    return super.send(command, options);
-  }
-}
+import {
+  createB2S3PeerClient,
+  type B2S3PeerClient,
+  type B2S3PeerClientConfig,
+} from "./aws-sdk-adapter.js";
 
 class EndpointOnlyAccountInfo implements AccountInfo {
   constructor(private readonly s3ApiUrl: string) {}
@@ -159,7 +108,10 @@ interface B2S3ClientOptions {
   surface?: string;
 }
 
-function customUserAgent(config: B2Config, surface?: string): AwsS3ClientConfig["customUserAgent"] {
+function customUserAgent(
+  config: B2Config,
+  surface?: string,
+): B2S3PeerClientConfig["customUserAgent"] {
   const entries: Array<[string, string]> = [
     ["backblaze-b2-mcp", VERSION],
     ["transport", config.transport ?? "stdio"],
@@ -176,7 +128,7 @@ function customUserAgent(config: B2Config, surface?: string): AwsS3ClientConfig[
 export function buildB2S3ClientConfig(
   config: B2Config,
   options: B2S3ClientOptions = {},
-): AwsS3ClientConfig {
+): B2S3PeerClientConfig {
   if (options.authorizedS3ApiUrl) assertB2S3ApiUrl(options.authorizedS3ApiUrl, config.region);
   const sdkS3Config = createS3ClientConfig({
     accountInfo:
@@ -192,11 +144,11 @@ export function buildB2S3ClientConfig(
   };
 }
 
-export function createS3Client(config: B2Config, options: B2S3ClientOptions = {}): S3Client {
-  return new RequestAbortS3Client(buildB2S3ClientConfig(config, options));
+export function createS3Client(config: B2Config, options: B2S3ClientOptions = {}): B2S3PeerClient {
+  return createB2S3PeerClient(buildB2S3ClientConfig(config, options));
 }
 
-export function createReportS3Client(config: B2Config, auth: B2AuthResponse): S3Client {
+export function createReportS3Client(config: B2Config, auth: B2AuthResponse): B2S3PeerClient {
   return createS3Client(config, {
     applicationKeyId: config.applicationKeyId,
     applicationKey: config.applicationKey,

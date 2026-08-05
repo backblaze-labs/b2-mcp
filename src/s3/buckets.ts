@@ -1,22 +1,9 @@
-import {
-  S3Client,
-  HeadBucketCommand,
-  PutBucketLifecycleConfigurationCommand,
-} from "./aws-sdk-adapter.js";
+import type { B2S3LifecycleRule, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-
-interface S3LifecycleRule {
-  id: string;
-  status: "Enabled" | "Disabled";
-  filter?: { prefix?: string };
-  expiration?: { days?: number; expiredObjectDeleteMarker?: boolean };
-  noncurrentVersionExpiration?: { noncurrentDays: number };
-  abortIncompleteMultipartUpload?: { daysAfterInitiation: number };
-}
 
 // S3-compatible bucket tools are intentionally minimal: anything with a native
 // b2_* equivalent has been removed to keep the tool surface small. Only the two
@@ -27,7 +14,11 @@ interface S3LifecycleRule {
 //                               native lifecycle API does not express
 // A lifecycle rule carrying Expiration/NoncurrentVersionExpiration schedules
 // deletion of objects, so that variant is routed through the destructive gate.
-export function registerS3BucketTools(server: ToolRegistrar, s3: S3Client, config: B2Config): void {
+export function registerS3BucketTools(
+  server: ToolRegistrar,
+  s3: B2S3PeerClient,
+  config: B2Config,
+): void {
   server.registerTool(
     "s3_head_bucket",
     {
@@ -39,7 +30,7 @@ export function registerS3BucketTools(server: ToolRegistrar, s3: S3Client, confi
     },
     async (args) => {
       try {
-        await s3.send(new HeadBucketCommand({ Bucket: args.bucket }));
+        await s3.headBucket(args.bucket);
         return toolSuccess(`Bucket '${args.bucket}' exists and is accessible.`);
       } catch (err) {
         return toolError(err);
@@ -103,34 +94,10 @@ export function registerS3BucketTools(server: ToolRegistrar, s3: S3Client, confi
       try {
         const gate = checkDestructive("s3_put_bucket_lifecycle", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        await s3.send(
-          new PutBucketLifecycleConfigurationCommand({
-            Bucket: args.bucket,
-            LifecycleConfiguration: {
-              Rules: (args.rules as S3LifecycleRule[]).map((r) => ({
-                ID: r.id,
-                Status: r.status,
-                Filter: r.filter ? { Prefix: r.filter.prefix ?? "" } : { Prefix: "" },
-                Expiration: r.expiration
-                  ? {
-                      Days: r.expiration.days,
-                      ExpiredObjectDeleteMarker: r.expiration.expiredObjectDeleteMarker,
-                    }
-                  : undefined,
-                NoncurrentVersionExpiration: r.noncurrentVersionExpiration
-                  ? {
-                      NoncurrentDays: r.noncurrentVersionExpiration.noncurrentDays,
-                    }
-                  : undefined,
-                AbortIncompleteMultipartUpload: r.abortIncompleteMultipartUpload
-                  ? {
-                      DaysAfterInitiation: r.abortIncompleteMultipartUpload.daysAfterInitiation,
-                    }
-                  : undefined,
-              })),
-            },
-          }),
-        );
+        await s3.putBucketLifecycle({
+          bucket: args.bucket,
+          rules: args.rules as B2S3LifecycleRule[],
+        });
         return toolSuccess(`Lifecycle rules updated for bucket '${args.bucket}'.`);
       } catch (err) {
         return toolError(err);
