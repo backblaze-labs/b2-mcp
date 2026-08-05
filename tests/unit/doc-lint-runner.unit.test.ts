@@ -48,7 +48,7 @@ describe("doc lint runner", () => {
     expect(env).not.toHaveProperty("GITHUB_ACTIONS");
   });
 
-  it("blocks network and child-process APIs in the lint process", () => {
+  it("blocks egress, listener, and child-process APIs in the lint process", () => {
     const env = buildDocLintEnv({
       lockdownPath,
       sourceEnv: { PATH: process.env.PATH },
@@ -58,21 +58,81 @@ describe("doc lint runner", () => {
       [
         "-e",
         [
+          "(async () => {",
           'const https = require("node:https");',
+          'const http = require("node:http");',
+          'const net = require("node:net");',
+          'const tls = require("node:tls");',
+          'const dns = require("node:dns");',
+          'const dnsPromises = require("node:dns/promises");',
+          'const inspector = require("node:inspector");',
           'const child = require("node:child_process");',
-          "let blocked = 0;",
-          'for (const fn of [() => https.request("https://example.invalid"), () => child.spawnSync("node", ["-v"])]) {',
-          "  try { fn(); } catch (err) { blocked++; console.error(err.message); }",
+          "const blocked = [];",
+          "async function expectBlocked(label, fn) {",
+          "  try {",
+          "    const value = fn();",
+          '    if (value && typeof value.then === "function") await value;',
+          "    console.error(`${label} was not blocked`);",
+          "  } catch (err) {",
+          "    const message = err && err.message ? err.message : String(err);",
+          '    if (message.includes("doc-lint lockdown blocked")) {',
+          "      blocked.push(label);",
+          "      console.error(`${label}: ${message}`);",
+          "      return;",
+          "    }",
+          "    console.error(`${label} failed without lockdown: ${message}`);",
+          "  }",
           "}",
-          "process.exit(blocked === 2 ? 0 : 1);",
+          'await expectBlocked("https.request", () => https.request("https://example.invalid"));',
+          'await expectBlocked("net.Socket.connect", () => {',
+          "  const socket = new net.Socket();",
+          '  socket.on("error", () => {});',
+          "  try {",
+          '    return socket.connect({ host: "127.0.0.1", port: 9 });',
+          "  } finally {",
+          "    socket.destroy();",
+          "  }",
+          "});",
+          'await expectBlocked("tls.TLSSocket", () => new tls.TLSSocket());',
+          'await expectBlocked("http.ClientRequest", () => new http.ClientRequest("http://127.0.0.1:9"));',
+          'await expectBlocked("http.Agent.createConnection", () =>',
+          '  new http.Agent().createConnection({ host: "127.0.0.1", port: 9 }),',
+          ");",
+          'await expectBlocked("dns.promises.resolve4", () => dns.promises.resolve4("example.invalid"));',
+          'await expectBlocked("dns/promises.resolve4", () => dnsPromises.resolve4("example.invalid"));',
+          'await expectBlocked("inspector.open", () => inspector.open(0, "0.0.0.0"));',
+          'await expectBlocked("child_process.spawnSync", () => child.spawnSync("node", ["-v"]));',
+          "process.exit(blocked.length === 9 ? 0 : 1);",
+          "})().catch((err) => { console.error(err); process.exit(1); });",
         ].join("\n"),
       ],
-      { cwd: root, encoding: "utf8", env },
+      { cwd: root, encoding: "utf8", env, timeout: 5000 },
     );
 
     expect(result.status).toBe(0);
-    expect(outputOf(result)).toContain("doc-lint lockdown blocked https.request network egress");
-    expect(outputOf(result)).toContain("doc-lint lockdown blocked child_process.spawnSync");
+    expect(outputOf(result)).toContain(
+      "https.request: doc-lint lockdown blocked https.request network egress",
+    );
+    expect(outputOf(result)).toContain(
+      "net.Socket.connect: doc-lint lockdown blocked net.Socket.connect network egress",
+    );
+    expect(outputOf(result)).toContain(
+      "tls.TLSSocket: doc-lint lockdown blocked tls.TLSSocket network egress",
+    );
+    expect(outputOf(result)).toContain(
+      "http.ClientRequest: doc-lint lockdown blocked http.ClientRequest network egress",
+    );
+    expect(outputOf(result)).toContain(
+      "http.Agent.createConnection: doc-lint lockdown blocked http.Agent.createConnection network egress",
+    );
+    expect(outputOf(result)).toContain("dns.promises.resolve4: doc-lint lockdown blocked");
+    expect(outputOf(result)).toContain("dns/promises.resolve4: doc-lint lockdown blocked");
+    expect(outputOf(result)).toContain(
+      "inspector.open: doc-lint lockdown blocked inspector.open listener",
+    );
+    expect(outputOf(result)).toContain(
+      "child_process.spawnSync: doc-lint lockdown blocked child_process.spawnSync",
+    );
   });
 
   it("detects checkout credentials that actions/checkout can persist", () => {
@@ -107,12 +167,23 @@ describe("doc lint runner", () => {
   });
 
   it("keeps eslint.config.js limited to parser plus doc-comment plugins", () => {
-    const config = readFileSync(join(root, "eslint.config.js"), "utf8");
+    type FlatConfig = {
+      files?: string[];
+      plugins?: Record<string, unknown>;
+      languageOptions?: { parser?: unknown };
+      rules?: Record<string, unknown>;
+    };
+    const config = nodeRequire(join(root, "eslint.config.js")) as FlatConfig[];
+    const tseslint = nodeRequire("typescript-eslint") as { parser: unknown };
+    const docConfig = config.find((entry) => entry.files?.includes("src/**/*.ts"));
 
-    expect(config).toContain("parser: tseslint.parser");
-    expect(config).toContain("eslint-plugin-jsdoc");
-    expect(config).toContain("eslint-plugin-tsdoc");
-    expect(config).not.toContain("disabledTypeScriptRules");
-    expect(config).not.toContain('"@typescript-eslint": tseslint.plugin');
+    expect(docConfig).toBeDefined();
+    expect(docConfig?.languageOptions?.parser).toBe(tseslint.parser);
+    expect(Object.keys(docConfig?.plugins ?? {}).sort()).toEqual(["jsdoc", "tsdoc"]);
+    expect(
+      Object.keys(docConfig?.rules ?? {}).some((ruleName) =>
+        ruleName.startsWith("@typescript-eslint/"),
+      ),
+    ).toBe(false);
   });
 });

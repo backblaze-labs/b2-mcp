@@ -42,6 +42,8 @@ module.exports = [
       ],
       "jsdoc/require-param-description": "error",
       "jsdoc/require-hyphen-before-param-description": ["error", "always"],
+      // Keep public return docs intentional even when small wrappers need a
+      // short @returns line; the docs gate covers exported API surfaces.
       "jsdoc/require-returns": ["error", { publicOnly: true }],
       "jsdoc/require-returns-check": "error",
       "jsdoc/require-throws": "error",

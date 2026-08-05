@@ -83,7 +83,6 @@
   "devDependencies": {
     "@babel/plugin-transform-modules-commonjs": "7.29.7",
     "@biomejs/biome": "2.5.7",
-    "@microsoft/tsdoc-config": "0.18.1",
     "@modelcontextprotocol/client": "2.0.0",
     "@toon-format/toon": "4.1.0",
     "@types/jest": "^29.5.0",

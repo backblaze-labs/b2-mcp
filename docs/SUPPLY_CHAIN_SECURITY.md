@@ -38,9 +38,12 @@ npm run audit:supply-chain:denylist -- --packlist
 [`../scripts/run-doc-lint.mjs`](../scripts/run-doc-lint.mjs) wrapper rather than
 executing the ESLint binary directly. The wrapper strips secret-like environment
 variables, refuses local checkout credentials such as persisted GitHub
-`extraheader` values, and preloads a lockdown module that blocks Node network,
-DNS, child-process, and worker APIs before ESLint plugins are loaded. CI jobs
-that run `lint:docs` also check out with `persist-credentials: false`.
+`extraheader` values, and preloads a best-effort lockdown module that denies the
+tracked Node network, DNS, listener, child-process, and worker APIs before
+ESLint plugins are loaded. This in-process denylist is not a complete sandbox;
+review it when the Node runtime is upgraded and add newly exposed egress or code
+execution APIs to the lockdown tests. CI jobs that run `lint:docs` also check
+out with `persist-credentials: false`.
 
 ## Normal Install Policy
 

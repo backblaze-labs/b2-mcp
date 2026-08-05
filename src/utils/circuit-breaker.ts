@@ -147,7 +147,7 @@ async function withDeadlineSignal<T>(timeoutMs: number, fn: () => Promise<T>): P
  * Run `fn` through the circuit breaker. When the breaker is open, this
  * throws an `EOPENBREAKER` error immediately without invoking `fn`.
  *
- * @returns The result produced by `fn`.
+ * @returns The callback result after the default circuit breaker allows execution.
  */
 export async function withCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return breaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
@@ -157,7 +157,7 @@ export async function withCircuit<T>(fn: () => Promise<T>): Promise<T> {
  * Like withCircuit, but for long-running transfers — no per-call timeout.
  * Use for uploads and large file downloads, never for quick metadata calls.
  *
- * @returns The result produced by `fn`.
+ * @returns The callback result after the transfer circuit breaker allows execution.
  */
 export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return longBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
@@ -166,7 +166,7 @@ export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
 /**
  * Run Usage Report S3 calls through their own breaker.
  *
- * @returns The result produced by `fn`.
+ * @returns The callback result after the usage-report circuit breaker allows execution.
  */
 export async function withReportCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return reportBreaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;

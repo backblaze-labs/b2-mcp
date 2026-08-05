@@ -265,7 +265,6 @@ describe("supply-chain audit policy", () => {
 
   it("exact-pins executable doc lint tooling", () => {
     for (const name of [
-      "@microsoft/tsdoc-config",
       "eslint",
       "eslint-plugin-jsdoc",
       "eslint-plugin-tsdoc",
