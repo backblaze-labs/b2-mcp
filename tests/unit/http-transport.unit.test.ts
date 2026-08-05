@@ -22,6 +22,7 @@ import {
   invalidateCapabilityCache,
 } from "../../src/server";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
+import { logger } from "../../src/utils/logger";
 import {
   JSON_HEADERS,
   type Resp,
@@ -76,6 +77,46 @@ function postDeclaredLargeBody(port: number, pathname: string): Promise<Resp> {
       "content-length": String(1024 * 1024 + 1),
     },
     body: "{}",
+  });
+}
+
+function requestAndTrackEnd(
+  port: number,
+  method: string,
+  pathname: string,
+  opts: { headers?: Record<string, string>; body?: string } = {},
+): Promise<Resp & { ended: boolean }> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let status = 0;
+    let data = "";
+    let headers: http.IncomingHttpHeaders = {};
+    const finish = (ended: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status, body: data, headers, ended });
+    };
+    const req = http.request(
+      { host: "127.0.0.1", port, method, path: pathname, headers: opts.headers },
+      (res) => {
+        status = res.statusCode ?? 0;
+        headers = res.headers;
+        res.on("data", (c) => (data += c));
+        res.on("end", () => finish(true));
+        res.on("aborted", () => finish(false));
+        res.on("error", () => finish(false));
+        res.on("close", () => finish(false));
+      },
+    );
+    req.on("error", () => finish(false));
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(new Error("request timed out"));
+    }, 4000);
+    timer.unref();
+    if (opts.body) req.write(opts.body);
+    req.end();
   });
 }
 
@@ -659,6 +700,38 @@ describe("HTTP transport handler", () => {
       error: { code: -32603, message: "Internal server error" },
       id: null,
     });
+  });
+
+  it("reports response stream failures and fails the connection", async () => {
+    const streamError = new Error("stream failed while client connected");
+    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      mcpHandler: {
+        fetch: jest.fn(async () => {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("data: partial\n\n"));
+              controller.error(streamError);
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }),
+        close: jest.fn(),
+      },
+    });
+
+    const res = await requestAndTrackEnd(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+
+    expect(res.ended).toBe(false);
+    expect(warnSpy).toHaveBeenCalledWith({ err: streamError.message }, "mcp.http.failed");
   });
 
   it("aborts the adapter Request signal when the client disconnects", async () => {

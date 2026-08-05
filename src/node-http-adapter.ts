@@ -18,6 +18,14 @@ export interface NodeHttpAdapterOptions {
   onerror?: (error: Error) => void;
 }
 
+function reportAdapterError(options: NodeHttpAdapterOptions, error: unknown): void {
+  try {
+    options.onerror?.(error instanceof Error ? error : new Error(String(error)));
+  } catch {
+    // Error observers must not prevent a protocol-safe response.
+  }
+}
+
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -112,6 +120,7 @@ async function writeWebResponse(
   response: Response,
   res: ServerResponse,
   signal: AbortSignal,
+  options: NodeHttpAdapterOptions,
 ): Promise<void> {
   const headers: Record<string, string> = {};
   for (const [name, value] of response.headers) headers[name] = value;
@@ -123,8 +132,11 @@ async function writeWebResponse(
         if (signal.aborted) break;
         if (!res.write(chunk)) await waitForDrain(res, signal);
       }
-    } catch {
-      // A response stream can reject after the client has disconnected.
+    } catch (error) {
+      if (signal.aborted || res.destroyed) return;
+      reportAdapterError(options, error);
+      if (!res.destroyed) res.destroy(error instanceof Error ? error : new Error(String(error)));
+      return;
     }
   }
 
@@ -158,15 +170,11 @@ export function createNodeHttpHandler(
       };
       response = await handler.fetch(request, requestOptions);
     } catch (error) {
-      try {
-        options.onerror?.(error instanceof Error ? error : new Error(String(error)));
-      } catch {
-        // Error observers must not prevent a protocol-safe response.
-      }
+      reportAdapterError(options, error);
       response = internalServerError(parsedBody);
     }
 
-    await writeWebResponse(response, res, abortController.signal);
+    await writeWebResponse(response, res, abortController.signal, options);
     finished = true;
   };
 }
