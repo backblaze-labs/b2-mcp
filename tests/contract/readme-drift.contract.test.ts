@@ -2,36 +2,27 @@
  * Doc-drift guard: README.md must stay in sync with the registered tool surface.
  *
  * The tool count and tool tables in README.md are hand-maintained and have
- * drifted before (the 4 insight tools shipped without README rows, and the
- * headline count read 36 for weeks after the surface hit 40). These tests make
- * the README self-policing: every registered tool must appear in a README
- * table, every backticked tool name in the README must exist on the server,
- * and the headline counts must match the registry.
+ * drifted before. These tests make the README self-policing: every contracted
+ * tool must appear in a README table, every backticked tool name in the README
+ * must exist in the contract, and the headline counts must match the generated
+ * contract artifact.
  */
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
+import { readJson } from "./support";
 
 let toolNames: string[];
 let readme: string;
 let v1Scope: string;
+let contract: {
+  profiles: Record<string, { names: string[]; counts: { total: number; b2: number; s3: number } }>;
+};
 
 beforeAll(() => {
-  const config = {
-    applicationKeyId: "test",
-    applicationKey: "test",
-    appKeyId: "test",
-    appKey: "test",
-    masterKeyId: "test",
-    masterKey: "test",
-    region: "us-west-004",
-    allowLocalFiles: true,
-    fileRoot: null,
-  };
-  const server = createServer(config);
-  toolNames = Object.keys(getRegisteredTools(server) ?? {}).sort();
+  contract = readJson("docs/tool-profile-contract.json");
+  toolNames = contract.profiles.full.names;
   readme = readFileSync(join(__dirname, "../../README.md"), "utf8");
   v1Scope = readFileSync(join(__dirname, "../../docs/V1_SCOPE.md"), "utf8");
 });
@@ -55,7 +46,7 @@ describe("README tool-surface drift", () => {
     expect(stale).toEqual([]);
   });
 
-  it("headline tool counts match the registry", () => {
+  it("headline tool counts match the generated contract artifact", () => {
     const total = toolNames.length;
     const native = toolNames.filter((n) => n.startsWith("b2_")).length;
     const s3 = toolNames.filter((n) => n.startsWith("s3_")).length;
@@ -109,11 +100,17 @@ describe("V1 scope profile drift", () => {
       expect(b2).toHaveLength(counts.b2);
       expect(s3).toHaveLength(counts.s3);
       expect([...b2, ...s3]).toHaveLength(counts.total);
+      expect(counts).toEqual({
+        total: contract.profiles[profile].counts.total,
+        b2: contract.profiles[profile].counts.b2,
+        s3: contract.profiles[profile].counts.s3,
+      });
+      expect([...b2, ...s3].sort()).toEqual(contract.profiles[profile].names);
     },
   );
 
-  it("full profile list matches actual registration", () => {
+  it("full profile list matches the generated contract artifact", () => {
     const listed = [...listedTools("full", "b2"), ...listedTools("full", "s3")].sort();
-    expect(listed).toEqual(toolNames);
+    expect(listed).toEqual(contract.profiles.full.names);
   });
 });

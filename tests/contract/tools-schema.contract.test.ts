@@ -16,6 +16,18 @@
 
 import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { readJson } from "./support";
+
+const contract = readJson<{
+  profiles: {
+    full: {
+      names: string[];
+      counts: { total: number; b2: number; s3: number; bz: number };
+    };
+  };
+}>("docs/tool-profile-contract.json");
+const contractToolNames = contract.profiles.full.names;
+const contractCounts = contract.profiles.full.counts;
 
 // ── Zod-mini schema helpers ───────────────────────────────────────────────────
 
@@ -64,8 +76,9 @@ beforeAll(() => {
 // ── Inventory ─────────────────────────────────────────────────────────────────
 
 describe("Tool inventory", () => {
-  it("registers exactly 40 callable tool names", () => {
-    expect(toolNames.length).toBe(40);
+  it("registers the full profile's contracted callable tool names", () => {
+    expect(toolNames).toEqual(contractToolNames);
+    expect(toolNames.length).toBe(contractCounts.total);
   });
 
   it("has no duplicate tool names", () => {
@@ -80,65 +93,23 @@ describe("Tool inventory", () => {
     expect(invalid).toEqual([]);
   });
 
-  it("has 21 B2 native + Partner + insight b2_ tool names", () => {
-    expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(21);
+  it("has the contracted B2 native + Partner + insight b2_ tool count", () => {
+    expect(toolNames.filter((n) => n.startsWith("b2_")).length).toBe(contractCounts.b2);
   });
 
   it("has no bz_ backup tools (Computer Backup is out of scope)", () => {
-    expect(toolNames.filter((n) => n.startsWith("bz_")).length).toBe(0);
+    expect(toolNames.filter((n) => n.startsWith("bz_")).length).toBe(contractCounts.bz);
   });
 
-  it("has 19 S3-compatible tools (the object data plane)", () => {
-    expect(toolNames.filter((n) => n.startsWith("s3_")).length).toBe(19);
+  it("has the contracted S3-compatible object data-plane tool count", () => {
+    expect(toolNames.filter((n) => n.startsWith("s3_")).length).toBe(contractCounts.s3);
   });
 });
 
 // ── Per-tool schema validation ────────────────────────────────────────────────
 
 describe("Every tool has a valid description", () => {
-  const toolList = [
-    // B2 native — control plane (buckets, keys, object lock)
-    "b2_authorize_account",
-    "b2_list_buckets",
-    "b2_create_bucket",
-    "b2_delete_bucket",
-    "b2_update_bucket",
-    "b2_get_bucket_notification_rules",
-    "b2_set_bucket_notification_rules",
-    "b2_create_key",
-    "b2_list_keys",
-    "b2_delete_key",
-    "b2_update_file_legal_hold",
-    "b2_update_file_retention",
-    // Partner API (b2_ prefix)
-    "b2_list_groups",
-    "b2_create_group_member",
-    "b2_eject_group_member",
-    "b2_list_group_members",
-    "b2_reserve_trial_create_account",
-    // S3-compatible — object data plane
-    "s3_put_object",
-    "s3_get_object",
-    "s3_delete_object",
-    "s3_delete_objects",
-    "s3_head_object",
-    "s3_copy_object",
-    "s3_list_objects_v2",
-    "s3_list_object_versions",
-    "s3_create_multipart_upload",
-    "s3_presign_upload_part",
-    "s3_complete_multipart_upload",
-    "s3_abort_multipart_upload",
-    "s3_list_parts",
-    "s3_list_multipart_uploads",
-    "s3_upload_part_copy",
-    "s3_get_presigned_url",
-    "s3_head_bucket",
-    "s3_get_bucket_location",
-    "s3_put_bucket_lifecycle",
-  ];
-
-  test.each(toolList)("%s has a description longer than 20 chars", (name) => {
+  test.each(contractToolNames)("%s has a description longer than 20 chars", (name) => {
     const tool = tools[name];
     expect(tool).toBeDefined();
     expect(typeof tool.description).toBe("string");

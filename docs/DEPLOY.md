@@ -504,20 +504,27 @@ tool per credential scope.
 Server or principal mode, where the client sends no B2 key:
 
 ```bash
-MCP_URL=https://mcp.your-domain.example/mcp npm run smoke
+MCP_URL=https://mcp.your-domain.example/mcp \
+B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
+npm run smoke
 ```
 
 Header compatibility mode, where the client still sends B2 credential headers:
 
 ```bash
 MCP_URL=https://mcp.your-domain.example/mcp \
+B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
 B2_KEY_ID=...  B2_KEY=... \
 B2_APP_KEY_ID=...  B2_APP_KEY=... \
 npm run smoke
 ```
 
 `B2_APP_KEY_ID` / `B2_APP_KEY` are optional — if absent the S3 check is
-skipped. Exit code 0 = pass, 1 = at least one check failed.
+skipped. `B2_MCP_EXPECTED_TOOL_PROFILE` is required for deploy verification and
+must be one of `full`, `phase1-default`, or `read-only`; the smoke test compares
+the live sorted tool names and normalized tool-contract hash against that frozen
+profile. For exploratory local checks only, set `B2_MCP_ALLOW_ANY_TOOL_PROFILE=true`
+to accept any frozen profile. Exit code 0 = pass, 1 = at least one check failed.
 
 ### CI smoke runs
 
@@ -529,6 +536,8 @@ The same script also runs automatically via `.github/workflows/smoke.yml`:
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
+- `vars.B2_MCP_EXPECTED_TOOL_PROFILE` — expected frozen profile for the live
+  credential set (`phase1-default`, `read-only`, or `full`)
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 

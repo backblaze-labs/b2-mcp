@@ -112,10 +112,11 @@ jobs:
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
           B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
         run: |
           set -euo pipefail
           missing=0
-          for name in MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY; do
+          for name in MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_MCP_EXPECTED_TOOL_PROFILE; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-smoke variable or secret for ${name}"
               missing=1
@@ -129,3 +130,4 @@ jobs:
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
           B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}

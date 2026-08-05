@@ -17,6 +17,8 @@
  *   B2_APP_KEY_ID — value for the X-B2-App-Key-Id header
  *   B2_APP_KEY    — value for the X-B2-App-Key header
  *   B2_SMOKE_BUCKET — known bucket to probe with s3_head_bucket
+ *   B2_MCP_EXPECTED_TOOL_PROFILE — full, phase1-default, or read-only
+ *   B2_MCP_ALLOW_ANY_TOOL_PROFILE — set to true only for exploratory local smoke runs
  *
  * Optional env for a customer OAuth/resource-server edge:
  *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
@@ -25,6 +27,18 @@
  * printed.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import smokeContract from "./lib/smoke-contract.cjs";
+
+const { evaluateProfileContract } = smokeContract;
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const toolContract = JSON.parse(
+  readFileSync(join(root, "docs/tool-profile-contract.json"), "utf8"),
+);
+
 const {
   MCP_URL,
   B2_KEY_ID,
@@ -32,34 +46,15 @@ const {
   B2_APP_KEY_ID,
   B2_APP_KEY,
   B2_SMOKE_BUCKET,
+  B2_MCP_EXPECTED_TOOL_PROFILE,
+  B2_MCP_ALLOW_ANY_TOOL_PROFILE,
   MCP_AUTHORIZATION,
 } = process.env;
 
-if (!MCP_URL) {
-  console.error("Missing required env: MCP_URL");
-  process.exit(2);
-}
-
-if ((B2_KEY_ID && !B2_KEY) || (!B2_KEY_ID && B2_KEY)) {
-  console.error("B2_KEY_ID and B2_KEY must be set together for headers mode");
-  process.exit(2);
-}
-
-const headers = {};
-if (B2_KEY_ID && B2_KEY) {
-  headers["X-B2-Key-Id"] = B2_KEY_ID;
-  headers["X-B2-Key"] = B2_KEY;
-}
-if (B2_APP_KEY_ID && B2_APP_KEY) {
-  headers["X-B2-App-Key-Id"] = B2_APP_KEY_ID;
-  headers["X-B2-App-Key"] = B2_APP_KEY;
-}
-if (MCP_AUTHORIZATION) {
-  headers.Authorization = MCP_AUTHORIZATION;
-}
-
 const failures = [];
 let nextId = 1;
+let mcpUrl = MCP_URL;
+let headers = {};
 
 function check(name, ok, detail = "") {
   const mark = ok ? "PASS" : "FAIL";
@@ -69,7 +64,7 @@ function check(name, ok, detail = "") {
 
 async function mcp(method, params = {}) {
   const name = method === "tools/call" ? params.name : undefined;
-  const response = await fetch(MCP_URL, {
+  const response = await fetch(mcpUrl, {
     method: "POST",
     headers: {
       ...headers,
@@ -107,11 +102,79 @@ function parseToolJson(result) {
   }
 }
 
+export function sortedToolNames(tools) {
+  return [...tools].sort((a, b) => a.localeCompare(b));
+}
+
+export function liveToolContractSnapshot(tools, helpers) {
+  const sortedTools = [...(tools ?? [])]
+    .filter((tool) => tool?.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const names = sortedTools.map((tool) => tool.name);
+  return {
+    names,
+    hash: helpers.fixtureHash({ names, tools: sortedTools.map(helpers.normalizeTool) }),
+  };
+}
+
+function configureRequestContext() {
+  if (!MCP_URL) {
+    console.error("Missing required env: MCP_URL");
+    process.exit(2);
+  }
+
+  if ((B2_KEY_ID && !B2_KEY) || (!B2_KEY_ID && B2_KEY)) {
+    console.error("B2_KEY_ID and B2_KEY must be set together for headers mode");
+    process.exit(2);
+  }
+
+  mcpUrl = MCP_URL;
+  headers = {};
+  if (B2_KEY_ID && B2_KEY) {
+    headers["X-B2-Key-Id"] = B2_KEY_ID;
+    headers["X-B2-Key"] = B2_KEY;
+  }
+  if (B2_APP_KEY_ID && B2_APP_KEY) {
+    headers["X-B2-App-Key-Id"] = B2_APP_KEY_ID;
+    headers["X-B2-App-Key"] = B2_APP_KEY;
+  }
+  if (MCP_AUTHORIZATION) {
+    headers.Authorization = MCP_AUTHORIZATION;
+  }
+}
+
+async function loadContractHelpers() {
+  const helperPath = join(root, "dist/tool-contract.js");
+  try {
+    const helpers = await import(pathToFileURL(helperPath).href);
+    if (typeof helpers.normalizeTool !== "function" || typeof helpers.fixtureHash !== "function") {
+      throw new Error("dist/tool-contract.js does not export the contract helpers");
+    }
+    return helpers;
+  } catch (err) {
+    console.error(
+      `Unable to load compiled tool-contract helpers from ${helperPath}. Run npm run build before npm run smoke. ${err.message}`,
+    );
+    process.exit(2);
+  }
+}
+
 async function main() {
-  console.log(`Connecting: ${MCP_URL}`);
+  configureRequestContext();
+  const helpers = await loadContractHelpers();
+  console.log(`Connecting: ${mcpUrl}`);
 
   const tools = await mcp("tools/list");
-  const toolNames = new Set((tools.tools ?? []).map((tool) => tool?.name).filter(Boolean));
+  const liveSnapshot = liveToolContractSnapshot(tools.tools, helpers);
+  const toolNames = new Set(liveSnapshot.names);
+  const expectedProfile = B2_MCP_EXPECTED_TOOL_PROFILE;
+  const allowAnyProfile = B2_MCP_ALLOW_ANY_TOOL_PROFILE === "true";
+  const profileResult = evaluateProfileContract({
+    snapshot: liveSnapshot,
+    toolContract,
+    expectedProfile,
+    allowAnyProfile,
+  });
   const info = tools?._meta?.["io.modelcontextprotocol/serverInfo"];
   check(
     "tools/list returns server info",
@@ -119,6 +182,9 @@ async function main() {
     `server=${info?.name} v${info?.version}`,
   );
   check("tools/list returns registered tools", toolNames.size > 0, `${toolNames.size} tools`);
+  for (const result of profileResult.checks) {
+    check(result.name, result.ok, result.detail);
+  }
   check(
     "tools/list includes b2_authorize_account",
     toolNames.has("b2_authorize_account"),
@@ -170,7 +236,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err.message ?? err);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("Fatal:", err.message ?? err);
+    process.exit(1);
+  });
+}

@@ -11,17 +11,17 @@
     "directProductionDependencyCount": 7,
     "totalProductionPackageCount": 47,
     "transitiveProductionPackageCount": 39,
-    "packedTarballBytes": 181125,
-    "unpackedPackageBytes": 797982,
-    "packedEntryCount": 165,
-    "cleanConsumerInstallFootprintBytes": 27646594
+    "packedTarballBytes": 228193,
+    "unpackedPackageBytes": 1123560,
+    "packedEntryCount": 177,
+    "cleanConsumerInstallFootprintBytes": 27972172
   },
   "limits": {
     "directProductionDependencyCount": 7,
     "totalProductionPackageCount": 47,
-    "packedTarballBytes": 200000,
-    "unpackedPackageBytes": 850000,
-    "packedEntryCount": 175,
+    "packedTarballBytes": 252000,
+    "unpackedPackageBytes": 1200000,
+    "packedEntryCount": 188,
     "cleanConsumerInstallFootprintBytes": 30000000
   },
   "directProductionDependencies": {

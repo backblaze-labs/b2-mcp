@@ -239,7 +239,8 @@ npx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspect
 - [`docs/CLIENTS.md`](docs/CLIENTS.md) — per-client setup + compatibility matrix
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — hosted deployment + security baseline
 - [`docs/PUBLIC_CONTRACTS.md`](docs/PUBLIC_CONTRACTS.md) — public document ownership and contract status
-- [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — Phase 1 tool-contract skeleton
+- [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — Phase 1 tool-contract policy
+- [`docs/TOOL_PROFILES.md`](docs/TOOL_PROFILES.md) — generated tool-profile reference
 - [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
 - [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md) — pre-public security and provenance review checklist
 - [`RELEASE.md`](RELEASE.md) — release process and `[Unreleased]` discipline
