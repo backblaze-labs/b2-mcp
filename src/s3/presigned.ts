@@ -3,18 +3,6 @@ import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
 import { B2Client } from "../b2/client.js";
 
-type PresignOperationInput = "GetObject" | "PutObject" | "GET" | "PUT" | "get" | "put";
-
-function normalizePresignOperation(args: {
-  operation?: PresignOperationInput;
-  method?: "GET" | "PUT" | "get" | "put";
-}): "GetObject" | "PutObject" {
-  const value = args.operation ?? args.method;
-  if (value === "GetObject" || value === "GET" || value === "get") return "GetObject";
-  if (value === "PutObject" || value === "PUT" || value === "put") return "PutObject";
-  throw new Error("operation must be GetObject/PutObject or method must be GET/PUT.");
-}
-
 /**
  * Presigned URL tools for the B2 S3-compatible API.
  *
@@ -33,15 +21,8 @@ export function registerS3PresignedTools(server: ToolRegistrar, b2: B2Client): v
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
         operation: z
-          .enum(["GetObject", "PutObject", "GET", "PUT", "get", "put"])
-          .optional()
-          .describe(
-            "The operation the URL allows: GetObject/GET to download, PutObject/PUT to upload.",
-          ),
-        method: z
-          .enum(["GET", "PUT", "get", "put"])
-          .optional()
-          .describe("Legacy alias for operation. Prefer operation."),
+          .enum(["GetObject", "PutObject"])
+          .describe("The operation the URL allows: GetObject to download or PutObject to upload."),
         expiresIn: z
           .number()
           .int()
@@ -62,11 +43,14 @@ export function registerS3PresignedTools(server: ToolRegistrar, b2: B2Client): v
     },
     async (args) => {
       try {
+        if (args.operation !== "GetObject" && args.operation !== "PutObject") {
+          return toolError(new Error("operation must be GetObject or PutObject."));
+        }
         return toolJson(
           await b2.s3PresignObjectUrl({
             bucket: args.bucket,
             key: args.key,
-            operation: normalizePresignOperation(args),
+            operation: args.operation,
             expiresIn: args.expiresIn ?? 3600,
             versionId: args.versionId,
             contentType: args.contentType,

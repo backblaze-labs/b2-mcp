@@ -4,11 +4,13 @@
  * simulator; only S3-material bucket/multipart operations mock S3Client.send.
  */
 
-import { B2Client as SdkB2Client, BucketType, BufferSource } from "@backblaze-labs/b2-sdk";
+import { B2Client as SdkB2Client, BucketType, BufferSource, SSE_B2 } from "@backblaze-labs/b2-sdk";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { B2Client } from "../../src/b2/client";
+import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { installSdkTransport } from "../support/sdk-test-helpers";
 
@@ -83,6 +85,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  circuitBreaker.close();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
 });
@@ -175,6 +178,198 @@ describe("s3_list_object_versions", () => {
     expect(result.versions[0].IsLatest).toBe(false);
     expect(sendSpy).not.toHaveBeenCalled();
   });
+
+  it("keeps IsLatest false for older versions continued onto another page", async () => {
+    const bucket = await createBucket("versions-bucket");
+    await bucket.upload({
+      fileName: "k",
+      source: new BufferSource(new TextEncoder().encode("old")),
+    });
+    await bucket.upload({
+      fileName: "k",
+      source: new BufferSource(new TextEncoder().encode("new")),
+    });
+
+    const first = parseResult(
+      await callTool(server, "s3_list_object_versions", {
+        bucket: "versions-bucket",
+        maxKeys: 1,
+      }),
+    );
+    const second = parseResult(
+      await callTool(server, "s3_list_object_versions", {
+        bucket: "versions-bucket",
+        maxKeys: 1,
+        keyMarker: first.nextKeyMarker,
+        versionIdMarker: first.nextVersionIdMarker,
+      }),
+    );
+
+    expect(first.versions[0].IsLatest).toBe(true);
+    expect(second.versions[0].IsLatest).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("versionId ownership validation", () => {
+  async function seedVersionMismatch() {
+    const requestedBucket = await createBucket("requested-bucket");
+    const otherBucket = await createBucket("other-bucket");
+    await requestedBucket.upload({
+      fileName: "expected.txt",
+      source: new BufferSource(new TextEncoder().encode("expected")),
+    });
+    const other = await otherBucket.upload({
+      fileName: "secret.txt",
+      source: new BufferSource(new TextEncoder().encode("secret")),
+    });
+    return { requestedBucket, otherBucket, otherVersionId: String(other.fileId) };
+  }
+
+  it("refuses s3_get_object when versionId belongs to a different bucket/key", async () => {
+    const { otherVersionId } = await seedVersionMismatch();
+
+    const result = await callTool(server, "s3_get_object", {
+      bucket: "requested-bucket",
+      key: "expected.txt",
+      versionId: otherVersionId,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses s3_head_object when versionId belongs to a different bucket/key", async () => {
+    const { otherVersionId } = await seedVersionMismatch();
+
+    const result = await callTool(server, "s3_head_object", {
+      bucket: "requested-bucket",
+      key: "expected.txt",
+      versionId: otherVersionId,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses s3_delete_object when versionId belongs to a different bucket/key", async () => {
+    const { otherBucket, otherVersionId } = await seedVersionMismatch();
+
+    const result = await callTool(server, "s3_delete_object", {
+      bucket: "requested-bucket",
+      key: "expected.txt",
+      versionId: otherVersionId,
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(await otherBucket.getFileInfoByName("secret.txt")).toBeTruthy();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses presigned GET when versionId belongs to a different bucket/key", async () => {
+    const { otherVersionId } = await seedVersionMismatch();
+
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "requested-bucket",
+      key: "expected.txt",
+      operation: "GetObject",
+      versionId: otherVersionId,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("s3_copy_object", () => {
+  it("copies into the requested destination bucket on cross-bucket copy", async () => {
+    const sourceBucket = await createBucket("copy-source");
+    const destinationBucket = await createBucket("copy-destination");
+    await sourceBucket.upload({
+      fileName: "source.txt",
+      source: new BufferSource(new TextEncoder().encode("source")),
+    });
+
+    const result = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeTruthy();
+    expect(await sourceBucket.getFileInfoByName("copied.txt")).toBeNull();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("SDK-backed delete destructive gate", () => {
+  it("blocks s3_delete_object before the SDK hide path without confirm", async () => {
+    const bucket = await createBucket("delete-gate-bucket");
+    await bucket.upload({
+      fileName: "k",
+      source: new BufferSource(new TextEncoder().encode("data")),
+    });
+
+    const result = await callTool(server, "s3_delete_object", {
+      bucket: "delete-gate-bucket",
+      key: "k",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(await bucket.getFileInfoByName("k")).toBeTruthy();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("blocks s3_delete_objects before the SDK hide path without confirm", async () => {
+    const bucket = await createBucket("delete-gate-bucket");
+    await bucket.upload({
+      fileName: "k",
+      source: new BufferSource(new TextEncoder().encode("data")),
+    });
+
+    const result = await callTool(server, "s3_delete_objects", {
+      bucket: "delete-gate-bucket",
+      objects: [{ key: "k" }],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(await bucket.getFileInfoByName("k")).toBeTruthy();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("s3_delete_objects", () => {
+  it("returns bounded-concurrency bulk delete accounting", async () => {
+    const bucket = await createBucket("bulk-delete-bucket");
+    for (let index = 0; index < 12; index++) {
+      await bucket.upload({
+        fileName: `k-${index}`,
+        source: new BufferSource(new TextEncoder().encode(`data-${index}`)),
+      });
+    }
+
+    const result = parseResult(
+      await callTool(server, "s3_delete_objects", {
+        bucket: "bulk-delete-bucket",
+        objects: Array.from({ length: 12 }, (_, index) => ({ key: `k-${index}` })),
+        quiet: false,
+        confirm: true,
+      }),
+    );
+
+    expect(result.errors).toEqual([]);
+    expect(result.deleted).toHaveLength(12);
+    expect(result.attempted).toBe(12);
+    expect(result.aborted).toBe(false);
+    expect(result.maxConcurrency).toBe(8);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
 });
 
 // ── s3_put_bucket_lifecycle ───────────────────────────────────────────────────
@@ -230,6 +425,54 @@ describe("s3_get_bucket_location", () => {
   });
 });
 
+describe("s3_head_object", () => {
+  it("reports SSE-B2 encryption metadata for encrypted objects", async () => {
+    const bucket = await createBucket("head-bucket");
+    await bucket.upload({
+      fileName: "encrypted.txt",
+      source: new BufferSource(new TextEncoder().encode("encrypted")),
+      serverSideEncryption: SSE_B2,
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "encrypted.txt",
+      }),
+    );
+
+    expect(result.serverSideEncryption).toBe("AES256");
+    expect(result.deleteMarker).toBeUndefined();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("reports deleteMarker for an explicit hide-marker version", async () => {
+    const bucket = await createBucket("head-bucket");
+    await bucket.upload({
+      fileName: "hidden.txt",
+      source: new BufferSource(new TextEncoder().encode("hidden")),
+    });
+    await callTool(server, "s3_delete_object", {
+      bucket: "head-bucket",
+      key: "hidden.txt",
+      confirm: true,
+    });
+    const page = await bucket.listFileVersions({ prefix: "hidden.txt" });
+    const marker = page.files.find((file) => file.action === "hide");
+
+    const result = parseResult(
+      await callTool(server, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "hidden.txt",
+        versionId: String(marker?.fileId),
+      }),
+    );
+
+    expect(result.deleteMarker).toBe(true);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
 // ── s3_get_presigned_url ──────────────────────────────────────────────────────
 
 describe("s3_get_presigned_url", () => {
@@ -238,13 +481,40 @@ describe("s3_get_presigned_url", () => {
       await callTool(server, "s3_get_presigned_url", {
         bucket: "my-bucket",
         key: "photo.jpg",
-        operation: "get",
+        operation: "GetObject",
         expiresIn: 3600,
       }),
     );
     // Result is either a URL string or an object with a url field
     const hasUrl = typeof result === "string" || typeof result?.url === "string";
     expect(hasUrl).toBe(true);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects omitted operation instead of relying on runtime defaults", async () => {
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "photo.jpg",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/operation must be GetObject or PutObject/);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("generates URLs while the native circuit breaker is open", async () => {
+    circuitBreaker.open();
+
+    const result = parseResult(
+      await callTool(server, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "PutObject",
+        expiresIn: 3600,
+      }),
+    );
+
+    expect(result.url).toMatch(/^https?:\/\//);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 });
@@ -274,6 +544,8 @@ describe("inline object cap (control-plane-first data path)", () => {
       bucket: "bucket-b",
       key: "k",
       content: small,
+      acl: "public-read",
+      storageClass: "STANDARD",
     });
     expect(result.isError).toBeFalsy();
     expect(sendSpy).not.toHaveBeenCalled();
@@ -292,6 +564,77 @@ describe("inline object cap (control-plane-first data path)", () => {
     expect(result.isError).toBe(true);
     expect(parseResult(result)).toMatch(/inline read limit|s3_get_presigned_url|saveToPath/i);
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("s3_get_object rejects invalid reported contentLength and cancels the body", async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    jest.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
+      key: "k",
+      contentType: "application/octet-stream",
+      contentLength: Number.NaN,
+      lastModified: new Date(),
+      versionId: "v",
+      metadata: {},
+      body: { cancel } as any,
+    });
+
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/invalid content length/i);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("s3_get_object enforces the inline cap while streaming a lying body", async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: jest
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(1024 * 1024 + 1) })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+      cancel,
+      releaseLock: jest.fn(),
+    };
+    jest.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
+      key: "k",
+      contentType: "application/octet-stream",
+      contentLength: 1,
+      lastModified: new Date(),
+      versionId: "v",
+      metadata: {},
+      body: { getReader: () => reader } as any,
+    });
+
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/inline read limit|exceeded/i);
+    expect(cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
+  });
+
+  it("s3_get_object cancels the stream when inline reading fails mid-stream", async () => {
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: jest.fn().mockRejectedValue(new Error("network interrupted")),
+      cancel,
+      releaseLock: jest.fn(),
+    };
+    jest.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
+      key: "k",
+      contentType: "application/octet-stream",
+      contentLength: 10,
+      lastModified: new Date(),
+      versionId: "v",
+      metadata: {},
+      body: { getReader: () => reader } as any,
+    });
+
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
   });
 });
 

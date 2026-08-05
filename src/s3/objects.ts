@@ -19,7 +19,10 @@ interface DeleteObjectEntry {
   versionId?: string;
 }
 
-async function webStreamToBuffer(stream: WebReadableStream<Uint8Array>): Promise<Buffer> {
+async function webStreamToBuffer(
+  stream: WebReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Buffer> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -29,7 +32,16 @@ async function webStreamToBuffer(stream: WebReadableStream<Uint8Array>): Promise
       if (done) break;
       chunks.push(value);
       total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel(`Inline object body exceeded ${maxBytes} bytes.`);
+        throw new Error(
+          `Object body exceeded the ${maxBytes}-byte inline read limit for s3_get_object while streaming.`,
+        );
+      }
     }
+  } catch (err) {
+    await reader.cancel(err).catch(() => undefined);
+    throw err;
   } finally {
     reader.releaseLock();
   }
@@ -65,7 +77,10 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
           .record(z.string(), z.string())
           .optional()
           .describe("Custom metadata key-value pairs."),
-        acl: z.enum(["private", "public-read"]).optional().describe("Canned ACL for the object."),
+        acl: z
+          .enum(["private", "public-read"])
+          .optional()
+          .describe("Accepted as a no-op S3 compatibility hint; B2 bucket policy is unchanged."),
         serverSideEncryption: z
           .enum(["AES256"])
           .optional()
@@ -73,9 +88,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
         storageClass: z
           .string()
           .optional()
-          .describe(
-            "Storage class, e.g. STANDARD (B2 ignores this but accepts it for S3 compatibility).",
-          ),
+          .describe("Accepted as a no-op S3 compatibility hint; B2 storage class is unchanged."),
       },
     },
     async (args) => {
@@ -165,6 +178,11 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
         // and base64-copied into the response (and the model context), so this is
         // a control-plane convenience for small payloads only. Reject before
         // buffering and steer bulk reads to a presigned URL or saveToPath.
+        if (!Number.isFinite(result.contentLength) || result.contentLength < 0) {
+          await result.body.cancel().catch(() => undefined);
+          return toolError(new Error("Object response reported an invalid content length."));
+        }
+
         if (result.contentLength > MAX_INLINE_OBJECT_BYTES) {
           await result.body.cancel().catch(() => undefined);
           return toolError(
@@ -175,7 +193,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
             ),
           );
         }
-        const buffer = await webStreamToBuffer(result.body);
+        const buffer = await webStreamToBuffer(result.body, MAX_INLINE_OBJECT_BYTES);
 
         return toolJson({
           key: args.key,
@@ -226,7 +244,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     "s3_delete_objects",
     {
       description:
-        "Delete multiple objects from a B2 bucket in a single request (up to 1000 objects).",
+        "Delete multiple objects from a B2 bucket with bounded SDK concurrency (up to 1000 objects).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         objects: z
