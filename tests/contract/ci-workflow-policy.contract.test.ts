@@ -43,11 +43,17 @@ describe("CI workflow policy", () => {
     expect(packageBudgetJob).toContain("npm run check:package-budget");
     expect(packageBudgetJob).toContain("Upload package budget reports");
     expect(productionJob).toContain("npm run build");
+    expect(productionJob).toContain("name: Enforce global coverage floors");
     expect(productionJob).toContain("npm run test:coverage");
+    expect(productionJob).toContain("name: Publish coverage summary");
+    expect(productionJob).toContain("GITHUB_STEP_SUMMARY");
     expect(productionJob).toContain("npm run test:slow");
     expect(productionJob).toContain("npm run smoke:package");
     expect(productionJob).not.toContain("test:package");
     expect(currentJob).toContain("npm run test:coverage");
+    expect(currentJob).toContain("name: Enforce global coverage floors");
+    expect(currentJob).toContain("name: Publish coverage summary");
+    expect(currentJob).toContain("GITHUB_STEP_SUMMARY");
     expect(currentJob).toContain("npm run test:slow");
     expect(currentJob).not.toContain("test:package");
     expect(packageJob).toContain("continue-on-error: true");

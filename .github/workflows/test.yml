@@ -88,8 +88,28 @@ jobs:
         continue-on-error: true
         run: npm run typecheck
       - id: coverage
+        name: Enforce global coverage floors
         continue-on-error: true
         run: npm run test:coverage
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          echo "## Coverage summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "Required: statements 82%, branches 72%, functions 86%, lines 86%." >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const s = require('./coverage/coverage-summary.json').total;
+              const fmt = (m) => \`\${m.pct.toFixed(2).padStart(6)}%  (\${m.covered}/\${m.total})\`;
+              console.log('statements:', fmt(s.statements));
+              console.log('branches:  ', fmt(s.branches));
+              console.log('functions: ', fmt(s.functions));
+              console.log('lines:     ', fmt(s.lines));
+            " >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '(coverage-summary.json not found)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - id: slow
         continue-on-error: true
         run: npm run test:slow
@@ -142,8 +162,28 @@ jobs:
         continue-on-error: true
         run: npm run typecheck
       - id: coverage
+        name: Enforce global coverage floors
         continue-on-error: true
         run: npm run test:coverage
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          echo "## Coverage summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "Required: statements 82%, branches 72%, functions 86%, lines 86%." >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const s = require('./coverage/coverage-summary.json').total;
+              const fmt = (m) => \`\${m.pct.toFixed(2).padStart(6)}%  (\${m.covered}/\${m.total})\`;
+              console.log('statements:', fmt(s.statements));
+              console.log('branches:  ', fmt(s.branches));
+              console.log('functions: ', fmt(s.functions));
+              console.log('lines:     ', fmt(s.lines));
+            " >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '(coverage-summary.json not found)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - id: slow
         continue-on-error: true
         run: npm run test:slow

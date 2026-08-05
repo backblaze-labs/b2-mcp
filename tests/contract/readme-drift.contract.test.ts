@@ -16,12 +16,20 @@ import { readJson } from "./support";
 let toolNames: string[];
 let readme: string;
 let v1Scope: string;
+let packageMetadata: {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  engines: { node: string };
+  license: string;
+  name: string;
+};
 let contract: {
   profiles: Record<string, { names: string[]; counts: { total: number; b2: number; s3: number } }>;
 };
 
 beforeAll(() => {
   contract = readJson("docs/tool-profile-contract.json");
+  packageMetadata = readJson("package.json");
   toolNames = contract.profiles.full.names;
   readme = readFileSync(join(__dirname, "../../README.md"), "utf8");
   v1Scope = readFileSync(join(__dirname, "../../docs/V1_SCOPE.md"), "utf8");
@@ -54,6 +62,24 @@ describe("README tool-surface drift", () => {
     expect(readme).toContain(
       `**${total} total — ${native} native (\`b2_*\`) + ${s3} data-plane (\`s3_*\`).**`,
     );
+  });
+});
+
+describe("README project badges", () => {
+  it("tracks repository and package policy", () => {
+    const dependencyCount = Object.keys(packageMetadata.dependencies).length;
+
+    expect(packageMetadata.name).toBe("@backblaze-labs/b2-mcp");
+    expect(packageMetadata.engines.node).toBe(">=22.3.0");
+    expect(packageMetadata.devDependencies.typescript).toMatch(/^~6\./);
+    expect(readme).toContain("actions/workflows/test.yml/badge.svg");
+    expect(readme).toContain("CodeQL-enabled-brightgreen");
+    expect(readme).toContain("npm/v/@backblaze-labs/b2-mcp");
+    expect(readme).toContain(`license-${packageMetadata.license}-blue.svg`);
+    expect(readme).toContain("TypeScript-6.x-3178c6");
+    expect(readme).toContain("Node.js-%E2%89%A522.3-339933");
+    expect(readme).toContain("MCP-2026--07--28-5b5fc7");
+    expect(readme).toContain(`runtime_dependencies-${dependencyCount}-blue`);
   });
 });
 

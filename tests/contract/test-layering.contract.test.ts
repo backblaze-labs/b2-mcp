@@ -280,9 +280,13 @@ describe("test layer naming", () => {
 
   it("enforces the current global coverage floors", () => {
     const vitestConfig = readFileSync(join(root, "vitest.config.mts"), "utf8");
+    const readme = readFileSync(join(root, "README.md"), "utf8");
 
     expect(vitestConfig).toMatch(
       /thresholds:\s*{\s*statements:\s*82,\s*branches:\s*72,\s*functions:\s*86,\s*lines:\s*86,?\s*}/,
+    );
+    expect(readme).toContain(
+      "coverage-S%2082%20%7C%20B%2072%20%7C%20F%2086%20%7C%20L%2086-brightgreen",
     );
   });
 
