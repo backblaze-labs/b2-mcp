@@ -208,9 +208,31 @@ export function confirmToolsFrom(
     .sort();
 }
 
-export function destructiveConfirmToolsForNames(names: string[]): string[] {
-  const present = new Set(names);
-  return DESTRUCTIVE_TOOL_NAMES.filter((name) => present.has(name));
+function schemaContainsLiteral(value: unknown, literal: string): boolean {
+  if (value === literal) return true;
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some((item) => schemaContainsLiteral(item, literal));
+  return Object.values(value).some((item) => schemaContainsLiteral(item, literal));
+}
+
+export function toolAdvertisesDestructivePath(tool: {
+  name: string;
+  inputSchema?: unknown;
+}): boolean {
+  if (!DESTRUCTIVE_TOOL_NAMES.includes(tool.name)) return false;
+  if (tool.name === "s3_get_presigned_url") {
+    return schemaContainsLiteral(tool.inputSchema, "PutObject");
+  }
+  return true;
+}
+
+export function destructiveConfirmToolsFromTools(
+  tools: Array<{ name: string; inputSchema?: unknown }>,
+): string[] {
+  return tools
+    .filter(toolAdvertisesDestructivePath)
+    .map((tool) => tool.name)
+    .sort();
 }
 
 export function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {

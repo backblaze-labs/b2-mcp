@@ -20,6 +20,7 @@ describe("destructive-gate", () => {
         "b2_delete_bucket",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_presigned_url",
         "b2_delete_key",
         "s3_abort_multipart_upload",
         "b2_eject_group_member",
@@ -83,6 +84,36 @@ describe("destructive-gate", () => {
   describe("allow policy", () => {
     it("permits a destructive call without confirm", () => {
       const r = checkDestructive("s3_delete_object", { bucket: "b", key: "k" }, cfg("allow"));
+      expect(r.ok).toBe(true);
+    });
+  });
+
+  describe("presigned write URLs are gated by operation", () => {
+    it("gates PutObject presigning by default", () => {
+      const r = checkDestructive(
+        "s3_get_presigned_url",
+        { bucket: "b", key: "k", operation: "PutObject" },
+        cfg(),
+      );
+      expect(r.ok).toBe(false);
+      expect(r.message).toMatch(/PutObject presigned URL/i);
+    });
+
+    it("allows confirmed PutObject presigning", () => {
+      const r = checkDestructive(
+        "s3_get_presigned_url",
+        { bucket: "b", key: "k", operation: "PutObject", confirm: true },
+        cfg(),
+      );
+      expect(r.ok).toBe(true);
+    });
+
+    it("does not gate GetObject presigning", () => {
+      const r = checkDestructive(
+        "s3_get_presigned_url",
+        { bucket: "b", key: "k", operation: "GetObject" },
+        cfg(),
+      );
       expect(r.ok).toBe(true);
     });
   });

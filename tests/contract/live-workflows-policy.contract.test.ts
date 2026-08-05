@@ -139,6 +139,18 @@ describe("live secret workflow policy", () => {
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
   });
 
+  it("pins the expected tool profile for live smoke", () => {
+    const text = workflowText(".github/workflows/smoke.yml");
+    const smokeJob = text.slice(text.indexOf("  smoke:"));
+
+    expect(smokeJob).toContain(
+      "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
+    );
+    expect(smokeJob).toContain(
+      "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_MCP_EXPECTED_TOOL_PROFILE",
+    );
+  });
+
   it.each(liveWorkflows)(
     "$path uses only required environment-scoped B2 secrets",
     ({ path, b2Secrets }) => {

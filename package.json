@@ -99,6 +99,7 @@
     "dist/**/*",
     "docs/tool-profile-contract.json",
     "docs/TOOL_PROFILES.md",
+    "tests/fixtures/tool-contract/*.json",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",

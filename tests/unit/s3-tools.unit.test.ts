@@ -621,6 +621,19 @@ describe("s3_get_presigned_url", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
+  it("requires confirmation before minting PutObject URLs", async () => {
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "photo.jpg",
+      operation: "PutObject",
+      expiresIn: 3600,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/Confirmation required/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it("generates URLs while the native circuit breaker is open", async () => {
     circuitBreaker.open();
 
@@ -630,6 +643,7 @@ describe("s3_get_presigned_url", () => {
         key: "photo.jpg",
         operation: "PutObject",
         expiresIn: 3600,
+        confirm: true,
       }),
     );
 

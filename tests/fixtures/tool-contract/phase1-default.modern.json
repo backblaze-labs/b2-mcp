@@ -117,6 +117,7 @@
     "s3_abort_multipart_upload",
     "s3_delete_object",
     "s3_delete_objects",
+    "s3_get_presigned_url",
     "s3_put_bucket_lifecycle"
   ],
   "tools": [
@@ -953,6 +954,10 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "bucket": { "description": "The bucket name.", "type": "string" },
+          "confirm": {
+            "description": "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          },
           "contentType": {
             "description": "For PutObject: restrict the upload to this content type.",
             "type": "string"
@@ -1289,5 +1294,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "d5e36e8792f16d7b3b05edfd8e1a4e67f728fbfeafa7f6a6e1a65a0799a383d5"
+  "hash": "bd598a6292d021a3fcce02f728353325917e750d769dd2131e842e6dbfe49615"
 }

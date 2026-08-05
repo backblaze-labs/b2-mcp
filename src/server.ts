@@ -220,7 +220,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   registerS3BucketTools(registrar, s3Client, config);
   registerS3ObjectTools(registrar, b2Client, config);
   registerS3MultipartTools(registrar, s3Client, config);
-  registerS3PresignedTools(registrar, b2Client, {
+  registerS3PresignedTools(registrar, b2Client, config, {
     allowGetObjectUrl: !filterActive || (capsSet?.has("readFiles") ?? false),
     allowPutObjectUrl: !filterActive || (capsSet?.has("writeFiles") ?? false),
   });

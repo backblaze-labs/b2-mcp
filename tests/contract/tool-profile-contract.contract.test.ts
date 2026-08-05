@@ -13,14 +13,13 @@ import type { CredentialProvider, CredentialResolution } from "../../src/credent
 import { readJson, root } from "./support";
 import {
   CONTRACT_TEST_CONFIG,
-  DESTRUCTIVE_TOOL_NAMES,
   LEGACY_PROTOCOL_VERSION,
   PROFILE_NAMES,
   capabilitiesForProfile,
   confirmToolsFrom,
   contractSdkVersions,
   countPrefixes,
-  destructiveConfirmToolsForNames,
+  destructiveConfirmToolsFromTools,
   fixtureHash,
   normalizeTool,
   renderProfileReference,
@@ -352,12 +351,10 @@ describe("MCP tool profile invariants", () => {
   it.each(profileNames)("%s declares confirm fields on destructive tools only", (profile) => {
     const fixture = fixtureFor(profile, "modern");
     expect(contract.profiles[profile].destructiveConfirmTools).toEqual(
-      destructiveConfirmToolsForNames(fixture.names),
+      destructiveConfirmToolsFromTools(fixture.tools),
     );
     expect(fixture.confirmTools).toEqual(contract.profiles[profile].destructiveConfirmTools);
-    for (const name of DESTRUCTIVE_TOOL_NAMES.filter((toolName) =>
-      fixture.names.includes(toolName),
-    )) {
+    for (const name of contract.profiles[profile].destructiveConfirmTools) {
       const schema = getTool(fixture, name).inputSchema;
       const confirm = (schema.properties as Record<string, JsonObject>).confirm;
       expect(confirm).toBeDefined();
@@ -444,12 +441,18 @@ describe("MCP tool profile invariants", () => {
     }
   });
 
-  it("read-only presigned URLs are download-only", () => {
-    const tool = getTool(fixtureFor("read-only", "modern"), "s3_get_presigned_url");
+  it.each(eras)("read-only %s presigned URLs are download-only", (era) => {
+    const fixture = fixtureFor("read-only", era);
+    const tool = getTool(fixture, "s3_get_presigned_url");
     const properties = tool.inputSchema.properties as Record<string, JsonObject>;
+    const presignWriteTools = fixture.tools
+      .filter((candidate) => candidate.name.includes("presign"))
+      .filter((candidate) => JSON.stringify(candidate.inputSchema).includes('"PutObject"'))
+      .map((candidate) => candidate.name);
 
     expect(properties.operation.enum).toEqual(["GetObject"]);
     expect(properties.contentType).toBeUndefined();
+    expect(presignWriteTools).toEqual([]);
   });
 
   it.each(["full", "phase1-default"] as const)(
@@ -460,6 +463,7 @@ describe("MCP tool profile invariants", () => {
 
       expect(properties.operation.enum).toEqual(["GetObject", "PutObject"]);
       expect(properties.contentType).toBeDefined();
+      expect(properties.confirm?.type).toBe("boolean");
     },
   );
 

@@ -24,7 +24,7 @@ const {
   confirmToolsFrom,
   contractSdkVersions,
   countPrefixes,
-  destructiveConfirmToolsForNames,
+  destructiveConfirmToolsFromTools,
   fixtureHash,
   normalizeTool,
   renderProfileReference,
@@ -156,7 +156,7 @@ async function main() {
           names: fixture.names,
           requiredFields: fixture.requiredFields,
           confirmTools: fixture.confirmTools,
-          destructiveConfirmTools: destructiveConfirmToolsForNames(fixture.names),
+          destructiveConfirmTools: destructiveConfirmToolsFromTools(fixture.tools),
           hash: fixture.hash,
           fixtures: {
             modern: `tests/fixtures/tool-contract/${profile}.modern.json`,

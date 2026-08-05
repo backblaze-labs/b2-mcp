@@ -30,6 +30,10 @@ const DETECTORS: Record<string, Detector> = {
   b2_delete_bucket: () => "permanently delete a bucket",
   s3_delete_object: () => "permanently delete an object",
   s3_delete_objects: () => "permanently delete multiple objects (irreversible)",
+  s3_get_presigned_url: (args) =>
+    args.operation === "PutObject"
+      ? "mint a PutObject presigned URL bearer capability that can create or overwrite object data"
+      : null,
   s3_abort_multipart_upload: () =>
     "abort a multipart upload, discarding uploaded parts (irreversible)",
   b2_delete_key: () =>

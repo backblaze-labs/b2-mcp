@@ -62,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transition alias.
 - Switched the smoke helper to Streamable HTTP `/mcp` and the generated Phase 1
   tool-profile contract.
+- Tightened the smoke helper to require an expected frozen tool profile by
+  default and compare normalized tool-contract hashes, with an explicit
+  any-profile opt-in for exploratory local runs.
+- Read-only credentials no longer expose or allow `PutObject` on
+  `s3_get_presigned_url`; upload presigned URLs now require the same
+  confirmation policy as destructive write paths.
 - Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
   disallowed refs, validate environment secrets before live calls, and avoid
   recurring scheduled contract writes until cleanup automation exists.

@@ -111,6 +111,7 @@
         "s3_abort_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
       "destructiveConfirmTools": [
@@ -126,9 +127,10 @@
         "s3_abort_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "ea5d266eae211d6af5589639d3073bf12568986f8cfe9bc79e92a137d1dcf7ac",
+      "hash": "772992884ca08b782b4f80409b8fd704c9e8f7050b36c82ed3322a92af51148a",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -242,6 +244,7 @@
         "s3_abort_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
       "destructiveConfirmTools": [
@@ -256,9 +259,10 @@
         "s3_abort_multipart_upload",
         "s3_delete_object",
         "s3_delete_objects",
+        "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "d5e36e8792f16d7b3b05edfd8e1a4e67f728fbfeafa7f6a6e1a65a0799a383d5",
+      "hash": "bd598a6292d021a3fcce02f728353325917e750d769dd2131e842e6dbfe49615",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -320,7 +324,7 @@
       },
       "confirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
       "destructiveConfirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
-      "hash": "ff3b2980b387719edcaad20b0f582b497e11acae4ed8d2e58942bc3442410882",
+      "hash": "f9e5a004ee0d112bad135df8777e34de5f6f7f030b09eef0e131ea9a8d525e0a",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"

@@ -2,6 +2,8 @@ import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
 import { B2Client } from "../b2/client.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
+import type { B2Config } from "../utils/types.js";
 
 /**
  * Presigned URL tools for the B2 S3-compatible API.
@@ -16,6 +18,9 @@ interface S3PresignedToolOptions {
   allowPutObjectUrl?: boolean;
 }
 
+const PUT_OBJECT_CONFIRM_DESC =
+  "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
+
 function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean): string {
   if (allowGetObjectUrl && allowPutObjectUrl) {
     return "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.";
@@ -23,7 +28,7 @@ function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boo
   if (allowPutObjectUrl) {
     return "Generate a short-lived PutObject presigned URL bearer capability for uploading one B2 object. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred upload path for real object data because bytes flow directly between the client/worker and B2 and never pass through the MCP server.";
   }
-  return "Generate a short-lived GetObject presigned URL bearer capability for downloading one B2 object. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. Read-only profiles do not expose PutObject upload URLs.";
+  return "Generate a short-lived GetObject presigned URL bearer capability for downloading one B2 object. The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. Read-only profiles expose download URLs only.";
 }
 
 function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean) {
@@ -35,12 +40,13 @@ function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean)
   if (allowPutObjectUrl) {
     return z.enum(["PutObject"]).describe("Generate an upload URL. Requires writeFiles.");
   }
-  return z.enum(["GetObject"]).describe("Generate a download URL. PutObject requires writeFiles.");
+  return z.enum(["GetObject"]).describe("Generate a download URL.");
 }
 
 export function registerS3PresignedTools(
   server: ToolRegistrar,
   b2: B2Client,
+  config: B2Config,
   options: S3PresignedToolOptions = {},
 ): void {
   const allowGetObjectUrl = options.allowGetObjectUrl ?? true;
@@ -71,6 +77,7 @@ export function registerS3PresignedTools(
             .string()
             .optional()
             .describe("For PutObject: restrict the upload to this content type."),
+          confirm: z.boolean().optional().describe(PUT_OBJECT_CONFIRM_DESC),
         }
       : {}),
   };
@@ -97,6 +104,8 @@ export function registerS3PresignedTools(
             message: "PutObject presigned URLs require the writeFiles capability.",
           });
         }
+        const gate = checkDestructive("s3_get_presigned_url", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         return toolJson(
           await b2.s3PresignObjectUrl({
             bucket: args.bucket,

@@ -321,7 +321,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "454787bb31fcccf2a3373b52373023e4923dabe489d4d138ad4b0091d71f53ed",
+      "descriptionSha256": "a1865bf0f00c1d8c921241ab0272c76e11a4050493754d7c7685b6da711fc1d1",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -335,7 +335,7 @@
           },
           "key": { "description": "The object key.", "type": "string" },
           "operation": {
-            "description": "Generate a download URL. PutObject requires writeFiles.",
+            "description": "Generate a download URL.",
             "enum": ["GetObject"],
             "type": "string"
           },
@@ -478,5 +478,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "ff3b2980b387719edcaad20b0f582b497e11acae4ed8d2e58942bc3442410882"
+  "hash": "f9e5a004ee0d112bad135df8777e34de5f6f7f030b09eef0e131ea9a8d525e0a"
 }

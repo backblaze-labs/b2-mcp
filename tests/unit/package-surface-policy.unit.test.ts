@@ -28,6 +28,9 @@ describe("package surface policy", () => {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   }>("package.json");
+  const toolContract = readJson<{
+    profiles: Record<string, { fixtures: Record<string, string> }>;
+  }>("docs/tool-profile-contract.json");
   const readme = readFileSync(join(root, "README.md"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
@@ -47,6 +50,11 @@ describe("package surface policy", () => {
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
     expect(files).toContain("docs/tool-profile-contract.json");
+    for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
+      Object.values(profile.fixtures),
+    )) {
+      expect(files).toContain(fixturePath);
+    }
   });
 
   it("retries a transient lockfile-less packed-consumer install", () => {
