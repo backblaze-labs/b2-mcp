@@ -1,17 +1,16 @@
 /**
  * Unit tests for the retained S3-compatible tool handlers.
- * Mocks S3Client.prototype.send so no real network calls are made.
- *
- * Only 4 S3 tools are kept (those with no native b2_* equivalent):
- *   s3_head_bucket, s3_put_bucket_lifecycle, s3_get_bucket_location,
- *   s3_get_presigned_url. Error-path coverage for the SDK-calling ones lives in
- *   s3-coverage.unit.test.ts.
+ * The object/presign compatibility aliases run against the official B2 SDK
+ * simulator; only S3-material bucket/multipart operations mock S3Client.send.
  */
 
+import { B2Client as SdkB2Client, BucketType, BufferSource } from "@backblaze-labs/b2-sdk";
+import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { S3Client } from "@aws-sdk/client-s3";
-import { createServer, getRegisteredTools } from "../../src/server";
+import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
-import { runWithMcpRequestSignal } from "../../src/request-context";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport } from "../support/sdk-test-helpers";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,10 +46,36 @@ const testConfig = {
 };
 
 let server: McpServer;
+let sim: B2Simulator;
+let seed: SdkB2Client;
 // Use a loose type to avoid TypeScript overload resolution issues with S3Client.send
 let sendSpy: jest.SpyInstance;
 
-beforeEach(() => {
+async function seedClient(): Promise<SdkB2Client> {
+  const client = new SdkB2Client({
+    applicationKeyId: testConfig.applicationKeyId,
+    applicationKey: testConfig.applicationKey,
+    transport: sim.transport(),
+    retry: {
+      maxRetries: 0,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    },
+  });
+  await client.authorize();
+  return client;
+}
+
+async function createBucket(name = "b") {
+  return seed.createBucket({ bucketName: name, bucketType: BucketType.AllPrivate });
+}
+
+beforeEach(async () => {
+  invalidateAuthManagerCache();
+  sim = new B2Simulator({ minimumPartSize: 1000, recommendedPartSize: 5 * 1024 * 1024 });
+  installSdkTransport(sim.transport());
+  seed = await seedClient();
   // S3Client.prototype.send is a generic overloaded method; cast to bypass TS strictness
   sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   server = createServer(testConfig);
@@ -58,6 +83,8 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  setB2SdkClientFactoryForTests(null);
+  invalidateAuthManagerCache();
 });
 
 // ── s3_head_bucket ────────────────────────────────────────────────────────────
@@ -82,30 +109,71 @@ describe("s3_head_bucket", () => {
 
 describe("s3_list_objects_v2", () => {
   it("preserves nextContinuationToken for truncated responses", async () => {
-    sendSpy.mockResolvedValue({
-      Contents: [{ Key: "a.txt", Size: 1 }],
-      IsTruncated: true,
-      NextContinuationToken: "usable-page-cursor",
-      KeyCount: 1,
+    const bucket = await createBucket("list-bucket");
+    await bucket.upload({
+      fileName: "a.txt",
+      source: new BufferSource(new TextEncoder().encode("a")),
+    });
+    await bucket.upload({
+      fileName: "b.txt",
+      source: new BufferSource(new TextEncoder().encode("b")),
     });
 
     const result = parseResult(
-      await callTool(server, "s3_list_objects_v2", { bucket: "b", maxKeys: 1 }),
+      await callTool(server, "s3_list_objects_v2", { bucket: "list-bucket", maxKeys: 1 }),
     );
 
     expect(result.isTruncated).toBe(true);
-    expect(result.nextContinuationToken).toBe("usable-page-cursor");
+    expect(result.nextContinuationToken).toBeTruthy();
+    expect(result.objects).toHaveLength(1);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("passes the current MCP request abort signal to S3 API calls", async () => {
-    sendSpy.mockResolvedValue({ Contents: [] });
-    const abort = new AbortController();
+  it("preserves S3 StartAfter exclusion while using B2 SDK pagination", async () => {
+    const bucket = await createBucket("list-bucket");
+    for (const fileName of ["a.txt", "b.txt", "c.txt"]) {
+      await bucket.upload({
+        fileName,
+        source: new BufferSource(new TextEncoder().encode(fileName)),
+      });
+    }
 
-    await runWithMcpRequestSignal(abort.signal, () =>
-      callTool(server, "s3_list_objects_v2", { bucket: "b" }),
+    const result = parseResult(
+      await callTool(server, "s3_list_objects_v2", {
+        bucket: "list-bucket",
+        startAfter: "a.txt",
+        maxKeys: 2,
+      }),
     );
 
-    expect(sendSpy).toHaveBeenCalledWith(expect.anything(), { abortSignal: abort.signal });
+    expect(result.objects.map((object: { Key: string }) => object.Key)).toEqual(["b.txt", "c.txt"]);
+    expect(result.isTruncated).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("s3_list_object_versions", () => {
+  it("marks a hide marker as latest when it shadows an older version", async () => {
+    const bucket = await createBucket("versions-bucket");
+    await bucket.upload({
+      fileName: "k",
+      source: new BufferSource(new TextEncoder().encode("visible")),
+    });
+    await callTool(server, "s3_delete_object", {
+      bucket: "versions-bucket",
+      key: "k",
+      confirm: true,
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_list_object_versions", { bucket: "versions-bucket" }),
+    );
+
+    expect(result.deleteMarkers).toHaveLength(1);
+    expect(result.deleteMarkers[0].IsLatest).toBe(true);
+    expect(result.versions).toHaveLength(1);
+    expect(result.versions[0].IsLatest).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -177,6 +245,7 @@ describe("s3_get_presigned_url", () => {
     // Result is either a URL string or an object with a url field
     const hasUrl = typeof result === "string" || typeof result?.url === "string";
     expect(hasUrl).toBe(true);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -199,21 +268,30 @@ describe("inline object cap (control-plane-first data path)", () => {
   });
 
   it("s3_put_object allows a small inline payload", async () => {
+    await createBucket("bucket-b");
     const small = Buffer.from("hello").toString("base64");
     const result = await callTool(server, "s3_put_object", {
-      bucket: "b",
+      bucket: "bucket-b",
       key: "k",
       content: small,
     });
     expect(result.isError).toBeFalsy();
-    expect(sendSpy).toHaveBeenCalled();
+    expect(sendSpy).not.toHaveBeenCalled();
+    const bucket = await seed.getBucket("bucket-b");
+    const uploaded = await bucket?.getFileInfoByName("k");
+    expect(uploaded?.contentLength).toBe(5);
   });
 
   it("s3_get_object refuses an inline read over the cap and points to a presigned URL", async () => {
-    sendSpy.mockResolvedValue({ ContentLength: 2 * 1024 * 1024 } as any);
-    const result = await callTool(server, "s3_get_object", { bucket: "b", key: "k" });
+    const bucket = await createBucket("bucket-b");
+    await bucket.upload({
+      fileName: "k",
+      source: new BufferSource(new Uint8Array(2 * 1024 * 1024)),
+    });
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
     expect(result.isError).toBe(true);
     expect(parseResult(result)).toMatch(/inline read limit|s3_get_presigned_url|saveToPath/i);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 });
 

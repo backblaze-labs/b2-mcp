@@ -1,24 +1,15 @@
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  DeleteObjectsCommand,
-  HeadObjectCommand,
-  CopyObjectCommand,
-  ListObjectsV2Command,
-  ListObjectVersionsCommand,
-} from "@aws-sdk/client-s3";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
 import { Readable } from "stream";
 import { pipeline } from "stream/promises";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
+import { B2Client } from "../b2/client.js";
 
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
@@ -26,6 +17,27 @@ const CONFIRM_DESC =
 interface DeleteObjectEntry {
   key: string;
   versionId?: string;
+}
+
+async function webStreamToBuffer(stream: WebReadableStream<Uint8Array>): Promise<Buffer> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function nodeReadableFromWeb(stream: WebReadableStream<Uint8Array>): Readable {
+  return Readable.fromWeb(stream as Parameters<typeof Readable.fromWeb>[0]);
 }
 
 // Inline object content moves bytes *through* the server — and, for base64,
@@ -37,7 +49,7 @@ interface DeleteObjectEntry {
 // cap is what keeps the data plane off the server: anything larger must presign.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
-export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, config: B2Config): void {
+export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, config: B2Config): void {
   server.registerTool(
     "s3_put_object",
     {
@@ -72,9 +84,6 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
           return toolError(new Error("Either filePath or content must be provided."));
         }
 
-        // filePath: stream from disk — AWS SDK v3 accepts ReadStream natively.
-        // Pass ContentLength so the SDK can set the header without buffering.
-        // content (base64): already in memory from the MCP JSON payload.
         const safePath = args.filePath
           ? resolveLocalPath(config, args.filePath, "read")
           : undefined;
@@ -95,25 +104,16 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
           );
         }
 
-        const body = safePath
-          ? fs.createReadStream(safePath)
-          : Buffer.from(args.content!, "base64");
-
-        const contentLength = safePath ? size : undefined;
-
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            Body: body,
-            ContentLength: contentLength,
-            ContentType: args.contentType,
-            Metadata: args.metadata,
-            ACL: args.acl,
-            ServerSideEncryption: args.serverSideEncryption as any,
-            StorageClass: args.storageClass as any,
-          }),
-        );
+        await b2.s3PutObject({
+          bucket: args.bucket,
+          key: args.key,
+          source: safePath
+            ? { kind: "file", path: safePath }
+            : { kind: "buffer", buffer: new Uint8Array(Buffer.from(args.content!, "base64")) },
+          contentType: args.contentType,
+          metadata: args.metadata,
+          serverSideEncryption: args.serverSideEncryption,
+        });
 
         return toolSuccess(`Object '${args.key}' uploaded to '${args.bucket}'.`);
       } catch (err) {
@@ -140,14 +140,12 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new GetObjectCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            Range: args.range,
-            VersionId: args.versionId,
-          }),
-        );
+        const result = await b2.s3GetObject({
+          bucket: args.bucket,
+          key: args.key,
+          range: args.range,
+          versionId: args.versionId,
+        });
 
         // Stream straight to disk for saveToPath — no full-object buffering.
         if (args.saveToPath) {
@@ -155,38 +153,38 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
           fs.mkdirSync(path.dirname(safePath), { recursive: true });
           const writeStream = fs.createWriteStream(safePath);
           try {
-            await pipeline(result.Body as Readable, writeStream);
+            await pipeline(nodeReadableFromWeb(result.body), writeStream);
           } catch (e) {
             await fs.promises.unlink(safePath).catch(() => {});
             throw e;
           }
-          return toolSuccess(`Object saved to ${safePath} (${result.ContentLength ?? "?"} bytes)`);
+          return toolSuccess(`Object saved to ${safePath} (${result.contentLength} bytes)`);
         }
 
         // Bound the inline path: without saveToPath the whole object is buffered
         // and base64-copied into the response (and the model context), so this is
         // a control-plane convenience for small payloads only. Reject before
         // buffering and steer bulk reads to a presigned URL or saveToPath.
-        if ((result.ContentLength ?? 0) > MAX_INLINE_OBJECT_BYTES) {
+        if (result.contentLength > MAX_INLINE_OBJECT_BYTES) {
+          await result.body.cancel().catch(() => undefined);
           return toolError(
             new Error(
-              `Object is ${result.ContentLength} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline read limit for s3_get_object. ` +
+              `Object is ${result.contentLength} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline read limit for s3_get_object. ` +
                 `Generate a GetObject URL with s3_get_presigned_url to download directly from B2, use saveToPath to stream it to disk, ` +
                 `or a Range request to read a small slice.`,
             ),
           );
         }
-        const bodyBytes = await result.Body!.transformToByteArray();
-        const buffer = Buffer.from(bodyBytes);
+        const buffer = await webStreamToBuffer(result.body);
 
         return toolJson({
           key: args.key,
-          contentType: result.ContentType,
-          contentLength: result.ContentLength,
-          lastModified: result.LastModified,
-          etag: result.ETag,
-          versionId: result.VersionId,
-          metadata: result.Metadata,
+          contentType: result.contentType,
+          contentLength: result.contentLength,
+          lastModified: result.lastModified,
+          etag: result.etag,
+          versionId: result.versionId,
+          metadata: result.metadata,
           content: buffer.toString("base64"),
           encoding: "base64",
         });
@@ -212,13 +210,11 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
       try {
         const gate = checkDestructive("s3_delete_object", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        await s3.send(
-          new DeleteObjectCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            VersionId: args.versionId,
-          }),
-        );
+        await b2.s3DeleteObject({
+          bucket: args.bucket,
+          key: args.key,
+          versionId: args.versionId,
+        });
         return toolSuccess(`Object '${args.key}' deleted from '${args.bucket}'.`);
       } catch (err) {
         return toolError(err);
@@ -254,21 +250,12 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
       try {
         const gate = checkDestructive("s3_delete_objects", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const result = await s3.send(
-          new DeleteObjectsCommand({
-            Bucket: args.bucket,
-            Delete: {
-              Objects: (args.objects as DeleteObjectEntry[]).map((o) => ({
-                Key: o.key,
-                VersionId: o.versionId,
-              })),
-              Quiet: args.quiet ?? true,
-            },
-          }),
-        );
         return toolJson({
-          deleted: result.Deleted ?? [],
-          errors: result.Errors ?? [],
+          ...(await b2.s3DeleteObjects({
+            bucket: args.bucket,
+            objects: args.objects as DeleteObjectEntry[],
+            quiet: args.quiet ?? true,
+          })),
         });
       } catch (err) {
         return toolError(err);
@@ -289,23 +276,21 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new HeadObjectCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            VersionId: args.versionId,
-          }),
-        );
+        const result = await b2.s3HeadObject({
+          bucket: args.bucket,
+          key: args.key,
+          versionId: args.versionId,
+        });
         return toolJson({
           key: args.key,
-          contentType: result.ContentType,
-          contentLength: result.ContentLength,
-          lastModified: result.LastModified,
-          etag: result.ETag,
-          versionId: result.VersionId,
-          metadata: result.Metadata,
-          serverSideEncryption: result.ServerSideEncryption,
-          deleteMarker: result.DeleteMarker,
+          contentType: result.contentType,
+          contentLength: result.contentLength,
+          lastModified: result.lastModified,
+          etag: result.etag,
+          versionId: result.versionId,
+          metadata: result.metadata,
+          serverSideEncryption: result.serverSideEncryption,
+          deleteMarker: result.deleteMarker,
         });
       } catch (err) {
         return toolError(err);
@@ -341,21 +326,16 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
     },
     async (args) => {
       try {
-        const source = args.sourceVersionId
-          ? `${args.sourceBucket}/${args.sourceKey}?versionId=${args.sourceVersionId}`
-          : `${args.sourceBucket}/${args.sourceKey}`;
-
-        await s3.send(
-          new CopyObjectCommand({
-            CopySource: source,
-            Bucket: args.destinationBucket,
-            Key: args.destinationKey,
-            MetadataDirective: args.metadataDirective ?? "COPY",
-            ContentType: args.contentType,
-            Metadata: args.metadata,
-            ACL: args.acl,
-          }),
-        );
+        await b2.s3CopyObject({
+          sourceBucket: args.sourceBucket,
+          sourceKey: args.sourceKey,
+          sourceVersionId: args.sourceVersionId,
+          destinationBucket: args.destinationBucket,
+          destinationKey: args.destinationKey,
+          metadataDirective: args.metadataDirective ?? "COPY",
+          contentType: args.contentType,
+          metadata: args.metadata,
+        });
         return toolSuccess(
           `Copied '${args.sourceKey}' to '${args.destinationBucket}/${args.destinationKey}'.`,
         );
@@ -385,27 +365,20 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
         startAfter: z
           .string()
           .optional()
-          .describe("Return objects after this key (inclusive pagination)."),
+          .describe("Return objects after this key (exclusive S3 StartAfter semantics)."),
       },
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new ListObjectsV2Command({
-            Bucket: args.bucket,
-            Prefix: args.prefix,
-            Delimiter: args.delimiter,
-            MaxKeys: args.maxKeys ?? 1000,
-            ContinuationToken: args.continuationToken,
-            StartAfter: args.startAfter,
-          }),
-        );
         return toolJson({
-          objects: result.Contents ?? [],
-          commonPrefixes: result.CommonPrefixes ?? [],
-          isTruncated: result.IsTruncated,
-          nextContinuationToken: result.NextContinuationToken,
-          keyCount: result.KeyCount,
+          ...(await b2.s3ListObjectsV2({
+            bucket: args.bucket,
+            prefix: args.prefix,
+            delimiter: args.delimiter,
+            maxKeys: args.maxKeys ?? 1000,
+            continuationToken: args.continuationToken,
+            startAfter: args.startAfter,
+          })),
         });
       } catch (err) {
         return toolError(err);
@@ -435,23 +408,15 @@ export function registerS3ObjectTools(server: ToolRegistrar, s3: S3Client, confi
     },
     async (args) => {
       try {
-        const result = await s3.send(
-          new ListObjectVersionsCommand({
-            Bucket: args.bucket,
-            Prefix: args.prefix,
-            Delimiter: args.delimiter,
-            MaxKeys: args.maxKeys ?? 1000,
-            KeyMarker: args.keyMarker,
-            VersionIdMarker: args.versionIdMarker,
-          }),
-        );
         return toolJson({
-          versions: result.Versions ?? [],
-          deleteMarkers: result.DeleteMarkers ?? [],
-          commonPrefixes: result.CommonPrefixes ?? [],
-          isTruncated: result.IsTruncated,
-          nextKeyMarker: result.NextKeyMarker,
-          nextVersionIdMarker: result.NextVersionIdMarker,
+          ...(await b2.s3ListObjectVersions({
+            bucket: args.bucket,
+            prefix: args.prefix,
+            delimiter: args.delimiter,
+            maxKeys: args.maxKeys ?? 1000,
+            keyMarker: args.keyMarker,
+            versionIdMarker: args.versionIdMarker,
+          })),
         });
       } catch (err) {
         return toolError(err);

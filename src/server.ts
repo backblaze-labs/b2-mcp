@@ -210,9 +210,9 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
   registerS3BucketTools(registrar, s3Client, config);
-  registerS3ObjectTools(registrar, s3Client, config);
+  registerS3ObjectTools(registrar, b2Client, config);
   registerS3MultipartTools(registrar, s3Client, config);
-  registerS3PresignedTools(registrar, s3Client);
+  registerS3PresignedTools(registrar, b2Client);
   registerS3ExtraTools(registrar, s3Client);
 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────

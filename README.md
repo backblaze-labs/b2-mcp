@@ -5,7 +5,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 **40 tools, split by what they do:**
 
 - **Control plane (11 active, native B2 API)** — buckets, key listing/deletion, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
-- **Data plane (19, S3-compatible API)** — object upload/download/copy/list/delete, multipart, presigned URLs. _(Forward-compatible; S3 is the standard surface for object data.)_
+- **Data plane (19, compatibility `s3_*` names)** — object upload/download/copy/list/delete through the official B2 SDK, plus S3-material multipart, bucket reachability, lifecycle, and presigned URL paths.
 - **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
 - **Unavailable compatibility stubs (6, native B2 API in the full surface)** — three durable-secret-producing tool names and three Partner/Groups SDK-gap tool names return a non-secret unavailable error until their reviewed dependencies exist.
 
@@ -134,7 +134,7 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 34 tools are active in the full surface; 6 native names are unavailable compatibility stubs for stale cached `tools/list` clients or deferred dependencies. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 34 tools are active in the full surface; 6 native names are unavailable compatibility stubs for stale cached `tools/list` clients or deferred dependencies. The inherited `s3_*` object aliases now use the official B2 SDK where semantics match; only S3-material multipart, bucket reachability, lifecycle, and URL signing paths stay on the SDK `/s3` compatibility boundary. Buckets, key listing/deletion, Object Lock, notifications, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
 <summary><b>Control plane — native B2 API (11 active + 3 Partner SDK-gap stubs)</b></summary>

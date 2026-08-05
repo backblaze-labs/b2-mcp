@@ -205,10 +205,19 @@ describe("SDK adoption contract", () => {
     expect(partner).toContain('client.call("b2_list_group_members"');
     expect(partner).not.toContain("partnerSdkGap");
 
-    expectMatrixPath("s3_put_object", "s3", "PutObjectCommand");
-    expect(s3Objects).toContain("PutObjectCommand");
-    expectMatrixPath("s3_get_presigned_url", "s3", "@aws-sdk/s3-request-presigner");
-    expect(s3Presigned).toContain("@aws-sdk/s3-request-presigner");
+    expectMatrixPath("s3_put_object", "facade", "Bucket.upload");
+    expectMatrixPath("s3_get_object", "facade", "Bucket.download");
+    expectMatrixPath("s3_delete_objects", "compose", "Bucket.deleteFileVersion");
+    expectMatrixPath("s3_list_objects_v2", "facade", "Bucket.listFileNames");
+    expect(b2Client).toContain("s3PutObject");
+    expect(b2Client).toContain("s3ListObjectsV2");
+    expect(s3Objects).toContain("s3PutObject");
+    expect(s3Objects).not.toContain("@aws-sdk/client-s3");
+    expectMatrixPath("s3_get_presigned_url", "s3", "presignS3GetObjectUrl");
+    expect(b2Client).toContain("presignS3GetObjectUrl");
+    expect(b2Client).toContain("presignS3PutObjectUrl");
+    expect(s3Presigned).toContain("s3PresignObjectUrl");
+    expect(s3Presigned).not.toContain("@aws-sdk/s3-request-presigner");
 
     expectMatrixPath("b2_usage_growth", "compose", "createReportS3Client");
     expectMatrixPath("b2_egress_leaders", "compose", "createReportS3Client");
@@ -242,7 +251,11 @@ describe("SDK adoption contract", () => {
     expect(shim).toContain("Temporary TypeScript-resolution shim");
     expect(shim).toContain("Issue");
     expect(typeof sdkS3.createS3ClientConfig).toBe("function");
+    expect(typeof sdkS3.presignS3GetObjectUrl).toBe("function");
+    expect(typeof sdkS3.presignS3PutObjectUrl).toBe("function");
     expect(shim).toContain("export function createS3ClientConfig");
+    expect(shim).toContain("export function presignS3GetObjectUrl");
+    expect(shim).toContain("export function presignS3PutObjectUrl");
     expect(shim).toContain("readonly forcePathStyle: boolean");
     expect(typeof sdkSimulator.B2Simulator).toBe("function");
     expect(shim).toContain("export class B2Simulator");
