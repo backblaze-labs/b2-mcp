@@ -9,12 +9,16 @@ const nodeRequire = createRequire(__filename);
 const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
 };
+const semver = nodeRequire("semver") as {
+  satisfies: (version: string, range: string, options?: { includePrerelease?: boolean }) => boolean;
+};
 
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
   const npmrc = readFileSync(join(root, ".npmrc"), "utf8");
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    devDependencies: Record<string, string>;
     scripts: Record<string, string>;
   };
   const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
@@ -33,7 +37,12 @@ describe("supply-chain audit policy", () => {
   const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as {
     packages: Record<
       string,
-      { version?: string; integrity?: string; dependencies?: Record<string, string> }
+      {
+        dependencies?: Record<string, string>;
+        engines?: { node?: string };
+        integrity?: string;
+        version?: string;
+      }
     >;
   };
   const braceExpansion = lock.packages["node_modules/brace-expansion"];
@@ -252,6 +261,37 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
     expect(publishWorkflow).not.toContain("tar -xzf");
+  });
+
+  it("exact-pins executable doc lint tooling", () => {
+    for (const name of [
+      "@microsoft/tsdoc-config",
+      "eslint",
+      "eslint-plugin-jsdoc",
+      "eslint-plugin-tsdoc",
+      "typescript-eslint",
+    ]) {
+      expect(packageJson.devDependencies[name]).toBeDefined();
+      expect(packageJson.devDependencies[name]).not.toMatch(/^[~^]/);
+    }
+  });
+
+  it("keeps the full lockfile installable on the advertised Node floor", () => {
+    const unsupported = Object.entries(lock.packages)
+      .filter(([_path, pkg]) => {
+        return pkg.engines?.node && !semver.satisfies("22.3.0", pkg.engines.node);
+      })
+      .map(([path, pkg]) => `${path || "<root>"}@${pkg.version}: ${pkg.engines?.node}`);
+
+    expect(unsupported).toEqual([]);
+  });
+
+  it("runs doc lint without persisted checkout credentials", () => {
+    for (const name of ["deterministic-linux-production", "deterministic-linux-current"]) {
+      const job = jobBlock(name);
+      expect(job).toContain("persist-credentials: false");
+      expect(job).toContain("npm run lint:docs");
+    }
   });
 
   it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {

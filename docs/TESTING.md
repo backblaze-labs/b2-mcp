@@ -16,13 +16,15 @@ npm ci
 npm run verify
 ```
 
-`npm run verify` runs typecheck, build, lint, the Biome-supported format check,
-deterministic coverage, deterministic slow tests, and packed-package
-installation tests. The individual deterministic layers are:
+`npm run verify` runs typecheck, build, Biome lint, doc-comment lint, the
+Biome-supported format check, deterministic coverage, deterministic slow tests,
+and packed-package installation tests. The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------ |
 | `npm test`              | Typecheck, then `npm run test:unit`.                                                 |
+| `npm run lint`          | Biome lint for source, test, and script code.                                        |
+| `npm run lint:docs`     | TSDoc/JSDoc doc-comment syntax and hygiene gate for non-test `src/**/*.ts` files.    |
 | `npm run test:unit`     | Fast source unit tests.                                                              |
 | `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
 | `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
@@ -35,7 +37,8 @@ matrix runs the bundled coverage and slow deterministic lifecycle layers, while
 `test:package` runs in a separate non-blocking package job.
 CI verifies the production dependency graph with `npm ci --omit=dev
 --engine-strict` on the Node.js 22.3.0 package floor. The credential-free full
-toolchain gate runs on Linux for Node.js 22.23.1, 24, and 26. It also runs
+toolchain gate, including `npm run lint:docs`, runs on Linux for Node.js
+22.23.1, 24, and 26. It also runs
 `npm run check:runtime-policy`, which fails if workflow or metadata runtime
 policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI port
 parsing, local-path policy, and request shutdown/signal suite runs on Linux,

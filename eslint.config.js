@@ -2,16 +2,14 @@ const jsdoc = require("eslint-plugin-jsdoc");
 const tsdoc = require("eslint-plugin-tsdoc");
 const tseslint = require("typescript-eslint");
 
-const disabledTypeScriptRules = Object.fromEntries(
-  Object.keys(tseslint.plugin.rules).map((ruleName) => [`@typescript-eslint/${ruleName}`, "off"]),
-);
-
+// ESLint is parser-only for TypeScript here; Biome owns code linting.
+// Do not register @typescript-eslint as a plugin unless doc lint starts using
+// one of its rules explicitly.
 module.exports = [
   {
     files: ["src/**/*.ts"],
     ignores: ["src/**/*.test.ts"],
     plugins: {
-      "@typescript-eslint": tseslint.plugin,
       jsdoc,
       tsdoc: { rules: tsdoc.rules },
     },
@@ -31,7 +29,6 @@ module.exports = [
       },
     },
     rules: {
-      ...disabledTypeScriptRules,
       "tsdoc/syntax": "error",
       "jsdoc/no-bad-blocks": "error",
       "jsdoc/no-blank-blocks": "error",
