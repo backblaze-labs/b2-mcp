@@ -13,7 +13,9 @@ const eslintEntrypoint = join(root, "node_modules", "eslint", "bin", "eslint.js"
 const lockdownEntrypoint = join(root, "scripts", "doc-lint-lockdown.mjs");
 
 if (!existsSync(eslintEntrypoint)) {
-  console.error("Local ESLint is not installed. Run npm ci before npm run lint:docs.");
+  console.error(
+    "Local ESLint is not installed. Run pnpm install --frozen-lockfile before pnpm run lint:docs.",
+  );
   process.exit(1);
 }
 

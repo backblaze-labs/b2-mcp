@@ -1,16 +1,8 @@
 import { execFileSync } from "child_process";
-import {
-  copyFileSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { join, relative } from "path";
 import { tmpdir } from "os";
-import { root } from "../contract/support";
+import { readLock, root } from "../contract/support";
 
 interface PackFile {
   path: string;
@@ -42,73 +34,47 @@ interface PackageJson {
   engines?: Record<string, string>;
 }
 
-function readLock(path: string): PackageLock {
+function readNpmLock(path: string): PackageLock {
   return JSON.parse(readFileSync(path, "utf8")) as PackageLock;
+}
+
+function packageNameFromNodeModulesPath(lockPath: string): string {
+  const segments = lockPath.split("/");
+  let nodeModulesIndex = -1;
+  for (let index = 0; index < segments.length; index += 1) {
+    if (segments[index] === "node_modules") nodeModulesIndex = index;
+  }
+  const first = segments[nodeModulesIndex + 1];
+  if (!first) throw new Error(`Invalid node_modules package path: ${lockPath}`);
+  return first.startsWith("@") ? `${first}/${segments[nodeModulesIndex + 2]}` : first;
+}
+
+function productionEntries(lock: PackageLock): Array<[string, LockPackage]> {
+  return Object.entries(lock.packages).filter(
+    ([path, entry]) => path.startsWith("node_modules/") && !entry.dev && Boolean(entry.version),
+  );
 }
 
 function committedProductionGraphMismatches(
   repoLock: PackageLock,
   consumerLock: PackageLock,
 ): string[] {
-  return Object.entries(repoLock.packages)
-    .filter(([path, entry]) => path.startsWith("node_modules/") && !entry.dev && entry.version)
-    .flatMap(([path, entry]) => {
-      const installed = consumerLock.packages[path];
-      if (!installed) return [`${path} missing from consumer lock`];
-      if (installed.version !== entry.version) {
-        return [`${path} expected ${entry.version}, got ${installed.version ?? "missing"}`];
-      }
-      if (entry.integrity && installed.integrity !== entry.integrity) {
-        return [`${path} integrity mismatch`];
-      }
-      return [];
-    });
-}
-
-function writeConsumerLock(
-  appDir: string,
-  tarball: string,
-  pack: PackResult,
-  repoPkg: PackageJson,
-  repoLock: PackageLock,
-): void {
-  const tarballSpec = `file:${relative(appDir, tarball)}`;
-  const packages: Record<string, LockPackage> = {
-    "": {
-      name: "b2-mcp-pack-test",
-      private: true,
-      dependencies: { [repoPkg.name]: tarballSpec },
-    },
-    [`node_modules/${repoPkg.name}`]: {
-      version: repoPkg.version,
-      resolved: tarballSpec,
-      integrity: pack.integrity,
-      license: repoPkg.license,
-      dependencies: repoPkg.dependencies,
-      bin: repoPkg.bin,
-      engines: repoPkg.engines,
-    },
-  };
-
-  for (const [path, entry] of Object.entries(repoLock.packages)) {
-    if (path.startsWith("node_modules/") && !entry.dev && entry.version) {
-      packages[path] = entry;
-    }
-  }
-
-  writeFileSync(
-    join(appDir, "package-lock.json"),
-    JSON.stringify(
-      {
-        name: "b2-mcp-pack-test",
-        lockfileVersion: 3,
-        requires: true,
-        packages,
-      },
-      null,
-      2,
-    ),
+  const consumerByIdentity = new Map(
+    productionEntries(consumerLock).map(([path, entry]) => [
+      `${packageNameFromNodeModulesPath(path)}@${entry.version}`,
+      entry,
+    ]),
   );
+
+  return productionEntries(repoLock).flatMap(([path, entry]) => {
+    const identity = `${packageNameFromNodeModulesPath(path)}@${entry.version}`;
+    const installed = consumerByIdentity.get(identity);
+    if (!installed) return [`${identity} missing from consumer lock`];
+    if (entry.integrity && installed.integrity !== entry.integrity) {
+      return [`${identity} integrity mismatch`];
+    }
+    return [];
+  });
 }
 
 describe("packed package", () => {
@@ -118,26 +84,12 @@ describe("packed package", () => {
     try {
       const packDir = join(tmp, "pack");
       const appDir = join(tmp, "app");
-      const seedDir = join(tmp, "seed");
       const cacheDir = join(tmp, "npm-cache");
       mkdirSync(packDir);
       mkdirSync(appDir);
-      mkdirSync(seedDir);
       mkdirSync(cacheDir);
       const repoPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageJson;
-      const repoLock = readLock(join(root, "package-lock.json"));
-
-      copyFileSync(join(root, "package.json"), join(seedDir, "package.json"));
-      copyFileSync(join(root, "package-lock.json"), join(seedDir, "package-lock.json"));
-      execFileSync(
-        "npm",
-        ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", cacheDir],
-        {
-          cwd: seedDir,
-          stdio: "pipe",
-          timeout: 180_000,
-        },
-      );
+      const repoLock = readLock<PackageLock>();
 
       const packOutput = execFileSync("npm", ["pack", "--json", "--pack-destination", packDir], {
         cwd: root,
@@ -165,21 +117,30 @@ describe("packed package", () => {
           2,
         ),
       );
-      writeConsumerLock(appDir, tarball, pack, repoPkg, repoLock);
-
-      expect(
-        committedProductionGraphMismatches(repoLock, readLock(join(appDir, "package-lock.json"))),
-      ).toEqual([]);
-
       execFileSync(
         "npm",
-        ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", cacheDir],
+        [
+          "install",
+          "--omit=dev",
+          "--ignore-scripts",
+          "--no-audit",
+          "--no-fund",
+          "--cache",
+          cacheDir,
+        ],
         {
           cwd: appDir,
           stdio: "pipe",
-          timeout: 120_000,
+          timeout: 180_000,
         },
       );
+
+      expect(
+        committedProductionGraphMismatches(
+          repoLock,
+          readNpmLock(join(appDir, "package-lock.json")),
+        ),
+      ).toEqual([]);
 
       execFileSync(
         "node",

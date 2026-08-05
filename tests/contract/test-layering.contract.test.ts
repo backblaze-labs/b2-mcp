@@ -263,7 +263,7 @@ describe("test layer naming", () => {
     },
   );
 
-  it("keeps live tests behind explicit live npm scripts", () => {
+  it("keeps live tests behind explicit live pnpm scripts", () => {
     const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
 
     expect(pkg.scripts["test:integration:live"]).toContain("require-live-env.mjs integration");
@@ -294,7 +294,7 @@ describe("test layer naming", () => {
     const liveSummaryPath = join(root, "reports/vitest/integration-live.json");
     if (existsSync(liveSummaryPath)) rmSync(liveSummaryPath);
 
-    const result = spawnSync("npm", ["run", "test:integration", "--silent"], {
+    const result = spawnSync("pnpm", ["run", "test:integration", "--silent"], {
       cwd: root,
       encoding: "utf8",
       env: {

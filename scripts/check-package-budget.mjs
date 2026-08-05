@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import {
-  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -11,6 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -20,6 +20,8 @@ import envUtils from "./lib/sanitized-env.cjs";
 
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const root = path.resolve(process.env.B2_MCP_PACKAGE_BUDGET_ROOT ?? scriptRoot);
+const require = createRequire(import.meta.url);
+const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const reportsDir = path.join(root, "reports", "package-budget");
 const policyOnly = process.argv.includes("--policy-only");
 mkdirSync(reportsDir, { recursive: true });
@@ -27,7 +29,7 @@ rmSync(path.join(reportsDir, "npm-ls-production.json"), { force: true });
 writeFileSync(path.join(reportsDir, "summary.md"), "# Package Budget\n\nStatus: started.\n");
 const budget = readJson("package-budget.json");
 const packageJson = readJson("package.json");
-const packageLock = readJson("package-lock.json");
+const packageLock = readPackageManagerLock(root);
 const errors = [];
 const { commandLine, runNpmCommandWithRetries } = retryUtils;
 const { sanitizedEnv: baseSanitizedEnv } = envUtils;
@@ -35,6 +37,39 @@ const productionDependencySections = ["dependencies", "optionalDependencies"];
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
+}
+
+function configuredRegistrySettings() {
+  const npmrcPath = path.join(root, ".npmrc");
+  if (!existsSync(npmrcPath)) return [];
+  return readFileSync(npmrcPath, "utf8")
+    .split(/\r?\n/)
+    .map((line, index) => ({ line: index + 1, text: line.trim() }))
+    .filter(({ text }) => text && !text.startsWith("#") && !text.startsWith(";"))
+    .map(({ line, text }) => {
+      const match = text.match(/^((?:@[^:]+:)?registry)\s*=\s*(.+)$/i);
+      return match ? { line, key: match[1], value: match[2].trim() } : null;
+    })
+    .filter(Boolean);
+}
+
+function normalizeRegistryUrl(value) {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return String(value).replace(/\/+$/, "");
+  }
+}
+
+function assertDefaultRegistryPolicy() {
+  for (const setting of configuredRegistrySettings()) {
+    if (normalizeRegistryUrl(setting.value) !== "https://registry.npmjs.org") {
+      fail(
+        `.npmrc:${setting.line} ${setting.key} must be https://registry.npmjs.org/ for pnpm lock provenance, got ${setting.value}`,
+      );
+    }
+  }
 }
 
 function fail(message) {
@@ -167,14 +202,6 @@ function packageProductionDependencyEntries() {
   return entries.sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function productionDependencyMetadata() {
-  const metadata = {};
-  for (const section of productionDependencySections) {
-    if (packageJson[section]) metadata[section] = packageJson[section];
-  }
-  return metadata;
-}
-
 function rootLockProductionSpecifier(entry) {
   return packageLock.packages?.[""]?.[entry.section]?.[entry.name];
 }
@@ -232,7 +259,9 @@ function assertBudgetMetadata() {
             `temporary adapter ${adapter.name} dependency ${dependency} is not a direct dependency`,
           );
         }
-        adapterImports.add(`${adapter.source}|${dependency}`);
+        if (dependency.startsWith("@aws-sdk/")) {
+          adapterImports.add(`${adapter.source}|${dependency}`);
+        }
       }
     }
 
@@ -411,14 +440,14 @@ function assertDirectDependencyPolicy() {
     const rootLockSpec = actualEntry ? rootLockProductionSpecifier(actualEntry) : undefined;
     if (rootLockSpec !== record.version) {
       fail(
-        `package-lock root dependency ${name} must be exact-pinned to ${
+        `pnpm lock root dependency ${name} must be exact-pinned to ${
           record.version ?? "missing"
         }, got ${rootLockSpec ?? "missing"}`,
       );
     }
     const lockEntry = directLockEntry(name);
     if (!lockEntry) {
-      fail(`package-lock.json is missing node_modules/${name}`);
+      fail(`pnpm-lock.yaml is missing node_modules/${name}`);
       continue;
     }
     for (const field of ["version", "resolved", "integrity"]) {
@@ -445,7 +474,7 @@ function assertDirectDependencyPolicy() {
       fail(`forbidden runtime dependency is present in package.json: ${name}`);
     }
     if (packageLock.packages?.[`node_modules/${name}`] !== undefined) {
-      fail(`forbidden runtime dependency is present in package-lock.json: ${name}`);
+      fail(`forbidden runtime dependency is present in pnpm-lock.yaml: ${name}`);
     }
   }
 }
@@ -465,6 +494,7 @@ function isAllowedNonRegistryProductionPackage(entry) {
 }
 
 function assertProductionLockfileProvenance(productionPackages) {
+  assertDefaultRegistryPolicy();
   for (const entry of productionPackages) {
     if (!entry.resolved) {
       fail(`${entry.path}: production package is missing resolved URL`);
@@ -492,11 +522,11 @@ function assertSdkDependencyPolicy() {
   }
   const lockSdk = directLockEntry("@backblaze-labs/b2-sdk");
   if (!lockSdk) {
-    fail("package-lock.json is missing node_modules/@backblaze-labs/b2-sdk");
+    fail("pnpm-lock.yaml is missing node_modules/@backblaze-labs/b2-sdk");
     return;
   }
   if (lockSdk.version !== sdkSpec) {
-    fail(`package-lock SDK version expected ${sdkSpec}, got ${lockSdk.version ?? "missing"}`);
+    fail(`pnpm lock SDK version expected ${sdkSpec}, got ${lockSdk.version ?? "missing"}`);
   }
   if (!String(lockSdk.resolved ?? "").startsWith("https://registry.npmjs.org/")) {
     fail(`@backblaze-labs/b2-sdk must resolve from the npm registry, got ${lockSdk.resolved}`);
@@ -588,89 +618,30 @@ function sumFileBytes(dir) {
 }
 
 function committedProductionGraphMismatches(repoLock, consumerLock) {
-  return Object.entries(repoLock.packages ?? {})
-    .filter(
-      ([lockPath, entry]) => lockPath.startsWith("node_modules/") && !entry.dev && entry.version,
-    )
-    .flatMap(([lockPath, entry]) => {
-      const installed = consumerLock.packages?.[lockPath];
-      if (!installed) return [`${lockPath} missing from clean consumer lock`];
-      if (installed.version !== entry.version) {
-        return [`${lockPath} expected ${entry.version}, got ${installed.version ?? "missing"}`];
-      }
-      if (entry.integrity && installed.integrity !== entry.integrity) {
-        return [`${lockPath} integrity mismatch`];
-      }
-      if (entry.resolved && installed.resolved !== entry.resolved) {
-        return [`${lockPath} resolved URL mismatch`];
-      }
-      return [];
-    });
-}
-
-function writeConsumerLock(appDir, tarball, packResult) {
-  const tarballSpec = `file:${path.relative(appDir, tarball)}`;
-  const packages = {
-    "": {
-      name: "b2-mcp-package-budget-consumer",
-      private: true,
-      dependencies: { [packageJson.name]: tarballSpec },
-    },
-    [`node_modules/${packageJson.name}`]: {
-      version: packageJson.version,
-      resolved: tarballSpec,
-      integrity: packResult.integrity,
-      license: packageJson.license,
-      ...productionDependencyMetadata(),
-      bin: packageJson.bin,
-      engines: packageJson.engines,
-    },
-  };
-
-  for (const [lockPath, entry] of Object.entries(packageLock.packages ?? {})) {
-    if (lockPath.startsWith("node_modules/") && !entry.dev && entry.version) {
-      packages[lockPath] = entry;
-    }
-  }
-
-  writeFileSync(
-    path.join(appDir, "package-lock.json"),
-    JSON.stringify(
-      {
-        name: "b2-mcp-package-budget-consumer",
-        lockfileVersion: 3,
-        requires: true,
-        packages,
-      },
-      null,
-      2,
-    ),
+  const consumerByIdentity = new Map(
+    productionPackagesFromLock(consumerLock).map((entry) => [
+      `${entry.name}@${entry.version}`,
+      entry,
+    ]),
   );
+
+  return productionPackagesFromLock(repoLock).flatMap((entry) => {
+    const identity = `${entry.name}@${entry.version}`;
+    const installed = consumerByIdentity.get(identity);
+    if (!installed) return [`${identity} missing from clean consumer lock`];
+    if (entry.integrity && installed.integrity !== entry.integrity) {
+      return [`${identity} integrity mismatch`];
+    }
+    if (entry.resolved && installed.resolved !== entry.resolved) {
+      return [`${identity} resolved URL mismatch`];
+    }
+    return [];
+  });
 }
 
 function cleanConsumerInstallMetrics(packResult, tarball, workspace) {
   const appDir = path.join(workspace, "consumer");
-  const seedDir = path.join(workspace, "seed");
   mkdirSync(appDir, { recursive: true });
-  mkdirSync(seedDir, { recursive: true });
-  copyFileSync(path.join(root, "package.json"), path.join(seedDir, "package.json"));
-  copyFileSync(path.join(root, "package-lock.json"), path.join(seedDir, "package-lock.json"));
-  run("npm", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
-    retries: 2,
-    retryLabel: "npm ci seed",
-    retryDelayMs: 1_000,
-    spawnOptions: {
-      cwd: seedDir,
-      encoding: "utf8",
-      timeout: 180_000,
-      env: npmEnv(workspace, {
-        npm_config_fetch_retries: "3",
-        npm_config_fetch_retry_factor: "2",
-        npm_config_fetch_retry_mintimeout: "1000",
-        npm_config_fetch_retry_maxtimeout: "10000",
-      }),
-    },
-  });
   writeFileSync(
     path.join(appDir, "package.json"),
     JSON.stringify(
@@ -686,13 +657,20 @@ function cleanConsumerInstallMetrics(packResult, tarball, workspace) {
       2,
     ),
   );
-  writeConsumerLock(appDir, tarball, packResult);
-  run("npm", ["ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"], {
+  run("npm", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], {
+    retries: 2,
+    retryLabel: "npm install clean consumer",
+    retryDelayMs: 1_000,
     spawnOptions: {
       cwd: appDir,
       encoding: "utf8",
-      timeout: 120_000,
-      env: npmEnv(workspace),
+      timeout: 180_000,
+      env: npmEnv(workspace, {
+        npm_config_fetch_retries: "3",
+        npm_config_fetch_retry_factor: "2",
+        npm_config_fetch_retry_mintimeout: "1000",
+        npm_config_fetch_retry_maxtimeout: "10000",
+      }),
     },
   });
 
@@ -798,7 +776,7 @@ function transitiveProductionPackageCount(metrics) {
 
 function productionLockInventoryReport() {
   return {
-    source: "package-lock.json",
+    source: "pnpm-lock.yaml",
     packages: productionPackagesFromLock(packageLock),
   };
 }
@@ -906,7 +884,7 @@ function emitCollectedErrors() {
 function verifyBuiltEntrypoints() {
   for (const entrypoint of ["dist/index.js", "dist/http-server.js"]) {
     if (!existsSync(path.join(root, entrypoint))) {
-      fail(`${entrypoint} is missing; run npm run build before check:package-budget`);
+      fail(`${entrypoint} is missing; run pnpm run build before check:package-budget`);
     }
   }
 }

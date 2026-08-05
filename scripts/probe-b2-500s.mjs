@@ -13,7 +13,7 @@
  * including the B2 requestId. Output goes to the gitignored probe-output/ dir.
  *
  * Usage (build first, then run with creds):
- *   npm run probe:500
+ *   pnpm run probe:500
  * Requires: B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY (+ B2_APP_KEY_ID/B2_APP_KEY
  * for the S3 probes, which is where the suspected 500s live).
  */

@@ -11,9 +11,9 @@
  *   writeBucketLogging, listKeys
  *
  * Run with:
- *   npm run test:integration:live
+ *   pnpm run test:integration:live
  *
- * The npm script fails fast when credentials are absent. If this file is
+ * The pnpm script fails fast when credentials are absent. If this file is
  * selected directly with Vitest, live B2 API tests are skipped when credentials
  * are absent so a local editor cannot accidentally call B2.
  */

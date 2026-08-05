@@ -10,8 +10,8 @@
 
 ## Testing
 
-- [ ] `npm run build` passes
-- [ ] `npm test` passes
+- [ ] `pnpm run build` passes
+- [ ] `pnpm test` passes
 - [ ] Manual verification (describe below if applicable)
 
 ## Security / Credential Handling
@@ -21,4 +21,4 @@
 - [ ] Modifies authentication, authorization, or token handling
 - [ ] Changes how B2 credentials flow through the server
 - [ ] Touches the HTTP transport or request parsing
-- [ ] Updates dependencies (run `npm run audit:supply-chain` after)
+- [ ] Updates dependencies (run `pnpm run audit:supply-chain` after)

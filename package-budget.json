@@ -8,16 +8,16 @@
     "date": "2026-08-05",
     "nodeVersions": ["22.3.0", "24", "26"],
     "primaryB2Transport": "@backblaze-labs/b2-sdk@0.2.0",
-    "directProductionDependencyCount": 7,
+    "directProductionDependencyCount": 8,
     "totalProductionPackageCount": 47,
-    "transitiveProductionPackageCount": 39,
+    "transitiveProductionPackageCount": 38,
     "packedTarballBytes": 228193,
     "unpackedPackageBytes": 1123560,
     "packedEntryCount": 177,
     "cleanConsumerInstallFootprintBytes": 27972172
   },
   "limits": {
-    "directProductionDependencyCount": 7,
+    "directProductionDependencyCount": 8,
     "totalProductionPackageCount": 47,
     "packedTarballBytes": 252000,
     "unpackedPackageBytes": 1200000,
@@ -45,10 +45,18 @@
     },
     "@backblaze-labs/b2-sdk": {
       "purpose": "Primary Backblaze B2 transport and public SDK boundary for native B2, raw, S3 helper, and simulator-backed tests.",
-      "policy": "Must remain a stable npm release pinned exactly in package.json and package-lock.json.",
+      "policy": "Must remain a stable npm release pinned exactly in package.json and pnpm-lock.yaml.",
       "version": "0.2.0",
       "resolved": "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz",
       "integrity": "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ=="
+    },
+    "@smithy/types": {
+      "purpose": "Public AWS/Smithy command type boundary for the temporary S3 peer adapter.",
+      "policy": "Must stay pinned to the version resolved through the reviewed AWS SDK dependency set and be removed with the S3 peer adapter if the type import is no longer needed.",
+      "version": "4.16.1",
+      "resolved": "https://registry.npmjs.org/@smithy/types/-/types-4.16.1.tgz",
+      "integrity": "sha512-0JFs3V2y2M9tKW5na/qxe69Zv+uxLMO7QBbhxF/FHu/Gp2NFZAAL9tWl9PU02xxo07pb3G9FTyjNc6D5uZrJIg==",
+      "owner": "@goanpeca"
     },
     "@modelcontextprotocol/server": {
       "purpose": "Stable MCP server v2 runtime for stdio and Streamable HTTP handling.",
@@ -110,7 +118,7 @@
       "name": "s3-material-aws-peer-adapter",
       "owner": "@goanpeca",
       "source": "src/s3/aws-sdk-adapter.ts",
-      "dependencies": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
+      "dependencies": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner", "@smithy/types"],
       "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
       "tests": [
         "tests/unit/s3-tools.unit.test.ts",
@@ -119,7 +127,7 @@
         "tests/contract/sdk-adoption.contract.test.ts",
         "tests/package/packed-install.package.test.ts"
       ],
-      "removalCondition": "Remove this adapter and both AWS direct dependencies after a stable @backblaze-labs/b2-sdk release exposes first-party helpers for the retained S3-material operations."
+      "removalCondition": "Remove this adapter plus the AWS and Smithy direct dependencies after a stable @backblaze-labs/b2-sdk release exposes first-party helpers for the retained S3-material operations."
     }
   ],
   "approvedDuplicatePackageVersions": {

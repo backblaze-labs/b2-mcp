@@ -19,7 +19,7 @@ mamba run -n b2-mcp trufflehog --json --regex --entropy=True \
   --repo_path . file://$(pwd)
 ```
 
-The first pass scans every file, including `package-lock.json`, for regex-backed
+The first pass scans every file, including `pnpm-lock.yaml`, for regex-backed
 credential patterns. The second pass enables entropy detection and excludes only
 lockfile integrity-hash noise. Do not disable entropy globally: B2
 application-key secrets and many session tokens are high-entropy strings without

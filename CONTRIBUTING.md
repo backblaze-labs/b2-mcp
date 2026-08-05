@@ -14,12 +14,12 @@ release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later patched
 runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 ```bash
-npm ci
-npm run build        # clean + tsc → dist/
-npm test             # typecheck, then fast unit suite
-npm run verify       # full no-credential local gate
-npm run lint         # Biome lint for src/, tests/, and scripts/
-npm run format:check # checks Biome-supported formatting
+pnpm install --frozen-lockfile
+pnpm run build        # clean + tsc → dist/
+pnpm test             # typecheck, then fast unit suite
+pnpm run verify       # full no-credential local gate
+pnpm run lint         # Biome lint for src/, tests/, and scripts/
+pnpm run format:check # checks Biome-supported formatting
 ```
 
 For the version/build-pinned conda bootstrap:
@@ -27,12 +27,12 @@ For the version/build-pinned conda bootstrap:
 ```bash
 mamba env create -f environment.yml
 mamba run -n b2-mcp node --version
-mamba run -n b2-mcp npm ci
+mamba run -n b2-mcp pnpm install --frozen-lockfile
 ```
 
 Live tests need real B2 credentials and are not run in the default suite. Use
-`npm run test:integration:live` for live integration behavior and
-`npm run test:contract:live` for live request-shape checks; both require
+`pnpm run test:integration:live` for live integration behavior and
+`pnpm run test:contract:live` for live request-shape checks; both require
 `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`.
 
 Biome is the sole formatter in this repository. The `format` and `format:check`
@@ -48,7 +48,7 @@ Test files must follow the layer suffix convention documented in
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
-- `npm run verify` must pass before opening a PR. CI runs the bundled
+- `pnpm run verify` must pass before opening a PR. CI runs the bundled
   deterministic coverage and slow layers on Node.js 22.23.1, 24, and 26, checks
   production-only dependency installation at the Node.js 22.3.0 engine floor,
   and runs a patched Node 22 LTS cross-platform suite. A separate package-install
@@ -72,10 +72,10 @@ tools must respect the existing guardrails:
 - **Never log credentials, tokens, presigned URLs, or signing secrets**, and
   redact any secret a B2 response echoes back before returning it to the model.
 
-## Dependencies and `npm audit`
+## Dependencies and `pnpm audit`
 
 Production dependencies ship in `dist/`, and development dependencies run in
-CI, so review the full lockfile with `npm run audit:supply-chain` before
+CI, so review the full lockfile with `pnpm run audit:supply-chain` before
 release. `audit-policy.json` holds narrow, expiring exceptions for known
 upstream advisories; the current policy has no exceptions. Do not add untracked
 high or critical production or development-toolchain findings.
@@ -84,8 +84,8 @@ Runtime dependency ownership and package footprint are gated by
 `package-budget.json`:
 
 ```bash
-npm run build
-npm run check:package-budget
+pnpm run build
+pnpm run check:package-budget
 ```
 
 The budget records every direct production dependency from `dependencies` or

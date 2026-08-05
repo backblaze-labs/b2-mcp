@@ -8,7 +8,7 @@ controls that remain in force after the incident.
 
 ## Current Exposure Snapshot
 
-As of 2026-08-05, this repository's `package-lock.json` includes these related
+As of 2026-08-05, this repository's `pnpm-lock.yaml` includes these related
 transitive packages through the narrowly reintroduced ESLint doc-comment
 toolchain:
 
@@ -17,13 +17,13 @@ toolchain:
 - `keyv@4.5.4`
 
 Biome remains the owner for code linting and formatting. ESLint is present only
-for `npm run lint:docs`, where it validates TSDoc syntax and JSDoc hygiene for
+for `pnpm run lint:docs`, where it validates TSDoc syntax and JSDoc hygiene for
 the exported TypeScript tool/handler surface that Biome cannot validate. The
 direct doc-lint packages are exact-pinned in `package.json`; the lockfile
 snapshot above remains unchanged after reintroducing that narrow ESLint path.
 The `@typescript-eslint/visitor-keys` override keeps its `eslint-visitor-keys`
 resolution on a Node.js 22.3-compatible release so the full lockfile still
-installs under the advertised package engine floor with `npm ci --engine-strict`.
+installs under the advertised package engine floor with `pnpm install --frozen-lockfile`.
 
 Those are not the denied malicious versions recorded in the checked-in Wiz IOC
 snapshot at [`../security/iocs/keyv-packages.csv`](../security/iocs/keyv-packages.csv)
@@ -31,10 +31,10 @@ and loaded through [`../supply-chain-denylist.json`](../supply-chain-denylist.js
 The current lockfile and publish packlist are checked by:
 
 ```bash
-npm run audit:supply-chain:denylist -- --packlist
+pnpm run audit:supply-chain:denylist --packlist
 ```
 
-`npm run lint:docs` uses the repository-owned
+`pnpm run lint:docs` uses the repository-owned
 [`../scripts/run-doc-lint.mjs`](../scripts/run-doc-lint.mjs) wrapper rather than
 executing the ESLint binary directly. The wrapper strips secret-like environment
 variables, refuses local checkout credentials such as persisted GitHub
@@ -49,13 +49,13 @@ out with `persist-credentials: false`.
 
 Lifecycle scripts are disabled by default in [`.npmrc`](../.npmrc). Normal
 developer, CI, and packed-consumer installs must keep `ignore-scripts=true`.
-The scanner rejects new `package-lock.json` entries with `hasInstallScript`
+The scanner rejects new `pnpm-lock.yaml` entries with `hasInstallScript`
 unless the exact package path/name/version is added to the reviewed
 `allowedLifecycleScripts` list, so dependencies that require a postinstall step
 fail at the supply-chain gate instead of silently leaving a broken install.
 
-Use `npm ci` from a clean checkout rather than `npm install` for verification.
-Do not run `npm update` during an active package compromise unless the update is
+Use `pnpm install --frozen-lockfile` from a clean checkout rather than `pnpm install` for verification.
+Do not run `pnpm update` during an active package compromise unless the update is
 the reviewed remediation itself and the resulting lockfile passes the denylist
 and audit gates.
 
@@ -68,17 +68,17 @@ The repository-owned denylist gate blocks:
   `@cacheable/*` rules;
 - known SHA-256 hashes for the npm preinstall loader, repository persistence
   loader, and second-stage payload;
-- denied versions in `package.json`, `package-lock.json`, `npm-shrinkwrap.json`,
-  `pnpm-lock.yaml`, and `yarn.lock`;
+- denied versions in `package.json`, `pnpm-lock.yaml`, `npm-shrinkwrap.json`,
+  and `yarn.lock`;
 - missing lockfile integrity on installed packages;
 - unexpected lockfile lifecycle scripts;
 - denied file hashes in checked-in files, npm packlists, expanded artifacts,
   tarballs, and installed `node_modules` indicator filenames.
 
-The default supply-chain audit runs the denylist gate before the live npm audit:
+The default supply-chain audit runs the denylist gate before the live pnpm audit:
 
 ```bash
-npm run audit:supply-chain
+pnpm run audit:supply-chain
 ```
 
 Filesystem scan failures are reported as scanner errors instead of aborting the
@@ -92,7 +92,7 @@ deploys:
 
 ```bash
 git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
-npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist
+pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist
 ```
 
 During incident triage, run the all-branches scan from a fresh clone and treat
@@ -101,7 +101,7 @@ release input:
 
 ```bash
 git fetch --prune --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
-npm run audit:supply-chain:denylist -- --all-branches --packlist
+pnpm run audit:supply-chain:denylist --all-branches --packlist
 ```
 
 When reviewing historical or downloaded workflow artifacts, expand them first
@@ -109,7 +109,7 @@ and scan the extracted directory:
 
 ```bash
 gh run download --repo backblaze-labs/b2-mcp --dir /tmp/b2-mcp-artifacts
-npm run audit:supply-chain:denylist -- --artifacts-dir /tmp/b2-mcp-artifacts
+pnpm run audit:supply-chain:denylist --artifacts-dir /tmp/b2-mcp-artifacts
 ```
 
 `gh run download` extracts GitHub artifact ZIPs by default. If another tool
@@ -171,7 +171,7 @@ The only repository workflow allowed to publish npm packages is
 - pins every marketplace action to a reviewed commit SHA;
 - accepts only a `vMAJOR.MINOR.PATCH[-prerelease]` tag and checks it out only
   after proving it is reachable from the current `ci-green` history;
-- runs `npm ci` with lifecycle scripts still disabled;
+- runs `pnpm install --frozen-lockfile` with lifecycle scripts still disabled;
 - builds explicitly, enforces the reviewed runtime package budget, requires
   `dist/index.js` in the packlist, creates an npm tarball with lifecycle scripts
   disabled, scans that exact tarball through the safe denylist extractor, and

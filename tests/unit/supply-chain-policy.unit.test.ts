@@ -9,6 +9,9 @@ const nodeRequire = createRequire(__filename);
 const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
 };
+const { readPackageManagerLock } = nodeRequire("../../scripts/lib/pnpm-lock.cjs") as {
+  readPackageManagerLock: (root: string) => unknown;
+};
 const semver = nodeRequire("semver") as {
   satisfies: (version: string, range: string, options?: { includePrerelease?: boolean }) => boolean;
 };
@@ -34,7 +37,7 @@ describe("supply-chain audit policy", () => {
       expires: string;
     }>;
   };
-  const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as {
+  const lock = readPackageManagerLock(root) as {
     packages: Record<
       string,
       {
@@ -208,9 +211,9 @@ describe("supply-chain audit policy", () => {
     const auditJob = jobBlock("supply-chain-audit");
     const markGreenJob = jobBlock("mark-green");
     expect(workflow).toContain("supply-chain-audit:");
-    expect(workflow).toContain("npm run audit:supply-chain");
+    expect(workflow).toContain("pnpm run audit:supply-chain");
     expect(workflow).toContain(
-      "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist",
+      "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
     expect(auditJob).toContain("fetch-depth: 0");
     expect(auditJob).toContain(
@@ -225,8 +228,8 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
     expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail");
     expect(auditJob).not.toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: warn");
-    expect(productionJob).not.toContain("npm run audit:supply-chain");
-    expect(currentJob).not.toContain("npm run audit:supply-chain");
+    expect(productionJob).not.toContain("pnpm run audit:supply-chain");
+    expect(currentJob).not.toContain("pnpm run audit:supply-chain");
     for (const required of [
       "runtime-engine-floor",
       "deterministic-linux-production",
@@ -241,12 +244,12 @@ describe("supply-chain audit policy", () => {
   it("disables normal lifecycle scripts and isolates npm publishing", () => {
     expect(npmrc).toMatch(/^ignore-scripts=true$/m);
     expect(packageJson.scripts["audit:supply-chain"]).toContain(
-      "npm run audit:supply-chain:denylist -- --packlist",
+      "pnpm run audit:supply-chain:denylist --packlist",
     );
     expect(packageJson.scripts["audit:supply-chain:denylist"]).toBe(
       "node scripts/check-supply-chain-denylist.mjs",
     );
-    expect(packageJson.scripts.test).toBe("npm run typecheck && npm run test:unit");
+    expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
     expect(packageJson.scripts.prepublishOnly).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
@@ -254,7 +257,7 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("environment: npm-publish");
     expect(publishWorkflow).toContain("ci-green");
     expect(publishWorkflow).toContain(
-      "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
+      "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
@@ -334,7 +337,7 @@ describe("supply-chain audit policy", () => {
     for (const name of ["deterministic-linux-production", "deterministic-linux-current"]) {
       const job = jobBlock(name);
       expect(job).toContain("persist-credentials: false");
-      expect(job).toContain("npm run lint:docs");
+      expect(job).toContain("pnpm run lint:docs");
     }
   });
 
@@ -343,12 +346,12 @@ describe("supply-chain audit policy", () => {
     const publishJob = publishJobBlock("publish");
 
     expect(prepareJob).not.toContain("id-token: write");
-    expect(prepareJob).toContain("npm run typecheck");
-    expect(prepareJob).toContain("npm run build");
+    expect(prepareJob).toContain("pnpm run typecheck");
+    expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
     expect(publishJob).toContain("id-token: write");
-    expect(publishJob).not.toContain("npm run typecheck");
-    expect(publishJob).not.toContain("npm run build");
+    expect(publishJob).not.toContain("pnpm run typecheck");
+    expect(publishJob).not.toContain("pnpm run build");
     expect(publishJob).not.toContain("--ignore-scripts=false");
     expect(publishJob).toContain("npm publish");
     expect(publishJob).toContain("--ignore-scripts");
@@ -415,12 +418,49 @@ describe("supply-chain audit policy", () => {
     expect(result.stderr).toContain("refusing B2_MCP_AUDIT_POLICY_JSON outside NODE_ENV=test");
   });
 
-  it("retries transient npm audit registry failures before evaluating advisories", () => {
-    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-npm-"));
+  it("fails closed when pnpm audit reports multiple advisories for one package", () => {
+    const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify({ allowedAdvisories: [] }),
+        B2_MCP_AUDIT_REPORT_JSON: JSON.stringify({
+          advisories: {
+            1001: {
+              id: 1001,
+              module_name: "evilpkg",
+              severity: "high",
+              title: "High severity advisory",
+              url: "https://advisories.example/1001",
+              vulnerable_versions: "<1.0.1",
+              findings: [{ paths: ["node_modules/evilpkg"] }],
+            },
+            1002: {
+              id: 1002,
+              module_name: "evilpkg",
+              severity: "low",
+              title: "Low severity advisory",
+              url: "https://advisories.example/1002",
+              vulnerable_versions: "<1.0.2",
+              findings: [{ paths: ["node_modules/evilpkg"] }],
+            },
+          },
+        }),
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("evilpkg:1001 high: High severity advisory");
+  });
+
+  it("retries transient pnpm audit registry failures before evaluating advisories", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-pnpm-"));
     const state = join(dir, "attempts");
-    const fakeNpm = join(dir, "npm");
+    const fakePnpm = join(dir, "pnpm");
     writeFileSync(
-      fakeNpm,
+      fakePnpm,
       [
         "#!/usr/bin/env node",
         'const fs = require("node:fs");',
@@ -431,15 +471,15 @@ describe("supply-chain audit policy", () => {
         "attempt += 1;",
         "fs.writeFileSync(state, String(attempt));",
         "if (attempt === 1) {",
-        '  console.error("npm ERR! code EAI_AGAIN");',
-        '  console.error("npm ERR! registry network timeout");',
+        '  console.error("pnpm ERR! code EAI_AGAIN");',
+        '  console.error("pnpm ERR! registry network timeout");',
         "  process.exit(1);",
         "}",
         "console.log(JSON.stringify(report));",
         "process.exit(1);",
       ].join("\n"),
     );
-    chmodSync(fakeNpm, 0o755);
+    chmodSync(fakePnpm, 0o755);
 
     try {
       const env: NodeJS.ProcessEnv = {
@@ -469,14 +509,14 @@ describe("supply-chain audit policy", () => {
     ["npm_config_omit=dev", { NODE_ENV: "test", npm_config_omit: "dev", NPM_CONFIG_OMIT: "dev" }],
   ])("reports dev-only high advisories when %s is inherited", (_name, inheritedEnv) => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-dev-"));
-    const fakeNpm = join(dir, "npm");
+    const fakePnpm = join(dir, "pnpm");
     writeFileSync(
-      fakeNpm,
+      fakePnpm,
       [
         "#!/usr/bin/env node",
         `const report = ${JSON.stringify(devOnlyAuditReport())};`,
         "const args = process.argv.slice(2);",
-        'const devIncluded = args.includes("--include=dev") && process.env.npm_config_include === "dev";',
+        'const devIncluded = args[0] === "audit" && args.includes("--json") && process.env.npm_config_include === "dev";',
         "const omitCleared =",
         "  !process.env.npm_config_omit && !process.env.NPM_CONFIG_OMIT &&",
         "  !process.env.npm_config_only && !process.env.NPM_CONFIG_ONLY &&",
@@ -490,7 +530,7 @@ describe("supply-chain audit policy", () => {
         "process.exit(0);",
       ].join("\n"),
     );
-    chmodSync(fakeNpm, 0o755);
+    chmodSync(fakePnpm, 0o755);
 
     try {
       const env: NodeJS.ProcessEnv = {

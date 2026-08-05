@@ -34,7 +34,7 @@ describe("spelling policy", () => {
   it("wires cspell into package scripts and verify", () => {
     expect(pkg.devDependencies.cspell).toBeDefined();
     expect(pkg.scripts.spell).toEqual(expect.stringMatching(/\bcspell\b/));
-    expect(pkg.scripts.verify).toContain("npm run spell");
+    expect(pkg.scripts.verify).toContain("pnpm run spell");
   });
 
   it("loads the cspell config and central project dictionary", () => {
@@ -76,9 +76,9 @@ describe("spelling policy", () => {
   it("gates the deterministic CI jobs on spelling", () => {
     for (const jobName of ["deterministic-linux-production", "deterministic-linux-current"]) {
       const job = workflowJob(jobName);
-      const lintStep = job.indexOf("npm run lint");
-      const spellStep = job.indexOf("npm run spell");
-      const buildStep = job.indexOf("npm run build");
+      const lintStep = job.indexOf("pnpm run lint");
+      const spellStep = job.indexOf("pnpm run spell");
+      const buildStep = job.indexOf("pnpm run build");
 
       expect(lintStep).toBeGreaterThan(-1);
       expect(spellStep).toBeGreaterThan(-1);

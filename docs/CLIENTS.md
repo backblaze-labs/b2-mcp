@@ -31,8 +31,8 @@ This server speaks the Model Context Protocol over **two transports**:
 ```bash
 git clone https://github.com/backblaze-labs/b2-mcp.git b2-mcp
 cd b2-mcp
-npm install
-npm run build      # produces dist/ — required for the stdio command below
+pnpm install
+pnpm run build      # produces dist/ — required for the stdio command below
 ```
 
 You also need a Backblaze B2 **Application Key** (key ID + secret). A single non-master application key works for both the B2 native and S3-compatible APIs. Master keys are only needed for Partner API and account-level key management in the Phase 1 tool surface.

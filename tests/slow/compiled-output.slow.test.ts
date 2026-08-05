@@ -3,7 +3,7 @@ import { root } from "../contract/support";
 
 describe("compiled output", () => {
   it("rebuilds dist and exposes the compiled entry points", () => {
-    execFileSync("npm", ["run", "build"], {
+    execFileSync("pnpm", ["run", "build"], {
       cwd: root,
       stdio: "pipe",
       timeout: 120_000,

@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import retryUtils from "./lib/retry-utils.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
+const require = createRequire(import.meta.url);
+const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
+const lock = readPackageManagerLock(root);
 const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const minimumRank = severityRank.moderate;
-const { isTransientNpmFailure, runNpmCommandWithRetries } = retryUtils;
+const { isTransientNpmFailure, runCommandWithRetries } = retryUtils;
 const injectedReportJson = process.env.B2_MCP_AUDIT_REPORT_JSON;
 const injectedPolicyJson = process.env.B2_MCP_AUDIT_POLICY_JSON;
 const allowInjectedReport = process.env.NODE_ENV === "test";
@@ -26,7 +29,7 @@ if (injectedToday && !allowInjectedReport) {
 }
 if (injectedReportJson && !allowInjectedReport) {
   console.error(
-    "audit-policy: refusing B2_MCP_AUDIT_REPORT_JSON outside NODE_ENV=test; CI must run real npm audit",
+    "audit-policy: refusing B2_MCP_AUDIT_REPORT_JSON outside NODE_ENV=test; CI must run real pnpm audit",
   );
   process.exit(1);
 }
@@ -87,12 +90,55 @@ function isTransientAuditFailure(audit, parseError = null) {
 
 function parseAuditReport(audit) {
   try {
-    return JSON.parse(audit.stdout || "{}");
+    return normalizeAuditReport(JSON.parse(audit.stdout || "{}"));
   } catch (error) {
     return { error };
   }
 }
 
+function normalizePnpmAdvisory(advisory) {
+  const name = advisory.module_name ?? advisory.name;
+  if (!name) return null;
+  const source = advisory.id ?? advisory.source ?? advisory.github_advisory_id ?? advisory.url;
+  const nodes = [...new Set((advisory.findings ?? []).flatMap((finding) => finding.paths ?? []))];
+  return {
+    name,
+    severity: advisory.severity,
+    isDirect: Boolean(advisory.isDirect),
+    via: [
+      {
+        source,
+        name,
+        dependency: name,
+        title: advisory.title ?? advisory.overview ?? `Advisory for ${name}`,
+        url: advisory.url,
+        severity: advisory.severity,
+        range: advisory.vulnerable_versions ?? advisory.range,
+      },
+    ],
+    effects: [],
+    range: advisory.vulnerable_versions ?? advisory.range,
+    nodes,
+    fixAvailable: advisory.fix_available ?? false,
+  };
+}
+
+function normalizeAuditReport(report) {
+  if (report.auditReportVersion) return report;
+  if (!report.advisories || typeof report.advisories !== "object") return report;
+  const vulnerabilities = {};
+  for (const [index, advisory] of Object.values(report.advisories).entries()) {
+    const normalized = normalizePnpmAdvisory(advisory);
+    if (!normalized) continue;
+    const source = normalized.via?.[0]?.source ?? `unknown-${index}`;
+    vulnerabilities[`${normalized.name}:${source}`] = normalized;
+  }
+  return {
+    auditReportVersion: 2,
+    vulnerabilities,
+    metadata: report.metadata,
+  };
+}
 function logAuditFailure(audit, message) {
   console.error(`audit-policy: ${message}`);
   if (audit.stdout) console.error(audit.stdout);
@@ -101,33 +147,33 @@ function logAuditFailure(audit, message) {
 
 function auditRetryReason(audit) {
   if (audit.error) {
-    return isTransientAuditFailure(audit) ? "npm audit registry/network failure" : null;
+    return isTransientAuditFailure(audit) ? "pnpm audit registry/network failure" : null;
   }
 
   const parsed = parseAuditReport(audit);
   if (parsed.error) {
     return isTransientAuditFailure(audit, parsed.error)
-      ? "npm audit returned a transient non-report response"
+      ? "pnpm audit returned a transient non-report response"
       : null;
   }
 
   if (audit.status && audit.status > 1) {
-    return isTransientAuditFailure(audit) ? "npm audit registry/network failure" : null;
+    return isTransientAuditFailure(audit) ? "pnpm audit registry/network failure" : null;
   }
 
   if (!parsed.auditReportVersion) {
     return isTransientAuditFailure(audit)
-      ? "npm audit returned a transient non-report response"
+      ? "pnpm audit returned a transient non-report response"
       : null;
   }
 
   return null;
 }
 
-function runNpmAudit() {
-  const audit = runNpmCommandWithRetries(["audit", "--json", "--include=dev"], {
+function runPackageAudit() {
+  const audit = runCommandWithRetries("pnpm", ["audit", "--json"], {
     attempts: 3,
-    retryLabel: "npm audit",
+    retryLabel: "pnpm audit",
     retryDelayMs: 1_000,
     shouldRetry: (result) => auditRetryReason(result) !== null,
     retryMessage: ({ result, attempt, attempts }) =>
@@ -147,21 +193,21 @@ function runNpmAudit() {
 
   const parsed = parseAuditReport(audit);
   if (parsed.error) {
-    logAuditFailure(audit, "npm audit did not return parseable JSON");
+    logAuditFailure(audit, "pnpm audit did not return parseable JSON");
     throw parsed.error;
   }
 
   if (audit.status && audit.status > 1) {
     logAuditFailure(
       audit,
-      "npm audit failed before advisory evaluation; registry/network failures are logged separately when retried",
+      "pnpm audit failed before advisory evaluation; registry/network failures are logged separately when retried",
     );
     process.exit(audit.status);
   }
 
   if (!parsed.auditReportVersion) {
-    logAuditFailure(audit, "npm audit did not return an audit report");
-    throw new Error("npm audit did not return an audit report");
+    logAuditFailure(audit, "pnpm audit did not return an audit report");
+    throw new Error("pnpm audit did not return an audit report");
   }
 
   return parsed;
@@ -176,7 +222,7 @@ function fixtureAuditReport() {
   return parsed;
 }
 
-const report = injectedReportJson ? fixtureAuditReport() : runNpmAudit();
+const report = injectedReportJson ? fixtureAuditReport() : runPackageAudit();
 
 function sortedJson(value) {
   return JSON.stringify([...(value ?? [])].sort());

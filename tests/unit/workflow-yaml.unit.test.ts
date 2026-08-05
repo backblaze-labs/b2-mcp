@@ -20,7 +20,7 @@ describe("workflow YAML helper", () => {
     "          - '24'",
     '          - "26" # current line',
     "    steps:",
-    "      - run: npm test",
+    "      - run: pnpm test",
     "  smoke:",
     "    strategy:",
     "      max-parallel: 1",

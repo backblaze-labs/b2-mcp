@@ -143,6 +143,7 @@ export function scanFilesystemRoot(root, label, state, report) {
   const files = isGitWorkTree(root) ? gitTrackedFiles(root) : null;
   if (files) {
     for (const relativePath of files) {
+      if (!existsSync(path.join(root, relativePath))) continue;
       scanFilesystemFile(root, relativePath, label, state, report, { hashAll: true });
     }
   } else {

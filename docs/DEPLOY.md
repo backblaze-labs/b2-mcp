@@ -133,6 +133,9 @@ For other providers: any VM with 2 vCPU and 4 GB RAM works.
 ```bash
 sudo dnf install -y nodejs git nginx certbot python3-certbot-nginx fail2ban
 node --version  # confirm patched v22 LTS, v24, or v26
+sudo corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+pnpm --version  # confirm 11.20.0
 ```
 
 ## Step 3 — Build and run
@@ -141,8 +144,8 @@ node --version  # confirm patched v22 LTS, v24, or v26
 sudo useradd -r -m -s /bin/bash mcp || true   # optional dedicated user
 git clone https://github.com/backblaze-labs/b2-mcp.git /home/ec2-user/b2-mcp
 cd /home/ec2-user/b2-mcp
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
 ## Step 4 — Hardened systemd unit
@@ -486,11 +489,17 @@ still choose affinity for operational reasons.
 
 ```bash
 cd /home/ec2-user/b2-mcp
+sudo corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
 git pull
-npm ci
-npm run build
+pnpm install --frozen-lockfile
+pnpm run build
 sudo systemctl restart b2-mcp
 ```
+
+Existing hosts that were provisioned with the previous npm-based runbook must
+run the Corepack commands above before the first pnpm install after pulling this
+repository version.
 
 The `SIGTERM` handler stops accepting new traffic and gives in-flight HTTP
 requests a short drain window before process exit.
@@ -506,7 +515,7 @@ Server or principal mode, where the client sends no B2 key:
 ```bash
 MCP_URL=https://mcp.your-domain.example/mcp \
 B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
-npm run smoke
+pnpm run smoke
 ```
 
 Header compatibility mode, where the client still sends B2 credential headers:
@@ -516,7 +525,7 @@ MCP_URL=https://mcp.your-domain.example/mcp \
 B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
 B2_KEY_ID=...  B2_KEY=... \
 B2_APP_KEY_ID=...  B2_APP_KEY=... \
-npm run smoke
+pnpm run smoke
 ```
 
 `B2_APP_KEY_ID` / `B2_APP_KEY` are optional — if absent the S3 check is

@@ -12,26 +12,26 @@ The PR gate must not require real B2 credentials. The complete local
 no-credential gate is:
 
 ```bash
-npm ci
-npm run verify
+pnpm install --frozen-lockfile
+pnpm run verify
 ```
 
-`npm run verify` runs typecheck, build, Biome lint, doc-comment lint, the
+`pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, the
 Biome-supported format check, spelling, and deterministic coverage across all
 non-live layers, including slow lifecycle and packed-package installation tests.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------ |
-| `npm test`              | Typecheck, then `npm run test:unit`.                                                 |
-| `npm run lint`          | Biome lint for source, test, and script code.                                        |
-| `npm run lint:docs`     | TSDoc/JSDoc doc-comment syntax and hygiene gate for non-test `src/**/*.ts` files.    |
-| `npm run test:unit`     | Fast source unit tests.                                                              |
-| `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
-| `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
-| `npm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Vitest worker.  |
-| `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
-| `npm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
+| `pnpm test`              | Typecheck, then `pnpm run test:unit`.                                                |
+| `pnpm run lint`          | Biome lint for source, test, and script code.                                        |
+| `pnpm run lint:docs`     | TSDoc/JSDoc doc-comment syntax and hygiene gate for non-test `src/**/*.ts` files.    |
+| `pnpm run test:unit`     | Fast source unit tests.                                                              |
+| `pnpm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
+| `pnpm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
+| `pnpm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Vitest worker.  |
+| `pnpm run test:package`  | Builds, packs, installs through an npm consumer, and verifies installed entry points. |
+| `pnpm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
 
 Local scripts can call each deterministic layer independently. The Linux Node
 matrix runs the bundled coverage and slow deterministic lifecycle layers, while
@@ -41,11 +41,11 @@ and package packing do not race each other.
 Global V8 coverage must remain at or above 82% statements, 72% branches, 86%
 functions, and 86% lines. Raise these floors as coverage improves; lowering
 them requires explicit review and justification.
-CI verifies the production dependency graph with `npm ci --omit=dev
---engine-strict` on the Node.js 22.3.0 package floor. The credential-free full
-toolchain gate, including `npm run lint:docs`, runs on Linux for Node.js
+CI installs with `pnpm install --frozen-lockfile` and verifies the runtime
+package floor with a packed consumer smoke on Node.js 22.3.0. The credential-free full
+toolchain gate, including `pnpm run lint:docs`, runs on Linux for Node.js
 22.23.1, 24, and 26. It also runs
-`npm run check:runtime-policy`, which fails if workflow or metadata runtime
+`pnpm run check:runtime-policy`, which fails if workflow or metadata runtime
 policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI port
 parsing, local-path policy, and request shutdown/signal suite runs on Linux,
 Windows, and macOS at the patched Node 22 LTS pin.
@@ -54,7 +54,7 @@ TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
 TypeScript range only with a matching typecheck and lint toolchain upgrade.
 
-Biome is also the only formatter. `npm run format` and `npm run format:check`
+Biome is also the only formatter. `pnpm run format` and `pnpm run format:check`
 cover Biome-supported file types; Markdown and YAML files are not part of the
 automated format gate.
 
@@ -78,7 +78,7 @@ import `src/`; only the slow/package layers may build or inspect `dist/`.
 
 ## Test Reports
 
-All npm Vitest layer commands run through `scripts/run-vitest-layer.mjs`. The runner
+All pnpm Vitest layer commands run through `scripts/run-vitest-layer.mjs`. The runner
 preserves the normal terminal reporter and writes machine-readable summaries
 without raw failure messages. Deterministic layers write JUnit XML only when no
 B2 credential environment variables are present. Any layer running with B2
@@ -86,8 +86,8 @@ credentials suppresses the JUnit reporter.
 
 - JUnit XML: `reports/junit/<layer>.xml`
 - Vitest JSON summary: `reports/vitest/<layer>.json`
-- Coverage summary: `coverage/coverage-summary.json` from `npm run test:coverage`
-- Cobertura XML: `coverage/cobertura-coverage.xml` from `npm run test:coverage`
+- Coverage summary: `coverage/coverage-summary.json` from `pnpm run test:coverage`
+- Cobertura XML: `coverage/cobertura-coverage.xml` from `pnpm run test:coverage`
 
 If a selected layer has zero executed tests because every case was skipped, the
 runner exits nonzero and prints the summary path. A skipped-only run is visible
@@ -147,8 +147,8 @@ These live commands are outside the deterministic PR gate and fail fast when the
 required credentials are not present:
 
 ```bash
-npm run test:integration:live # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
-npm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+pnpm run test:integration:live # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+pnpm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 ```
 
 ## Networked Security Gate
@@ -157,21 +157,21 @@ The full lockfile audit is release-gate evidence, a pull-request CI gate, and
 part of the `mark-green` deploy gate on `main` pushes:
 
 ```bash
-npm run audit:supply-chain
+pnpm run audit:supply-chain
 ```
 
 The first phase of that command is the repository denylist/IOC gate for active
 npm supply-chain incidents:
 
 ```bash
-npm run audit:supply-chain:denylist -- --packlist
+pnpm run audit:supply-chain:denylist --packlist
 ```
 
 CI fetches the protected `origin/main` ref and scans the tested ref plus
 `origin/main` before `ci-green` can advance:
 
 ```bash
-npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist
+pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist
 ```
 
 For incident triage across all fetched branches, run the same command with
@@ -186,7 +186,7 @@ severity, dependency path, lockfile version/integrity, and rationale. The
 current policy has no exceptions; adding one requires explicit security-owner
 review.
 
-`scripts/audit-supply-chain.mjs` always runs a real `npm audit` outside
+`scripts/audit-supply-chain.mjs` always runs a real `pnpm audit` outside
 `NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded
 npm fetch retry options, and retries transient registry/network failures before
 evaluating advisories. `scripts/check-supply-chain-denylist.mjs` runs without
