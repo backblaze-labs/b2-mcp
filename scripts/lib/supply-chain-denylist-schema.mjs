@@ -135,6 +135,7 @@ function loadPackageSource(denylistPath, raw, location, errors) {
     return [];
   }
 
+  const initialErrorCount = errors.length;
   const sourcePath = requireString(raw.path, `${location}.path`, errors);
   const format = requireString(raw.format, `${location}.format`, errors);
   const sourceUrl = requireString(raw.sourceUrl, `${location}.sourceUrl`, errors);
@@ -152,7 +153,7 @@ function loadPackageSource(denylistPath, raw, location, errors) {
     errors.push(`${location}.format unsupported value ${JSON.stringify(format)}`);
     return [];
   }
-  if (errors.length > 0) return [];
+  if (errors.length > initialErrorCount) return [];
 
   const denylistRoot = path.resolve(path.dirname(denylistPath));
   const absolutePath = path.resolve(denylistRoot, sourcePath);

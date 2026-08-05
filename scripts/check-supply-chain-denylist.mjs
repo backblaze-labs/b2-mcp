@@ -33,6 +33,7 @@ function usage() {
 function parseArgs(argv) {
   const options = {
     root: repoRoot,
+    rootProvided: false,
     denylist: path.join(repoRoot, "supply-chain-denylist.json"),
     refs: [],
     allBranches: false,
@@ -70,8 +71,10 @@ function parseArgs(argv) {
         process.exit(2);
       }
       index += 1;
-      if (arg === "--root") options.root = value;
-      else if (arg === "--denylist") options.denylist = value;
+      if (arg === "--root") {
+        options.root = value;
+        options.rootProvided = true;
+      } else if (arg === "--denylist") options.denylist = value;
       else if (arg === "--ref") options.refs.push(value);
       else if (arg === "--artifacts-dir") options.artifactDirs.push(value);
       else if (arg === "--tarball") options.tarballs.push(value);
@@ -111,6 +114,15 @@ function printAndExit(report, state) {
   );
 }
 
+function unknownErrorMessage(error) {
+  if (error instanceof Error) return error.message;
+  try {
+    return String(error);
+  } catch {
+    return "unknown error";
+  }
+}
+
 const options = parseArgs(process.argv.slice(2));
 const report = { detections: [], errors: [] };
 let state;
@@ -118,12 +130,13 @@ let state;
 try {
   state = loadDenylist(options.denylist);
 } catch (error) {
-  report.errors.push(`denylist schema: ${error.message}`);
+  report.errors.push(`denylist schema: ${unknownErrorMessage(error)}`);
   state = { denylist: { incident: "unknown" } };
   printAndExit(report, state);
 }
 
-scanFilesystemRoot(options.root, "working-tree", state, report);
+const scanRootLabel = options.rootProvided ? `scan-root:${options.root}` : "working-tree";
+scanFilesystemRoot(options.root, scanRootLabel, state, report);
 if (options.allBranches) {
   scanRefs(options.root, refsForBranchScan(options.root, report), state, report);
 }

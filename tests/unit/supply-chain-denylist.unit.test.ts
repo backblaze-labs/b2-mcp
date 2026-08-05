@@ -406,6 +406,7 @@ describe("supply-chain denylist scanner", () => {
 
       const result = runDenylist(dir, [], customDenylist);
       expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`scan-root:${dir}:setup.mjs`);
       expect(result.stderr).toContain(`matched denied SHA-256 ${hash}`);
       expect(readFileSync(join(dir, "setup.mjs"), "utf8")).toBe(payload);
     });
@@ -424,7 +425,7 @@ describe("supply-chain denylist scanner", () => {
         const result = runDenylist(dir, [], customDenylist);
         expect(result.status).toBe(2);
         expect(result.stderr).toContain("scanner-error");
-        expect(result.stderr).toContain("working-tree:package.json: could not read file");
+        expect(result.stderr).toContain(`scan-root:${dir}:package.json: could not read file`);
       } finally {
         chmodSync(manifest, 0o600);
       }
@@ -458,7 +459,7 @@ describe("supply-chain denylist scanner", () => {
 
       const result = runDenylist(dir, [], customDenylist);
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("working-tree:node_modules:keyv/setup.mjs");
+      expect(result.stderr).toContain(`scan-root:${dir}:node_modules:keyv/setup.mjs`);
       expect(result.stderr).toContain(`matched denied SHA-256 ${hash}`);
     });
   });
@@ -507,6 +508,41 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("scanner-error");
       expect(result.stderr).toContain("packages[0].versions");
+    });
+  });
+
+  it("loads valid package sources despite unrelated earlier schema errors", () => {
+    withTempDir((dir) => {
+      const malformed = join(dir, "denylist.json");
+      writeFileSync(join(dir, "source.csv"), "Package,Malicious Versions\nkeyv,6.0.0\n");
+      writeJson(malformed, {
+        ...baseDenylist(),
+        incident: "",
+        packageSources: [
+          {
+            path: "source.csv",
+            format: "wiz-keyv-packages-csv",
+            sourceUrl: "https://example.test/ioc",
+            reviewedAt: "2026-08-05",
+            expectedPackages: 1,
+            expectedPackageVersions: 1,
+            reason: "valid source after an unrelated error",
+          },
+        ],
+        requiredPackageVersions: [
+          {
+            name: "keyv",
+            version: "6.0.0",
+            reason: "must be populated from the valid source",
+          },
+        ],
+      });
+
+      const result = runDenylist(dir, [], malformed);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("incident must be a non-empty string");
+      expect(result.stderr).not.toContain("keyv@6.0.0 is not denied");
     });
   });
 
