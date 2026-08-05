@@ -1,0 +1,73 @@
+# cspell configuration for @backblaze-labs/b2-mcp.
+#
+# Scope: comments, JSDoc, Markdown docs, GitHub workflows, and string literals
+# across source, tests, and local scripts. Generated output and lockfiles are
+# excluded because they contain minified text, hashes, and registry-encoded
+# names that are not meaningfully spell-checkable.
+#
+# Project-specific terminology lives in `.cspell/project-words.txt`. Adding a
+# new word there is preferred over inlining `// cspell:ignore foo` directives
+# because the central list is auditable and reusable.
+version: '0.2'
+language: en
+
+# Built-in dictionaries. `softwareTerms` + `typescript` + `node` cover most
+# programmer vocabulary; the project list fills the repo-specific terms.
+dictionaries:
+  - typescript
+  - node
+  - npm
+  - bash
+  - softwareTerms
+  - filetypes
+  - misc
+  - en_US
+  - project-words
+
+dictionaryDefinitions:
+  - name: project-words
+    path: ./.cspell/project-words.txt
+    addWords: true
+
+ignorePaths:
+  - node_modules/**
+  - dist/**
+  - coverage/**
+  - reports/**
+  - package-lock.json
+  - pnpm-lock.yaml
+  - .git/**
+  - .cspell/**
+
+files:
+  - 'src/**/*.ts'
+  - 'tests/**/*.ts'
+  - 'scripts/**/*.{mjs,cjs}'
+  - 'docs/**/*.md'
+  - '*.md'
+  - 'CLAUDE.md'
+  - '.github/**/*.yml'
+
+# Patterns we never want to flag, even inside otherwise-scanned files.
+# - SHA-1 / SHA-256 hex strings: long contiguous hex looks like gibberish but is not.
+# - Base64 / base32 blobs: same.
+# - Percent-encoded URL escapes: without this, `%5Btest` can surface as `Btest`.
+patterns:
+  - name: long-hex
+    pattern: /\b[0-9a-f]{16,}\b/gi
+  - name: base64-blob
+    pattern: '/[A-Za-z0-9+/]{20,}={0,2}/g'
+  - name: percent-encoded
+    pattern: /%[0-9A-Fa-f]{2}/g
+
+ignoreRegExpList:
+  - long-hex
+  - base64-blob
+  - percent-encoded
+  - Urls
+  - Email
+
+# Permit established run-together domain and tooling compounds that appear in
+# docs, scripts, and identifiers. This is intentionally permissive for valid
+# word pairs; obvious misspellings are still checked by the dictionaries above.
+allowCompoundWords: true

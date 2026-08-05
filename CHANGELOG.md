@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aligned package metadata on the `0.1.0` Phase 1 release line.
 - Aligned the enforced runtime policy with the official B2 SDK floor:
   `engines.node` is `>=22.3.0`, CI verifies production dependencies at Node.js
-  22.3.0 and the full toolchain on Node.js 22.13.0, 24, and 26, local and live
+  22.3.0 and the full toolchain on Node.js 22.23.1, 24, and 26, local and live
   22.x jobs use a patched Node 22 LTS release, and workflow drift is checked
   from `runtime-policy.json`.
 - Migrated linting and Biome-supported formatting from ESLint and Prettier to
