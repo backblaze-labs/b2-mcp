@@ -38,6 +38,9 @@ matrix runs the bundled coverage and slow deterministic lifecycle layers, while
 `test:package` runs in a separate non-blocking package job. The coverage
 aggregate disables file parallelism so contract fixture reports, dist rebuilds,
 and package packing do not race each other.
+Global V8 coverage must remain at or above 82% statements, 72% branches, 86%
+functions, and 86% lines. Raise these floors as coverage improves; lowering
+them requires explicit review and justification.
 CI verifies the production dependency graph with `npm ci --omit=dev
 --engine-strict` on the Node.js 22.3.0 package floor. The credential-free full
 toolchain gate, including `npm run lint:docs`, runs on Linux for Node.js

@@ -33,10 +33,10 @@ export default defineConfig({
       reporter: ["text-summary", "json-summary", "cobertura"],
       include: ["src/**/*.ts"],
       thresholds: {
-        statements: 80,
-        branches: 70,
-        functions: 85,
-        lines: 85,
+        statements: 82,
+        branches: 72,
+        functions: 86,
+        lines: 86,
       },
     },
     projects: layerProjectNamesForConfig().map((name) =>

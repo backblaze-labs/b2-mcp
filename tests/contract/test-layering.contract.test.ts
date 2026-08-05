@@ -278,6 +278,14 @@ describe("test layer naming", () => {
     );
   });
 
+  it("enforces the current global coverage floors", () => {
+    const vitestConfig = readFileSync(join(root, "vitest.config.mts"), "utf8");
+
+    expect(vitestConfig).toMatch(
+      /thresholds:\s*{\s*statements:\s*82,\s*branches:\s*72,\s*functions:\s*86,\s*lines:\s*86,?\s*}/,
+    );
+  });
+
   it("does not route the legacy integration alias to live tests with ambient credentials", () => {
     const liveSummaryPath = join(root, "reports/vitest/integration-live.json");
     if (existsSync(liveSummaryPath)) rmSync(liveSummaryPath);
