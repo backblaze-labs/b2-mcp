@@ -79,8 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Added a keyv/cacheable supply-chain denylist and IOC scanner, disabled npm
   lifecycle scripts for normal installs, isolated provenance-backed npm
-  publishing to a protected workflow, and documented the branch/artifact scan
-  plus host and credential response runbook for issue #89.
+  publishing to a protected prebuilt-tarball workflow, and documented the
+  branch/artifact/tarball scan plus host and credential response runbook for
+  issue #89.
 - Patched all currently reported npm advisories by updating `brace-expansion`,
   `js-yaml`, and Babel core, and replaced the MCP Node adapter with a minimal
   platform-only bridge so vulnerable `@hono/node-server` code is absent from

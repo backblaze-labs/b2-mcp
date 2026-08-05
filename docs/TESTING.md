@@ -155,14 +155,18 @@ npm supply-chain incidents:
 npm run audit:supply-chain:denylist -- --packlist
 ```
 
-CI also fetches every branch ref and runs:
+CI fetches the protected `origin/main` ref and scans the tested ref plus
+`origin/main` before `ci-green` can advance:
 
 ```bash
-npm run audit:supply-chain:denylist -- --all-branches --packlist
+npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist
 ```
 
-For downloaded GitHub workflow artifacts, expand the artifacts and pass each
-root with `--artifacts-dir`. The detailed branch and artifact workflow is in
+For incident triage across all fetched branches, run the same command with
+`--all-branches` from a fresh clone. For downloaded GitHub workflow artifacts or
+publish tarballs, expand the artifacts and pass each root with
+`--artifacts-dir`, or pass package tarballs directly with `--tarball`. The
+detailed branch, artifact, and tarball workflow is in
 [`SUPPLY_CHAIN_SECURITY.md`](SUPPLY_CHAIN_SECURITY.md).
 
 Known exceptions must live in `audit-policy.json` with an expiry, maximum
@@ -174,8 +178,9 @@ review.
 `NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded
 npm fetch retry options, and retries transient registry/network failures before
 evaluating advisories. `scripts/check-supply-chain-denylist.mjs` runs without
-executing package lifecycle scripts and also scans the `npm pack --dry-run`
-file list when `--packlist` is passed. Expired advisory exceptions fail the audit on pull
+executing package lifecycle scripts, reports scanner/infrastructure failures
+separately from real detections, and also scans the `npm pack --dry-run` file
+list when `--packlist` is passed. Expired advisory exceptions fail the audit on pull
 requests and on the `main` deploy-gating path required by `mark-green`; the
 `ci-green` ref must not advance after an exception expiry without an affirmative
 policy update or exception removal. `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn`

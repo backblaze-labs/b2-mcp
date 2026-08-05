@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm run build          # compile TypeScript → dist/ (src only)
 npm run typecheck      # type-check src + ALL tests, no emit (tsconfig.typecheck.json)
-npm test               # runs `typecheck` first (pretest), then unit tests — no credentials needed
+npm test               # runs `typecheck` first, then unit tests — no credentials needed
 npm run test:contract  # deterministic MCP/schema/workflow contracts
 npm run test:protocol  # deterministic modern + legacy MCP protocol behavior
 npm run test:integration:live  # live tests — requires real B2 credentials in env
@@ -16,7 +16,7 @@ npm run start:http     # Streamable HTTP transport — add --port 3000
 ```
 
 > `npm run build` uses `tsconfig.json`, which **excludes `tests/`** — so it does
-> not catch compile errors in test files. `npm run typecheck` (wired as `pretest`)
+> not catch compile errors in test files. `npm run typecheck` (wired into `npm test`)
 > compiles `src` **and** `tests` via `tsconfig.typecheck.json`, so live-test
 > compile errors are caught with no credentials. This closed a real gap where a
 > broken live-test reference only surfaced on a credentialed run.

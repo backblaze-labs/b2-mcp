@@ -1,67 +1,50 @@
 {
   "incident": "keyv-cacheable-mini-shai-hulud-2026-08-04",
   "lastReviewed": "2026-08-05",
+  "provenanceMode": "single-incident-shared",
   "reviewSourceUrls": [
     "https://snyk.io/blog/inside-keyv-npm-compromise-preinstall-malware-trusted-provenance-ide-hooks/",
     "https://socket.dev/blog/popular-npm-packages-in-the-keyv-and-cacheable-namespaces-compromised-in-active-supply-chain",
     "https://www.wiz.io/blog/keyv-and-cacheable-npm-supply-chain-attack",
     "https://github.com/wiz-sec-public/wiz-research-iocs/blob/main/reports/keyv-packages.csv"
   ],
-  "packages": [
+  "packageSources": [
     {
-      "name": "keyv",
+      "path": "security/iocs/keyv-packages.csv",
+      "format": "wiz-keyv-packages-csv",
+      "sourceUrl": "https://github.com/wiz-sec-public/wiz-research-iocs/blob/main/reports/keyv-packages.csv",
+      "reviewedAt": "2026-08-05",
+      "expectedPackages": 443,
+      "expectedPackageVersions": 2235,
+      "reason": "Confirmed malicious package/version snapshot for the keyv/cacheable compromise."
+    }
+  ],
+  "packages": [],
+  "requiredPackageVersions": [
+    {
+      "name": "@thiennq/docs-viewer",
+      "version": "1.6.2",
+      "reason": "Issue #89 explicitly names this malicious package/version."
+    }
+  ],
+  "quarantineRules": [
+    {
+      "namePattern": "^@keyv/[^/]+$",
       "versions": ["6.0.0"],
-      "reason": "Published with a malicious preinstall loader during the keyv/cacheable compromise."
+      "reason": "The incident review quarantines unreviewed @keyv/* packages resolving to 6.0.0."
     },
     {
-      "name": "@cacheable/net",
-      "versions": ["2.1.1"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
+      "namePattern": "^@cacheable/[^/]+$",
+      "versions": ["*"],
+      "reason": "The incident review quarantines unreviewed @cacheable/* namespace additions until explicitly cleared."
+    }
+  ],
+  "allowedLifecycleScripts": [
     {
-      "name": "@cacheable/node-cache",
-      "versions": ["3.1.2"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "cacheable",
-      "versions": ["2.5.1"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "flat-cache",
-      "versions": ["6.1.24"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "@cacheable/memory",
-      "versions": ["2.2.1"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "cacheable-request",
-      "versions": ["13.0.20"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "file-entry-cache",
-      "versions": ["11.1.6"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "@cacheable/utils",
-      "versions": ["2.5.1"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "cache-manager",
-      "versions": ["7.2.10"],
-      "reason": "Published with the same malicious lifecycle payload during the cacheable burst."
-    },
-    {
-      "name": "ecto",
-      "versions": ["5.0.1"],
-      "reason": "Published with byte-identical payload files after the first public warnings."
+      "path": "node_modules/fsevents",
+      "name": "fsevents",
+      "version": "2.3.3",
+      "reason": "Optional native file watcher install script in the existing dev toolchain; lockfile integrity remains required."
     }
   ],
   "fileIndicators": [

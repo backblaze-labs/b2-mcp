@@ -15,9 +15,10 @@ transitive packages through the ESLint toolchain:
 - `flat-cache@4.0.1`
 - `keyv@4.5.4`
 
-Those are not the denied malicious versions recorded in
-[`../supply-chain-denylist.json`](../supply-chain-denylist.json). The current
-lockfile and publish packlist are checked by:
+Those are not the denied malicious versions recorded in the checked-in Wiz IOC
+snapshot at [`../security/iocs/keyv-packages.csv`](../security/iocs/keyv-packages.csv)
+and loaded through [`../supply-chain-denylist.json`](../supply-chain-denylist.json).
+The current lockfile and publish packlist are checked by:
 
 ```bash
 npm run audit:supply-chain:denylist -- --packlist
@@ -26,8 +27,11 @@ npm run audit:supply-chain:denylist -- --packlist
 ## Normal Install Policy
 
 Lifecycle scripts are disabled by default in [`.npmrc`](../.npmrc). Normal
-developer, CI, and packed-consumer installs must keep `ignore-scripts=true`
-unless a documented release step explicitly opts in.
+developer, CI, and packed-consumer installs must keep `ignore-scripts=true`.
+The scanner rejects new `package-lock.json` entries with `hasInstallScript`
+unless the exact package path/name/version is added to the reviewed
+`allowedLifecycleScripts` list, so dependencies that require a postinstall step
+fail at the supply-chain gate instead of silently leaving a broken install.
 
 Use `npm ci` from a clean checkout rather than `npm install` for verification.
 Do not run `npm update` during an active package compromise unless the update is
@@ -39,10 +43,16 @@ and audit gates.
 The repository-owned denylist gate blocks:
 
 - exact malicious package versions from the keyv/cacheable incident;
+- unreviewed namespace additions that match the quarantined `@keyv/*` or
+  `@cacheable/*` rules;
 - known SHA-256 hashes for the npm preinstall loader, repository persistence
   loader, and second-stage payload;
 - denied versions in `package.json`, `package-lock.json`, `npm-shrinkwrap.json`,
-  `pnpm-lock.yaml`, and `yarn.lock`.
+  `pnpm-lock.yaml`, and `yarn.lock`;
+- missing lockfile integrity on installed packages;
+- unexpected lockfile lifecycle scripts;
+- denied file hashes in checked-in files, npm packlists, expanded artifacts,
+  tarballs, and installed `node_modules` indicator filenames.
 
 The default supply-chain audit runs the denylist gate before the live npm audit:
 
@@ -50,7 +60,18 @@ The default supply-chain audit runs the denylist gate before the live npm audit:
 npm run audit:supply-chain
 ```
 
-CI also scans every fetched branch ref before `ci-green` can advance:
+Pull-request and `mark-green` CI scan only the tested ref and the protected
+`origin/main` ref so a stale or poisoned side branch cannot block unrelated
+deploys:
+
+```bash
+git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist
+```
+
+During incident triage, run the all-branches scan from a fresh clone and treat
+findings on non-protected branches as branch cleanup work unless the branch is a
+release input:
 
 ```bash
 git fetch --prune --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
@@ -103,9 +124,10 @@ key IDs in the incident record.
 Updates to [`../supply-chain-denylist.json`](../supply-chain-denylist.json)
 must include:
 
-- the package name and exact denied version;
-- the source URL used for the update;
-- the review date;
+- a checked-in package-source snapshot, package name/version entry, quarantine
+  rule, lifecycle allowlist entry, or file indicator;
+- the shared single-incident source URL and review date, or a new incident file
+  if the source/provenance differs;
 - any payload hashes or file indicators that can be checked without executing
   package code.
 
@@ -120,14 +142,18 @@ The only repository workflow allowed to publish npm packages is
 [`.github/workflows/publish.yml`](../.github/workflows/publish.yml). It:
 
 - runs only in the canonical `backblaze-labs/b2-mcp` repository;
-- requires a protected `npm-publish` environment;
+- pins every marketplace action to a reviewed commit SHA;
 - checks out the `ci-green` commit only after proving the requested `v*` tag
   points at `ci-green`;
 - runs `npm ci` with lifecycle scripts still disabled;
-- re-runs the denylist and audit gates;
-- uses npm trusted publishing with `id-token: write`;
-- enables lifecycle scripts only for the final
-  `npm publish --provenance --access public --ignore-scripts=false` command.
+- builds explicitly, requires `dist/index.js` in the packlist, creates an npm
+  tarball with lifecycle scripts disabled, expands and scans that exact tarball,
+  and uploads it as a short-lived artifact;
+- requires a protected `npm-publish` environment only for the final publish job;
+- verifies the tarball SHA-256 before publishing;
+- uses npm trusted publishing with `id-token: write` and an OIDC preflight;
+- publishes the prebuilt tarball with lifecycle scripts disabled:
+  `npm publish <tarball> --provenance --access public --ignore-scripts`.
 
 Do not publish from a developer workstation or from a workflow that has not
 first resolved the exact `ci-green` commit.

@@ -89,8 +89,9 @@ security-reviewed dependency change rather than an automated floating update.
 
 Lifecycle scripts are disabled for normal installs via `.npmrc`, and
 `npm run audit:supply-chain` runs the repository denylist gate before the live
-npm advisory audit. The denylist gate blocks the known keyv/cacheable malicious
-versions and payload hashes from issue #89.
+npm advisory audit. The denylist gate blocks the checked-in keyv/cacheable IOC
+snapshot, quarantined namespaces, known malicious payload hashes, missing
+lockfile integrity, and unexpected package lifecycle scripts from issue #89.
 
 If a denied package or IOC is found, treat the host as compromised, rebuild it
 from a clean image, revoke reachable GitHub/npm/cloud/CI credentials, revoke any

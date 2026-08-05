@@ -195,10 +195,12 @@ describe("supply-chain audit policy", () => {
     const markGreenJob = jobBlock("mark-green");
     expect(workflow).toContain("supply-chain-audit:");
     expect(workflow).toContain("npm run audit:supply-chain");
-    expect(workflow).toContain("npm run audit:supply-chain:denylist -- --all-branches --packlist");
+    expect(workflow).toContain(
+      "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist",
+    );
     expect(auditJob).toContain("fetch-depth: 0");
     expect(auditJob).toContain(
-      "git fetch --prune --no-tags origin '+refs/heads/*:refs/remotes/origin/*'",
+      "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
     );
     expect(workflow).not.toContain("npm audit --omit=dev");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
@@ -229,15 +231,30 @@ describe("supply-chain audit policy", () => {
     );
     expect(packageJson.scripts.test).toBe("npm run typecheck && npm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
+    expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
-    expect(publishWorkflow).toContain("refs/heads/ci-green");
+    expect(publishWorkflow).toContain("ci-green");
     expect(publishWorkflow).toContain(
-      "npm run audit:supply-chain:denylist -- --all-branches --packlist",
+      "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
-    expect(publishWorkflow).toContain(
-      "npm publish --provenance --access public --ignore-scripts=false",
-    );
+    expect(publishWorkflow).toContain("--artifacts-dir publish-extracted");
+    expect(publishWorkflow).toContain('--tarball "$tarball"');
+    expect(publishWorkflow).toContain('sha256sum "$tarball"');
+    expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
+    expect(publishWorkflow).not.toContain("--ignore-scripts=false");
+  });
+
+  it("pins every marketplace action used by the publish workflow", () => {
+    const uses = [...publishWorkflow.matchAll(/uses:\s*([^@\s]+)@([^\s#]+)/g)].map((match) => ({
+      action: match[1],
+      ref: match[2],
+    }));
+
+    expect(uses.length).toBeGreaterThan(0);
+    for (const action of uses) {
+      expect(action.ref).toMatch(/^[a-f0-9]{40}$/);
+    }
   });
 
   it("guards ci-green against stale main workflow runs", () => {

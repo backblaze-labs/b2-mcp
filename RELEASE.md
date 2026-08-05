@@ -52,5 +52,6 @@ Before publishing `v0.1.0`:
 10. Publish only from the canonical repository through the protected
     `.github/workflows/publish.yml` workflow. Do not publish from a developer
     workstation. The publish workflow must resolve a `v*` tag to `ci-green`,
-    run with normal install lifecycle scripts disabled, and enable lifecycle
-    scripts only for the final provenance-backed `npm publish` command.
+    build explicitly, scan the generated packlist and tarball, verify the
+    tarball SHA-256, and publish the already-scanned tarball with lifecycle
+    scripts disabled.
