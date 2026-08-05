@@ -31,23 +31,23 @@ describe("supply-chain audit policy", () => {
       { version?: string; integrity?: string; dependencies?: Record<string, string> }
     >;
   };
-  const formData = lock.packages["node_modules/form-data"];
-  const axios = lock.packages["node_modules/axios"];
+  const braceExpansion = lock.packages["node_modules/brace-expansion"];
+  const minimatch = lock.packages["node_modules/minimatch"];
   const exceptionPolicy = {
     allowedAdvisories: [
       {
-        name: "form-data",
+        name: "brace-expansion",
         source: 999000,
         maxSeverity: "moderate",
         isDirect: false,
-        nodes: ["node_modules/form-data"],
-        effects: ["axios"],
-        package: { version: formData.version, integrity: formData.integrity },
+        nodes: ["node_modules/brace-expansion"],
+        effects: ["minimatch"],
+        package: { version: braceExpansion.version, integrity: braceExpansion.integrity },
         via: {
-          path: "node_modules/axios",
-          name: "axios",
-          version: axios.version,
-          dependencyRange: axios.dependencies?.["form-data"],
+          path: "node_modules/minimatch",
+          name: "minimatch",
+          version: minimatch.version,
+          dependencyRange: minimatch.dependencies?.["brace-expansion"],
         },
         expires: "2026-10-01",
         reason: "Test-only exception fixture for policy behavior.",
@@ -63,35 +63,35 @@ describe("supply-chain audit policy", () => {
     return {
       auditReportVersion: 2,
       vulnerabilities: {
-        "form-data": {
-          name: "form-data",
+        "brace-expansion": {
+          name: "brace-expansion",
           severity: "moderate",
           isDirect: false,
           via: [
             {
               source: 999000,
-              name: "form-data",
-              dependency: "form-data",
+              name: "brace-expansion",
+              dependency: "brace-expansion",
               title: "Test-only transitive advisory",
               url: "https://github.com/advisories/test-only",
               severity: "moderate",
-              range: "<4.0.7",
+              range: "<1.1.19",
             },
           ],
-          effects: ["axios"],
-          range: "<4.0.7",
-          nodes: ["node_modules/form-data"],
+          effects: ["minimatch"],
+          range: "<1.1.19",
+          nodes: ["node_modules/brace-expansion"],
           fixAvailable: false,
           ...overrides,
         },
-        axios: {
-          name: "axios",
+        minimatch: {
+          name: "minimatch",
           severity: "moderate",
-          isDirect: true,
-          via: ["form-data"],
+          isDirect: false,
+          via: ["brace-expansion"],
           effects: [],
           range: "*",
-          nodes: ["node_modules/axios"],
+          nodes: ["node_modules/minimatch"],
           fixAvailable: false,
         },
       },
@@ -354,7 +354,7 @@ describe("supply-chain audit policy", () => {
     const result = runAudit(scopedAuditReport(), { B2_MCP_AUDIT_TODAY: "2026-10-02" });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("::error::audit-policy: form-data:999000");
+    expect(result.stderr).toContain("::error::audit-policy: brace-expansion:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
   });
 
@@ -366,7 +366,7 @@ describe("supply-chain audit policy", () => {
     const result = runAudit(scopedAuditReport(), {}, policy);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("::error::audit-policy: form-data:999000");
+    expect(result.stderr).toContain("::error::audit-policy: brace-expansion:999000");
     expect(result.stderr).toContain("expires must be a real YYYY-MM-DD calendar date");
     expect(result.stderr).toContain(expectedValue);
   });
@@ -378,7 +378,7 @@ describe("supply-chain audit policy", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("::warning::audit-policy: form-data:999000");
+    expect(result.stderr).toContain("::warning::audit-policy: brace-expansion:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
   });
 
@@ -399,7 +399,7 @@ describe("supply-chain audit policy", () => {
   it("allows only a tightly scoped test advisory", () => {
     const result = runAudit(scopedAuditReport());
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("form-data:999000");
+    expect(result.stderr).toContain("brace-expansion:999000");
   });
 
   it.each([
@@ -412,8 +412,8 @@ describe("supply-chain audit policy", () => {
         via: [
           {
             source: 999000,
-            name: "form-data",
-            dependency: "form-data",
+            name: "brace-expansion",
+            dependency: "brace-expansion",
             title: "Test-only transitive advisory",
             url: "https://github.com/advisories/test-only",
             severity: "high",
@@ -425,6 +425,6 @@ describe("supply-chain audit policy", () => {
   ])("fails the audit for %s", (_name, overrides) => {
     const result = runAudit(scopedAuditReport(overrides));
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("form-data:999000");
+    expect(result.stderr).toContain("brace-expansion:999000");
   });
 });

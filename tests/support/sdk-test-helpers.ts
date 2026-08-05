@@ -5,6 +5,7 @@ import {
   type HttpTransport,
   type RetryOptions,
 } from "@backblaze-labs/b2-sdk";
+import type { ReadableStream } from "node:stream/web";
 import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import { B2Config } from "../../src/utils/types";
 

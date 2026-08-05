@@ -13,6 +13,7 @@ import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 import { currentMcpRequestSignal } from "./request-context.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
+import { abortError, isAbortError } from "./utils/named-error.js";
 
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
@@ -80,14 +81,14 @@ class SharedRetryBudgetTransport implements HttpTransport {
     if (!next) return this.inner.send(request);
     const { attempts, attempt, key } = next;
     if (attempt > 0 && !consumeRetryBudgetToken()) {
-      throw new DOMException("B2 retry budget exhausted", "AbortError");
+      throw abortError("B2 retry budget exhausted");
     }
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
       return response;
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") attempts.delete(key);
+      if (isAbortError(err)) attempts.delete(key);
       throw err;
     }
   }

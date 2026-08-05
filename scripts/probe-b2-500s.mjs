@@ -116,7 +116,7 @@ async function main() {
   // Curated probe list. Each: { id, tool, args, expect, note, run? }.
   // `run` allows a self-cleaning safe-write sequence and returns the result to classify.
   const probes = [
-    // ── B2 native (axios) — sanity baselines ──
+    // ── B2 native SDK — sanity baselines ──
     {
       id: "b2-bad-file-id",
       tool: "b2_get_file_info",
@@ -129,7 +129,7 @@ async function main() {
       args: { bucketId: "bad_bucket_id_000" },
       expect: "400 bad_bucket_id",
     },
-    // ── B2 native edge cases (axios path) ──
+    // ── B2 native SDK edge cases ──
     {
       id: "b2-download-by-bad-id",
       tool: "b2_download_file_by_id",

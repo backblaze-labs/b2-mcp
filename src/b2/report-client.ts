@@ -1,8 +1,10 @@
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import type { ReadableStreamDefaultReader } from "node:stream/web";
 import { B2AuthManager } from "../auth.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { createReportS3Client } from "../s3/client.js";
 import { withReportCircuit } from "../utils/circuit-breaker.js";
+import { abortError, timeoutError } from "../utils/named-error.js";
 
 export interface ReportObjectPage {
   keys: string[];
@@ -101,7 +103,7 @@ function reportObjectText(state: {
 }
 
 function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new DOMException("Aborted", "AbortError");
+  return signal.reason ?? abortError();
 }
 
 async function raceWithAbort<T>(
@@ -242,13 +244,11 @@ async function withReportDeadline<T>(
   const parent = currentMcpRequestSignal();
   const controller = new AbortController();
   const abortFromParent = () => {
-    controller.abort(parent?.reason ?? new DOMException("Aborted", "AbortError"));
+    controller.abort(parent?.reason ?? abortError());
   };
   const ms = Math.max(1, timeoutMs ?? DEFAULT_REPORT_REQUEST_TIMEOUT_MS);
   const timer = setTimeout(() => {
-    controller.abort(
-      new DOMException(`B2 report request timed out after ${ms} ms`, "TimeoutError"),
-    );
+    controller.abort(timeoutError(`B2 report request timed out after ${ms} ms`));
   }, ms);
   unrefTimer(timer);
 

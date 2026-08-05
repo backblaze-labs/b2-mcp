@@ -14,6 +14,7 @@
  */
 
 import { logger } from "./logger.js";
+import { abortError } from "./named-error.js";
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 const MAX_RETRIES = 3;
@@ -120,7 +121,7 @@ function getStatusCode(err: unknown): number | null {
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
-    throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    throw signal.reason ?? abortError();
   }
 }
 
@@ -132,7 +133,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       "abort",
       () => {
         clearTimeout(timer);
-        reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+        reject(signal.reason ?? abortError());
       },
       { once: true },
     );

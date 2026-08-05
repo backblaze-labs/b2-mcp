@@ -3,6 +3,7 @@ import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import { B2Config } from "../../src/utils/types";
 import { runWithMcpRequestSignal } from "../../src/request-context";
+import { abortError } from "../../src/utils/named-error";
 import {
   authorizeResponse,
   installSdkTransport,
@@ -170,7 +171,7 @@ describe("B2AuthManager", () => {
     const pending = manager.getAuth();
     const assertion = expect(pending).rejects.toThrow(/retry budget/i);
 
-    await jest.advanceTimersByTimeAsync(1000);
+    await jest.runAllTimersAsync();
 
     await assertion;
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -198,7 +199,7 @@ describe("B2AuthManager", () => {
     const pending = runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
     await Promise.resolve();
     await Promise.resolve();
-    abort.abort(new DOMException("Aborted", "AbortError"));
+    abort.abort(abortError());
 
     await expect(pending).rejects.toThrow(/Aborted/);
     expect(inner.requests).toHaveLength(1);

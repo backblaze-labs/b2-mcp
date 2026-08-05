@@ -1,5 +1,6 @@
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
+import { abortError, timeoutError } from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 
 export const CIRCUIT_TIMEOUT_MS = 150_000;
@@ -105,15 +106,15 @@ function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   if (typeof maybeUnref === "function") maybeUnref.call(timer);
 }
 
-function timeoutReason(timeoutMs: number): DOMException {
-  return new DOMException(`Circuit timed out after ${timeoutMs} ms`, "TimeoutError");
+function timeoutReason(timeoutMs: number): Error {
+  return timeoutError(`Circuit timed out after ${timeoutMs} ms`);
 }
 
 async function withDeadlineSignal<T>(timeoutMs: number, fn: () => Promise<T>): Promise<T> {
   const parent = currentMcpRequestSignal();
   const controller = new AbortController();
   const abortFromParent = () => {
-    controller.abort(parent?.reason ?? new DOMException("Aborted", "AbortError"));
+    controller.abort(parent?.reason ?? abortError());
   };
   const timer = setTimeout(() => {
     controller.abort(timeoutReason(timeoutMs));
