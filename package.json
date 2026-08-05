@@ -53,8 +53,8 @@
     "audit:supply-chain:denylist": "node scripts/check-supply-chain-denylist.mjs",
     "probe:500": "npm run build && node scripts/probe-b2-500s.mjs",
     "lint": "node scripts/run-biome.mjs lint src tests scripts",
-    "lint:fix": "node scripts/run-biome.mjs lint --write src tests scripts",
-    "format": "node scripts/run-biome.mjs format --write .",
+    "lint:fix": "node scripts/run-biome.mjs lint src tests scripts --write",
+    "format": "node scripts/run-biome.mjs format . --write",
     "format:check": "node scripts/run-biome.mjs format ."
   },
   "keywords": [

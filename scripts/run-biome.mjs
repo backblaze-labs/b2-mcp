@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const skippedDirectories = new Set([
-  ".git",
-  "coverage",
-  "dist",
-  "node_modules",
-  "probe-output",
-  "reports",
-]);
+const biomeConfig = JSON.parse(readFileSync(join(root, "biome.json"), "utf8"));
+const biomeIgnoredPatterns = (biomeConfig.files?.includes ?? [])
+  .filter((pattern) => typeof pattern === "string" && pattern.startsWith("!"))
+  .map((pattern) => pattern.slice(1));
+const gitIgnoredPatterns = readFileSync(join(root, ".gitignore"), "utf8")
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line && !line.startsWith("#") && !line.startsWith("!"));
 
 const [command, ...rawArgs] = process.argv.slice(2);
 if (!command) {
@@ -20,13 +20,16 @@ if (!command) {
   process.exit(2);
 }
 
-function isOptionValue(args, index) {
-  const previous = args[index - 1];
-  return previous === "--config-path" || previous === "--reporter-file" || previous === "--since";
-}
-
 function targetPaths(args) {
-  const paths = args.filter((arg, index) => !arg.startsWith("-") && !isOptionValue(args, index));
+  // Keep this parser intentionally conservative: package scripts pass paths
+  // before flags, and unknown option shapes fall back to scanning "." instead
+  // of trying to mirror Biome's full CLI grammar.
+  const candidates = args.includes("--") ? args.slice(args.indexOf("--") + 1) : args;
+  const paths = [];
+  for (const arg of candidates) {
+    if (arg.startsWith("-")) break;
+    paths.push(arg);
+  }
   return paths.length ? paths : ["."];
 }
 
@@ -35,7 +38,61 @@ function safeRelativePath(path) {
   return rel && !rel.startsWith("..") ? rel : path;
 }
 
+function normalizedRelativePath(path) {
+  return safeRelativePath(path).split(/[/\\]/).join("/");
+}
+
+function matchesBiomeIgnoredPattern(path) {
+  const rel = normalizedRelativePath(path);
+  return biomeIgnoredPatterns.some((pattern) => {
+    if (pattern.endsWith("/**")) {
+      const prefix = pattern.slice(0, -3);
+      return rel === prefix || rel.startsWith(`${prefix}/`);
+    }
+    return rel === pattern;
+  });
+}
+
+function globToRegExp(glob) {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${escaped.replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
+}
+
+function matchesGitIgnoredPattern(path) {
+  const rel = safeRelativePath(path);
+  if (!rel || rel.startsWith("..")) return false;
+  const normalized = normalizedRelativePath(path);
+  const basename = normalized.split("/").at(-1) ?? normalized;
+
+  return gitIgnoredPatterns.some((pattern) => {
+    if (pattern.endsWith("/")) {
+      const prefix = pattern.slice(0, -1);
+      return normalized === prefix || normalized.startsWith(`${prefix}/`);
+    }
+    if (pattern.includes("/")) {
+      return globToRegExp(pattern).test(normalized);
+    }
+    return globToRegExp(pattern).test(basename);
+  });
+}
+
+function shouldSkipPath(path) {
+  const rel = normalizedRelativePath(path);
+  return (
+    rel === ".git" ||
+    rel.startsWith(".git/") ||
+    matchesBiomeIgnoredPattern(path) ||
+    matchesGitIgnoredPattern(path)
+  );
+}
+
+// Biome follows symlinks. Running lint or format over the repository could then
+// read diagnostics from, or write formatting changes to, files outside the
+// checkout. Refuse non-ignored symlinks before invoking Biome so the toolchain
+// never receives an out-of-tree path.
 function collectSymlinks(startPath, symlinks) {
+  if (shouldSkipPath(startPath)) return;
+
   const stats = lstatSync(startPath, { throwIfNoEntry: false });
   if (!stats) return;
 
@@ -45,11 +102,11 @@ function collectSymlinks(startPath, symlinks) {
   }
 
   if (!stats.isDirectory()) return;
-  if (skippedDirectories.has(startPath === root ? "" : startPath.split(/[/\\]/).at(-1))) return;
 
   for (const entry of readdirSync(startPath, { withFileTypes: true })) {
-    if (entry.isDirectory() && skippedDirectories.has(entry.name)) continue;
-    collectSymlinks(join(startPath, entry.name), symlinks);
+    const child = join(startPath, entry.name);
+    if (shouldSkipPath(child)) continue;
+    collectSymlinks(child, symlinks);
   }
 }
 
@@ -64,21 +121,46 @@ if (symlinks.length) {
   process.exit(1);
 }
 
-const biomeBin = join(
+const localBiomeShim = join(
   root,
   "node_modules",
   ".bin",
   process.platform === "win32" ? "biome.cmd" : "biome",
 );
-const executable = existsSync(biomeBin) ? biomeBin : "biome";
-const result = spawnSync(executable, [command, ...rawArgs, "--reporter=summary", "--colors=off"], {
-  cwd: root,
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    NO_COLOR: "1",
+const biomeEntrypoint = join(root, "node_modules", "@biomejs", "biome", "bin", "biome");
+
+if (!existsSync(localBiomeShim) || !existsSync(biomeEntrypoint)) {
+  console.error("Local Biome is not installed. Run npm ci before npm run lint or format.");
+  process.exit(1);
+}
+
+const safePath =
+  process.platform === "win32"
+    ? process.env.SystemRoot
+      ? `${process.env.SystemRoot}\\System32`
+      : undefined
+    : "/usr/bin:/bin";
+const childEnv = {
+  NO_COLOR: "1",
+  ...(safePath ? { PATH: safePath } : {}),
+  ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+  ...(process.env.WINDIR ? { WINDIR: process.env.WINDIR } : {}),
+  ...(process.env.COMSPEC ? { COMSPEC: process.env.COMSPEC } : {}),
+  ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+  ...(process.env.TMPDIR ? { TMPDIR: process.env.TMPDIR } : {}),
+  ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
+  ...(process.env.TMP ? { TMP: process.env.TMP } : {}),
+};
+
+const result = spawnSync(
+  process.execPath,
+  [biomeEntrypoint, command, ...rawArgs, "--reporter=summary", "--colors=off"],
+  {
+    cwd: root,
+    stdio: "inherit",
+    env: childEnv,
   },
-});
+);
 
 if (result.error) {
   console.error(result.error.message);
