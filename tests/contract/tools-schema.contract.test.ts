@@ -198,6 +198,13 @@ describe("S3 object tools require bucket and key where expected", () => {
     expect(required).toContain("key");
   });
 
+  it("documents s3_copy_object acl as a no-op compatibility hint", () => {
+    const acl = getShape(tools["s3_copy_object"]?.inputSchema).acl;
+    expect(acl).toBeDefined();
+    expect(acl.description).toMatch(/no-op S3 compatibility hint/i);
+    expect(acl.description).toMatch(/destination bucket policy/i);
+  });
+
   it("registers durable-secret-producing names only as unavailable compatibility stubs", async () => {
     for (const name of [
       "b2_create_key",

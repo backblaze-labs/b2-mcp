@@ -1,8 +1,7 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
+import { B2Client } from "../b2/client.js";
 
 /**
  * Presigned URL tools for the B2 S3-compatible API.
@@ -12,7 +11,7 @@ import { toolError, toolJson } from "../utils/errors.js";
  * and PUT URLs are supported. s3_get_presigned_post has been intentionally
  * omitted for this reason.
  */
-export function registerS3PresignedTools(server: ToolRegistrar, s3: S3Client): void {
+export function registerS3PresignedTools(server: ToolRegistrar, b2: B2Client): void {
   server.registerTool(
     "s3_get_presigned_url",
     {
@@ -23,7 +22,7 @@ export function registerS3PresignedTools(server: ToolRegistrar, s3: S3Client): v
         key: z.string().describe("The object key."),
         operation: z
           .enum(["GetObject", "PutObject"])
-          .describe("The operation the URL allows: GetObject to download, PutObject to upload."),
+          .describe("The operation the URL allows: GetObject to download or PutObject to upload."),
         expiresIn: z
           .number()
           .int()
@@ -44,28 +43,16 @@ export function registerS3PresignedTools(server: ToolRegistrar, s3: S3Client): v
     },
     async (args) => {
       try {
-        let command;
-        if (args.operation === "GetObject") {
-          command = new GetObjectCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            VersionId: args.versionId,
-          });
-        } else {
-          command = new PutObjectCommand({
-            Bucket: args.bucket,
-            Key: args.key,
-            ContentType: args.contentType,
-          });
-        }
-
-        const url = await getSignedUrl(s3, command, { expiresIn: args.expiresIn ?? 3600 });
-        return toolJson({
-          url,
-          operation: args.operation,
-          expiresIn: args.expiresIn ?? 3600,
-          expiresAt: new Date(Date.now() + (args.expiresIn ?? 3600) * 1000).toISOString(),
-        });
+        return toolJson(
+          await b2.s3PresignObjectUrl({
+            bucket: args.bucket,
+            key: args.key,
+            operation: args.operation,
+            expiresIn: args.expiresIn ?? 3600,
+            versionId: args.versionId,
+            contentType: args.contentType,
+          }),
+        );
       } catch (err) {
         return toolError(err);
       }

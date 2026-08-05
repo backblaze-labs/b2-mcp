@@ -7,7 +7,6 @@ import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
-import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   buildHttpServer,
@@ -858,33 +857,56 @@ describe("HTTP transport handler", () => {
     expect(capturedSignal?.aborted).toBe(true);
   });
 
-  it("aborts an in-flight S3 call when the HTTP client disconnects", async () => {
-    let markS3Started!: () => void;
-    const s3Started = new Promise<void>((resolve) => {
-      markS3Started = resolve;
+  it("aborts an in-flight SDK list call when the HTTP client disconnects", async () => {
+    let markSdkStarted!: () => void;
+    const sdkStarted = new Promise<void>((resolve) => {
+      markSdkStarted = resolve;
     });
-    let markS3Aborted!: () => void;
-    const s3Aborted = new Promise<void>((resolve) => {
-      markS3Aborted = resolve;
+    let markSdkAborted!: () => void;
+    const sdkAborted = new Promise<void>((resolve) => {
+      markSdkAborted = resolve;
     });
     let capturedSignal: AbortSignal | undefined;
-    const sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockImplementation(((
-      _command: unknown,
-      options?: { abortSignal?: AbortSignal },
-    ) => {
-      capturedSignal = options?.abortSignal;
-      markS3Started();
-      return new Promise((resolve) => {
-        options?.abortSignal?.addEventListener(
-          "abort",
-          () => {
-            markS3Aborted();
-            resolve({ Contents: [] });
-          },
-          { once: true },
-        );
-      });
-    }) as never);
+    installSdkTransport(
+      new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(200, authorizeResponse(["listBuckets", "listFiles"]));
+        }
+        if (endpoint === "b2_list_buckets") {
+          return new StaticHttpResponse(200, {
+            buckets: [
+              {
+                accountId: "test-account-123",
+                bucketId: "bucket-1",
+                bucketName: "bucket-a",
+                bucketType: "allPrivate",
+                bucketInfo: {},
+                corsRules: [],
+                lifecycleRules: [],
+                revision: 1,
+                options: [],
+              },
+            ],
+          });
+        }
+        if (endpoint === "b2_list_file_names") {
+          capturedSignal = request.signal;
+          markSdkStarted();
+          return new Promise<StaticHttpResponse>((resolve) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => {
+                markSdkAborted();
+                resolve(new StaticHttpResponse(200, { files: [], nextFileName: null }));
+              },
+              { once: true },
+            );
+          });
+        }
+        return new StaticHttpResponse(200, {});
+      }),
+    );
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       fetchCapabilities: jest.fn(async () => null),
@@ -896,12 +918,11 @@ describe("HTTP transport handler", () => {
       callToolBody("s3_list_objects_v2", { bucket: "bucket-a" }),
     );
 
-    await s3Started;
+    await sdkStarted;
     client.destroy();
-    await s3Aborted;
+    await sdkAborted;
 
     expect(capturedSignal?.aborted).toBe(true);
-    sendSpy.mockRestore();
   });
 
   it("reuses a B2 auth manager across stateless requests for the same credential", async () => {

@@ -25,7 +25,25 @@ declare module "@backblaze-labs/b2-sdk/s3" {
     readonly forcePathStyle: boolean;
   }
 
+  export interface S3PresignObjectUrlOptions extends B2S3Config {
+    readonly bucketName: string;
+    readonly fileName: string;
+    readonly expiresIn?: number;
+  }
+
+  export interface PresignS3GetObjectUrlOptions extends S3PresignObjectUrlOptions {
+    readonly versionId?: string;
+  }
+
+  export interface PresignS3PutObjectUrlOptions extends S3PresignObjectUrlOptions {
+    readonly contentType?: string;
+    readonly contentLength?: number;
+    readonly metadata?: Record<string, string>;
+  }
+
   export function createS3ClientConfig(config: B2S3Config): S3ClientConfig;
+  export function presignS3GetObjectUrl(options: PresignS3GetObjectUrlOptions): Promise<string>;
+  export function presignS3PutObjectUrl(options: PresignS3PutObjectUrlOptions): Promise<string>;
 }
 
 declare module "@backblaze-labs/b2-sdk/simulator" {
