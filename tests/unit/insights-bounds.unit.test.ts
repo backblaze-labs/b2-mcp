@@ -336,4 +336,46 @@ describe("b2_unfinished_uploads — upload bound", () => {
     expect(result.wasted_gb).toBe(1);
     expect(result.oldest_file).toBe("u2");
   });
+
+  it("aborts an in-flight listParts call when the scan deadline expires", async () => {
+    let clock = 0;
+    jest.spyOn(Date, "now").mockImplementation(() => clock);
+    let listPartsSignal: AbortSignal | undefined;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets", "listFiles"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, { buckets: [bucketInfo] });
+      }
+      if (endpoint === "b2_list_unfinished_large_files") {
+        clock = 11_999;
+        return new StaticHttpResponse(200, {
+          files: [upload("u1", "1", "2020-02-01T00:00:00.000Z")],
+          nextFileId: null,
+        });
+      }
+      if (endpoint === "b2_list_parts") {
+        listPartsSignal = request.signal;
+        return new Promise((_, reject) => {
+          request.signal?.addEventListener("abort", () => reject(request.signal?.reason), {
+            once: true,
+          });
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(
+      await callTool(server, "b2_unfinished_uploads", { bucket: "test-bucket", max_uploads: 1000 }),
+    );
+
+    expect(listPartsSignal?.aborted).toBe(true);
+    expect(result.wasted_is_lower_bound).toBe(true);
+    expect(result.sized_uploads).toBe(0);
+    expect(result.wasted_gb).toBe(0);
+  });
 });

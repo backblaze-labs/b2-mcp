@@ -7,6 +7,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import {
@@ -83,6 +84,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
+  setWebhookDnsLookupForTests(null);
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
 });
@@ -386,6 +389,120 @@ describe("b2_list_keys and b2_delete_key", () => {
   });
 });
 
+describe("native SDK DTO boundaries", () => {
+  it("drops unreviewed secret-bearing SDK fields before tool serialization", async () => {
+    invalidateAuthManagerCache();
+    installSdkTransport(
+      new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(
+            200,
+            authorizeResponse(["listBuckets", "listKeys", "listFiles", "writeFileLegalHolds"]),
+          );
+        }
+        if (endpoint === "b2_list_buckets") {
+          return new StaticHttpResponse(200, {
+            buckets: [
+              {
+                accountId: "test-account-123",
+                bucketId: "bucket-1",
+                bucketName: "dto-bucket",
+                bucketType: "allPrivate",
+                bucketInfo: {},
+                corsRules: [],
+                lifecycleRules: [],
+                options: [],
+                revision: 1,
+                injectedSecret: "bucket-secret",
+              },
+            ],
+          });
+        }
+        if (endpoint === "b2_list_keys") {
+          return new StaticHttpResponse(200, {
+            keys: [
+              {
+                keyName: "dto-key",
+                applicationKeyId: "key-1",
+                capabilities: ["readFiles"],
+                accountId: "test-account-123",
+                expirationTimestamp: null,
+                bucketIds: null,
+                bucketId: null,
+                namePrefix: null,
+                options: [],
+                applicationKey: "key-secret",
+              },
+            ],
+            nextApplicationKeyId: null,
+            injectedSecret: "list-secret",
+          });
+        }
+        if (endpoint === "b2_list_file_names") {
+          return new StaticHttpResponse(200, {
+            files: [
+              {
+                accountId: "test-account-123",
+                bucketId: "bucket-1",
+                fileId: "file-1",
+                fileName: "large.bin",
+                action: "upload",
+                contentLength: 42,
+                contentSha1: "none",
+                contentType: "b2/x-auto",
+                fileInfo: {},
+                uploadTimestamp: Date.parse("2021-01-01T00:00:00.000Z"),
+                injectedSecret: "file-secret",
+              },
+            ],
+            nextFileName: null,
+            injectedSecret: "page-secret",
+          });
+        }
+        if (endpoint === "b2_update_file_legal_hold") {
+          return new StaticHttpResponse(200, {
+            fileName: "large.bin",
+            fileId: "file-1",
+            legalHold: "off",
+            injectedSecret: "hold-secret",
+          });
+        }
+        return new StaticHttpResponse(200, {});
+      }),
+    );
+    server = createServer(testConfig);
+
+    const outputs = [
+      parseResult(await callTool(server, "b2_list_buckets", {})),
+      parseResult(await callTool(server, "b2_list_keys", {})),
+      parseResult(
+        await callTool(server, "b2_largest_files", {
+          bucket: "dto-bucket",
+          limit: 1,
+          max_scan: 1000,
+        }),
+      ),
+      parseResult(
+        await callTool(server, "b2_update_file_legal_hold", {
+          fileId: "file-1",
+          fileName: "large.bin",
+          legalHold: "off",
+          confirm: true,
+        }),
+      ),
+    ];
+    const serialized = JSON.stringify(outputs);
+
+    expect(serialized).not.toContain("bucket-secret");
+    expect(serialized).not.toContain("key-secret");
+    expect(serialized).not.toContain("list-secret");
+    expect(serialized).not.toContain("file-secret");
+    expect(serialized).not.toContain("page-secret");
+    expect(serialized).not.toContain("hold-secret");
+  });
+});
+
 describe("Error propagation", () => {
   it("b2_list_keys returns isError for SDK B2 errors", async () => {
     sim.injectFailure({
@@ -427,6 +544,10 @@ describe("b2_update_bucket", () => {
 });
 
 describe("bucket notification rules", () => {
+  beforeEach(() => {
+    setWebhookDnsLookupForTests(async () => [{ address: "93.184.216.34" }]);
+  });
+
   it("sets, gets, and redacts notification secrets", async () => {
     const bucket = await createBucket("notify-bucket");
     const rules = [
@@ -500,9 +621,12 @@ describe("bucket notification rules", () => {
                   Authorization: "Bearer stored-token",
                   "X-Api-Key": "stored-key",
                 },
+                extraSecret: "target-secret",
               },
+              injectedSecret: "rule-secret",
             },
           ],
+          injectedSecret: "notification-secret",
         });
       }
       return new StaticHttpResponse(200, {});
@@ -521,6 +645,9 @@ describe("bucket notification rules", () => {
     expect(json).not.toContain("fragment-token");
     expect(json).not.toContain("stored-token");
     expect(json).not.toContain("stored-key");
+    expect(json).not.toContain("target-secret");
+    expect(json).not.toContain("rule-secret");
+    expect(json).not.toContain("notification-secret");
     expect(get.eventNotificationRules[0].targetConfiguration.url).toBe(
       "https://hooks.example.com/[redacted]",
     );
@@ -572,6 +699,19 @@ describe("bucket notification rules", () => {
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toMatch(/private|loopback|numeric|IPv6|non-public/i);
     }
+  });
+
+  it("rejects webhook hostnames that resolve to private addresses", async () => {
+    setWebhookDnsLookupForTests(async () => [{ address: "10.0.0.7" }]);
+    const bucket = await createBucket("notify-dns-ssrf");
+
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: bucket.id,
+      eventNotificationRules: [ruleWith("https://customer.example.com/hook")],
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/resolve|non-public|public IP/i);
   });
 
   it("rejects webhook URLs with embedded credentials", async () => {

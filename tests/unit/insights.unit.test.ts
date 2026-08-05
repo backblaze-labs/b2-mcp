@@ -321,6 +321,30 @@ describe("insights — snapshot selection (fake report client)", () => {
     // two region rows for account a → 60 + 40 GB stored
     expect(rows.reduce((s, r) => s + (r.storageBytes ?? 0), 0)).toBe(100 * GB);
   });
+
+  it("latestSnapshotDate stops at the report listing page budget", async () => {
+    let calls = 0;
+    const b2Client = {
+      listReportObjectKeys: async () => {
+        calls++;
+        return {
+          keys: [`2026-06-${String(Math.min(calls, 28)).padStart(2, "0")}/usage.account.csv`],
+          isTruncated: true,
+          nextContinuationToken: String(calls),
+        };
+      },
+      downloadReportObjectText: async () => ({ text: "", bytes: 0, truncated: false }),
+    };
+
+    const result = await latestSnapshotDate(
+      b2Client as any,
+      "b2-reports-x",
+      new Date(Date.UTC(2026, 5, 28)),
+    );
+
+    expect(calls).toBe(100);
+    expect(result.date).toBe("2026-06-28");
+  });
 });
 
 describe("insights — report scan bounds", () => {
@@ -405,5 +429,65 @@ describe("insights — report scan bounds", () => {
     expect(body.report_scan.downloaded_mb).toBe(25);
     expect(body.report_scan.stop_reasons).toContain("max_downloaded_bytes");
     expect(downloadReportObjectText).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one byte budget across b2_usage_growth discovery and both snapshots", async () => {
+    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+    const server = {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+    };
+    const csv = "account_id,date,stored_gb\nacct,2026-06-20,1\n";
+    const downloadReportObjectText = jest
+      .fn()
+      .mockResolvedValueOnce({
+        text: csv,
+        bytes: 20 * 1024 * 1024,
+        truncated: false,
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        bytes: 5 * 1024 * 1024,
+        truncated: true,
+      });
+    const b2Client = {
+      listReportObjectKeys: async (
+        _bucket: string,
+        input: { prefix?: string; maxKeys?: number },
+      ) => {
+        if (input.prefix === "2026-06-20/") {
+          return { keys: ["2026-06-20/usage.account.csv"], isTruncated: false };
+        }
+        if (input.prefix === "2026-06-28/") {
+          return { keys: ["2026-06-28/usage.account.csv"], isTruncated: false };
+        }
+        if (input.maxKeys === 1) {
+          return { keys: ["2026-06-20/usage.account.csv"], isTruncated: false };
+        }
+        return {
+          keys: ["2026-06-20/usage.account.csv", "2026-06-28/usage.account.csv"],
+          isTruncated: false,
+        };
+      },
+      downloadReportObjectText,
+    };
+    const auth = {
+      getAuth: async () => ({ accountId: "acct" }),
+    };
+    registerInsightTools(server as any, {} as any, auth as any, b2Client as any);
+
+    const result = await tools.b2_usage_growth.execute({
+      period: "month",
+      order: "most_grown",
+      limit: 1,
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.partial).toBe(true);
+    expect(body.report_scan.downloaded_mb).toBe(25);
+    expect(body.report_scan.stop_reasons).toContain("max_downloaded_bytes");
+    expect(downloadReportObjectText).toHaveBeenCalledTimes(2);
+    expect(downloadReportObjectText.mock.calls[1][2].maxBytes).toBe(5 * 1024 * 1024);
   });
 });

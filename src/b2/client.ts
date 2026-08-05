@@ -120,6 +120,16 @@ export interface BucketInfoResult {
   bucketId: string;
   bucketName: string;
   bucketType: string;
+  accountId?: string;
+  bucketInfo?: Record<string, string>;
+  corsRules?: CorsRuleInput[];
+  defaultServerSideEncryption?: unknown;
+  fileLockConfiguration?: unknown;
+  lifecycleRules?: LifecycleRuleInput[];
+  options?: string[];
+  revision?: number;
+  defaultRetention?: BucketRetentionInput;
+  replicationConfiguration?: unknown;
 }
 
 export interface ListBucketsResult {
@@ -127,6 +137,7 @@ export interface ListBucketsResult {
 }
 
 export interface NotificationRulesResult {
+  bucketId?: string;
   eventNotificationRules: EventNotificationRuleInput[];
 }
 
@@ -244,22 +255,34 @@ function cloneJsonResponse<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function toPlainObject<T extends object>(value: T): T {
-  return Object.assign({}, cloneJsonResponse(value));
+function cloneJsonField<T>(value: T): T {
+  if (value === undefined || value === null) return value;
+  return cloneJsonResponse(value);
 }
 
 function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
-  return Object.assign({}, cloneJsonResponse(value), {
+  return {
+    accountId: String(value.accountId),
     bucketId: String(value.bucketId),
     bucketName: value.bucketName,
     bucketType: value.bucketType,
-  });
+    bucketInfo: cloneJsonField(value.bucketInfo),
+    corsRules: cloneJsonField(value.corsRules) as CorsRuleInput[],
+    defaultServerSideEncryption: cloneJsonField(value.defaultServerSideEncryption),
+    fileLockConfiguration: cloneJsonField(value.fileLockConfiguration),
+    lifecycleRules: cloneJsonField(value.lifecycleRules) as LifecycleRuleInput[],
+    options: value.options ? [...value.options] : [],
+    revision: value.revision,
+    defaultRetention: cloneJsonField(value.defaultRetention) as BucketRetentionInput,
+    replicationConfiguration: cloneJsonField(value.replicationConfiguration),
+  };
 }
 
 function toNotificationRulesResult(
   value: GetBucketNotificationRulesResponse | SetBucketNotificationRulesResponse,
 ): NotificationRulesResult {
-  return Object.assign({}, cloneJsonResponse(value), {
+  return {
+    bucketId: String(value.bucketId),
     eventNotificationRules: value.eventNotificationRules.map((rule) => ({
       name: rule.name,
       eventTypes: [...rule.eventTypes],
@@ -268,18 +291,21 @@ function toNotificationRulesResult(
       objectNamePrefix: rule.objectNamePrefix,
       suspensionReason: rule.suspensionReason,
       targetConfiguration: {
-        ...rule.targetConfiguration,
+        targetType: rule.targetConfiguration.targetType,
+        url: rule.targetConfiguration.url,
+        ...(rule.targetConfiguration.hmacSha256SigningSecret !== undefined
+          ? { hmacSha256SigningSecret: rule.targetConfiguration.hmacSha256SigningSecret }
+          : {}),
         ...(rule.targetConfiguration.customHeaders !== undefined
-          ? { customHeaders: rule.targetConfiguration.customHeaders }
+          ? { customHeaders: cloneJsonField(rule.targetConfiguration.customHeaders) }
           : {}),
       },
     })),
-  });
+  };
 }
 
 function toApplicationKeyResult(value: ApplicationKey): ApplicationKeyResult {
   return {
-    ...toPlainObject(value),
     keyName: value.keyName,
     applicationKeyId: String(value.applicationKeyId),
     capabilities: [...value.capabilities],
@@ -293,31 +319,30 @@ function toApplicationKeyResult(value: ApplicationKey): ApplicationKeyResult {
 }
 
 function toFileVersionResult(value: FileVersion): FileVersionResult {
-  return Object.assign({}, cloneJsonResponse(value), {
+  return {
     fileName: value.fileName,
     contentLength: value.contentLength,
     uploadTimestamp: value.uploadTimestamp,
-  });
+  };
 }
 
 function toUnfinishedLargeFileResult(value: UnfinishedLargeFile): UnfinishedLargeFileResult {
-  return Object.assign({}, cloneJsonResponse(value), {
+  return {
     fileId: String(value.fileId),
     fileName: value.fileName,
     uploadTimestamp: value.uploadTimestamp,
-  });
+  };
 }
 
 function toPartInfoResult(value: PartInfo): PartInfoResult {
-  return Object.assign({}, cloneJsonResponse(value), {
+  return {
     partNumber: value.partNumber,
     contentLength: value.contentLength,
-  });
+  };
 }
 
 function toFileLegalHoldResult(value: UpdateFileLegalHoldResult): UpdateFileLegalHoldResult {
   return {
-    ...toPlainObject(value),
     fileName: value.fileName,
     fileId: String(value.fileId),
     legalHold: value.legalHold,
@@ -326,7 +351,6 @@ function toFileLegalHoldResult(value: UpdateFileLegalHoldResult): UpdateFileLega
 
 function toFileRetentionResult(value: UpdateFileRetentionResult): UpdateFileRetentionResult {
   return {
-    ...toPlainObject(value),
     fileName: value.fileName,
     fileId: String(value.fileId),
     fileRetention: {
@@ -620,11 +644,11 @@ export class B2Client {
         startApplicationKeyId: maybeApplicationKeyId(options.startApplicationKeyId),
       }),
     );
-    return Object.assign({}, toPlainObject(result), {
+    return {
       keys: result.keys.map(toApplicationKeyResult),
       nextApplicationKeyId:
         result.nextApplicationKeyId == null ? null : String(result.nextApplicationKeyId),
-    });
+    };
   }
 
   async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKeyResult> {
@@ -664,10 +688,10 @@ export class B2Client {
         signal: currentMcpRequestSignal(),
       }),
     );
-    return Object.assign({}, toPlainObject(result), {
+    return {
       files: result.files.map(toFileVersionResult),
       nextFileName: result.nextFileName,
-    });
+    };
   }
 
   async listUnfinishedLargeFiles(
@@ -683,10 +707,10 @@ export class B2Client {
         signal: currentMcpRequestSignal(),
       }),
     );
-    return Object.assign({}, toPlainObject(result), {
+    return {
       files: result.files.map(toUnfinishedLargeFileResult),
       nextFileId: result.nextFileId,
-    });
+    };
   }
 
   async listParts(options: ListPartsOptions): Promise<ListPartsResult> {
@@ -696,10 +720,10 @@ export class B2Client {
         signal: currentMcpRequestSignal(),
       }),
     );
-    return Object.assign({}, toPlainObject(result), {
+    return {
       parts: result.parts.map(toPartInfoResult),
       nextPartNumber: result.nextPartNumber,
-    });
+    };
   }
 
   private async withNativeCircuit<T>(

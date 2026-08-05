@@ -28,6 +28,7 @@ import { B2ReportClient, type ReportObjectClient } from "./report-client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { dateFromTimestamp } from "../utils/date.js";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 
 const GB = 1e9; // report columns are GB = 1e9 bytes
 
@@ -215,6 +216,11 @@ interface ReportRowsResult {
   stats: ReportLoadStats;
 }
 
+interface ReportScanBudget {
+  startedAt: number;
+  stats: ReportLoadStats;
+}
+
 function newReportStats(): ReportLoadStats {
   return {
     pages: 0,
@@ -231,52 +237,59 @@ function stopReportScan(stats: ReportLoadStats, reason: string): void {
   stats.stop_reason ??= reason;
 }
 
-function reportScanTimedOut(startedAt: number): boolean {
-  return Date.now() - startedAt > REPORT_SCAN_LIMITS.maxElapsedMs;
+function createReportScanBudget(): ReportScanBudget {
+  return { startedAt: Date.now(), stats: newReportStats() };
 }
 
-function reportScanRemainingMs(startedAt: number): number {
-  return Math.max(1, REPORT_SCAN_LIMITS.maxElapsedMs - (Date.now() - startedAt));
+function reportScanTimedOut(budget: ReportScanBudget): boolean {
+  return Date.now() - budget.startedAt >= REPORT_SCAN_LIMITS.maxElapsedMs;
+}
+
+function reportScanRemainingMs(budget: ReportScanBudget): number {
+  return Math.max(1, REPORT_SCAN_LIMITS.maxElapsedMs - (Date.now() - budget.startedAt));
+}
+
+function ensureReportPageBudget(budget: ReportScanBudget): boolean {
+  if (reportScanTimedOut(budget)) {
+    stopReportScan(budget.stats, "time_budget");
+    return false;
+  }
+  if (budget.stats.pages >= REPORT_SCAN_LIMITS.maxPages) {
+    stopReportScan(budget.stats, "max_pages");
+    return false;
+  }
+  return true;
+}
+
+function reportScanMetadataFromStats(stats: ReportLoadStats): Record<string, unknown> {
+  return {
+    ...(stats.stop_reason ? { truncated: true, partial: true } : {}),
+    report_scan: {
+      pages: stats.pages,
+      listed_keys: stats.listed_keys,
+      candidate_keys: stats.candidate_keys,
+      selected_keys: stats.selected_keys,
+      downloaded_keys: stats.downloaded_keys,
+      downloaded_mb: Math.round((stats.downloaded_bytes / 1024 / 1024) * 10) / 10,
+      parsed_rows: stats.parsed_rows,
+      ...(stats.stop_reason ? { stop_reasons: [stats.stop_reason] } : {}),
+    },
+  };
 }
 
 function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknown> {
-  const truncated = loads.some((load) => load.truncated);
-  const totals = loads.reduce(
-    (acc, load) => {
-      acc.pages += load.stats.pages;
-      acc.listed_keys += load.stats.listed_keys;
-      acc.candidate_keys += load.stats.candidate_keys;
-      acc.selected_keys += load.stats.selected_keys;
-      acc.downloaded_keys += load.stats.downloaded_keys;
-      acc.downloaded_bytes += load.stats.downloaded_bytes;
-      acc.parsed_rows += load.stats.parsed_rows;
-      if (load.stats.stop_reason) acc.stop_reasons.add(load.stats.stop_reason);
-      return acc;
-    },
-    {
-      pages: 0,
-      listed_keys: 0,
-      candidate_keys: 0,
-      selected_keys: 0,
-      downloaded_keys: 0,
-      downloaded_bytes: 0,
-      parsed_rows: 0,
-      stop_reasons: new Set<string>(),
-    },
-  );
-  return {
-    ...(truncated ? { truncated: true, partial: true } : {}),
-    report_scan: {
-      pages: totals.pages,
-      listed_keys: totals.listed_keys,
-      candidate_keys: totals.candidate_keys,
-      selected_keys: totals.selected_keys,
-      downloaded_keys: totals.downloaded_keys,
-      downloaded_mb: Math.round((totals.downloaded_bytes / 1024 / 1024) * 10) / 10,
-      parsed_rows: totals.parsed_rows,
-      ...(totals.stop_reasons.size ? { stop_reasons: [...totals.stop_reasons].sort() } : {}),
-    },
-  };
+  const totals = loads.reduce((acc, load) => {
+    acc.pages += load.stats.pages;
+    acc.listed_keys += load.stats.listed_keys;
+    acc.candidate_keys += load.stats.candidate_keys;
+    acc.selected_keys += load.stats.selected_keys;
+    acc.downloaded_keys += load.stats.downloaded_keys;
+    acc.downloaded_bytes += load.stats.downloaded_bytes;
+    acc.parsed_rows += load.stats.parsed_rows;
+    if (load.stats.stop_reason) acc.stop_reason ??= load.stats.stop_reason;
+    return acc;
+  }, newReportStats());
+  return reportScanMetadataFromStats(totals);
 }
 
 /**
@@ -319,18 +332,15 @@ async function loadReportRows(
   reportClient: ReportObjectClient,
   bucketName: string,
   sinceDate: string,
+  budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<ReportRowsResult | null> {
   const keyRe = /^\d{4}-\d{2}-\d{2}\/.+\.csv$/;
   const keys: string[] = [];
   let token: string | undefined;
-  const stats = newReportStats();
-  const startedAt = Date.now();
+  const { stats } = budget;
   try {
     do {
-      if (reportScanTimedOut(startedAt)) {
-        stopReportScan(stats, "time_budget");
-        break;
-      }
+      if (!ensureReportPageBudget(budget)) break;
       const page = await reportClient.listReportObjectKeys(bucketName, {
         // StartAfter skips every key before the window (keys are date-prefixed
         // and sort lexically), so a long-lived report bucket isn't fully scanned.
@@ -338,7 +348,7 @@ async function loadReportRows(
         startAfter: sinceDate,
         continuationToken: token,
         maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
-        timeoutMs: reportScanRemainingMs(startedAt),
+        timeoutMs: reportScanRemainingMs(budget),
       });
       stats.pages++;
       stats.listed_keys += page.keys.length;
@@ -353,10 +363,6 @@ async function loadReportRows(
       stats.candidate_keys = keys.length;
       token = page.isTruncated ? page.nextContinuationToken : undefined;
       if (stats.stop_reason) break;
-      if (token && stats.pages >= REPORT_SCAN_LIMITS.maxPages) {
-        stopReportScan(stats, "max_pages");
-        break;
-      }
     } while (token);
   } catch (e) {
     const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
@@ -364,16 +370,16 @@ async function loadReportRows(
     throw e;
   }
 
-  return loadRowsFromReportKeys(reportClient, bucketName, keys, stats, startedAt);
+  return loadRowsFromReportKeys(reportClient, bucketName, keys, budget);
 }
 
 async function loadRowsFromReportKeys(
   reportClient: ReportObjectClient,
   bucketName: string,
   keys: string[],
-  stats: ReportLoadStats,
-  startedAt: number,
+  budget: ReportScanBudget,
 ): Promise<ReportRowsResult> {
+  const { stats } = budget;
   const selectedKeys = selectUsageKeys(keys);
   const boundedKeys = selectedKeys.slice(0, REPORT_SCAN_LIMITS.maxSelectedKeys);
   const selectedKeysWereCapped = selectedKeys.length > boundedKeys.length;
@@ -385,7 +391,7 @@ async function loadRowsFromReportKeys(
 
   const worker = async () => {
     while (next < boundedKeys.length && !stopDownloads) {
-      if (reportScanTimedOut(startedAt)) {
+      if (reportScanTimedOut(budget)) {
         stopReportScan(stats, "time_budget");
         stopDownloads = true;
         return;
@@ -399,7 +405,7 @@ async function loadRowsFromReportKeys(
       }
       const download = await reportClient.downloadReportObjectText(bucketName, key, {
         maxBytes: remainingBytes,
-        timeoutMs: reportScanRemainingMs(startedAt),
+        timeoutMs: reportScanRemainingMs(budget),
       });
       const { text, bytes, truncated } = download;
       stats.downloaded_keys++;
@@ -492,14 +498,17 @@ async function nearestSnapshotDate(
   reportClient: ReportObjectClient,
   bucketName: string,
   target: string,
+  budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<{ date: string | null; bucketMissing: boolean }> {
-  const startedAt = Date.now();
   try {
+    if (!ensureReportPageBudget(budget)) return { date: null, bucketMissing: false };
     const page = await reportClient.listReportObjectKeys(bucketName, {
       startAfter: target,
       maxKeys: 1,
-      timeoutMs: reportScanRemainingMs(startedAt),
+      timeoutMs: reportScanRemainingMs(budget),
     });
+    budget.stats.pages++;
+    budget.stats.listed_keys += page.keys.length;
     return { date: snapshotDateOf(page.keys[0] ?? ""), bucketMissing: false };
   } catch (e) {
     if (is404(e)) return { date: null, bucketMissing: true };
@@ -513,30 +522,36 @@ export async function latestSnapshotDate(
   reportClient: ReportObjectClient,
   bucketName: string,
   today: Date,
+  budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<{ date: string | null; bucketMissing: boolean }> {
-  const startedAt = Date.now();
   for (const lookback of [10, 45, 180]) {
     const after = new Date(today.getTime() - lookback * 86400_000).toISOString().slice(0, 10);
     let token: string | undefined;
     let max: string | null = null;
     try {
       do {
+        if (!ensureReportPageBudget(budget)) break;
         const page = await reportClient.listReportObjectKeys(bucketName, {
           startAfter: after,
           continuationToken: token,
-          timeoutMs: reportScanRemainingMs(startedAt),
+          maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
+          timeoutMs: reportScanRemainingMs(budget),
         });
+        budget.stats.pages++;
+        budget.stats.listed_keys += page.keys.length;
         for (const key of page.keys) {
           const d = snapshotDateOf(key);
           if (d && (max === null || d > max)) max = d;
         }
         token = page.isTruncated ? page.nextContinuationToken : undefined;
+        if (budget.stats.stop_reason) break;
       } while (token);
     } catch (e) {
       if (is404(e)) return { date: null, bucketMissing: true };
       throw e;
     }
     if (max) return { date: max, bucketMissing: false };
+    if (budget.stats.stop_reason) break;
   }
   return { date: null, bucketMissing: false };
 }
@@ -554,21 +569,18 @@ async function loadDayRowsBounded(
   reportClient: ReportObjectClient,
   bucketName: string,
   dayDate: string,
+  budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<ReportRowsResult> {
   const keys: string[] = [];
   let token: string | undefined;
-  const stats = newReportStats();
-  const startedAt = Date.now();
+  const { stats } = budget;
   do {
-    if (reportScanTimedOut(startedAt)) {
-      stopReportScan(stats, "time_budget");
-      break;
-    }
+    if (!ensureReportPageBudget(budget)) break;
     const page = await reportClient.listReportObjectKeys(bucketName, {
       prefix: `${dayDate}/`,
       continuationToken: token,
       maxKeys: REPORT_SCAN_LIMITS.maxKeysPerPage,
-      timeoutMs: reportScanRemainingMs(startedAt),
+      timeoutMs: reportScanRemainingMs(budget),
     });
     stats.pages++;
     stats.listed_keys += page.keys.length;
@@ -583,12 +595,8 @@ async function loadDayRowsBounded(
     stats.candidate_keys = keys.length;
     token = page.isTruncated ? page.nextContinuationToken : undefined;
     if (stats.stop_reason) break;
-    if (token && stats.pages >= REPORT_SCAN_LIMITS.maxPages) {
-      stopReportScan(stats, "max_pages");
-      break;
-    }
   } while (token);
-  return loadRowsFromReportKeys(reportClient, bucketName, keys, stats, startedAt);
+  return loadRowsFromReportKeys(reportClient, bucketName, keys, budget);
 }
 
 /** Sum stored bytes per account from a snapshot's rows (skip null storage). */
@@ -718,6 +726,46 @@ function matchingUnfinishedUploads(
   return matches;
 }
 
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: unknown }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+function isInsightDeadlineError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "TimeoutError";
+}
+
+async function withNativeInsightDeadline<T>(
+  startedAt: number,
+  budgetMs: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const remaining = budgetMs - (Date.now() - startedAt);
+  if (remaining <= 0) {
+    throw new DOMException("B2 insight scan timed out", "TimeoutError");
+  }
+
+  const parent = currentMcpRequestSignal();
+  const controller = new AbortController();
+  const abortFromParent = () => {
+    controller.abort(parent?.reason ?? new DOMException("Aborted", "AbortError"));
+  };
+  const timer = setTimeout(() => {
+    controller.abort(new DOMException("B2 insight scan timed out", "TimeoutError"));
+  }, remaining);
+  unrefTimer(timer);
+
+  if (parent?.aborted === true) abortFromParent();
+  else parent?.addEventListener("abort", abortFromParent, { once: true });
+
+  try {
+    return await runWithMcpRequestSignal(controller.signal, fn);
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener("abort", abortFromParent);
+  }
+}
+
 // ── Tool registration ───────────────────────────────────────────────────────
 
 export function registerInsightTools(
@@ -766,16 +814,21 @@ export function registerInsightTools(
     async (args) => {
       try {
         const bucket = await reportsBucketName(auth);
+        const reportBudget = createReportScanBudget();
         const today = new Date();
         const targetThen =
           args.days != null ? daysAgo(args.days) : periodStartDate(args.period, today);
 
-        const latest = await latestSnapshotDate(reportClient, bucket, today);
+        const latest = await latestSnapshotDate(reportClient, bucket, today, reportBudget);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
         if (!latest.date)
-          return toolJson({ reports_enabled: true, note: "No usage-report snapshots found yet." });
+          return toolJson({
+            reports_enabled: true,
+            note: "No usage-report snapshots found yet.",
+            ...reportScanMetadataFromStats(reportBudget.stats),
+          });
 
-        const then = await nearestSnapshotDate(reportClient, bucket, targetThen);
+        const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
         if (!then.date || then.date >= latest.date)
           return toolJson({
@@ -784,12 +837,11 @@ export function registerInsightTools(
               `Not enough report history to compare: latest snapshot is ${latest.date}, with no ` +
               `earlier snapshot at or after the requested ${targetThen}.`,
             latest_snapshot: latest.date,
+            ...reportScanMetadataFromStats(reportBudget.stats),
           });
 
-        const [thenRows, nowRows] = await Promise.all([
-          loadDayRowsBounded(reportClient, bucket, then.date),
-          loadDayRowsBounded(reportClient, bucket, latest.date),
-        ]);
+        const thenRows = await loadDayRowsBounded(reportClient, bucket, then.date, reportBudget);
+        const nowRows = await loadDayRowsBounded(reportClient, bucket, latest.date, reportBudget);
 
         let accounts = computeSnapshotGrowth(thenRows.rows, nowRows.rows);
         if (args.order === "least_grown") accounts = [...accounts].reverse();
@@ -802,7 +854,7 @@ export function registerInsightTools(
           from_date: then.date,
           to_date: latest.date,
           account_count: accounts.length,
-          ...reportScanMetadata(thenRows, nowRows),
+          ...reportScanMetadataFromStats(reportBudget.stats),
           accounts: accounts.map((a) => ({
             account: a.accountId,
             start_gb: gb(a.firstBytes),
@@ -918,12 +970,22 @@ export function registerInsightTools(
         let truncated = false;
         let stopReason: "complete" | "max_scan" | "time_budget" = "complete";
         do {
-          const page = await b2Client.listFileNames({
-            bucketId: resolvedBucketId,
-            prefix: args.prefix,
-            startFileName: token,
-            maxFileCount: Math.min(Math.max(args.limit, 1000), 10_000),
-          });
+          let page;
+          try {
+            page = await withNativeInsightDeadline(startedAt, TIME_BUDGET_MS, () =>
+              b2Client.listFileNames({
+                bucketId: resolvedBucketId,
+                prefix: args.prefix,
+                startFileName: token,
+                maxFileCount: Math.min(Math.max(args.limit, 1000), 10_000),
+              }),
+            );
+          } catch (err) {
+            if (!isInsightDeadlineError(err)) throw err;
+            truncated = true;
+            stopReason = "time_budget";
+            break;
+          }
           const files = page.files ?? [];
           let pageExhausted = true;
           for (const file of files) {
@@ -1034,11 +1096,21 @@ export function registerInsightTools(
         let truncated = false;
         let stopReason: "complete" | "max_uploads" | "time_budget" = "complete";
         do {
-          const page = await b2Client.listUnfinishedLargeFiles({
-            bucketId: resolvedBucketId,
-            startFileId: fileIdMarker,
-            maxFileCount: 100,
-          });
+          let page;
+          try {
+            page = await withNativeInsightDeadline(startedAt, TIME_BUDGET_MS, () =>
+              b2Client.listUnfinishedLargeFiles({
+                bucketId: resolvedBucketId,
+                startFileId: fileIdMarker,
+                maxFileCount: 100,
+              }),
+            );
+          } catch (err) {
+            if (!isInsightDeadlineError(err)) throw err;
+            truncated = true;
+            stopReason = "time_budget";
+            break;
+          }
           const matchingUploads = matchingUnfinishedUploads(page.files ?? [], cutoff);
           const availableSlots = Math.max(0, args.max_uploads - uploads.length);
           uploads.push(...matchingUploads.slice(0, availableSlots));
@@ -1062,7 +1134,10 @@ export function registerInsightTools(
           return toolJson({
             bucket: resolvedBucketName,
             unfinished_count: 0,
-            note: "No abandoned multipart uploads found.",
+            truncated,
+            note: truncated
+              ? `Stopped after a ${TIME_BUDGET_MS / 1000}s time budget before abandoned multipart uploads could be fully scanned.`
+              : "No abandoned multipart uploads found.",
           });
 
         // Sum already-uploaded part bytes for wasted storage; find the oldest.
@@ -1078,16 +1153,27 @@ export function registerInsightTools(
             oldest = u;
           if (wastedIsLowerBound) continue; // budget hit — keep scanning for oldest only
           let partMarker: number | undefined;
+          let completedPartScan = true;
           do {
-            const parts = await b2Client.listParts({
-              fileId: u.fileId,
-              startPartNumber: partMarker,
-              maxPartCount: 1000,
-            });
+            let parts;
+            try {
+              parts = await withNativeInsightDeadline(startedAt, TIME_BUDGET_MS, () =>
+                b2Client.listParts({
+                  fileId: u.fileId,
+                  startPartNumber: partMarker,
+                  maxPartCount: 1000,
+                }),
+              );
+            } catch (err) {
+              if (!isInsightDeadlineError(err)) throw err;
+              wastedIsLowerBound = true;
+              completedPartScan = false;
+              break;
+            }
             for (const p of parts.parts ?? []) wasted += toListedPart(p).size;
             partMarker = parts.nextPartNumber ?? undefined;
           } while (partMarker != null);
-          sizedUploads++;
+          if (completedPartScan) sizedUploads++;
           if (overBudget()) wastedIsLowerBound = true;
         }
 

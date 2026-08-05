@@ -150,6 +150,8 @@ describe("SDK adoption contract", () => {
     );
 
     expect(unresolved).toEqual([]);
+    expect(contract).not.toContain("s3_presign_upload_part` remains release-blocking");
+    expect(contract).not.toContain("keep the existing name as a release-blocking SDK gap");
   });
 
   it("delegates Node runtime and SDK floor policy to check-runtime-policy", () => {

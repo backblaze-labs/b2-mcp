@@ -25,6 +25,28 @@ const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   requestTimeoutMs: API_TIMEOUT_MS,
 };
 
+const NO_REPLAY_RETRY_OPTIONS: Partial<RetryOptions> = { maxRetries: 0 };
+
+const NON_IDEMPOTENT_NATIVE_ENDPOINTS = new Set([
+  "b2_cancel_large_file",
+  "b2_copy_file",
+  "b2_copy_part",
+  "b2_create_bucket",
+  "b2_create_key",
+  "b2_delete_bucket",
+  "b2_delete_file_version",
+  "b2_delete_key",
+  "b2_finish_large_file",
+  "b2_hide_file",
+  "b2_set_bucket_notification_rules",
+  "b2_start_large_file",
+  "b2_update_bucket",
+  "b2_update_file_legal_hold",
+  "b2_update_file_retention",
+  "b2_upload_file",
+  "b2_upload_part",
+]);
+
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
@@ -56,8 +78,30 @@ class RequestSignalTransport implements HttpTransport {
 
   send(request: HttpRequest): Promise<HttpResponse> {
     const signal = request.signal ?? currentMcpRequestSignal() ?? new AbortController().signal;
-    return this.inner.send(signal ? { ...request, signal } : request);
+    const replaySafeRequest = withOperationRetryPolicy(request);
+    return this.inner.send(signal ? { ...replaySafeRequest, signal } : replaySafeRequest);
   }
+}
+
+function b2ApiEndpointName(rawUrl: string): string | undefined {
+  try {
+    const [, root, , endpoint] = new URL(rawUrl).pathname.split("/");
+    return root === "b2api" ? endpoint : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
+  const endpoint = b2ApiEndpointName(request.url);
+  if (!endpoint || !NON_IDEMPOTENT_NATIVE_ENDPOINTS.has(endpoint)) return request;
+  return {
+    ...request,
+    retry: {
+      ...request.retry,
+      ...NO_REPLAY_RETRY_OPTIONS,
+    },
+  };
 }
 
 const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);

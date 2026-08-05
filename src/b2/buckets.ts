@@ -1,4 +1,5 @@
 import type { ToolRegistrar } from "../mcp.js";
+import * as dns from "node:dns/promises";
 import { isIP } from "node:net";
 import { z } from "zod";
 import {
@@ -83,6 +84,22 @@ const NON_GLOBAL_IPV6_CIDRS: Array<[string, number]> = [
   ["ff00::", 8],
 ];
 
+const WEBHOOK_DNS_LOOKUP_TIMEOUT_MS = 2_000;
+
+type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
+let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
+
+function isTestRuntime(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
+}
+
+export function setWebhookDnsLookupForTests(lookup: WebhookDnsLookup | null): void {
+  if (!isTestRuntime()) {
+    throw new Error("Webhook DNS resolver override is only available in tests.");
+  }
+  webhookDnsLookupForTests = lookup;
+}
+
 function ipv4ToInt(raw: string): number | null {
   const parts = raw.split(".");
   if (parts.length !== 4) return null;
@@ -157,6 +174,45 @@ function isNonGlobalIpLiteral(host: string): boolean {
   return false;
 }
 
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: unknown }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+async function lookupWebhookHost(host: string): Promise<Array<{ address: string }>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const lookup =
+    webhookDnsLookupForTests ?? ((name: string) => dns.lookup(name, { all: true, verbatim: true }));
+  try {
+    return await Promise.race([
+      lookup(host),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error("Webhook hostname DNS lookup timed out."));
+        }, WEBHOOK_DNS_LOOKUP_TIMEOUT_MS);
+        unrefTimer(timer);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function validateWebhookHostResolution(host: string): Promise<string | null> {
+  if (isIP(host)) return null;
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookupWebhookHost(host);
+  } catch {
+    return "must resolve to a public IP address";
+  }
+  if (!addresses.length) return "must resolve to a public IP address";
+  if (addresses.some(({ address }) => isNonGlobalIpLiteral(address))) {
+    return "must not resolve to a non-public IP address";
+  }
+  return null;
+}
+
 function rawUrlHost(raw: string): string | null {
   const authority = raw.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i)?.[1];
   if (!authority) return null;
@@ -176,7 +232,7 @@ function isNonCanonicalNumericIpHost(host: string): boolean {
  * Server-side webhook URL guard (defense-in-depth): require HTTPS and reject
  * internal/SSRF targets. Returns a reason string if invalid, or null if OK.
  */
-function validateWebhookUrl(raw: string): string | null {
+async function validateWebhookUrl(raw: string): Promise<string | null> {
   const rawHost = rawUrlHost(raw);
   if (rawHost?.includes("%")) return "must not include an IPv6 zone identifier";
   if (rawHost && isNonCanonicalNumericIpHost(rawHost)) {
@@ -201,7 +257,7 @@ function validateWebhookUrl(raw: string): string | null {
   if (isNonGlobalIpLiteral(host)) {
     return "must not target a non-public IP address";
   }
-  return null;
+  return validateWebhookHostResolution(host);
 }
 
 function normalizeBucketSse(
@@ -612,7 +668,7 @@ export function registerBucketTools(
         const eventNotificationRules: EventNotificationRuleInput[] =
           args.eventNotificationRules.map(normalizeNotificationRule);
         for (const rule of eventNotificationRules) {
-          const reason = validateWebhookUrl(rule.targetConfiguration.url);
+          const reason = await validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
             const safeUrl = redactWebhookUrl(rule.targetConfiguration.url);
             return toolError(new Error(`Webhook URL ${JSON.stringify(safeUrl)} ${reason}.`));

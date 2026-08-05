@@ -1,4 +1,5 @@
 import { B2AuthManager } from "../../src/auth";
+import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import { B2Config } from "../../src/utils/types";
@@ -6,6 +7,7 @@ import { runWithMcpRequestSignal } from "../../src/request-context";
 import { abortError } from "../../src/utils/named-error";
 import {
   authorizeResponse,
+  b2EndpointName,
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
@@ -176,6 +178,80 @@ describe("B2AuthManager", () => {
     await assertion;
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     jest.useRealTimers();
+  });
+
+  it("does not replay createBucket after a response-lost failure", async () => {
+    let createCalls = 0;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["writeBuckets"]));
+      }
+      if (endpoint === "b2_create_bucket") {
+        createCalls++;
+        if (createCalls === 1) throw new Error("lost response after createBucket");
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          bucketId: "bucket-1",
+          bucketName: "created-on-retry",
+          bucketType: "allPrivate",
+          bucketInfo: {},
+          corsRules: [],
+          lifecycleRules: [],
+          options: [],
+          revision: 1,
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+    const client = new B2Client(new B2AuthManager(mockConfig));
+
+    await expect(
+      client.createBucket({ bucketName: "created-on-retry", bucketType: "allPrivate" }),
+    ).rejects.toThrow(/lost response/);
+    expect(createCalls).toBe(1);
+  });
+
+  it("does not replay deleteKey after a response-lost failure", async () => {
+    let deleteCalls = 0;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["deleteKeys"]));
+      }
+      if (endpoint === "b2_delete_key") {
+        deleteCalls++;
+        if (deleteCalls === 1) throw new Error("lost response after deleteKey");
+        return new StaticHttpResponse(200, {
+          keyName: "deleted",
+          applicationKeyId: "key-1",
+          capabilities: ["readFiles"],
+          accountId: "test-account-123",
+          expirationTimestamp: null,
+          bucketIds: null,
+          bucketId: null,
+          namePrefix: null,
+          options: [],
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+    const client = new B2Client(new B2AuthManager(mockConfig));
+
+    await expect(client.deleteKey("key-1")).rejects.toThrow(/lost response/);
+    expect(deleteCalls).toBe(1);
   });
 
   it("passes the MCP abort signal into SDK retry backoff", async () => {
