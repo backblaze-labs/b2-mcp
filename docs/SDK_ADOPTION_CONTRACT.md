@@ -30,9 +30,10 @@ for Phase 1 migration and for the public MCP tool contract freeze.
   SDK release before the MCP release can claim that capability as an SDK-backed
   contract.
 - The MCP protocol baseline remains `2026-07-28`. The modern MCP runtime uses
-  the stable v2 package split through `createMcpHandler`, `toNodeHandler`, and
-  `serveStdio`. The monolithic `@modelcontextprotocol/sdk` v1 package is not an
-  allowed dependency.
+  the stable v2 server entry points through `createMcpHandler` and `serveStdio`.
+  A repository-owned Node HTTP bridge adapts the web-standard handler without
+  `@modelcontextprotocol/node` or its web-framework dependency. The monolithic
+  `@modelcontextprotocol/sdk` v1 package is not an allowed dependency.
 
 ## Package Policy
 

@@ -63,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HTTP readiness now rejects unsupported `B2_MCP_OUTPUT_FORMAT` values and TOON
   preflight failures in every credential mode before serving traffic.
 
+### Security
+- Patched all currently reported npm advisories by updating `brace-expansion`,
+  `js-yaml`, and Babel core, and replaced the MCP Node adapter with a minimal
+  platform-only bridge so vulnerable `@hono/node-server` code is absent from
+  both development and published dependency graphs.
+- Added explicit read-only workflow permissions and consolidated the safe AWS
+  SDK, Axios, and TypeScript dependency updates from superseded Dependabot PRs.
+
 ### Removed
 - Removed the `b2_create_key` lockdown toggles
   `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, and

@@ -20,7 +20,7 @@ import {
   type McpHandlerRequestOptions,
   type McpRequestContext,
 } from "@modelcontextprotocol/server";
-import { toNodeHandler } from "@modelcontextprotocol/node";
+import { createNodeHttpHandler } from "./node-http-adapter.js";
 import {
   createServer as createMcpServerDefinition,
   fetchCapabilities as fetchCredentialCapabilities,
@@ -542,7 +542,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     await Promise.all(servers.map((server) => server.close().catch(() => undefined)));
   }
 
-  const nodeMcpHandler = toNodeHandler(
+  const nodeMcpHandler = createNodeHttpHandler(
     {
       fetch: async (request: Request, requestOptions?: McpHandlerRequestOptions) => {
         return mcpHandler.fetch(request, requestOptions);

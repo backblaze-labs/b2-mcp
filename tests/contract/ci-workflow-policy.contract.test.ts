@@ -13,6 +13,10 @@ function workflowJob(text: string, job: string): string {
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
 
+  it("defaults workflow permissions to read-only contents", () => {
+    expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
+  });
+
   it("keeps package verification off the ci-green dependency path", () => {
     const markGreen = workflowJob(ci, "mark-green");
     const testJob = workflowJob(ci, "test");
