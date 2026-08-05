@@ -270,8 +270,11 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).toContain("--ignore-scripts");
   });
 
-  it("pins every marketplace action used by the publish workflow", () => {
-    const uses = [...publishWorkflow.matchAll(/uses:\s*([^@\s]+)@([^\s#]+)/g)].map((match) => ({
+  it.each([
+    ["CI", workflow],
+    ["publish", publishWorkflow],
+  ])("pins every marketplace action used by the %s workflow", (_name, workflowText) => {
+    const uses = [...workflowText.matchAll(/uses:\s*([^@\s]+)@([^\s#]+)/g)].map((match) => ({
       action: match[1],
       ref: match[2],
     }));

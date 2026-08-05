@@ -55,42 +55,63 @@ function shouldHashPath(relativePath, state) {
 
 function scanFilesystemFile(root, relativePath, label, state, report, { hashAll = false } = {}) {
   const fullPath = path.join(root, relativePath);
+  const context = `${label}:${relativePath}`;
   let stat;
   try {
     stat = lstatSync(fullPath);
-  } catch {
+  } catch (error) {
+    report.errors.push(`${context}: could not inspect file: ${error.message}`);
     return;
   }
   if (!stat.isFile()) return;
 
-  const context = `${label}:${relativePath}`;
-  if (isStructuredPath(relativePath)) {
-    scanStructuredFile(relativePath, readFileSync(fullPath, "utf8"), context, state, report);
+  const isStructured = isStructuredPath(relativePath);
+  const shouldHash = (hashAll || shouldHashPath(relativePath, state)) && stat.size <= maxHashBytes;
+  if (!isStructured && !shouldHash) return;
+
+  let bytes;
+  try {
+    bytes = readFileSync(fullPath);
+  } catch (error) {
+    report.errors.push(`${context}: could not read file: ${error.message}`);
+    return;
   }
-  if ((hashAll || shouldHashPath(relativePath, state)) && stat.size <= maxHashBytes) {
-    scanFileBytes(readFileSync(fullPath), context, state, report);
-  }
+
+  if (isStructured)
+    scanStructuredFile(relativePath, bytes.toString("utf8"), context, state, report);
+  if (shouldHash) scanFileBytes(bytes, context, state, report);
 }
 
-function recursiveFiles(root, { includeGitIgnored = true } = {}) {
-  const files = [];
-
+function walkFilesystemFiles(
+  root,
+  { includeNodeModules = true, shouldInspect = () => true, inspect, label, report },
+) {
   function walk(dir, relativeDir = "") {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true }).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      );
+    } catch (error) {
+      const context = relativeDir ? `${label}:${relativeDir}` : label;
+      report.errors.push(`${context}: could not read directory: ${error.message}`);
+      return;
+    }
+
+    for (const entry of entries) {
       if (entry.name === ".git") continue;
-      if (!includeGitIgnored && entry.name === "node_modules") continue;
+      if (!includeNodeModules && entry.name === "node_modules") continue;
       const relative = path.join(relativeDir, entry.name);
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full, relative);
-      } else if (entry.isFile()) {
-        files.push(relative);
+      } else if (entry.isFile() && shouldInspect(relative)) {
+        inspect(relative);
       }
     }
   }
 
   walk(root);
-  return files.sort();
 }
 
 function gitTrackedFiles(root) {
@@ -100,12 +121,19 @@ function gitTrackedFiles(root) {
 }
 
 export function scanFilesystemRoot(root, label, state, report) {
-  const files = isGitWorkTree(root)
-    ? (gitTrackedFiles(root) ?? recursiveFiles(root, { includeGitIgnored: false }))
-    : recursiveFiles(root, { includeGitIgnored: false });
-
-  for (const relativePath of files) {
-    scanFilesystemFile(root, relativePath, label, state, report, { hashAll: true });
+  const files = isGitWorkTree(root) ? gitTrackedFiles(root) : null;
+  if (files) {
+    for (const relativePath of files) {
+      scanFilesystemFile(root, relativePath, label, state, report, { hashAll: true });
+    }
+  } else {
+    walkFilesystemFiles(root, {
+      includeNodeModules: false,
+      inspect: (relativePath) =>
+        scanFilesystemFile(root, relativePath, label, state, report, { hashAll: true }),
+      label,
+      report,
+    });
   }
 
   scanNodeModules(root, label, state, report);
@@ -115,10 +143,15 @@ function scanNodeModules(root, label, state, report) {
   const nodeModules = path.join(root, "node_modules");
   if (!existsSync(nodeModules)) return;
 
-  for (const relativePath of recursiveFiles(nodeModules)) {
-    if (!isStructuredPath(relativePath) && !shouldHashPath(relativePath, state)) continue;
-    scanFilesystemFile(nodeModules, relativePath, `${label}:node_modules`, state, report);
-  }
+  const nodeModulesLabel = `${label}:node_modules`;
+  walkFilesystemFiles(nodeModules, {
+    shouldInspect: (relativePath) =>
+      isStructuredPath(relativePath) || shouldHashPath(relativePath, state),
+    inspect: (relativePath) =>
+      scanFilesystemFile(nodeModules, relativePath, nodeModulesLabel, state, report),
+    label: nodeModulesLabel,
+    report,
+  });
 }
 
 export function refsForBranchScan(root, report) {

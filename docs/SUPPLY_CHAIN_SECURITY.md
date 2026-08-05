@@ -60,6 +60,11 @@ The default supply-chain audit runs the denylist gate before the live npm audit:
 npm run audit:supply-chain
 ```
 
+Filesystem scan failures are reported as scanner errors instead of aborting the
+process. Installed dependency trees are filtered while walking so only package
+metadata, lockfiles, and configured indicator filenames are retained for
+inspection.
+
 Pull-request and `mark-green` CI scan only the tested ref and the protected
 `origin/main` ref so a stale or poisoned side branch cannot block unrelated
 deploys:

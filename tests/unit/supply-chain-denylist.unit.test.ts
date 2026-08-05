@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -373,6 +374,26 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`matched denied SHA-256 ${hash}`);
       expect(readFileSync(join(dir, "setup.mjs"), "utf8")).toBe(payload);
+    });
+  });
+
+  const posixIt = process.platform === "win32" ? it.skip : it;
+  posixIt("reports unreadable inspected files as scanner errors", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const manifest = join(dir, "package.json");
+      writeJson(customDenylist, baseDenylist());
+      writeJson(manifest, { name: "fixture", version: "0.0.0" });
+      chmodSync(manifest, 0o000);
+
+      try {
+        const result = runDenylist(dir, [], customDenylist);
+        expect(result.status).toBe(2);
+        expect(result.stderr).toContain("scanner-error");
+        expect(result.stderr).toContain("working-tree:package.json: could not read file");
+      } finally {
+        chmodSync(manifest, 0o600);
+      }
     });
   });
 
