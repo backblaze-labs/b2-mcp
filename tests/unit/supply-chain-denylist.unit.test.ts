@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -319,6 +319,38 @@ describe("supply-chain denylist scanner", () => {
     });
   });
 
+  it("does not follow tracked symlinks outside the scanned root", () => {
+    withTempDir((dir) => {
+      const repoDir = join(dir, "repo");
+      const payload = "outside payload";
+      const hash = createHash("sha256").update(payload).digest("hex");
+      const customDenylist = join(dir, "denylist.json");
+      mkdirSync(repoDir);
+      writeJson(customDenylist, {
+        ...baseDenylist(),
+        fileIndicators: [
+          {
+            sha256: hash,
+            filenames: ["setup.mjs"],
+            description: "outside tree indicator",
+          },
+        ],
+      });
+      writeFileSync(join(dir, "setup.mjs"), payload);
+      writeJson(join(repoDir, "package.json"), { name: "fixture", version: "0.0.0" });
+      symlinkSync(join(dir, "setup.mjs"), join(repoDir, "setup.mjs"));
+      runGit(repoDir, ["init", "-b", "main"]);
+      runGit(repoDir, ["config", "user.email", "test@example.com"]);
+      runGit(repoDir, ["config", "user.name", "Test User"]);
+      runGit(repoDir, ["add", "package.json", "setup.mjs"]);
+      runGit(repoDir, ["commit", "-m", "init"]);
+
+      const result = runDenylist(repoDir, [], customDenylist);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("no denied packages or IOCs found");
+    });
+  });
+
   it("fails schema validation with path-specific errors", () => {
     withTempDir((dir) => {
       const malformed = join(dir, "denylist.json");
@@ -360,6 +392,29 @@ describe("supply-chain denylist scanner", () => {
       expect(result.stderr).toContain("poisoned:package-lock.json");
       expect(result.stderr).toContain("denied package keyv@6.0.0");
       expect(result.stderr).not.toContain("scanner-error");
+    });
+  });
+
+  it("deduplicates branch refs that point at the same commit", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      writeJson(customDenylist, packageDenylist());
+      writeJson(join(dir, "package.json"), { name: "fixture", version: "0.0.0" });
+      runGit(dir, ["init", "-b", "main"]);
+      runGit(dir, ["config", "user.email", "test@example.com"]);
+      runGit(dir, ["config", "user.name", "Test User"]);
+      runGit(dir, ["add", "package.json"]);
+      runGit(dir, ["commit", "-m", "init"]);
+      runGit(dir, ["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+      const result = runDenylist(dir, ["--all-branches"], customDenylist);
+
+      expect(result.status).toBe(0);
+      const scannedRefs = result.stderr
+        .split(/\r?\n/)
+        .filter((line) => line.includes("supply-chain-denylist: scanned ref "));
+      expect(scannedRefs).toHaveLength(1);
+      expect(scannedRefs[0]).toContain("main");
     });
   });
 

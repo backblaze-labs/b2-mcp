@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -756,7 +756,7 @@ function scanFilesystemFile(root, relativePath, label, state, report, { hashAll 
   const fullPath = path.join(root, relativePath);
   let stat;
   try {
-    stat = statSync(fullPath);
+    stat = lstatSync(fullPath);
   } catch {
     return;
   }
@@ -823,7 +823,7 @@ function scanNodeModules(root, label, state, report) {
 function refsForBranchScan(root, report) {
   const result = git(root, [
     "for-each-ref",
-    "--format=%(refname:short)",
+    "--format=%(objectname)%00%(refname:short)",
     "refs/heads",
     "refs/remotes",
   ]);
@@ -832,11 +832,14 @@ function refsForBranchScan(root, report) {
     return [];
   }
 
-  return result.stdout
-    .split(/\r?\n/)
-    .map((ref) => ref.trim())
-    .filter((ref) => ref && ref !== "origin/HEAD")
-    .sort();
+  const refsByOid = new Map();
+  for (const line of result.stdout.split(/\r?\n/)) {
+    const [oid, ref] = line.split("\0");
+    if (!oid || !ref || ref === "origin/HEAD") continue;
+    if (!refsByOid.has(oid)) refsByOid.set(oid, ref.trim());
+  }
+
+  return [...refsByOid.values()].filter(Boolean).sort();
 }
 
 function gitLsTreeEntries(root, ref, report) {
