@@ -520,6 +520,20 @@ describe("Error propagation", () => {
 });
 
 describe("b2_update_bucket", () => {
+  const replicationConfiguration = {
+    asReplicationSource: {
+      replicationRules: [
+        {
+          replicationRuleName: "copy-all",
+          destinationBucketId: "dest-bucket-id",
+          isEnabled: true,
+          priority: 1,
+        },
+      ],
+      sourceApplicationKeyId: "source-key-id",
+    },
+  };
+
   it("updates bucket metadata and Object Lock settings", async () => {
     const bucket = await createBucket("update-bucket", BucketType.AllPrivate, {
       fileLockEnabled: true,
@@ -540,6 +554,44 @@ describe("b2_update_bucket", () => {
     expect(result.bucketType).toBe("allPublic");
     expect(result.defaultRetention).toEqual(defaultRetention);
     expect(result.fileLockConfiguration.value.isFileLockEnabled).toBe(true);
+  });
+
+  it("blocks replication updates without confirmation before SDK update", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      throw new Error(`unexpected ${b2EndpointName(request)}`);
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_update_bucket", {
+      bucketId: "bucket-1",
+      replicationConfiguration,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/confirm/i);
+    expect(result.content[0].text).toMatch(/replication/i);
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it("blocks replication updates under block policy even with confirmation", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      throw new Error(`unexpected ${b2EndpointName(request)}`);
+    });
+    installSdkTransport(transport);
+    server = createServer({ ...testConfig, destructivePolicy: "block" });
+
+    const result = await callTool(server, "b2_update_bucket", {
+      bucketId: "bucket-1",
+      replicationConfiguration,
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/blocked/i);
+    expect(transport.requests).toHaveLength(0);
   });
 });
 
@@ -568,6 +620,7 @@ describe("bucket notification rules", () => {
       await callTool(server, "b2_set_bucket_notification_rules", {
         bucketId: bucket.id,
         eventNotificationRules: rules,
+        confirm: true,
       }),
     );
     expect(set.eventNotificationRules[0].objectNamePrefix).toBe("");
@@ -664,11 +717,50 @@ describe("bucket notification rules", () => {
     targetConfiguration: { targetType: "webhook" as const, url },
   });
 
+  it("blocks notification-rule updates without confirmation before SDK update", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      throw new Error(`unexpected ${b2EndpointName(request)}`);
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "bucket-1",
+      eventNotificationRules: [ruleWith("https://attacker.example.com/hook")],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/confirm/i);
+    expect(result.content[0].text).toMatch(/webhook/i);
+    expect(transport.requests).toHaveLength(0);
+  });
+
+  it("blocks notification-rule updates under block policy even with confirmation", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      throw new Error(`unexpected ${b2EndpointName(request)}`);
+    });
+    installSdkTransport(transport);
+    server = createServer({ ...testConfig, destructivePolicy: "block" });
+
+    const result = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: "bucket-1",
+      eventNotificationRules: [ruleWith("https://attacker.example.com/hook")],
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/blocked/i);
+    expect(transport.requests).toHaveLength(0);
+  });
+
   it("rejects a non-HTTPS webhook URL", async () => {
     const bucket = await createBucket("notify-http");
     const res = await callTool(server, "b2_set_bucket_notification_rules", {
       bucketId: bucket.id,
       eventNotificationRules: [ruleWith("http://example.com/hook")],
+      confirm: true,
     });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/https/i);
@@ -695,6 +787,7 @@ describe("bucket notification rules", () => {
       const res = await callTool(server, "b2_set_bucket_notification_rules", {
         bucketId: bucket.id,
         eventNotificationRules: [ruleWith(url)],
+        confirm: true,
       });
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toMatch(/private|loopback|numeric|IPv6|non-public/i);
@@ -708,6 +801,7 @@ describe("bucket notification rules", () => {
     const res = await callTool(server, "b2_set_bucket_notification_rules", {
       bucketId: bucket.id,
       eventNotificationRules: [ruleWith("https://customer.example.com/hook")],
+      confirm: true,
     });
 
     expect(res.isError).toBe(true);
@@ -721,6 +815,7 @@ describe("bucket notification rules", () => {
       eventNotificationRules: [
         ruleWith("https://ops:pa55w0rd@example.com/hook/path-token?token=query-token#frag-token"),
       ],
+      confirm: true,
     });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/credentials/i);

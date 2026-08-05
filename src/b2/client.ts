@@ -53,6 +53,48 @@ export interface BucketRetentionInput {
   period: { duration: number; unit: "days" | "years" } | null;
 }
 
+export interface ServerSideEncryptionResult {
+  mode: "none" | "SSE-B2" | "SSE-C" | null;
+  algorithm?: "AES256" | null;
+}
+
+export interface RetentionPeriodResult {
+  duration: number;
+  unit: "days" | "years";
+}
+
+export interface BucketRetentionPolicyResult {
+  mode: "governance" | "compliance" | "none" | null;
+  period: RetentionPeriodResult | null;
+}
+
+export interface BucketFileLockConfigurationResult {
+  isClientAuthorizedToRead: boolean;
+  value: {
+    isFileLockEnabled: boolean;
+    defaultRetention: BucketRetentionPolicyResult;
+  } | null;
+}
+
+export interface ReplicationRuleResult {
+  replicationRuleName: string;
+  destinationBucketId: string;
+  fileNamePrefix: string;
+  includeExistingFiles: boolean;
+  isEnabled: boolean;
+  priority: number;
+}
+
+export interface ReplicationConfigurationResult {
+  asReplicationSource: {
+    replicationRules: ReplicationRuleResult[];
+    sourceApplicationKeyId: string;
+  } | null;
+  asReplicationDestination: {
+    sourceToDestinationKeyMapping: Record<string, string>;
+  } | null;
+}
+
 export interface ReplicationConfigurationInput {
   asReplicationSource?: {
     replicationRules: Array<{
@@ -123,13 +165,13 @@ export interface BucketInfoResult {
   accountId?: string;
   bucketInfo?: Record<string, string>;
   corsRules?: CorsRuleInput[];
-  defaultServerSideEncryption?: unknown;
-  fileLockConfiguration?: unknown;
+  defaultServerSideEncryption?: ServerSideEncryptionResult;
+  fileLockConfiguration?: BucketFileLockConfigurationResult;
   lifecycleRules?: LifecycleRuleInput[];
   options?: string[];
   revision?: number;
-  defaultRetention?: BucketRetentionInput;
-  replicationConfiguration?: unknown;
+  defaultRetention?: BucketRetentionPolicyResult;
+  replicationConfiguration?: ReplicationConfigurationResult;
 }
 
 export interface ListBucketsResult {
@@ -260,6 +302,86 @@ function cloneJsonField<T>(value: T): T {
   return cloneJsonResponse(value);
 }
 
+function toServerSideEncryptionResult(
+  value: BucketInfo["defaultServerSideEncryption"] | null | undefined,
+): ServerSideEncryptionResult | undefined {
+  if (value == null) return undefined;
+  const cloned = cloneJsonField(value) as { mode?: unknown; algorithm?: unknown };
+  const mode =
+    cloned.mode === "none" ||
+    cloned.mode === "SSE-B2" ||
+    cloned.mode === "SSE-C" ||
+    cloned.mode === null
+      ? cloned.mode
+      : null;
+  const algorithm =
+    cloned.algorithm === "AES256" || cloned.algorithm === null ? cloned.algorithm : undefined;
+  return algorithm !== undefined ? { mode, algorithm } : { mode };
+}
+
+function toBucketRetentionPolicyResult(
+  value: BucketInfo["defaultRetention"] | null | undefined,
+): BucketRetentionPolicyResult | undefined {
+  if (value == null) return undefined;
+  return {
+    mode: value.mode,
+    period: value.period
+      ? {
+          duration: value.period.duration,
+          unit: value.period.unit,
+        }
+      : null,
+  };
+}
+
+function toBucketFileLockConfigurationResult(
+  value: BucketInfo["fileLockConfiguration"] | null | undefined,
+): BucketFileLockConfigurationResult | undefined {
+  if (value == null) return undefined;
+  return {
+    isClientAuthorizedToRead: value.isClientAuthorizedToRead,
+    value: value.value
+      ? {
+          isFileLockEnabled: value.value.isFileLockEnabled,
+          defaultRetention: toBucketRetentionPolicyResult(value.value.defaultRetention) ?? {
+            mode: "none",
+            period: null,
+          },
+        }
+      : null,
+  };
+}
+
+function toReplicationConfigurationResult(
+  value: BucketInfo["replicationConfiguration"] | null | undefined,
+): ReplicationConfigurationResult | undefined {
+  if (value == null) return undefined;
+  return {
+    asReplicationSource: value.asReplicationSource
+      ? {
+          sourceApplicationKeyId: String(value.asReplicationSource.sourceApplicationKeyId),
+          replicationRules: value.asReplicationSource.replicationRules.map((rule) => ({
+            replicationRuleName: rule.replicationRuleName,
+            destinationBucketId: String(rule.destinationBucketId),
+            fileNamePrefix: rule.fileNamePrefix,
+            includeExistingFiles: rule.includeExistingFiles,
+            isEnabled: rule.isEnabled,
+            priority: rule.priority,
+          })),
+        }
+      : null,
+    asReplicationDestination: value.asReplicationDestination
+      ? {
+          sourceToDestinationKeyMapping: Object.fromEntries(
+            Object.entries(value.asReplicationDestination.sourceToDestinationKeyMapping).map(
+              ([source, destination]) => [source, String(destination)],
+            ),
+          ),
+        }
+      : null,
+  };
+}
+
 function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
   return {
     accountId: String(value.accountId),
@@ -268,13 +390,13 @@ function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
     bucketType: value.bucketType,
     bucketInfo: cloneJsonField(value.bucketInfo),
     corsRules: cloneJsonField(value.corsRules) as CorsRuleInput[],
-    defaultServerSideEncryption: cloneJsonField(value.defaultServerSideEncryption),
-    fileLockConfiguration: cloneJsonField(value.fileLockConfiguration),
+    defaultServerSideEncryption: toServerSideEncryptionResult(value.defaultServerSideEncryption),
+    fileLockConfiguration: toBucketFileLockConfigurationResult(value.fileLockConfiguration),
     lifecycleRules: cloneJsonField(value.lifecycleRules) as LifecycleRuleInput[],
     options: value.options ? [...value.options] : [],
     revision: value.revision,
-    defaultRetention: cloneJsonField(value.defaultRetention) as BucketRetentionInput,
-    replicationConfiguration: cloneJsonField(value.replicationConfiguration),
+    defaultRetention: toBucketRetentionPolicyResult(value.defaultRetention),
+    replicationConfiguration: toReplicationConfigurationResult(value.replicationConfiguration),
   };
 }
 

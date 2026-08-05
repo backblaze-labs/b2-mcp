@@ -1,6 +1,6 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client } from "./client.js";
+import { B2Client, type ListKeysOptions } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
@@ -41,7 +41,7 @@ export function registerKeyTools(
     },
     async (args) => {
       try {
-        const payload: Record<string, unknown> = {
+        const payload: ListKeysOptions = {
           maxKeyCount: args.maxKeyCount ?? 100,
         };
         if (args.startApplicationKeyId) payload.startApplicationKeyId = args.startApplicationKeyId;

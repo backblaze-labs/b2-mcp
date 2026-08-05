@@ -10,7 +10,7 @@ import {
   fetchCapabilities,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { verificationFingerprintConfig } from "../../src/credentials";
+import { CredentialResolutionError, verificationFingerprintConfig } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
 import {
   DURABLE_SECRET_PRODUCING_TOOLS,
@@ -211,6 +211,46 @@ describe("fetchCapabilities", () => {
       code: "capability_upstream_unavailable",
     });
   });
+
+  it.each([
+    [401, 401, "capability_auth_failed"],
+    [500, 503, "capability_upstream_unavailable"],
+  ])(
+    "normalizes shared concurrent %i capability failures for every waiter",
+    async (upstreamStatus, expectedStatus, expectedCode) => {
+      const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+      const requestId = `req-shared-${upstreamStatus}`;
+      const transport = installAuthorizeFailure(
+        upstreamStatus,
+        upstreamStatus === 401 ? "unauthorized" : "internal_error",
+        `B2 ${upstreamStatus}`,
+        { "X-Bz-Request-Id": requestId },
+      );
+
+      const results = await Promise.allSettled([
+        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+      ]);
+
+      expect(transport.requests).toHaveLength(1);
+      for (const result of results) {
+        expect(result.status).toBe("rejected");
+        if (result.status !== "rejected") continue;
+        expect(result.reason).toBeInstanceOf(CredentialResolutionError);
+        expect(result.reason).toMatchObject({
+          status: expectedStatus,
+          code: expectedCode,
+        });
+      }
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId,
+        }),
+        "capability.fetch.failed",
+      );
+    },
+  );
 
   it("sanitizes capability fetch failure log text, code, and request id", async () => {
     const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);

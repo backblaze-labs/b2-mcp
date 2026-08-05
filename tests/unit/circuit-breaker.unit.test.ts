@@ -48,6 +48,18 @@ describe("circuit-breaker", () => {
     expect(isClientError(null)).toBe(false);
   });
 
+  it("filters caller AbortError values as non-failures", () => {
+    const abort = new Error("caller aborted");
+    abort.name = "AbortError";
+
+    expect(isClientError(abort)).toBe(true);
+    expect(isClientError(new DOMException("caller aborted", "AbortError"))).toBe(true);
+    expect(isClientError(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }))).toBe(true);
+    expect(isClientError(Object.assign(new Error("timeout"), { name: "TimeoutError" }))).toBe(
+      false,
+    );
+  });
+
   it("classifies AWS SDK (S3) errors by $metadata.httpStatusCode", () => {
     // 4xx → filtered out (client error); 5xx/408/429 → counted as B2 trouble.
     expect(isClientError({ $metadata: { httpStatusCode: 404 } })).toBe(true);
@@ -89,5 +101,22 @@ describe("circuit-breaker", () => {
 
     await expect(withReportCircuit(async () => 1)).rejects.toThrow(/breaker/i);
     await expect(withCircuit(async () => 42)).resolves.toBe(42);
+  });
+
+  it("keeps native and report breakers closed after repeated caller aborts", async () => {
+    for (const run of [withCircuit, withReportCircuit]) {
+      for (let i = 0; i < 12; i++) {
+        await expect(
+          run(async () => {
+            if (i % 2 === 0) throw new DOMException("caller aborted", "AbortError");
+            const abort = new Error("caller aborted");
+            abort.name = "AbortError";
+            throw abort;
+          }),
+        ).rejects.toThrow(/caller aborted/i);
+      }
+
+      await expect(run(async () => "still closed")).resolves.toBe("still closed");
+    }
   });
 });

@@ -5,12 +5,21 @@ import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-con
 
 export const CIRCUIT_TIMEOUT_MS = 150_000;
 
+function isAbortLikeError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { name?: unknown; code?: unknown };
+  return e.name === "AbortError" || e.code === "ABORT_ERR";
+}
+
 /**
  * Errors that should NOT count as B2 service failures.
  * Client-side 4xx (except 408 and 429) reflect bad requests, not B2 trouble.
+ * Caller cancellations are also filtered so client disconnects cannot open a
+ * shared B2 circuit breaker.
  * Exported for direct testing.
  */
 export function isClientError(err: unknown): boolean {
+  if (isAbortLikeError(err)) return true;
   if (typeof err !== "object" || err === null) return false;
   const e = err as {
     status?: number;

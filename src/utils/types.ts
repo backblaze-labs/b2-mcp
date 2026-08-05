@@ -37,8 +37,9 @@ export interface B2Config {
    */
   fileRoot: string | null;
   /** Gate policy for destructive/irreversible tools (delete bucket/file-version/
-   *  key, cancel large file, eject group member, make-public / weaken-lock via
-   *  b2_update_bucket). "confirm" (default) requires confirm:true; "block" refuses;
+   *  key, cancel large file, eject group member, make-public / weaken-lock /
+   *  replication via b2_update_bucket, outbound notification rules).
+   *  "confirm" (default) requires confirm:true; "block" refuses;
    *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY. */
   destructivePolicy?: DestructivePolicy;
   /**

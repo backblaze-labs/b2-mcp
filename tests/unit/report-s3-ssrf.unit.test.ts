@@ -117,6 +117,26 @@ describe("insight report S3 endpoint validation", () => {
     expect(transport.requests).toHaveLength(1);
   });
 
+  it("destroys the per-server report S3 client when the server closes", async () => {
+    const destroySpy = jest.spyOn(B2ReportClient.prototype, "destroy");
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["readFiles"]));
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    const server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_usage_growth", { period: "month", limit: 1 });
+    expect(result.isError).not.toBe(true);
+    expect(sendSpy).toHaveBeenCalled();
+
+    await server.close();
+
+    expect(destroySpy).toHaveBeenCalledTimes(1);
+  });
+
   it("streams report downloads and stops at the configured byte cap", async () => {
     let chunksRead = 0;
     const body = {

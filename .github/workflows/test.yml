@@ -205,7 +205,14 @@ jobs:
   # commits ever reach production. Runs only on a successful main push.
   mark-green:
     needs:
-      [runtime-policy, runtime-engine-floor, deterministic-linux-production, supply-chain-audit]
+      [
+        runtime-policy,
+        runtime-engine-floor,
+        deterministic-linux-production,
+        deterministic-linux-current,
+        cross-platform-minimum,
+        supply-chain-audit,
+      ]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:

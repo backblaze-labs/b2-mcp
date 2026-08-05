@@ -573,7 +573,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a destructive change (making the bucket public, or disabling/clearing Object Lock). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+            "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
           ),
       },
     },
@@ -661,10 +661,18 @@ export function registerBucketTools(
             isEnabled: z.boolean().describe("Whether this rule is active."),
           }),
         ),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe(
+            "Confirm replacing persistent outbound webhook notification rules. Required when the server destructive policy is 'confirm' (the default).",
+          ),
       },
     },
     async (args) => {
       try {
+        const gate = checkDestructive("b2_set_bucket_notification_rules", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
         const eventNotificationRules: EventNotificationRuleInput[] =
           args.eventNotificationRules.map(normalizeNotificationRule);
         for (const rule of eventNotificationRules) {

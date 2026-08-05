@@ -229,6 +229,20 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   const toolCount = registrar.commit();
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
 
+  const originalClose = server.close.bind(server);
+  let cleanedUp = false;
+  server.close = async () => {
+    try {
+      await originalClose();
+    } finally {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        s3Client.destroy();
+        reportClient.destroy();
+      }
+    }
+  };
+
   return server;
 }
 
@@ -443,6 +457,16 @@ function capabilityFailureDetails(
   };
 }
 
+function throwCapabilityResolutionError(
+  err: unknown,
+  config: B2Config,
+  credentialLogKey: string,
+): never {
+  const details = capabilityFailureDetails(err, config);
+  logger.warn({ credential: credentialLogKey, ...details.log }, "capability.fetch.failed");
+  throw new CredentialResolutionError(details.message, details.status, details.code);
+}
+
 export async function fetchCapabilities(
   config: B2Config,
   capabilityCacheKey?: string,
@@ -466,23 +490,21 @@ export async function fetchCapabilities(
   if (existingInflight) return [...(await existingInflight)];
 
   const discovery = (async () => {
-    const auth = new B2AuthManager(config);
-    const info = await auth.getAuth();
-    const capabilities = info.capabilities ?? [];
-    rememberCapabilities(resolvedCacheKey, capabilities, now);
-    return capabilities;
+    try {
+      const auth = new B2AuthManager(config);
+      const info = await auth.getAuth();
+      const capabilities = info.capabilities ?? [];
+      rememberCapabilities(resolvedCacheKey, capabilities, now);
+      return capabilities;
+    } catch (err) {
+      throwCapabilityResolutionError(err, config, credentialLogKey);
+    } finally {
+      capabilityInflight.delete(resolvedCacheKey);
+    }
   })();
   capabilityInflight.set(resolvedCacheKey, discovery);
 
-  try {
-    return [...(await discovery)];
-  } catch (err) {
-    const details = capabilityFailureDetails(err, config);
-    logger.warn({ credential: credentialLogKey, ...details.log }, "capability.fetch.failed");
-    throw new CredentialResolutionError(details.message, details.status, details.code);
-  } finally {
-    capabilityInflight.delete(resolvedCacheKey);
-  }
+  return [...(await discovery)];
 }
 
 /**

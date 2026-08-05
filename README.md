@@ -85,6 +85,12 @@ A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-acces
 
 ---
 
+## Package API Surface
+
+The npm package intentionally supports only the root CommonJS entry (`require("@backblaze-labs/b2-mcp")`), which exposes `startStdio`, plus `./package.json` for metadata. Deep imports such as `@backblaze-labs/b2-mcp/dist/server.js` are private implementation details and are closed by the package `exports` map before the 0.1 release. Use the CLI/bin entry or the root `startStdio` export instead.
+
+---
+
 ## Tool result text format
 
 MCP transport messages always remain JSON-RPC JSON. Structured successful tool
@@ -128,7 +134,7 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 34 tools are active in the full surface; 6 native names are unavailable compatibility stubs for stale cached `tools/list` clients or deferred dependencies. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, and insights stay native. Nine destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`) and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 34 tools are active in the full surface; 6 native names are unavailable compatibility stubs for stale cached `tools/list` clients or deferred dependencies. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
 <summary><b>Control plane — native B2 API (11 active + 3 Partner SDK-gap stubs)</b></summary>
