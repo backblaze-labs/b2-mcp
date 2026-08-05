@@ -722,7 +722,7 @@ describe("inline object cap (control-plane-first data path)", () => {
   it("s3_get_object enforces the inline cap while streaming a lying body", async () => {
     const cancel = vi.fn().mockResolvedValue(undefined);
     const reader = {
-      read: vitest
+      read: vi
         .fn()
         .mockResolvedValueOnce({ done: false, value: new Uint8Array(1024 * 1024 + 1) })
         .mockResolvedValueOnce({ done: true, value: undefined }),

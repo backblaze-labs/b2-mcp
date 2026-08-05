@@ -15,6 +15,7 @@ import { buildUserAgent } from "./utils/user-agent.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { abortError, isAbortError } from "./utils/named-error.js";
+import { isTestRuntime } from "./utils/runtime.js";
 
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
@@ -65,10 +66,6 @@ function sdkAbortException(message: string): Error {
   const ctor = (globalThis as typeof globalThis & { DOMException?: DomExceptionConstructor })
     .DOMException;
   return ctor ? new ctor(message, "AbortError") : abortError(message);
-}
-
-function isTestRuntime(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.VITEST_WORKER_ID !== undefined;
 }
 
 export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null): void {

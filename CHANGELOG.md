@@ -586,8 +586,8 @@ B2 by the new `Contract: v4 tool-surface alignment` integration test.
 - HTTP server now exports `configFromHeaders` and `getPort` for testability.
 - `parseInt(...)` for `--port` now rejects `NaN`, zero, negative, and
   out-of-range values at startup instead of silently calling `listen(NaN)`.
-- Vitest `moduleNameMapper` added so TypeScript source files using `.js`
-  extension imports resolve correctly under `ts-vitest`.
+- Jest `moduleNameMapper` added so TypeScript source files using `.js`
+  extension imports resolve correctly under `ts-jest`.
 
 ### Fixed
 - Health endpoint previously hardcoded `version: "1.0.0"` regardless of the

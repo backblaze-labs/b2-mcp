@@ -65,7 +65,7 @@ describe("withRetry — success path", () => {
   });
 
   it("succeeds on the third attempt after two retryable failures", async () => {
-    const fn = vitest
+    const fn = vi
       .fn()
       .mockRejectedValueOnce(httpError(503))
       .mockRejectedValueOnce(httpError(503))

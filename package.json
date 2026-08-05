@@ -43,7 +43,7 @@
     "test:integration:live": "node scripts/require-live-env.mjs integration && node scripts/run-vitest-layer.mjs integration-live",
     "test:contract:live": "node scripts/require-live-env.mjs contract && node scripts/run-vitest-layer.mjs contract-live",
     "test:package": "npm run build && node scripts/run-vitest-layer.mjs package",
-    "verify": "npm run typecheck && npm run build && npm run lint && npm run lint:docs && npm run format:check && npm run spell && npm run test:coverage && npm run test:slow && npm run test:package",
+    "verify": "npm run typecheck && npm run build && npm run lint && npm run lint:docs && npm run format:check && npm run spell && npm run test:coverage",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "generate:tool-contract": "npm run build && node scripts/generate-tool-contract.mjs",

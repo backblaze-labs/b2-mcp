@@ -439,7 +439,7 @@ describe("insights — report scan bounds", () => {
       },
     };
     const csv = "account_id,date,stored_gb\nacct,2026-06-20,1\n";
-    const downloadReportObjectText = vitest
+    const downloadReportObjectText = vi
       .fn()
       .mockResolvedValueOnce({
         text: csv,

@@ -14,6 +14,7 @@ import {
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
+import { isTestRuntime } from "../utils/runtime.js";
 
 /**
  * Redact webhook secrets from a notification-rules API response before it reaches
@@ -88,10 +89,6 @@ const WEBHOOK_DNS_LOOKUP_TIMEOUT_MS = 2_000;
 
 type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
 let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
-
-function isTestRuntime(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.VITEST_WORKER_ID !== undefined;
-}
 
 export function setWebhookDnsLookupForTests(lookup: WebhookDnsLookup | null): void {
   if (!isTestRuntime()) {

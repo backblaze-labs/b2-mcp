@@ -1,34 +1,26 @@
 import { defineConfig, type TestProjectConfiguration } from "vitest/config";
+import {
+  layerProjectNamesForConfig,
+  vitestLayerProjects,
+} from "./scripts/vitest-layer-registry.mjs";
 
-function layerProject(
-  name: string,
-  include: string[],
-  options: { testTimeout?: number; serial?: boolean } = {},
-): TestProjectConfiguration {
+type LayerProjectDefinition = {
+  include: string[];
+  testTimeout?: number;
+  serial?: boolean;
+};
+
+function layerProject(name: string, definition: LayerProjectDefinition): TestProjectConfiguration {
   return {
     extends: true,
     test: {
       name,
-      include,
-      testTimeout: options.testTimeout ?? 30_000,
-      ...(options.serial ? { fileParallelism: false } : {}),
+      include: definition.include,
+      testTimeout: definition.testTimeout ?? 30_000,
+      ...(definition.serial ? { fileParallelism: false } : {}),
     },
   };
 }
-
-const fixtureProjects =
-  process.env.B2_VITEST_LAYER_ENABLE_FIXTURES === "true"
-    ? [
-        layerProject("runner-fixture-nonlive", [
-          "tests/fixtures/run-vitest-layer-fixture.fixture.test.ts",
-        ]),
-        layerProject(
-          "runner-fixture-live",
-          ["tests/fixtures/run-vitest-layer-fixture.fixture.test.ts"],
-          { serial: true },
-        ),
-      ]
-    : [];
 
 export default defineConfig({
   test: {
@@ -47,32 +39,8 @@ export default defineConfig({
         lines: 85,
       },
     },
-    projects: [
-      layerProject("unit", ["tests/unit/**/*.unit.test.ts"]),
-      layerProject("contract", ["tests/contract/**/*.contract.test.ts"]),
-      layerProject("protocol-modern", ["tests/protocol/**/*.modern-protocol.test.ts"], {
-        serial: true,
-      }),
-      layerProject("protocol-legacy", ["tests/protocol/**/*.legacy-protocol.test.ts"], {
-        serial: true,
-      }),
-      layerProject("slow", ["tests/slow/**/*.slow.test.ts"], {
-        serial: true,
-        testTimeout: 120_000,
-      }),
-      layerProject("package", ["tests/package/**/*.package.test.ts"], {
-        serial: true,
-        testTimeout: 120_000,
-      }),
-      layerProject("integration-live", ["tests/live/**/*.integration.live.test.ts"], {
-        serial: true,
-        testTimeout: 120_000,
-      }),
-      layerProject("contract-live", ["tests/live/**/*.contract.live.test.ts"], {
-        serial: true,
-        testTimeout: 120_000,
-      }),
-      ...fixtureProjects,
-    ],
+    projects: layerProjectNamesForConfig().map((name) =>
+      layerProject(name, vitestLayerProjects[name]),
+    ),
   },
 });

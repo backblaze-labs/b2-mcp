@@ -64,16 +64,13 @@ describe("security dependency policy", () => {
     expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
   });
 
-  it("keeps any brace-expansion resolution above its advisory floor", () => {
+  it("does not include brace-expansion after removing the Jest transform stack", () => {
     const versions = Object.entries(lock.packages)
       .filter(([path]) => path.endsWith("node_modules/brace-expansion"))
       .map(([, entry]) => entry.version)
       .filter((version): version is string => Boolean(version));
 
-    for (const version of versions) {
-      const major = Number(version.split(".")[0]);
-      expect(versionAtLeast(version, major === 1 ? "1.1.18" : "5.0.9")).toBe(true);
-    }
+    expect(versions).toEqual([]);
   });
 
   it("does not reintroduce the removed Jest transform stack", () => {

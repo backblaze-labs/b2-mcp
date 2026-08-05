@@ -232,9 +232,7 @@ describe("secret sanitizer canary policy", () => {
     const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const wrapped = createAuditedToolCallback(
       "t",
-      vitest
-        .fn()
-        .mockResolvedValue(toolError(new Error(`failed with ${CONFIGURED_APPLICATION_KEY}`))),
+      vi.fn().mockResolvedValue(toolError(new Error(`failed with ${CONFIGURED_APPLICATION_KEY}`))),
       cfg,
     );
 
@@ -248,7 +246,7 @@ describe("secret sanitizer canary policy", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const wrapped = createAuditedToolCallback(
       "t",
-      vitest
+      vi
         .fn()
         .mockRejectedValue(
           new Error(

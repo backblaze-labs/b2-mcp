@@ -7,48 +7,56 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { b2CredentialEnvNames, redactB2CredentialValues } from "./b2-credential-env.mjs";
+import {
+  coverageLayerNames,
+  fixtureLayerNames,
+  publicLayerNames,
+  vitestLayerProjects,
+} from "./vitest-layer-registry.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const [layer, maybeSeparator, ...rest] = process.argv.slice(2);
 
 const projectArgs = (...projects) => projects.map((project) => `--project=${project}`);
 
-const publicLayerRegistry = {
-  unit: { args: projectArgs("unit"), live: false },
-  contract: { args: projectArgs("contract"), live: false },
-  "protocol-modern": { args: projectArgs("protocol-modern"), live: false },
-  "protocol-legacy": { args: projectArgs("protocol-legacy"), live: false },
-  slow: { args: projectArgs("slow"), live: false },
-  package: { args: projectArgs("package"), live: false },
-  "integration-live": { args: projectArgs("integration-live"), live: true },
-  "contract-live": { args: projectArgs("contract-live"), live: true },
-  coverage: {
-    args: [
-      "--coverage",
-      ...projectArgs("unit", "contract", "protocol-modern", "protocol-legacy", "slow", "package"),
-    ],
-    live: false,
-  },
+const publicLayerRegistry = Object.fromEntries(
+  publicLayerNames.map((name) => [
+    name,
+    {
+      args: projectArgs(name),
+      live: vitestLayerProjects[name].live,
+      coverage: false,
+    },
+  ]),
+);
+publicLayerRegistry.coverage = {
+  args: ["--coverage", ...projectArgs(...coverageLayerNames)],
+  live: false,
+  coverage: true,
 };
 
-// Fixture-only layers used by tests/contract/test-layering.contract.test.ts.
-// Keep them out of the public CLI surface and normal layer reports.
-const fixtureLayerRegistry = {
-  "runner-fixture-nonlive": {
-    args: projectArgs("runner-fixture-nonlive"),
-    live: false,
-  },
-  "runner-fixture-live": {
-    args: projectArgs("runner-fixture-live"),
-    live: true,
-  },
-};
+const fixtureLayerRegistry = Object.fromEntries(
+  fixtureLayerNames.map((name) => [
+    name,
+    {
+      args: projectArgs(name),
+      live: vitestLayerProjects[name].live,
+      coverage: false,
+    },
+  ]),
+);
 
 const layerRegistry =
   process.env.B2_VITEST_LAYER_ENABLE_FIXTURES === "true"
     ? { ...publicLayerRegistry, ...fixtureLayerRegistry }
     : publicLayerRegistry;
 const supportedLayers = Object.keys(publicLayerRegistry).sort();
+
+function hasCoverageArg(args) {
+  return args.some(
+    (arg) => arg === "--coverage" || arg === "--no-coverage" || arg.startsWith("--coverage="),
+  );
+}
 
 function printUsage(message) {
   if (message) console.error(message);
@@ -71,6 +79,8 @@ if (!/^[A-Za-z0-9._-]+$/.test(layer) || !layerRegistry[layer]) {
 const extraVitestArgs = maybeSeparator === "--" ? rest : [maybeSeparator, ...rest].filter(Boolean);
 const layerConfig = layerRegistry[layer];
 const liveLayer = layerConfig.live;
+const coverageArgs =
+  layerConfig.coverage || hasCoverageArg(extraVitestArgs) ? [] : ["--coverage=false"];
 const hasB2CredentialEnv = b2CredentialEnvNames(process.env).length > 0;
 const hasCustomReporter = extraVitestArgs.some(
   (arg) =>
@@ -97,6 +107,7 @@ const vitestArgs = [
   "--config",
   "vitest.config.ts",
   ...layerConfig.args,
+  ...coverageArgs,
   ...extraVitestArgs,
   ...(!hasB2CredentialEnv ? ["--reporter=default"] : []),
   `--reporter=${summaryReporter}`,

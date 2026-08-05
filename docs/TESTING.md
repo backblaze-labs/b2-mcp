@@ -17,8 +17,9 @@ npm run verify
 ```
 
 `npm run verify` runs typecheck, build, Biome lint, doc-comment lint, the
-Biome-supported format check, deterministic coverage, deterministic slow tests,
-and packed-package installation tests. The individual deterministic layers are:
+Biome-supported format check, spelling, and deterministic coverage across all
+non-live layers, including slow lifecycle and packed-package installation tests.
+The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------ |
