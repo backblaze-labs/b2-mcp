@@ -1,7 +1,7 @@
 {
   "name": "@backblaze-labs/b2-mcp",
   "version": "0.1.0",
-  "description": "MCP server for Backblaze B2 — full B2 native API + a minimal S3-compatible set (only operations with no native equivalent)",
+  "description": "MCP server for Backblaze B2 with frozen Phase 1 B2 and S3-compatible tool profiles",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -46,6 +46,7 @@
     "verify": "npm run typecheck && npm run build && npm run lint && npm run format:check && npm run test:coverage && npm run test:slow && npm run test:package",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
+    "generate:tool-contract": "npm run build && node scripts/generate-tool-contract.mjs",
     "smoke:package": "npm run build && node scripts/packed-consumer-smoke.mjs",
     "check:runtime-policy": "node scripts/check-runtime-policy.mjs",
     "check:package-budget": "node scripts/check-package-budget.mjs",
@@ -96,6 +97,8 @@
   },
   "files": [
     "dist/**/*",
+    "docs/tool-profile-contract.json",
+    "docs/TOOL_PROFILES.md",
     "README.md",
     "CHANGELOG.md",
     "SECURITY.md",

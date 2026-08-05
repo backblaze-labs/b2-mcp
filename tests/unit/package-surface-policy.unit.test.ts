@@ -46,6 +46,7 @@ describe("package surface policy", () => {
     expect(files).not.toContain("audit-policy.json");
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
+    expect(files).toContain("docs/tool-profile-contract.json");
   });
 
   it("retries a transient lockfile-less packed-consumer install", () => {

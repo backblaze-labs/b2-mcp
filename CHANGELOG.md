@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unset/default mode (`B2_MCP_OUTPUT_FORMAT=json` for explicit config).
 - Added a checked-in runtime dependency and package-footprint budget with CI
   enforcement and PR/release summary artifacts.
+- Added the frozen Phase 1 MCP tool-profile contract artifact, generated
+  profile reference, and deterministic modern/legacy `tools/list` fixtures.
 
 ### Changed
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
@@ -58,8 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Object form uploads are not in the Phase 1 MCP contract.
 - Made `b2-mcp` the canonical CLI binary while preserving `b2-mcp-server` as a
   transition alias.
-- Switched the smoke helper to Streamable HTTP `/mcp` and the 40-tool Phase 1
-  surface.
+- Switched the smoke helper to Streamable HTTP `/mcp` and the generated Phase 1
+  tool-profile contract.
 - Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
   disallowed refs, validate environment secrets before live calls, and avoid
   recurring scheduled contract writes until cleanup automation exists.

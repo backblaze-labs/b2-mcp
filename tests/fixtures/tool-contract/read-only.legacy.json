@@ -1,0 +1,514 @@
+{
+  "contractVersion": 1,
+  "issue": 49,
+  "profile": "read-only",
+  "era": "legacy",
+  "protocolVersion": "2025-11-25",
+  "transport": "streamable-http",
+  "mcpRevision": "2026-07-28",
+  "sdk": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/client": "2.0.0"
+  },
+  "counts": {
+    "total": 20,
+    "b2": 11,
+    "s3": 9,
+    "bz": 0
+  },
+  "names": [
+    "b2_authorize_account",
+    "b2_create_group_member",
+    "b2_create_key",
+    "b2_egress_leaders",
+    "b2_get_bucket_notification_rules",
+    "b2_largest_files",
+    "b2_list_buckets",
+    "b2_list_keys",
+    "b2_reserve_trial_create_account",
+    "b2_unfinished_uploads",
+    "b2_usage_growth",
+    "s3_get_bucket_location",
+    "s3_get_object",
+    "s3_get_presigned_url",
+    "s3_head_bucket",
+    "s3_head_object",
+    "s3_list_multipart_uploads",
+    "s3_list_object_versions",
+    "s3_list_objects_v2",
+    "s3_list_parts"
+  ],
+  "requiredFields": {
+    "b2_authorize_account": [],
+    "b2_create_group_member": [],
+    "b2_create_key": [],
+    "b2_egress_leaders": [],
+    "b2_get_bucket_notification_rules": ["bucketId"],
+    "b2_largest_files": ["bucket"],
+    "b2_list_buckets": [],
+    "b2_list_keys": [],
+    "b2_reserve_trial_create_account": [],
+    "b2_unfinished_uploads": ["bucket"],
+    "b2_usage_growth": [],
+    "s3_get_bucket_location": ["bucket"],
+    "s3_get_object": ["bucket", "key"],
+    "s3_get_presigned_url": ["bucket", "key", "operation"],
+    "s3_head_bucket": ["bucket"],
+    "s3_head_object": ["bucket", "key"],
+    "s3_list_multipart_uploads": ["bucket"],
+    "s3_list_object_versions": ["bucket"],
+    "s3_list_objects_v2": ["bucket"],
+    "s3_list_parts": ["bucket", "key", "uploadId"]
+  },
+  "confirmTools": [],
+  "tools": [
+    {
+      "name": "b2_authorize_account",
+      "descriptionSha256": "e1bb0c0733a469ad76f47a10a2b05c11cf03d58b2f576930f324c967928c9a25",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_create_group_member",
+      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_create_key",
+      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_egress_leaders",
+      "descriptionSha256": "bd10578dd665435a3af4ddf2a0d8dee3dc32716a1fe0b64678f784bbfa2f2bcd",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "by": {
+            "default": "account",
+            "enum": ["account", "bucket"],
+            "type": "string"
+          },
+          "days": {
+            "maximum": 90,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 15,
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_get_bucket_notification_rules",
+      "descriptionSha256": "66774dafbe9ef8e125d483fb5621a6cd148c13b30c962178120c975f980e60a4",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucketId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_largest_files",
+      "descriptionSha256": "551618b1bfc6a4df209c7992244a028b7cd57b1cdffac80563ce435ffa6d9c95",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_scan": {
+            "default": 50000,
+            "maximum": 500000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_list_buckets",
+      "descriptionSha256": "d23dc0ed897958bc0b6649b672e8e1b76e0fe8401db912446d4047d08e4d7499",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          },
+          "bucketName": {
+            "type": "string"
+          },
+          "bucketTypes": {
+            "items": {
+              "enum": ["allPublic", "allPrivate", "snapshot", "all"],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_list_keys",
+      "descriptionSha256": "23711d3bb7929f6d1f0d5c305aa5e63285b3ba7af2066c02de0b5f89aab95709",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "maxKeyCount": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "startApplicationKeyId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_reserve_trial_create_account",
+      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_unfinished_uploads",
+      "descriptionSha256": "d6864c452148d9ad78cd24484ddef634db9267af7b3952b73c20637fae3faee9",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "max_uploads": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "older_than_days": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_usage_growth",
+      "descriptionSha256": "7a7dec02f490d7760620fa11f21cbdcd5672e9a2f63e764cc9566c8c4ad217ff",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "days": {
+            "maximum": 3650,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "order": {
+            "default": "most_grown",
+            "enum": ["most_grown", "least_grown", "shrinking"],
+            "type": "string"
+          },
+          "period": {
+            "default": "month",
+            "enum": ["month", "quarter", "year"],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_get_bucket_location",
+      "descriptionSha256": "547c5df273d7e92d1cd70bcde04ae90d3706e9317d7cc06fcb58ace6a8f86465",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_get_object",
+      "descriptionSha256": "372860e08b930d6f3a8a153a0a6ea99015de17cbd7067a56cc5ccef70db07856",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string"
+          },
+          "saveToPath": {
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_get_presigned_url",
+      "descriptionSha256": "68d1e083d929ab5b54041f468d3849735db21f80337d52c736c1e2c26d6bf862",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "default": 3600,
+            "maximum": 604800,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": ["GetObject", "PutObject"],
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "operation"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_head_bucket",
+      "descriptionSha256": "55437a5342e087b4537f1ed2c9ce4e8274291e15a5218a25f08df8cd1845f84f",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_head_object",
+      "descriptionSha256": "0d8a00e565200577efc9af34aa4d8c799e94ed1d04be9039587b48d3e0b86bb8",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_multipart_uploads",
+      "descriptionSha256": "01e22e220014f7d05b0fc629ac1575c116ecc8b1820817b5286ed880f5b4a48d",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "keyMarker": {
+            "type": "string"
+          },
+          "maxUploads": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "uploadIdMarker": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_object_versions",
+      "descriptionSha256": "11639a7bc862a85b6b24432a922b0b734a8f929cc13e9292f15274be9fc30c08",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "keyMarker": {
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "versionIdMarker": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_objects_v2",
+      "descriptionSha256": "fdd0707185a6c8c26d43508c869cc3e23945481a4b0082b9133f3a66e0a75e84",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "continuationToken": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "startAfter": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_parts",
+      "descriptionSha256": "7d68b9c4612f46290a37569f6575d3d92b55ec60ec4a6a4133b781017bed0c17",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "maxParts": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "partNumberMarker": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "uploadId"],
+        "type": "object"
+      }
+    }
+  ],
+  "legacy": {
+    "toolsListCacheHint": null,
+    "discover": null
+  },
+  "hash": "d7833bfcd9e6c85b1dccbc93b5b11835111391fa35babe566ea20dbdf4b3afd0"
+}

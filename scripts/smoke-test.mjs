@@ -25,6 +25,15 @@
  * printed.
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const toolContract = JSON.parse(
+  readFileSync(join(root, "docs/tool-profile-contract.json"), "utf8"),
+);
+
 const {
   MCP_URL,
   B2_KEY_ID,
@@ -107,11 +116,29 @@ function parseToolJson(result) {
   }
 }
 
+function sortedToolNames(tools) {
+  return [...tools].sort((a, b) => a.localeCompare(b));
+}
+
+function arraysEqual(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function matchedContractProfile(names) {
+  return Object.entries(toolContract.profiles).find(([, profile]) =>
+    arraysEqual(names, profile.names),
+  );
+}
+
 async function main() {
   console.log(`Connecting: ${MCP_URL}`);
 
   const tools = await mcp("tools/list");
   const toolNames = new Set((tools.tools ?? []).map((tool) => tool?.name).filter(Boolean));
+  const orderedToolNames = sortedToolNames(toolNames);
+  const fullProfileNames = new Set(toolContract.profiles.full.names);
+  const unknownTools = orderedToolNames.filter((name) => !fullProfileNames.has(name));
+  const matchedProfile = matchedContractProfile(orderedToolNames);
   const info = tools?._meta?.["io.modelcontextprotocol/serverInfo"];
   check(
     "tools/list returns server info",
@@ -119,6 +146,21 @@ async function main() {
     `server=${info?.name} v${info?.version}`,
   );
   check("tools/list returns registered tools", toolNames.size > 0, `${toolNames.size} tools`);
+  check(
+    "tools/list is within the approved profile contract",
+    unknownTools.length === 0,
+    unknownTools.length === 0
+      ? `${toolNames.size} tools`
+      : `unexpected: ${unknownTools.join(", ")}`,
+  );
+  check(
+    "tools/list matches an approved named profile when count aligns",
+    !!matchedProfile ||
+      !Object.values(toolContract.profiles).some(
+        (profile) => profile.counts.total === toolNames.size,
+      ),
+    matchedProfile ? `${matchedProfile[0]} (${toolNames.size} tools)` : `${toolNames.size} tools`,
+  );
   check(
     "tools/list includes b2_authorize_account",
     toolNames.has("b2_authorize_account"),

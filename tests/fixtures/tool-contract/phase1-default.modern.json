@@ -1,0 +1,1473 @@
+{
+  "contractVersion": 1,
+  "issue": 49,
+  "profile": "phase1-default",
+  "era": "modern",
+  "protocolVersion": "2026-07-28",
+  "transport": "streamable-http",
+  "mcpRevision": "2026-07-28",
+  "sdk": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/client": "2.0.0"
+  },
+  "counts": {
+    "total": 37,
+    "b2": 18,
+    "s3": 19,
+    "bz": 0
+  },
+  "names": [
+    "b2_authorize_account",
+    "b2_create_bucket",
+    "b2_create_group_member",
+    "b2_create_key",
+    "b2_delete_bucket",
+    "b2_delete_key",
+    "b2_egress_leaders",
+    "b2_get_bucket_notification_rules",
+    "b2_largest_files",
+    "b2_list_buckets",
+    "b2_list_keys",
+    "b2_reserve_trial_create_account",
+    "b2_set_bucket_notification_rules",
+    "b2_unfinished_uploads",
+    "b2_update_bucket",
+    "b2_update_file_legal_hold",
+    "b2_update_file_retention",
+    "b2_usage_growth",
+    "s3_abort_multipart_upload",
+    "s3_complete_multipart_upload",
+    "s3_copy_object",
+    "s3_create_multipart_upload",
+    "s3_delete_object",
+    "s3_delete_objects",
+    "s3_get_bucket_location",
+    "s3_get_object",
+    "s3_get_presigned_url",
+    "s3_head_bucket",
+    "s3_head_object",
+    "s3_list_multipart_uploads",
+    "s3_list_object_versions",
+    "s3_list_objects_v2",
+    "s3_list_parts",
+    "s3_presign_upload_part",
+    "s3_put_bucket_lifecycle",
+    "s3_put_object",
+    "s3_upload_part_copy"
+  ],
+  "requiredFields": {
+    "b2_authorize_account": [],
+    "b2_create_bucket": ["bucketName", "bucketType"],
+    "b2_create_group_member": [],
+    "b2_create_key": [],
+    "b2_delete_bucket": ["bucketId"],
+    "b2_delete_key": ["applicationKeyId"],
+    "b2_egress_leaders": [],
+    "b2_get_bucket_notification_rules": ["bucketId"],
+    "b2_largest_files": ["bucket"],
+    "b2_list_buckets": [],
+    "b2_list_keys": [],
+    "b2_reserve_trial_create_account": [],
+    "b2_set_bucket_notification_rules": ["bucketId", "eventNotificationRules"],
+    "b2_unfinished_uploads": ["bucket"],
+    "b2_update_bucket": ["bucketId"],
+    "b2_update_file_legal_hold": ["fileId", "fileName", "legalHold"],
+    "b2_update_file_retention": ["fileId", "fileName", "fileRetention"],
+    "b2_usage_growth": [],
+    "s3_abort_multipart_upload": ["bucket", "key", "uploadId"],
+    "s3_complete_multipart_upload": ["bucket", "key", "parts", "uploadId"],
+    "s3_copy_object": ["destinationBucket", "destinationKey", "sourceBucket", "sourceKey"],
+    "s3_create_multipart_upload": ["bucket", "key"],
+    "s3_delete_object": ["bucket", "key"],
+    "s3_delete_objects": ["bucket", "objects"],
+    "s3_get_bucket_location": ["bucket"],
+    "s3_get_object": ["bucket", "key"],
+    "s3_get_presigned_url": ["bucket", "key", "operation"],
+    "s3_head_bucket": ["bucket"],
+    "s3_head_object": ["bucket", "key"],
+    "s3_list_multipart_uploads": ["bucket"],
+    "s3_list_object_versions": ["bucket"],
+    "s3_list_objects_v2": ["bucket"],
+    "s3_list_parts": ["bucket", "key", "uploadId"],
+    "s3_presign_upload_part": ["bucket", "key", "partNumbers", "uploadId"],
+    "s3_put_bucket_lifecycle": ["bucket", "rules"],
+    "s3_put_object": ["bucket", "key"],
+    "s3_upload_part_copy": ["bucket", "copySource", "key", "partNumber", "uploadId"]
+  },
+  "confirmTools": [
+    "b2_delete_bucket",
+    "b2_delete_key",
+    "b2_set_bucket_notification_rules",
+    "b2_update_bucket",
+    "b2_update_file_legal_hold",
+    "b2_update_file_retention",
+    "s3_abort_multipart_upload",
+    "s3_delete_object",
+    "s3_delete_objects",
+    "s3_put_bucket_lifecycle"
+  ],
+  "tools": [
+    {
+      "name": "b2_authorize_account",
+      "descriptionSha256": "e1bb0c0733a469ad76f47a10a2b05c11cf03d58b2f576930f324c967928c9a25",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_create_bucket",
+      "descriptionSha256": "8c76f5be85dc27d50fda55282341fe75ec117a71ea3234102bd602ac79114d47",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketInfo": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "bucketName": {
+            "type": "string"
+          },
+          "bucketType": {
+            "enum": ["allPublic", "allPrivate"],
+            "type": "string"
+          },
+          "corsRules": {
+            "items": {
+              "properties": {
+                "allowedHeaders": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "allowedOperations": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "allowedOrigins": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "corsRuleName": {
+                  "type": "string"
+                },
+                "exposeHeaders": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "maxAgeSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "allowedHeaders",
+                "allowedOperations",
+                "allowedOrigins",
+                "corsRuleName",
+                "maxAgeSeconds"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "defaultServerSideEncryption": {
+            "properties": {
+              "algorithm": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": ["none", "SSE-B2"],
+                "type": "string"
+              }
+            },
+            "required": ["mode"],
+            "type": "object"
+          },
+          "fileLockEnabled": {
+            "type": "boolean"
+          },
+          "lifecycleRules": {
+            "items": {
+              "properties": {
+                "daysFromHidingToDeleting": {
+                  "type": "number"
+                },
+                "daysFromStartingToCancelingUnfinishedLargeFiles": {
+                  "type": "number"
+                },
+                "daysFromUploadingToHiding": {
+                  "type": "number"
+                },
+                "fileNamePrefix": {
+                  "type": "string"
+                }
+              },
+              "required": ["fileNamePrefix"],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["bucketName", "bucketType"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_create_group_member",
+      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_create_key",
+      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_delete_bucket",
+      "descriptionSha256": "b621f12433fd5b4f98be91b1c27e42a7fdfec409d37215b309b3bff95dadd0b1",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "required": ["bucketId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_delete_key",
+      "descriptionSha256": "99b70ea3809fa6b93d81e376e8339f3d7e5840e014794ca9b5146d5428cb1d21",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "applicationKeyId": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          }
+        },
+        "required": ["applicationKeyId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_egress_leaders",
+      "descriptionSha256": "bd10578dd665435a3af4ddf2a0d8dee3dc32716a1fe0b64678f784bbfa2f2bcd",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "by": {
+            "default": "account",
+            "enum": ["account", "bucket"],
+            "type": "string"
+          },
+          "days": {
+            "maximum": 90,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 15,
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_get_bucket_notification_rules",
+      "descriptionSha256": "66774dafbe9ef8e125d483fb5621a6cd148c13b30c962178120c975f980e60a4",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucketId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_largest_files",
+      "descriptionSha256": "551618b1bfc6a4df209c7992244a028b7cd57b1cdffac80563ce435ffa6d9c95",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "limit": {
+            "default": 10,
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_scan": {
+            "default": 50000,
+            "maximum": 500000,
+            "minimum": 1000,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_list_buckets",
+      "descriptionSha256": "d23dc0ed897958bc0b6649b672e8e1b76e0fe8401db912446d4047d08e4d7499",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          },
+          "bucketName": {
+            "type": "string"
+          },
+          "bucketTypes": {
+            "items": {
+              "enum": ["allPublic", "allPrivate", "snapshot", "all"],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_list_keys",
+      "descriptionSha256": "23711d3bb7929f6d1f0d5c305aa5e63285b3ba7af2066c02de0b5f89aab95709",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "maxKeyCount": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "startApplicationKeyId": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_reserve_trial_create_account",
+      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {},
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_set_bucket_notification_rules",
+      "descriptionSha256": "ef7d2679181192161673324ad85b7a4e52133445b83274fda6c281c9f5711622",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "eventNotificationRules": {
+            "items": {
+              "properties": {
+                "eventTypes": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "isEnabled": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "objectNamePrefix": {
+                  "default": "",
+                  "type": "string"
+                },
+                "targetConfiguration": {
+                  "properties": {
+                    "customHeaders": {
+                      "items": {
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["name", "value"],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "hmacSha256SigningSecret": {
+                      "type": "string"
+                    },
+                    "targetType": {
+                      "const": "webhook",
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["targetType", "url"],
+                  "type": "object"
+                }
+              },
+              "required": ["eventTypes", "isEnabled", "name", "targetConfiguration"],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["bucketId", "eventNotificationRules"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_unfinished_uploads",
+      "descriptionSha256": "d6864c452148d9ad78cd24484ddef634db9267af7b3952b73c20637fae3faee9",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "max_uploads": {
+            "default": 1000,
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "older_than_days": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_update_bucket",
+      "descriptionSha256": "17be672759fc3e137e04efa0eeead42044ded147a24ac11512a176eea8a11afb",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucketId": {
+            "type": "string"
+          },
+          "bucketInfo": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "bucketType": {
+            "enum": ["allPublic", "allPrivate"],
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "corsRules": {
+            "items": {
+              "properties": {
+                "allowedHeaders": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "allowedOperations": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "allowedOrigins": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "corsRuleName": {
+                  "type": "string"
+                },
+                "exposeHeaders": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "maxAgeSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "allowedHeaders",
+                "allowedOperations",
+                "allowedOrigins",
+                "corsRuleName",
+                "maxAgeSeconds"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "defaultRetention": {
+            "properties": {
+              "mode": {
+                "anyOf": [
+                  {
+                    "enum": ["governance", "compliance"],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "period": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "duration": {
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991,
+                        "type": "integer"
+                      },
+                      "unit": {
+                        "enum": ["days", "years"],
+                        "type": "string"
+                      }
+                    },
+                    "required": ["duration", "unit"],
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["mode", "period"],
+            "type": "object"
+          },
+          "defaultServerSideEncryption": {
+            "properties": {
+              "algorithm": {
+                "type": "string"
+              },
+              "mode": {
+                "enum": ["none", "SSE-B2"],
+                "type": "string"
+              }
+            },
+            "required": ["mode"],
+            "type": "object"
+          },
+          "fileLockEnabled": {
+            "type": "boolean"
+          },
+          "ifRevisionIs": {
+            "type": "number"
+          },
+          "lifecycleRules": {
+            "items": {
+              "properties": {
+                "daysFromHidingToDeleting": {
+                  "type": "number"
+                },
+                "daysFromStartingToCancelingUnfinishedLargeFiles": {
+                  "type": "number"
+                },
+                "daysFromUploadingToHiding": {
+                  "type": "number"
+                },
+                "fileNamePrefix": {
+                  "type": "string"
+                }
+              },
+              "required": ["fileNamePrefix"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "replicationConfiguration": {
+            "properties": {
+              "asReplicationDestination": {
+                "properties": {
+                  "sourceToDestinationKeyMapping": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": ["sourceToDestinationKeyMapping"],
+                "type": "object"
+              },
+              "asReplicationSource": {
+                "properties": {
+                  "replicationRules": {
+                    "items": {
+                      "properties": {
+                        "destinationBucketId": {
+                          "type": "string"
+                        },
+                        "fileNamePrefix": {
+                          "type": "string"
+                        },
+                        "includeExistingFiles": {
+                          "type": "boolean"
+                        },
+                        "isEnabled": {
+                          "type": "boolean"
+                        },
+                        "priority": {
+                          "type": "number"
+                        },
+                        "replicationRuleName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "destinationBucketId",
+                        "isEnabled",
+                        "priority",
+                        "replicationRuleName"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "sourceApplicationKeyId": {
+                    "type": "string"
+                  }
+                },
+                "required": ["replicationRules", "sourceApplicationKeyId"],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": ["bucketId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_update_file_legal_hold",
+      "descriptionSha256": "b8f569217a045c66c90afd2214c2a85e97dae00ddcc0162e8324d626eb7d29d8",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "confirm": {
+            "type": "boolean"
+          },
+          "fileId": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "legalHold": {
+            "enum": ["on", "off"],
+            "type": "string"
+          }
+        },
+        "required": ["fileId", "fileName", "legalHold"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_update_file_retention",
+      "descriptionSha256": "5916715ecf84aca535fd8eee88a80a2c0b87944ef9b3674b638062ba6e9a8b64",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bypassGovernance": {
+            "type": "boolean"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "fileId": {
+            "type": "string"
+          },
+          "fileName": {
+            "type": "string"
+          },
+          "fileRetention": {
+            "properties": {
+              "mode": {
+                "anyOf": [
+                  {
+                    "enum": ["governance", "compliance"],
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "retainUntilTimestamp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["mode", "retainUntilTimestamp"],
+            "type": "object"
+          }
+        },
+        "required": ["fileId", "fileName", "fileRetention"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "b2_usage_growth",
+      "descriptionSha256": "7a7dec02f490d7760620fa11f21cbdcd5672e9a2f63e764cc9566c8c4ad217ff",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "days": {
+            "maximum": 3650,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "order": {
+            "default": "most_grown",
+            "enum": ["most_grown", "least_grown", "shrinking"],
+            "type": "string"
+          },
+          "period": {
+            "default": "month",
+            "enum": ["month", "quarter", "year"],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_abort_multipart_upload",
+      "descriptionSha256": "3db71bf358f5a23255cddac35b29a87442e01f2911d913a055a590b09528bf62",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "uploadId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_complete_multipart_upload",
+      "descriptionSha256": "388fedfdb0d32019f07b7a5581fa1fd2f9d96a1a53d04684a85eccdf6ace8e76",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "parts": {
+            "items": {
+              "properties": {
+                "etag": {
+                  "type": "string"
+                },
+                "partNumber": {
+                  "maximum": 9007199254740991,
+                  "minimum": -9007199254740991,
+                  "type": "integer"
+                }
+              },
+              "required": ["etag", "partNumber"],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "parts", "uploadId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_copy_object",
+      "descriptionSha256": "363910cd742071f6ac91e61d3bb13d577141dab1766f35bca382abd3212e4985",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "acl": {
+            "enum": ["private", "public-read"],
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "destinationBucket": {
+            "type": "string"
+          },
+          "destinationKey": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "metadataDirective": {
+            "default": "COPY",
+            "enum": ["COPY", "REPLACE"],
+            "type": "string"
+          },
+          "sourceBucket": {
+            "type": "string"
+          },
+          "sourceKey": {
+            "type": "string"
+          },
+          "sourceVersionId": {
+            "type": "string"
+          }
+        },
+        "required": ["destinationBucket", "destinationKey", "sourceBucket", "sourceKey"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_create_multipart_upload",
+      "descriptionSha256": "6a2c69b510eab88f817fe26f68ea02c62bd1836cfb754dc007e9c6a2248ac735",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "acl": {
+            "enum": ["private", "public-read"],
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "serverSideEncryption": {
+            "enum": ["AES256"],
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_delete_object",
+      "descriptionSha256": "05f96a0295e2b5392a6df2003ea122734d2e8637e33ad0db0329898551d6126d",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_delete_objects",
+      "descriptionSha256": "8ca46ff9710400d96a951ba3a3de99d718501b16450bdfe9f5e9b3fd8562f1a9",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "objects": {
+            "items": {
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "versionId": {
+                  "type": "string"
+                }
+              },
+              "required": ["key"],
+              "type": "object"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "quiet": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        "required": ["bucket", "objects"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_get_bucket_location",
+      "descriptionSha256": "547c5df273d7e92d1cd70bcde04ae90d3706e9317d7cc06fcb58ace6a8f86465",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_get_object",
+      "descriptionSha256": "372860e08b930d6f3a8a153a0a6ea99015de17cbd7067a56cc5ccef70db07856",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "range": {
+            "type": "string"
+          },
+          "saveToPath": {
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_get_presigned_url",
+      "descriptionSha256": "68d1e083d929ab5b54041f468d3849735db21f80337d52c736c1e2c26d6bf862",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "default": 3600,
+            "maximum": 604800,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": ["GetObject", "PutObject"],
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "operation"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_head_bucket",
+      "descriptionSha256": "55437a5342e087b4537f1ed2c9ce4e8274291e15a5218a25f08df8cd1845f84f",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_head_object",
+      "descriptionSha256": "0d8a00e565200577efc9af34aa4d8c799e94ed1d04be9039587b48d3e0b86bb8",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "versionId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_multipart_uploads",
+      "descriptionSha256": "01e22e220014f7d05b0fc629ac1575c116ecc8b1820817b5286ed880f5b4a48d",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "keyMarker": {
+            "type": "string"
+          },
+          "maxUploads": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "uploadIdMarker": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_object_versions",
+      "descriptionSha256": "11639a7bc862a85b6b24432a922b0b734a8f929cc13e9292f15274be9fc30c08",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "keyMarker": {
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "versionIdMarker": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_objects_v2",
+      "descriptionSha256": "fdd0707185a6c8c26d43508c869cc3e23945481a4b0082b9133f3a66e0a75e84",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "continuationToken": {
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "startAfter": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_list_parts",
+      "descriptionSha256": "7d68b9c4612f46290a37569f6575d3d92b55ec60ec4a6a4133b781017bed0c17",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "maxParts": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "partNumberMarker": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "uploadId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_presign_upload_part",
+      "descriptionSha256": "fff9882a0922e19d0c6028c299144926da5b83488ddd7046a34ddca9d0ad9e94",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "default": 3600,
+            "maximum": 604800,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "partNumbers": {
+            "items": {
+              "maximum": 10000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "maxItems": 10000,
+            "minItems": 1,
+            "type": "array"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key", "partNumbers", "uploadId"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_put_bucket_lifecycle",
+      "descriptionSha256": "c85754636636c43c7e9cd46a744a1c35438e8340bca6086fa7123cb7e4f425aa",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "rules": {
+            "items": {
+              "properties": {
+                "abortIncompleteMultipartUpload": {
+                  "properties": {
+                    "daysAfterInitiation": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["daysAfterInitiation"],
+                  "type": "object"
+                },
+                "expiration": {
+                  "properties": {
+                    "days": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    },
+                    "expiredObjectDeleteMarker": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                },
+                "filter": {
+                  "properties": {
+                    "prefix": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "noncurrentVersionExpiration": {
+                  "properties": {
+                    "noncurrentDays": {
+                      "maximum": 9007199254740991,
+                      "minimum": -9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": ["noncurrentDays"],
+                  "type": "object"
+                },
+                "status": {
+                  "enum": ["Enabled", "Disabled"],
+                  "type": "string"
+                }
+              },
+              "required": ["id", "status"],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": ["bucket", "rules"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_put_object",
+      "descriptionSha256": "68be430dee746554e517654a6fb69423c9d0cda8b50f20904c98228c349818f7",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "acl": {
+            "enum": ["private", "public-read"],
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "filePath": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "serverSideEncryption": {
+            "enum": ["AES256"],
+            "type": "string"
+          },
+          "storageClass": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "key"],
+        "type": "object"
+      }
+    },
+    {
+      "name": "s3_upload_part_copy",
+      "descriptionSha256": "86b2bd390e25226f42a275c46f92842ec91bba00e968d89ccd4a20caf8b41f67",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "copySource": {
+            "type": "string"
+          },
+          "copySourceRange": {
+            "type": "string"
+          },
+          "copySourceVersionId": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "partNumber": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "uploadId": {
+            "type": "string"
+          }
+        },
+        "required": ["bucket", "copySource", "key", "partNumber", "uploadId"],
+        "type": "object"
+      }
+    }
+  ],
+  "modern": {
+    "toolsListCacheHint": {
+      "ttlMs": 30000,
+      "cacheScope": "private"
+    },
+    "discover": {
+      "supportedVersions": ["2026-07-28"],
+      "capabilities": {
+        "tools": {
+          "listChanged": true
+        }
+      },
+      "ttlMs": 30000,
+      "cacheScope": "private",
+      "resultType": "complete"
+    }
+  },
+  "hash": "4dc4b97eefdfa18502b3cef89194852ceaa652dbe3e6a80fd453a11104aeb693"
+}
