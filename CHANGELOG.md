@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added opt-in token-efficient TOON tool-result text for structured successes
   via a repo-owned encoder for spec `4.1`, while using compact JSON as the
   unset/default mode (`B2_MCP_OUTPUT_FORMAT=json` for explicit config).
+- Added a checked-in runtime dependency and package-footprint budget with CI
+  enforcement and PR/release summary artifacts.
 
 ### Changed
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
@@ -71,6 +73,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compact JSON, and errors and concise status strings remain plain text.
 - HTTP readiness now rejects unsupported `B2_MCP_OUTPUT_FORMAT` values and TOON
   preflight failures in every credential mode before serving traffic.
+- Centralized the remaining AWS S3 peer imports behind the approved temporary
+  S3-material adapter while the upstream SDK helper gap is open.
 
 ### Security
 - Patched all currently reported npm advisories by updating `brace-expansion`,

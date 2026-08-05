@@ -16,6 +16,9 @@ function readJson(relativePath) {
   return JSON.parse(read(relativePath));
 }
 
+// Intentionally walks repo-relative workflow/doc paths with statSync; the
+// package-budget runtime import inventory uses lstatSync on absolute paths so
+// symlinked src trees cannot pull generated/vendor files into that policy gate.
 function listFiles(dir) {
   const entries = readdirSync(path.join(root, dir)).sort();
   const files = [];

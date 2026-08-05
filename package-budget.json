@@ -1,0 +1,131 @@
+{
+  "issue": {
+    "number": 75,
+    "url": "https://github.com/backblaze-labs/b2-mcp/issues/75",
+    "planningId": "P1-RUNTIME-02"
+  },
+  "reviewedBaseline": {
+    "date": "2026-08-05",
+    "nodeVersions": ["22.3.0", "24", "26"],
+    "primaryB2Transport": "@backblaze-labs/b2-sdk@0.2.0",
+    "directProductionDependencyCount": 7,
+    "totalProductionPackageCount": 47,
+    "transitiveProductionPackageCount": 39,
+    "packedTarballBytes": 181125,
+    "unpackedPackageBytes": 797982,
+    "packedEntryCount": 165,
+    "cleanConsumerInstallFootprintBytes": 27646594
+  },
+  "limits": {
+    "directProductionDependencyCount": 7,
+    "totalProductionPackageCount": 47,
+    "packedTarballBytes": 200000,
+    "unpackedPackageBytes": 850000,
+    "packedEntryCount": 175,
+    "cleanConsumerInstallFootprintBytes": 30000000
+  },
+  "directProductionDependencies": {
+    "@aws-sdk/client-s3": {
+      "purpose": "Temporary S3-material peer used only through src/s3/aws-sdk-adapter.ts for B2 S3 endpoint reachability, lifecycle, multipart, and usage-report object reads.",
+      "policy": "Must be removed when a stable @backblaze-labs/b2-sdk release covers the approved S3 helper gap.",
+      "version": "3.1103.0",
+      "resolved": "https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1103.0.tgz",
+      "integrity": "sha512-FO7SB2vLhZRN3lBHVhMhRm3YKSHK8e917qjB8LMEEhU69cQ0Ahd/OMyezu+KqNANqEtyxfSnFVvYt81x6ZKGZA==",
+      "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
+      "owner": "@goanpeca"
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "purpose": "Temporary UploadPart presigning peer used only through src/s3/aws-sdk-adapter.ts for s3_presign_upload_part.",
+      "policy": "Must be removed when a stable @backblaze-labs/b2-sdk release exposes first-party S3 multipart presign helpers.",
+      "version": "3.1103.0",
+      "resolved": "https://registry.npmjs.org/@aws-sdk/s3-request-presigner/-/s3-request-presigner-3.1103.0.tgz",
+      "integrity": "sha512-937UiasYudfKWsCU/+kAHJ4UMJa90l0UcMDLwPvZ2UBjhJ4Iz5mVxiZNowthsPmJ8wH+tHqTl/O1kOD6dMuIIg==",
+      "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
+      "owner": "@goanpeca"
+    },
+    "@backblaze-labs/b2-sdk": {
+      "purpose": "Primary Backblaze B2 transport and public SDK boundary for native B2, raw, S3 helper, and simulator-backed tests.",
+      "policy": "Must remain a stable npm release pinned exactly in package.json and package-lock.json.",
+      "version": "0.2.0",
+      "resolved": "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz",
+      "integrity": "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ=="
+    },
+    "@modelcontextprotocol/server": {
+      "purpose": "Stable MCP server v2 runtime for stdio and Streamable HTTP handling.",
+      "policy": "Use public v2 server exports only; do not add the monolithic v1 SDK or Node adapter packages.",
+      "version": "2.0.0",
+      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.0.0.tgz",
+      "integrity": "sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw=="
+    },
+    "opossum": {
+      "purpose": "Circuit breaker runtime for bounded provider calls.",
+      "policy": "Exact-pinned because major/runtime support changes can affect the Node engine floor.",
+      "version": "10.0.0",
+      "resolved": "https://registry.npmjs.org/opossum/-/opossum-10.0.0.tgz",
+      "integrity": "sha512-sghtqL8Usj+et06Zui0nyn0R6FFsl7cyuoU+d7MctYU0nbS7Htzjleh+tWohFqk1Rp1srrFwbFa8Vxd0O64w6A=="
+    },
+    "pino": {
+      "purpose": "Structured server logging with existing secret-redaction policy.",
+      "policy": "No wrapper logging package may be added without review.",
+      "version": "10.3.1",
+      "resolved": "https://registry.npmjs.org/pino/-/pino-10.3.1.tgz",
+      "integrity": "sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg=="
+    },
+    "zod": {
+      "purpose": "MCP tool input schemas supplied to the server runtime.",
+      "policy": "Schema package additions require review; do not duplicate validation stacks.",
+      "version": "4.4.3",
+      "resolved": "https://registry.npmjs.org/zod/-/zod-4.4.3.tgz",
+      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="
+    }
+  },
+  "runtimeImportPolicy": {
+    "allowedBackblazeSdkSpecifiers": [
+      "@backblaze-labs/b2-sdk",
+      "@backblaze-labs/b2-sdk/raw",
+      "@backblaze-labs/b2-sdk/s3"
+    ],
+    "allowedAwsRuntimeImports": [
+      {
+        "source": "src/s3/aws-sdk-adapter.ts",
+        "specifier": "@aws-sdk/client-s3"
+      },
+      {
+        "source": "src/s3/aws-sdk-adapter.ts",
+        "specifier": "@aws-sdk/s3-request-presigner"
+      }
+    ],
+    "forbiddenRuntimeDependencies": [
+      "axios",
+      "@aws-sdk/s3-presigned-post",
+      "@modelcontextprotocol/node",
+      "@modelcontextprotocol/sdk"
+    ]
+  },
+  "lockfileProvenancePolicy": {
+    "allowedNonRegistryProductionPackages": []
+  },
+  "temporaryAdapters": [
+    {
+      "name": "s3-material-aws-peer-adapter",
+      "owner": "@goanpeca",
+      "source": "src/s3/aws-sdk-adapter.ts",
+      "dependencies": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
+      "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
+      "tests": [
+        "tests/unit/s3-tools.unit.test.ts",
+        "tests/unit/s3-coverage.unit.test.ts",
+        "tests/unit/report-s3-ssrf.unit.test.ts",
+        "tests/contract/sdk-adoption.contract.test.ts",
+        "tests/package/packed-install.package.test.ts"
+      ],
+      "removalCondition": "Remove this adapter and both AWS direct dependencies after a stable @backblaze-labs/b2-sdk release exposes first-party helpers for the retained S3-material operations."
+    }
+  ],
+  "approvedDuplicatePackageVersions": {
+    "real-require": {
+      "versions": ["0.2.0", "1.0.0"],
+      "reason": "Pinned production transitive packages currently require both pino's helper and thread-stream's nested helper."
+    }
+  }
+}

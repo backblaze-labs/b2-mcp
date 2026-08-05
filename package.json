@@ -49,13 +49,14 @@
     "smoke": "node scripts/smoke-test.mjs",
     "smoke:package": "npm run build && node scripts/packed-consumer-smoke.mjs",
     "check:runtime-policy": "node scripts/check-runtime-policy.mjs",
+    "check:package-budget": "node scripts/check-package-budget.mjs",
     "audit:supply-chain": "node scripts/audit-supply-chain.mjs",
     "probe:500": "npm run build && node scripts/probe-b2-500s.mjs",
     "lint": "eslint src tests",
     "lint:fix": "eslint src tests --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepublishOnly": "npm run typecheck && npm run build"
+    "prepublishOnly": "npm run typecheck && npm run build && npm run check:package-budget"
   },
   "keywords": [
     "mcp",
@@ -68,12 +69,12 @@
   "author": "Backblaze",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1103.0",
-    "@aws-sdk/s3-request-presigner": "^3.1103.0",
+    "@aws-sdk/client-s3": "3.1103.0",
+    "@aws-sdk/s3-request-presigner": "3.1103.0",
     "@backblaze-labs/b2-sdk": "0.2.0",
     "@modelcontextprotocol/server": "2.0.0",
     "opossum": "10.0.0",
-    "pino": "^10.3.1",
+    "pino": "10.3.1",
     "zod": "4.4.3"
   },
   "devDependencies": {

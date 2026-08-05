@@ -25,11 +25,13 @@ describe("CI workflow policy", () => {
     const markGreen = workflowJob("mark-green");
     const productionJob = workflowJob("deterministic-linux-production");
     const currentJob = workflowJob("deterministic-linux-current");
+    const packageBudgetJob = workflowJob("package-budget");
     const packageJob = workflowJob("package");
 
     for (const required of [
       "runtime-policy",
       "runtime-engine-floor",
+      "package-budget",
       "deterministic-linux-production",
       "deterministic-linux-current",
       "cross-platform-minimum",
@@ -37,7 +39,9 @@ describe("CI workflow policy", () => {
     ]) {
       expect(markGreen).toContain(required);
     }
-    expect(markGreen).not.toContain("package");
+    expect(markGreen).not.toMatch(/^\s*package,?\s*$/m);
+    expect(packageBudgetJob).toContain("npm run check:package-budget");
+    expect(packageBudgetJob).toContain("Upload package budget reports");
     expect(productionJob).toContain("npm run build");
     expect(productionJob).toContain("npm run test:coverage");
     expect(productionJob).toContain("npm run test:slow");

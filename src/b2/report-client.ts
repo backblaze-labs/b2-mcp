@@ -1,4 +1,4 @@
-import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import type { B2S3PeerClient } from "../s3/aws-sdk-adapter.js";
 import type { ReadableStreamDefaultReader } from "node:stream/web";
 import { B2AuthManager } from "../auth.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
@@ -264,7 +264,7 @@ async function withReportDeadline<T>(
 }
 
 export class B2ReportClient implements ReportObjectClient {
-  private s3Client: S3Client | null = null;
+  private s3Client: B2S3PeerClient | null = null;
 
   constructor(private readonly auth: B2AuthManager) {}
 
@@ -275,23 +275,13 @@ export class B2ReportClient implements ReportObjectClient {
     const s3 = await this.getS3Client();
     return withReportCircuit(() =>
       withReportDeadline(options.timeoutMs, async () => {
-        const page = await s3.send(
-          new ListObjectsV2Command({
-            Bucket: bucketName,
-            Prefix: options.prefix,
-            StartAfter: options.startAfter,
-            ContinuationToken: options.continuationToken,
-            MaxKeys: options.maxKeys,
-          }),
-          { abortSignal: currentMcpRequestSignal() },
-        );
-        return {
-          keys: (page.Contents ?? []).flatMap((object) =>
-            typeof object.Key === "string" ? [object.Key] : [],
-          ),
-          isTruncated: page.IsTruncated === true,
-          nextContinuationToken: page.NextContinuationToken,
-        };
+        return s3.listReportObjectKeys({
+          bucketName,
+          prefix: options.prefix,
+          startAfter: options.startAfter,
+          continuationToken: options.continuationToken,
+          maxKeys: options.maxKeys,
+        });
       }),
     );
   }
@@ -304,10 +294,8 @@ export class B2ReportClient implements ReportObjectClient {
     const s3 = await this.getS3Client();
     return withReportCircuit(() =>
       withReportDeadline(options.timeoutMs, async () => {
-        const obj = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: key }), {
-          abortSignal: currentMcpRequestSignal(),
-        });
-        return readReportObjectBodyText(obj.Body, options.maxBytes, currentMcpRequestSignal());
+        const obj = await s3.downloadReportObject({ bucketName, key });
+        return readReportObjectBodyText(obj.body, options.maxBytes, currentMcpRequestSignal());
       }),
     );
   }
@@ -317,7 +305,7 @@ export class B2ReportClient implements ReportObjectClient {
     this.s3Client = null;
   }
 
-  private async getS3Client(): Promise<S3Client> {
+  private async getS3Client(): Promise<B2S3PeerClient> {
     if (this.s3Client) return this.s3Client;
     const config = this.auth.getConfig();
     const auth = await this.auth.getAuth();

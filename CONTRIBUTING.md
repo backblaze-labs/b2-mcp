@@ -76,6 +76,33 @@ release. `audit-policy.json` holds narrow, expiring exceptions for known
 upstream advisories; the current policy has no exceptions. Do not add untracked
 high or critical production or development-toolchain findings.
 
+Runtime dependency ownership and package footprint are gated by
+`package-budget.json`:
+
+```bash
+npm run build
+npm run check:package-budget
+```
+
+The budget records every direct production dependency from `dependencies` or
+`optionalDependencies` and the approved limits for total production packages,
+packed tarball size, unpacked package size, clean consumer install footprint,
+and duplicate runtime package versions. CI and `prepublishOnly` reject an
+unapproved direct dependency, Axios runtime import, SDK private/unpublished
+import, Git/path SDK dependency, unpinned or provenance-mismatched direct
+dependency, production lockfile entry without npm registry provenance and
+integrity, or AWS import outside the temporary `src/s3/aws-sdk-adapter.ts`
+boundary. The clean consumer install is measured from the committed production
+lock graph, not from lockfile-less semver resolution.
+
+To intentionally raise the budget, update `package-budget.json` in the same PR,
+include the reason, policy, reviewed version, resolved URL, integrity, and owner
+for any new direct dependency, link an upstream SDK gap for temporary adapters,
+run the package-budget check, and call out the metric delta in the PR. Do not
+add compatibility packages for Node.js 18/20, browsers, Bun, Deno, HTTP, stream,
+abort, retry, or schema wrapping when Node 22+ built-ins, the MCP server
+package, or public B2 SDK exports cover the need.
+
 `@types/node` tracks the Node 22.3.0 runtime floor so TypeScript does not allow
 newer Node standard-library APIs that would fail for minimum-supported
 consumers. Node 24 and 26 remain covered by execution tests in CI.

@@ -25,6 +25,33 @@ The approved implementation order is:
 No runtime code may import SDK private modules, package-internal files, or
 unpublished branches.
 
+## Runtime Dependency Budget
+
+The server keeps normal npm package semantics and is not bundled to hide package
+count or dependency ownership. `package-budget.json` is the reviewed Phase 1
+runtime budget and records each direct production dependency from
+`dependencies` or `optionalDependencies`, its purpose, the reviewed version, npm
+registry URL, integrity, current package-footprint baseline, and the ceiling
+that CI enforces. Clean consumer install measurements are generated from the
+committed production lock graph so an unchanged SHA does not drift with new
+registry releases.
+
+The package-budget gate rejects unapproved direct production dependencies, Axios
+runtime imports, SDK private or unpublished imports, Git/path SDK dependencies,
+unpinned or provenance-mismatched direct dependencies, production lockfile
+entries without npm registry provenance and integrity, and AWS runtime imports
+outside `src/s3/aws-sdk-adapter.ts`. The AWS adapter is a
+temporary S3-material compatibility boundary tracked by
+[backblaze-labs/b2-sdk-typescript#154](https://github.com/backblaze-labs/b2-sdk-typescript/issues/154).
+It may remain only for report-object reads, S3 endpoint probes, lifecycle
+operations with `AbortIncompleteMultipartUpload`, multipart operations, and
+UploadPart presigning until a stable SDK release covers those helpers.
+
+New runtime dependencies must not exist solely for Node.js 18/20, browser, Bun,
+Deno, stream, abort, retry, or HTTP-client compatibility. Prefer Node.js 22+
+built-ins, the official MCP server package, and public
+`@backblaze-labs/b2-sdk` exports.
+
 ## MCP Runtime Boundary
 
 The MCP runtime targets the `2026-07-28` serving model. The implementation uses

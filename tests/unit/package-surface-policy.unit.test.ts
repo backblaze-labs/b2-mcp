@@ -41,8 +41,10 @@ describe("package surface policy", () => {
 
     expect(pkg.files).not.toContain("runtime-policy.json");
     expect(pkg.files).not.toContain("audit-policy.json");
+    expect(pkg.files).not.toContain("package-budget.json");
     expect(files).not.toContain("runtime-policy.json");
     expect(files).not.toContain("audit-policy.json");
+    expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
   });
 
@@ -97,6 +99,10 @@ describe("package surface policy", () => {
         "  fs.writeFileSync(",
         '    path.join(packageRoot, "dist", "index.js"),',
         '    "module.exports = { startStdio() {} };\\nif (require.main === module) {\\n  if (process.env.B2_REGISTER_ALL_TOOLS !== \\"true\\") throw new Error(\\"missing B2_REGISTER_ALL_TOOLS\\");\\n  if (process.env.B2_MASTER_KEY) throw new Error(\\"leaked B2 secret\\");\\n  process.exit(1);\\n}\\n",',
+        "  );",
+        "  fs.writeFileSync(",
+        '    path.join(packageRoot, "dist", "http-server.js"),',
+        '    "module.exports = { buildHttpServer() {} };\\n",',
         "  );",
         "  process.exit(0);",
         "}",
