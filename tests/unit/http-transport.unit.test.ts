@@ -8,7 +8,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
 import type { AuthInfo } from "@modelcontextprotocol/server";
-import type { Mock } from "vitest";
+import type { MockInstance } from "vitest";
 import {
   buildHttpServer,
   configFromHeaders,
@@ -424,7 +424,7 @@ describe("HTTP transport handler", () => {
   });
 
   it("disposes per-request server instances after stateless requests", async () => {
-    const closeSpies: Mock[] = [];
+    const closeSpies: MockInstance[] = [];
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       fetchCapabilities: vi.fn(async () => null),
