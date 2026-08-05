@@ -168,7 +168,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
           try {
             await pipeline(nodeReadableFromWeb(result.body), writeStream);
           } catch (e) {
-            await fs.promises.unlink(safePath).catch(() => {});
+            await fs.promises.unlink(safePath).catch(() => undefined);
             throw e;
           }
           return toolSuccess(`Object saved to ${safePath} (${result.contentLength} bytes)`);

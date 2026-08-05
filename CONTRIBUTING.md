@@ -18,8 +18,8 @@ npm ci
 npm run build        # clean + tsc → dist/
 npm test             # typecheck, then fast unit suite
 npm run verify       # full no-credential local gate
-npm run lint         # eslint src tests
-npm run format:check # prettier
+npm run lint         # biome lint src tests
+npm run format:check # biome format check
 ```
 
 For the version/build-pinned conda bootstrap:

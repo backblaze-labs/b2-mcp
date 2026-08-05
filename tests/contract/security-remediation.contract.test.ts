@@ -105,7 +105,7 @@ describe("security dependency policy", () => {
     );
   });
 
-  it("keeps TypeScript inside the eslint toolchain peer window", () => {
+  it("keeps TypeScript on the reviewed 6.0 patch line", () => {
     const range = pkg.devDependencies.typescript;
     const [major, minor] = versionTuple(rangeFloor(range));
     expect(versionAtLeast(rangeFloor(range), "6.0.3")).toBe(true);
@@ -115,8 +115,5 @@ describe("security dependency policy", () => {
     const lockedVersion = resolvedVersion("node_modules/typescript");
     expect(versionAtLeast(lockedVersion, "6.0.3")).toBe(true);
     expect(versionTuple(lockedVersion).slice(0, 2)).toEqual([6, 0]);
-    expect(
-      lock.packages["node_modules/@typescript-eslint/parser"]?.peerDependencies?.typescript,
-    ).toContain("<6.1.0");
   });
 });

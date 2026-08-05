@@ -35,16 +35,15 @@ matrix runs the bundled coverage and slow deterministic lifecycle layers, while
 `test:package` runs in a separate non-blocking package job.
 CI verifies the production dependency graph with `npm ci --omit=dev
 --engine-strict` on the Node.js 22.3.0 package floor. The credential-free full
-toolchain gate runs on Linux for Node.js 22.13.0, 24, and 26 because the
-TypeScript 6-compatible lint toolchain requires Node.js 22.13.0 or newer. It
-also runs `npm run check:runtime-policy`, which fails if workflow or metadata
-runtime policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI
-port parsing, local-path policy, and request shutdown/signal suite runs on
-Linux, Windows, and macOS at the patched Node 22 LTS pin.
+toolchain gate runs on Linux for Node.js 22.13.0, 24, and 26. It also runs
+`npm run check:runtime-policy`, which fails if workflow or metadata runtime
+policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI port
+parsing, local-path policy, and request shutdown/signal suite runs on Linux,
+Windows, and macOS at the patched Node 22 LTS pin.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
-`typescript-eslint` declares a `<6.1.0` peer range. Widen the TypeScript range
-only with a matching lint toolchain upgrade.
+the toolchain validates support on Node.js 22, 24, and 26. Widen the
+TypeScript range only with a matching typecheck and lint toolchain upgrade.
 
 ## File Naming Convention
 

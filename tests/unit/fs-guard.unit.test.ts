@@ -76,9 +76,9 @@ describe("resolveLocalPath — sandbox root", () => {
 
   it("rejects a traversal escape via ..", () => {
     const cfg = { ...baseConfig, fileRoot: root };
-    const escape = path.join(root, "..", path.basename(outside), "secret.txt");
+    const escapedPath = path.join(root, "..", path.basename(outside), "secret.txt");
     fs.writeFileSync(path.join(outside, "secret.txt"), "secret");
-    expect(() => resolveLocalPath(cfg, escape, "read")).toThrow(FileAccessError);
+    expect(() => resolveLocalPath(cfg, escapedPath, "read")).toThrow(FileAccessError);
   });
 
   it("allows a write to a new nested path inside the root", () => {
