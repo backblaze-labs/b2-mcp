@@ -319,7 +319,8 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
   server.registerTool(
     "s3_copy_object",
     {
-      description: "Copy an object within B2 or between B2 buckets via the S3-compatible API.",
+      description:
+        "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
       inputSchema: {
         sourceBucket: z.string().describe("The source bucket name."),
         sourceKey: z.string().describe("The source object key."),
@@ -339,7 +340,12 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
           .record(z.string(), z.string())
           .optional()
           .describe("New metadata (only used with REPLACE)."),
-        acl: z.enum(["private", "public-read"]).optional(),
+        acl: z
+          .enum(["private", "public-read"])
+          .optional()
+          .describe(
+            "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+          ),
       },
     },
     async (args) => {

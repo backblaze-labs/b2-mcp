@@ -177,6 +177,9 @@ Each retained row has exactly one reviewed implementation class:
 | `b2_largest_files`                 | `compose`      | `B2Client.raw.listFileNames`                                                                                                                            | Replace S3 live listing with the raw native SDK method because SDK 0.2.0 does not expose a bucket paginator for this reviewed adapter path. Cap: `listFiles`. Pagination: bounded by `max_scan` and time budget, with truncation note. Abort: raw call signal required. Retry/idempotency: read. Secret: object names/size metadata are scoped data. Error: bucket resolution failures remain structured.                                                                                                                                                                               |
 | `b2_unfinished_uploads`            | `compose`      | `B2Client.raw.listUnfinishedLargeFiles` and `B2Client.raw.listParts`                                                                                    | Replace S3 multipart listing with raw native SDK methods because SDK 0.2.0 does not expose the needed paginator facade for this reviewed adapter path; S3 lifecycle recommendation remains S3-material. Cap: `listFiles`. Pagination: bounded by `max_uploads`, part-page limits, and time budget. Abort: raw call signal required. Retry/idempotency: read. Secret: upload IDs and object names are scoped metadata. Error: bucket resolution failures remain structured.                                                                                                              |
 
+`s3_copy_object.acl` remains accepted as a no-op S3 compatibility hint; B2
+access follows the destination bucket policy.
+
 ## Release Gate For #49
 
 [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) must not freeze tool
