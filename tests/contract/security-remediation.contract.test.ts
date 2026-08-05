@@ -95,7 +95,8 @@ describe("security dependency policy", () => {
       "3.1103.0",
       3,
     );
-    expectManifestAndLockAtLeast(pkg.dependencies.axios, "node_modules/axios", "1.19.0", 1);
+    expect(pkg.dependencies).not.toHaveProperty("axios");
+    expect(lock.packages["node_modules/axios"]).toBeUndefined();
     expectManifestAndLockAtLeast(
       pkg.devDependencies["@babel/plugin-transform-modules-commonjs"],
       "node_modules/@babel/plugin-transform-modules-commonjs",
