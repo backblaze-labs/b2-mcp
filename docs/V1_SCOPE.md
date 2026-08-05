@@ -29,7 +29,8 @@ In scope for Phase 1:
 - Deterministic tool-profile contracts for the full, default, and read-only
   profiles.
 - A Node.js `>=22.3.0` package engine floor matching the official B2 SDK, with
-  Node.js 22.3.0 minimum-floor evidence plus Node.js 24 and 26 coverage.
+  production dependency-install evidence at Node.js 22.3.0 and full toolchain
+  coverage on Node.js 22.13.0, 24, and 26.
 - Release, package, CI, protocol, security, and reference-deployment work needed
   to ship `v0.1.0`.
 
@@ -78,11 +79,11 @@ is released.
 
 Node.js `>=22.3.0` is the package engine floor for Phase 1.
 
-Implementation, tests, package verification, reference deployment instructions,
-and CI must continuously verify Node.js 22.3.0, 24, and 26. Operators should use
-a patched Node 22 LTS release (`22.23.1` or newer at the time of writing),
-Node.js 24, or Node.js 26. Other Node.js lines are not part of the `v0.1.0`
-support contract.
+CI must continuously verify production dependency installation on Node.js
+22.3.0 and the full implementation, tests, and package toolchain on Node.js
+22.13.0, 24, and 26. Operators should use a patched Node 22 LTS release
+(`22.23.1` or newer at the time of writing), Node.js 24, or Node.js 26. Other
+Node.js lines are not part of the `v0.1.0` support contract.
 
 ## API Architecture
 

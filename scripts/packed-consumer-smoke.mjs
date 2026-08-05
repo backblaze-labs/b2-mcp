@@ -85,6 +85,12 @@ function writeConsumerLock(tarball) {
   };
   delete packageEntry.devDependencies;
 
+  sourceLock.packages = Object.fromEntries(
+    Object.entries(sourceLock.packages).filter(
+      ([packagePath, entry]) => packagePath === "" || entry.dev !== true,
+    ),
+  );
+
   sourceLock.name = "b2-mcp-packed-consumer";
   sourceLock.version = "0.0.0";
   sourceLock.packages[""] = {

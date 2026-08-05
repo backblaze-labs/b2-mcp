@@ -33,11 +33,14 @@ individual deterministic layers are:
 Local scripts can call each deterministic layer independently. The Linux Node
 matrix runs the bundled coverage and slow deterministic lifecycle layers, while
 `test:package` runs in a separate non-blocking package job.
-CI runs the credential-free deterministic gate on Linux for Node.js 22.3.0, 24,
-and 26. It also runs `npm run check:runtime-policy`, which fails if workflow or
-metadata runtime policy drifts. Cross-platform coverage stays lean: the fast
-stdio, CLI port parsing, local-path policy, and request shutdown/signal suite
-runs on Linux, Windows, and macOS at the patched Node 22 LTS pin.
+CI verifies the production dependency graph with `npm ci --omit=dev
+--engine-strict` on the Node.js 22.3.0 package floor. The credential-free full
+toolchain gate runs on Linux for Node.js 22.13.0, 24, and 26 because the
+TypeScript 6-compatible lint toolchain requires Node.js 22.13.0 or newer. It
+also runs `npm run check:runtime-policy`, which fails if workflow or metadata
+runtime policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI
+port parsing, local-path policy, and request shutdown/signal suite runs on
+Linux, Windows, and macOS at the patched Node 22 LTS pin.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
 `typescript-eslint` declares a `<6.1.0` peer range. Widen the TypeScript range
@@ -78,12 +81,11 @@ If a selected layer has zero executed tests because every case was skipped, the
 runner exits nonzero and prints the summary path. A skipped-only run is visible
 evidence, not an authoritative pass.
 
-The `ci-green` production deploy marker depends on the Node 22 deterministic
-gate only. Node.js 24 and 26 remain required PR checks, but a regression isolated
-to those non-production current lines does not freeze the production deploy ref.
-The production host is pinned to the patched Node 22 LTS line from `.nvmrc`, so
-the deploy gate covers the production runtime major and the Node 22.3.0
-minimum-consumer floor.
+The `ci-green` production deploy marker depends on both the Node.js 22.3.0
+production-dependency install and the Node 22.13.0 deterministic gate. Node.js
+24 and 26 remain required PR checks, but a regression isolated to those
+non-production current lines does not freeze the production deploy ref. The
+production host is pinned to the patched Node 22 LTS line from `.nvmrc`.
 
 ## MCP Protocol Matrix
 

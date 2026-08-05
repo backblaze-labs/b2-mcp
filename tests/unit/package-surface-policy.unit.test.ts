@@ -19,6 +19,7 @@ describe("package surface policy", () => {
     expect(pkg.files).not.toContain("audit-policy.json");
     expect(smoke).toContain('["runtime-policy.json", "audit-policy.json"]');
     expect(smoke).toContain("should not be published");
+    expect(smoke).toContain('packagePath === "" || entry.dev !== true');
   });
 
   it("keeps the cold packed-consumer install retry hardened", () => {

@@ -28,9 +28,10 @@ Before publishing `v0.1.0`:
 1. Confirm `docs/V1_SCOPE.md` still matches the implemented package, runtime,
    tool profiles, and MCP transport contract.
 2. Confirm operators use a patched Node 22 LTS release (`.nvmrc`) or Node.js 24
-   or 26. Keep CI minimum-floor evidence on Node.js 22.3.0. Build release
-   artifacts on the patched Node 22 LTS pin, then run the deterministic local
-   gate: `npm ci`, `npm run build`, `npm run typecheck`, `npm run lint`,
+   or 26. Keep CI production-dependency installation evidence on Node.js 22.3.0
+   and full toolchain evidence on Node.js 22.13.0. Build release artifacts on
+   the patched Node 22 LTS pin, then run the deterministic local gate: `npm ci`,
+   `npm run build`, `npm run typecheck`, `npm run lint`,
    `npm run format:check`, `npm test`, `npm run test:integration`,
    `npm run test:contract`, `npm run smoke:package`, and
    `npm run audit:supply-chain`.

@@ -159,7 +159,7 @@ describe("supply-chain audit policy", () => {
     expect(productionJob).not.toContain("npm run audit:supply-chain");
     expect(currentJob).not.toContain("npm run audit:supply-chain");
     expect(markGreenJob).toContain(
-      "needs: [runtime-policy, deterministic-linux-production, supply-chain-audit]",
+      "runtime-engine-floor, deterministic-linux-production, supply-chain-audit",
     );
     expect(markGreenJob).not.toContain("deterministic-linux-current");
     expect(markGreenJob).not.toContain("cross-platform-minimum");

@@ -10,8 +10,8 @@ By participating you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.m
 The package engine floor is `>=22.3.0` because it matches the official B2 SDK.
 For local development and deployed 22.x hosts, use the patched Node 22 LTS
 release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later patched
-22.x release. CI keeps a Linux `22.3.0` leg only as minimum-floor evidence and
-also covers Node.js 24 and 26.
+22.x release. CI verifies the production dependency graph at Node 22.3.0 and
+runs the full toolchain on Node.js 22.13.0, 24, and 26.
 
 ```bash
 npm ci
@@ -45,9 +45,10 @@ Test files must follow the layer suffix convention documented in
 
 - Branch off `main`; keep changes focused.
 - `npm run verify` must pass before opening a PR. CI runs the bundled
-  deterministic coverage and slow layers on Node.js 22.3.0, 24, and 26, plus a
-  patched Node 22 LTS cross-platform suite. A separate package-install job stays
-  off the deploy-gating path.
+  deterministic coverage and slow layers on Node.js 22.13.0, 24, and 26, checks
+  production-only dependency installation at the Node.js 22.3.0 engine floor,
+  and runs a patched Node 22 LTS cross-platform suite. A separate package-install
+  job stays off the deploy-gating path.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
 - Update `CHANGELOG.md` under the appropriate heading.
@@ -72,9 +73,8 @@ tools must respect the existing guardrails:
 Production dependencies ship in `dist/`, and development dependencies run in
 CI, so review the full lockfile with `npm run audit:supply-chain` before
 release. `audit-policy.json` holds narrow, expiring exceptions for known
-upstream advisories, including the current moderate `@hono/node-server` finding
-from stable MCP SDK v2. Do not add untracked high or critical production or
-development-toolchain findings.
+upstream advisories; the current policy has no exceptions. Do not add untracked
+high or critical production or development-toolchain findings.
 
 `@types/node` tracks the Node 22.3.0 runtime floor so TypeScript does not allow
 newer Node standard-library APIs that would fail for minimum-supported

@@ -156,6 +156,11 @@ requireEqual(
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
   policy.engineFloor,
 );
+requireEqual(
+  "runtime-policy runtime install floor",
+  `>=${policy.runtimeInstallNode}`,
+  policy.engineFloor,
+);
 
 const nvmrc = read(".nvmrc").trim();
 requireExactNode22Pin(".nvmrc", nvmrc, policy);
@@ -182,6 +187,23 @@ if (
 
 const deterministicCurrentMatrix = policy.deterministicLinuxMatrix.filter(
   (version) => version !== policy.minimumEvidenceNode,
+);
+requireWorkflowNodeVersionInJob(
+  ".github/workflows/test.yml",
+  "runtime-engine-floor",
+  policy.runtimeInstallNode,
+  "runtime dependency floor",
+);
+requireWorkflowNodeVersionInJob(
+  ".github/workflows/test.yml",
+  "runtime-engine-floor",
+  policy.minimumEvidenceNode,
+  "runtime package build toolchain",
+);
+requireContains(
+  ".github/workflows/test.yml",
+  "node scripts/packed-consumer-smoke.mjs",
+  "packed runtime-floor consumer smoke",
 );
 requireWorkflowMatrixInJob(
   ".github/workflows/test.yml",

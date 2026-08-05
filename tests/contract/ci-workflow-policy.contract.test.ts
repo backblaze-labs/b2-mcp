@@ -24,7 +24,7 @@ describe("CI workflow policy", () => {
     const packageJob = workflowJob(ci, "package");
 
     expect(markGreen).toContain(
-      "needs: [runtime-policy, deterministic-linux-production, supply-chain-audit]",
+      "runtime-engine-floor, deterministic-linux-production, supply-chain-audit",
     );
     expect(markGreen).not.toContain("package");
     expect(productionJob).toContain("npm run build");
