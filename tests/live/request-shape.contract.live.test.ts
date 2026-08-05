@@ -15,7 +15,7 @@
  *   npm run test:contract:live
  *
  * The npm script fails fast when B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
- * are absent. Direct Jest selection skips this file's cases when credentials
+ * are absent. Direct Vitest selection skips this file's cases when credentials
  * are absent so a local editor cannot accidentally call B2.
  */
 

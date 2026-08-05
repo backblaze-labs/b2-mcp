@@ -46,23 +46,23 @@ describe("supply-chain audit policy", () => {
       }
     >;
   };
-  const braceExpansion = lock.packages["node_modules/brace-expansion"];
-  const minimatch = lock.packages["node_modules/minimatch"];
+  const auditFixturePackage = lock.packages["node_modules/acorn"];
+  const auditFixtureVia = lock.packages["node_modules/acorn-walk"];
   const exceptionPolicy = {
     allowedAdvisories: [
       {
-        name: "brace-expansion",
+        name: "acorn",
         source: 999000,
         maxSeverity: "moderate",
         isDirect: false,
-        nodes: ["node_modules/brace-expansion"],
-        effects: ["minimatch"],
-        package: { version: braceExpansion.version, integrity: braceExpansion.integrity },
+        nodes: ["node_modules/acorn"],
+        effects: ["acorn-walk"],
+        package: { version: auditFixturePackage.version, integrity: auditFixturePackage.integrity },
         via: {
-          path: "node_modules/minimatch",
-          name: "minimatch",
-          version: minimatch.version,
-          dependencyRange: minimatch.dependencies?.["brace-expansion"],
+          path: "node_modules/acorn-walk",
+          name: "acorn-walk",
+          version: auditFixtureVia.version,
+          dependencyRange: auditFixtureVia.dependencies?.acorn,
         },
         expires: "2026-10-01",
         reason: "Test-only exception fixture for policy behavior.",
@@ -82,35 +82,35 @@ describe("supply-chain audit policy", () => {
     return {
       auditReportVersion: 2,
       vulnerabilities: {
-        "brace-expansion": {
-          name: "brace-expansion",
+        acorn: {
+          name: "acorn",
           severity: "moderate",
           isDirect: false,
           via: [
             {
               source: 999000,
-              name: "brace-expansion",
-              dependency: "brace-expansion",
+              name: "acorn",
+              dependency: "acorn",
               title: "Test-only transitive advisory",
               url: "https://github.com/advisories/test-only",
               severity: "moderate",
-              range: "<1.1.19",
+              range: "<8.16.1",
             },
           ],
-          effects: ["minimatch"],
-          range: "<1.1.19",
-          nodes: ["node_modules/brace-expansion"],
+          effects: ["acorn-walk"],
+          range: "<8.16.1",
+          nodes: ["node_modules/acorn"],
           fixAvailable: false,
           ...overrides,
         },
-        minimatch: {
-          name: "minimatch",
+        "acorn-walk": {
+          name: "acorn-walk",
           severity: "moderate",
           isDirect: false,
-          via: ["brace-expansion"],
+          via: ["acorn"],
           effects: [],
           range: "*",
-          nodes: ["node_modules/minimatch"],
+          nodes: ["node_modules/acorn-walk"],
           fixAvailable: false,
         },
       },
@@ -518,7 +518,7 @@ describe("supply-chain audit policy", () => {
     const result = runAudit(scopedAuditReport(), { B2_MCP_AUDIT_TODAY: "2026-10-02" });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("::error::audit-policy: brace-expansion:999000");
+    expect(result.stderr).toContain("::error::audit-policy: acorn:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
   });
 
@@ -530,7 +530,7 @@ describe("supply-chain audit policy", () => {
     const result = runAudit(scopedAuditReport(), {}, policy);
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("::error::audit-policy: brace-expansion:999000");
+    expect(result.stderr).toContain("::error::audit-policy: acorn:999000");
     expect(result.stderr).toContain("expires must be a real YYYY-MM-DD calendar date");
     expect(result.stderr).toContain(expectedValue);
   });
@@ -542,7 +542,7 @@ describe("supply-chain audit policy", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("::warning::audit-policy: brace-expansion:999000");
+    expect(result.stderr).toContain("::warning::audit-policy: acorn:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
   });
 
@@ -563,7 +563,7 @@ describe("supply-chain audit policy", () => {
   it("allows only a tightly scoped test advisory", () => {
     const result = runAudit(scopedAuditReport());
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("brace-expansion:999000");
+    expect(result.stderr).toContain("acorn:999000");
   });
 
   it.each([
@@ -576,8 +576,8 @@ describe("supply-chain audit policy", () => {
         via: [
           {
             source: 999000,
-            name: "brace-expansion",
-            dependency: "brace-expansion",
+            name: "acorn",
+            dependency: "acorn",
             title: "Test-only transitive advisory",
             url: "https://github.com/advisories/test-only",
             severity: "high",
@@ -589,6 +589,6 @@ describe("supply-chain audit policy", () => {
   ])("fails the audit for %s", (_name, overrides) => {
     const result = runAudit(scopedAuditReport(overrides));
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("brace-expansion:999000");
+    expect(result.stderr).toContain("acorn:999000");
   });
 });

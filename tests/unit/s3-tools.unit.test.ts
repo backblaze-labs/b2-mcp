@@ -20,6 +20,7 @@ import { B2Client } from "../../src/b2/client";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { installSdkTransport } from "../support/sdk-test-helpers";
+import type { MockInstance } from "vitest";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ let server: McpServer;
 let sim: B2Simulator;
 let seed: SdkB2Client;
 // Use a loose type to avoid TypeScript overload resolution issues with S3Client.send
-let sendSpy: jest.SpyInstance;
+let sendSpy: MockInstance;
 
 async function seedClient(): Promise<SdkB2Client> {
   const client = new SdkB2Client({
@@ -86,12 +87,12 @@ beforeEach(async () => {
   installSdkTransport(sim.transport());
   seed = await seedClient();
   // S3Client.prototype.send is a generic overloaded method; cast to bypass TS strictness
-  sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
+  sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   server = createServer(testConfig);
 });
 
 afterEach(() => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   circuitBreaker.close();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
@@ -167,7 +168,7 @@ describe("s3_list_objects_v2", () => {
       fileName: "root.txt",
       source: new BufferSource(new TextEncoder().encode("root")),
     });
-    jest.spyOn(Bucket.prototype, "listFileNames").mockResolvedValue({
+    vi.spyOn(Bucket.prototype, "listFileNames").mockResolvedValue({
       files: [{ ...root, action: FileAction.Folder, fileName: "folder/" }, root],
       nextFileName: null,
     });
@@ -347,7 +348,7 @@ describe("s3_copy_object", () => {
       source: new BufferSource(new TextEncoder().encode("source")),
     });
     const marker = await sourceBucket.hideFile("source.txt");
-    jest.spyOn(Bucket.prototype, "getFileInfoByName").mockResolvedValueOnce(marker);
+    vi.spyOn(Bucket.prototype, "getFileInfoByName").mockResolvedValueOnce(marker);
 
     const result = await callTool(server, "s3_copy_object", {
       sourceBucket: "copy-source",
@@ -700,8 +701,8 @@ describe("inline object cap (control-plane-first data path)", () => {
   });
 
   it("s3_get_object rejects invalid reported contentLength and cancels the body", async () => {
-    const cancel = jest.fn().mockResolvedValue(undefined);
-    jest.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
       key: "k",
       contentType: "application/octet-stream",
       contentLength: Number.NaN,
@@ -719,16 +720,16 @@ describe("inline object cap (control-plane-first data path)", () => {
   });
 
   it("s3_get_object enforces the inline cap while streaming a lying body", async () => {
-    const cancel = jest.fn().mockResolvedValue(undefined);
+    const cancel = vi.fn().mockResolvedValue(undefined);
     const reader = {
-      read: jest
+      read: vitest
         .fn()
         .mockResolvedValueOnce({ done: false, value: new Uint8Array(1024 * 1024 + 1) })
         .mockResolvedValueOnce({ done: true, value: undefined }),
       cancel,
-      releaseLock: jest.fn(),
+      releaseLock: vi.fn(),
     };
-    jest.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
+    vi.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
       key: "k",
       contentType: "application/octet-stream",
       contentLength: 1,
@@ -747,13 +748,13 @@ describe("inline object cap (control-plane-first data path)", () => {
   });
 
   it("s3_get_object cancels the stream when inline reading fails mid-stream", async () => {
-    const cancel = jest.fn().mockResolvedValue(undefined);
+    const cancel = vi.fn().mockResolvedValue(undefined);
     const reader = {
-      read: jest.fn().mockRejectedValue(new Error("network interrupted")),
+      read: vi.fn().mockRejectedValue(new Error("network interrupted")),
       cancel,
-      releaseLock: jest.fn(),
+      releaseLock: vi.fn(),
     };
-    jest.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
+    vi.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
       key: "k",
       contentType: "application/octet-stream",
       contentLength: 10,

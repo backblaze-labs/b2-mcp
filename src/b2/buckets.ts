@@ -90,7 +90,7 @@ type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
 let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
 
 function isTestRuntime(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
+  return process.env.NODE_ENV === "test" || process.env.VITEST_WORKER_ID !== undefined;
 }
 
 export function setWebhookDnsLookupForTests(lookup: WebhookDnsLookup | null): void {

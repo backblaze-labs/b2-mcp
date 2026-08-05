@@ -31,7 +31,7 @@ function expectNoCanary(value: unknown): void {
 }
 
 describe("secret sanitizer canary policy", () => {
-  afterEach(() => jest.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
 
   it("redacts sensitive B2/API response fields from MCP JSON content", async () => {
     const result = await toolJson({
@@ -184,10 +184,10 @@ describe("secret sanitizer canary policy", () => {
   });
 
   it("redacts configured secret values from wrapped tool results", async () => {
-    const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const wrapped = createAuditedToolCallback(
       "t",
-      jest.fn().mockResolvedValue({
+      vi.fn().mockResolvedValue({
         content: [
           {
             type: "text",
@@ -207,10 +207,10 @@ describe("secret sanitizer canary policy", () => {
   });
 
   it("redacts JSON-formatted sensitive fields from wrapped response strings", async () => {
-    const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const wrapped = createAuditedToolCallback(
       "t",
-      jest.fn().mockResolvedValue({
+      vi.fn().mockResolvedValue({
         content: [
           {
             type: "text",
@@ -229,10 +229,10 @@ describe("secret sanitizer canary policy", () => {
   });
 
   it("redacts configured secret values from wrapped tool errors", async () => {
-    const infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const wrapped = createAuditedToolCallback(
       "t",
-      jest
+      vitest
         .fn()
         .mockResolvedValue(toolError(new Error(`failed with ${CONFIGURED_APPLICATION_KEY}`))),
       cfg,
@@ -245,10 +245,10 @@ describe("secret sanitizer canary policy", () => {
   });
 
   it("redacts structured logs and rethrown handler errors", async () => {
-    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const wrapped = createAuditedToolCallback(
       "t",
-      jest
+      vitest
         .fn()
         .mockRejectedValue(
           new Error(

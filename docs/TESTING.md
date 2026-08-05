@@ -28,9 +28,9 @@ and packed-package installation tests. The individual deterministic layers are:
 | `npm run test:unit`     | Fast source unit tests.                                                              |
 | `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
 | `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
-| `npm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Jest worker.   |
+| `npm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Vitest worker.  |
 | `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
-| `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.     |
+| `npm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
 
 Local scripts can call each deterministic layer independently. The Linux Node
 matrix runs the bundled coverage and slow deterministic lifecycle layers, while
@@ -72,14 +72,14 @@ import `src/`; only the slow/package layers may build or inspect `dist/`.
 
 ## Test Reports
 
-All npm Jest layer commands run through `scripts/run-jest-layer.mjs`. The runner
+All npm Vitest layer commands run through `scripts/run-vitest-layer.mjs`. The runner
 preserves the normal terminal reporter and writes machine-readable summaries
 without raw failure messages. Deterministic layers write JUnit XML only when no
 B2 credential environment variables are present. Any layer running with B2
-credentials suppresses the third-party JUnit reporter.
+credentials suppresses the JUnit reporter.
 
 - JUnit XML: `reports/junit/<layer>.xml`
-- Jest JSON summary: `reports/jest/<layer>.json`
+- Vitest JSON summary: `reports/vitest/<layer>.json`
 - Coverage summary: `coverage/coverage-summary.json` from `npm run test:coverage`
 - Cobertura XML: `coverage/cobertura-coverage.xml` from `npm run test:coverage`
 

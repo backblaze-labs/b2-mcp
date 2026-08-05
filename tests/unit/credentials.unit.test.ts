@@ -96,30 +96,30 @@ describe("credential providers", () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
     process.env.B2_MCP_OUTPUT_FORMAT = "toon";
 
-    await jest.isolateModulesAsync(async () => {
-      jest.doMock("../../src/utils/toon-encoder", () => ({
-        encodeToon: () => {
-          throw new Error("encoder unavailable");
-        },
-      }));
+    vi.resetModules();
+    vi.doMock("../../src/utils/toon-encoder", () => ({
+      encodeToon: () => {
+        throw new Error("encoder unavailable");
+      },
+    }));
+    try {
+      const { validateHttpCredentialConfiguration: validate } = await import(
+        "../../src/credentials"
+      );
+      let caught: unknown;
       try {
-        const { validateHttpCredentialConfiguration: validate } = await import(
-          "../../src/credentials"
-        );
-        let caught: unknown;
-        try {
-          validate();
-        } catch (err) {
-          caught = err;
-        }
-        expect(caught).toMatchObject({
-          code: "invalid_output_format",
-          message: "encoder unavailable",
-        });
-      } finally {
-        jest.dontMock("../../src/utils/toon-encoder");
+        validate();
+      } catch (err) {
+        caught = err;
       }
-    });
+      expect(caught).toMatchObject({
+        code: "invalid_output_format",
+        message: "encoder unavailable",
+      });
+    } finally {
+      vi.doUnmock("../../src/utils/toon-encoder");
+      vi.resetModules();
+    }
   });
 
   it("ignores partial optional stdio master credentials and falls back to the app key", () => {

@@ -8,6 +8,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import type { Mock } from "vitest";
 import {
   buildHttpServer,
   configFromHeaders,
@@ -191,8 +192,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  jest.restoreAllMocks();
-  jest.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
   await closeHttpServer(handle);
@@ -382,7 +383,7 @@ describe("HTTP transport handler", () => {
     const seenConfigs: string[] = [];
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       createServer: (config, capabilities) => {
         seenConfigs.push(config.applicationKeyId);
         return createServer(config, capabilities);
@@ -423,14 +424,14 @@ describe("HTTP transport handler", () => {
   });
 
   it("disposes per-request server instances after stateless requests", async () => {
-    const closeSpies: jest.Mock[] = [];
+    const closeSpies: Mock[] = [];
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       createServer: (config, capabilities) => {
         const server = createServer(config, capabilities);
         const originalClose = server.close.bind(server);
-        const closeSpy = jest.fn(() => originalClose());
+        const closeSpy = vi.fn(() => originalClose());
         server.close = closeSpy as typeof server.close;
         closeSpies.push(closeSpy);
         return server;
@@ -457,7 +458,7 @@ describe("HTTP transport handler", () => {
     const blockedCapabilities = new Promise<string[] | null>((resolve) => {
       resolveCapabilities = resolve;
     });
-    const fetchCapabilities = jest.fn(() => {
+    const fetchCapabilities = vi.fn(() => {
       markCapabilitiesStarted();
       return blockedCapabilities;
     });
@@ -494,7 +495,7 @@ describe("HTTP transport handler", () => {
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       mcpHandler: {
-        fetch: jest.fn(async () => {
+        fetch: vi.fn(async () => {
           const stream = new ReadableStream<Uint8Array>({
             start(controller) {
               streamController = controller;
@@ -507,7 +508,7 @@ describe("HTTP transport handler", () => {
             headers: { "Content-Type": "text/event-stream" },
           });
         }),
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -537,7 +538,7 @@ describe("HTTP transport handler", () => {
     });
     await replaceHandle(undefined, {
       mcpHandler: {
-        fetch: jest.fn(async () => {
+        fetch: vi.fn(async () => {
           const stream = new ReadableStream<Uint8Array>({
             start(controller) {
               streamController = controller;
@@ -550,7 +551,7 @@ describe("HTTP transport handler", () => {
             headers: { "Content-Type": "text/event-stream" },
           });
         }),
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -595,7 +596,7 @@ describe("HTTP transport handler", () => {
           captured = req.headers;
           return jsonRpcResponse({ ok: true });
         },
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -652,13 +653,13 @@ describe("HTTP transport handler", () => {
     let capturedAuth: AuthInfo | undefined;
     await replaceHandle(() => authInfo, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       mcpHandler: {
         fetch: async (_req, options) => {
           capturedAuth = options?.authInfo;
           return jsonRpcResponse({ ok: true });
         },
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -674,7 +675,7 @@ describe("HTTP transport handler", () => {
   it("preserves repeated adapter response headers", async () => {
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       mcpHandler: {
         fetch: async () =>
           new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } }), {
@@ -685,7 +686,7 @@ describe("HTTP transport handler", () => {
               ["Set-Cookie", "second=2; Path=/; HttpOnly"],
             ],
           }),
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -704,12 +705,12 @@ describe("HTTP transport handler", () => {
   it("returns a protocol-safe 500 when the fetch handler throws", async () => {
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       mcpHandler: {
-        fetch: jest.fn(async () => {
+        fetch: vi.fn(async () => {
           throw new Error("adapter test failure");
         }),
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -728,12 +729,12 @@ describe("HTTP transport handler", () => {
 
   it("reports response stream failures and fails the connection", async () => {
     const streamError = new Error("stream failed while client connected");
-    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       mcpHandler: {
-        fetch: jest.fn(async () => {
+        fetch: vi.fn(async () => {
           const stream = new ReadableStream<Uint8Array>({
             start(controller) {
               controller.enqueue(new TextEncoder().encode("data: partial\n\n"));
@@ -745,7 +746,7 @@ describe("HTTP transport handler", () => {
             headers: { "Content-Type": "text/event-stream" },
           });
         }),
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -771,9 +772,9 @@ describe("HTTP transport handler", () => {
 
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
       mcpHandler: {
-        fetch: jest.fn(
+        fetch: vi.fn(
           (req) =>
             new Promise<Response>((resolve) => {
               captured.signal = req.signal;
@@ -788,7 +789,7 @@ describe("HTTP transport handler", () => {
               );
             }),
         ),
-        close: jest.fn(),
+        close: vi.fn(),
       },
     });
 
@@ -841,7 +842,7 @@ describe("HTTP transport handler", () => {
     );
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
     });
 
     const client = startPost(
@@ -909,7 +910,7 @@ describe("HTTP transport handler", () => {
     );
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
-      fetchCapabilities: jest.fn(async () => null),
+      fetchCapabilities: vi.fn(async () => null),
     });
 
     const client = startPost(

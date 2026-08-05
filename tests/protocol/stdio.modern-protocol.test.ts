@@ -12,8 +12,8 @@ import {
   StaticHttpResponse,
 } from "../support/sdk-test-helpers";
 
-jest.mock("@modelcontextprotocol/server/stdio", () => ({
-  serveStdio: jest.fn(),
+vi.mock("@modelcontextprotocol/server/stdio", () => ({
+  serveStdio: vi.fn(),
 }));
 
 import { startStdio } from "../../src/index";
@@ -25,7 +25,7 @@ describe("startStdio", () => {
     process.env = { ...saved };
     setB2SdkClientFactoryForTests(null);
     invalidateCapabilityCache();
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it("loads config, builds the server, and connects the stdio transport", async () => {
@@ -80,7 +80,7 @@ describe("startStdio", () => {
     delete process.env.B2_APPLICATION_KEY;
     // loadConfig() calls process.exit(1) on missing creds — stub it so the
     // test doesn't actually exit, and assert it was triggered.
-    const exit = jest.spyOn(process, "exit").mockImplementation((() => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("exit");
     }) as never);
 

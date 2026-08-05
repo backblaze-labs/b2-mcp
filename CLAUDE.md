@@ -24,13 +24,13 @@ npm run start:http     # Streamable HTTP transport — add --port 3000
 Run a single unit test file:
 
 ```bash
-npx jest tests/unit/auth.unit.test.ts
+npx vitest run --config vitest.config.ts --project=unit tests/unit/auth.unit.test.ts
 ```
 
 Run a single test by name:
 
 ```bash
-npx jest --testNamePattern="should cache the token"
+npx vitest run --config vitest.config.ts --testNamePattern="should cache the token"
 ```
 
 Integration tests require env vars. A single non-master application key works for B2 native, S3, **and** key management (`b2_create_key`/`list_keys`/`delete_key` only need `writeKeys`/`listKeys`/`deleteKeys`). A master key is only needed to exercise the Partner API tests — set `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` for those (the master key is used only by those tools; the application key drives everything else):
@@ -97,7 +97,10 @@ The official SDK retry transport handles B2 retries and token refresh. `B2Client
 
 ### Test patterns
 
-Unit tests (`tests/unit/`) mock axios with `jest.spyOn(axios, "get/post")` — no network calls, no credentials needed. `tests/contract/tools-schema.contract.test.ts` builds the full server with dummy credentials and validates all 40 tool schemas structurally.
+Unit tests (`tests/unit/`) mock dependencies with `vi.spyOn(...)` — no network
+calls, no credentials needed. `tests/contract/tools-schema.contract.test.ts`
+builds the full server with dummy credentials and validates all 40 tool schemas
+structurally.
 
 Live integration tests (`tests/live/b2.integration.live.test.ts`) use these skip guards:
 

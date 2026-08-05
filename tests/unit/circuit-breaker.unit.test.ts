@@ -87,7 +87,7 @@ describe("circuit-breaker", () => {
   });
 
   it("aborts wrapped work when the circuit timeout fires", async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     try {
       let signal: AbortSignal | undefined;
       const promise = withCircuit(
@@ -100,11 +100,11 @@ describe("circuit-breaker", () => {
 
       await Promise.resolve();
       expect(signal).toBeDefined();
-      jest.advanceTimersByTime(CIRCUIT_TIMEOUT_MS + 1);
+      vi.advanceTimersByTime(CIRCUIT_TIMEOUT_MS + 1);
       await expect(promise).rejects.toThrow(/timed out/i);
       expect(signal?.aborted).toBe(true);
     } finally {
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   });
 

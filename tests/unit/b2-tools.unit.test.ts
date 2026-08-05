@@ -84,7 +84,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   setWebhookDnsLookupForTests(null);
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
@@ -889,7 +889,7 @@ describe("object lock tools", () => {
 
 describe("Partner API tools", () => {
   function mockPartnerFetch(response: unknown) {
-    return jest.spyOn(globalThis, "fetch").mockResolvedValue(
+    return vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify(response), {
         status: 200,
         headers: { "Content-Type": "application/json" },

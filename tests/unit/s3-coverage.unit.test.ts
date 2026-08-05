@@ -7,6 +7,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 import { B2Config } from "../../src/utils/types";
+import type { MockInstance } from "vitest";
 
 const testConfig: B2Config = {
   applicationKeyId: "k",
@@ -27,14 +28,14 @@ async function callTool(server: McpServer, name: string, args: Record<string, un
 }
 
 let server: McpServer;
-let sendSpy: jest.SpyInstance;
+let sendSpy: MockInstance;
 
 beforeEach(() => {
-  sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
+  sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   server = createServer(testConfig);
 });
 afterEach(() => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe("S3 tool error paths (catch blocks)", () => {

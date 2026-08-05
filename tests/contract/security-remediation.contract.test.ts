@@ -64,22 +64,32 @@ describe("security dependency policy", () => {
     expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
   });
 
-  it("keeps every brace-expansion resolution above its advisory floor", () => {
+  it("keeps any brace-expansion resolution above its advisory floor", () => {
     const versions = Object.entries(lock.packages)
       .filter(([path]) => path.endsWith("node_modules/brace-expansion"))
       .map(([, entry]) => entry.version)
       .filter((version): version is string => Boolean(version));
 
-    expect(versions.length).toBeGreaterThan(0);
     for (const version of versions) {
       const major = Number(version.split(".")[0]);
       expect(versionAtLeast(version, major === 1 ? "1.1.18" : "5.0.9")).toBe(true);
     }
   });
 
-  it("keeps vulnerable YAML and Babel transitive packages patched", () => {
-    expect(versionAtLeast(resolvedVersion("node_modules/js-yaml"), "3.15.0")).toBe(true);
-    expect(versionAtLeast(resolvedVersion("node_modules/@babel/core"), "7.29.1")).toBe(true);
+  it("does not reintroduce the removed Jest transform stack", () => {
+    for (const packageName of [
+      "@babel/plugin-transform-modules-commonjs",
+      "@types/jest",
+      "babel-jest",
+      "jest",
+      "jest-junit",
+      "ts-jest",
+    ]) {
+      expect(pkg.devDependencies).not.toHaveProperty(packageName);
+      expect(lock.packages[`node_modules/${packageName}`]).toBeUndefined();
+    }
+    expect(lock.packages["node_modules/@babel/core"]).toBeUndefined();
+    expect(lock.packages["node_modules/js-yaml"]).toBeUndefined();
   });
 
   it("includes the consolidated safe direct dependency updates", () => {
@@ -97,12 +107,6 @@ describe("security dependency policy", () => {
     );
     expect(pkg.dependencies).not.toHaveProperty("axios");
     expect(lock.packages["node_modules/axios"]).toBeUndefined();
-    expectManifestAndLockAtLeast(
-      pkg.devDependencies["@babel/plugin-transform-modules-commonjs"],
-      "node_modules/@babel/plugin-transform-modules-commonjs",
-      "7.29.7",
-      7,
-    );
   });
 
   it("keeps TypeScript on the reviewed 6.0 patch line", () => {

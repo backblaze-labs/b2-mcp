@@ -71,7 +71,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
 });
@@ -295,7 +295,7 @@ describe("b2_unfinished_uploads — upload bound", () => {
 
   it("reports wasted_gb as a lower bound when the parts-summing budget is hit", async () => {
     let clock = 0;
-    jest.spyOn(Date, "now").mockImplementation(() => clock);
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
       if (endpoint === "b2_authorize_account") {
@@ -339,7 +339,7 @@ describe("b2_unfinished_uploads — upload bound", () => {
 
   it("aborts an in-flight listParts call when the scan deadline expires", async () => {
     let clock = 0;
-    jest.spyOn(Date, "now").mockImplementation(() => clock);
+    vi.spyOn(Date, "now").mockImplementation(() => clock);
     let listPartsSignal: AbortSignal | undefined;
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);

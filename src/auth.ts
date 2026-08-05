@@ -68,7 +68,7 @@ function sdkAbortException(message: string): Error {
 }
 
 function isTestRuntime(): boolean {
-  return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
+  return process.env.NODE_ENV === "test" || process.env.VITEST_WORKER_ID !== undefined;
 }
 
 export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null): void {

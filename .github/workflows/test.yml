@@ -103,7 +103,7 @@ jobs:
           name: test-reports-node-${{ matrix.node-version }}
           path: |
             reports/junit/*.xml
-            reports/jest/*.json
+            reports/vitest/*.json
             coverage/coverage-summary.json
             coverage/cobertura-coverage.xml
           if-no-files-found: error
@@ -157,7 +157,7 @@ jobs:
           name: test-reports-node-${{ matrix.node-version }}
           path: |
             reports/junit/*.xml
-            reports/jest/*.json
+            reports/vitest/*.json
             coverage/coverage-summary.json
             coverage/cobertura-coverage.xml
           if-no-files-found: error
@@ -206,7 +206,7 @@ jobs:
           name: package-test-reports
           path: |
             reports/junit/package.xml
-            reports/jest/package.json
+            reports/vitest/package.json
           if-no-files-found: error
 
   supply-chain-audit:

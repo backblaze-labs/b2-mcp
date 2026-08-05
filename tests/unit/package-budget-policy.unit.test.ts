@@ -133,7 +133,7 @@ function runPolicyFixture(fixtureRoot: string) {
 
 describe("package budget policy gate", () => {
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it.each([

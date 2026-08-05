@@ -18,11 +18,23 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-const jestBin = path.join(root, "node_modules", "jest", "bin", "jest.js");
-const result = spawnSync(process.execPath, [jestBin, "--runTestsByPath", ...tests], {
-  cwd: root,
-  env: { ...process.env, NODE_ENV: "test" },
-  stdio: "inherit",
-});
+const vitestBin = path.join(root, "node_modules", "vitest", "vitest.mjs");
+const result = spawnSync(
+  process.execPath,
+  [
+    vitestBin,
+    "run",
+    "--config",
+    "vitest.config.ts",
+    "--project=unit",
+    "--project=protocol-modern",
+    ...tests,
+  ],
+  {
+    cwd: root,
+    env: { ...process.env, NODE_ENV: "test", VITE_CONFIG_NATIVE_IGNORE_WARNING: "true" },
+    stdio: "inherit",
+  },
+);
 
 process.exit(result.status ?? 1);

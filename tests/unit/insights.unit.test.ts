@@ -400,7 +400,7 @@ describe("insights — report scan bounds", () => {
     };
     const today = new Date().toISOString().slice(0, 10);
     const keys = [`${today}/usage.account-0001.csv`, `${today}/usage.account-0002.csv`];
-    const downloadReportObjectText = jest.fn(async () => ({
+    const downloadReportObjectText = vi.fn(async () => ({
       text: "",
       bytes: 25 * 1024 * 1024,
       truncated: false,
@@ -439,7 +439,7 @@ describe("insights — report scan bounds", () => {
       },
     };
     const csv = "account_id,date,stored_gb\nacct,2026-06-20,1\n";
-    const downloadReportObjectText = jest
+    const downloadReportObjectText = vitest
       .fn()
       .mockResolvedValueOnce({
         text: csv,
