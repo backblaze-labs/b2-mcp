@@ -53,6 +53,10 @@ function realTargetForWrite(resolved: string): string {
  * - `write`: the file need not exist yet, but its resolved path and nearest
  *   existing ancestor must both be inside the root, so symlinked ancestors
  *   can't redirect the write outside.
+ *
+ * @returns The safe absolute path to use for the requested access.
+ *
+ * @throws FileAccessError when local file access is disabled or outside policy.
  */
 export function resolveLocalPath(
   config: B2Config,

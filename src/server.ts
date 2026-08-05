@@ -57,6 +57,10 @@ const COMPATIBILITY_STUB_CONFIRM_DESC =
 
 /**
  * Load and validate configuration from environment variables.
+ *
+ * @returns The validated B2 server configuration.
+ *
+ * @throws CredentialResolutionError when an unexpected credential resolution error occurs.
  */
 export function loadConfig(): B2Config {
   try {
@@ -122,6 +126,8 @@ function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void
  * When `capabilities` is null/undefined, the full surface is registered; this is
  * reserved for explicit operator override and legacy unit tests. An empty array
  * is a fail-closed capability set, not "unknown".
+ *
+ * @returns The configured MCP server instance.
  */
 export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
   const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
@@ -523,6 +529,8 @@ export async function fetchCapabilities(
  * non-secret credential fingerprint, top-level arg keys, duration, and
  * success/error. Argument values are not logged to avoid leaking file content,
  * bucket data, or credentials.
+ *
+ * @returns The wrapped tool callback.
  */
 export function createAuditedToolCallback(
   name: string,

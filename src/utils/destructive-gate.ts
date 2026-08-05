@@ -103,6 +103,8 @@ export interface GateResult {
 /**
  * Evaluate whether a tool call may proceed. Call at the top of a destructive
  * tool's handler; if `ok` is false, return `toolError(new Error(message))`.
+ *
+ * @returns The gate decision for the requested tool call.
  */
 export function checkDestructive(
   toolName: string,

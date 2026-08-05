@@ -58,6 +58,8 @@ function numberOrFallback(value: unknown, fallback: number): number {
  *
  * Reading the AWS SDK shape is what lets us tell a genuine Backblaze 5xx apart
  * from a 4xx (e.g. NoSuchKey) and surface the requestId support needs.
+ *
+ * @returns The normalized B2 API error object.
  */
 export function parseB2Error(err: unknown): B2ApiError {
   if (typeof err === "object" && err !== null) {
@@ -128,6 +130,8 @@ export function parseB2Error(err: unknown): B2ApiError {
  * to record error code/status/requestId from a tool's error response (the tool
  * surface only carries the formatted text). Returns null if the text isn't a
  * formatted B2 error.
+ *
+ * @returns Parsed error metadata, or null when the text is not a formatted B2 error.
  */
 export function parseErrorText(
   text: string | undefined,
@@ -142,6 +146,8 @@ export function parseErrorText(
  * Format a B2 error into a human-readable string for MCP tool responses.
  * Includes the provider requestId when available — the field a Backblaze
  * support ticket needs to trace a server-side failure.
+ *
+ * @returns The formatted, sanitized B2 error message.
  */
 export function formatB2Error(err: unknown): string {
   const parsed = parseB2Error(err);
@@ -191,6 +197,8 @@ function errorHint(parsed: B2ApiError): string {
 
 /**
  * Return a structured MCP error content block for tool error responses.
+ *
+ * @returns The structured MCP error response.
  */
 export function toolError(err: unknown): {
   isError: true;
@@ -204,6 +212,8 @@ export function toolError(err: unknown): {
 
 /**
  * Return a successful tool response with text content.
+ *
+ * @returns The structured MCP success response.
  */
 export function toolSuccess(text: string): { content: Array<{ type: "text"; text: string }> } {
   return markSanitizedMcpResponse({
@@ -213,6 +223,8 @@ export function toolSuccess(text: string): { content: Array<{ type: "text"; text
 
 /**
  * Return a successful tool response with a JSON object.
+ *
+ * @returns The structured MCP JSON response.
  */
 export function toolJson(data: unknown): StructuredToolResult {
   return markSanitizedMcpResponse(serializeStructuredToolResult(data, currentSanitizerOptions()));

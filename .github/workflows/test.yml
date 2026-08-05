@@ -80,6 +80,7 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run spell
+      - run: npm run lint:docs
       - run: npm run build
       - id: typecheck
         continue-on-error: true
@@ -131,6 +132,7 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run spell
+      - run: npm run lint:docs
       - run: npm run build
       - id: typecheck
         continue-on-error: true

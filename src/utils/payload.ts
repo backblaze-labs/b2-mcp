@@ -5,6 +5,8 @@
  * used across the B2-native tool handlers — the one obvious way to do it,
  * instead of hand-rolling an `if (args.x !== undefined) payload.x = args.x`
  * chain (or an inline loop) in each handler.
+ *
+ * @returns The target object after copying defined values.
  */
 export function assignDefined<T extends Record<string, unknown>>(
   target: Record<string, unknown>,

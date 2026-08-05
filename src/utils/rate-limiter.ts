@@ -40,6 +40,8 @@ const buckets = new Map<string, Bucket>();
 /**
  * Try to consume one token for `key`. Returns true if allowed, false if
  * the bucket is empty (caller should respond with 429).
+ *
+ * @returns True when a token was consumed and the request may proceed.
  */
 export function allowRequest(key: string): boolean {
   const now = Date.now();
@@ -61,7 +63,7 @@ export function allowRequest(key: string): boolean {
 }
 
 /**
- * Drop idle buckets (full and untouched for > IDLE_TTL_MS).
+ * Drop idle buckets (full and untouched for more than IDLE_TTL_MS).
  * Called periodically from the HTTP server; safe to call any time.
  */
 export function sweepIdleBuckets(now: number = Date.now()): void {
@@ -77,7 +79,11 @@ export function _resetRateLimiter(): void {
   buckets.clear();
 }
 
-/** Test-only: read current bucket state. */
+/**
+ * Test-only: read current bucket state.
+ *
+ * @returns The bucket state for `key`, if present.
+ */
 export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);
 }
