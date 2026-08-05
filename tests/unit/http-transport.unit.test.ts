@@ -608,6 +608,59 @@ describe("HTTP transport handler", () => {
     }
   });
 
+  it("forwards verified authInfo outside the sanitized HTTP headers", async () => {
+    const authInfo: AuthInfo = {
+      token: "verified-token",
+      clientId: "test-client",
+      scopes: ["mcp:invoke"],
+    };
+    let capturedAuth: AuthInfo | undefined;
+    await replaceHandle(() => authInfo, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      mcpHandler: {
+        fetch: async (_req, options) => {
+          capturedAuth = options?.authInfo;
+          return jsonRpcResponse({ ok: true });
+        },
+        close: jest.fn(),
+      },
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+
+    expect(res.status).toBe(200);
+    expect(capturedAuth).toBe(authInfo);
+  });
+
+  it("returns a protocol-safe 500 when the fetch handler throws", async () => {
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      mcpHandler: {
+        fetch: jest.fn(async () => {
+          throw new Error("adapter test failure");
+        }),
+        close: jest.fn(),
+      },
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+
+    expect(res.status).toBe(500);
+    expect(JSON.parse(res.body)).toEqual({
+      jsonrpc: "2.0",
+      error: { code: -32603, message: "Internal server error" },
+      id: null,
+    });
+  });
+
   it("aborts the adapter Request signal when the client disconnects", async () => {
     let markFetchStarted!: () => void;
     const fetchStarted = new Promise<void>((resolve) => {

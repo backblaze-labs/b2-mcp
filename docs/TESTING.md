@@ -84,11 +84,12 @@ Protocol tests cover the SDK v2 serving matrix used in production:
 | HTTP  | GET/DELETE rejection, ignored `Mcp-Session-Id`, no event replay from `Last-Event-ID`.      |
 | stdio | `serveStdio` factory wiring, including degraded capability lookup behavior.                |
 
-The modern HTTP path uses one `createMcpHandler` wrapped once by
-`toNodeHandler` from `@modelcontextprotocol/node`. Tests assert that body-size,
-Host, Origin, credential, rate-limit, in-flight, and shutdown behavior stays
-outside the MCP handler while the SDK owns protocol validation and modern result
-metadata.
+The modern HTTP path uses one `createMcpHandler` wrapped once by the
+repository-owned Node HTTP bridge. Tests assert request abort propagation,
+stream completion, and dependency-graph exclusion of `@modelcontextprotocol/node`
+and `@hono/node-server`, while body-size, Host, Origin, credential, rate-limit,
+in-flight, and shutdown behavior stays outside the MCP handler and the SDK owns
+protocol validation and modern result metadata.
 
 Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
