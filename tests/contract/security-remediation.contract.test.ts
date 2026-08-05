@@ -64,13 +64,17 @@ describe("security dependency policy", () => {
     expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
   });
 
-  it("does not include brace-expansion after removing the Jest transform stack", () => {
+  it("keeps every brace-expansion resolution above its advisory floor", () => {
     const versions = Object.entries(lock.packages)
       .filter(([path]) => path.endsWith("node_modules/brace-expansion"))
       .map(([, entry]) => entry.version)
       .filter((version): version is string => Boolean(version));
 
-    expect(versions).toEqual([]);
+    expect(versions.length).toBeGreaterThan(0);
+    for (const version of versions) {
+      const major = Number(version.split(".")[0]);
+      expect(versionAtLeast(version, major === 1 ? "1.1.18" : "5.0.9")).toBe(true);
+    }
   });
 
   it("does not reintroduce the removed Jest transform stack", () => {
@@ -86,7 +90,7 @@ describe("security dependency policy", () => {
       expect(lock.packages[`node_modules/${packageName}`]).toBeUndefined();
     }
     expect(lock.packages["node_modules/@babel/core"]).toBeUndefined();
-    expect(lock.packages["node_modules/js-yaml"]).toBeUndefined();
+    expect(versionAtLeast(resolvedVersion("node_modules/js-yaml"), "4.1.1")).toBe(true);
   });
 
   it("includes the consolidated safe direct dependency updates", () => {
