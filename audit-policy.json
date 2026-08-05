@@ -1,24 +1,3 @@
 {
-  "allowedAdvisories": [
-    {
-      "name": "@hono/node-server",
-      "source": 1124006,
-      "maxSeverity": "moderate",
-      "isDirect": false,
-      "nodes": ["node_modules/@hono/node-server"],
-      "effects": ["@modelcontextprotocol/node"],
-      "package": {
-        "version": "1.19.17",
-        "integrity": "sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ=="
-      },
-      "via": {
-        "path": "node_modules/@modelcontextprotocol/node",
-        "name": "@modelcontextprotocol/node",
-        "version": "2.0.0",
-        "dependencyRange": "^1.19.9"
-      },
-      "expires": "2026-10-01",
-      "reason": "Transitive through stable @modelcontextprotocol/node@2.0.0; no fixed stable MCP v2 package is published yet."
-    }
-  ]
+  "allowedAdvisories": []
 }

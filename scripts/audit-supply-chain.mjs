@@ -6,15 +6,12 @@ import { fileURLToPath } from "node:url";
 import retryUtils from "./lib/retry-utils.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const policy = JSON.parse(readFileSync(path.join(root, "audit-policy.json"), "utf8"));
 const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
-const allowed = new Map(
-  policy.allowedAdvisories.map((entry) => [`${entry.name}:${entry.source}`, entry]),
-);
 const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const minimumRank = severityRank.moderate;
 const { isTransientNpmFailure, sleep } = retryUtils;
 const injectedReportJson = process.env.B2_MCP_AUDIT_REPORT_JSON;
+const injectedPolicyJson = process.env.B2_MCP_AUDIT_POLICY_JSON;
 const allowInjectedReport = process.env.NODE_ENV === "test";
 const expiredExceptionMode = process.env.B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE ?? "fail";
 const injectedToday = process.env.B2_MCP_AUDIT_TODAY;
@@ -34,6 +31,19 @@ if (injectedReportJson && !allowInjectedReport) {
   );
   process.exit(1);
 }
+if (injectedPolicyJson && !allowInjectedReport) {
+  console.error(
+    "audit-policy: refusing B2_MCP_AUDIT_POLICY_JSON outside NODE_ENV=test; CI must use audit-policy.json",
+  );
+  process.exit(1);
+}
+
+const policy = JSON.parse(
+  injectedPolicyJson ?? readFileSync(path.join(root, "audit-policy.json"), "utf8"),
+);
+const allowed = new Map(
+  policy.allowedAdvisories.map((entry) => [`${entry.name}:${entry.source}`, entry]),
+);
 
 function referenceDate() {
   if (!injectedToday) return new Date().toISOString().slice(0, 10);
@@ -59,6 +69,7 @@ function auditEnv() {
     npm_config_fetch_retry_maxtimeout: process.env.npm_config_fetch_retry_maxtimeout ?? "10000",
   };
   delete env.B2_MCP_AUDIT_REPORT_JSON;
+  delete env.B2_MCP_AUDIT_POLICY_JSON;
   return env;
 }
 

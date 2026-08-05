@@ -147,9 +147,9 @@ npm run audit:supply-chain
 ```
 
 Known exceptions must live in `audit-policy.json` with an expiry, maximum
-severity, dependency path, lockfile version/integrity, and rationale. The stable
-MCP Node adapter currently pulls a moderate `@hono/node-server` advisory with no
-fixed stable MCP v2 package available.
+severity, dependency path, lockfile version/integrity, and rationale. The
+current policy has no exceptions; adding one requires explicit security-owner
+review.
 
 `scripts/audit-supply-chain.mjs` always runs a real `npm audit` outside
 `NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded

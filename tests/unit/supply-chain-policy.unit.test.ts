@@ -25,6 +25,35 @@ describe("supply-chain audit policy", () => {
       expires: string;
     }>;
   };
+  const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as {
+    packages: Record<
+      string,
+      { version?: string; integrity?: string; dependencies?: Record<string, string> }
+    >;
+  };
+  const formData = lock.packages["node_modules/form-data"];
+  const axios = lock.packages["node_modules/axios"];
+  const exceptionPolicy = {
+    allowedAdvisories: [
+      {
+        name: "form-data",
+        source: 999000,
+        maxSeverity: "moderate",
+        isDirect: false,
+        nodes: ["node_modules/form-data"],
+        effects: ["axios"],
+        package: { version: formData.version, integrity: formData.integrity },
+        via: {
+          path: "node_modules/axios",
+          name: "axios",
+          version: axios.version,
+          dependencyRange: axios.dependencies?.["form-data"],
+        },
+        expires: "2026-10-01",
+        reason: "Test-only exception fixture for policy behavior.",
+      },
+    ],
+  };
 
   function jobBlock(name: string): string {
     return workflowJobBlock(workflow, name) ?? "";
@@ -34,35 +63,35 @@ describe("supply-chain audit policy", () => {
     return {
       auditReportVersion: 2,
       vulnerabilities: {
-        "@hono/node-server": {
-          name: "@hono/node-server",
+        "form-data": {
+          name: "form-data",
           severity: "moderate",
           isDirect: false,
           via: [
             {
-              source: 1124006,
-              name: "@hono/node-server",
-              dependency: "@hono/node-server",
-              title: "Node.js Adapter for Hono path traversal",
-              url: "https://github.com/advisories/GHSA-frvp-7c67-39w9",
+              source: 999000,
+              name: "form-data",
+              dependency: "form-data",
+              title: "Test-only transitive advisory",
+              url: "https://github.com/advisories/test-only",
               severity: "moderate",
-              range: "<2.0.5",
+              range: "<4.0.7",
             },
           ],
-          effects: ["@modelcontextprotocol/node"],
-          range: "<2.0.5",
-          nodes: ["node_modules/@hono/node-server"],
+          effects: ["axios"],
+          range: "<4.0.7",
+          nodes: ["node_modules/form-data"],
           fixAvailable: false,
           ...overrides,
         },
-        "@modelcontextprotocol/node": {
-          name: "@modelcontextprotocol/node",
+        axios: {
+          name: "axios",
           severity: "moderate",
           isDirect: true,
-          via: ["@hono/node-server"],
+          via: ["form-data"],
           effects: [],
           range: "*",
-          nodes: ["node_modules/@modelcontextprotocol/node"],
+          nodes: ["node_modules/axios"],
           fixAvailable: false,
         },
       },
@@ -106,6 +135,7 @@ describe("supply-chain audit policy", () => {
         ...process.env,
         NODE_ENV: "test",
         B2_MCP_AUDIT_REPORT_JSON: JSON.stringify(report),
+        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
         B2_MCP_AUDIT_TODAY: "2026-09-30",
         ...extraEnv,
       },
@@ -165,6 +195,22 @@ describe("supply-chain audit policy", () => {
     expect(result.stderr).toContain("refusing B2_MCP_AUDIT_REPORT_JSON outside NODE_ENV=test");
   });
 
+  it("refuses environment-injected audit policy outside tests", () => {
+    const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
+      cwd: root,
+      env: {
+        ...process.env,
+        GITHUB_ACTIONS: "true",
+        NODE_ENV: "production",
+        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+      },
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("refusing B2_MCP_AUDIT_POLICY_JSON outside NODE_ENV=test");
+  });
+
   it("retries transient npm audit registry failures before evaluating advisories", () => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-npm-"));
     const state = join(dir, "attempts");
@@ -195,7 +241,9 @@ describe("supply-chain audit policy", () => {
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        NODE_ENV: "test",
         B2_MCP_FAKE_NPM_STATE: state,
+        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
       };
       delete env.B2_MCP_AUDIT_REPORT_JSON;
       const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
@@ -216,7 +264,7 @@ describe("supply-chain audit policy", () => {
     const result = runAudit(scopedAuditReport(), { B2_MCP_AUDIT_TODAY: "2026-10-02" });
 
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("::error::audit-policy: @hono/node-server:1124006");
+    expect(result.stderr).toContain("::error::audit-policy: form-data:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
   });
 
@@ -227,7 +275,7 @@ describe("supply-chain audit policy", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("::warning::audit-policy: @hono/node-server:1124006");
+    expect(result.stderr).toContain("::warning::audit-policy: form-data:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
   });
 
@@ -241,31 +289,14 @@ describe("supply-chain audit policy", () => {
     expect(result.stderr).toContain("::error::audit-policy: new-vulnerable-package:999001");
   });
 
-  it("tracks tightly scoped exceptions for known moderate advisories", () => {
-    expect(auditPolicy.allowedAdvisories).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "@hono/node-server",
-          source: 1124006,
-          maxSeverity: "moderate",
-          isDirect: false,
-          nodes: ["node_modules/@hono/node-server"],
-          effects: ["@modelcontextprotocol/node"],
-        }),
-      ]),
-    );
-    for (const advisory of auditPolicy.allowedAdvisories) {
-      expect(advisory.expires).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(advisory.package.version).toMatch(/^\d+\.\d+\.\d+$/);
-      expect(advisory.package.integrity).toMatch(/^sha512-/);
-      expect(advisory.via.path).toBe(`node_modules/${advisory.via.name}`);
-    }
+  it("ships without advisory exceptions", () => {
+    expect(auditPolicy.allowedAdvisories).toEqual([]);
   });
 
-  it("allows only the documented scoped Hono advisory", () => {
+  it("allows only a tightly scoped test advisory", () => {
     const result = runAudit(scopedAuditReport());
     expect(result.status).toBe(0);
-    expect(result.stderr).toContain("@hono/node-server:1124006");
+    expect(result.stderr).toContain("form-data:999000");
   });
 
   it.each([
@@ -277,13 +308,13 @@ describe("supply-chain audit policy", () => {
         severity: "high",
         via: [
           {
-            source: 1124006,
-            name: "@hono/node-server",
-            dependency: "@hono/node-server",
-            title: "Node.js Adapter for Hono path traversal",
-            url: "https://github.com/advisories/GHSA-frvp-7c67-39w9",
+            source: 999000,
+            name: "form-data",
+            dependency: "form-data",
+            title: "Test-only transitive advisory",
+            url: "https://github.com/advisories/test-only",
             severity: "high",
-            range: "<2.0.5",
+            range: "<4.0.7",
           },
         ],
       },
@@ -291,6 +322,6 @@ describe("supply-chain audit policy", () => {
   ])("fails the audit for %s", (_name, overrides) => {
     const result = runAudit(scopedAuditReport(overrides));
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("@hono/node-server:1124006");
+    expect(result.stderr).toContain("form-data:999000");
   });
 });
