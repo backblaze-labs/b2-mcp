@@ -533,7 +533,8 @@ It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 The workflow is gated to the canonical repo and protected refs, fails loudly
 when dispatched from a non-main ref, verifies release tags point at `ci-green`,
-and checks out `ci-green` before running package code with live secrets. It is
-then further gated by the `live-b2-smoke` GitHub environment. Configure that
-environment with branch/tag restrictions before storing live B2 secrets there.
-Add required reviewers when the repository plan supports environment reviewers.
+and checks out the resolved `ci-green` commit before running package code with
+live secrets. It is then further gated by the `live-b2-smoke` GitHub environment.
+Configure that environment with branch/tag restrictions before storing live B2
+secrets there. Add required reviewers when the repository plan supports
+environment reviewers.

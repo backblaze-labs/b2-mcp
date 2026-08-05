@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
 const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
 const minimumRank = severityRank.moderate;
-const { isTransientNpmFailure, sleep } = retryUtils;
+const { isTransientNpmFailure, runNpmCommandWithRetries } = retryUtils;
 const injectedReportJson = process.env.B2_MCP_AUDIT_REPORT_JSON;
 const injectedPolicyJson = process.env.B2_MCP_AUDIT_POLICY_JSON;
 const allowInjectedReport = process.env.NODE_ENV === "test";
@@ -63,13 +62,22 @@ const expiryWarningDays = 30;
 function auditEnv() {
   const env = {
     ...process.env,
+    NODE_ENV: "development",
+    NPM_CONFIG_INCLUDE: "dev",
+    NPM_CONFIG_PRODUCTION: "false",
+    npm_config_include: "dev",
+    npm_config_production: "false",
     npm_config_fetch_retries: process.env.npm_config_fetch_retries ?? "3",
     npm_config_fetch_retry_factor: process.env.npm_config_fetch_retry_factor ?? "2",
     npm_config_fetch_retry_mintimeout: process.env.npm_config_fetch_retry_mintimeout ?? "1000",
     npm_config_fetch_retry_maxtimeout: process.env.npm_config_fetch_retry_maxtimeout ?? "10000",
   };
+  delete env.NPM_CONFIG_OMIT;
+  delete env.NPM_CONFIG_ONLY;
   delete env.B2_MCP_AUDIT_REPORT_JSON;
   delete env.B2_MCP_AUDIT_POLICY_JSON;
+  delete env.npm_config_omit;
+  delete env.npm_config_only;
   return env;
 }
 
@@ -91,71 +99,72 @@ function logAuditFailure(audit, message) {
   if (audit.stderr) console.error(audit.stderr);
 }
 
+function auditRetryReason(audit) {
+  if (audit.error) {
+    return isTransientAuditFailure(audit) ? "npm audit registry/network failure" : null;
+  }
+
+  const parsed = parseAuditReport(audit);
+  if (parsed.error) {
+    return isTransientAuditFailure(audit, parsed.error)
+      ? "npm audit returned a transient non-report response"
+      : null;
+  }
+
+  if (audit.status && audit.status > 1) {
+    return isTransientAuditFailure(audit) ? "npm audit registry/network failure" : null;
+  }
+
+  if (!parsed.auditReportVersion) {
+    return isTransientAuditFailure(audit)
+      ? "npm audit returned a transient non-report response"
+      : null;
+  }
+
+  return null;
+}
+
 function runNpmAudit() {
-  const attempts = 3;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const audit = spawnSync("npm", ["audit", "--json"], {
+  const audit = runNpmCommandWithRetries(["audit", "--json", "--include=dev"], {
+    attempts: 3,
+    retryLabel: "npm audit",
+    retryDelayMs: 1_000,
+    shouldRetry: (result) => auditRetryReason(result) !== null,
+    retryMessage: ({ result, attempt, attempts }) =>
+      `audit-policy: ${auditRetryReason(result)} on attempt ${attempt}/${attempts}; retrying`,
+    spawnOptions: {
       cwd: root,
       encoding: "utf8",
       env: auditEnv(),
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 120_000,
-    });
+    },
+  });
 
-    if (audit.error) {
-      if (attempt < attempts && isTransientAuditFailure(audit)) {
-        console.warn(
-          `audit-policy: npm audit registry/network failure on attempt ${attempt}/${attempts}; retrying`,
-        );
-        sleep(1_000 * attempt);
-        continue;
-      }
-      throw audit.error;
-    }
-
-    const parsed = parseAuditReport(audit);
-    if (parsed.error) {
-      if (attempt < attempts && isTransientAuditFailure(audit, parsed.error)) {
-        console.warn(
-          `audit-policy: npm audit returned a transient non-report response on attempt ${attempt}/${attempts}; retrying`,
-        );
-        sleep(1_000 * attempt);
-        continue;
-      }
-      logAuditFailure(audit, "npm audit did not return parseable JSON");
-      throw parsed.error;
-    }
-
-    if (audit.status && audit.status > 1) {
-      if (attempt < attempts && isTransientAuditFailure(audit)) {
-        console.warn(
-          `audit-policy: npm audit registry/network failure on attempt ${attempt}/${attempts}; retrying`,
-        );
-        sleep(1_000 * attempt);
-        continue;
-      }
-      logAuditFailure(
-        audit,
-        "npm audit failed before advisory evaluation; registry/network failures are logged separately when retried",
-      );
-      process.exit(audit.status);
-    }
-
-    if (!parsed.auditReportVersion) {
-      if (attempt < attempts && isTransientAuditFailure(audit)) {
-        console.warn(
-          `audit-policy: npm audit returned a transient non-report response on attempt ${attempt}/${attempts}; retrying`,
-        );
-        sleep(1_000 * attempt);
-        continue;
-      }
-      logAuditFailure(audit, "npm audit did not return an audit report");
-      throw new Error("npm audit did not return an audit report");
-    }
-
-    return parsed;
+  if (audit.error) {
+    throw audit.error;
   }
-  throw new Error("npm audit failed without returning a result");
+
+  const parsed = parseAuditReport(audit);
+  if (parsed.error) {
+    logAuditFailure(audit, "npm audit did not return parseable JSON");
+    throw parsed.error;
+  }
+
+  if (audit.status && audit.status > 1) {
+    logAuditFailure(
+      audit,
+      "npm audit failed before advisory evaluation; registry/network failures are logged separately when retried",
+    );
+    process.exit(audit.status);
+  }
+
+  if (!parsed.auditReportVersion) {
+    logAuditFailure(audit, "npm audit did not return an audit report");
+    throw new Error("npm audit did not return an audit report");
+  }
+
+  return parsed;
 }
 
 function fixtureAuditReport() {

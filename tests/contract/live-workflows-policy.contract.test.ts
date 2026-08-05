@@ -74,8 +74,10 @@ describe("live secret workflow policy", () => {
       expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
       expect(text).toContain('[[ "$GITHUB_REF" != refs/tags/v* ]]');
       expect(text).toContain('protected_ref="refs/heads/ci-green"');
+      expect(text).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
       expect(text).toContain('tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}"');
       expect(text).toContain('"$tag_sha" != "$ci_green_sha"');
+      expect(text).toContain('echo "checkout_sha=${ci_green_sha}" >> "$GITHUB_OUTPUT"');
       expect(text).toContain("node-version: ${{ matrix.node-version }}");
       expect(text).not.toContain("node-version-file:");
     },
@@ -90,13 +92,18 @@ describe("live secret workflow policy", () => {
     },
   );
 
-  it.each(liveWorkflows)("$path checks out ci-green before running package code", ({ path }) => {
-    const text = workflowText(path);
-    expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-ref }}");
-    expect(text).toContain('checkout_ref="ci-green"');
-    expect(text).not.toContain("github.event_name == 'release'");
-    expect(text).not.toContain("startsWith(github.ref, 'refs/tags/v')");
-  });
+  it.each(liveWorkflows)(
+    "$path checks out the resolved ci-green commit before running package code",
+    ({ path }) => {
+      const text = workflowText(path);
+      expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      expect(text).toContain('ci_green_sha="$(git ls-remote origin "${protected_ref}"');
+      expect(text).not.toContain('checkout_ref="ci-green"');
+      expect(text).not.toContain("ref: ci-green");
+      expect(text).not.toContain("github.event_name == 'release'");
+      expect(text).not.toContain("startsWith(github.ref, 'refs/tags/v')");
+    },
+  );
 
   it("does not schedule recurring live contract writes", () => {
     const text = workflowText(".github/workflows/contract.yml");

@@ -9,7 +9,7 @@ const defaultKeepEnvNames = [
   "TMP",
   "TEMP",
 ];
-const defaultNonSecretEnvNames = ["B2_REGISTER_ALL_TOOLS"];
+const defaultNonSecretEnvNames = [];
 
 function sanitizedEnv(extra = {}, options = {}) {
   const sourceEnv = options.sourceEnv ?? process.env;

@@ -128,6 +128,35 @@ describe("supply-chain audit policy", () => {
     };
   }
 
+  function devOnlyAuditReport() {
+    return {
+      auditReportVersion: 2,
+      vulnerabilities: {
+        "dev-only-vulnerable-tool": {
+          name: "dev-only-vulnerable-tool",
+          severity: "high",
+          isDirect: true,
+          via: [
+            {
+              source: 999002,
+              name: "dev-only-vulnerable-tool",
+              dependency: "dev-only-vulnerable-tool",
+              title: "Dev-only advisory",
+              url: "https://github.com/advisories/dev-only-example",
+              severity: "high",
+              range: "<1.0.1",
+            },
+          ],
+          effects: [],
+          range: "<1.0.1",
+          nodes: ["node_modules/dev-only-vulnerable-tool"],
+          fixAvailable: false,
+        },
+      },
+      metadata: { vulnerabilities: { high: 1, total: 1 } },
+    };
+  }
+
   function runAudit(report: unknown, extraEnv: Record<string, string> = {}) {
     return spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
       cwd: root,
@@ -255,6 +284,56 @@ describe("supply-chain audit policy", () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("transient non-report response");
       expect(readFileSync(state, "utf8")).toBe("2");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["NODE_ENV=production", { NODE_ENV: "production" }],
+    ["npm_config_omit=dev", { NODE_ENV: "test", npm_config_omit: "dev", NPM_CONFIG_OMIT: "dev" }],
+  ])("reports dev-only high advisories when %s is inherited", (_name, inheritedEnv) => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-dev-"));
+    const fakeNpm = join(dir, "npm");
+    writeFileSync(
+      fakeNpm,
+      [
+        "#!/usr/bin/env node",
+        `const report = ${JSON.stringify(devOnlyAuditReport())};`,
+        "const args = process.argv.slice(2);",
+        'const devIncluded = args.includes("--include=dev") && process.env.npm_config_include === "dev";',
+        "const omitCleared =",
+        "  !process.env.npm_config_omit && !process.env.NPM_CONFIG_OMIT &&",
+        "  !process.env.npm_config_only && !process.env.NPM_CONFIG_ONLY &&",
+        '  process.env.NODE_ENV === "development" &&',
+        '  process.env.npm_config_production === "false";',
+        "if (devIncluded && omitCleared) {",
+        "  console.log(JSON.stringify(report));",
+        "  process.exit(1);",
+        "}",
+        "console.log(JSON.stringify({ auditReportVersion: 2, vulnerabilities: {}, metadata: { vulnerabilities: { total: 0 } } }));",
+        "process.exit(0);",
+      ].join("\n"),
+    );
+    chmodSync(fakeNpm, 0o755);
+
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        ...inheritedEnv,
+      };
+      delete env.B2_MCP_AUDIT_REPORT_JSON;
+      delete env.B2_MCP_AUDIT_POLICY_JSON;
+      delete env.B2_MCP_AUDIT_TODAY;
+      const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
+        cwd: root,
+        env,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("dev-only-vulnerable-tool:999002 high");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

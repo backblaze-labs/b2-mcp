@@ -12,7 +12,7 @@ const runtimePolicy = JSON.parse(readFileSync(path.join(root, "runtime-policy.js
 const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-consumer-"));
 const home = path.join(workspace, "home");
 const npmCache = path.join(workspace, "npm-cache");
-const { commandLine, isTransientNpmFailure, sleep } = retryUtils;
+const { commandLine, runNpmCommandWithRetries } = retryUtils;
 const { sanitizedEnv: baseSanitizedEnv } = envUtils;
 // These names intentionally look like credentials. The child-process probe below
 // verifies sanitizedEnv strips them before any npm or package process starts.
@@ -23,8 +23,8 @@ const sanitizerBlockedEnv = {
   NPM_TOKEN: "sentinel-npm-token",
 };
 
-function sanitizedEnv(extra = {}) {
-  const env = baseSanitizedEnv(extra);
+function sanitizedEnv(extra = {}, options = {}) {
+  const env = baseSanitizedEnv(extra, { nonSecretEnvNames: options.nonSecretEnvNames });
   env.HOME = home;
   env.USERPROFILE = home;
   env.npm_config_cache = npmCache;
@@ -33,45 +33,38 @@ function sanitizedEnv(extra = {}) {
   return env;
 }
 
-function isRetriableNpmFailure(command, result) {
-  if (command !== "npm") return false;
-  return isTransientNpmFailure(result);
-}
-
 function run(command, args, options = {}) {
-  const attempts = (options.retries ?? 0) + 1;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = spawnSync(command, args, {
-      cwd: options.cwd ?? workspace,
-      env: sanitizedEnv(options.env),
-      encoding: "utf8",
-      timeout: options.timeout ?? 120_000,
-      stdio: options.stdio ?? "pipe",
-    });
-    const failed = result.error || (options.allowFailure !== true && result.status !== 0);
-    if (!failed) return result;
+  const spawnOptions = {
+    cwd: options.cwd ?? workspace,
+    env: sanitizedEnv(options.env, { nonSecretEnvNames: options.nonSecretEnvNames }),
+    encoding: "utf8",
+    timeout: options.timeout ?? 120_000,
+    stdio: options.stdio ?? "pipe",
+  };
+  const result =
+    command === "npm" && (options.retries ?? 0) > 0
+      ? runNpmCommandWithRetries(args, {
+          attempts: (options.retries ?? 0) + 1,
+          retryDelayMs: options.retryDelayMs ?? 1_000,
+          retryLabel: options.retryLabel,
+          retryMessage: ({ label, attempt, attempts }) =>
+            `packed-consumer-smoke: retrying ${label} after transient registry failure (${attempt}/${attempts})`,
+          spawnOptions,
+        })
+      : spawnSync(command, args, spawnOptions);
+  const failed = result.error || (options.allowFailure !== true && result.status !== 0);
+  if (!failed) return result;
 
-    if (attempt < attempts && isRetriableNpmFailure(command, result)) {
-      const label = options.retryLabel ?? commandLine(command, args);
-      console.warn(
-        `packed-consumer-smoke: retrying ${label} after transient registry failure (${attempt}/${attempts})`,
-      );
-      sleep((options.retryDelayMs ?? 1_000) * attempt);
-      continue;
-    }
-
-    if (result.error) {
-      throw new Error(
-        `${commandLine(command, args)} failed: ${result.error.message}\n${result.stdout ?? ""}\n${
-          result.stderr ?? ""
-        }`,
-      );
-    }
+  if (result.error) {
     throw new Error(
-      `${commandLine(command, args)} failed with ${result.status}\n${result.stdout}\n${result.stderr}`,
+      `${commandLine(command, args)} failed: ${result.error.message}\n${result.stdout ?? ""}\n${
+        result.stderr ?? ""
+      }`,
     );
   }
-  throw new Error(`${commandLine(command, args)} failed without a result`);
+  throw new Error(
+    `${commandLine(command, args)} failed with ${result.status}\n${result.stdout}\n${result.stderr}`,
+  );
 }
 
 function writeConsumerLock(tarball) {
@@ -197,6 +190,7 @@ try {
       B2_APPLICATION_KEY: "",
       B2_REGISTER_ALL_TOOLS: "true",
     },
+    nonSecretEnvNames: ["B2_REGISTER_ALL_TOOLS"],
     timeout: 10_000,
   });
   if (withoutCreds.status !== 1) {
