@@ -84,3 +84,16 @@ requests, and retries expired-token or transient upstream failures. The server
 therefore pins the SDK to an exact reviewed version in `package.json`, verifies
 the package-lock integrity hash in tests, and treats every SDK version bump as a
 security-reviewed dependency change rather than an automated floating update.
+
+## npm Supply-Chain Incident Response
+
+Lifecycle scripts are disabled for normal installs via `.npmrc`, and
+`npm run audit:supply-chain` runs the repository denylist gate before the live
+npm advisory audit. The denylist gate blocks the known keyv/cacheable malicious
+versions and payload hashes from issue #89.
+
+If a denied package or IOC is found, treat the host as compromised, rebuild it
+from a clean image, revoke reachable GitHub/npm/cloud/CI credentials, revoke any
+reachable B2 application keys, and audit source control plus npm publishing
+history before restoring automation. The full runbook is
+[`docs/SUPPLY_CHAIN_SECURITY.md`](docs/SUPPLY_CHAIN_SECURITY.md).

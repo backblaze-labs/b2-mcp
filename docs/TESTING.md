@@ -22,7 +22,7 @@ individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------ |
-| `npm test`              | Typecheck via `pretest`, then `npm run test:unit`.                                   |
+| `npm test`              | Typecheck, then `npm run test:unit`.                                                 |
 | `npm run test:unit`     | Fast source unit tests.                                                              |
 | `npm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
 | `npm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
@@ -148,6 +148,23 @@ part of the `mark-green` deploy gate on `main` pushes:
 npm run audit:supply-chain
 ```
 
+The first phase of that command is the repository denylist/IOC gate for active
+npm supply-chain incidents:
+
+```bash
+npm run audit:supply-chain:denylist -- --packlist
+```
+
+CI also fetches every branch ref and runs:
+
+```bash
+npm run audit:supply-chain:denylist -- --all-branches --packlist
+```
+
+For downloaded GitHub workflow artifacts, expand the artifacts and pass each
+root with `--artifacts-dir`. The detailed branch and artifact workflow is in
+[`SUPPLY_CHAIN_SECURITY.md`](SUPPLY_CHAIN_SECURITY.md).
+
 Known exceptions must live in `audit-policy.json` with an expiry, maximum
 severity, dependency path, lockfile version/integrity, and rationale. The
 current policy has no exceptions; adding one requires explicit security-owner
@@ -156,7 +173,9 @@ review.
 `scripts/audit-supply-chain.mjs` always runs a real `npm audit` outside
 `NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded
 npm fetch retry options, and retries transient registry/network failures before
-evaluating advisories. Expired advisory exceptions fail the audit on pull
+evaluating advisories. `scripts/check-supply-chain-denylist.mjs` runs without
+executing package lifecycle scripts and also scans the `npm pack --dry-run`
+file list when `--packlist` is passed. Expired advisory exceptions fail the audit on pull
 requests and on the `main` deploy-gating path required by `mark-green`; the
 `ci-green` ref must not advance after an exception expiry without an affirmative
 policy update or exception removal. `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn`

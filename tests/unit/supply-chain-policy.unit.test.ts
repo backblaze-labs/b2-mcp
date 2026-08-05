@@ -12,6 +12,11 @@ const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") 
 
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+  const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const npmrc = readFileSync(join(root, ".npmrc"), "utf8");
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
   const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
     allowedAdvisories: Array<{
       name: string;
@@ -190,6 +195,11 @@ describe("supply-chain audit policy", () => {
     const markGreenJob = jobBlock("mark-green");
     expect(workflow).toContain("supply-chain-audit:");
     expect(workflow).toContain("npm run audit:supply-chain");
+    expect(workflow).toContain("npm run audit:supply-chain:denylist -- --all-branches --packlist");
+    expect(auditJob).toContain("fetch-depth: 0");
+    expect(auditJob).toContain(
+      "git fetch --prune --no-tags origin '+refs/heads/*:refs/remotes/origin/*'",
+    );
     expect(workflow).not.toContain("npm audit --omit=dev");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
     expect(auditJob).toContain("Reject injected audit fixtures");
@@ -207,6 +217,27 @@ describe("supply-chain audit policy", () => {
     ]) {
       expect(markGreenJob).toContain(required);
     }
+  });
+
+  it("disables normal lifecycle scripts and isolates npm publishing", () => {
+    expect(npmrc).toMatch(/^ignore-scripts=true$/m);
+    expect(packageJson.scripts["audit:supply-chain"]).toContain(
+      "npm run audit:supply-chain:denylist -- --packlist",
+    );
+    expect(packageJson.scripts["audit:supply-chain:denylist"]).toBe(
+      "node scripts/check-supply-chain-denylist.mjs",
+    );
+    expect(packageJson.scripts.test).toBe("npm run typecheck && npm run test:unit");
+    expect(packageJson.scripts.pretest).toBeUndefined();
+    expect(publishWorkflow).toContain("id-token: write");
+    expect(publishWorkflow).toContain("environment: npm-publish");
+    expect(publishWorkflow).toContain("refs/heads/ci-green");
+    expect(publishWorkflow).toContain(
+      "npm run audit:supply-chain:denylist -- --all-branches --packlist",
+    );
+    expect(publishWorkflow).toContain(
+      "npm publish --provenance --access public --ignore-scripts=false",
+    );
   });
 
   it("guards ci-green against stale main workflow runs", () => {

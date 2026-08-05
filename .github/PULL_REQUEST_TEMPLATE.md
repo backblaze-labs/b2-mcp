@@ -21,4 +21,4 @@
 - [ ] Modifies authentication, authorization, or token handling
 - [ ] Changes how B2 credentials flow through the server
 - [ ] Touches the HTTP transport or request parsing
-- [ ] Updates dependencies (run `npm audit` after)
+- [ ] Updates dependencies (run `npm run audit:supply-chain` after)
