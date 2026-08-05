@@ -28,6 +28,7 @@ import { B2ReportClient, type ReportObjectClient } from "./report-client.js";
 import { B2AuthManager } from "../auth.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { dateFromTimestamp } from "../utils/date.js";
+import { abortError, timeoutError } from "../utils/named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 
 const GB = 1e9; // report columns are GB = 1e9 bytes
@@ -732,7 +733,9 @@ function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
 }
 
 function isInsightDeadlineError(err: unknown): boolean {
-  return err instanceof DOMException && err.name === "TimeoutError";
+  return (
+    typeof err === "object" && err !== null && (err as { name?: unknown }).name === "TimeoutError"
+  );
 }
 
 async function withNativeInsightDeadline<T>(
@@ -742,16 +745,16 @@ async function withNativeInsightDeadline<T>(
 ): Promise<T> {
   const remaining = budgetMs - (Date.now() - startedAt);
   if (remaining <= 0) {
-    throw new DOMException("B2 insight scan timed out", "TimeoutError");
+    throw timeoutError("B2 insight scan timed out");
   }
 
   const parent = currentMcpRequestSignal();
   const controller = new AbortController();
   const abortFromParent = () => {
-    controller.abort(parent?.reason ?? new DOMException("Aborted", "AbortError"));
+    controller.abort(parent?.reason ?? abortError());
   };
   const timer = setTimeout(() => {
-    controller.abort(new DOMException("B2 insight scan timed out", "TimeoutError"));
+    controller.abort(timeoutError("B2 insight scan timed out"));
   }, remaining);
   unrefTimer(timer);
 

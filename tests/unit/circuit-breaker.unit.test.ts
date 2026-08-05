@@ -8,6 +8,18 @@ import {
 } from "../../src/utils/circuit-breaker";
 import { currentMcpRequestSignal } from "../../src/request-context";
 
+function domAbortError(message = "caller aborted"): Error {
+  const DomExceptionCtor = (
+    globalThis as typeof globalThis & {
+      DOMException?: new (message?: string, name?: string) => Error;
+    }
+  ).DOMException;
+  if (DomExceptionCtor) return new DomExceptionCtor(message, "AbortError");
+  const fallback = new Error(message);
+  fallback.name = "AbortError";
+  return fallback;
+}
+
 describe("circuit-breaker", () => {
   afterEach(() => {
     // Force the breaker back to a clean closed state between tests.
@@ -53,7 +65,7 @@ describe("circuit-breaker", () => {
     abort.name = "AbortError";
 
     expect(isClientError(abort)).toBe(true);
-    expect(isClientError(new DOMException("caller aborted", "AbortError"))).toBe(true);
+    expect(isClientError(domAbortError())).toBe(true);
     expect(isClientError(Object.assign(new Error("aborted"), { code: "ABORT_ERR" }))).toBe(true);
     expect(isClientError(Object.assign(new Error("timeout"), { name: "TimeoutError" }))).toBe(
       false,
@@ -108,7 +120,7 @@ describe("circuit-breaker", () => {
       for (let i = 0; i < 12; i++) {
         await expect(
           run(async () => {
-            if (i % 2 === 0) throw new DOMException("caller aborted", "AbortError");
+            if (i % 2 === 0) throw domAbortError();
             const abort = new Error("caller aborted");
             abort.name = "AbortError";
             throw abort;

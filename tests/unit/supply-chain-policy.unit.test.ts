@@ -198,11 +198,15 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).not.toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: warn");
     expect(productionJob).not.toContain("npm run audit:supply-chain");
     expect(currentJob).not.toContain("npm run audit:supply-chain");
-    expect(markGreenJob).toContain(
-      "runtime-engine-floor, deterministic-linux-production, supply-chain-audit",
-    );
-    expect(markGreenJob).not.toContain("deterministic-linux-current");
-    expect(markGreenJob).not.toContain("cross-platform-minimum");
+    for (const required of [
+      "runtime-engine-floor",
+      "deterministic-linux-production",
+      "deterministic-linux-current",
+      "cross-platform-minimum",
+      "supply-chain-audit",
+    ]) {
+      expect(markGreenJob).toContain(required);
+    }
   });
 
   it("guards ci-green against stale main workflow runs", () => {
