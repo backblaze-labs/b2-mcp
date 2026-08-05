@@ -6,7 +6,11 @@
   "protocolVersion": "2026-07-28",
   "transport": "streamable-http",
   "mcpRevision": "2026-07-28",
-  "sdk": { "@modelcontextprotocol/server": "2.0.0", "@modelcontextprotocol/client": "2.0.0" },
+  "sdk": {
+    "@backblaze-labs/b2-sdk": "0.2.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0"
+  },
   "capabilities": [
     "deleteBuckets",
     "deleteFiles",

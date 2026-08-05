@@ -100,11 +100,17 @@ export interface ContractArtifact {
   profiles: Record<ProfileName, ContractProfile>;
 }
 
+export interface ToolContractPackageJson {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+}
+
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
   full: "Complete tool superset for contract review and regression detection.",
   "phase1-default":
     "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, durable-secret producers exposed only as unavailable compatibility stubs.",
-  "read-only": "Deterministic read/list profile for safe production use and contract tests.",
+  "read-only":
+    "Deterministic read/list profile for safe production use and contract tests; b2_create_key, b2_create_group_member, and b2_reserve_trial_create_account remain present only as unavailable 410 compatibility stubs.",
 };
 
 export const PROFILE_NAMES = Object.keys(PROFILE_CAPABILITIES) as ProfileName[];
@@ -124,6 +130,14 @@ export const CONTRACT_TEST_CONFIG: B2Config = {
 export function capabilitiesForProfile(profile: ProfileName): string[] | null {
   const capabilities = PROFILE_CAPABILITIES[profile];
   return capabilities === null ? null : [...capabilities];
+}
+
+export function contractSdkVersions(packageJson: ToolContractPackageJson): Record<string, string> {
+  return {
+    "@backblaze-labs/b2-sdk": packageJson.dependencies["@backblaze-labs/b2-sdk"],
+    "@modelcontextprotocol/client": packageJson.devDependencies["@modelcontextprotocol/client"],
+    "@modelcontextprotocol/server": packageJson.dependencies["@modelcontextprotocol/server"],
+  };
 }
 
 export function sha256(value: string): string {

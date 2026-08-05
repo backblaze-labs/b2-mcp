@@ -18,6 +18,7 @@ import {
   PROFILE_NAMES,
   capabilitiesForProfile,
   confirmToolsFrom,
+  contractSdkVersions,
   countPrefixes,
   destructiveConfirmToolsForNames,
   fixtureHash,
@@ -30,14 +31,12 @@ import {
   type JsonObject,
   type NormalizedTool,
   type ProfileName,
+  type ToolContractPackageJson,
   type ToolFixture,
 } from "../../src/tool-contract";
 
 const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
-const packageJson = readJson<{
-  dependencies: Record<string, string>;
-  devDependencies: Record<string, string>;
-}>("package.json");
+const packageJson = readJson<ToolContractPackageJson>("package.json");
 const prettierBin = join(root, "node_modules/prettier/bin/prettier.cjs");
 
 const profileNames = Object.keys(contract.profiles) as ProfileName[];
@@ -141,10 +140,7 @@ async function collectFixture(profile: ProfileName, era: Era): Promise<ToolFixtu
     protocolVersion: collected.protocolVersion,
     transport: "streamable-http",
     mcpRevision: contract.mcpRevision,
-    sdk: {
-      "@modelcontextprotocol/server": packageJson.dependencies["@modelcontextprotocol/server"],
-      "@modelcontextprotocol/client": packageJson.devDependencies["@modelcontextprotocol/client"],
-    },
+    sdk: contractSdkVersions(packageJson),
     capabilities: contract.profiles[profile].capabilities,
     counts: countPrefixes(names),
     names,
@@ -299,6 +295,7 @@ function assertBoundedRefs(schema: JsonObject): void {
 describe("MCP tool profile fixtures", () => {
   it("publishes the approved profiles and capability inputs in the artifact", () => {
     expect(profileNames).toEqual(PROFILE_NAMES);
+    expect(contract.sdk).toEqual(contractSdkVersions(packageJson));
     for (const profile of profileNames) {
       expect(contract.profiles[profile].capabilities).toEqual(capabilitiesForProfile(profile));
     }

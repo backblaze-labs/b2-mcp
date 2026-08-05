@@ -22,6 +22,7 @@ const {
   TOOL_CONTRACT_ISSUE_URL,
   capabilitiesForProfile,
   confirmToolsFrom,
+  contractSdkVersions,
   countPrefixes,
   destructiveConfirmToolsForNames,
   fixtureHash,
@@ -33,6 +34,7 @@ const {
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const sdkVersions = contractSdkVersions(packageJson);
 
 async function listenOnEphemeralPort(handle) {
   await new Promise((resolve) => handle.server.listen(0, "127.0.0.1", resolve));
@@ -79,10 +81,7 @@ async function collectToolsList(profile, era) {
         era === "modern" ? client.getNegotiatedProtocolVersion() : LEGACY_PROTOCOL_VERSION,
       transport: "streamable-http",
       mcpRevision: MCP_REVISION,
-      sdk: {
-        "@modelcontextprotocol/server": packageJson.dependencies["@modelcontextprotocol/server"],
-        "@modelcontextprotocol/client": packageJson.devDependencies["@modelcontextprotocol/client"],
-      },
+      sdk: sdkVersions,
       capabilities,
       counts: countPrefixes(names),
       names,
@@ -177,10 +176,7 @@ async function main() {
       ttlMs: APPROVED_TTL_MS,
       cacheScope: APPROVED_CACHE_SCOPE,
     },
-    sdk: {
-      "@modelcontextprotocol/server": packageJson.dependencies["@modelcontextprotocol/server"],
-      "@modelcontextprotocol/client": packageJson.devDependencies["@modelcontextprotocol/client"],
-    },
+    sdk: sdkVersions,
     profiles,
   };
 

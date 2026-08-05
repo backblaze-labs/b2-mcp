@@ -17,6 +17,8 @@ deterministic `tools/list` fixtures are checked in under
 Each profile entry records the capability input that generated it; each fixture
 hash covers the sorted tool names and normalized tool definitions, including
 model-visible schema and parameter descriptions.
+The artifact and fixtures also identify the resolved MCP SDK packages and
+`@backblaze-labs/b2-sdk` version used to produce the snapshot.
 
 The public contract defines:
 

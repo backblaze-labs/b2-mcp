@@ -135,7 +135,7 @@ Profile hash: `d5e36e8792f16d7b3b05edfd8e1a4e67f728fbfeafa7f6a6e1a65a0799a383d5`
 
 ## `read-only`
 
-Deterministic read/list profile for safe production use and contract tests.
+Deterministic read/list profile for safe production use and contract tests; b2_create_key, b2_create_group_member, and b2_reserve_trial_create_account remain present only as unavailable 410 compatibility stubs.
 
 Profile hash: `ff3b2980b387719edcaad20b0f582b497e11acae4ed8d2e58942bc3442410882`
 

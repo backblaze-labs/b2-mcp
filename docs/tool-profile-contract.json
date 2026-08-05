@@ -4,7 +4,11 @@
   "issueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/49",
   "mcpRevision": "2026-07-28",
   "approvedCacheHint": { "ttlMs": 30000, "cacheScope": "private" },
-  "sdk": { "@modelcontextprotocol/server": "2.0.0", "@modelcontextprotocol/client": "2.0.0" },
+  "sdk": {
+    "@backblaze-labs/b2-sdk": "0.2.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0"
+  },
   "profiles": {
     "full": {
       "description": "Complete tool superset for contract review and regression detection.",
@@ -261,7 +265,7 @@
       }
     },
     "read-only": {
-      "description": "Deterministic read/list profile for safe production use and contract tests.",
+      "description": "Deterministic read/list profile for safe production use and contract tests; b2_create_key, b2_create_group_member, and b2_reserve_trial_create_account remain present only as unavailable 410 compatibility stubs.",
       "capabilities": [
         "listBuckets",
         "listFiles",
