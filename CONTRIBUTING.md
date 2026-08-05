@@ -19,7 +19,7 @@ npm run build        # clean + tsc → dist/
 npm test             # typecheck, then fast unit suite
 npm run verify       # full no-credential local gate
 npm run lint         # Biome lint for src/, tests/, and scripts/
-npm run format:check # Biome-supported format check
+npm run format:check # checks Biome-supported formatting
 ```
 
 For the version/build-pinned conda bootstrap:
