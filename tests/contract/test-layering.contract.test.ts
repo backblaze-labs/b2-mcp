@@ -224,26 +224,42 @@ describe("test layer naming", () => {
     expect(result.stderr).not.toContain("runner-fixture");
   });
 
-  it.each(["runner-fixture-live", "runner-fixture-nonlive"])(
-    "rejects custom reporters for %s with B2 credentials",
-    (layer) => {
+  it.each([
+    ["--config=/tmp/evil.vitest.config.mjs", "runner-fixture-nonlive"],
+    ["--globalSetup=/tmp/evil.vitest.setup.mjs", "runner-fixture-nonlive"],
+    ["--config=/tmp/evil.vitest.config.mjs", "runner-fixture-live"],
+  ])("rejects raw Vitest arg %s for %s with B2 credentials", (rawArg, layer) => {
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", layer, "--", rawArg], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...envWithoutB2Credentials(),
+        B2_APPLICATION_KEY_ID: "fake-live-key-id",
+        B2_APPLICATION_KEY: "fake-live-key-secret",
+      },
+      timeout: 30_000,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("do not accept raw Vitest args");
+  });
+
+  it.each(["--config=/tmp/evil.vitest.config.mjs", "--globalSetup=/tmp/evil.vitest.setup.mjs"])(
+    "rejects raw Vitest arg %s for live layers without ambient credentials",
+    (rawArg) => {
       const result = spawnSync(
         "node",
-        ["scripts/run-vitest-layer.mjs", layer, "--", "--reporter=junit"],
+        ["scripts/run-vitest-layer.mjs", "runner-fixture-live", "--", rawArg],
         {
           cwd: root,
           encoding: "utf8",
-          env: {
-            ...envWithoutB2Credentials(),
-            B2_APPLICATION_KEY_ID: "fake-live-key-id",
-            B2_APPLICATION_KEY: "fake-live-key-secret",
-          },
+          env: envWithoutB2Credentials(),
           timeout: 30_000,
         },
       );
 
       expect(result.status).toBe(2);
-      expect(result.stderr).toContain("do not accept custom reporters");
+      expect(result.stderr).toContain("do not accept raw Vitest args");
     },
   );
 

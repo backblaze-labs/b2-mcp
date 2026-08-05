@@ -30,7 +30,7 @@ const publicLayerRegistry = Object.fromEntries(
   ]),
 );
 publicLayerRegistry.coverage = {
-  args: ["--coverage", ...projectArgs(...coverageLayerNames)],
+  args: ["--coverage", "--fileParallelism=false", ...projectArgs(...coverageLayerNames)],
   live: false,
   coverage: true,
 };
@@ -82,16 +82,9 @@ const liveLayer = layerConfig.live;
 const coverageArgs =
   layerConfig.coverage || hasCoverageArg(extraVitestArgs) ? [] : ["--coverage=false"];
 const hasB2CredentialEnv = b2CredentialEnvNames(process.env).length > 0;
-const hasCustomReporter = extraVitestArgs.some(
-  (arg) =>
-    arg === "--reporter" ||
-    arg.startsWith("--reporter=") ||
-    arg === "--reporters" ||
-    arg.startsWith("--reporters="),
-);
 
-if (hasB2CredentialEnv && hasCustomReporter) {
-  console.error("Vitest layers with B2 credentials do not accept custom reporters.");
+if ((liveLayer || hasB2CredentialEnv) && extraVitestArgs.length > 0) {
+  console.error("Vitest layers with live tests or B2 credentials do not accept raw Vitest args.");
   process.exit(2);
 }
 const allowJunit = !liveLayer && !hasB2CredentialEnv;
@@ -105,7 +98,7 @@ const summaryReporter = join(root, "scripts", "vitest-layer-summary-reporter.mjs
 const vitestArgs = [
   "run",
   "--config",
-  "vitest.config.ts",
+  "vitest.config.mts",
   ...layerConfig.args,
   ...coverageArgs,
   ...extraVitestArgs,

@@ -125,6 +125,9 @@ describe("Biome runner", () => {
         throw err;
       }
 
+      // Scope this fixture to paths that exercise the gitignored symlink. The
+      // full format:check script would make this unit test depend on unrelated
+      // repository files.
       const result = spawnSync(
         process.execPath,
         ["scripts/run-biome.mjs", "format", "biome.json", ".vscode"],

@@ -41,7 +41,7 @@ const result = spawnSync(
     vitestBin,
     "run",
     "--config",
-    "vitest.config.ts",
+    "vitest.config.mts",
     "--coverage=false",
     ...projectNames.map((name) => `--project=${name}`),
     ...tests,
