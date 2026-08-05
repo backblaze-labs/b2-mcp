@@ -677,6 +677,36 @@ describe("HTTP transport handler", () => {
     expect(capturedAuth).toBe(authInfo);
   });
 
+  it("preserves repeated adapter response headers", async () => {
+    await replaceHandle(undefined, {
+      credentialProvider: credentialProviderFromHeaders(),
+      fetchCapabilities: jest.fn(async () => null),
+      mcpHandler: {
+        fetch: async () =>
+          new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { ok: true } }), {
+            status: 200,
+            headers: [
+              ["Content-Type", "application/json"],
+              ["Set-Cookie", "first=1; Path=/; HttpOnly"],
+              ["Set-Cookie", "second=2; Path=/; HttpOnly"],
+            ],
+          }),
+        close: jest.fn(),
+      },
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers["set-cookie"]).toEqual([
+      "first=1; Path=/; HttpOnly",
+      "second=2; Path=/; HttpOnly",
+    ]);
+  });
+
   it("returns a protocol-safe 500 when the fetch handler throws", async () => {
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),

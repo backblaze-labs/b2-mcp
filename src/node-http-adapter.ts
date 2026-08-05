@@ -1,4 +1,4 @@
-import type { IncomingHttpHeaders, ServerResponse } from "http";
+import type { IncomingHttpHeaders, OutgoingHttpHeaders, ServerResponse } from "http";
 import type {
   AuthInfo,
   McpHandlerRequestOptions,
@@ -116,15 +116,31 @@ function waitForDrain(res: ServerResponse, signal: AbortSignal): Promise<void> {
   });
 }
 
+function headersFromWeb(headers: Headers): OutgoingHttpHeaders {
+  const nodeHeaders: OutgoingHttpHeaders = {};
+  for (const [name, value] of headers) {
+    const current = nodeHeaders[name];
+    if (current === undefined) {
+      nodeHeaders[name] = value;
+    } else if (Array.isArray(current)) {
+      current.push(value);
+    } else {
+      nodeHeaders[name] = [String(current), value];
+    }
+  }
+
+  const setCookies = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
+  if (setCookies && setCookies.length > 0) nodeHeaders["set-cookie"] = setCookies;
+  return nodeHeaders;
+}
+
 async function writeWebResponse(
   response: Response,
   res: ServerResponse,
   signal: AbortSignal,
   options: NodeHttpAdapterOptions,
 ): Promise<void> {
-  const headers: Record<string, string> = {};
-  for (const [name, value] of response.headers) headers[name] = value;
-  res.writeHead(response.status, headers);
+  res.writeHead(response.status, headersFromWeb(response.headers));
 
   if (response.body !== null) {
     try {
