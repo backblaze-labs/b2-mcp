@@ -39,6 +39,7 @@ describe("supply-chain audit policy", () => {
       string,
       {
         dependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
         engines?: { node?: string };
         integrity?: string;
         version?: string;
@@ -275,12 +276,56 @@ describe("supply-chain audit policy", () => {
     }
   });
 
-  it("keeps the full lockfile installable on the advertised Node floor", () => {
-    const unsupported = Object.entries(lock.packages)
-      .filter(([_path, pkg]) => {
-        return pkg.engines?.node && !semver.satisfies("22.3.0", pkg.engines.node);
+  it("keeps the doc lint dependency closure installable on the Node runtime floor", () => {
+    const pending = [
+      "eslint",
+      "eslint-plugin-jsdoc",
+      "eslint-plugin-tsdoc",
+      "typescript",
+      "typescript-eslint",
+    ].map((name) => `node_modules/${name}`);
+    const docLintPackages = new Set<string>();
+
+    while (pending.length > 0) {
+      const packagePath = pending.pop() as string;
+      if (docLintPackages.has(packagePath)) continue;
+      const pkg = lock.packages[packagePath];
+      if (!pkg) throw new Error(`Missing doc lint lockfile package: ${packagePath}`);
+      docLintPackages.add(packagePath);
+
+      const dependencies = {
+        ...(pkg.dependencies ?? {}),
+        ...(pkg.optionalDependencies ?? {}),
+      };
+      for (const name of Object.keys(dependencies)) {
+        let scope = packagePath;
+        let resolvedPath: string | undefined;
+        while (scope) {
+          const candidate = `${scope}/node_modules/${name}`;
+          if (lock.packages[candidate]) {
+            resolvedPath = candidate;
+            break;
+          }
+          const parentIndex = scope.lastIndexOf("/node_modules/");
+          scope = parentIndex === -1 ? "" : scope.slice(0, parentIndex);
+        }
+        resolvedPath ??= lock.packages[`node_modules/${name}`] ? `node_modules/${name}` : undefined;
+        if (!resolvedPath) {
+          throw new Error(`Missing ${name} required by ${packagePath}`);
+        }
+        pending.push(resolvedPath);
+      }
+    }
+
+    const unsupported = [...docLintPackages]
+      .filter((path) => {
+        const range = lock.packages[path].engines?.node;
+        return range && !semver.satisfies("22.3.0", range);
       })
-      .map(([path, pkg]) => `${path || "<root>"}@${pkg.version}: ${pkg.engines?.node}`);
+      .map((path) => {
+        const pkg = lock.packages[path];
+        return `${path}@${pkg.version}: ${pkg.engines?.node}`;
+      });
 
     expect(unsupported).toEqual([]);
   });
