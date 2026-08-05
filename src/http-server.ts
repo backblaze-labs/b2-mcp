@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/**
+/*
  * Backblaze B2 MCP Server — HTTP transport entry point.
  *
  * Production serving uses the MCP SDK v2 per-request HTTP handler for the

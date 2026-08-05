@@ -162,6 +162,8 @@ async function writeWebResponse(
 /**
  * Adapts the MCP SDK's web-standard fetch handler to Node's HTTP server API.
  * Keeping this narrow bridge local avoids shipping an additional web framework.
+ *
+ * @returns A Node HTTP request handler that delegates to the MCP fetch handler.
  */
 export function createNodeHttpHandler(
   handler: Pick<McpHttpHandler, "fetch">,

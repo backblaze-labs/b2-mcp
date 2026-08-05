@@ -38,7 +38,11 @@ const GB = 1e9; // report columns are GB = 1e9 bytes
 
 // ── CSV parsing ─────────────────────────────────────────────────────────────
 
-/** Minimal RFC-4180 parser: handles quoted fields, embedded commas, and "" escapes. */
+/**
+ * Minimal RFC-4180 parser: handles quoted fields, embedded commas, and "" escapes.
+ *
+ * @returns Parsed data rows keyed by CSV header names.
+ */
 export function parseCsv(text: string): Array<Record<string, string>> {
   const rows: string[][] = [];
   let field = "";
@@ -87,7 +91,11 @@ export function parseCsv(text: string): Array<Record<string, string>> {
   });
 }
 
-/** Normalize a report date to YYYY-MM-DD (the partner CSV sometimes uses M/D/YY). */
+/**
+ * Normalize a report date to YYYY-MM-DD (the partner CSV sometimes uses M/D/YY).
+ *
+ * @returns The normalized date, or null when the value cannot be parsed.
+ */
 export function normalizeDate(raw: string): string | null {
   const s = (raw || "").trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -304,6 +312,8 @@ function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknow
  * full-capability, account-wide keys — so we construct the name directly rather
  * than try to discover it by listing. Existence is then probed by the S3 read in
  * loadReportRows (a 404 on the bucket → Usage Reports not enabled).
+ *
+ * @returns The reserved usage-report bucket name for the authorized account.
  */
 async function reportsBucketName(auth: B2AuthManager): Promise<string> {
   const { accountId } = await auth.getAuth();
@@ -317,6 +327,8 @@ async function reportsBucketName(auth: B2AuthManager): Promise<string> {
  * file would double-count every metric. Falls back to all non-audit CSVs if a
  * different account type names its files differently (Groups/Locations rows lack
  * account_id/date and are dropped by mapRow anyway).
+ *
+ * @returns The report object keys that should be treated as usage data.
  */
 export function selectUsageKeys(keys: string[]): string[] {
   // Data files: usage.account-<acct>.csv and usage.group-<id>.<region>.csv.
@@ -333,6 +345,8 @@ export function selectUsageKeys(keys: string[]): string[] {
 /**
  * List + download the Usage CSVs within the window and return mapped rows.
  * Returns null when the bucket does not exist (reports not enabled).
+ *
+ * @returns The mapped report rows, or null when reports are not enabled.
  */
 async function loadReportRows(
   reportClient: ReportObjectClient,
@@ -469,8 +483,12 @@ const gb = (bytes: number | null) =>
 
 type Period = "month" | "quarter" | "year";
 
-/** Date one period before `from` (UTC), day-clamped for short months
- *  (e.g. Mar 31 minus one month → Feb 28/29, not Mar 3). */
+/**
+ * Date one period before `from` (UTC), day-clamped for short months
+ *  (e.g. Mar 31 minus one month → Feb 28/29, not Mar 3).
+ *
+ * @returns The period start date in YYYY-MM-DD format.
+ */
 export function periodStartDate(period: Period, from: Date): string {
   const y = from.getUTCFullYear();
   const m = from.getUTCMonth();
@@ -498,8 +516,12 @@ function is404(e: unknown): boolean {
   return err.name === "NoSuchBucket" || err.$metadata?.httpStatusCode === 404;
 }
 
-/** Date of the nearest available daily snapshot at or after `target`.
- *  `{ bucketMissing: true }` ⇒ reports bucket absent (not enabled). */
+/**
+ * Date of the nearest available daily snapshot at or after `target`.
+ *  `{ bucketMissing: true }` ⇒ reports bucket absent (not enabled).
+ *
+ * @returns The matching snapshot date and whether the reports bucket is missing.
+ */
 async function nearestSnapshotDate(
   reportClient: ReportObjectClient,
   bucketName: string,
@@ -522,8 +544,12 @@ async function nearestSnapshotDate(
   }
 }
 
-/** Date of the latest available snapshot (most recent day on or before today).
- *  Lists only recent days via StartAfter, widening if reporting is stale. */
+/**
+ * Date of the latest available snapshot (most recent day on or before today).
+ *  Lists only recent days via StartAfter, widening if reporting is stale.
+ *
+ * @returns The latest snapshot date and whether the reports bucket is missing.
+ */
 export async function latestSnapshotDate(
   reportClient: ReportObjectClient,
   bucketName: string,
@@ -562,7 +588,11 @@ export async function latestSnapshotDate(
   return { date: null, bucketMissing: false };
 }
 
-/** All usage rows for a single day folder (summed across that day's region files). */
+/**
+ * All usage rows for a single day folder (summed across that day's region files).
+ *
+ * @returns The mapped usage rows for that day.
+ */
 export async function loadDayRows(
   reportClient: ReportObjectClient,
   bucketName: string,
@@ -624,8 +654,12 @@ export interface SnapshotGrowth {
   isNew: boolean;
 }
 
-/** Per-account stored-data growth between two snapshots. Accounts present only
- *  in `now` are new (no % baseline); present only in `then` shrank toward zero. */
+/**
+ * Per-account stored-data growth between two snapshots. Accounts present only
+ *  in `now` are new (no % baseline); present only in `then` shrank toward zero.
+ *
+ * @returns Growth rows sorted by descending stored-byte growth.
+ */
 export function computeSnapshotGrowth(
   thenRows: ReportRow[],
   nowRows: ReportRow[],

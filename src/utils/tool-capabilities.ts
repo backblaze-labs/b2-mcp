@@ -63,9 +63,11 @@ export const DURABLE_SECRET_PRODUCING_TOOLS = new Set<string>([
   "b2_reserve_trial_create_account",
 ]);
 
-/** Partner/Groups tools — registered only when a distinct master key is
+/**
+ * Partner/Groups tools — registered only when a distinct master key is
  *  configured (they need Partner-API entitlement, not a standard capability),
- *  so they are exempt from capability filtering and gated in createServer. */
+ *  so they are exempt from capability filtering and gated in createServer.
+ */
 export const PARTNER_TOOLS = new Set<string>([
   "b2_list_groups",
   "b2_eject_group_member",
@@ -79,6 +81,8 @@ export const PARTNER_TOOLS = new Set<string>([
  * never hide a tool we did not explicitly classify). Mapped tools register when
  * the key holds any of the required capabilities. A null capability set is the
  * explicit full-surface mode and still honors durable-secret handler exclusion.
+ *
+ * @returns True when the tool should be registered for the capability set.
  */
 export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): boolean {
   if (DURABLE_SECRET_PRODUCING_TOOLS.has(name)) return false;

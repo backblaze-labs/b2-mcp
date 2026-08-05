@@ -279,6 +279,8 @@ export class B2AuthManager {
   /**
    * Return cached auth or re-authorize. Thread-safe: multiple concurrent
    * callers share a single in-flight SDK authorize call.
+   *
+   * @returns The cached or freshly authorized B2 auth response.
    */
   async getAuth(): Promise<B2AuthResponse> {
     this.syncCachedAuthFromSdk();
@@ -333,6 +335,8 @@ export class B2AuthManager {
   /**
    * Force a fresh authorization and return the result.
    * Useful for testing credentials or initial setup.
+   *
+   * @returns The freshly authorized B2 auth response.
    */
   async forceRefresh(): Promise<B2AuthResponse> {
     this.invalidate();

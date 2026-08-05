@@ -136,6 +136,8 @@ function customUserAgent(
 
 /**
  * Create an AWS SDK S3Client configured through the B2 SDK S3 helper.
+ *
+ * @returns The AWS SDK S3 client configuration for B2 S3 endpoints.
  */
 export function buildB2S3ClientConfig(
   config: B2Config,

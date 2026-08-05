@@ -51,7 +51,11 @@ export function _resetRetryBudget(): void {
   budget.lastRefill = Date.now();
 }
 
-/** Test-only: synchronously try to consume a retry token. */
+/**
+ * Test-only: synchronously try to consume a retry token.
+ *
+ * @returns True when a retry-budget token was consumed.
+ */
 export function _consumeRetryToken(): boolean {
   return consumeRetryBudgetToken();
 }

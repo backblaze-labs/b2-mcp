@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/**
+/*
  * Backblaze B2 MCP Server — stdio transport entry point.
  *
  * Usage:

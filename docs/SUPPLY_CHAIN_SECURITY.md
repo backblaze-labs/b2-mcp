@@ -9,11 +9,21 @@ controls that remain in force after the incident.
 ## Current Exposure Snapshot
 
 As of 2026-08-05, this repository's `package-lock.json` includes these related
-transitive packages through the ESLint toolchain:
+transitive packages through the narrowly reintroduced ESLint doc-comment
+toolchain:
 
 - `file-entry-cache@8.0.0`
 - `flat-cache@4.0.1`
 - `keyv@4.5.4`
+
+Biome remains the owner for code linting and formatting. ESLint is present only
+for `npm run lint:docs`, where it validates TSDoc syntax and JSDoc hygiene for
+the exported TypeScript tool/handler surface that Biome cannot validate. The
+direct doc-lint packages are exact-pinned in `package.json`; the lockfile
+snapshot above remains unchanged after reintroducing that narrow ESLint path.
+The `@typescript-eslint/visitor-keys` override keeps its `eslint-visitor-keys`
+resolution on a Node.js 22.3-compatible release so the full lockfile still
+installs under the advertised package engine floor with `npm ci --engine-strict`.
 
 Those are not the denied malicious versions recorded in the checked-in Wiz IOC
 snapshot at [`../security/iocs/keyv-packages.csv`](../security/iocs/keyv-packages.csv)
@@ -23,6 +33,17 @@ The current lockfile and publish packlist are checked by:
 ```bash
 npm run audit:supply-chain:denylist -- --packlist
 ```
+
+`npm run lint:docs` uses the repository-owned
+[`../scripts/run-doc-lint.mjs`](../scripts/run-doc-lint.mjs) wrapper rather than
+executing the ESLint binary directly. The wrapper strips secret-like environment
+variables, refuses local checkout credentials such as persisted GitHub
+`extraheader` values, and preloads a best-effort lockdown module that denies the
+tracked Node network, DNS, listener, child-process, and worker APIs before
+ESLint plugins are loaded. This in-process denylist is not a complete sandbox;
+review it when the Node runtime is upgraded and add newly exposed egress or code
+execution APIs to the lockdown tests. CI jobs that run `lint:docs` also check
+out with `persist-credentials: false`.
 
 ## Normal Install Policy
 

@@ -497,6 +497,10 @@ export function validateHttpCredentialConfiguration(
  * Header-compatibility parser. Returns null only when the required primary
  * header pair is absent/incomplete. Malformed optional pairs or conflicting
  * duplicate headers throw CredentialResolutionError with a stable code.
+ *
+ * @returns A B2 configuration, or null when the primary header pair is absent.
+ *
+ * @throws CredentialResolutionError when supplied HTTP credentials are malformed.
  */
 export function configFromHttpHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
   try {

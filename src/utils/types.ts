@@ -6,20 +6,26 @@ export type DestructivePolicy = "allow" | "confirm" | "block";
 export type { McpOutputFormat };
 
 export interface B2Config {
-  /** The application key — the workhorse credential. Used for the B2 native API,
+  /**
+   * The application key — the workhorse credential. Used for the B2 native API,
    *  the S3-compatible API, and key management. A non-master key is all most
-   *  users need; it works for everything except the Partner API. */
+   *  users need; it works for everything except the Partner API.
+   */
   applicationKeyId: string;
   applicationKey: string;
-  /** Credential the S3-compatible client signs with. Defaults to the application
+  /**
+   * Credential the S3-compatible client signs with. Defaults to the application
    *  key (which is what should be used). The deprecated B2_APP_KEY_ID override
    *  remains only for legacy setups whose application key is a master key (B2's
-   *  S3 endpoint rejects master keys). */
+   *  S3 endpoint rejects master keys).
+   */
   appKeyId: string;
   appKey: string;
-  /** Optional master application key, used ONLY by the Partner API
+  /**
+   * Optional master application key, used ONLY by the Partner API
    *  tools. Falls back to the application key when unset, so a
-   *  single non-master key remains a complete config for everything else. */
+   *  single non-master key remains a complete config for everything else.
+   */
   masterKeyId: string;
   masterKey: string;
   region: string;
@@ -36,11 +42,13 @@ export interface B2Config {
    * single-user stdio process. Set via B2_FILE_ROOT.
    */
   fileRoot: string | null;
-  /** Gate policy for destructive/irreversible tools (delete bucket/file-version/
+  /**
+   * Gate policy for destructive/irreversible tools (delete bucket/file-version/
    *  key, cancel large file, eject group member, make-public / weaken-lock /
    *  replication via b2_update_bucket, outbound notification rules).
    *  "confirm" (default) requires confirm:true; "block" refuses;
-   *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY. */
+   *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY.
+   */
   destructivePolicy?: DestructivePolicy;
   /**
    * LLM-facing TextContent serialization for structured successful tool results.
@@ -61,8 +69,10 @@ export interface B2AuthResponse {
   recommendedPartSize: number;
   absoluteMinimumPartSize: number;
   s3ApiUrl: string;
-  /** Capabilities granted to this key (from the v4 authorize `allowed` object).
-   *  Drives capability-aware tool registration. Empty array if unknown. */
+  /**
+   * Capabilities granted to this key (from the v4 authorize `allowed` object).
+   *  Drives capability-aware tool registration. Empty array if unknown.
+   */
   capabilities: string[];
 }
 
