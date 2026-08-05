@@ -8,15 +8,19 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile          | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix    |
 | ---------------- | ----: | -----: | -----: | -----: | -------------- |
-| `full`           |    40 |     21 |     19 |      0 | `2c1b084b7204` |
-| `phase1-default` |    37 |     18 |     19 |      0 | `4dc4b97eefdf` |
-| `read-only`      |    20 |     11 |      9 |      0 | `d7833bfcd9e6` |
+| `full`           |    40 |     21 |     19 |      0 | `ea5d266eae21` |
+| `phase1-default` |    37 |     18 |     19 |      0 | `d5e36e8792f1` |
+| `read-only`      |    20 |     11 |      9 |      0 | `ff3b2980b387` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection.
 
-Profile hash: `2c1b084b720467da37d5282e5063ae45821b4d1075bf084c82192665a007275f`
+Profile hash: `ea5d266eae211d6af5589639d3073bf12568986f8cfe9bc79e92a137d1dcf7ac`
+
+### Capability Input
+
+- Full-surface override (`null` capability input).
 
 ### `b2_*` Tools (21)
 
@@ -68,7 +72,23 @@ Profile hash: `2c1b084b720467da37d5282e5063ae45821b4d1075bf084c82192665a007275f`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, durable-secret producers exposed only as unavailable compatibility stubs.
 
-Profile hash: `4dc4b97eefdfa18502b3cef89194852ceaa652dbe3e6a80fd453a11104aeb693`
+Profile hash: `d5e36e8792f16d7b3b05edfd8e1a4e67f728fbfeafa7f6a6e1a65a0799a383d5`
+
+### Capability Input
+
+- `deleteBuckets`
+- `deleteFiles`
+- `deleteKeys`
+- `listBuckets`
+- `listFiles`
+- `listKeys`
+- `readBucketNotifications`
+- `readFiles`
+- `writeBucketNotifications`
+- `writeBuckets`
+- `writeFileLegalHolds`
+- `writeFileRetentions`
+- `writeFiles`
 
 ### `b2_*` Tools (18)
 
@@ -117,7 +137,15 @@ Profile hash: `4dc4b97eefdfa18502b3cef89194852ceaa652dbe3e6a80fd453a11104aeb693`
 
 Deterministic read/list profile for safe production use and contract tests.
 
-Profile hash: `d7833bfcd9e6c85b1dccbc93b5b11835111391fa35babe566ea20dbdf4b3afd0`
+Profile hash: `ff3b2980b387719edcaad20b0f582b497e11acae4ed8d2e58942bc3442410882`
+
+### Capability Input
+
+- `listBuckets`
+- `listFiles`
+- `listKeys`
+- `readBucketNotifications`
+- `readFiles`
 
 ### `b2_*` Tools (11)
 

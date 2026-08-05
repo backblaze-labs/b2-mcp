@@ -1,198 +1,72 @@
-import crypto from "crypto";
+import { spawnSync } from "child_process";
 import { readFileSync } from "fs";
 import { join } from "path";
 import {
   Client,
   StreamableHTTPClientTransport,
   type ClientOptions,
+  type JsonSchemaType,
 } from "@modelcontextprotocol/client";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
 import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import type { CredentialProvider, CredentialResolution } from "../../src/credentials";
-import type { B2Config } from "../../src/utils/types";
 import { readJson, root } from "./support";
-
-type Era = "modern" | "legacy";
-type ProfileName = "full" | "phase1-default" | "read-only";
-
-interface NormalizedTool {
-  name: string;
-  descriptionSha256: string;
-  inputSchema: JsonObject;
-  outputSchema?: JsonObject;
-  annotations?: JsonObject;
-  _meta?: JsonObject;
-}
-
-interface ToolFixture {
-  contractVersion: number;
-  issue: number;
-  profile: ProfileName;
-  era: Era;
-  protocolVersion: string;
-  transport: string;
-  mcpRevision: string;
-  sdk: Record<string, string>;
-  counts: { total: number; b2: number; s3: number; bz: number };
-  names: string[];
-  requiredFields: Record<string, string[]>;
-  confirmTools: string[];
-  tools: NormalizedTool[];
-  modern?: {
-    toolsListCacheHint: { ttlMs: number; cacheScope: string };
-    discover: {
-      supportedVersions: string[];
-      capabilities: JsonObject;
-      ttlMs: number;
-      cacheScope: string;
-      resultType: string;
-    };
-  };
-  legacy?: {
-    toolsListCacheHint: null;
-    discover: null;
-  };
-  hash: string;
-}
-
-interface ContractProfile {
-  description: string;
-  counts: ToolFixture["counts"];
-  names: string[];
-  requiredFields: Record<string, string[]>;
-  confirmTools: string[];
-  destructiveConfirmTools: string[];
-  hash: string;
-  fixtures: Record<Era, string>;
-}
-
-interface ContractArtifact {
-  contractVersion: number;
-  issue: number;
-  issueUrl: string;
-  mcpRevision: string;
-  approvedCacheHint: { ttlMs: number; cacheScope: string };
-  sdk: Record<string, string>;
-  profiles: Record<ProfileName, ContractProfile>;
-}
-
-type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
-type JsonObject = { [key: string]: JsonValue };
+import {
+  CONTRACT_TEST_CONFIG,
+  DESTRUCTIVE_TOOL_NAMES,
+  LEGACY_PROTOCOL_VERSION,
+  PROFILE_NAMES,
+  capabilitiesForProfile,
+  confirmToolsFrom,
+  countPrefixes,
+  destructiveConfirmToolsForNames,
+  fixtureHash,
+  normalizeTool,
+  renderProfileReference,
+  requiredFieldsByTool,
+  stable,
+  type ContractArtifact,
+  type Era,
+  type JsonObject,
+  type NormalizedTool,
+  type ProfileName,
+  type ToolFixture,
+} from "../../src/tool-contract";
 
 const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
 const packageJson = readJson<{
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
 }>("package.json");
+const prettierBin = join(root, "node_modules/prettier/bin/prettier.cjs");
 
 const profileNames = Object.keys(contract.profiles) as ProfileName[];
 const eras: Era[] = ["modern", "legacy"];
 
-const phase1DefaultCapabilities = [
-  "deleteBuckets",
-  "deleteFiles",
-  "deleteKeys",
-  "listBuckets",
-  "listFiles",
-  "listKeys",
-  "readBucketNotifications",
-  "readFiles",
-  "writeBucketNotifications",
-  "writeBuckets",
-  "writeFileLegalHolds",
-  "writeFileRetentions",
-  "writeFiles",
-];
-
-const profileCapabilities: Record<ProfileName, string[] | null> = {
-  full: null,
-  "phase1-default": phase1DefaultCapabilities,
-  "read-only": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
-};
-
-const testConfig: B2Config = {
-  applicationKeyId: "contract-key-id",
-  applicationKey: "contract-key-secret",
-  appKeyId: "contract-key-id",
-  appKey: "contract-key-secret",
-  masterKeyId: "contract-key-id",
-  masterKey: "contract-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
-
-function sha256(value: string): string {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function stable(value: unknown, parentKey = ""): JsonValue {
-  if (Array.isArray(value)) {
-    const next = value.map((item) => stable(item));
-    if (parentKey === "required" && next.every((item) => typeof item === "string")) {
-      return [...next].sort() as JsonValue;
-    }
-    return next as JsonValue;
-  }
-  if (value === null || typeof value !== "object") return value as JsonValue;
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([key]) => key !== "description")
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, item]) => [key, stable(item, key)]),
-  ) as JsonObject;
-}
-
-function countPrefixes(names: string[]): ToolFixture["counts"] {
-  return {
-    total: names.length,
-    b2: names.filter((name) => name.startsWith("b2_")).length,
-    s3: names.filter((name) => name.startsWith("s3_")).length,
-    bz: names.filter((name) => name.startsWith("bz_")).length,
-  };
-}
-
-function normalizeTool(tool: {
+interface RawToolPayload {
   name: string;
   description?: string;
-  inputSchema?: unknown;
+  inputSchema?: {
+    required?: string[];
+    properties?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
   outputSchema?: unknown;
   annotations?: unknown;
   _meta?: unknown;
-}): NormalizedTool {
-  const normalized: NormalizedTool = {
-    name: tool.name,
-    descriptionSha256: sha256(tool.description ?? ""),
-    inputSchema: stable(tool.inputSchema ?? {}) as JsonObject,
+}
+
+interface CollectedToolList {
+  tools: RawToolPayload[];
+  list: { tools?: unknown; ttlMs?: number; cacheScope?: string; [key: string]: unknown };
+  protocolVersion: string;
+  discover?: {
+    supportedVersions?: string[];
+    capabilities?: unknown;
+    ttlMs?: number;
+    cacheScope?: string;
+    resultType?: string;
   };
-  if (tool.outputSchema !== undefined)
-    normalized.outputSchema = stable(tool.outputSchema) as JsonObject;
-  if (tool.annotations !== undefined)
-    normalized.annotations = stable(tool.annotations) as JsonObject;
-  if (tool._meta !== undefined) normalized._meta = stable(tool._meta) as JsonObject;
-  return normalized;
-}
-
-function requiredFieldsByTool(
-  tools: Array<{ name: string; inputSchema?: { required?: string[] } }>,
-) {
-  return Object.fromEntries(
-    tools.map((tool) => [tool.name, [...(tool.inputSchema?.required ?? [])].sort()]),
-  );
-}
-
-function confirmToolsFrom(
-  tools: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }>,
-): string[] {
-  return tools
-    .filter((tool) => tool.inputSchema?.properties?.confirm !== undefined)
-    .map((tool) => tool.name)
-    .sort();
-}
-
-function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {
-  return sha256(JSON.stringify({ names: fixture.names, tools: fixture.tools }));
 }
 
 function numberValue(value: unknown, fallback: number): number {
@@ -218,7 +92,7 @@ function credentialProvider(profile: ProfileName): CredentialProvider {
     },
     resolve(): CredentialResolution {
       return {
-        config: testConfig,
+        config: CONTRACT_TEST_CONFIG,
         cacheKey: `tool-contract:${profile}`,
         capabilityCacheKey: `tool-contract:${profile}`,
       };
@@ -226,10 +100,10 @@ function credentialProvider(profile: ProfileName): CredentialProvider {
   };
 }
 
-async function collectFixture(profile: ProfileName, era: Era): Promise<ToolFixture> {
+async function collectToolsList(profile: ProfileName, era: Era): Promise<CollectedToolList> {
   const handle = buildHttpServer({
     credentialProvider: credentialProvider(profile),
-    fetchCapabilities: async () => profileCapabilities[profile],
+    fetchCapabilities: async () => contract.profiles[profile].capabilities,
   });
   const port = await listenOnEphemeralPort(handle);
   const clientOptions: ClientOptions =
@@ -241,59 +115,69 @@ async function collectFixture(profile: ProfileName, era: Era): Promise<ToolFixtu
     await client.connect(transport);
     const list = await client.listTools({}, { cacheMode: "refresh" });
     const tools = [...(list.tools ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-    const names = tools.map((tool) => tool.name);
-    const fixture: ToolFixture = {
-      contractVersion: contract.contractVersion,
-      issue: contract.issue,
-      profile,
-      era,
+    return {
+      tools,
+      list,
       protocolVersion:
-        era === "modern"
-          ? (client.getNegotiatedProtocolVersion() ?? "")
-          : (client.getNegotiatedProtocolVersion() ?? ""),
-      transport: "streamable-http",
-      mcpRevision: contract.mcpRevision,
-      sdk: {
-        "@modelcontextprotocol/server": packageJson.dependencies["@modelcontextprotocol/server"],
-        "@modelcontextprotocol/client": packageJson.devDependencies["@modelcontextprotocol/client"],
-      },
-      counts: countPrefixes(names),
-      names,
-      requiredFields: requiredFieldsByTool(tools),
-      confirmTools: confirmToolsFrom(tools),
-      tools: tools.map(normalizeTool),
-      hash: "",
+        era === "modern" ? (client.getNegotiatedProtocolVersion() ?? "") : LEGACY_PROTOCOL_VERSION,
+      discover: client.getDiscoverResult(),
     };
-
-    if (era === "modern") {
-      const discover = client.getDiscoverResult();
-      fixture.modern = {
-        toolsListCacheHint: {
-          ttlMs: numberValue(list.ttlMs, -1),
-          cacheScope: stringValue(list.cacheScope, ""),
-        },
-        discover: {
-          supportedVersions: discover?.supportedVersions ?? [],
-          capabilities: stable(discover?.capabilities ?? {}) as JsonObject,
-          ttlMs: numberValue(discover?.ttlMs, -1),
-          cacheScope: stringValue(discover?.cacheScope, ""),
-          resultType: stringValue(discover?.resultType, ""),
-        },
-      };
-    } else {
-      fixture.legacy = {
-        toolsListCacheHint: null,
-        discover: null,
-      };
-    }
-
-    fixture.hash = fixtureHash(fixture);
-    return fixture;
   } finally {
     await client.close().catch(() => undefined);
     handle.drain();
     await new Promise<void>((resolve) => handle.server.close(() => resolve()));
   }
+}
+
+async function collectFixture(profile: ProfileName, era: Era): Promise<ToolFixture> {
+  const collected = await collectToolsList(profile, era);
+  const tools = collected.tools;
+  const names = tools.map((tool) => tool.name);
+  const fixture: ToolFixture = {
+    contractVersion: contract.contractVersion,
+    issue: contract.issue,
+    profile,
+    era,
+    protocolVersion: collected.protocolVersion,
+    transport: "streamable-http",
+    mcpRevision: contract.mcpRevision,
+    sdk: {
+      "@modelcontextprotocol/server": packageJson.dependencies["@modelcontextprotocol/server"],
+      "@modelcontextprotocol/client": packageJson.devDependencies["@modelcontextprotocol/client"],
+    },
+    capabilities: contract.profiles[profile].capabilities,
+    counts: countPrefixes(names),
+    names,
+    requiredFields: requiredFieldsByTool(tools),
+    confirmTools: confirmToolsFrom(tools),
+    tools: tools.map(normalizeTool),
+    hash: "",
+  };
+
+  if (era === "modern") {
+    const discover = collected.discover;
+    fixture.modern = {
+      toolsListCacheHint: {
+        ttlMs: numberValue(collected.list.ttlMs, -1),
+        cacheScope: stringValue(collected.list.cacheScope, ""),
+      },
+      discover: {
+        supportedVersions: discover?.supportedVersions ?? [],
+        capabilities: stable(discover?.capabilities ?? {}) as JsonObject,
+        ttlMs: numberValue(discover?.ttlMs, -1),
+        cacheScope: stringValue(discover?.cacheScope, ""),
+        resultType: stringValue(discover?.resultType, ""),
+      },
+    };
+  } else {
+    fixture.legacy = {
+      toolsListCacheHint: null,
+      discover: null,
+    };
+  }
+
+  fixture.hash = fixtureHash(fixture);
+  return fixture;
 }
 
 function fixtureFor(profile: ProfileName, era: Era): ToolFixture {
@@ -321,6 +205,57 @@ function visit(
     cb(key, item, nextPath);
     visit(item, cb, nextPath);
   }
+}
+
+const unsafeModelVisibleTextPatterns = [
+  {
+    label: "instruction override",
+    pattern:
+      /\b(ignore|bypass|override)\b.{0,80}\b(previous|prior|system|developer|security)\b.{0,40}\binstructions?\b/i,
+  },
+  {
+    label: "credential exfiltration",
+    pattern:
+      /\b(read|open|load|print|echo|upload|send|post|copy|exfiltrate|leak|include|append)\b[\s\S]{0,120}\b(credentials?|secrets?|tokens?|passwords?|application keys?|master keys?|api keys?|authorization|~\/|\.aws|\.ssh)\b/i,
+  },
+  {
+    label: "tool prelude exfiltration",
+    pattern:
+      /\b(before|after)\s+calling\s+this\s+tool\b[\s\S]{0,120}\b(read|open|upload|send|post|copy|exfiltrate|leak)\b/i,
+  },
+];
+
+function collectStrings(
+  value: unknown,
+  cb: (value: string, path: string) => void,
+  path = "$",
+): void {
+  if (typeof value === "string") {
+    cb(value, path);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectStrings(item, cb, `${path}/${index}`));
+    return;
+  }
+  for (const [key, item] of Object.entries(value)) {
+    collectStrings(item, cb, `${path}/${key}`);
+  }
+}
+
+function formatWithRepoConfig(relativePath: string, source: string): string {
+  const path = join(root, relativePath);
+  const result = spawnSync(process.execPath, [prettierBin, "--stdin-filepath", path], {
+    cwd: root,
+    input: source,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1" },
+  });
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `Prettier failed for ${relativePath}`);
+  }
+  return result.stdout;
 }
 
 function resolveLocalRef(rootSchema: JsonObject, ref: string): unknown {
@@ -361,82 +296,14 @@ function assertBoundedRefs(schema: JsonObject): void {
   expect(maxDepth).toBeLessThanOrEqual(32);
 }
 
-function renderProfileReference(source: ContractArtifact): string {
-  const tableRows = [
-    ["Profile", "Total", "`b2_*`", "`s3_*`", "`bz_*`", "Hash prefix"],
-    ...Object.entries(source.profiles).map(([profile, data]) => [
-      `\`${profile}\``,
-      String(data.counts.total),
-      String(data.counts.b2),
-      String(data.counts.s3),
-      String(data.counts.bz),
-      `\`${data.hash.slice(0, 12)}\``,
-    ]),
-  ];
-  const widths = tableRows[0].map((_, index) =>
-    Math.max(...tableRows.map((row) => row[index].length)),
-  );
-  const numericColumns = new Set([1, 2, 3, 4]);
-  const formatCell = (value: string, index: number): string =>
-    numericColumns.has(index) ? value.padStart(widths[index]) : value.padEnd(widths[index]);
-  const header = `| ${tableRows[0].map(formatCell).join(" | ")} |`;
-  const separator = `| ${widths
-    .map((width, index) =>
-      numericColumns.has(index) ? `${"-".repeat(width - 1)}:` : "-".repeat(width),
-    )
-    .join(" | ")} |`;
-  const rows = tableRows
-    .slice(1)
-    .map((row) => `| ${row.map(formatCell).join(" | ")} |`)
-    .join("\n");
-
-  const sections = Object.entries(source.profiles)
-    .map(([profile, data]) => {
-      const b2 = data.names
-        .filter((name) => name.startsWith("b2_"))
-        .map((name) => `- \`${name}\``)
-        .join("\n");
-      const s3 = data.names
-        .filter((name) => name.startsWith("s3_"))
-        .map((name) => `- \`${name}\``)
-        .join("\n");
-      return [
-        `## \`${profile}\``,
-        "",
-        data.description,
-        "",
-        `Profile hash: \`${data.hash}\``,
-        "",
-        `### \`b2_*\` Tools (${data.counts.b2})`,
-        "",
-        b2 || "_None._",
-        "",
-        `### \`s3_*\` Tools (${data.counts.s3})`,
-        "",
-        s3 || "_None._",
-      ].join("\n");
-    })
-    .join("\n\n");
-
-  return [
-    "<!-- Generated by scripts/generate-tool-contract.mjs. Do not edit by hand. -->",
-    "",
-    "# MCP Tool Profiles",
-    "",
-    `Contract version: \`${source.contractVersion}\``,
-    `MCP revision: \`${source.mcpRevision}\``,
-    `Approved modern cache hint: \`ttlMs=${source.approvedCacheHint.ttlMs}\`, \`cacheScope=${source.approvedCacheHint.cacheScope}\``,
-    "",
-    header,
-    separator,
-    rows,
-    "",
-    sections,
-    "",
-  ].join("\n");
-}
-
 describe("MCP tool profile fixtures", () => {
+  it("publishes the approved profiles and capability inputs in the artifact", () => {
+    expect(profileNames).toEqual(PROFILE_NAMES);
+    for (const profile of profileNames) {
+      expect(contract.profiles[profile].capabilities).toEqual(capabilitiesForProfile(profile));
+    }
+  });
+
   it.each(profileNames.flatMap((profile) => eras.map((era) => [profile, era] as const)))(
     "%s %s fixture matches tools/list from the official SDK client",
     async (profile, era) => {
@@ -460,6 +327,7 @@ describe("MCP tool profile fixtures", () => {
       expect(contract.profiles[profile].names).toEqual(fixture.names);
       expect(contract.profiles[profile].requiredFields).toEqual(fixture.requiredFields);
       expect(contract.profiles[profile].confirmTools).toEqual(fixture.confirmTools);
+      expect(contract.profiles[profile].capabilities).toEqual(fixture.capabilities);
       expect(contract.profiles[profile].hash).toBe(fixture.hash);
     }
   });
@@ -486,8 +354,13 @@ describe("MCP tool profile invariants", () => {
 
   it.each(profileNames)("%s declares confirm fields on destructive tools only", (profile) => {
     const fixture = fixtureFor(profile, "modern");
+    expect(contract.profiles[profile].destructiveConfirmTools).toEqual(
+      destructiveConfirmToolsForNames(fixture.names),
+    );
     expect(fixture.confirmTools).toEqual(contract.profiles[profile].destructiveConfirmTools);
-    for (const name of contract.profiles[profile].destructiveConfirmTools) {
+    for (const name of DESTRUCTIVE_TOOL_NAMES.filter((toolName) =>
+      fixture.names.includes(toolName),
+    )) {
       const schema = getTool(fixture, name).inputSchema;
       const confirm = (schema.properties as Record<string, JsonObject>).confirm;
       expect(confirm).toBeDefined();
@@ -497,7 +370,7 @@ describe("MCP tool profile invariants", () => {
   });
 
   it.each(profileNames)(
-    "%s has input schemas without credential fields or x-mcp-header",
+    "%s has schemas and annotations without credential fields or x-mcp-header",
     (profile) => {
       const prohibitedFields = new Set([
         "accessKey",
@@ -517,17 +390,47 @@ describe("MCP tool profile invariants", () => {
       ]);
       const violations: string[] = [];
       for (const tool of fixtureFor(profile, "modern").tools) {
-        visit(tool.inputSchema, (key, value, path) => {
-          if (prohibitedFields.has(key)) violations.push(`${tool.name}:${path}`);
-          if (key.toLowerCase() === "x-mcp-header") violations.push(`${tool.name}:${path}`);
-          if (
-            key.toLowerCase() === "x-mcp-header" &&
-            typeof value === "string" &&
-            /authorization|credential|secret|key|token/i.test(value)
-          ) {
-            violations.push(`${tool.name}:${path}=${value}`);
-          }
-        });
+        for (const field of ["inputSchema", "outputSchema", "annotations", "_meta"] as const) {
+          const surface = tool[field];
+          if (surface === undefined) continue;
+          visit(surface, (key, value, path) => {
+            if (prohibitedFields.has(key)) violations.push(`${tool.name}:${field}:${path}`);
+            if (key.toLowerCase() === "x-mcp-header")
+              violations.push(`${tool.name}:${field}:${path}`);
+            if (
+              key.toLowerCase() === "x-mcp-header" &&
+              typeof value === "string" &&
+              /authorization|credential|secret|key|token/i.test(value)
+            ) {
+              violations.push(`${tool.name}:${field}:${path}=${value}`);
+            }
+          });
+        }
+      }
+      expect(violations).toEqual([]);
+    },
+  );
+
+  it.each(profileNames)(
+    "%s model-visible text contains no exfiltration instructions",
+    async (profile) => {
+      const violations: string[] = [];
+      const collected = await collectToolsList(profile, "modern");
+      for (const tool of collected.tools) {
+        collectStrings(
+          {
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+            outputSchema: tool.outputSchema,
+            annotations: tool.annotations,
+            _meta: tool._meta,
+          },
+          (value, path) => {
+            for (const { label, pattern } of unsafeModelVisibleTextPatterns) {
+              if (pattern.test(value)) violations.push(`${tool.name}:${path}:${label}`);
+            }
+          },
+        );
       }
       expect(violations).toEqual([]);
     },
@@ -540,10 +443,28 @@ describe("MCP tool profile invariants", () => {
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.inputSchema.properties).toBeDefined();
       assertBoundedRefs(tool.inputSchema);
-      expect((validator as any).ajv.validateSchema(tool.inputSchema)).toBe(true);
-      expect(() => validator.getValidator(tool.inputSchema as any)).not.toThrow();
+      expect(() => validator.getValidator(tool.inputSchema as JsonSchemaType)).not.toThrow();
     }
   });
+
+  it("read-only presigned URLs are download-only", () => {
+    const tool = getTool(fixtureFor("read-only", "modern"), "s3_get_presigned_url");
+    const properties = tool.inputSchema.properties as Record<string, JsonObject>;
+
+    expect(properties.operation.enum).toEqual(["GetObject"]);
+    expect(properties.contentType).toBeUndefined();
+  });
+
+  it.each(["full", "phase1-default"] as const)(
+    "%s presigned URLs keep download and upload operations",
+    (profile) => {
+      const tool = getTool(fixtureFor(profile, "modern"), "s3_get_presigned_url");
+      const properties = tool.inputSchema.properties as Record<string, JsonObject>;
+
+      expect(properties.operation.enum).toEqual(["GetObject", "PutObject"]);
+      expect(properties.contentType).toBeDefined();
+    },
+  );
 
   it("does not introduce outputSchema without result-conformance coverage", () => {
     const withOutputSchema = profileNames.flatMap((profile) =>
@@ -572,14 +493,29 @@ describe("MCP advertised capability contract", () => {
   it.each(profileNames)("legacy %s omits modern cache/discover extensions", (profile) => {
     const fixture = fixtureFor(profile, "legacy");
     expect(fixture.legacy).toEqual({ toolsListCacheHint: null, discover: null });
-    expect(fixture.protocolVersion).toBe("2025-11-25");
+    expect(fixture.protocolVersion).toBe(LEGACY_PROTOCOL_VERSION);
   });
 });
 
 describe("Tool profile reference drift", () => {
   it("keeps the human-readable profile reference generated from the JSON artifact", () => {
-    const expected = renderProfileReference(contract);
+    const expected = formatWithRepoConfig(
+      "docs/TOOL_PROFILES.md",
+      renderProfileReference(contract),
+    );
     const actual = readFileSync(join(root, "docs/TOOL_PROFILES.md"), "utf8");
     expect(actual).toBe(expected);
+  });
+
+  it("keeps generated JSON artifacts in Prettier format", () => {
+    const files = [
+      "docs/tool-profile-contract.json",
+      ...profileNames.flatMap((profile) => Object.values(contract.profiles[profile].fixtures)),
+    ].sort();
+
+    for (const file of files) {
+      const actual = readFileSync(join(root, file), "utf8");
+      expect(formatWithRepoConfig(file, actual)).toBe(actual);
+    }
   });
 });

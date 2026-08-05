@@ -598,6 +598,29 @@ describe("s3_get_presigned_url", () => {
     expect(result?.success).toBe(false);
   });
 
+  it("does not expose or allow PutObject URLs for read-only credentials", async () => {
+    const readOnlyServer = createServer(testConfig, ["readFiles"]);
+    const tool = getRegisteredTools(readOnlyServer)?.["s3_get_presigned_url"];
+
+    expect(
+      tool?.inputSchema?.safeParse({
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "PutObject",
+      }).success,
+    ).toBe(false);
+
+    const result = await callTool(readOnlyServer, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "photo.jpg",
+      operation: "PutObject",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/writeFiles capability/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it("generates URLs while the native circuit breaker is open", async () => {
     circuitBreaker.open();
 

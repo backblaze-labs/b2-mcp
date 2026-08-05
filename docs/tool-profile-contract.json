@@ -3,23 +3,13 @@
   "issue": 49,
   "issueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/49",
   "mcpRevision": "2026-07-28",
-  "approvedCacheHint": {
-    "ttlMs": 30000,
-    "cacheScope": "private"
-  },
-  "sdk": {
-    "@modelcontextprotocol/server": "2.0.0",
-    "@modelcontextprotocol/client": "2.0.0"
-  },
+  "approvedCacheHint": { "ttlMs": 30000, "cacheScope": "private" },
+  "sdk": { "@modelcontextprotocol/server": "2.0.0", "@modelcontextprotocol/client": "2.0.0" },
   "profiles": {
     "full": {
       "description": "Complete tool superset for contract review and regression detection.",
-      "counts": {
-        "total": 40,
-        "b2": 21,
-        "s3": 19,
-        "bz": 0
-      },
+      "capabilities": null,
+      "counts": { "total": 40, "b2": 21, "s3": 19, "bz": 0 },
       "names": [
         "b2_authorize_account",
         "b2_create_bucket",
@@ -105,9 +95,11 @@
         "s3_upload_part_copy": ["bucket", "copySource", "key", "partNumber", "uploadId"]
       },
       "confirmTools": [
+        "b2_create_group_member",
         "b2_delete_bucket",
         "b2_delete_key",
         "b2_eject_group_member",
+        "b2_reserve_trial_create_account",
         "b2_set_bucket_notification_rules",
         "b2_update_bucket",
         "b2_update_file_legal_hold",
@@ -118,9 +110,11 @@
         "s3_put_bucket_lifecycle"
       ],
       "destructiveConfirmTools": [
+        "b2_create_group_member",
         "b2_delete_bucket",
         "b2_delete_key",
         "b2_eject_group_member",
+        "b2_reserve_trial_create_account",
         "b2_set_bucket_notification_rules",
         "b2_update_bucket",
         "b2_update_file_legal_hold",
@@ -130,7 +124,7 @@
         "s3_delete_objects",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "2c1b084b720467da37d5282e5063ae45821b4d1075bf084c82192665a007275f",
+      "hash": "ea5d266eae211d6af5589639d3073bf12568986f8cfe9bc79e92a137d1dcf7ac",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -138,12 +132,22 @@
     },
     "phase1-default": {
       "description": "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, durable-secret producers exposed only as unavailable compatibility stubs.",
-      "counts": {
-        "total": 37,
-        "b2": 18,
-        "s3": 19,
-        "bz": 0
-      },
+      "capabilities": [
+        "deleteBuckets",
+        "deleteFiles",
+        "deleteKeys",
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketNotifications",
+        "readFiles",
+        "writeBucketNotifications",
+        "writeBuckets",
+        "writeFileLegalHolds",
+        "writeFileRetentions",
+        "writeFiles"
+      ],
+      "counts": { "total": 37, "b2": 18, "s3": 19, "bz": 0 },
       "names": [
         "b2_authorize_account",
         "b2_create_bucket",
@@ -223,8 +227,10 @@
         "s3_upload_part_copy": ["bucket", "copySource", "key", "partNumber", "uploadId"]
       },
       "confirmTools": [
+        "b2_create_group_member",
         "b2_delete_bucket",
         "b2_delete_key",
+        "b2_reserve_trial_create_account",
         "b2_set_bucket_notification_rules",
         "b2_update_bucket",
         "b2_update_file_legal_hold",
@@ -235,8 +241,10 @@
         "s3_put_bucket_lifecycle"
       ],
       "destructiveConfirmTools": [
+        "b2_create_group_member",
         "b2_delete_bucket",
         "b2_delete_key",
+        "b2_reserve_trial_create_account",
         "b2_set_bucket_notification_rules",
         "b2_update_bucket",
         "b2_update_file_legal_hold",
@@ -246,7 +254,7 @@
         "s3_delete_objects",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "4dc4b97eefdfa18502b3cef89194852ceaa652dbe3e6a80fd453a11104aeb693",
+      "hash": "d5e36e8792f16d7b3b05edfd8e1a4e67f728fbfeafa7f6a6e1a65a0799a383d5",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -254,12 +262,14 @@
     },
     "read-only": {
       "description": "Deterministic read/list profile for safe production use and contract tests.",
-      "counts": {
-        "total": 20,
-        "b2": 11,
-        "s3": 9,
-        "bz": 0
-      },
+      "capabilities": [
+        "listBuckets",
+        "listFiles",
+        "listKeys",
+        "readBucketNotifications",
+        "readFiles"
+      ],
+      "counts": { "total": 20, "b2": 11, "s3": 9, "bz": 0 },
       "names": [
         "b2_authorize_account",
         "b2_create_group_member",
@@ -304,9 +314,9 @@
         "s3_list_objects_v2": ["bucket"],
         "s3_list_parts": ["bucket", "key", "uploadId"]
       },
-      "confirmTools": [],
-      "destructiveConfirmTools": [],
-      "hash": "d7833bfcd9e6c85b1dccbc93b5b11835111391fa35babe566ea20dbdf4b3afd0",
+      "confirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
+      "destructiveConfirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
+      "hash": "ff3b2980b387719edcaad20b0f582b497e11acae4ed8d2e58942bc3442410882",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"

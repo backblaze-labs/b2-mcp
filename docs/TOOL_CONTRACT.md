@@ -14,6 +14,9 @@ The frozen machine-readable contract is
 human-readable reference is [`TOOL_PROFILES.md`](TOOL_PROFILES.md). The
 deterministic `tools/list` fixtures are checked in under
 [`../tests/fixtures/tool-contract`](../tests/fixtures/tool-contract).
+Each profile entry records the capability input that generated it; each fixture
+hash covers the sorted tool names and normalized tool definitions, including
+model-visible schema and parameter descriptions.
 
 The public contract defines:
 

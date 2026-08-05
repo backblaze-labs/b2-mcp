@@ -80,6 +80,8 @@ const DETECTORS: Record<string, Detector> = {
     "replace persistent bucket event notification webhook rules",
 };
 
+export const DESTRUCTIVE_TOOL_NAMES = Object.keys(DETECTORS).sort();
+
 export function isDestructiveTool(toolName: string): boolean {
   return toolName in DETECTORS;
 }

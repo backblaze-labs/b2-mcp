@@ -16,7 +16,10 @@ describe("smoke script release contract", () => {
 
   it("uses profile-aware tool checks rather than a universal full-surface count", () => {
     expect(smokeScript).toContain("docs/tool-profile-contract.json");
-    expect(smokeScript).toContain("tools/list is within the approved profile contract");
+    expect(smokeScript).toContain("B2_MCP_EXPECTED_TOOL_PROFILE");
+    expect(smokeScript).toContain("tools/list exactly matches an approved named profile");
+    expect(smokeScript).not.toContain("when count aligns");
+    expect(smokeScript).not.toContain("unknownTools.length === 0");
     expect(smokeScript).toContain('toolNames.has("b2_authorize_account")');
     expect(smokeScript).toContain("not exposed for this credential profile");
     expect(smokeScript).not.toContain("EXPECTED_FULL_TOOL_COUNT");

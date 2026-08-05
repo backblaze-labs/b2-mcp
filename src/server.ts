@@ -6,6 +6,7 @@ import {
   type ToolRegistrar,
 } from "./mcp.js";
 export { getRegisteredTools } from "./mcp.js";
+import { z } from "zod";
 import { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { isSanitizedMcpResponse, parseErrorText, toolError } from "./utils/errors.js";
@@ -49,6 +50,10 @@ import { registerS3ObjectTools } from "./s3/objects.js";
 import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
+import { isDestructiveTool } from "./utils/destructive-gate.js";
+
+const COMPATIBILITY_STUB_CONFIRM_DESC =
+  "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
 
 /**
  * Load and validate configuration from environment variables.
@@ -69,12 +74,15 @@ export function loadConfig(): B2Config {
 
 function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void {
   for (const name of DURABLE_SECRET_PRODUCING_TOOLS) {
+    const inputSchema: z.ZodRawShape = isDestructiveTool(name)
+      ? { confirm: z.boolean().optional().describe(COMPATIBILITY_STUB_CONFIRM_DESC) }
+      : {};
     registrar.registerTool(
       name,
       {
         description:
           "Compatibility stub for a durable-secret-producing B2 operation that is unavailable until an out-of-band secret sink is configured.",
-        inputSchema: {},
+        inputSchema,
         force: true,
       },
       async () =>
@@ -212,7 +220,10 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   registerS3BucketTools(registrar, s3Client, config);
   registerS3ObjectTools(registrar, b2Client, config);
   registerS3MultipartTools(registrar, s3Client, config);
-  registerS3PresignedTools(registrar, b2Client);
+  registerS3PresignedTools(registrar, b2Client, {
+    allowGetObjectUrl: !filterActive || (capsSet?.has("readFiles") ?? false),
+    allowPutObjectUrl: !filterActive || (capsSet?.has("writeFiles") ?? false),
+  });
   registerS3ExtraTools(registrar, s3Client);
 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────

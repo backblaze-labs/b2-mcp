@@ -17,6 +17,7 @@
  *   B2_APP_KEY_ID — value for the X-B2-App-Key-Id header
  *   B2_APP_KEY    — value for the X-B2-App-Key header
  *   B2_SMOKE_BUCKET — known bucket to probe with s3_head_bucket
+ *   B2_MCP_EXPECTED_TOOL_PROFILE — full, phase1-default, or read-only
  *
  * Optional env for a customer OAuth/resource-server edge:
  *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
@@ -41,6 +42,7 @@ const {
   B2_APP_KEY_ID,
   B2_APP_KEY,
   B2_SMOKE_BUCKET,
+  B2_MCP_EXPECTED_TOOL_PROFILE,
   MCP_AUTHORIZATION,
 } = process.env;
 
@@ -130,15 +132,18 @@ function matchedContractProfile(names) {
   );
 }
 
+function approvedProfileNames() {
+  return Object.keys(toolContract.profiles).sort().join(", ");
+}
+
 async function main() {
   console.log(`Connecting: ${MCP_URL}`);
 
   const tools = await mcp("tools/list");
   const toolNames = new Set((tools.tools ?? []).map((tool) => tool?.name).filter(Boolean));
   const orderedToolNames = sortedToolNames(toolNames);
-  const fullProfileNames = new Set(toolContract.profiles.full.names);
-  const unknownTools = orderedToolNames.filter((name) => !fullProfileNames.has(name));
   const matchedProfile = matchedContractProfile(orderedToolNames);
+  const expectedProfile = B2_MCP_EXPECTED_TOOL_PROFILE;
   const info = tools?._meta?.["io.modelcontextprotocol/serverInfo"];
   check(
     "tools/list returns server info",
@@ -147,19 +152,18 @@ async function main() {
   );
   check("tools/list returns registered tools", toolNames.size > 0, `${toolNames.size} tools`);
   check(
-    "tools/list is within the approved profile contract",
-    unknownTools.length === 0,
-    unknownTools.length === 0
-      ? `${toolNames.size} tools`
-      : `unexpected: ${unknownTools.join(", ")}`,
+    "expected tool profile is approved",
+    !expectedProfile || !!toolContract.profiles[expectedProfile],
+    expectedProfile
+      ? `${expectedProfile}; approved: ${approvedProfileNames()}`
+      : `not pinned; approved: ${approvedProfileNames()}`,
   );
   check(
-    "tools/list matches an approved named profile when count aligns",
-    !!matchedProfile ||
-      !Object.values(toolContract.profiles).some(
-        (profile) => profile.counts.total === toolNames.size,
-      ),
-    matchedProfile ? `${matchedProfile[0]} (${toolNames.size} tools)` : `${toolNames.size} tools`,
+    "tools/list exactly matches an approved named profile",
+    !!matchedProfile && (!expectedProfile || matchedProfile[0] === expectedProfile),
+    matchedProfile
+      ? `${matchedProfile[0]} (${toolNames.size} tools)`
+      : `unexpected tool set (${toolNames.size} tools)`,
   );
   check(
     "tools/list includes b2_authorize_account",
