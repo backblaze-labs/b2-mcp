@@ -146,10 +146,10 @@ The only repository workflow allowed to publish npm packages is
 - checks out the requested `v*` tag only after proving it is reachable from the
   current `ci-green` history;
 - runs `npm ci` with lifecycle scripts still disabled;
-- builds explicitly, requires `dist/index.js` in the packlist, creates an npm
-  tarball with lifecycle scripts disabled, scans that exact tarball through the
-  safe denylist extractor, and uploads it as a seven-day artifact for protected
-  environment approval;
+- builds explicitly, enforces the reviewed runtime package budget, requires
+  `dist/index.js` in the packlist, creates an npm tarball with lifecycle scripts
+  disabled, scans that exact tarball through the safe denylist extractor, and
+  uploads it as a seven-day artifact for protected environment approval;
 - requires a protected `npm-publish` environment only for the final publish job;
 - verifies the tarball SHA-256 before publishing;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;

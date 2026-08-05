@@ -485,6 +485,71 @@ describe("supply-chain denylist scanner", () => {
     });
   });
 
+  it("rejects package source files that are symbolic links", () => {
+    withTempDir((dir) => {
+      const repoDir = join(dir, "repo");
+      const malformed = join(repoDir, "denylist.json");
+      const outside = join(dir, "outside.csv");
+      mkdirSync(repoDir);
+      writeFileSync(outside, "Package,Malicious Versions\nkeyv,6.0.0\n");
+      symlinkSync(outside, join(repoDir, "source.csv"));
+      writeJson(malformed, {
+        ...baseDenylist(),
+        packageSources: [
+          {
+            path: "source.csv",
+            format: "wiz-keyv-packages-csv",
+            sourceUrl: "https://example.test/ioc",
+            reviewedAt: "2026-08-05",
+            expectedPackages: 1,
+            expectedPackageVersions: 1,
+            reason: "must not be read through a symbolic link",
+          },
+        ],
+      });
+
+      const result = runDenylist(repoDir, [], malformed);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(
+        "packageSources[0].path must reference a regular file, not a symbolic link",
+      );
+    });
+  });
+
+  it("rejects package sources that escape through a symbolic-link directory", () => {
+    withTempDir((dir) => {
+      const repoDir = join(dir, "repo");
+      const outsideDir = join(dir, "outside");
+      const malformed = join(repoDir, "denylist.json");
+      mkdirSync(repoDir);
+      mkdirSync(outsideDir);
+      writeFileSync(join(outsideDir, "source.csv"), "Package,Malicious Versions\nkeyv,6.0.0\n");
+      symlinkSync(outsideDir, join(repoDir, "security"), "dir");
+      writeJson(malformed, {
+        ...baseDenylist(),
+        packageSources: [
+          {
+            path: "security/source.csv",
+            format: "wiz-keyv-packages-csv",
+            sourceUrl: "https://example.test/ioc",
+            reviewedAt: "2026-08-05",
+            expectedPackages: 1,
+            expectedPackageVersions: 1,
+            reason: "must remain inside the denylist root",
+          },
+        ],
+      });
+
+      const result = runDenylist(repoDir, [], malformed);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(
+        "packageSources[0].path real path must resolve within the repository root",
+      );
+    });
+  });
+
   it("catches denied packages present only on another fetched branch", () => {
     withTempDir((dir) => {
       const customDenylist = join(dir, "denylist.json");
@@ -559,12 +624,13 @@ describe("supply-chain denylist scanner", () => {
       }
       runGit(dir, ["checkout", "main"]);
 
-      const started = Date.now();
       const result = runDenylist(dir, ["--all-branches"], customDenylist);
 
       expect(result.status).toBe(0);
-      expect(Date.now() - started).toBeLessThan(8000);
-      expect(result.stderr).toContain("scanned ref noise-0");
+      const noisyRef = result.stderr
+        .split(/\r?\n/)
+        .find((line) => line.includes("supply-chain-denylist: scanned ref noise-0"));
+      expect(noisyRef).toMatch(/\(61 files, 1 inspected,/);
     });
   });
 

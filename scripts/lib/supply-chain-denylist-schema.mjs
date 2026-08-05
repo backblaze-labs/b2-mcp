@@ -1,4 +1,12 @@
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
 import path from "node:path";
 
 export function isObject(value) {
@@ -153,9 +161,42 @@ function loadPackageSource(denylistPath, raw, location, errors) {
     return [];
   }
 
+  let sourceText;
+  let sourceFd;
+  try {
+    const sourceStats = lstatSync(absolutePath);
+    if (sourceStats.isSymbolicLink()) {
+      errors.push(`${location}.path must reference a regular file, not a symbolic link`);
+      return [];
+    }
+    if (!sourceStats.isFile()) {
+      errors.push(`${location}.path must reference a regular file`);
+      return [];
+    }
+
+    const realDenylistRoot = realpathSync(denylistRoot);
+    const realSourcePath = realpathSync(absolutePath);
+    if (!pathInsideRoot(realSourcePath, realDenylistRoot)) {
+      errors.push(`${location}.path real path must resolve within the repository root`);
+      return [];
+    }
+
+    sourceFd = openSync(realSourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    if (!fstatSync(sourceFd).isFile()) {
+      errors.push(`${location}.path must reference a regular file`);
+      return [];
+    }
+    sourceText = readFileSync(sourceFd, "utf8");
+  } catch (error) {
+    errors.push(`${location}.path could not be loaded: ${error.message}`);
+    return [];
+  } finally {
+    if (sourceFd !== undefined) closeSync(sourceFd);
+  }
+
   let rows;
   try {
-    rows = parseCsv(readFileSync(absolutePath, "utf8"), sourcePath);
+    rows = parseCsv(sourceText, sourcePath);
   } catch (error) {
     errors.push(`${location}.path could not be loaded: ${error.message}`);
     return [];

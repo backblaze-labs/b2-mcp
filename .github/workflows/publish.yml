@@ -66,6 +66,7 @@ jobs:
       - run: npm ci --engine-strict
       - run: npm run typecheck
       - run: npm run build
+      - run: npm run check:package-budget
       - run: npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js
       - run: npm run audit:supply-chain
         env:

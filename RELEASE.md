@@ -52,6 +52,6 @@ Before publishing `v0.1.0`:
 10. Publish only from the canonical repository through the protected
     `.github/workflows/publish.yml` workflow. Do not publish from a developer
     workstation. The publish workflow must prove the `v*` tag is reachable from
-    `ci-green`, build explicitly, scan the generated packlist and tarball,
-    verify the tarball SHA-256, and publish the already-scanned tarball with
-    lifecycle scripts disabled.
+    `ci-green`, build explicitly, enforce the runtime package budget, scan the
+    generated packlist and tarball, verify the tarball SHA-256, and publish the
+    already-scanned tarball with lifecycle scripts disabled.
