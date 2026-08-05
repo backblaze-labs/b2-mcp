@@ -18,10 +18,6 @@
  * are absent so a local editor cannot accidentally call B2.
  */
 
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import * as crypto from "crypto";
 import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 
@@ -77,9 +73,7 @@ let server: McpServer;
 
 // Populated during test run for use by later tests
 let firstBucketName: string; // bucket name (derived from b2_list_buckets)
-let firstBucketId: string; // B2 bucket ID (from b2_list_buckets)
 let writableBucketName: string; // First non-snapshot S3 bucket (safe for writes)
-let writableBucketId: string; // First non-snapshot B2 bucket ID (safe for writes)
 
 beforeAll(async () => {
   if (!HAS_CREDS) return;
@@ -90,11 +84,6 @@ beforeAll(async () => {
 
   // Discover a bucket and object once for use across all tests (B2 native — master key)
   const b2Buckets = parseResult(await callTool(server, "b2_list_buckets", {}));
-  if (b2Buckets?.buckets?.length) {
-    firstBucketId = b2Buckets.buckets[0].bucketId;
-    const writableB2 = b2Buckets.buckets.find((b: any) => isUserWritableBucket(b.bucketName));
-    if (writableB2) writableBucketId = writableB2.bucketId;
-  }
 
   // The retained S3 tools reuse the natively-discovered bucket (the S3 listing
   // tools were removed as duplicates of the native API).
