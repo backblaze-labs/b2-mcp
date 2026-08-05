@@ -220,7 +220,7 @@ Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitorin
 ```bash
 npm run build              # clean + compile to dist/
 npm run typecheck          # type-check src + tests (no emit)
-npm test                   # typecheck via pretest, then fast unit tests
+npm test                   # typecheck, then fast unit tests
 npm run test:contract      # deterministic MCP/package/schema contracts
 npm run test:protocol      # modern + legacy MCP protocol behavior
 npm run test:coverage      # deterministic source-covering suites + coverage summary

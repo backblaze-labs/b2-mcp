@@ -12,6 +12,11 @@ const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") 
 
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+  const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const npmrc = readFileSync(join(root, ".npmrc"), "utf8");
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
   const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
     allowedAdvisories: Array<{
       name: string;
@@ -57,6 +62,10 @@ describe("supply-chain audit policy", () => {
 
   function jobBlock(name: string): string {
     return workflowJobBlock(workflow, name) ?? "";
+  }
+
+  function publishJobBlock(name: string): string {
+    return workflowJobBlock(publishWorkflow, name) ?? "";
   }
 
   function scopedAuditReport(overrides: Record<string, unknown> = {}) {
@@ -190,6 +199,16 @@ describe("supply-chain audit policy", () => {
     const markGreenJob = jobBlock("mark-green");
     expect(workflow).toContain("supply-chain-audit:");
     expect(workflow).toContain("npm run audit:supply-chain");
+    expect(workflow).toContain(
+      "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist",
+    );
+    expect(auditJob).toContain("fetch-depth: 0");
+    expect(auditJob).toContain(
+      "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
+    );
+    expect(auditJob).toContain('sleep "$attempt"');
+    expect(auditJob).not.toContain("refs/heads/*:refs/remotes/origin/*");
+    expect(auditJob).not.toContain("--all-branches");
     expect(workflow).not.toContain("npm audit --omit=dev");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
     expect(auditJob).toContain("Reject injected audit fixtures");
@@ -206,6 +225,63 @@ describe("supply-chain audit policy", () => {
       "supply-chain-audit",
     ]) {
       expect(markGreenJob).toContain(required);
+    }
+  });
+
+  it("disables normal lifecycle scripts and isolates npm publishing", () => {
+    expect(npmrc).toMatch(/^ignore-scripts=true$/m);
+    expect(packageJson.scripts["audit:supply-chain"]).toContain(
+      "npm run audit:supply-chain:denylist -- --packlist",
+    );
+    expect(packageJson.scripts["audit:supply-chain:denylist"]).toBe(
+      "node scripts/check-supply-chain-denylist.mjs",
+    );
+    expect(packageJson.scripts.test).toBe("npm run typecheck && npm run test:unit");
+    expect(packageJson.scripts.pretest).toBeUndefined();
+    expect(packageJson.scripts.prepublishOnly).toBeUndefined();
+    expect(publishWorkflow).toContain("permissions:");
+    expect(publishWorkflow).toContain("id-token: write");
+    expect(publishWorkflow).toContain("environment: npm-publish");
+    expect(publishWorkflow).toContain("ci-green");
+    expect(publishWorkflow).toContain(
+      "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
+    );
+    expect(publishWorkflow).toContain('--tarball "$tarball"');
+    expect(publishWorkflow).toContain('sha256sum "$tarball"');
+    expect(publishWorkflow).toContain("retention-days: 7");
+    expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
+    expect(publishWorkflow).not.toContain("--ignore-scripts=false");
+    expect(publishWorkflow).not.toContain("tar -xzf");
+  });
+
+  it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {
+    const prepareJob = publishJobBlock("prepare");
+    const publishJob = publishJobBlock("publish");
+
+    expect(prepareJob).not.toContain("id-token: write");
+    expect(prepareJob).toContain("npm run typecheck");
+    expect(prepareJob).toContain("npm run build");
+    expect(prepareJob).toContain("persist-credentials: false");
+    expect(publishJob).toContain("id-token: write");
+    expect(publishJob).not.toContain("npm run typecheck");
+    expect(publishJob).not.toContain("npm run build");
+    expect(publishJob).not.toContain("--ignore-scripts=false");
+    expect(publishJob).toContain("npm publish");
+    expect(publishJob).toContain("--ignore-scripts");
+  });
+
+  it.each([
+    ["CI", workflow],
+    ["publish", publishWorkflow],
+  ])("pins every marketplace action used by the %s workflow", (_name, workflowText) => {
+    const uses = [...workflowText.matchAll(/uses:\s*([^@\s]+)@([^\s#]+)/g)].map((match) => ({
+      action: match[1],
+      ref: match[2],
+    }));
+
+    expect(uses.length).toBeGreaterThan(0);
+    for (const action of uses) {
+      expect(action.ref).toMatch(/^[a-f0-9]{40}$/);
     }
   });
 

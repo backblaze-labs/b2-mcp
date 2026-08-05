@@ -16,7 +16,7 @@ runs the full toolchain on Node.js 22.13.0, 24, and 26.
 ```bash
 npm ci
 npm run build        # clean + tsc → dist/
-npm test             # typecheck via pretest, then fast unit suite
+npm test             # typecheck, then fast unit suite
 npm run verify       # full no-credential local gate
 npm run lint         # eslint src tests
 npm run format:check # prettier

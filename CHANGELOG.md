@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
   live test files by stable suffix so `npm test` works from a clean checkout
   without relying on `dist/`.
-- Restored `npm test` typechecking through `pretest`, made package-install
+- Restored `npm test` typechecking, made package-install
   verification use the npm cache offline, and kept it off the `ci-green`
   deploy-gating path.
 - Canonicalized repository, package, workflow, security, and setup metadata for
@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   S3-material adapter while the upstream SDK helper gap is open.
 
 ### Security
+- Added a keyv/cacheable supply-chain denylist and IOC scanner, disabled npm
+  lifecycle scripts for normal installs, isolated provenance-backed npm
+  publishing to a protected prebuilt-tarball workflow, and documented the
+  branch/artifact/tarball scan plus host and credential response runbook for
+  issue #89.
+- Hardened the denylist scanner internals with importable schema, lockfile, and
+  scanner modules; tarballs with path traversal or link members are rejected
+  before extraction, and release tags may publish after later `ci-green` moves
+  as long as the tag remains reachable from that protected history.
 - Patched all currently reported npm advisories by updating `brace-expansion`,
   `js-yaml`, and Babel core, and replaced the MCP Node adapter with a minimal
   platform-only bridge so vulnerable `@hono/node-server` code is absent from

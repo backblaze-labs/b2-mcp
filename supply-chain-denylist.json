@@ -1,0 +1,67 @@
+{
+  "incident": "keyv-cacheable-mini-shai-hulud-2026-08-04",
+  "lastReviewed": "2026-08-05",
+  "provenanceMode": "single-incident-shared",
+  "reviewSourceUrls": [
+    "https://snyk.io/blog/inside-keyv-npm-compromise-preinstall-malware-trusted-provenance-ide-hooks/",
+    "https://socket.dev/blog/popular-npm-packages-in-the-keyv-and-cacheable-namespaces-compromised-in-active-supply-chain",
+    "https://www.wiz.io/blog/keyv-and-cacheable-npm-supply-chain-attack",
+    "https://github.com/wiz-sec-public/wiz-research-iocs/blob/main/reports/keyv-packages.csv"
+  ],
+  "packageSources": [
+    {
+      "path": "security/iocs/keyv-packages.csv",
+      "format": "wiz-keyv-packages-csv",
+      "sourceUrl": "https://github.com/wiz-sec-public/wiz-research-iocs/blob/main/reports/keyv-packages.csv",
+      "reviewedAt": "2026-08-05",
+      "expectedPackages": 443,
+      "expectedPackageVersions": 2235,
+      "reason": "Confirmed malicious package/version snapshot for the keyv/cacheable compromise."
+    }
+  ],
+  "packages": [],
+  "requiredPackageVersions": [
+    {
+      "name": "@thiennq/docs-viewer",
+      "version": "1.6.2",
+      "reason": "Issue #89 explicitly names this malicious package/version."
+    }
+  ],
+  "quarantineRules": [
+    {
+      "namePattern": "^@keyv/[^/]+$",
+      "versions": ["6.0.0"],
+      "reason": "The incident review quarantines unreviewed @keyv/* packages resolving to 6.0.0."
+    },
+    {
+      "namePattern": "^@cacheable/[^/]+$",
+      "versions": ["*"],
+      "reason": "The incident review quarantines unreviewed @cacheable/* namespace additions until explicitly cleared."
+    }
+  ],
+  "allowedLifecycleScripts": [
+    {
+      "path": "node_modules/fsevents",
+      "name": "fsevents",
+      "version": "2.3.3",
+      "reason": "Optional native file watcher install script in the existing dev toolchain; lockfile integrity remains required."
+    }
+  ],
+  "fileIndicators": [
+    {
+      "sha256": "54dc7ea54a1317cca0e890a2770630cf7fa6c97813e0cb9d2caa93012b350668",
+      "filenames": ["setup.mjs"],
+      "description": "npm tarball preinstall loader"
+    },
+    {
+      "sha256": "fd3ca4007b225fdf8de7af4345a19179d5efa8c4bb9205f88cda806e5684b1eb",
+      "filenames": ["setup.mjs"],
+      "description": "repository persistence loader"
+    },
+    {
+      "sha256": "9fc2570b7cef51c1b8df116d144d11ff4096357be7d2c4c6367cfc2509cf1bcc",
+      "filenames": ["Math_Symbol.js", "math_init.js"],
+      "description": "second-stage payload"
+    }
+  ]
+}

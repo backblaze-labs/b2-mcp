@@ -17,6 +17,7 @@ current with code, CI, and GitHub release metadata.
 | [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)                 | Gonza              | Tool-profile contract skeleton and fixture requirements                 | #49, #59                     |
 | [`TESTING.md`](TESTING.md)                             | Sophie / QK        | Deterministic PR gates, contract evidence, and live B2 smoke policy     | #50, #51, #52, #60, #61, #63 |
 | [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md)             | Sophie / QK        | Pre-public secret scanning, provenance, and legal review checklist      | #62, #66, #67                |
+| [`SUPPLY_CHAIN_SECURITY.md`](SUPPLY_CHAIN_SECURITY.md) | Sophie / QK        | npm compromise denylist, branch/artifact scan, and incident runbook     | #89                          |
 | [`../SECURITY.md`](../SECURITY.md)                     | Backblaze Security | Vulnerability reporting and support scope                               | #66                          |
 | [`../RELEASE.md`](../RELEASE.md)                       | Gonza              | Release process and changelog discipline                                | #64, #67                     |
 | [`../CHANGELOG.md`](../CHANGELOG.md)                   | Gonza              | Keep a Changelog release notes                                          | Ongoing                      |

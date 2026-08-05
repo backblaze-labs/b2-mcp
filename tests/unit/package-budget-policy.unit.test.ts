@@ -267,8 +267,12 @@ describe("package budget policy gate", () => {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
       scripts: Record<string, string>;
     };
+    const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+    const packageBudgetStep = publishWorkflow.indexOf("- run: npm run check:package-budget");
+    const packStep = publishWorkflow.indexOf("- name: Build and scan publish tarball");
 
-    expect(pkg.scripts.prepublishOnly).toContain("npm run build");
-    expect(pkg.scripts.prepublishOnly).toContain("npm run check:package-budget");
+    expect(pkg.scripts.prepublishOnly).toBeUndefined();
+    expect(packageBudgetStep).toBeGreaterThan(-1);
+    expect(packageBudgetStep).toBeLessThan(packStep);
   });
 });
