@@ -24,6 +24,7 @@ function parseJsonArray(stdout: string) {
 describe("package surface policy", () => {
   const pkg = readJson<{
     files: string[];
+    dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   }>("package.json");
 
@@ -43,9 +44,9 @@ describe("package surface policy", () => {
     expect(files).toContain("package.json");
   });
 
-  it("retries a transient packed-consumer npm ci and preserves the B2 probe flag", () => {
+  it("retries a transient lockfile-less packed-consumer install", () => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-smoke-npm-"));
-    const state = join(dir, "ci-attempts");
+    const state = join(dir, "install-attempts");
     const fakeNpm = join(dir, "npm");
     writeFileSync(
       fakeNpm,
@@ -61,7 +62,11 @@ describe("package surface policy", () => {
         "  console.log(JSON.stringify([{ filename }]));",
         "  process.exit(0);",
         "}",
-        'if (args[0] === "ci") {',
+        'if (args[0] === "install") {',
+        '  if (fs.existsSync(path.join(process.cwd(), "package-lock.json"))) {',
+        '    console.error("packed consumer install should start without a lockfile");',
+        "    process.exit(2);",
+        "  }",
         `  const state = ${JSON.stringify(state)};`,
         "  let attempt = 0;",
         '  try { attempt = Number(fs.readFileSync(state, "utf8")); } catch {}',
@@ -110,12 +115,17 @@ describe("package surface policy", () => {
       });
 
       expect(result.status).toBe(0);
-      expect(result.stderr).toContain("packed-consumer-smoke: retrying npm ci");
+      expect(result.stderr).toContain("packed-consumer-smoke: retrying npm install");
       expect(result.stdout).toContain("packed-consumer-smoke: installed and executed");
       expect(readFileSync(state, "utf8")).toBe("2");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps the runtime-sensitive circuit breaker dependency exact-pinned", () => {
+    expect(pkg.dependencies.opossum).toBe("10.0.0");
+    expect(pkg.dependencies.opossum).not.toMatch(/^[~^*]|x$/i);
   });
 
   it("exact-pins runtime-sensitive lint and typing packages", () => {

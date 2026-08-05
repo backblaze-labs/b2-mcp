@@ -165,8 +165,8 @@ GitHub `::warning` annotation.
 
 `mark-green` intentionally fail-closes on npm registry/advisory-service
 availability because `supply-chain-audit` makes a live `npm audit` call and
-`smoke:package` performs a cold consumer `npm ci`. If a sustained npm outage
-blocks an urgent unrelated production hotfix, the emergency path is: get
+`smoke:package` performs a cold lockfile-less consumer `npm install`. If a
+sustained npm outage blocks an urgent unrelated production hotfix, the emergency path is: get
 release-owner and security-owner approval in the incident record, verify the
 same commit passed every non-registry gate locally or in CI, confirm the commit
 is still `refs/heads/main`, then have a maintainer with write access advance

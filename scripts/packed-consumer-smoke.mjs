@@ -67,36 +67,6 @@ function run(command, args, options = {}) {
   );
 }
 
-function writeConsumerLock(tarball) {
-  const sourceLock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
-  const sourceRoot = sourceLock.packages[""];
-  // Reuse the root package entry as the installed package shape, but strip dev
-  // dependencies so the synthetic consumer lock represents a production install.
-  const packageEntry = {
-    ...sourceRoot,
-    resolved: `file:${tarball}`,
-  };
-  delete packageEntry.devDependencies;
-
-  sourceLock.packages = Object.fromEntries(
-    Object.entries(sourceLock.packages).filter(
-      ([packagePath, entry]) => packagePath === "" || entry.dev !== true,
-    ),
-  );
-
-  sourceLock.name = "b2-mcp-packed-consumer";
-  sourceLock.version = "0.0.0";
-  sourceLock.packages[""] = {
-    name: "b2-mcp-packed-consumer",
-    version: "0.0.0",
-    dependencies: {
-      "@backblaze-labs/b2-mcp": `file:${tarball}`,
-    },
-  };
-  sourceLock.packages["node_modules/@backblaze-labs/b2-mcp"] = packageEntry;
-  writeFileSync(path.join(workspace, "package-lock.json"), JSON.stringify(sourceLock, null, 2));
-}
-
 try {
   run(
     process.execPath,
@@ -135,9 +105,7 @@ try {
       2,
     ),
   );
-  writeConsumerLock(tarball);
-
-  run("npm", ["ci", "--engine-strict", "--omit=dev", "--ignore-scripts"], {
+  run("npm", ["install", "--engine-strict", "--omit=dev", "--ignore-scripts"], {
     env: {
       ...sanitizerBlockedEnv,
       npm_config_fetch_retries: "3",
@@ -147,7 +115,7 @@ try {
     },
     retries: 2,
     retryDelayMs: 1_000,
-    retryLabel: "npm ci",
+    retryLabel: "npm install",
     timeout: 180_000,
   });
   run(

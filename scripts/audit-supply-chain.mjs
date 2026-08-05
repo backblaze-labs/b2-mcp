@@ -46,8 +46,8 @@ const allowed = new Map(
 
 function referenceDate() {
   if (!injectedToday) return new Date().toISOString().slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(injectedToday)) {
-    throw new Error(`B2_MCP_AUDIT_TODAY must be YYYY-MM-DD, got ${injectedToday}`);
+  if (!isRealDate(injectedToday)) {
+    throw new Error(`B2_MCP_AUDIT_TODAY must be a real YYYY-MM-DD date, got ${injectedToday}`);
   }
   return injectedToday;
 }
@@ -188,7 +188,31 @@ function daysUntil(date) {
   return Math.ceil((expiresAt - todayAt) / 86_400_000);
 }
 
+function isRealDate(value) {
+  if (typeof value !== "string") return false;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
 function recordExpiryFinding(key, exception, details) {
+  if (!isRealDate(exception.expires)) {
+    details.push(
+      `exception expires must be a real YYYY-MM-DD calendar date, got ${JSON.stringify(
+        exception.expires,
+      )}`,
+    );
+    return;
+  }
+
   const days = daysUntil(exception.expires);
   if (exception.expires < today) {
     const message =

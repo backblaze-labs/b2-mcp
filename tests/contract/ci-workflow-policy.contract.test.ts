@@ -1,27 +1,31 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import { createRequire } from "module";
 import { root } from "./support";
 
-function workflowJob(text: string, job: string): string {
-  const marker = new RegExp(`^  ${job}:\\s*$`, "m").exec(text);
-  if (!marker) throw new Error(`Workflow job not found: ${job}`);
-  const rest = text.slice(marker.index + marker[0].length);
-  const nextJob = /\n {2}[A-Za-z0-9_-]+:\s*\n/.exec(rest);
-  return nextJob ? rest.slice(0, nextJob.index) : rest;
-}
+const nodeRequire = createRequire(__filename);
+const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  workflowJobBlock: (text: string, jobName: string) => string | null;
+};
 
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+
+  function workflowJob(name: string): string {
+    const job = workflowJobBlock(ci, name);
+    if (!job) throw new Error(`Workflow job not found: ${name}`);
+    return job;
+  }
 
   it("defaults workflow permissions to read-only contents", () => {
     expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
   });
 
   it("keeps the package layer separate from the ci-green dependency path", () => {
-    const markGreen = workflowJob(ci, "mark-green");
-    const productionJob = workflowJob(ci, "deterministic-linux-production");
-    const currentJob = workflowJob(ci, "deterministic-linux-current");
-    const packageJob = workflowJob(ci, "package");
+    const markGreen = workflowJob("mark-green");
+    const productionJob = workflowJob("deterministic-linux-production");
+    const currentJob = workflowJob("deterministic-linux-current");
+    const packageJob = workflowJob("package");
 
     expect(markGreen).toContain(
       "runtime-engine-floor, deterministic-linux-production, supply-chain-audit",

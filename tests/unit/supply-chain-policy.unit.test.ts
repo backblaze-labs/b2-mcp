@@ -157,14 +157,25 @@ describe("supply-chain audit policy", () => {
     };
   }
 
-  function runAudit(report: unknown, extraEnv: Record<string, string> = {}) {
+  function policyWithException(overrides: Record<string, unknown>, omitExpires = false) {
+    const entry = { ...exceptionPolicy.allowedAdvisories[0], ...overrides };
+    if (omitExpires)
+      delete (entry as Partial<(typeof exceptionPolicy.allowedAdvisories)[0]>).expires;
+    return { allowedAdvisories: [entry] };
+  }
+
+  function runAudit(
+    report: unknown,
+    extraEnv: Record<string, string> = {},
+    policy: unknown = exceptionPolicy,
+  ) {
     return spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
       cwd: root,
       env: {
         ...process.env,
         NODE_ENV: "test",
         B2_MCP_AUDIT_REPORT_JSON: JSON.stringify(report),
-        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(policy),
         B2_MCP_AUDIT_TODAY: "2026-09-30",
         ...extraEnv,
       },
@@ -345,6 +356,19 @@ describe("supply-chain audit policy", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("::error::audit-policy: form-data:999000");
     expect(result.stderr).toContain("exception expired on 2026-10-01");
+  });
+
+  it.each([
+    ["missing", policyWithException({}, true), "undefined"],
+    ["malformed", policyWithException({ expires: "never" }), '"never"'],
+    ["impossible", policyWithException({ expires: "2026-02-30" }), '"2026-02-30"'],
+  ])("fails closed for %s advisory exception expiry", (_name, policy, expectedValue) => {
+    const result = runAudit(scopedAuditReport(), {}, policy);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("::error::audit-policy: form-data:999000");
+    expect(result.stderr).toContain("expires must be a real YYYY-MM-DD calendar date");
+    expect(result.stderr).toContain(expectedValue);
   });
 
   it("supports warn mode only as a non-gating expired-exception reminder", () => {
