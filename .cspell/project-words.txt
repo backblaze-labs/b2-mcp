@@ -1,0 +1,58 @@
+# Project-specific dictionary for @backblaze-labs/b2-mcp.
+#
+# One word per line. Comments allowed (lines starting with `#`). Words are
+# case-insensitive by default.
+#
+# Adding a word here is preferred to inline `// cspell:ignore` directives
+# because the list stays auditable and reusable. Sort within each block.
+
+# Backblaze + B2
+backblaze
+backblazeb
+Backblaze
+b2sdk
+MGMT
+mgmt
+
+# Tooling, libraries, runtimes
+biome
+biomejs
+cobertura
+corepack
+cspell
+iocs
+junit
+MCP
+NOFILE
+opossum
+pino
+presigner
+SUIDSGID
+thiennq
+toon
+tvzf
+ustar
+xvda
+zod
+
+# People and account names
+goanpeca
+Gonza
+sophiecarreras
+
+# Cloud, network, storage, and security terms
+behaviour
+creds
+EOPENBREAKER
+noout
+paginators
+sessionful
+unallowed
+unparseable
+unreviewed
+
+# Test fixture tokens and identifier fragments
+dontMock
+ghijkl
+klass
+pathb

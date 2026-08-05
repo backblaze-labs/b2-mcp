@@ -43,7 +43,7 @@
     "test:integration:live": "node scripts/require-live-env.mjs integration && node scripts/run-jest-layer.mjs integration-live",
     "test:contract:live": "node scripts/require-live-env.mjs contract && node scripts/run-jest-layer.mjs contract-live",
     "test:package": "npm run build && node scripts/run-jest-layer.mjs package",
-    "verify": "npm run typecheck && npm run build && npm run lint && npm run format:check && npm run test:coverage && npm run test:slow && npm run test:package",
+    "verify": "npm run typecheck && npm run build && npm run lint && npm run format:check && npm run spell && npm run test:coverage && npm run test:slow && npm run test:package",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "smoke:package": "npm run build && node scripts/packed-consumer-smoke.mjs",
@@ -55,7 +55,8 @@
     "lint": "node scripts/run-biome.mjs lint src tests scripts",
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts --write",
     "format": "node scripts/run-biome.mjs format . --write",
-    "format:check": "node scripts/run-biome.mjs format ."
+    "format:check": "node scripts/run-biome.mjs format .",
+    "spell": "cspell --no-progress --gitignore \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,cjs}\" \"docs/**/*.md\" \"*.md\" \"CLAUDE.md\" \".github/**/*.yml\""
   },
   "keywords": [
     "mcp",
@@ -85,6 +86,7 @@
     "@types/node": "22.3.0",
     "@types/opossum": "^8.1.9",
     "babel-jest": "^29.7.0",
+    "cspell": "^10.0.1",
     "jest": "^29.5.0",
     "jest-junit": "^17.0.0",
     "ts-jest": "^29.4.12",
