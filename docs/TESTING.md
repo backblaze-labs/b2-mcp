@@ -37,6 +37,10 @@ registry availability cannot stall `ci-green`.
 The current CI check names are `lint` and `test`. If branch protection is added,
 use those names, not the retired matrix names `test (20)` or `test (22)`.
 
+TypeScript is intentionally constrained to the `6.0.x` line while
+`typescript-eslint` declares a `<6.1.0` peer range. Widen the TypeScript range
+only with a matching lint toolchain upgrade.
+
 ## File Naming Convention
 
 Test files must use these suffixes so scripts do not depend on accidental paths:

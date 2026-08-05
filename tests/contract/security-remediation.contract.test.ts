@@ -3,7 +3,7 @@ import { join } from "path";
 import { root } from "./support";
 
 type PackageLock = {
-  packages: Record<string, { version?: string }>;
+  packages: Record<string, { version?: string; peerDependencies?: Record<string, string> }>;
 };
 
 function versionAtLeast(actual: string, floor: string): boolean {
@@ -16,10 +16,23 @@ function versionAtLeast(actual: string, floor: string): boolean {
   return true;
 }
 
+function versionTuple(version: string): [number, number, number] {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!match) throw new Error(`Invalid semver version: ${version}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function rangeFloor(range: string): string {
+  const match = /(\d+\.\d+\.\d+)/.exec(range);
+  if (!match) throw new Error(`Missing semver floor in range: ${range}`);
+  return match[1];
+}
+
 describe("security dependency policy", () => {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
+    overrides?: Record<string, string>;
   };
   const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as PackageLock;
 
@@ -29,10 +42,26 @@ describe("security dependency policy", () => {
     return version;
   };
 
+  const expectManifestAndLockAtLeast = (
+    manifestRange: string,
+    lockPath: string,
+    floor: string,
+    expectedMajor: number,
+  ): void => {
+    const manifestFloor = rangeFloor(manifestRange);
+    expect(versionAtLeast(manifestFloor, floor)).toBe(true);
+    expect(versionTuple(manifestFloor)[0]).toBe(expectedMajor);
+
+    const lockedVersion = resolvedVersion(lockPath);
+    expect(versionAtLeast(lockedVersion, floor)).toBe(true);
+    expect(versionTuple(lockedVersion)[0]).toBe(expectedMajor);
+  };
+
   it("excludes the vulnerable MCP Node adapter from the published graph", () => {
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]).toBeUndefined();
     expect(lock.packages["node_modules/@hono/node-server"]).toBeUndefined();
+    expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
   });
 
   it("keeps every brace-expansion resolution above its advisory floor", () => {
@@ -54,10 +83,39 @@ describe("security dependency policy", () => {
   });
 
   it("includes the consolidated safe direct dependency updates", () => {
-    expect(pkg.dependencies["@aws-sdk/client-s3"]).toBe("^3.1103.0");
-    expect(pkg.dependencies["@aws-sdk/s3-request-presigner"]).toBe("^3.1103.0");
-    expect(pkg.dependencies.axios).toBe("^1.19.0");
-    expect(pkg.devDependencies.typescript).toBe("^6.0.3");
-    expect(pkg.devDependencies["@babel/plugin-transform-modules-commonjs"]).toBe("7.29.7");
+    expectManifestAndLockAtLeast(
+      pkg.dependencies["@aws-sdk/client-s3"],
+      "node_modules/@aws-sdk/client-s3",
+      "3.1103.0",
+      3,
+    );
+    expectManifestAndLockAtLeast(
+      pkg.dependencies["@aws-sdk/s3-request-presigner"],
+      "node_modules/@aws-sdk/s3-request-presigner",
+      "3.1103.0",
+      3,
+    );
+    expectManifestAndLockAtLeast(pkg.dependencies.axios, "node_modules/axios", "1.19.0", 1);
+    expectManifestAndLockAtLeast(
+      pkg.devDependencies["@babel/plugin-transform-modules-commonjs"],
+      "node_modules/@babel/plugin-transform-modules-commonjs",
+      "7.29.7",
+      7,
+    );
+  });
+
+  it("keeps TypeScript inside the eslint toolchain peer window", () => {
+    const range = pkg.devDependencies.typescript;
+    const [major, minor] = versionTuple(rangeFloor(range));
+    expect(versionAtLeast(rangeFloor(range), "6.0.3")).toBe(true);
+    expect([major, minor]).toEqual([6, 0]);
+    expect(range).toMatch(/^~?6\.0\.\d+$/);
+
+    const lockedVersion = resolvedVersion("node_modules/typescript");
+    expect(versionAtLeast(lockedVersion, "6.0.3")).toBe(true);
+    expect(versionTuple(lockedVersion).slice(0, 2)).toEqual([6, 0]);
+    expect(
+      lock.packages["node_modules/@typescript-eslint/parser"]?.peerDependencies?.typescript,
+    ).toContain("<6.1.0");
   });
 });
