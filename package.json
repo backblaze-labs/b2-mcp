@@ -52,10 +52,10 @@
     "audit:supply-chain": "npm run audit:supply-chain:denylist -- --packlist && node scripts/audit-supply-chain.mjs",
     "audit:supply-chain:denylist": "node scripts/check-supply-chain-denylist.mjs",
     "probe:500": "npm run build && node scripts/probe-b2-500s.mjs",
-    "lint": "biome lint src tests",
-    "lint:fix": "biome lint --write src tests",
-    "format": "biome format --write .",
-    "format:check": "biome format ."
+    "lint": "node scripts/run-biome.mjs lint src tests scripts",
+    "lint:fix": "node scripts/run-biome.mjs lint --write src tests scripts",
+    "format": "node scripts/run-biome.mjs format --write .",
+    "format:check": "node scripts/run-biome.mjs format ."
   },
   "keywords": [
     "mcp",

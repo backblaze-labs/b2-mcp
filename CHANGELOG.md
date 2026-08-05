@@ -46,8 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   22.3.0 and the full toolchain on Node.js 22.13.0, 24, and 26, local and live
   22.x jobs use a patched Node 22 LTS release, and workflow drift is checked
   from `runtime-policy.json`.
-- Migrated linting and formatting from ESLint and Prettier to Biome while
-  keeping the existing npm script names used by CI and `npm run verify`.
+- Migrated linting and Biome-supported formatting from ESLint and Prettier to
+  Biome while keeping the existing npm script names used by CI and
+  `npm run verify`; Markdown and YAML files are no longer part of the automated
+  format gate.
 - Exact-pinned the runtime-sensitive `opossum` dependency and changed the packed
   consumer smoke gate to exercise a fresh lockfile-less npm install path.
 - Migrated HTTP and stdio serving to the MCP TypeScript SDK v2 modern entry

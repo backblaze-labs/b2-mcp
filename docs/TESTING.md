@@ -16,9 +16,9 @@ npm ci
 npm run verify
 ```
 
-`npm run verify` runs typecheck, build, lint, format check, deterministic
-coverage, deterministic slow tests, and packed-package installation tests. The
-individual deterministic layers are:
+`npm run verify` runs typecheck, build, lint, the Biome-supported format check,
+deterministic coverage, deterministic slow tests, and packed-package
+installation tests. The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
 | ----------------------- | ------------------------------------------------------------------------------------ |
@@ -44,6 +44,10 @@ Windows, and macOS at the patched Node 22 LTS pin.
 TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
 TypeScript range only with a matching typecheck and lint toolchain upgrade.
+
+Biome is also the only formatter. `npm run format` and `npm run format:check`
+cover Biome-supported file types; Markdown and YAML files are not part of the
+automated format gate.
 
 ## File Naming Convention
 

@@ -18,8 +18,8 @@ npm ci
 npm run build        # clean + tsc → dist/
 npm test             # typecheck, then fast unit suite
 npm run verify       # full no-credential local gate
-npm run lint         # biome lint src tests
-npm run format:check # biome format check
+npm run lint         # Biome lint for src/, tests/, and scripts/
+npm run format:check # Biome-supported format check
 ```
 
 For the version/build-pinned conda bootstrap:
@@ -34,6 +34,10 @@ Live tests need real B2 credentials and are not run in the default suite. Use
 `npm run test:integration:live` for live integration behavior and
 `npm run test:contract:live` for live request-shape checks; both require
 `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`.
+
+Biome is the sole formatter in this repository. The `format` and `format:check`
+scripts intentionally cover Biome-supported file types; Markdown and YAML files
+are outside the automated formatting gate.
 
 Test files must follow the layer suffix convention documented in
 [`docs/TESTING.md`](./docs/TESTING.md): `*.unit.test.ts`,
