@@ -2,7 +2,7 @@
  * Unit tests for the withRetry() exponential backoff utility.
  *
  * Retryable status codes: 408, 429, 503, 504.
- * Non-retryable: everything else (400, 401, 404, 500, plain errors).
+ * Non-retryable: everything else (400, 401, 404, plain errors).
  * Max retries: 3 (4 total attempts).
  */
 
@@ -89,7 +89,7 @@ describe("withRetry — success path", () => {
 // ── Retryable status codes ────────────────────────────────────────────────────
 
 describe("withRetry — retries on transient status codes", () => {
-  test.each([408, 429, 503, 504])("retries on HTTP %d", async (status) => {
+  test.each([408, 429, 500, 502, 503, 504])("retries on HTTP %d", async (status) => {
     const fn = jest.fn().mockRejectedValueOnce(httpError(status)).mockResolvedValueOnce("ok");
 
     const promise = withRetry(fn);
@@ -123,7 +123,7 @@ describe("withRetry — reads AWS SDK $metadata status", () => {
 // ── Non-retryable status codes ────────────────────────────────────────────────
 
 describe("withRetry — does NOT retry on non-retryable errors", () => {
-  test.each([400, 401, 403, 404, 500])("fails immediately on HTTP %d", async (status) => {
+  test.each([400, 401, 403, 404])("fails immediately on HTTP %d", async (status) => {
     const fn = jest.fn().mockRejectedValue(httpError(status));
 
     const promise = withRetry(fn);

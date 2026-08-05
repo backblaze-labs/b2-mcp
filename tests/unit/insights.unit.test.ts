@@ -7,6 +7,7 @@ import {
   computeSnapshotGrowth,
   periodStartDate,
   selectUsageKeys,
+  registerInsightTools,
   ReportRow,
 } from "../../src/b2/insights.js";
 
@@ -261,49 +262,50 @@ describe("insights — computeEgressLeaders", () => {
   });
 });
 
-// ── Snapshot listing/selection (fake S3 — proves the perf-critical path) ──────
+// ── Snapshot listing/selection (fake report client — proves the perf-critical path) ──────
 import { latestSnapshotDate, loadDayRows } from "../../src/b2/insights.js";
 
-// Minimal S3 stand-in: returns ListObjectsV2 pages by Prefix/StartAfter and a
-// GetObject body. Lets us verify date selection and per-day loading without a network.
-function fakeS3(objectsByDay: Record<string, string[]>, csvByKey: Record<string, string> = {}) {
+function fakeReportClient(
+  objectsByDay: Record<string, string[]>,
+  csvByKey: Record<string, string> = {},
+) {
   const allKeys = Object.entries(objectsByDay).flatMap(([d, names]) =>
     names.map((n) => `${d}/${n}`),
   );
   return {
-    send: async (cmd: any) => {
-      const input = cmd.input ?? {};
-      if (
-        "Key" in input &&
-        !("Prefix" in input) &&
-        !("StartAfter" in input) &&
-        !("ContinuationToken" in input)
-      ) {
-        return { Body: { transformToString: async () => csvByKey[input.Key] ?? "" } };
-      }
+    listReportObjectKeys: async (
+      _bucketName: string,
+      input: { prefix?: string; startAfter?: string; maxKeys?: number },
+    ) => {
       let keys = allKeys.slice().sort();
-      if (input.Prefix) keys = keys.filter((k) => k.startsWith(input.Prefix));
-      if (input.StartAfter) keys = keys.filter((k) => k > input.StartAfter);
-      if (input.MaxKeys) keys = keys.slice(0, input.MaxKeys);
-      return { Contents: keys.map((Key) => ({ Key })), IsTruncated: false };
+      const prefix = input.prefix;
+      const startAfter = input.startAfter;
+      if (prefix) keys = keys.filter((k) => k.startsWith(prefix));
+      if (startAfter) keys = keys.filter((k) => k > startAfter);
+      if (input.maxKeys) keys = keys.slice(0, input.maxKeys);
+      return { keys, isTruncated: false };
+    },
+    downloadReportObjectText: async (_bucketName: string, key: string) => {
+      const text = csvByKey[key] ?? "";
+      return { text, bytes: Buffer.byteLength(text, "utf8"), truncated: false };
     },
   } as any;
 }
 
-describe("insights — snapshot selection (fake S3)", () => {
+describe("insights — snapshot selection (fake report client)", () => {
   it("latestSnapshotDate returns the most recent day present", async () => {
-    const s3 = fakeS3({
+    const b2Client = fakeReportClient({
       "2026-06-20": ["usage.account-a.us-west.csv"],
       "2026-06-27": ["usage.account-a.us-west.csv"],
     });
     const today = new Date(Date.UTC(2026, 5, 28));
-    expect((await latestSnapshotDate(s3, "b2-reports-x", today)).date).toBe("2026-06-27");
+    expect((await latestSnapshotDate(b2Client, "b2-reports-x", today)).date).toBe("2026-06-27");
   });
 
   it("loadDayRows loads only the requested day and sums its region files", async () => {
     const csv = "account_id,date,stored_gb\n" + "a,2026-05-28,60\n";
     const csv2 = "account_id,date,stored_gb\n" + "a,2026-05-28,40\n";
-    const s3 = fakeS3(
+    const b2Client = fakeReportClient(
       {
         "2026-05-28": ["usage.account-a.us-west.csv", "usage.account-a.eu-central.csv"],
         "2026-06-27": ["usage.account-a.us-west.csv"], // must NOT be loaded
@@ -313,10 +315,179 @@ describe("insights — snapshot selection (fake S3)", () => {
         "2026-05-28/usage.account-a.eu-central.csv": csv2,
       },
     );
-    const rows = await loadDayRows(s3, "b2-reports-x", "2026-05-28");
+    const rows = await loadDayRows(b2Client, "b2-reports-x", "2026-05-28");
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r._date === "2026-05-28")).toBe(true);
     // two region rows for account a → 60 + 40 GB stored
     expect(rows.reduce((s, r) => s + (r.storageBytes ?? 0), 0)).toBe(100 * GB);
+  });
+
+  it("latestSnapshotDate stops at the report listing page budget", async () => {
+    let calls = 0;
+    const b2Client = {
+      listReportObjectKeys: async () => {
+        calls++;
+        return {
+          keys: [`2026-06-${String(Math.min(calls, 28)).padStart(2, "0")}/usage.account.csv`],
+          isTruncated: true,
+          nextContinuationToken: String(calls),
+        };
+      },
+      downloadReportObjectText: async () => ({ text: "", bytes: 0, truncated: false }),
+    };
+
+    const result = await latestSnapshotDate(
+      b2Client as any,
+      "b2-reports-x",
+      new Date(Date.UTC(2026, 5, 28)),
+    );
+
+    expect(calls).toBe(100);
+    expect(result.date).toBe("2026-06-28");
+  });
+});
+
+describe("insights — report scan bounds", () => {
+  it("returns partial metadata when report CSV selection is capped", async () => {
+    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+    const server = {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const keys = Array.from(
+      { length: 1005 },
+      (_, i) => `${today}/usage.account-${String(i).padStart(4, "0")}.csv`,
+    );
+    const csv = `account_id,date,downloaded_gb,stored_gb\nacct,${today},1,1\n`;
+    const b2Client = {
+      listReportObjectKeys: async () => ({
+        keys,
+        isTruncated: false,
+      }),
+      downloadReportObjectText: async () => ({
+        text: csv,
+        bytes: Buffer.byteLength(csv, "utf8"),
+        truncated: false,
+      }),
+    };
+    const auth = {
+      getAuth: async () => ({ accountId: "acct" }),
+    };
+    registerInsightTools(server as any, b2Client as any, auth as any, b2Client as any);
+
+    const result = await tools.b2_egress_leaders.execute({
+      by: "account",
+      days: 90,
+      limit: 1,
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.partial).toBe(true);
+    expect(body.truncated).toBe(true);
+    expect(body.report_scan.selected_keys).toBe(1000);
+    expect(body.report_scan.downloaded_keys).toBe(1000);
+    expect(body.report_scan.stop_reasons).toContain("max_selected_keys");
+  });
+
+  it("stops before starting another report download at the byte cap", async () => {
+    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+    const server = {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+    };
+    const today = new Date().toISOString().slice(0, 10);
+    const keys = [`${today}/usage.account-0001.csv`, `${today}/usage.account-0002.csv`];
+    const downloadReportObjectText = jest.fn(async () => ({
+      text: "",
+      bytes: 25 * 1024 * 1024,
+      truncated: false,
+    }));
+    const b2Client = {
+      listReportObjectKeys: async () => ({
+        keys,
+        isTruncated: false,
+      }),
+      downloadReportObjectText,
+    };
+    const auth = {
+      getAuth: async () => ({ accountId: "acct" }),
+    };
+    registerInsightTools(server as any, b2Client as any, auth as any, b2Client as any);
+
+    const result = await tools.b2_egress_leaders.execute({
+      by: "account",
+      days: 90,
+      limit: 1,
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.partial).toBe(true);
+    expect(body.report_scan.downloaded_keys).toBe(1);
+    expect(body.report_scan.downloaded_mb).toBe(25);
+    expect(body.report_scan.stop_reasons).toContain("max_downloaded_bytes");
+    expect(downloadReportObjectText).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one byte budget across b2_usage_growth discovery and both snapshots", async () => {
+    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+    const server = {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+    };
+    const csv = "account_id,date,stored_gb\nacct,2026-06-20,1\n";
+    const downloadReportObjectText = jest
+      .fn()
+      .mockResolvedValueOnce({
+        text: csv,
+        bytes: 20 * 1024 * 1024,
+        truncated: false,
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        bytes: 5 * 1024 * 1024,
+        truncated: true,
+      });
+    const b2Client = {
+      listReportObjectKeys: async (
+        _bucket: string,
+        input: { prefix?: string; maxKeys?: number },
+      ) => {
+        if (input.prefix === "2026-06-20/") {
+          return { keys: ["2026-06-20/usage.account.csv"], isTruncated: false };
+        }
+        if (input.prefix === "2026-06-28/") {
+          return { keys: ["2026-06-28/usage.account.csv"], isTruncated: false };
+        }
+        if (input.maxKeys === 1) {
+          return { keys: ["2026-06-20/usage.account.csv"], isTruncated: false };
+        }
+        return {
+          keys: ["2026-06-20/usage.account.csv", "2026-06-28/usage.account.csv"],
+          isTruncated: false,
+        };
+      },
+      downloadReportObjectText,
+    };
+    const auth = {
+      getAuth: async () => ({ accountId: "acct" }),
+    };
+    registerInsightTools(server as any, {} as any, auth as any, b2Client as any);
+
+    const result = await tools.b2_usage_growth.execute({
+      period: "month",
+      order: "most_grown",
+      limit: 1,
+    });
+    const body = JSON.parse(result.content[0].text);
+
+    expect(body.partial).toBe(true);
+    expect(body.report_scan.downloaded_mb).toBe(25);
+    expect(body.report_scan.stop_reasons).toContain("max_downloaded_bytes");
+    expect(downloadReportObjectText).toHaveBeenCalledTimes(2);
+    expect(downloadReportObjectText.mock.calls[1][2].maxBytes).toBe(5 * 1024 * 1024);
   });
 });

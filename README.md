@@ -4,10 +4,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 
 **40 tools, split by what they do:**
 
-- **Control plane (14, native B2 API)** — buckets, key listing/deletion, Partner/Groups administration, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
+- **Control plane (11 active, native B2 API)** — buckets, key listing/deletion, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
 - **Data plane (19, S3-compatible API)** — object upload/download/copy/list/delete, multipart, presigned URLs. _(Forward-compatible; S3 is the standard surface for object data.)_
 - **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
-- **Unavailable compatibility stubs (3, native B2 API)** — durable-secret-producing tool names return a non-secret unavailable error until a reviewed out-of-band secret sink exists.
+- **Unavailable compatibility stubs (6, native B2 API in the full surface)** — three durable-secret-producing tool names and three Partner/Groups SDK-gap tool names return a non-secret unavailable error until their reviewed dependencies exist.
 
 Destructive actions are gated, durable B2 secrets never enter the model's context, and the tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
@@ -44,7 +44,7 @@ npm run build          # produces dist/ — required before first run
 
 Replace the path with where you put the folder, then restart Claude Desktop — the B2 tools appear.
 
-> **One non-master application key covers everything** — B2 native, S3, and key management. A **master key is optional**, used _only_ by the Partner API tools (`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`). B2's S3 endpoint rejects master keys, which is why the application key is the primary credential. See [Configuration](#configuration) for the full list.
+> **One non-master application key covers everything active** — B2 native, S3, and key management. The Partner/Groups tool names are currently unavailable SDK-gap stubs; configuring `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` does not activate them until the upstream SDK support lands. B2's S3 endpoint rejects master keys, which is why the application key is the primary credential. See [Configuration](#configuration) for the full list.
 
 > **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP) — plus a compatibility matrix.
 
@@ -58,18 +58,18 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 
 ## Configuration
 
-| Variable                                                      | Required              | Default               | Description                                                                                                               |
-| ------------------------------------------------------------- | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse for native B2 and S3-compatible tools                                     |
-| `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                    |
-| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master key — used **only** by Partner API tools                                                                           |
-| `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                     |
-| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                              |
-| `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                            |
-| `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                       |
-| `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments |
-| `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                           |
-| `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                |
+| Variable                                                      | Required              | Default               | Description                                                                                                                |
+| ------------------------------------------------------------- | --------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse for native B2 and S3-compatible tools                                      |
+| `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                     |
+| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Reserved for Partner/Groups tools; those tools are currently unavailable SDK-gap stubs and are not activated by setting it |
+| `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                      |
+| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                               |
+| `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
+| `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                        |
+| `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments  |
+| `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
+| `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                 |
 
 **Security / policy (safe defaults; override as needed):**
 
@@ -82,6 +82,12 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size. Cache identity is secret-bound; log labels are non-secret fingerprints   |
 
 A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+---
+
+## Package API Surface
+
+The npm package intentionally supports only the root CommonJS entry (`require("@backblaze-labs/b2-mcp")`), which exposes `startStdio`, plus `./package.json` for metadata. Deep imports such as `@backblaze-labs/b2-mcp/dist/server.js` are private implementation details and are closed by the package `exports` map before the 0.1 release. Use the CLI/bin entry or the root `startStdio` export instead.
 
 ---
 
@@ -128,10 +134,10 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 37 tools are active; 3 native names are unavailable compatibility stubs for stale cached `tools/list` clients. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, Partner/Groups administration, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), Group-member eject (`b2_eject_group_member`), and the protection-removal paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 34 tools are active in the full surface; 6 native names are unavailable compatibility stubs for stale cached `tools/list` clients or deferred dependencies. Object data runs on S3; buckets, key listing/deletion, Object Lock, notifications, and insights stay native. Ten destructive or protection-weakening tools require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object(s)`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
-<summary><b>Control plane — native B2 API (14)</b></summary>
+<summary><b>Control plane — native B2 API (11 active + 3 Partner SDK-gap stubs)</b></summary>
 
 | Tool                                 | Description                                                        |
 | ------------------------------------ | ------------------------------------------------------------------ |
@@ -147,13 +153,13 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 | `b2_update_file_legal_hold`          | Set/clear legal hold on an object                                  |
 | `b2_update_file_retention`           | Set/clear retention on an object                                   |
 | **Partner API** _(needs master key)_ |                                                                    |
-| `b2_list_groups`                     | List partner groups                                                |
-| `b2_eject_group_member`              | Remove an account from a group                                     |
-| `b2_list_group_members`              | List group members                                                 |
+| `b2_list_groups`                     | Unavailable SDK-gap compatibility stub for listing partner groups  |
+| `b2_eject_group_member`              | Unavailable SDK-gap compatibility stub for removing a group member |
+| `b2_list_group_members`              | Unavailable SDK-gap compatibility stub for listing group members   |
 
 </details>
 
-Durable-secret-producing operations are registered only as compatibility stubs in Phase 1 because there is no configured out-of-band secret sink. Calls to `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` return a structured non-secret unavailable error. A future sink-backed profile may expose them only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
+Durable-secret-producing operations are registered only as compatibility stubs in Phase 1 because there is no configured out-of-band secret sink. Calls to `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` return a structured non-secret unavailable error. Partner/Groups operations `b2_list_groups`, `b2_eject_group_member`, and `b2_list_group_members` are also unavailable compatibility stubs until the official Backblaze SDK publishes stable Partner APIs. A future sink-backed profile may expose secret-producing operations only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
 
 <details>
 <summary><b>Data plane — S3-compatible API (19)</b></summary>

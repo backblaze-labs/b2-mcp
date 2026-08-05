@@ -1,9 +1,9 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client } from "./client.js";
-import { B2AuthManager } from "../auth.js";
-import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
+import type { B2AuthManager } from "../auth.js";
+import type { B2Client } from "./client.js";
+import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
 /**
@@ -11,12 +11,11 @@ import { checkDestructive } from "../utils/destructive-gate.js";
  * computer backup management. These endpoints require the admin account to
  * be authorized for the Partner API and a MASTER application key.
  *
- * `client` here is the master-key B2Client wired up in createServer (it falls
- * back to the application-key client when no distinct master key is set). These
- * are the only tools that use the master key; everything else uses the
- * application key.
- *
- * Group endpoints use /b2api/v3/
+ * The official SDK release consumed by this server does not yet publish typed
+ * Partner/Groups operations. The read/eject contracts remain callable through
+ * the repository-owned native HTTP adapter until upstream SDK gap #153 ships.
+ * Secret-producing Partner account-creation flows remain disabled unless and
+ * until they have a durable secret sink.
  */
 export function registerPartnerTools(
   server: ToolRegistrar,

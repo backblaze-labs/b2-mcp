@@ -24,9 +24,11 @@ function parseJsonArray(stdout: string) {
 describe("package surface policy", () => {
   const pkg = readJson<{
     files: string[];
+    exports: Record<string, unknown>;
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
   }>("package.json");
+  const readme = readFileSync(join(root, "README.md"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
     const packed = spawnSync("npm", ["pack", "--json", "--ignore-scripts", "--dry-run"], {
@@ -126,6 +128,15 @@ describe("package surface policy", () => {
   it("keeps the runtime-sensitive circuit breaker dependency exact-pinned", () => {
     expect(pkg.dependencies.opossum).toBe("10.0.0");
     expect(pkg.dependencies.opossum).not.toMatch(/^[~^*]|x$/i);
+  });
+
+  it("documents the intentionally narrow package export surface", () => {
+    expect(Object.keys(pkg.exports).sort()).toEqual([".", "./package.json"]);
+    expect(readme).toContain("Package API Surface");
+    expect(readme).toContain("root CommonJS entry");
+    expect(readme).toContain("startStdio");
+    expect(readme).toContain("Deep imports");
+    expect(readme).toContain("private implementation details");
   });
 
   it("exact-pins runtime-sensitive lint and typing packages", () => {

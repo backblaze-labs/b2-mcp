@@ -75,7 +75,7 @@ rather than complete CI evidence.
 Issue #49 must not freeze tool names, schemas, capability maps, response
 fixtures, or profile hashes until #71 and its SDK implementation follow-ups are
 complete. The frozen fixture must identify the resolved
-`@backblaze-labs/b2-sdk` version and fail if inherited Axios/AWS behavior
+`@backblaze-labs/b2-sdk` version and fail if direct B2 HTTP/AWS behavior
 silently reappears outside the reviewed SDK boundary.
 
 Until this document is filled out, [`V1_SCOPE.md`](V1_SCOPE.md) remains the

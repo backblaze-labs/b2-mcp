@@ -74,3 +74,13 @@ into a failed B2 operation.
 Presigned S3 URLs are short-lived bearer capabilities, not durable B2
 application keys. Tools may return them only with operation and expiry metadata;
 operators and clients must treat the URL as sensitive until `expiresAt`.
+
+## SDK Credential Trust Boundary
+
+`@backblaze-labs/b2-sdk` is inside the credential trust boundary: it receives
+the plaintext B2 application key, performs `b2_authorize_account`, stores the
+current authorization response in its `AccountInfo`, owns URL-guarded transport
+requests, and retries expired-token or transient upstream failures. The server
+therefore pins the SDK to an exact reviewed version in `package.json`, verifies
+the package-lock integrity hash in tests, and treats every SDK version bump as a
+security-reviewed dependency change rather than an automated floating update.

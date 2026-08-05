@@ -14,8 +14,9 @@
  */
 
 import { logger } from "./logger.js";
+import { abortError } from "./named-error.js";
 
-const RETRYABLE_STATUS_CODES = new Set([408, 429, 503, 504]);
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 const MAX_RETRIES = 3;
 const BASE_DELAY_MS = 1000;
 
@@ -30,7 +31,7 @@ interface RetryBudget {
 
 const budget: RetryBudget = { tokens: BUDGET_TOKENS, lastRefill: Date.now() };
 
-function consumeRetryToken(): boolean {
+export function consumeRetryBudgetToken(): boolean {
   const now = Date.now();
   const elapsed = now - budget.lastRefill;
   if (elapsed > 0) {
@@ -52,20 +53,25 @@ export function _resetRetryBudget(): void {
 
 /** Test-only: synchronously try to consume a retry token. */
 export function _consumeRetryToken(): boolean {
-  return consumeRetryToken();
+  return consumeRetryBudgetToken();
 }
 
-export async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  retries = MAX_RETRIES,
+  signal?: AbortSignal,
+): Promise<T> {
   let lastErr: unknown;
 
   for (let attempt = 0; attempt <= retries; attempt++) {
+    throwIfAborted(signal);
     try {
       return await fn();
     } catch (err: unknown) {
+      throwIfAborted(signal);
       lastErr = err;
 
-      const status = getStatusCode(err);
-      if (status === null || !RETRYABLE_STATUS_CODES.has(status)) {
+      if (!isRetryableError(err)) {
         throw err; // Not retryable — fail immediately
       }
 
@@ -73,17 +79,27 @@ export async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES):
         break; // Exhausted local retry count
       }
 
-      if (!consumeRetryToken()) {
-        logger.warn({ attempt, status }, "retry.budgetExhausted");
+      if (!consumeRetryBudgetToken()) {
+        logger.warn({ attempt, status: getStatusCode(err) }, "retry.budgetExhausted");
         throw err;
       }
 
       const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-      await sleep(delay);
+      await sleep(delay, signal);
     }
   }
 
   throw lastErr;
+}
+
+export function isRetryableError(err: unknown): boolean {
+  if (typeof err === "object" && err !== null) {
+    const retryable = (err as Record<string, unknown>).retryable;
+    if (retryable === true) return true;
+    if (retryable === false) return false;
+  }
+  const status = getStatusCode(err);
+  return status !== null && RETRYABLE_STATUS_CODES.has(status);
 }
 
 function getStatusCode(err: unknown): number | null {
@@ -103,6 +119,23 @@ function getStatusCode(err: unknown): number | null {
   return null;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw signal.reason ?? abortError();
+  }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    throwIfAborted(signal);
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? abortError());
+      },
+      { once: true },
+    );
+  });
 }

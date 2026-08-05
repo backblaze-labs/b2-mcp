@@ -90,16 +90,17 @@ Node.js lines are not part of the `v0.1.0` support contract.
 The official Backblaze TypeScript SDK is the required B2 integration boundary
 for Phase 1. The reviewed adoption and parity matrix lives in
 [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) and supersedes the prior
-implementation allowance from #55 that accepted direct Axios B2 calls and direct
+implementation allowance from #55 that accepted direct B2 HTTP calls and direct
 AWS SDK S3 calls as the default architecture.
 
-Direct Axios calls to the B2 Native API and direct AWS SDK calls to B2's
-S3-compatible endpoint are inherited implementation details only. New B2
-behavior must use the public high-level `@backblaze-labs/b2-sdk` facade,
-documented `@backblaze-labs/b2-sdk/raw`, documented
-`@backblaze-labs/b2-sdk/s3`, or composition of public SDK operations. Missing
-SDK capabilities must be tracked upstream and released in a stable SDK version
-before the MCP release consumes them.
+Direct B2 HTTP calls are not allowed in runtime code. Direct AWS SDK calls to
+B2's S3-compatible endpoint are retained only when anchored through the SDK
+`/s3` helper and justified by S3-material behavior. New B2 behavior must use
+the public high-level `@backblaze-labs/b2-sdk` facade, documented
+`@backblaze-labs/b2-sdk/raw`, documented `@backblaze-labs/b2-sdk/s3`, or
+composition of public SDK operations. Missing SDK capabilities must be tracked
+upstream and released in a stable SDK version before the MCP release consumes
+them.
 
 The product contract is Backblaze B2 through MCP, not S3 as a standalone product
 surface. Existing `s3_*` names remain compatibility names only until #49 freezes
@@ -135,7 +136,7 @@ The profile count table below is the canonical numeric source in this document:
 
 | Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                   |
 | ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------------------------- |
-| `full`           | 40          | 21     | 19     | 0      | Complete implemented tool superset plus 3 unavailable compatibility stubs.                |
+| `full`           | 40          | 21     | 19     | 0      | Complete tool superset; 6 `b2_*` names are unavailable compatibility stubs.               |
 | `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted user profile for `v0.1.0` plus 3 unavailable compatibility stubs. |
 | `read-only`      | 20          | 11     | 9      | 0      | Deterministic read-only profile plus 3 unavailable compatibility stubs.                   |
 
@@ -150,6 +151,11 @@ actual registrations agree; any drift must fail CI.
 `full` is the complete implemented tool superset. It is for explicit
 full-surface contract generation, administrative review, and regression
 detection. It is not the default user profile.
+
+Six `b2_*` names in `full` are unavailable compatibility stubs: the durable
+secret-producing names `b2_create_key`, `b2_create_group_member`, and
+`b2_reserve_trial_create_account`, plus the Partner/Groups SDK-gap names
+`b2_list_groups`, `b2_eject_group_member`, and `b2_list_group_members`.
 
 `b2_*` tools in `full`:
 
@@ -203,7 +209,10 @@ detection. It is not the default user profile.
 customer-hosted deployment with a standard B2 application key, no distinct
 Partner/master credential, and no configured out-of-band secret sink.
 
-It excludes real Partner/Groups handlers:
+It excludes Partner/Groups handlers unless an explicit distinct master-key
+profile is configured. In `full`, these names are compatibility stubs because
+the official Backblaze SDK version consumed for v0.1 does not publish stable
+Partner/Groups operations:
 
 - `b2_eject_group_member`
 - `b2_list_group_members`
@@ -609,7 +618,7 @@ The tracker issues that should consume this decision include:
 
 - [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) for deterministic
   tool contract fixtures. #49 must freeze the post-SDK-migration surface, not
-  the inherited Axios/AWS implementation.
+  inherited direct B2 HTTP/AWS behavior.
 - [#71](https://github.com/backblaze-labs/b2-mcp/issues/71) for the official
   SDK adoption and MCP tool parity contract.
 - [#57](https://github.com/backblaze-labs/b2-mcp/issues/57) for credential

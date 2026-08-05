@@ -72,8 +72,12 @@ const DETECTORS: Record<string, Detector> = {
     const lr = args.lifecycleRules as Array<Record<string, unknown>> | undefined;
     if (Array.isArray(lr) && lr.some((r) => r.daysFromHidingToDeleting != null))
       reasons.push("set a lifecycle rule that schedules permanent deletion of objects");
+    if (args.replicationConfiguration !== undefined)
+      reasons.push("set bucket replication rules that can copy objects to another bucket");
     return reasons.length ? reasons.join(" and ") : null;
   },
+  b2_set_bucket_notification_rules: () =>
+    "replace persistent bucket event notification webhook rules",
 };
 
 export function isDestructiveTool(toolName: string): boolean {

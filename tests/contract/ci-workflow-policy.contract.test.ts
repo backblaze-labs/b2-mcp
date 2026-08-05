@@ -21,15 +21,22 @@ describe("CI workflow policy", () => {
     expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
   });
 
-  it("keeps the package layer separate from the ci-green dependency path", () => {
+  it("gates ci-green on supported runtime and platform jobs", () => {
     const markGreen = workflowJob("mark-green");
     const productionJob = workflowJob("deterministic-linux-production");
     const currentJob = workflowJob("deterministic-linux-current");
     const packageJob = workflowJob("package");
 
-    expect(markGreen).toContain(
-      "runtime-engine-floor, deterministic-linux-production, supply-chain-audit",
-    );
+    for (const required of [
+      "runtime-policy",
+      "runtime-engine-floor",
+      "deterministic-linux-production",
+      "deterministic-linux-current",
+      "cross-platform-minimum",
+      "supply-chain-audit",
+    ]) {
+      expect(markGreen).toContain(required);
+    }
     expect(markGreen).not.toContain("package");
     expect(productionJob).toContain("npm run build");
     expect(productionJob).toContain("npm run test:coverage");

@@ -194,6 +194,19 @@ describe("packed package", () => {
         },
       );
 
+      execFileSync(
+        "node",
+        [
+          "-e",
+          'try { require("@backblaze-labs/b2-mcp/dist/b2/client.js"); process.exit(4); } catch (err) { if (err.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw err; }',
+        ],
+        {
+          cwd: appDir,
+          stdio: "pipe",
+          timeout: 30_000,
+        },
+      );
+
       expect(statSync(join(appDir, "node_modules", ".bin", "b2-mcp")).isFile()).toBe(true);
     } finally {
       rmSync(tmp, { recursive: true, force: true });

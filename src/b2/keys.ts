@@ -1,6 +1,6 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client } from "./client.js";
+import { B2Client, type ListKeysOptions } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
@@ -41,14 +41,12 @@ export function registerKeyTools(
     },
     async (args) => {
       try {
-        const authData = await auth.getAuth();
-        const payload: Record<string, unknown> = {
-          accountId: authData.accountId,
+        const payload: ListKeysOptions = {
           maxKeyCount: args.maxKeyCount ?? 100,
         };
         if (args.startApplicationKeyId) payload.startApplicationKeyId = args.startApplicationKeyId;
 
-        const result = await client.call("b2_list_keys", payload);
+        const result = await client.listKeys(payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -76,9 +74,7 @@ export function registerKeyTools(
       try {
         const gate = checkDestructive("b2_delete_key", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const result = await client.call("b2_delete_key", {
-          applicationKeyId: args.applicationKeyId,
-        });
+        const result = await client.deleteKey(args.applicationKeyId);
         return toolJson(result);
       } catch (err) {
         return toolError(err);

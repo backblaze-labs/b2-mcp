@@ -24,6 +24,7 @@ describe("destructive-gate", () => {
         "s3_abort_multipart_upload",
         "b2_eject_group_member",
         "b2_update_bucket",
+        "b2_set_bucket_notification_rules",
         // protection-removal, account creation, and mass-delete-via-lifecycle
         "b2_update_file_retention",
         "b2_update_file_legal_hold",
@@ -137,6 +138,31 @@ describe("destructive-gate", () => {
       ).toBe(false);
     });
 
+    it("gates replication configuration changes", () => {
+      expect(
+        checkDestructive(
+          "b2_update_bucket",
+          {
+            bucketId: "b",
+            replicationConfiguration: {
+              asReplicationSource: {
+                replicationRules: [
+                  {
+                    replicationRuleName: "copy-all",
+                    destinationBucketId: "dest-bucket",
+                    isEnabled: true,
+                    priority: 1,
+                  },
+                ],
+                sourceApplicationKeyId: "source-key",
+              },
+            },
+          },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+
     it("does NOT gate a hide-only lifecycle rule (no deletion)", () => {
       expect(
         checkDestructive(
@@ -145,6 +171,42 @@ describe("destructive-gate", () => {
           cfg(),
         ).ok,
       ).toBe(true);
+    });
+  });
+
+  describe("b2_set_bucket_notification_rules is gated", () => {
+    it("requires confirmation by default", () => {
+      expect(
+        checkDestructive(
+          "b2_set_bucket_notification_rules",
+          {
+            bucketId: "b",
+            eventNotificationRules: [
+              {
+                name: "r",
+                eventTypes: ["b2:ObjectCreated:*"],
+                isEnabled: true,
+                targetConfiguration: { targetType: "webhook", url: "https://example.com/hook" },
+              },
+            ],
+          },
+          cfg(),
+        ).ok,
+      ).toBe(false);
+    });
+
+    it("is refused under block even with confirmation", () => {
+      expect(
+        checkDestructive(
+          "b2_set_bucket_notification_rules",
+          {
+            bucketId: "b",
+            eventNotificationRules: [],
+            confirm: true,
+          },
+          cfg("block"),
+        ).ok,
+      ).toBe(false);
     });
   });
 

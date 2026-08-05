@@ -7,7 +7,6 @@ import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
-import axios from "axios";
 import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
@@ -23,6 +22,7 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
 import {
@@ -36,11 +36,13 @@ import {
   saveEnv,
   setDefaultHttpTestEnv,
 } from "../support/http";
-
-jest.mock("axios");
-const mockedAxios = axios as jest.MockedFunction<typeof axios> & {
-  get: jest.MockedFunction<typeof axios.get>;
-};
+import {
+  authorizeResponse,
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "../support/sdk-test-helpers";
 
 function postLargeBody(port: number, pathname: string): Promise<number> {
   return request(port, "POST", pathname, {
@@ -174,6 +176,17 @@ beforeEach(async () => {
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
   restoreEnv(savedMutableEnv);
   invalidateCapabilityCache();
+  installSdkTransport(
+    new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      if (b2EndpointName(request) === "b2_list_buckets") {
+        return new StaticHttpResponse(200, { buckets: [] });
+      }
+      return new StaticHttpResponse(200, {});
+    }),
+  );
   handle = buildHttpServer();
   port = await listenOnLocalhost(handle);
 });
@@ -181,8 +194,7 @@ beforeEach(async () => {
 afterEach(async () => {
   jest.restoreAllMocks();
   jest.clearAllMocks();
-  mockedAxios.mockReset();
-  mockedAxios.get = jest.fn() as jest.MockedFunction<typeof axios.get>;
+  setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
   await closeHttpServer(handle);
 });
@@ -238,25 +250,6 @@ function credentialProviderFromHeaders(): CredentialProvider {
 
 function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
   return modernBody("tools/call", { name, arguments: args }, id);
-}
-
-function authData() {
-  return {
-    data: {
-      accountId: "account-1",
-      authorizationToken: "token-1",
-      apiInfo: {
-        storageApi: {
-          apiUrl: "https://api.example",
-          downloadUrl: "https://download.example",
-          s3ApiUrl: "https://s3.example",
-          recommendedPartSize: 100,
-          absoluteMinimumPartSize: 100,
-          allowed: { capabilities: ["listBuckets"] },
-        },
-      },
-    },
-  };
 }
 
 async function replaceHandle(
@@ -819,7 +812,6 @@ describe("HTTP transport handler", () => {
   });
 
   it("aborts an in-flight B2 call when the HTTP client disconnects", async () => {
-    mockedAxios.get = jest.fn().mockResolvedValue(authData());
     let markApiStarted!: () => void;
     const apiStarted = new Promise<void>((resolve) => {
       markApiStarted = resolve;
@@ -829,20 +821,25 @@ describe("HTTP transport handler", () => {
       markApiAborted = resolve;
     });
     let capturedSignal: AbortSignal | undefined;
-    mockedAxios.mockImplementation(((config: { signal?: AbortSignal }) => {
-      capturedSignal = config.signal;
-      markApiStarted();
-      return new Promise((resolve) => {
-        config.signal?.addEventListener(
-          "abort",
-          () => {
-            markApiAborted();
-            resolve({ data: { buckets: [] } });
-          },
-          { once: true },
-        );
-      });
-    }) as never);
+    installSdkTransport(
+      new RecordingTransport((request) => {
+        if (b2EndpointName(request) === "b2_authorize_account") {
+          return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+        }
+        capturedSignal = request.signal;
+        markApiStarted();
+        return new Promise((resolve) => {
+          request.signal?.addEventListener(
+            "abort",
+            () => {
+              markApiAborted();
+              resolve(new StaticHttpResponse(200, { buckets: [] }));
+            },
+            { once: true },
+          );
+        });
+      }),
+    );
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       fetchCapabilities: jest.fn(async () => null),
@@ -908,8 +905,13 @@ describe("HTTP transport handler", () => {
   });
 
   it("reuses a B2 auth manager across stateless requests for the same credential", async () => {
-    mockedAxios.get = jest.fn().mockResolvedValue(authData());
-    mockedAxios.mockResolvedValue({ data: { buckets: [] } } as never);
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      return new StaticHttpResponse(200, { buckets: [] });
+    });
+    installSdkTransport(transport);
 
     for (let i = 0; i < 2; i++) {
       const res = await request(port, "POST", "/mcp", {
@@ -918,13 +920,22 @@ describe("HTTP transport handler", () => {
       });
       expect(res.status).toBe(200);
     }
-    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
-    expect(mockedAxios).toHaveBeenCalledTimes(2);
+    expect(
+      transport.requests.filter((r) => b2EndpointName(r) === "b2_authorize_account"),
+    ).toHaveLength(1);
+    expect(transport.requests.filter((r) => b2EndpointName(r) === "b2_list_buckets")).toHaveLength(
+      2,
+    );
   });
 
   it("does not reuse the B2 auth cache when a header secret changes", async () => {
-    mockedAxios.get = jest.fn().mockResolvedValue(authData());
-    mockedAxios.mockResolvedValue({ data: { buckets: [] } } as never);
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      return new StaticHttpResponse(200, { buckets: [] });
+    });
+    installSdkTransport(transport);
 
     const first = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
@@ -940,7 +951,9 @@ describe("HTTP transport handler", () => {
     });
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
-    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+    expect(
+      transport.requests.filter((r) => b2EndpointName(r) === "b2_authorize_account"),
+    ).toHaveLength(2);
   });
 
   it("server mode uses process credentials and rejects public B2 credential headers", async () => {

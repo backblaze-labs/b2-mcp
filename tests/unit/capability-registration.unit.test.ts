@@ -1,9 +1,8 @@
 /**
  * Capability-aware tool registration: the surface scales to the connected key's
  * capabilities. createServer does not authorize, so building servers here is
- * network-free; fetchCapabilities is tested against a mocked authorize.
+ * network-free; fetchCapabilities is tested through the SDK transport seam.
  */
-import axios from "axios";
 import {
   capabilityCacheSizeForTests,
   createServer,
@@ -11,7 +10,7 @@ import {
   fetchCapabilities,
   invalidateCapabilityCache,
 } from "../../src/server";
-import { verificationFingerprintConfig } from "../../src/credentials";
+import { CredentialResolutionError, verificationFingerprintConfig } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
 import {
   DURABLE_SECRET_PRODUCING_TOOLS,
@@ -19,6 +18,13 @@ import {
   TOOL_CAPABILITIES,
 } from "../../src/utils/tool-capabilities";
 import { B2Config } from "../../src/utils/types";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import {
+  authorizeResponse,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "../support/sdk-test-helpers";
 
 const CANARY = "B2_MCP_CANARY_SECRET_capability_do_not_leak";
 
@@ -152,44 +158,46 @@ describe("capability-aware registration", () => {
 describe("fetchCapabilities", () => {
   afterEach(() => {
     jest.restoreAllMocks();
+    setB2SdkClientFactoryForTests(null);
     invalidateCapabilityCache();
     delete process.env.B2_REGISTER_ALL_TOOLS;
     delete process.env.B2_CAPABILITY_CACHE_TTL_MS;
     delete process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES;
   });
 
-  // v4 puts capabilities at apiInfo.storageApi.allowed.capabilities.
-  const authData = (caps?: string[]) => ({
-    data: {
-      accountId: "a",
-      authorizationToken: "t",
-      apiInfo: {
-        storageApi: {
-          apiUrl: "u",
-          downloadUrl: "d",
-          s3ApiUrl: "s",
-          recommendedPartSize: 1,
-          absoluteMinimumPartSize: 1,
-          ...(caps ? { allowed: { capabilities: caps } } : {}),
-        },
-      },
-    },
-  });
+  function installAuthorizeResponse(caps?: string[]): RecordingTransport {
+    const transport = new RecordingTransport(
+      () => new StaticHttpResponse(200, authorizeResponse(caps)),
+    );
+    installSdkTransport(transport);
+    return transport;
+  }
+
+  function installAuthorizeFailure(
+    status: number,
+    code: string,
+    message: string,
+    headers: Record<string, string> = {},
+  ): RecordingTransport {
+    const transport = new RecordingTransport(
+      () => new StaticHttpResponse(status, { status, code, message }, headers),
+    );
+    installSdkTransport(transport);
+    return transport;
+  }
 
   it("returns the key's capabilities from apiInfo.storageApi.allowed", async () => {
-    jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles", "listBuckets"]) as never);
+    installAuthorizeResponse(["readFiles", "listBuckets"]);
     expect(await fetchCapabilities(baseConfig)).toEqual(["readFiles", "listBuckets"]);
   });
 
   it("returns an empty list when capabilities are empty or absent", async () => {
-    jest.spyOn(axios, "get").mockResolvedValue(authData(undefined) as never);
+    installAuthorizeResponse(undefined);
     expect(await fetchCapabilities(baseConfig)).toEqual([]);
   });
 
   it("rejects on auth failure so callers fail closed", async () => {
-    jest
-      .spyOn(axios, "get")
-      .mockRejectedValue(Object.assign(new Error("denied"), { response: { status: 401 } }));
+    installAuthorizeFailure(401, "unauthorized", "denied");
     await expect(fetchCapabilities(baseConfig)).rejects.toMatchObject({
       status: 401,
       code: "capability_auth_failed",
@@ -197,14 +205,52 @@ describe("fetchCapabilities", () => {
   });
 
   it("returns retryable status for upstream capability failures", async () => {
-    jest
-      .spyOn(axios, "get")
-      .mockRejectedValue(Object.assign(new Error("B2 500"), { response: { status: 500 } }));
+    installAuthorizeFailure(500, "internal_error", "B2 500");
     await expect(fetchCapabilities(baseConfig)).rejects.toMatchObject({
       status: 503,
       code: "capability_upstream_unavailable",
     });
   });
+
+  it.each([
+    [401, 401, "capability_auth_failed"],
+    [500, 503, "capability_upstream_unavailable"],
+  ])(
+    "normalizes shared concurrent %i capability failures for every waiter",
+    async (upstreamStatus, expectedStatus, expectedCode) => {
+      const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+      const requestId = `req-shared-${upstreamStatus}`;
+      const transport = installAuthorizeFailure(
+        upstreamStatus,
+        upstreamStatus === 401 ? "unauthorized" : "internal_error",
+        `B2 ${upstreamStatus}`,
+        { "X-Bz-Request-Id": requestId },
+      );
+
+      const results = await Promise.allSettled([
+        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+      ]);
+
+      expect(transport.requests).toHaveLength(1);
+      for (const result of results) {
+        expect(result.status).toBe("rejected");
+        if (result.status !== "rejected") continue;
+        expect(result.reason).toBeInstanceOf(CredentialResolutionError);
+        expect(result.reason).toMatchObject({
+          status: expectedStatus,
+          code: expectedCode,
+        });
+      }
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestId,
+        }),
+        "capability.fetch.failed",
+      );
+    },
+  );
 
   it("sanitizes capability fetch failure log text, code, and request id", async () => {
     const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
@@ -214,11 +260,11 @@ describe("fetchCapabilities", () => {
       appKey: "configured-app-capability-secret",
       masterKey: "configured-master-capability-secret",
     } as B2Config;
-    jest.spyOn(axios, "get").mockRejectedValue(
-      Object.assign(new Error(`authorizationToken=${CANARY} ${configWithSecrets.applicationKey}`), {
-        code: `bad_${CANARY}`,
-        response: { status: 500, headers: { "x-bz-request-id": `req-${CANARY}` } },
-      }),
+    installAuthorizeFailure(
+      500,
+      `bad_${CANARY}`,
+      `authorizationToken=${CANARY} ${configWithSecrets.applicationKey}`,
+      { "X-Bz-Request-Id": `req-${CANARY}` },
     );
 
     await expect(
@@ -241,27 +287,48 @@ describe("fetchCapabilities", () => {
     );
   });
 
+  it("captures capability failure request ids from Headers instances", async () => {
+    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    installAuthorizeFailure(500, "internal_error", "B2 500", {
+      "X-Bz-Request-Id": "req-from-headers",
+    });
+
+    await expect(
+      fetchCapabilities(baseConfig, "credential:capability-headers", "credential:headers"),
+    ).rejects.toMatchObject({
+      status: 503,
+      code: "capability_upstream_unavailable",
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "req-from-headers",
+      }),
+      "capability.fetch.failed",
+    );
+  });
+
   it("returns null without any network call when B2_REGISTER_ALL_TOOLS=true", async () => {
-    const spy = jest.spyOn(axios, "get");
+    const transport = installAuthorizeResponse(["readFiles"]);
     process.env.B2_REGISTER_ALL_TOOLS = "true";
     expect(await fetchCapabilities(baseConfig)).toBeNull();
-    expect(spy).not.toHaveBeenCalled();
+    expect(transport.requests).toHaveLength(0);
   });
 
   it("caches by explicit secret-bound cache key and supports invalidation", async () => {
     process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
-    const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
+    const transport = installAuthorizeResponse(["readFiles"]);
 
     await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
     await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(transport.requests).toHaveLength(1);
 
     await expect(fetchCapabilities(baseConfig, "credential:b")).resolves.toEqual(["readFiles"]);
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(transport.requests).toHaveLength(2);
 
     invalidateCapabilityCache("credential:a");
     await expect(fetchCapabilities(baseConfig, "credential:a")).resolves.toEqual(["readFiles"]);
-    expect(spy).toHaveBeenCalledTimes(3);
+    expect(transport.requests).toHaveLength(3);
   });
 
   it("does not reuse a warm cache entry for the same key id with a wrong secret", async () => {
@@ -272,10 +339,13 @@ describe("fetchCapabilities", () => {
       appKey: "wrong",
       masterKey: "wrong",
     };
-    const spy = jest
-      .spyOn(axios, "get")
-      .mockResolvedValueOnce(authData(["readFiles"]) as never)
-      .mockRejectedValueOnce(Object.assign(new Error("denied"), { response: { status: 401 } }));
+    let calls = 0;
+    const transport = new RecordingTransport(() => {
+      calls += 1;
+      if (calls === 1) return new StaticHttpResponse(200, authorizeResponse(["readFiles"]));
+      return new StaticHttpResponse(401, { status: 401, code: "unauthorized", message: "denied" });
+    });
+    installSdkTransport(transport);
 
     await expect(
       fetchCapabilities(
@@ -292,20 +362,20 @@ describe("fetchCapabilities", () => {
         "credential:non-secret",
       ),
     ).rejects.toMatchObject({ status: 401 });
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(transport.requests).toHaveLength(2);
   });
 
   it("does not cache an empty capability response at the positive TTL", async () => {
     process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
-    const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(undefined) as never);
+    const transport = installAuthorizeResponse(undefined);
     await expect(fetchCapabilities(baseConfig, "credential:empty")).resolves.toEqual([]);
     await expect(fetchCapabilities(baseConfig, "credential:empty")).resolves.toEqual([]);
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(transport.requests).toHaveLength(2);
   });
 
   it("deduplicates concurrent cold-cache capability lookups", async () => {
     process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
-    const spy = jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
+    const transport = installAuthorizeResponse(["readFiles"]);
 
     await expect(
       Promise.all([
@@ -314,13 +384,13 @@ describe("fetchCapabilities", () => {
         fetchCapabilities(baseConfig, "credential:singleflight"),
       ]),
     ).resolves.toEqual([["readFiles"], ["readFiles"], ["readFiles"]]);
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(transport.requests).toHaveLength(1);
   });
 
   it("bounds capability-cache growth as distinct credentials connect", async () => {
     process.env.B2_CAPABILITY_CACHE_TTL_MS = "60000";
     process.env.B2_CAPABILITY_CACHE_MAX_ENTRIES = "2";
-    jest.spyOn(axios, "get").mockResolvedValue(authData(["readFiles"]) as never);
+    installAuthorizeResponse(["readFiles"]);
 
     for (let i = 0; i < 5; i++) {
       await fetchCapabilities({ ...baseConfig, applicationKey: `s-${i}` }, `credential:${i}`);

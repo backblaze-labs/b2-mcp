@@ -10,9 +10,9 @@ B2 behavior. The reviewed adoption contract is
 [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md), which is normative for
 issue [#71](https://github.com/backblaze-labs/b2-mcp/issues/71).
 
-Direct Axios calls to the B2 Native API and direct AWS SDK calls to B2's
-S3-compatible endpoint are inherited implementation details. They are not the
-default architecture for Phase 1 and must not be expanded for new B2 behavior.
+Direct B2 HTTP calls are not allowed in runtime code. Direct AWS SDK calls to
+B2's S3-compatible endpoint are retained only when anchored through the SDK
+`/s3` helper and justified by S3-material behavior.
 
 The approved implementation order is:
 

@@ -1,76 +1,244 @@
 import type { ToolRegistrar } from "../mcp.js";
+import * as dns from "node:dns/promises";
+import { isIP } from "node:net";
 import { z } from "zod";
-import { B2Client } from "./client.js";
-import { B2AuthManager } from "../auth.js";
+import {
+  B2Client,
+  type BucketFilters,
+  type CreateBucketOptions,
+  type EventNotificationRuleInput,
+  type NotificationRulesResult,
+  type ServerSideEncryptionInput,
+  type UpdateBucketOptions,
+} from "./client.js";
 import { B2Config } from "../utils/types.js";
 import { toolJson, toolError } from "../utils/errors.js";
-import { assignDefined } from "../utils/payload.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-
-interface BucketNotificationRule {
-  objectNamePrefix?: string;
-  targetConfiguration: {
-    url: string;
-    hmacSha256SigningSecret?: string;
-    customHeaders?: Array<{ name: string; value: string }>;
-  };
-  isEnabled: boolean;
-  [key: string]: unknown;
-}
 
 /**
  * Redact webhook secrets from a notification-rules API response before it reaches
  * the model — B2 echoes back hmacSha256SigningSecret and custom-header values on
  * get/set, and a prompt-injected model should not be able to read them.
  */
-function redactNotificationSecrets(result: unknown): unknown {
-  const r = result as { eventNotificationRules?: Array<Record<string, unknown>> } | null;
-  if (!r || !Array.isArray(r.eventNotificationRules)) return result;
-  for (const rule of r.eventNotificationRules) {
-    const tc = rule?.targetConfiguration as
-      { hmacSha256SigningSecret?: unknown; customHeaders?: Array<{ value?: unknown }> } | undefined;
-    if (!tc || typeof tc !== "object") continue;
+function redactWebhookUrl(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined;
+  try {
+    const u = new URL(raw);
+    return `${u.protocol}//${u.host}/[redacted]`;
+  } catch {
+    return "[redacted]";
+  }
+}
+
+function redactNotificationSecrets(result: NotificationRulesResult): NotificationRulesResult {
+  for (const rule of result.eventNotificationRules) {
+    const tc = rule.targetConfiguration;
+    tc.url = redactWebhookUrl(tc.url) ?? tc.url;
     if (tc.hmacSha256SigningSecret) tc.hmacSha256SigningSecret = "[redacted]";
     if (Array.isArray(tc.customHeaders)) {
       tc.customHeaders = tc.customHeaders.map((h) =>
         h && typeof h === "object" ? { ...h, value: "[redacted]" } : h,
+      );
+    } else if (tc.customHeaders && typeof tc.customHeaders === "object") {
+      tc.customHeaders = Object.fromEntries(
+        Object.keys(tc.customHeaders).map((k) => [k, "[redacted]"]),
       );
     }
   }
   return result;
 }
 
-/**
- * True for IPv6 loopback (::1), unspecified (::), IPv4-mapped (::ffff:*), and
- * ULA / link-local ranges — including fully-expanded forms like 0:0:0:0:0:0:0:1
- * that a string-prefix check misses.
- */
-function isLocalIPv6(raw: string): boolean {
-  const h = raw.split("%")[0].toLowerCase(); // drop any zone id
-  if (/^(fc|fd|fe8|fe9|fea|feb)/.test(h)) return true; // ULA fc00::/7, link-local fe80::/10
-  if (h.startsWith("::ffff:")) return true; // IPv4-mapped
-  let groups: string[];
-  if (h.includes("::")) {
-    const [head, tail] = h.split("::");
-    const hg = head ? head.split(":") : [];
-    const tg = tail ? tail.split(":") : [];
-    groups = [...hg, ...Array(Math.max(0, 8 - hg.length - tg.length)).fill("0"), ...tg];
-  } else {
-    groups = h.split(":");
+const NON_GLOBAL_IPV4_CIDRS: Array<[string, number]> = [
+  ["0.0.0.0", 8],
+  ["10.0.0.0", 8],
+  ["100.64.0.0", 10],
+  ["127.0.0.0", 8],
+  ["169.254.0.0", 16],
+  ["172.16.0.0", 12],
+  ["192.0.0.0", 24],
+  ["192.0.2.0", 24],
+  ["192.88.99.0", 24],
+  ["192.168.0.0", 16],
+  ["198.18.0.0", 15],
+  ["198.51.100.0", 24],
+  ["203.0.113.0", 24],
+  ["224.0.0.0", 4],
+  ["240.0.0.0", 4],
+];
+
+const NON_GLOBAL_IPV6_CIDRS: Array<[string, number]> = [
+  ["::", 128],
+  ["::1", 128],
+  ["::ffff:0:0", 96],
+  ["64:ff9b::", 96],
+  ["64:ff9b:1::", 48],
+  ["100::", 64],
+  ["2001::", 23],
+  ["2001:2::", 48],
+  ["2001:db8::", 32],
+  ["2002::", 16],
+  ["3fff::", 20],
+  ["fc00::", 7],
+  ["fe80::", 10],
+  ["fec0::", 10],
+  ["ff00::", 8],
+];
+
+const WEBHOOK_DNS_LOOKUP_TIMEOUT_MS = 2_000;
+
+type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
+let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
+
+function isTestRuntime(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
+}
+
+export function setWebhookDnsLookupForTests(lookup: WebhookDnsLookup | null): void {
+  if (!isTestRuntime()) {
+    throw new Error("Webhook DNS resolver override is only available in tests.");
   }
-  if (groups.length !== 8) return false;
-  const n = groups.map((g) => parseInt(g || "0", 16));
-  if (n.some((x) => Number.isNaN(x))) return false;
-  const allZero = n.every((x) => x === 0); // ::  (unspecified)
-  const loopback = n.slice(0, 7).every((x) => x === 0) && n[7] === 1; // ::1
-  return allZero || loopback;
+  webhookDnsLookupForTests = lookup;
+}
+
+function ipv4ToInt(raw: string): number | null {
+  const parts = raw.split(".");
+  if (parts.length !== 4) return null;
+  let result = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    result = result * 256 + n;
+  }
+  return result >>> 0;
+}
+
+function ipv4InCidr(value: number, base: number, prefixLength: number): boolean {
+  const mask = prefixLength === 0 ? 0 : (0xffffffff << (32 - prefixLength)) >>> 0;
+  return (value & mask) === (base & mask);
+}
+
+function ipv6ToBigInt(raw: string): bigint | null {
+  let h = raw.toLowerCase().split("%")[0];
+  if (h.includes(".")) {
+    const lastColon = h.lastIndexOf(":");
+    const mapped = ipv4ToInt(h.slice(lastColon + 1));
+    if (lastColon < 0 || mapped === null) return null;
+    h = `${h.slice(0, lastColon)}:${((mapped >>> 16) & 0xffff).toString(16)}:${(mapped & 0xffff).toString(16)}`;
+  }
+
+  const pieces = h.split("::");
+  if (pieces.length > 2) return null;
+  const head = pieces[0] ? pieces[0].split(":") : [];
+  const tail = pieces.length === 2 && pieces[1] ? pieces[1].split(":") : [];
+  const fill = pieces.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0) return null;
+  const groups = pieces.length === 2 ? [...head, ...Array(fill).fill("0"), ...tail] : head;
+  if (groups.length !== 8) return null;
+
+  let result = 0n;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    result = (result << 16n) + BigInt(parseInt(group, 16));
+  }
+  return result;
+}
+
+function ipv6InCidr(value: bigint, base: bigint, prefixLength: number): boolean {
+  if (prefixLength === 0) return true;
+  const shift = 128n - BigInt(prefixLength);
+  return value >> shift === base >> shift;
+}
+
+function isNonGlobalIpLiteral(host: string): boolean {
+  if (isIP(host) === 4) {
+    const value = ipv4ToInt(host);
+    return (
+      value !== null &&
+      NON_GLOBAL_IPV4_CIDRS.some(([base, prefix]) => {
+        const baseValue = ipv4ToInt(base);
+        return baseValue !== null && ipv4InCidr(value, baseValue, prefix);
+      })
+    );
+  }
+  if (isIP(host) === 6) {
+    const value = ipv6ToBigInt(host);
+    return (
+      value !== null &&
+      NON_GLOBAL_IPV6_CIDRS.some(([base, prefix]) => {
+        const baseValue = ipv6ToBigInt(base);
+        return baseValue !== null && ipv6InCidr(value, baseValue, prefix);
+      })
+    );
+  }
+  return false;
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: unknown }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+async function lookupWebhookHost(host: string): Promise<Array<{ address: string }>> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const lookup =
+    webhookDnsLookupForTests ?? ((name: string) => dns.lookup(name, { all: true, verbatim: true }));
+  try {
+    return await Promise.race([
+      lookup(host),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error("Webhook hostname DNS lookup timed out."));
+        }, WEBHOOK_DNS_LOOKUP_TIMEOUT_MS);
+        unrefTimer(timer);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function validateWebhookHostResolution(host: string): Promise<string | null> {
+  if (isIP(host)) return null;
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookupWebhookHost(host);
+  } catch {
+    return "must resolve to a public IP address";
+  }
+  if (!addresses.length) return "must resolve to a public IP address";
+  if (addresses.some(({ address }) => isNonGlobalIpLiteral(address))) {
+    return "must not resolve to a non-public IP address";
+  }
+  return null;
+}
+
+function rawUrlHost(raw: string): string | null {
+  const authority = raw.match(/^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i)?.[1];
+  if (!authority) return null;
+  const withoutUserInfo = authority.slice(authority.lastIndexOf("@") + 1);
+  if (withoutUserInfo.startsWith("[")) {
+    const end = withoutUserInfo.indexOf("]");
+    return end >= 0 ? withoutUserInfo.slice(1, end).toLowerCase() : withoutUserInfo;
+  }
+  return withoutUserInfo.replace(/:\d*$/, "").toLowerCase();
+}
+
+function isNonCanonicalNumericIpHost(host: string): boolean {
+  return /^\d+(?:\.\d+){0,3}$/.test(host) && !/^\d{1,3}(\.\d{1,3}){3}$/.test(host);
 }
 
 /**
  * Server-side webhook URL guard (defense-in-depth): require HTTPS and reject
  * internal/SSRF targets. Returns a reason string if invalid, or null if OK.
  */
-function validateWebhookUrl(raw: string): string | null {
+async function validateWebhookUrl(raw: string): Promise<string | null> {
+  const rawHost = rawUrlHost(raw);
+  if (rawHost?.includes("%")) return "must not include an IPv6 zone identifier";
+  if (rawHost && isNonCanonicalNumericIpHost(rawHost)) {
+    return "must not target a numeric IP address";
+  }
+
   let u: URL;
   try {
     u = new URL(raw);
@@ -78,6 +246,7 @@ function validateWebhookUrl(raw: string): string | null {
     return "is not a valid URL";
   }
   if (u.protocol !== "https:") return "must use https://";
+  if (u.username || u.password) return "must not include credentials";
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost")) return "must not target localhost";
   // Reject non-standard numeric IP encodings that bypass the dotted-quad check
@@ -85,31 +254,58 @@ function validateWebhookUrl(raw: string): string | null {
   if (/^0x[0-9a-f]+$/.test(host) || /^[0-9]+$/.test(host) || /^0[0-7]+(\.|$)/.test(host)) {
     return "must not target a numeric IP address";
   }
-  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (m) {
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (
-      a === 0 ||
-      a === 127 ||
-      a === 10 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
-    ) {
-      return "must not target a private/loopback/link-local address";
-    }
+  if (isNonGlobalIpLiteral(host)) {
+    return "must not target a non-public IP address";
   }
-  if (host.includes(":") && isLocalIPv6(host)) {
-    return "must not target a private/loopback/link-local or unspecified IPv6 address";
-  }
-  return null;
+  return validateWebhookHostResolution(host);
+}
+
+function normalizeBucketSse(
+  value: { mode: "none" | "SSE-B2"; algorithm?: string } | undefined,
+): ServerSideEncryptionInput | undefined {
+  if (!value) return undefined;
+  return value.mode === "SSE-B2"
+    ? { mode: "SSE-B2", algorithm: value.algorithm === "AES256" ? "AES256" : undefined }
+    : { mode: "none" };
+}
+
+interface NotificationRuleArgs {
+  name: string;
+  eventTypes: string[];
+  isEnabled: boolean;
+  objectNamePrefix?: string;
+  targetConfiguration: {
+    targetType: string;
+    url: string;
+    hmacSha256SigningSecret?: string;
+    customHeaders?: Array<{ name: string; value: string }>;
+  };
+}
+
+function normalizeNotificationRule(rule: NotificationRuleArgs): EventNotificationRuleInput {
+  return {
+    name: rule.name,
+    eventTypes: rule.eventTypes,
+    isEnabled: rule.isEnabled,
+    // B2 requires objectNamePrefix on every rule; default to "" (matches all
+    // objects) when a caller omits it, regardless of Zod default.
+    objectNamePrefix: rule.objectNamePrefix ?? "",
+    targetConfiguration: {
+      targetType: rule.targetConfiguration.targetType,
+      url: rule.targetConfiguration.url,
+      ...(rule.targetConfiguration.hmacSha256SigningSecret !== undefined
+        ? { hmacSha256SigningSecret: rule.targetConfiguration.hmacSha256SigningSecret }
+        : {}),
+      ...(rule.targetConfiguration.customHeaders !== undefined
+        ? { customHeaders: rule.targetConfiguration.customHeaders }
+        : {}),
+    },
+  };
 }
 
 export function registerBucketTools(
   server: ToolRegistrar,
   client: B2Client,
-  auth: B2AuthManager,
   config: B2Config,
 ): void {
   // ── b2_list_buckets ───────────────────────────────────────────────────────
@@ -139,8 +335,7 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const authData = await auth.getAuth();
-        const payload: Record<string, unknown> = { accountId: authData.accountId };
+        const payload: BucketFilters = {};
         if (args.bucketId) payload.bucketId = args.bucketId;
         if (args.bucketName) payload.bucketName = args.bucketName;
         if (args.bucketTypes) payload.bucketTypes = args.bucketTypes;
@@ -148,10 +343,7 @@ export function registerBucketTools(
         // B2's b2_list_buckets has no count/pagination param — it returns every
         // bucket in one response. For accounts with thousands of buckets that is
         // a large, token-heavy payload, so cap how many we surface to the model.
-        const result = (await client.call("b2_list_buckets", payload)) as {
-          buckets?: unknown[];
-          [k: string]: unknown;
-        };
+        const result = await client.listBuckets(payload);
         const all = Array.isArray(result.buckets) ? result.buckets : [];
         const truncated = all.length > args.limit;
         const buckets = truncated ? all.slice(0, args.limit) : all;
@@ -234,28 +426,19 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const authData = await auth.getAuth();
-        const payload: Record<string, unknown> = {
-          accountId: authData.accountId,
+        const payload: CreateBucketOptions = {
           bucketName: args.bucketName,
           bucketType: args.bucketType,
+          ...(args.bucketInfo !== undefined ? { bucketInfo: args.bucketInfo } : {}),
+          ...(args.corsRules !== undefined ? { corsRules: args.corsRules } : {}),
+          ...(args.lifecycleRules !== undefined ? { lifecycleRules: args.lifecycleRules } : {}),
+          ...(args.defaultServerSideEncryption !== undefined
+            ? { defaultServerSideEncryption: normalizeBucketSse(args.defaultServerSideEncryption) }
+            : {}),
+          ...(args.fileLockEnabled !== undefined ? { fileLockEnabled: args.fileLockEnabled } : {}),
         };
-        if (args.bucketInfo) payload.bucketInfo = args.bucketInfo;
-        if (args.corsRules) payload.corsRules = args.corsRules;
-        if (args.lifecycleRules) payload.lifecycleRules = args.lifecycleRules;
-        if (args.defaultServerSideEncryption) {
-          // B2's native API requires algorithm "AES256" with SSE-B2; default it so
-          // callers can pass just { mode: "SSE-B2" }.
-          const sse = { ...args.defaultServerSideEncryption } as {
-            mode: string;
-            algorithm?: string;
-          };
-          if (sse.mode === "SSE-B2" && !sse.algorithm) sse.algorithm = "AES256";
-          payload.defaultServerSideEncryption = sse;
-        }
-        if (args.fileLockEnabled !== undefined) payload.fileLockEnabled = args.fileLockEnabled;
 
-        const result = await client.call("b2_create_bucket", payload);
+        const result = await client.createBucket(payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -283,11 +466,7 @@ export function registerBucketTools(
       try {
         const gate = checkDestructive("b2_delete_bucket", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const authData = await auth.getAuth();
-        const result = await client.call("b2_delete_bucket", {
-          accountId: authData.accountId,
-          bucketId: args.bucketId,
-        });
+        const result = await client.deleteBucket(args.bucketId);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -394,7 +573,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a destructive change (making the bucket public, or disabling/clearing Object Lock). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+            "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
           ),
       },
     },
@@ -402,27 +581,25 @@ export function registerBucketTools(
       try {
         const gate = checkDestructive("b2_update_bucket", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const authData = await auth.getAuth();
-        const payload: Record<string, unknown> = {
-          accountId: authData.accountId,
+        const payload: UpdateBucketOptions = {
           bucketId: args.bucketId,
+          ...(args.bucketType !== undefined ? { bucketType: args.bucketType } : {}),
+          ...(args.bucketInfo !== undefined ? { bucketInfo: args.bucketInfo } : {}),
+          ...(args.corsRules !== undefined ? { corsRules: args.corsRules } : {}),
+          ...(args.lifecycleRules !== undefined ? { lifecycleRules: args.lifecycleRules } : {}),
+          ...(args.defaultServerSideEncryption !== undefined
+            ? { defaultServerSideEncryption: normalizeBucketSse(args.defaultServerSideEncryption) }
+            : {}),
+          ...(args.replicationConfiguration !== undefined
+            ? { replicationConfiguration: args.replicationConfiguration }
+            : {}),
+          ...(args.fileLockEnabled !== undefined ? { fileLockEnabled: args.fileLockEnabled } : {}),
+          ...(args.defaultRetention !== undefined
+            ? { defaultRetention: args.defaultRetention }
+            : {}),
+          ...(args.ifRevisionIs !== undefined ? { ifRevisionIs: args.ifRevisionIs } : {}),
         };
-        assignDefined(payload, args, [
-          "bucketType",
-          "bucketInfo",
-          "corsRules",
-          "lifecycleRules",
-          "defaultServerSideEncryption",
-          "replicationConfiguration",
-          "fileLockEnabled",
-          "defaultRetention",
-          "ifRevisionIs",
-        ]);
-        // Default SSE-B2 algorithm (B2 requires "AES256" with SSE-B2).
-        const upSse = payload.defaultServerSideEncryption as
-          { mode?: string; algorithm?: string } | undefined;
-        if (upSse && upSse.mode === "SSE-B2" && !upSse.algorithm) upSse.algorithm = "AES256";
-        const result = await client.call("b2_update_bucket", payload);
+        const result = await client.updateBucket(payload);
         return toolJson(result);
       } catch (err) {
         return toolError(err);
@@ -441,9 +618,7 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
-        const result = await client.call("b2_get_bucket_notification_rules", {
-          bucketId: args.bucketId,
-        });
+        const result = await client.getBucketNotificationRules(args.bucketId);
         return toolJson(redactNotificationSecrets(result));
       } catch (err) {
         return toolError(err);
@@ -486,28 +661,31 @@ export function registerBucketTools(
             isEnabled: z.boolean().describe("Whether this rule is active."),
           }),
         ),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe(
+            "Confirm replacing persistent outbound webhook notification rules. Required when the server destructive policy is 'confirm' (the default).",
+          ),
       },
     },
     async (args) => {
       try {
-        const eventNotificationRules = args.eventNotificationRules as BucketNotificationRule[];
+        const gate = checkDestructive("b2_set_bucket_notification_rules", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
+        const eventNotificationRules: EventNotificationRuleInput[] =
+          args.eventNotificationRules.map(normalizeNotificationRule);
         for (const rule of eventNotificationRules) {
-          const reason = validateWebhookUrl(rule.targetConfiguration.url);
+          const reason = await validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
-            return toolError(
-              new Error(`Webhook URL ${JSON.stringify(rule.targetConfiguration.url)} ${reason}.`),
-            );
+            const safeUrl = redactWebhookUrl(rule.targetConfiguration.url);
+            return toolError(new Error(`Webhook URL ${JSON.stringify(safeUrl)} ${reason}.`));
           }
         }
-        const result = await client.call("b2_set_bucket_notification_rules", {
-          bucketId: args.bucketId,
-          // B2 requires objectNamePrefix on every rule; default to "" (matches
-          // all objects) when a caller omits it, regardless of Zod default.
-          eventNotificationRules: eventNotificationRules.map((rule) => ({
-            ...rule,
-            objectNamePrefix: rule.objectNamePrefix ?? "",
-          })),
-        });
+        const result = await client.setBucketNotificationRules(
+          args.bucketId,
+          eventNotificationRules,
+        );
         return toolJson(redactNotificationSecrets(result));
       } catch (err) {
         return toolError(err);
