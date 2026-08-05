@@ -338,6 +338,74 @@ describe("s3_copy_object", () => {
     expect(await sourceBucket.getFileInfoByName("copied.txt")).toBeNull();
     expect(sendSpy).not.toHaveBeenCalled();
   });
+
+  it("returns not found when the current source resolves to a hide marker", async () => {
+    const sourceBucket = await createBucket("copy-source");
+    const destinationBucket = await createBucket("copy-destination");
+    await sourceBucket.upload({
+      fileName: "source.txt",
+      source: new BufferSource(new TextEncoder().encode("source")),
+    });
+    const marker = await sourceBucket.hideFile("source.txt");
+    jest.spyOn(Bucket.prototype, "getFileInfoByName").mockResolvedValueOnce(marker);
+
+    const result = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeNull();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns not found when sourceVersionId identifies a hide marker", async () => {
+    const sourceBucket = await createBucket("copy-source");
+    const destinationBucket = await createBucket("copy-destination");
+    await sourceBucket.upload({
+      fileName: "source.txt",
+      source: new BufferSource(new TextEncoder().encode("source")),
+    });
+    const marker = await sourceBucket.hideFile("source.txt");
+
+    const result = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      sourceVersionId: String(marker.fileId),
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeNull();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("copies an explicit upload version hidden by a newer marker", async () => {
+    const sourceBucket = await createBucket("copy-source");
+    const destinationBucket = await createBucket("copy-destination");
+    const upload = await sourceBucket.upload({
+      fileName: "source.txt",
+      source: new BufferSource(new TextEncoder().encode("source")),
+    });
+    await sourceBucket.hideFile("source.txt");
+
+    const result = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "source.txt",
+      sourceVersionId: String(upload.fileId),
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeTruthy();
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("SDK-backed delete destructive gate", () => {

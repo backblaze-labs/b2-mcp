@@ -1400,7 +1400,7 @@ export class B2Client {
               fileId: fileId(options.sourceVersionId),
             })
           : await sourceBucket.getFileInfoByName(options.sourceKey);
-        if (!source) {
+        if (!source || source.action === "hide") {
           throw b2NotFound(
             `Object '${options.sourceKey}' not found in bucket '${options.sourceBucket}'.`,
           );
