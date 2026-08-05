@@ -1,6 +1,7 @@
 import {
   B2Client as SdkB2Client,
   FetchTransport,
+  RetryTransport,
   UrlGuard,
   deriveAllowedSuffixes,
   type AuthorizeAccountResponse,
@@ -11,7 +12,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
-import { currentMcpRequestSignal } from "./request-context.js";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { abortError, isAbortError } from "./utils/named-error.js";
 
@@ -58,6 +59,14 @@ interface ManagedSdkClient {
 type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
 let sdkClientFactoryForTests: SdkClientFactory | null = null;
 
+type DomExceptionConstructor = new (message?: string, name?: string) => Error;
+
+function sdkAbortException(message: string): Error {
+  const ctor = (globalThis as typeof globalThis & { DOMException?: DomExceptionConstructor })
+    .DOMException;
+  return ctor ? new ctor(message, "AbortError") : abortError(message);
+}
+
 function isTestRuntime(): boolean {
   return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
 }
@@ -76,11 +85,30 @@ function configuredSdkClientFactoryForTests(): SdkClientFactory | null {
 class RequestSignalTransport implements HttpTransport {
   constructor(private readonly inner: HttpTransport) {}
 
-  send(request: HttpRequest): Promise<HttpResponse> {
+  async send(request: HttpRequest): Promise<HttpResponse> {
     const signal = request.signal ?? currentMcpRequestSignal() ?? new AbortController().signal;
     const replaySafeRequest = withOperationRetryPolicy(request);
-    return this.inner.send(signal ? { ...replaySafeRequest, signal } : replaySafeRequest);
+    try {
+      return await this.inner.send(signal ? { ...replaySafeRequest, signal } : replaySafeRequest);
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw sdkAbortException(err instanceof Error ? err.message || "Aborted" : "Aborted");
+      }
+      throw err;
+    }
   }
+}
+
+export function createMcpHttpTransport(
+  inner: HttpTransport,
+  retry: Partial<RetryOptions> = SDK_RETRY_OPTIONS,
+): HttpTransport {
+  return new RequestSignalTransport(
+    new RetryTransport({
+      transport: new SharedRetryBudgetTransport(inner),
+      retry,
+    }),
+  );
 }
 
 function b2ApiEndpointName(rawUrl: string): string | undefined {
@@ -158,19 +186,12 @@ function lockUrlGuard(client: ManagedSdkClient, auth: AuthorizeAccountResponse):
   client.urlGuard?.setAllowedSuffixes(deriveAllowedSuffixes(auth.apiInfo.storageApi));
 }
 
-function injectMcpSignalBeforeSdkRetry(client: SdkB2Client): void {
-  // The SDK owns the RetryTransport. Wrap its already-built raw transport so
-  // MCP cancellation is visible before retry sleeps/backoff begin.
-  const raw = client.raw as unknown as { transport: HttpTransport };
-  raw.transport = new RequestSignalTransport(raw.transport);
-}
-
 function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
   const urlGuard = new UrlGuard();
   const client = new SdkB2Client({
     applicationKeyId: config.applicationKeyId,
     applicationKey: config.applicationKey,
-    transport: new SharedRetryBudgetTransport(
+    transport: createMcpHttpTransport(
       new FetchTransport({
         userAgent: buildUserAgent(config),
         urlGuard,
@@ -182,6 +203,42 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
     client,
     urlGuard,
   };
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? abortError();
+}
+
+function raceWithCallerAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      promise.catch(() => {});
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      },
+    );
+  });
 }
 
 function flattenAuth(data: AuthorizeAccountResponse): B2AuthResponse {
@@ -213,7 +270,6 @@ export class B2AuthManager {
   constructor(config: B2Config) {
     this.config = config;
     this.sdk = (configuredSdkClientFactoryForTests() ?? defaultSdkClientFactory)(config);
-    injectMcpSignalBeforeSdkRetry(this.sdk.client);
   }
 
   getConfig(): B2Config {
@@ -230,15 +286,18 @@ export class B2AuthManager {
       return this.cachedAuth!;
     }
 
+    const callerSignal = currentMcpRequestSignal();
     if (this.inflightAuth) {
-      return this.inflightAuth;
+      return raceWithCallerAbort(this.inflightAuth, callerSignal);
     }
 
-    this.inflightAuth = this.authorize().finally(() => {
-      this.inflightAuth = null;
-    });
+    this.inflightAuth = runWithMcpRequestSignal(undefined, () =>
+      this.authorize().finally(() => {
+        this.inflightAuth = null;
+      }),
+    );
 
-    return this.inflightAuth;
+    return raceWithCallerAbort(this.inflightAuth, callerSignal);
   }
 
   async getAuthorizedSdk(): Promise<{ client: SdkB2Client; auth: B2AuthResponse }> {

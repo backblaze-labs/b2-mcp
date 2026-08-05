@@ -7,6 +7,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import type { ReadableStream } from "node:stream/web";
 import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
+import { createMcpHttpTransport } from "../../src/auth";
 import { B2Config } from "../../src/utils/types";
 
 export class StaticHttpResponse implements HttpResponse {
@@ -99,7 +100,7 @@ export function installSdkTransport(
     client: new SdkB2Client({
       applicationKeyId: config.applicationKeyId,
       applicationKey: config.applicationKey,
-      transport,
+      transport: createMcpHttpTransport(transport, retry),
       retry,
     }),
   }));

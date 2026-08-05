@@ -1,43 +1,34 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { toolError } from "../utils/errors.js";
+import { toolJson, toolError } from "../utils/errors.js";
 import type { B2AuthManager } from "../auth.js";
 import type { B2Client } from "./client.js";
 import type { B2Config } from "../utils/types.js";
-
-const PARTNER_SDK_GAP =
-  "Partner/Groups tools are unavailable in this release because @backblaze-labs/b2-sdk@0.2.0 does not publish a stable Partner API. Tracked upstream at backblaze-labs/b2-sdk-typescript#153.";
-
-function partnerSdkGap(name: string) {
-  return toolError({
-    status: 410,
-    code: "tool_unavailable",
-    message: `${name} is deferred until the official Backblaze SDK exposes Partner/Groups operations. ${PARTNER_SDK_GAP}`,
-  });
-}
+import { checkDestructive } from "../utils/destructive-gate.js";
 
 /**
  * Partner API tools — Group management, trial account provisioning, and
  * computer backup management. These endpoints require the admin account to
  * be authorized for the Partner API and a MASTER application key.
  *
- * The official SDK release consumed by this server does not yet publish
- * Partner/Groups operations, so these tools are compatibility stubs. Do not
- * add a secret-bearing parallel transport here; wire the real handlers only
- * after the upstream SDK gap ships in a stable release.
+ * The official SDK release consumed by this server does not yet publish typed
+ * Partner/Groups operations. The read/eject contracts remain callable through
+ * the repository-owned native HTTP adapter until upstream SDK gap #153 ships.
+ * Secret-producing Partner account-creation flows remain disabled unless and
+ * until they have a durable secret sink.
  */
 export function registerPartnerTools(
   server: ToolRegistrar,
-  _client: B2Client,
+  client: B2Client,
   _auth: B2AuthManager,
-  _config: B2Config,
+  config: B2Config,
 ): void {
   // ── b2_list_groups ──────────────────────────────────────────────────────────
   server.registerTool(
     "b2_list_groups",
     {
       description:
-        "Unavailable compatibility stub for listing active Groups. The official Backblaze SDK version used by this release does not expose Partner/Groups operations yet; calls return tool_unavailable until backblaze-labs/b2-sdk-typescript#153 ships in a stable SDK.",
+        "List active Groups administered by a Group admin account. Returns up to 100 groups per call; use nextGroupId for pagination. Requires the account to be authorized for the Partner API.",
       inputSchema: {
         adminAccountId: z
           .string()
@@ -61,7 +52,25 @@ export function registerPartnerTools(
           .describe("Maximum number of Groups to return (1-100). Defaults to 100."),
       },
     },
-    async () => partnerSdkGap("b2_list_groups"),
+    async (args) => {
+      try {
+        const params: Record<string, unknown> = {
+          adminAccountId: args.adminAccountId,
+          maxGroupCount: args.maxGroupCount ?? 100,
+        };
+        if (args.groupName) params.groupName = args.groupName;
+        if (args.startGroupId !== undefined) params.startGroupId = args.startGroupId;
+
+        const result = await client.call("b2_list_groups", undefined, {
+          method: "GET",
+          apiPath: "b2api/v3",
+          params,
+        });
+        return toolJson(result);
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // Phase 1 deliberately does not register the real b2_create_group_member
@@ -74,7 +83,7 @@ export function registerPartnerTools(
     "b2_eject_group_member",
     {
       description:
-        "Unavailable compatibility stub for ejecting a Group member. The official Backblaze SDK version used by this release does not expose Partner/Groups operations yet; calls return tool_unavailable until backblaze-labs/b2-sdk-typescript#153 ships in a stable SDK.",
+        "Eject a member from a Group. The account is NOT deleted — just removed (the member resets their password on next login). Optionally change their email on eject. Cannot be re-added via API (only the Group Management page).",
       inputSchema: {
         adminAccountId: z
           .string()
@@ -100,7 +109,25 @@ export function registerPartnerTools(
           ),
       },
     },
-    async () => partnerSdkGap("b2_eject_group_member"),
+    async (args) => {
+      try {
+        const gate = checkDestructive("b2_eject_group_member", args, config);
+        if (!gate.ok) return toolError(new Error(gate.message));
+        const payload: Record<string, unknown> = {
+          adminAccountId: args.adminAccountId,
+          groupId: args.groupId,
+          memberAccountId: args.memberAccountId,
+        };
+        if (args.email) payload.email = args.email;
+
+        const result = await client.call("b2_eject_group_member", payload, {
+          apiPath: "b2api/v3",
+        });
+        return toolJson(result);
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // ── b2_list_group_members ───────────────────────────────────────────────────
@@ -108,7 +135,7 @@ export function registerPartnerTools(
     "b2_list_group_members",
     {
       description:
-        "Unavailable compatibility stub for listing Group members. The official Backblaze SDK version used by this release does not expose Partner/Groups operations yet; calls return tool_unavailable until backblaze-labs/b2-sdk-typescript#153 ships in a stable SDK.",
+        "List active (ACCEPTED) Group members for a specific Group. Returns up to 1,000 members per call; use nextEmail for pagination. Includes B2 storage stats per member.",
       inputSchema: {
         adminAccountId: z
           .string()
@@ -130,7 +157,25 @@ export function registerPartnerTools(
           .describe("Maximum number of members to return (1-1000). Defaults to 100."),
       },
     },
-    async () => partnerSdkGap("b2_list_group_members"),
+    async (args) => {
+      try {
+        const params: Record<string, unknown> = {
+          adminAccountId: args.adminAccountId,
+          groupId: args.groupId,
+          maxMemberCount: args.maxMemberCount ?? 100,
+        };
+        if (args.startEmail) params.startEmail = args.startEmail;
+
+        const result = await client.call("b2_list_group_members", undefined, {
+          method: "GET",
+          apiPath: "b2api/v3",
+          params,
+        });
+        return toolJson(result);
+      } catch (err) {
+        return toolError(err);
+      }
+    },
   );
 
   // Phase 1 deliberately does not register the real

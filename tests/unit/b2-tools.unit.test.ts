@@ -888,19 +888,109 @@ describe("object lock tools", () => {
 });
 
 describe("Partner API tools", () => {
-  it("returns explicit SDK-gap errors instead of using a parallel transport", async () => {
+  function mockPartnerFetch(response: unknown) {
+    return jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  }
+
+  it("lists groups through the Partner API adapter", async () => {
+    const fetchSpy = mockPartnerFetch({
+      groups: [{ groupId: "254", groupName: "engineering" }],
+      nextGroupId: null,
+    });
     const tools = getRegisteredTools(server) ?? {};
-    for (const name of ["b2_list_groups", "b2_eject_group_member", "b2_list_group_members"]) {
-      expect(tools[name].description).toMatch(/Unavailable compatibility stub/);
-      const result = await callTool(server, name, {
+    expect(tools.b2_list_groups.description).not.toMatch(/Unavailable compatibility stub/);
+
+    const result = parseResult(
+      await callTool(server, "b2_list_groups", {
+        adminAccountId: "test-account-123",
+        groupName: "engineering",
+        startGroupId: 10,
+        maxGroupCount: 25,
+      }),
+    );
+    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+
+    expect(result.groups[0].groupName).toBe("engineering");
+    expect(url.pathname).toBe("/b2api/v3/b2_list_groups");
+    expect(url.searchParams.get("adminAccountId")).toBe("test-account-123");
+    expect(url.searchParams.get("groupName")).toBe("engineering");
+    expect(url.searchParams.get("startGroupId")).toBe("10");
+    expect(url.searchParams.get("maxGroupCount")).toBe("25");
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).method).toBe("GET");
+  });
+
+  it("lists group members through the Partner API adapter", async () => {
+    const fetchSpy = mockPartnerFetch({
+      members: [{ accountId: "member-account-xyz", email: "member@example.com" }],
+      nextEmail: null,
+    });
+
+    const result = parseResult(
+      await callTool(server, "b2_list_group_members", {
+        adminAccountId: "test-account-123",
+        groupId: "254",
+        startEmail: "a@example.com",
+        maxMemberCount: 50,
+      }),
+    );
+    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+
+    expect(result.members[0].email).toBe("member@example.com");
+    expect(url.pathname).toBe("/b2api/v3/b2_list_group_members");
+    expect(url.searchParams.get("adminAccountId")).toBe("test-account-123");
+    expect(url.searchParams.get("groupId")).toBe("254");
+    expect(url.searchParams.get("startEmail")).toBe("a@example.com");
+    expect(url.searchParams.get("maxMemberCount")).toBe("50");
+    expect((fetchSpy.mock.calls[0][1] as RequestInit).method).toBe("GET");
+  });
+
+  it("ejects a group member through the Partner API adapter when confirmed", async () => {
+    const fetchSpy = mockPartnerFetch({
+      accountId: "member-account-xyz",
+      ejected: true,
+    });
+
+    const result = parseResult(
+      await callTool(server, "b2_eject_group_member", {
         adminAccountId: "test-account-123",
         groupId: "254",
         memberAccountId: "member-account-xyz",
+        email: "new@example.com",
         confirm: true,
-      });
-      expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain("tool_unavailable");
-      expect(result.content[0].text).toContain("b2-sdk-typescript#153");
-    }
+      }),
+    );
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(init.body));
+
+    expect(result.ejected).toBe(true);
+    expect(new URL(String(fetchSpy.mock.calls[0][0])).pathname).toBe(
+      "/b2api/v3/b2_eject_group_member",
+    );
+    expect(init.method).toBe("POST");
+    expect(body).toMatchObject({
+      adminAccountId: "test-account-123",
+      groupId: "254",
+      memberAccountId: "member-account-xyz",
+      email: "new@example.com",
+    });
+  });
+
+  it("blocks unconfirmed group member ejection before the API call", async () => {
+    const fetchSpy = mockPartnerFetch({ ejected: true });
+
+    const result = await callTool(server, "b2_eject_group_member", {
+      adminAccountId: "test-account-123",
+      groupId: "254",
+      memberAccountId: "member-account-xyz",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Confirmation required");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

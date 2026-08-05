@@ -39,6 +39,16 @@ function installAuthorizeTransport(
   return transport;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("B2AuthManager", () => {
   afterEach(() => {
     jest.useRealTimers();
@@ -114,14 +124,72 @@ describe("B2AuthManager", () => {
     expect(auth2.authorizationToken).toBe(auth3.authorizationToken);
   });
 
-  it("passes the current MCP request abort signal to authorize_account", async () => {
-    const inner = installAuthorizeTransport();
+  it("does not bind shared authorize_account to the initiating caller signal", async () => {
+    const pendingAuth = deferred<StaticHttpResponse>();
+    const inner = new RecordingTransport(() => pendingAuth.promise);
+    installSdkTransport(inner);
     const manager = new B2AuthManager(mockConfig);
     const abort = new AbortController();
 
-    await runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
+    const first = runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
+    await Promise.resolve();
+    expect(inner.requests).toHaveLength(1);
 
-    expect(inner.requests[0].signal).toBe(abort.signal);
+    abort.abort(abortError());
+    await expect(first).rejects.toThrow(/Aborted/);
+
+    expect(inner.requests[0].signal).not.toBe(abort.signal);
+    expect(inner.requests[0].signal?.aborted).toBe(false);
+
+    pendingAuth.resolve(new StaticHttpResponse(200, authorizeResponse(["listBuckets"])));
+    await expect(manager.getAuth()).resolves.toMatchObject({
+      authorizationToken: "mock-token-xyz",
+    });
+  });
+
+  it("lets a healthy waiter complete when the initiating auth caller aborts", async () => {
+    const pendingAuth = deferred<StaticHttpResponse>();
+    const inner = new RecordingTransport(() => pendingAuth.promise);
+    installSdkTransport(inner);
+    const manager = new B2AuthManager(mockConfig);
+    const abort = new AbortController();
+
+    const first = runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
+    await Promise.resolve();
+    const second = manager.getAuth();
+
+    abort.abort(abortError());
+    await expect(first).rejects.toThrow(/Aborted/);
+    pendingAuth.resolve(new StaticHttpResponse(200, authorizeResponse(["listBuckets"])));
+
+    await expect(second).resolves.toMatchObject({
+      authorizationToken: "mock-token-xyz",
+    });
+    expect(inner.requests).toHaveLength(1);
+    expect(inner.requests[0].signal?.aborted).toBe(false);
+  });
+
+  it("returns promptly for an aborting waiter without cancelling shared auth", async () => {
+    const pendingAuth = deferred<StaticHttpResponse>();
+    const inner = new RecordingTransport(() => pendingAuth.promise);
+    installSdkTransport(inner);
+    const manager = new B2AuthManager(mockConfig);
+    const abort = new AbortController();
+
+    const first = manager.getAuth();
+    await Promise.resolve();
+    const second = runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
+
+    abort.abort(abortError());
+    await expect(second).rejects.toThrow(/Aborted/);
+    pendingAuth.resolve(new StaticHttpResponse(200, authorizeResponse(["listBuckets"])));
+
+    await expect(first).resolves.toMatchObject({
+      authorizationToken: "mock-token-xyz",
+    });
+    expect(inner.requests).toHaveLength(1);
+    expect(inner.requests[0].signal).not.toBe(abort.signal);
+    expect(inner.requests[0].signal?.aborted).toBe(false);
   });
 
   it("ignores the removed process-global SDK factory hook", async () => {
@@ -254,15 +322,17 @@ describe("B2AuthManager", () => {
     expect(deleteCalls).toBe(1);
   });
 
-  it("passes the MCP abort signal into SDK retry backoff", async () => {
-    const inner = new RecordingTransport(
-      () =>
-        new StaticHttpResponse(
-          503,
-          { status: 503, code: "service_unavailable", message: "try later" },
-          { "Retry-After": "10" },
-        ),
-    );
+  it("passes the MCP abort signal into SDK retry backoff for native calls", async () => {
+    const inner = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      return new StaticHttpResponse(
+        503,
+        { status: 503, code: "service_unavailable", message: "try later" },
+        { "Retry-After": "10" },
+      );
+    });
     installSdkTransport(inner, {
       maxRetries: 1,
       initialRetryDelayMs: 10_000,
@@ -270,14 +340,27 @@ describe("B2AuthManager", () => {
       requestTimeoutMs: 30_000,
     });
     const abort = new AbortController();
-    const manager = new B2AuthManager(mockConfig);
+    const client = new B2Client(new B2AuthManager(mockConfig));
 
-    const pending = runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
-    await Promise.resolve();
-    await Promise.resolve();
+    const pending = runWithMcpRequestSignal(abort.signal, () => client.listBuckets());
+    for (
+      let i = 0;
+      i < 20 && !inner.requests.some((request) => b2EndpointName(request) === "b2_list_buckets");
+      i++
+    ) {
+      await Promise.resolve();
+    }
+    expect(inner.requests.map(b2EndpointName)).toContain("b2_list_buckets");
+    const listRequest = inner.requests.find(
+      (request) => b2EndpointName(request) === "b2_list_buckets",
+    );
+    expect(listRequest?.signal).toBeDefined();
     abort.abort(abortError());
+    expect(listRequest?.signal?.aborted).toBe(true);
 
     await expect(pending).rejects.toThrow(/Aborted/);
-    expect(inner.requests).toHaveLength(1);
+    expect(
+      inner.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(1);
   });
 });

@@ -56,6 +56,35 @@ function reportAuth() {
   };
 }
 
+function parseToolJson(result: any): any {
+  if (result?.structuredContent !== undefined) return result.structuredContent;
+  return JSON.parse(result.content[0].text);
+}
+
+function reportCsv(
+  accountId: string,
+  date: string,
+  storedGb: number,
+  downloadedGb: number,
+): string {
+  return (
+    "account_id,date,bucket_id,bucket_name,stored_gb,downloaded_gb,uploaded_gb,api_txn_class_c\n" +
+    `${accountId},${date},bucket-${accountId},bucket-${accountId},${storedGb},${downloadedGb},0,0\n`
+  );
+}
+
+function reportBody(text: string) {
+  return {
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(text);
+    },
+  };
+}
+
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+}
+
 describe("insight report S3 endpoint validation", () => {
   let sendSpy: jest.SpyInstance;
 
@@ -198,5 +227,75 @@ describe("insight report S3 endpoint validation", () => {
 
     expect(next).toHaveBeenCalledTimes(1);
     expect(body.destroy).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["b2_usage_growth", { days: 30, limit: 10 }],
+    ["b2_egress_leaders", { by: "account", days: 90, limit: 10 }],
+  ])("%s does not use the broader S3 override credential", async (toolName, args) => {
+    const thenDay = daysAgo(29);
+    const latestDay = daysAgo(1);
+    const tenantKeys = [
+      `${thenDay}/usage.account-tenant.csv`,
+      `${latestDay}/usage.account-tenant.csv`,
+    ];
+    const broadKeys = [
+      `${thenDay}/usage.account-outside.csv`,
+      `${latestDay}/usage.account-outside.csv`,
+    ];
+    const seenAccessKeys: string[] = [];
+    sendSpy.mockImplementation(async function (this: S3Client, command: any) {
+      const credentials = await this.config.credentials();
+      seenAccessKeys.push(credentials.accessKeyId);
+      const usingBroadOverride = credentials.accessKeyId === testConfig.appKeyId;
+      const keys = usingBroadOverride ? broadKeys : tenantKeys;
+      const account = usingBroadOverride ? "outside-account" : "tenant-account";
+      const commandName = command.constructor.name;
+      const input = command.input ?? {};
+
+      if (commandName === "ListObjectsV2Command") {
+        const prefix = typeof input.Prefix === "string" ? input.Prefix : undefined;
+        const startAfter = typeof input.StartAfter === "string" ? input.StartAfter : undefined;
+        let listed = [...keys].sort();
+        if (prefix) listed = listed.filter((key) => key.startsWith(prefix));
+        if (startAfter) listed = listed.filter((key) => key > startAfter);
+        if (typeof input.MaxKeys === "number") listed = listed.slice(0, input.MaxKeys);
+        return { Contents: listed.map((Key) => ({ Key })), IsTruncated: false };
+      }
+
+      if (commandName === "GetObjectCommand") {
+        const key = String(input.Key);
+        const date = key.slice(0, 10);
+        const stored = date === thenDay ? 10 : 15;
+        return { Body: reportBody(reportCsv(account, date, stored, 4)) };
+      }
+
+      throw new Error(`unexpected command ${commandName}`);
+    });
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(200, {
+          ...authorizeResponse(["readFiles"]),
+          accountId: "tenant-account",
+        });
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    const server = createServer(testConfig);
+
+    const result = await callTool(server, toolName, args);
+    const text = JSON.stringify(parseToolJson(result));
+    const authHeader = transport.requests[0].headers?.Authorization ?? "";
+    const authorizedCredential = Buffer.from(authHeader.replace(/^Basic\s+/i, ""), "base64")
+      .toString("utf8")
+      .split(":")[0];
+
+    expect(result.isError).not.toBe(true);
+    expect(authorizedCredential).toBe(testConfig.applicationKeyId);
+    expect(seenAccessKeys).toEqual(expect.arrayContaining([testConfig.applicationKeyId]));
+    expect(seenAccessKeys).not.toContain(testConfig.appKeyId);
+    expect(text).toContain("tenant-account");
+    expect(text).not.toContain("outside-account");
   });
 });

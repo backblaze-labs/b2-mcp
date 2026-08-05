@@ -64,6 +64,22 @@ function contractImportInventory(contract: string): string[] {
   return [...found].sort();
 }
 
+function matrixRows(
+  contract: string,
+): Map<string, { className: string; path: string; row: string }> {
+  const rows = new Map<string, { className: string; path: string; row: string }>();
+  for (const line of contract.split("\n")) {
+    const match = line.match(/^\| `((?:b2|s3)_[a-z0-9_]+)`\s+\| `?([^`| ]+)`?\s+\| ([^|]+)\|/);
+    if (!match) continue;
+    rows.set(match[1], {
+      className: match[2],
+      path: match[3],
+      row: line,
+    });
+  }
+  return rows;
+}
+
 function parseFloor(value: string): [number, number, number] {
   const match = value.match(/^>=(\d+)\.(\d+)\.(\d+)$/);
   if (!match) throw new Error(`Unsupported engine floor: ${value}`);
@@ -152,6 +168,51 @@ describe("SDK adoption contract", () => {
     expect(unresolved).toEqual([]);
     expect(contract).not.toContain("s3_presign_upload_part` remains release-blocking");
     expect(contract).not.toContain("keep the existing name as a release-blocking SDK gap");
+  });
+
+  it("keeps reviewed matrix classes and paths aligned with runtime adapters", () => {
+    const rows = matrixRows(contract);
+    const b2Client = readFileSync(join(ROOT, "src/b2/client.ts"), "utf8");
+    const partner = readFileSync(join(ROOT, "src/b2/partner.ts"), "utf8");
+    const s3Objects = readFileSync(join(ROOT, "src/s3/objects.ts"), "utf8");
+    const s3Presigned = readFileSync(join(ROOT, "src/s3/presigned.ts"), "utf8");
+    const reportClient = readFileSync(join(ROOT, "src/b2/report-client.ts"), "utf8");
+
+    function expectMatrixPath(tool: string, className: string, path: string): void {
+      const row = rows.get(tool);
+      expect(row?.className).toBe(className);
+      expect(row?.path).toContain(path);
+    }
+
+    expectMatrixPath("b2_list_buckets", "raw", "RawClient.listBuckets");
+    expect(b2Client).toContain("client.raw.listBuckets");
+    expectMatrixPath("b2_update_bucket", "raw", "RawClient.updateBucket");
+    expect(b2Client).toContain("client.raw.updateBucket");
+
+    expectMatrixPath("b2_list_groups", "partner-http", 'B2Client.call("b2_list_groups")');
+    expectMatrixPath(
+      "b2_eject_group_member",
+      "partner-http",
+      'B2Client.call("b2_eject_group_member")',
+    );
+    expectMatrixPath(
+      "b2_list_group_members",
+      "partner-http",
+      'B2Client.call("b2_list_group_members")',
+    );
+    expect(partner).toContain('client.call("b2_list_groups"');
+    expect(partner).toContain('client.call("b2_eject_group_member"');
+    expect(partner).toContain('client.call("b2_list_group_members"');
+    expect(partner).not.toContain("partnerSdkGap");
+
+    expectMatrixPath("s3_put_object", "s3", "PutObjectCommand");
+    expect(s3Objects).toContain("PutObjectCommand");
+    expectMatrixPath("s3_get_presigned_url", "s3", "@aws-sdk/s3-request-presigner");
+    expect(s3Presigned).toContain("@aws-sdk/s3-request-presigner");
+
+    expectMatrixPath("b2_usage_growth", "compose", "createReportS3Client");
+    expectMatrixPath("b2_egress_leaders", "compose", "createReportS3Client");
+    expect(reportClient).toContain("createReportS3Client");
   });
 
   it("delegates Node runtime and SDK floor policy to check-runtime-policy", () => {

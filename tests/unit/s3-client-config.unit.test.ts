@@ -47,7 +47,7 @@ describe("B2 S3 client configuration", () => {
     expect(JSON.stringify(s3.customUserAgent)).toContain("b2-insights-reports");
   });
 
-  it("creates report clients with the configured S3 credential selection", async () => {
+  it("creates report clients with the authorized caller credential", async () => {
     const s3 = createReportS3Client(config, {
       accountId: "acct",
       authorizationToken: "token",
@@ -60,8 +60,8 @@ describe("B2 S3 client configuration", () => {
     });
 
     await expect(s3.config.credentials()).resolves.toMatchObject({
-      accessKeyId: "legacy-s3-key-id",
-      secretAccessKey: "legacy-s3-secret",
+      accessKeyId: "principal-key-id",
+      secretAccessKey: "principal-secret",
     });
     s3.destroy();
   });

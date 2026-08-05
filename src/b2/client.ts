@@ -21,8 +21,9 @@ import type {
 import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
 import { B2AuthManager } from "../auth.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
-import { currentMcpRequestSignal } from "../request-context.js";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { B2AuthResponse } from "../utils/types.js";
+import { buildUserAgent } from "../utils/user-agent.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
 export type BucketTypeFilter = BucketType | "all";
@@ -696,12 +697,102 @@ function isUnauthorized(err: unknown): boolean {
   return e.status === 401 || e.response?.status === 401;
 }
 
+export interface NativeCallOptions {
+  method?: "GET" | "POST";
+  useDownloadUrl?: boolean;
+  apiPath?: string;
+  params?: Record<string, unknown>;
+}
+
+function appendQueryParams(url: URL, params: Record<string, unknown> | undefined): void {
+  if (!params) return;
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== undefined && item !== null) url.searchParams.append(key, String(item));
+      }
+    } else {
+      url.searchParams.set(key, String(value));
+    }
+  }
+}
+
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+function responseRequestId(headers: Headers): string | undefined {
+  return (
+    headers.get("x-bz-request-id") ??
+    headers.get("x-amz-request-id") ??
+    headers.get("x-request-id") ??
+    undefined
+  );
+}
+
+class NativeB2HttpError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly requestId?: string;
+
+  constructor(status: number, body: unknown, headers: Headers) {
+    const data =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
+    const code = typeof data.code === "string" && data.code ? data.code : "unknown_error";
+    const message =
+      typeof data.message === "string" && data.message
+        ? data.message
+        : `B2 API request failed with HTTP ${status}`;
+    super(message);
+    this.name = "NativeB2HttpError";
+    this.status = status;
+    this.code = code;
+    this.requestId = responseRequestId(headers);
+  }
+}
+
 /**
  * Repository-owned adapter over the official B2 SDK. Tool handlers call this
  * class instead of constructing SDK clients or raw credential details.
  */
 export class B2Client {
   constructor(private readonly auth: B2AuthManager) {}
+
+  async call<T>(path: string, data?: unknown, options: NativeCallOptions = {}): Promise<T> {
+    return this.withNativeCircuit(async (_client, auth) => {
+      const baseUrl = options.useDownloadUrl ? auth.downloadUrl : auth.apiUrl;
+      assertB2ApiUrl(baseUrl);
+      const apiPath = options.apiPath ?? "b2api/v2";
+      const url = new URL(`${baseUrl.replace(/\/$/, "")}/${apiPath}/${path}`);
+      appendQueryParams(url, options.params);
+
+      const method = options.method ?? (data !== undefined ? "POST" : "GET");
+      const headers: Record<string, string> = {
+        Authorization: auth.authorizationToken,
+        "User-Agent": buildUserAgent(this.auth.getConfig()),
+      };
+      if (data !== undefined) headers["Content-Type"] = "application/json";
+
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: data === undefined ? undefined : JSON.stringify(data),
+        signal: currentMcpRequestSignal(),
+      });
+      const body = await readResponseBody(response);
+      if (!response.ok) throw new NativeB2HttpError(response.status, body, response.headers);
+      return body as T;
+    });
+  }
 
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
     const result = await this.withNativeCircuit((client, auth) =>
@@ -852,19 +943,23 @@ export class B2Client {
     operation: (client: SdkB2Client, auth: B2AuthResponse) => Promise<T>,
   ): Promise<T> {
     let lastError: unknown;
+    const callerSignal = currentMcpRequestSignal();
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return await withCircuit(async () => {
+          const operationSignal = currentMcpRequestSignal();
           const { client, auth } = await this.auth.getAuthorizedSdk();
           assertB2ApiUrl(auth.apiUrl);
-          const result = await operation(client, auth);
+          const result = await runWithMcpRequestSignal(operationSignal, () =>
+            operation(client, auth),
+          );
           this.auth.syncCachedAuthFromSdk();
           return result;
         });
       } catch (err) {
         this.auth.syncCachedAuthFromSdk();
         lastError = err;
-        if (attempt === 0 && isUnauthorized(err) && currentMcpRequestSignal()?.aborted !== true) {
+        if (attempt === 0 && isUnauthorized(err) && callerSignal?.aborted !== true) {
           this.auth.invalidate();
           continue;
         }
