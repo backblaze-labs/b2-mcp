@@ -2,6 +2,7 @@ import { spawnSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import { join } from "path";
+import { stripVTControlCharacters } from "util";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
@@ -28,10 +29,6 @@ describe("spelling policy", () => {
     const job = workflowJobBlock(ci, name);
     if (!job) throw new Error(`Workflow job not found: ${name}`);
     return job;
-  }
-
-  function stripAnsi(text: string): string {
-    return text.replace(/\u001b\[[0-9;]*m/g, "");
   }
 
   it("wires cspell into package scripts and verify", () => {
@@ -66,7 +63,7 @@ describe("spelling policy", () => {
       encoding: "utf8",
       timeout: 60_000,
     });
-    const output = stripAnsi(`${result.stdout}\n${result.stderr}`);
+    const output = stripVTControlCharacters(`${result.stdout}\n${result.stderr}`);
 
     if (result.status !== 0) {
       throw new Error(`cspell repo scan failed\n${output}`);
