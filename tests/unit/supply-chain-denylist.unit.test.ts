@@ -170,7 +170,7 @@ describe("supply-chain denylist scanner", () => {
       writeFileSync(
         join(dir, "yarn.lock"),
         [
-          "keyv@^6.0.0:",
+          '"keyv@^6.0.0", "keyv@~6.0.0":',
           '  version "6.0.0"',
           '  resolved "https://registry.npmjs.org/keyv/-/keyv-6.0.0.tgz"',
           "",
@@ -209,6 +209,11 @@ describe("supply-chain denylist scanner", () => {
             resolved: "https://registry.npmjs.org/keyv/-/keyv-6.0.0.tgz",
             integrity: "sha512-test",
           },
+          "node_modules/scoped-safe-name": {
+            version: "1.6.2",
+            resolved: "https://registry.npmjs.org/%40thiennq%2fdocs-viewer/-/docs-viewer-1.6.2.tgz",
+            integrity: "sha512-test",
+          },
         },
       });
 
@@ -216,6 +221,7 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("resolved tarball");
       expect(result.stderr).toContain("denied package keyv@6.0.0");
+      expect(result.stderr).toContain("denied package @thiennq/docs-viewer@1.6.2");
     });
   });
 

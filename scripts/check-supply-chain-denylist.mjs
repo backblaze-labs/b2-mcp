@@ -515,10 +515,11 @@ function recordPackageFinding(report, context, state, name, version, detail) {
 function tarballNeedles(name, version) {
   const basename = name.split("/").pop();
   const encodedName = encodeURIComponent(name);
+  const lowercaseSlashEncodedName = encodedName.replaceAll("%2F", "%2f");
   return [
     `/${name}/-/${basename}-${version}.tgz`,
     `/${encodedName}/-/${basename}-${version}.tgz`,
-    `/${encodedName.replace("%2F", "%2f")}/-/${basename}-${version}.tgz`,
+    `/${lowercaseSlashEncodedName}/-/${basename}-${version}.tgz`,
   ];
 }
 
@@ -679,6 +680,36 @@ function packageVersionFromPnpmKey(value) {
   return name ? { name, version } : null;
 }
 
+function yarnHeaderDescriptors(line) {
+  const trimmed = line.trimEnd();
+  if (!trimmed.endsWith(":")) return [];
+
+  const body = trimmed.slice(0, -1).trim();
+  if (!body.includes("@")) return [];
+
+  const descriptors = [];
+  let current = "";
+  let quote = null;
+  for (const char of body) {
+    if (char === '"' || char === "'") {
+      if (quote === char) quote = null;
+      else if (!quote) quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "," && !quote) {
+      if (current.trim()) descriptors.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  if (quote) return [];
+  if (current.trim()) descriptors.push(current.trim());
+  return descriptors;
+}
+
 function scanTextLockfile(text, context, state, report) {
   const lines = text.split(/\r?\n/);
 
@@ -703,10 +734,7 @@ function scanTextLockfile(text, context, state, report) {
       recordPackageFinding(report, context, state, pnpmKey.name, pnpmKey.version);
     }
 
-    const header = line.match(/^("?[^"\n]+?"?(?:,\s*"?[^"\n]+?"?)*):\s*$/);
-    if (!header) continue;
-
-    const names = header[1].split(/,\s*/).map(descriptorPackageName).filter(Boolean);
+    const names = yarnHeaderDescriptors(line).map(descriptorPackageName).filter(Boolean);
     if (names.length === 0) continue;
 
     let version = null;
