@@ -143,6 +143,33 @@ try {
         'for (const repoOnlyFile of ["runtime-policy.json", "audit-policy.json", "package-budget.json"]) {',
         "  if (fs.existsSync(path.join(packageRoot, repoOnlyFile))) throw new Error(`${repoOnlyFile} should not be published`);",
         "}",
+        "(async () => {",
+        '  const { createServer, getRegisteredTools } = require(path.join(packageRoot, "dist", "server.js"));',
+        "  const runtimeConfig = {",
+        '    applicationKeyId: "key-id",',
+        '    applicationKey: "key-secret",',
+        '    appKeyId: "key-id",',
+        '    appKey: "key-secret",',
+        '    masterKeyId: "key-id",',
+        '    masterKey: "key-secret",',
+        '    region: "us-west-004",',
+        "    allowLocalFiles: false,",
+        "    fileRoot: null,",
+        "  };",
+        "  const server = createServer(runtimeConfig);",
+        "  const tools = getRegisteredTools(server) || {};",
+        "  const toolNames = Object.keys(tools);",
+        "  if (toolNames.length !== 40) throw new Error(`expected 40 registered tools, got ${toolNames.length}`);",
+        '  if (!tools.s3_get_object.inputSchema.safeParse({ bucket: "bucket", key: "object" }).success) throw new Error("s3_get_object schema rejected required bucket/key");',
+        '  const readOnlyServer = createServer(runtimeConfig, ["listBuckets", "listFiles", "readFiles", "listKeys"]);',
+        "  const readOnlyTools = getRegisteredTools(readOnlyServer) || {};",
+        '  if (readOnlyTools.s3_delete_object) throw new Error("read-only capability filter exposed delete object");',
+        '  if (!readOnlyTools.s3_get_object) throw new Error("read-only capability filter hid get object");',
+        "  const stubResult = await tools.b2_create_key.execute({}, {});",
+        '  const stubText = stubResult?.content?.[0]?.text ?? "";',
+        '  if (!stubText.includes("tool_unavailable")) throw new Error("durable secret stub did not return unavailable response");',
+        "  await Promise.all([server.close(), readOnlyServer.close()]);",
+        "})().catch((err) => { console.error(err); process.exit(1); });",
       ].join("\n"),
     ],
     { env: sanitizerBlockedEnv },
@@ -171,7 +198,9 @@ try {
     throw new Error(`expected missing-credential startup to exit 1, got ${withoutCreds.status}`);
   }
 
-  console.log(`packed-consumer-smoke: installed and executed ${filename}`);
+  console.log(
+    `packed-consumer-smoke: installed and exercised runtime compatibility for ${filename}`,
+  );
 } finally {
   rmSync(workspace, { recursive: true, force: true });
 }

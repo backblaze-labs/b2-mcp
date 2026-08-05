@@ -56,7 +56,7 @@
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts --write",
     "format": "node scripts/run-biome.mjs format . --write",
     "format:check": "node scripts/run-biome.mjs format .",
-    "spell": "cspell --no-progress --gitignore \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.{mjs,cjs}\" \"docs/**/*.md\" \"*.md\" \"CLAUDE.md\" \".github/**/*.yml\""
+    "spell": "cspell lint --no-progress --gitignore"
   },
   "keywords": [
     "mcp",

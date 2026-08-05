@@ -67,6 +67,7 @@ ignoreRegExpList:
   - Urls
   - Email
 
-# Split identifiers on case boundaries so typos inside camelCase, PascalCase,
-# and ALLCAPS_SNAKE names are still checked.
+# Permit established run-together domain and tooling compounds that appear in
+# docs, scripts, and identifiers. This is intentionally permissive for valid
+# word pairs; obvious misspellings are still checked by the dictionaries above.
 allowCompoundWords: true

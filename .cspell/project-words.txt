@@ -7,11 +7,10 @@
 # because the list stays auditable and reusable. Sort within each block.
 
 # Backblaze + B2
-backblaze
-backblazeb
-Backblaze
 b2sdk
-MGMT
+backblaze
+# Host fragment from backblazeb2.com after cspell splits the numeral.
+backblazeb
 mgmt
 
 # Tooling, libraries, runtimes

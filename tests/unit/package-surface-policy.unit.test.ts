@@ -104,6 +104,24 @@ describe("package surface policy", () => {
         '    path.join(packageRoot, "dist", "http-server.js"),',
         '    "module.exports = { buildHttpServer() {} };\\n",',
         "  );",
+        "  fs.writeFileSync(",
+        '    path.join(packageRoot, "dist", "server.js"),',
+        "    [",
+        '      "const allTools = {};\\n",',
+        '      "for (let i = 0; i < 37; i += 1) allTools[`b2_fixture_${i}`] = {};\\n",',
+        '      "allTools.b2_create_key = { execute: async () => ({ content: [{ text: \\"tool_unavailable\\" }] }) };\\n",',
+        '      "allTools.s3_get_object = { inputSchema: { safeParse: () => ({ success: true }) } };\\n",',
+        '      "allTools.s3_delete_object = {};\\n",',
+        '      "function createServer(_config, capabilities) { return { capabilities, close: async () => {} }; }\\n",',
+        '      "function getRegisteredTools(server) {\\n",',
+        '      "  if (Array.isArray(server.capabilities)) {\\n",',
+        '      "    return { b2_create_key: allTools.b2_create_key, s3_get_object: allTools.s3_get_object };\\n",',
+        '      "  }\\n",',
+        '      "  return allTools;\\n",',
+        '      "}\\n",',
+        '      "module.exports = { createServer, getRegisteredTools };\\n",',
+        '    ].join(""),',
+        "  );",
         "  process.exit(0);",
         "}",
         'console.error(`unexpected npm command: ${args.join(" ")}`);',
@@ -124,7 +142,9 @@ describe("package surface policy", () => {
 
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("packed-consumer-smoke: retrying npm install");
-      expect(result.stdout).toContain("packed-consumer-smoke: installed and executed");
+      expect(result.stdout).toContain(
+        "packed-consumer-smoke: installed and exercised runtime compatibility",
+      );
       expect(readFileSync(state, "utf8")).toBe("2");
     } finally {
       rmSync(dir, { recursive: true, force: true });

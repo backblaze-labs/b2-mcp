@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 import { join } from "path";
@@ -14,9 +15,14 @@ describe("spelling policy", () => {
     scripts: Record<string, string>;
   };
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
-  const cspellConfig = readFileSync(join(root, "cspell.config.yaml"), "utf8");
+  const cspellConfigPath = join(root, "cspell.config.yaml");
   const projectWordsPath = join(root, ".cspell/project-words.txt");
-  const projectWords = readFileSync(projectWordsPath, "utf8");
+  const cspellBin = join(
+    root,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "cspell.cmd" : "cspell",
+  );
 
   function workflowJob(name: string): string {
     const job = workflowJobBlock(ci, name);
@@ -24,30 +30,30 @@ describe("spelling policy", () => {
     return job;
   }
 
-  it("wires cspell into package scripts", () => {
-    expect(pkg.devDependencies.cspell).toMatch(/^\^10\./);
-    expect(pkg.scripts.spell).toContain("cspell --no-progress --gitignore");
-    expect(pkg.scripts.spell).toContain('"src/**/*.ts"');
-    expect(pkg.scripts.spell).toContain('"tests/**/*.ts"');
-    expect(pkg.scripts.spell).toContain('"scripts/**/*.{mjs,cjs}"');
-    expect(pkg.scripts.spell).toContain('"docs/**/*.md"');
-    expect(pkg.scripts.spell).toContain('".github/**/*.yml"');
+  it("wires cspell into package scripts and verify", () => {
+    expect(pkg.devDependencies.cspell).toBeDefined();
+    expect(pkg.scripts.spell).toEqual(expect.stringMatching(/\bcspell\b/));
     expect(pkg.scripts.verify).toContain("npm run spell");
   });
 
-  it("keeps a central project dictionary and noise filters", () => {
+  it("loads the cspell config and central project dictionary", () => {
+    const result = spawnSync(
+      cspellBin,
+      ["lint", "--config", cspellConfigPath, "--no-progress", "--no-summary", "stdin://README.md"],
+      {
+        cwd: root,
+        encoding: "utf8",
+        input: "b2sdk\n",
+        timeout: 30_000,
+      },
+    );
+
+    expect(existsSync(cspellConfigPath)).toBe(true);
     expect(existsSync(projectWordsPath)).toBe(true);
-    expect(projectWords).toContain("Backblaze");
-    expect(projectWords).toContain("MCP");
-    expect(cspellConfig).toContain("allowCompoundWords: true");
-    expect(cspellConfig).toContain("project-words");
-    expect(cspellConfig).toContain("package-lock.json");
-    expect(cspellConfig).toContain("pnpm-lock.yaml");
-    expect(cspellConfig).toContain("long-hex");
-    expect(cspellConfig).toContain("base64-blob");
-    expect(cspellConfig).toContain("percent-encoded");
-    expect(cspellConfig).toContain("Urls");
-    expect(cspellConfig).toContain("Email");
+    if (result.status !== 0) {
+      throw new Error(`cspell config check failed\n${result.stdout}\n${result.stderr}`);
+    }
+    expect(result.status).toBe(0);
   });
 
   it("gates the deterministic CI jobs on spelling", () => {

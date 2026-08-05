@@ -11,7 +11,7 @@ The package engine floor is `>=22.3.0` because it matches the official B2 SDK.
 For local development and deployed 22.x hosts, use the patched Node 22 LTS
 release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later patched
 22.x release. CI verifies the production dependency graph at Node 22.3.0 and
-runs the full toolchain on Node.js 22.13.0, 24, and 26.
+runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 ```bash
 npm ci
@@ -49,7 +49,7 @@ Test files must follow the layer suffix convention documented in
 
 - Branch off `main`; keep changes focused.
 - `npm run verify` must pass before opening a PR. CI runs the bundled
-  deterministic coverage and slow layers on Node.js 22.13.0, 24, and 26, checks
+  deterministic coverage and slow layers on Node.js 22.23.1, 24, and 26, checks
   production-only dependency installation at the Node.js 22.3.0 engine floor,
   and runs a patched Node 22 LTS cross-platform suite. A separate package-install
   job stays off the deploy-gating path.
