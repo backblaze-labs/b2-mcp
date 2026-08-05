@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -17,6 +17,16 @@ function writeFixture(
   options: {
     packageSpec?: string;
     lockEntry?: Partial<typeof sdkProvenance>;
+    optionalDependencies?: Record<string, string>;
+    lockPackages?: Record<
+      string,
+      {
+        version: string;
+        resolved: string;
+        integrity: string;
+        dependencies?: Record<string, string>;
+      }
+    >;
   } = {},
 ): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-package-budget-policy-"));
@@ -35,6 +45,9 @@ function writeFixture(
         dependencies: {
           "@backblaze-labs/b2-sdk": packageSpec,
         },
+        ...(options.optionalDependencies
+          ? { optionalDependencies: options.optionalDependencies }
+          : {}),
       },
       null,
       2,
@@ -55,12 +68,16 @@ function writeFixture(
             dependencies: {
               "@backblaze-labs/b2-sdk": packageSpec,
             },
+            ...(options.optionalDependencies
+              ? { optionalDependencies: options.optionalDependencies }
+              : {}),
           },
           "node_modules/@backblaze-labs/b2-sdk": {
             version: lockEntry.version,
             resolved: lockEntry.resolved,
             integrity: lockEntry.integrity,
           },
+          ...(options.lockPackages ?? {}),
         },
       },
       null,
@@ -172,5 +189,86 @@ describe("package budget policy gate", () => {
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
+  });
+
+  it("rejects transitive production lockfile entries outside the npm registry", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
+      lockPackages: {
+        "node_modules/@smithy/util-utf8": {
+          version: "4.2.0",
+          resolved: "https://attacker.example/@smithy/util-utf8-4.2.0.tgz",
+          integrity:
+            "sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      },
+    });
+    try {
+      const result = runPolicyFixture(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        "node_modules/@smithy/util-utf8: production package must resolve from the npm registry",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("counts optionalDependencies as direct production dependencies", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
+      optionalDependencies: {
+        pino: "10.3.1",
+      },
+      lockPackages: {
+        "node_modules/pino": {
+          version: "10.3.1",
+          resolved: "https://registry.npmjs.org/pino/-/pino-10.3.1.tgz",
+          integrity:
+            "sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==",
+        },
+      },
+    });
+    try {
+      const result = runPolicyFixture(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        "direct production dependency count expected 1, got 2",
+      );
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        "unapproved direct production dependency: pino",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("records transitive package count without direct dependencies", () => {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      dependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    };
+    const budget = JSON.parse(readFileSync(join(root, "package-budget.json"), "utf8")) as {
+      reviewedBaseline: {
+        totalProductionPackageCount: number;
+        transitiveProductionPackageCount: number;
+      };
+    };
+    const directProductionDependencyCount =
+      Object.keys(pkg.dependencies ?? {}).length +
+      Object.keys(pkg.optionalDependencies ?? {}).length;
+
+    expect(budget.reviewedBaseline.transitiveProductionPackageCount).toBe(
+      budget.reviewedBaseline.totalProductionPackageCount - 1 - directProductionDependencyCount,
+    );
+  });
+
+  it("runs the package budget before npm publish", () => {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(pkg.scripts.prepublishOnly).toContain("npm run build");
+    expect(pkg.scripts.prepublishOnly).toContain("npm run check:package-budget");
   });
 });

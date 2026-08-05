@@ -10,11 +10,11 @@
     "primaryB2Transport": "@backblaze-labs/b2-sdk@0.2.0",
     "directProductionDependencyCount": 7,
     "totalProductionPackageCount": 47,
-    "transitiveProductionPackageCount": 46,
-    "packedTarballBytes": 181021,
-    "unpackedPackageBytes": 797552,
+    "transitiveProductionPackageCount": 39,
+    "packedTarballBytes": 181125,
+    "unpackedPackageBytes": 797982,
     "packedEntryCount": 165,
-    "cleanConsumerInstallFootprintBytes": 27646164
+    "cleanConsumerInstallFootprintBytes": 27646594
   },
   "limits": {
     "directProductionDependencyCount": 7,
@@ -101,6 +101,9 @@
       "@modelcontextprotocol/node",
       "@modelcontextprotocol/sdk"
     ]
+  },
+  "lockfileProvenancePolicy": {
+    "allowedNonRegistryProductionPackages": []
   },
   "temporaryAdapters": [
     {

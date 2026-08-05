@@ -49,6 +49,21 @@ export interface B2S3CompletedMultipartPart {
   etag: string;
 }
 
+export interface B2S3MultipartUploadSummary {
+  Key?: string;
+  UploadId?: string;
+  Initiated?: Date;
+  StorageClass?: string;
+  Owner?: unknown;
+}
+
+export interface B2S3PartSummary {
+  PartNumber?: number;
+  LastModified?: Date;
+  ETag?: string;
+  Size?: number;
+}
+
 export class B2S3PeerClient extends S3Client {
   private optionsWithRequestSignal(options?: HttpHandlerOptions): HttpHandlerOptions | undefined {
     const signal = currentMcpRequestSignal();
@@ -215,7 +230,7 @@ export class B2S3PeerClient extends S3Client {
     keyMarker?: string;
     uploadIdMarker?: string;
   }): Promise<{
-    uploads: unknown[];
+    uploads: B2S3MultipartUploadSummary[];
     isTruncated?: boolean;
     nextKeyMarker?: string;
     nextUploadIdMarker?: string;
@@ -244,7 +259,11 @@ export class B2S3PeerClient extends S3Client {
     uploadId: string;
     maxParts: number;
     partNumberMarker?: number;
-  }): Promise<{ parts: unknown[]; isTruncated?: boolean; nextPartNumberMarker?: string }> {
+  }): Promise<{
+    parts: B2S3PartSummary[];
+    isTruncated?: boolean;
+    nextPartNumberMarker?: string;
+  }> {
     const result = await this.send(
       new ListPartsCommand({
         Bucket: input.bucket,
@@ -301,7 +320,6 @@ export class B2S3PeerClient extends S3Client {
         ContinuationToken: input.continuationToken,
         MaxKeys: input.maxKeys,
       }),
-      { abortSignal: currentMcpRequestSignal() },
     );
     return {
       keys: (page.Contents ?? []).flatMap((object) =>
@@ -318,9 +336,6 @@ export class B2S3PeerClient extends S3Client {
   }): Promise<{ body: unknown }> {
     const object = await this.send(
       new GetObjectCommand({ Bucket: input.bucketName, Key: input.key }),
-      {
-        abortSignal: currentMcpRequestSignal(),
-      },
     );
     return { body: object.Body };
   }

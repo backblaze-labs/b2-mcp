@@ -84,12 +84,14 @@ npm run build
 npm run check:package-budget
 ```
 
-The budget records every direct production dependency and the approved limits for
-total production packages, packed tarball size, unpacked package size, clean
-consumer install footprint, and duplicate runtime package versions. CI rejects an
+The budget records every direct production dependency from `dependencies` or
+`optionalDependencies` and the approved limits for total production packages,
+packed tarball size, unpacked package size, clean consumer install footprint,
+and duplicate runtime package versions. CI and `prepublishOnly` reject an
 unapproved direct dependency, Axios runtime import, SDK private/unpublished
 import, Git/path SDK dependency, unpinned or provenance-mismatched direct
-dependency, or AWS import outside the temporary `src/s3/aws-sdk-adapter.ts`
+dependency, production lockfile entry without npm registry provenance and
+integrity, or AWS import outside the temporary `src/s3/aws-sdk-adapter.ts`
 boundary. The clean consumer install is measured from the committed production
 lock graph, not from lockfile-less semver resolution.
 

@@ -31,6 +31,7 @@ const packageLock = readJson("package-lock.json");
 const errors = [];
 const { commandLine, runNpmCommandWithRetries } = retryUtils;
 const { sanitizedEnv: baseSanitizedEnv } = envUtils;
+const productionDependencySections = ["dependencies", "optionalDependencies"];
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
@@ -149,6 +150,35 @@ function directLockEntry(name) {
   return packageLock.packages?.[`node_modules/${name}`];
 }
 
+function packageProductionDependencyEntries() {
+  const entries = [];
+  const seen = new Map();
+  for (const section of productionDependencySections) {
+    for (const [name, specifier] of Object.entries(packageJson[section] ?? {})) {
+      const previous = seen.get(name);
+      if (previous) {
+        fail(`direct production dependency ${name} is declared in both ${previous} and ${section}`);
+        continue;
+      }
+      seen.set(name, section);
+      entries.push({ name, section, specifier });
+    }
+  }
+  return entries.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function productionDependencyMetadata() {
+  const metadata = {};
+  for (const section of productionDependencySections) {
+    if (packageJson[section]) metadata[section] = packageJson[section];
+  }
+  return metadata;
+}
+
+function rootLockProductionSpecifier(entry) {
+  return packageLock.packages?.[""]?.[entry.section]?.[entry.name];
+}
+
 function assertBudgetMetadata() {
   const directDependencies = budget.directProductionDependencies ?? {};
   for (const [name, record] of Object.entries(directDependencies)) {
@@ -225,6 +255,19 @@ function assertBudgetMetadata() {
   for (const key of allowedAwsImports) {
     if (!adapterImports.has(key)) {
       fail(`allowedAwsRuntimeImports entry is not backed by a temporary adapter: ${key}`);
+    }
+  }
+
+  const nonRegistryAllowlist =
+    budget.lockfileProvenancePolicy?.allowedNonRegistryProductionPackages ?? [];
+  if (!Array.isArray(nonRegistryAllowlist)) {
+    fail("lockfileProvenancePolicy.allowedNonRegistryProductionPackages must be an array");
+  } else {
+    for (const [index, record] of nonRegistryAllowlist.entries()) {
+      const label = `lockfileProvenancePolicy.allowedNonRegistryProductionPackages[${index}]`;
+      for (const field of ["path", "name", "version", "resolved", "integrity", "reason"]) {
+        requireNonEmptyString(record?.[field], `${label}.${field}`);
+      }
     }
   }
 }
@@ -339,7 +382,9 @@ function inventoryRuntimeImports() {
 }
 
 function assertDirectDependencyPolicy() {
-  const actual = Object.keys(packageJson.dependencies ?? {}).sort();
+  const actualEntries = packageProductionDependencyEntries();
+  const actual = actualEntries.map((entry) => entry.name);
+  const actualByName = new Map(actualEntries.map((entry) => [entry.name, entry]));
   const approved = Object.keys(budget.directProductionDependencies ?? {}).sort();
   const actualSet = new Set(actual);
   const approvedSet = new Set(approved);
@@ -355,15 +400,15 @@ function assertDirectDependencyPolicy() {
   for (const name of missing) fail(`approved direct production dependency missing: ${name}`);
 
   for (const [name, record] of Object.entries(budget.directProductionDependencies ?? {})) {
-    const packageSpec = packageJson.dependencies?.[name];
-    if (packageSpec !== record.version) {
+    const actualEntry = actualByName.get(name);
+    if (actualEntry?.specifier !== record.version) {
       fail(
         `direct dependency ${name} must be exact-pinned to reviewed version ${
           record.version ?? "missing"
-        }, got ${packageSpec ?? "missing"}`,
+        }, got ${actualEntry?.specifier ?? "missing"}`,
       );
     }
-    const rootLockSpec = packageLock.packages?.[""]?.dependencies?.[name];
+    const rootLockSpec = actualEntry ? rootLockProductionSpecifier(actualEntry) : undefined;
     if (rootLockSpec !== record.version) {
       fail(
         `package-lock root dependency ${name} must be exact-pinned to ${
@@ -393,11 +438,49 @@ function assertDirectDependencyPolicy() {
   }
 
   for (const name of budget.runtimeImportPolicy?.forbiddenRuntimeDependencies ?? []) {
-    if (packageJson.dependencies?.[name] !== undefined) {
+    const forbiddenSection = productionDependencySections.find(
+      (section) => packageJson[section]?.[name] !== undefined,
+    );
+    if (forbiddenSection) {
       fail(`forbidden runtime dependency is present in package.json: ${name}`);
     }
     if (packageLock.packages?.[`node_modules/${name}`] !== undefined) {
       fail(`forbidden runtime dependency is present in package-lock.json: ${name}`);
+    }
+  }
+}
+
+function isAllowedNonRegistryProductionPackage(entry) {
+  const allowed = budget.lockfileProvenancePolicy?.allowedNonRegistryProductionPackages ?? [];
+  return allowed.some(
+    (record) =>
+      record.path === entry.path &&
+      record.name === entry.name &&
+      record.version === entry.version &&
+      record.resolved === entry.resolved &&
+      record.integrity === entry.integrity &&
+      typeof record.reason === "string" &&
+      record.reason.trim() !== "",
+  );
+}
+
+function assertProductionLockfileProvenance(productionPackages) {
+  for (const entry of productionPackages) {
+    if (!entry.resolved) {
+      fail(`${entry.path}: production package is missing resolved URL`);
+    } else if (
+      !String(entry.resolved).startsWith("https://registry.npmjs.org/") &&
+      !isAllowedNonRegistryProductionPackage(entry)
+    ) {
+      fail(
+        `${entry.path}: production package must resolve from the npm registry or an explicit reviewed allowlist, got ${entry.resolved}`,
+      );
+    }
+
+    if (!entry.integrity) {
+      fail(`${entry.path}: production package is missing integrity`);
+    } else if (!/^sha512-[A-Za-z0-9+/=]+$/.test(String(entry.integrity))) {
+      fail(`${entry.path}: production package integrity must use sha512`);
     }
   }
 }
@@ -538,7 +621,7 @@ function writeConsumerLock(appDir, tarball, packResult) {
       resolved: tarballSpec,
       integrity: packResult.integrity,
       license: packageJson.license,
-      dependencies: packageJson.dependencies,
+      ...productionDependencyMetadata(),
       bin: packageJson.bin,
       engines: packageJson.engines,
     },
@@ -679,7 +762,7 @@ function assertBudget(metrics) {
 }
 
 function markdownSummary(metrics) {
-  const directCount = Object.keys(packageJson.dependencies ?? {}).length;
+  const directCount = packageProductionDependencyEntries().length;
   const duplicates =
     metrics.duplicatePackageVersions.length === 0
       ? "none"
@@ -701,6 +784,16 @@ function markdownSummary(metrics) {
     `Duplicate runtime package versions: ${duplicates}.`,
     "",
   ].join("\n");
+}
+
+function transitiveProductionPackageCount(metrics) {
+  const packagePath = `node_modules/${packageJson.name}`;
+  const directPaths = new Set(
+    packageProductionDependencyEntries().map((entry) => `node_modules/${entry.name}`),
+  );
+  return metrics.productionPackages.filter(
+    (entry) => entry.path !== packagePath && !directPaths.has(entry.path),
+  ).length;
 }
 
 function productionLockInventoryReport() {
@@ -764,9 +857,9 @@ function writeReports(metrics, productionInventory, runtimeImports) {
       {
         issue: budget.issue,
         metrics: {
-          directProductionDependencyCount: Object.keys(packageJson.dependencies ?? {}).length,
+          directProductionDependencyCount: packageProductionDependencyEntries().length,
           totalProductionPackageCount: metrics.productionPackageCount,
-          transitiveProductionPackageCount: metrics.productionPackageCount - 1,
+          transitiveProductionPackageCount: transitiveProductionPackageCount(metrics),
           packedTarballBytes: metrics.packResult.size,
           unpackedPackageBytes: metrics.packResult.unpackedSize,
           packedEntryCount: metrics.packResult.entryCount,
@@ -806,6 +899,10 @@ function writeFailureReport(err) {
   appendStepSummary(summary);
 }
 
+function emitCollectedErrors() {
+  for (const error of errors) console.error(`package-budget: ${error}`);
+}
+
 function verifyBuiltEntrypoints() {
   for (const entrypoint of ["dist/index.js", "dist/http-server.js"]) {
     if (!existsSync(path.join(root, entrypoint))) {
@@ -823,6 +920,7 @@ async function main() {
   const runtimeImports = inventoryRuntimeImports();
   assertRuntimeImportPolicy(runtimeImports);
   const productionInventory = productionLockInventoryReport();
+  assertProductionLockfileProvenance(productionInventory.packages);
 
   if (policyOnly) {
     const summary = writePolicyReports(
@@ -832,7 +930,7 @@ async function main() {
     );
     process.stdout.write(summary);
     if (errors.length > 0) {
-      for (const error of errors) console.error(`package-budget: ${error}`);
+      emitCollectedErrors();
       process.exit(1);
     }
     return;
@@ -840,7 +938,7 @@ async function main() {
 
   if (errors.length > 0) {
     writePolicyReports(productionInventory, runtimeImports, "policy checks failed");
-    for (const error of errors) console.error(`package-budget: ${error}`);
+    emitCollectedErrors();
     process.exit(1);
   }
 
@@ -867,13 +965,14 @@ async function main() {
   }
 
   if (errors.length > 0) {
-    for (const error of errors) console.error(`package-budget: ${error}`);
+    emitCollectedErrors();
     process.exit(1);
   }
 }
 
 main().catch((err) => {
   writeFailureReport(err);
+  emitCollectedErrors();
   console.error(`package-budget: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 });
