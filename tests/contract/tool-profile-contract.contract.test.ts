@@ -36,7 +36,7 @@ import {
 
 const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
 const packageJson = readJson<ToolContractPackageJson>("package.json");
-const prettierBin = join(root, "node_modules/prettier/bin/prettier.cjs");
+const biomeRunner = join(root, "scripts/run-biome.mjs");
 
 const profileNames = Object.keys(contract.profiles) as ProfileName[];
 const eras: Era[] = ["modern", "legacy"];
@@ -192,7 +192,9 @@ function visit(
 ) {
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
-    value.forEach((item, index) => visit(item, cb, `${path}/${index}`));
+    value.forEach((item, index) => {
+      visit(item, cb, `${path}/${index}`);
+    });
     return;
   }
   for (const [key, item] of Object.entries(value)) {
@@ -231,7 +233,9 @@ function collectStrings(
   }
   if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
-    value.forEach((item, index) => collectStrings(item, cb, `${path}/${index}`));
+    value.forEach((item, index) => {
+      collectStrings(item, cb, `${path}/${index}`);
+    });
     return;
   }
   for (const [key, item] of Object.entries(value)) {
@@ -239,18 +243,15 @@ function collectStrings(
   }
 }
 
-function formatWithRepoConfig(relativePath: string, source: string): string {
-  const path = join(root, relativePath);
-  const result = spawnSync(process.execPath, [prettierBin, "--stdin-filepath", path], {
+function expectRepoFormatted(relativePaths: string[]): void {
+  const result = spawnSync(process.execPath, [biomeRunner, "format", ...relativePaths], {
     cwd: root,
-    input: source,
     encoding: "utf8",
     env: { ...process.env, NO_COLOR: "1" },
   });
   if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || `Prettier failed for ${relativePath}`);
+    throw new Error(result.stderr || result.stdout || "Biome format check failed");
   }
-  return result.stdout;
 }
 
 function resolveLocalRef(rootSchema: JsonObject, ref: string): unknown {
@@ -276,7 +277,9 @@ function assertBoundedRefs(schema: JsonObject): void {
     if (depth > 32) throw new Error("JSON Schema nesting exceeds contract bound");
     if (!value || typeof value !== "object") return;
     if (Array.isArray(value)) {
-      value.forEach((item) => walk(item, depth + 1));
+      value.forEach((item) => {
+        walk(item, depth + 1);
+      });
       return;
     }
     const object = value as Record<string, unknown>;
@@ -285,7 +288,9 @@ function assertBoundedRefs(schema: JsonObject): void {
       if (refCount > 100) throw new Error("JSON Schema $ref count exceeds contract bound");
       resolveLocalRef(schema, object.$ref);
     }
-    Object.values(object).forEach((item) => walk(item, depth + 1));
+    Object.values(object).forEach((item) => {
+      walk(item, depth + 1);
+    });
   };
   walk(schema, 0);
   expect(maxDepth).toBeLessThanOrEqual(32);
@@ -500,23 +505,17 @@ describe("MCP advertised capability contract", () => {
 
 describe("Tool profile reference drift", () => {
   it("keeps the human-readable profile reference generated from the JSON artifact", () => {
-    const expected = formatWithRepoConfig(
-      "docs/TOOL_PROFILES.md",
-      renderProfileReference(contract),
-    );
+    const expected = renderProfileReference(contract);
     const actual = readFileSync(join(root, "docs/TOOL_PROFILES.md"), "utf8");
     expect(actual).toBe(expected);
   });
 
-  it("keeps generated JSON artifacts in Prettier format", () => {
+  it("keeps generated JSON artifacts in Biome format", () => {
     const files = [
       "docs/tool-profile-contract.json",
       ...profileNames.flatMap((profile) => Object.values(contract.profiles[profile].fixtures)),
     ].sort();
 
-    for (const file of files) {
-      const actual = readFileSync(join(root, file), "utf8");
-      expect(formatWithRepoConfig(file, actual)).toBe(actual);
-    }
+    expectRepoFormatted(files);
   });
 });

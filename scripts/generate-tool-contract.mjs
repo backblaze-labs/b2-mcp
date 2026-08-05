@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import prettier from "prettier";
 
 const require = createRequire(import.meta.url);
 
@@ -45,7 +45,9 @@ async function collectToolsList(profile, era) {
   const capabilities = capabilitiesForProfile(profile);
   const credentialProvider = {
     name: "tool-contract-fixture",
-    validateConfiguration() {},
+    validateConfiguration() {
+      // The fixture provider has no external configuration to validate.
+    },
     resolve() {
       return {
         config: CONTRACT_TEST_CONFIG,
@@ -121,13 +123,23 @@ async function collectToolsList(profile, era) {
   }
 }
 
-async function formatWithRepoConfig(path, source, parser) {
-  const config = (await prettier.resolveConfig(path)) ?? {};
-  return prettier.format(source, { ...config, filepath: path, parser });
+function writeJson(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-async function writeJson(path, value) {
-  writeFileSync(path, await formatWithRepoConfig(path, JSON.stringify(value), "json"));
+function formatGeneratedJson(paths) {
+  const result = spawnSync(
+    process.execPath,
+    [join(root, "scripts/run-biome.mjs"), "format", ...paths, "--write"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: process.env,
+    },
+  );
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || "Biome failed to format tool contracts");
+  }
 }
 
 async function main() {
@@ -140,8 +152,11 @@ async function main() {
     fixtures[`${profile}.legacy`] = await collectToolsList(profile, "legacy");
   }
 
+  const generatedJsonPaths = [];
   for (const [key, fixture] of Object.entries(fixtures)) {
-    await writeJson(join(fixturesDir, `${key}.json`), fixture);
+    const fixturePath = join(fixturesDir, `${key}.json`);
+    writeJson(fixturePath, fixture);
+    generatedJsonPaths.push(fixturePath);
   }
 
   const profiles = Object.fromEntries(
@@ -180,12 +195,12 @@ async function main() {
     profiles,
   };
 
-  await writeJson(join(root, "docs/tool-profile-contract.json"), contract);
+  const contractPath = join(root, "docs/tool-profile-contract.json");
+  writeJson(contractPath, contract);
+  generatedJsonPaths.push(contractPath);
+  formatGeneratedJson(generatedJsonPaths);
   const profileReferencePath = join(root, "docs/TOOL_PROFILES.md");
-  writeFileSync(
-    profileReferencePath,
-    await formatWithRepoConfig(profileReferencePath, renderProfileReference(contract), "markdown"),
-  );
+  writeFileSync(profileReferencePath, renderProfileReference(contract));
 }
 
 main().catch((err) => {

@@ -3,7 +3,10 @@
   "issue": 49,
   "issueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/49",
   "mcpRevision": "2026-07-28",
-  "approvedCacheHint": { "ttlMs": 30000, "cacheScope": "private" },
+  "approvedCacheHint": {
+    "ttlMs": 30000,
+    "cacheScope": "private"
+  },
   "sdk": {
     "@backblaze-labs/b2-sdk": "0.2.0",
     "@modelcontextprotocol/client": "2.0.0",
@@ -13,7 +16,12 @@
     "full": {
       "description": "Complete tool superset for contract review and regression detection.",
       "capabilities": null,
-      "counts": { "total": 40, "b2": 21, "s3": 19, "bz": 0 },
+      "counts": {
+        "total": 40,
+        "b2": 21,
+        "s3": 19,
+        "bz": 0
+      },
       "names": [
         "b2_authorize_account",
         "b2_create_bucket",
@@ -153,7 +161,12 @@
         "writeFileRetentions",
         "writeFiles"
       ],
-      "counts": { "total": 37, "b2": 18, "s3": 19, "bz": 0 },
+      "counts": {
+        "total": 37,
+        "b2": 18,
+        "s3": 19,
+        "bz": 0
+      },
       "names": [
         "b2_authorize_account",
         "b2_create_bucket",
@@ -277,7 +290,12 @@
         "readBucketNotifications",
         "readFiles"
       ],
-      "counts": { "total": 20, "b2": 11, "s3": 9, "bz": 0 },
+      "counts": {
+        "total": 20,
+        "b2": 11,
+        "s3": 9,
+        "bz": 0
+      },
       "names": [
         "b2_authorize_account",
         "b2_create_group_member",

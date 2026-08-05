@@ -12,7 +12,12 @@
     "@modelcontextprotocol/server": "2.0.0"
   },
   "capabilities": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
-  "counts": { "total": 20, "b2": 11, "s3": 9, "bz": 0 },
+  "counts": {
+    "total": 20,
+    "b2": 11,
+    "s3": 9,
+    "bz": 0
+  },
   "names": [
     "b2_authorize_account",
     "b2_create_group_member",
@@ -141,7 +146,10 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "Bucket name or bucketId to inspect.", "type": "string" },
+          "bucket": {
+            "description": "Bucket name or bucketId to inspect.",
+            "type": "string"
+          },
           "limit": {
             "default": 10,
             "description": "How many of the largest files to return (default 10, max 100).",
@@ -171,14 +179,20 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucketId": { "description": "Filter to a specific bucket by its ID", "type": "string" },
+          "bucketId": {
+            "description": "Filter to a specific bucket by its ID",
+            "type": "string"
+          },
           "bucketName": {
             "description": "Filter to a specific bucket by its name",
             "type": "string"
           },
           "bucketTypes": {
             "description": "Filter by bucket types. Defaults to all types.",
-            "items": { "enum": ["allPublic", "allPrivate", "snapshot", "all"], "type": "string" },
+            "items": {
+              "enum": ["allPublic", "allPrivate", "snapshot", "all"],
+              "type": "string"
+            },
             "type": "array"
           },
           "limit": {
@@ -233,7 +247,10 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "Bucket name or bucketId to inspect.", "type": "string" },
+          "bucket": {
+            "description": "Bucket name or bucketId to inspect.",
+            "type": "string"
+          },
           "max_uploads": {
             "default": 1000,
             "description": "Safety cap on how many unfinished uploads to scan (default 1000, max 10,000). A bucket bloated with abandoned uploads would otherwise trigger an unbounded walk plus a per-upload parts fan-out that times out. If the cap or an internal time budget is hit, the result is truncated and wasted_gb may be a lower bound — add a lifecycle rule to auto-cancel unfinished large files.",
@@ -292,7 +309,12 @@
       "descriptionSha256": "547c5df273d7e92d1cd70bcde04ae90d3706e9317d7cc06fcb58ace6a8f86465",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": { "bucket": { "description": "The bucket name.", "type": "string" } },
+        "properties": {
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          }
+        },
         "required": ["bucket"],
         "type": "object"
       }
@@ -303,9 +325,18 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
-          "key": { "description": "The object key.", "type": "string" },
-          "range": { "description": "Byte range, e.g. 'bytes=0-1048575'.", "type": "string" },
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The object key.",
+            "type": "string"
+          },
+          "range": {
+            "description": "Byte range, e.g. 'bytes=0-1048575'.",
+            "type": "string"
+          },
           "saveToPath": {
             "description": "If provided, save the file to this local path.",
             "type": "string"
@@ -325,7 +356,10 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
           "expiresIn": {
             "default": 3600,
             "description": "URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days).",
@@ -333,7 +367,10 @@
             "minimum": 1,
             "type": "integer"
           },
-          "key": { "description": "The object key.", "type": "string" },
+          "key": {
+            "description": "The object key.",
+            "type": "string"
+          },
           "operation": {
             "description": "Generate a download URL.",
             "enum": ["GetObject"],
@@ -354,7 +391,10 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name to check.", "type": "string" }
+          "bucket": {
+            "description": "The bucket name to check.",
+            "type": "string"
+          }
         },
         "required": ["bucket"],
         "type": "object"
@@ -366,9 +406,18 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
-          "key": { "description": "The object key.", "type": "string" },
-          "versionId": { "description": "Specific version of the object.", "type": "string" }
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The object key.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Specific version of the object.",
+            "type": "string"
+          }
         },
         "required": ["bucket", "key"],
         "type": "object"
@@ -380,15 +429,31 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
-          "delimiter": { "type": "string" },
-          "keyMarker": { "description": "Pagination cursor.", "type": "string" },
-          "maxUploads": { "default": 100, "maximum": 1000, "minimum": 1, "type": "integer" },
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "keyMarker": {
+            "description": "Pagination cursor.",
+            "type": "string"
+          },
+          "maxUploads": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
           "prefix": {
             "description": "Only list uploads for keys with this prefix.",
             "type": "string"
           },
-          "uploadIdMarker": { "description": "Pagination cursor.", "type": "string" }
+          "uploadIdMarker": {
+            "description": "Pagination cursor.",
+            "type": "string"
+          }
         },
         "required": ["bucket"],
         "type": "object"
@@ -400,13 +465,23 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
-          "delimiter": { "type": "string" },
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
           "keyMarker": {
             "description": "Pagination cursor — key from a previous response.",
             "type": "string"
           },
-          "maxKeys": { "default": 1000, "maximum": 1000, "minimum": 1, "type": "integer" },
+          "maxKeys": {
+            "default": 1000,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
           "prefix": {
             "description": "Only list versions for objects with this prefix.",
             "type": "string"
@@ -426,13 +501,24 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
           "continuationToken": {
             "description": "Pagination token from a previous response.",
             "type": "string"
           },
-          "delimiter": { "description": "Use '/' to list like a folder tree.", "type": "string" },
-          "maxKeys": { "default": 1000, "maximum": 1000, "minimum": 1, "type": "integer" },
+          "delimiter": {
+            "description": "Use '/' to list like a folder tree.",
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
           "prefix": {
             "description": "Only return objects whose keys start with this prefix.",
             "type": "string"
@@ -452,22 +538,39 @@
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
-          "bucket": { "description": "The bucket name.", "type": "string" },
-          "key": { "description": "The object key.", "type": "string" },
-          "maxParts": { "default": 100, "maximum": 1000, "minimum": 1, "type": "integer" },
+          "bucket": {
+            "description": "The bucket name.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The object key.",
+            "type": "string"
+          },
+          "maxParts": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
           "partNumberMarker": {
             "description": "Pagination cursor.",
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
             "type": "integer"
           },
-          "uploadId": { "description": "The UploadId.", "type": "string" }
+          "uploadId": {
+            "description": "The UploadId.",
+            "type": "string"
+          }
         },
         "required": ["bucket", "key", "uploadId"],
         "type": "object"
       }
     }
   ],
-  "legacy": { "toolsListCacheHint": null, "discover": null },
+  "legacy": {
+    "toolsListCacheHint": null,
+    "discover": null
+  },
   "hash": "f9e5a004ee0d112bad135df8777e34de5f6f7f030b09eef0e131ea9a8d525e0a"
 }

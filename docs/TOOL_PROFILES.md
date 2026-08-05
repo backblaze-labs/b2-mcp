@@ -6,11 +6,11 @@ Contract version: `1`
 MCP revision: `2026-07-28`
 Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
-| Profile          | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix    |
-| ---------------- | ----: | -----: | -----: | -----: | -------------- |
-| `full`           |    40 |     21 |     19 |      0 | `772992884ca0` |
-| `phase1-default` |    37 |     18 |     19 |      0 | `bd598a6292d0` |
-| `read-only`      |    20 |     11 |      9 |      0 | `f9e5a004ee0d` |
+| Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `full` | 40 | 21 | 19 | 0 | `772992884ca0` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `bd598a6292d0` |
+| `read-only` | 20 | 11 | 9 | 0 | `f9e5a004ee0d` |
 
 ## `full`
 
