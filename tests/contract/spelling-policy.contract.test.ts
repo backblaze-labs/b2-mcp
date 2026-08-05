@@ -63,6 +63,9 @@ describe("spelling policy", () => {
       const spellStep = job.indexOf("npm run spell");
       const buildStep = job.indexOf("npm run build");
 
+      expect(lintStep).toBeGreaterThan(-1);
+      expect(spellStep).toBeGreaterThan(-1);
+      expect(buildStep).toBeGreaterThan(-1);
       expect(spellStep).toBeGreaterThan(lintStep);
       expect(spellStep).toBeLessThan(buildStep);
     }
