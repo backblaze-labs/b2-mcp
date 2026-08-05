@@ -979,11 +979,42 @@ function scanPacklist(root, state, report, expectedPackFiles) {
   }
 }
 
+function unsafeTarEntryPath(entry) {
+  const normalized = entry.replace(/\\/g, "/");
+  return (
+    !normalized ||
+    normalized.startsWith("/") ||
+    /^[A-Za-z]:/.test(normalized) ||
+    normalized.split("/").includes("..")
+  );
+}
+
+function validateTarballEntries(tarball, report) {
+  const result = command(path.dirname(tarball), "tar", ["-tzf", tarball], { timeout: 60_000 });
+  if (result.status !== 0) {
+    report.errors.push(
+      `tarball:${tarball}: ${result.stderr.trim() || "could not list tarball entries"}`,
+    );
+    return false;
+  }
+
+  const unsafeEntry = result.stdout
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .find((entry) => unsafeTarEntryPath(entry));
+  if (unsafeEntry) {
+    report.errors.push(`tarball:${tarball}: unsafe entry path ${JSON.stringify(unsafeEntry)}`);
+    return false;
+  }
+  return true;
+}
+
 function scanTarball(tarball, state, report) {
   if (!existsSync(tarball)) {
     report.errors.push(`tarball:${tarball}: file does not exist`);
     return;
   }
+  if (!validateTarballEntries(tarball, report)) return;
 
   const tempDir = mkdtempSync(path.join(tmpdir(), "b2-mcp-tarball-"));
   try {

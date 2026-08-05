@@ -1,8 +1,17 @@
 import { createHash } from "crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
+import { gzipSync } from "zlib";
 
 const root = join(__dirname, "../..");
 const script = join(root, "scripts/check-supply-chain-denylist.mjs");
@@ -38,6 +47,44 @@ function runGit(cwd: string, args: string[]) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
   }
   return result.stdout.trim();
+}
+
+function tarOctal(value: number, length: number): string {
+  return `${value.toString(8).padStart(length - 1, "0")}\0`;
+}
+
+function concatBufferParts(parts: Buffer[]): Buffer {
+  return Buffer.concat(parts.map((part) => Uint8Array.from(part)));
+}
+
+function tarFileBlock(name: string, content: string): Buffer {
+  const data = Buffer.from(content);
+  const header = Buffer.alloc(512);
+  header.write(name, 0, 100, "utf8");
+  header.write(tarOctal(0o644, 8), 100, 8, "ascii");
+  header.write(tarOctal(0, 8), 108, 8, "ascii");
+  header.write(tarOctal(0, 8), 116, 8, "ascii");
+  header.write(tarOctal(data.length, 12), 124, 12, "ascii");
+  header.write(tarOctal(0, 12), 136, 12, "ascii");
+  header.fill(0x20, 148, 156);
+  header.write("0", 156, 1, "ascii");
+  header.write("ustar\0", 257, 6, "ascii");
+  header.write("00", 263, 2, "ascii");
+
+  let checksum = 0;
+  for (const byte of header) checksum += byte;
+  header.write(checksum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+  header[154] = 0;
+  header[155] = 0x20;
+
+  const padding = Buffer.alloc((512 - (data.length % 512)) % 512);
+  return concatBufferParts([header, data, padding]);
+}
+
+function writeTarGz(path: string, entries: Array<{ name: string; content: string }>): void {
+  const blocks = entries.map((entry) => tarFileBlock(entry.name, entry.content));
+  const archive = concatBufferParts([...blocks, Buffer.alloc(1024)]);
+  writeFileSync(path, Uint8Array.from(gzipSync(Uint8Array.from(archive))));
 }
 
 function baseDenylist(overrides: Record<string, unknown> = {}) {
@@ -487,6 +534,24 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("npm-pack:setup.mjs");
       expect(result.stderr).toContain(`matched denied SHA-256 ${hash}`);
+    });
+  });
+
+  it("rejects unsafe tarball member paths before extraction", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const tarball = join(dir, "unsafe.tgz");
+      const escapedPath = join(dir, "escaped.txt");
+      writeJson(customDenylist, baseDenylist());
+      writeJson(join(dir, "package.json"), { name: "fixture", version: "0.0.0" });
+      writeTarGz(tarball, [{ name: "../escaped.txt", content: "do not extract\n" }]);
+
+      const result = runDenylist(dir, ["--tarball", tarball], customDenylist);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("scanner-error");
+      expect(result.stderr).toContain("unsafe entry path");
+      expect(existsSync(escapedPath)).toBe(false);
     });
   });
 
