@@ -7,6 +7,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -461,6 +462,25 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`scan-root:${dir}:node_modules:keyv/setup.mjs`);
       expect(result.stderr).toContain(`matched denied SHA-256 ${hash}`);
+    });
+  });
+
+  it("rejects oversized structured files before reading them", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const lockfile = join(dir, "package-lock.json");
+      writeJson(customDenylist, baseDenylist());
+      writeJson(join(dir, "package.json"), { name: "fixture", version: "0.0.0" });
+      writeFileSync(lockfile, "");
+      truncateSync(lockfile, 10 * 1024 * 1024 + 1);
+
+      const result = runDenylist(dir, [], customDenylist);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("scanner-error");
+      expect(result.stderr).toContain(
+        "package-lock.json: structured file exceeds 10485760-byte scan limit",
+      );
     });
   });
 

@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 
 function usage() {
   return [
-    "Usage: node scripts/resolve-publish-ref.mjs --tag <v*> --remote <url> [--output <path>]",
+    "Usage: node scripts/resolve-publish-ref.mjs --tag <vX.Y.Z[-prerelease]> --remote <url> [--output <path>]",
     "",
     "Validates that the requested release tag is reachable from refs/heads/ci-green and",
     "writes checkout_sha=<sha> to the GitHub Actions output file when provided.",
@@ -121,8 +121,16 @@ function fetchReleaseRefs(remote, tag) {
 
 const options = parseArgs(process.argv.slice(2));
 
-if (!/^v.+/.test(options.tag)) {
-  console.error(`::error::Publish tag must start with v; got ${options.tag}`);
+const numericIdentifier = "(?:0|[1-9]\\d*)";
+const prereleaseIdentifier = "(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)";
+const publishTagPattern = new RegExp(
+  `^v${numericIdentifier}\\.${numericIdentifier}\\.${numericIdentifier}(?:-${prereleaseIdentifier}(?:\\.${prereleaseIdentifier})*)?$`,
+);
+
+if (!publishTagPattern.test(options.tag)) {
+  console.error(
+    `::error::Publish tag must be a valid vMAJOR.MINOR.PATCH tag with an optional prerelease; got ${options.tag}`,
+  );
   process.exit(1);
 }
 

@@ -79,6 +79,12 @@ function scanFilesystemFile(root, relativePath, label, state, report, { hashAll 
   if (!stat.isFile()) return;
 
   const isStructured = isStructuredPath(relativePath);
+  if (isStructured && stat.size > maxHashBytes) {
+    report.errors.push(
+      `${context}: structured file exceeds ${maxHashBytes}-byte scan limit (${stat.size} bytes)`,
+    );
+    return;
+  }
   const shouldHash = (hashAll || shouldHashPath(relativePath, state)) && stat.size <= maxHashBytes;
   if (!isStructured && !shouldHash) return;
 
@@ -227,6 +233,13 @@ function scanGitRef(root, ref, state, report) {
   for (const entry of entries) {
     if (entry.objectType !== "blob") continue;
     const isStructured = isStructuredPath(entry.path);
+    if (isStructured && (entry.size === null || entry.size > maxHashBytes)) {
+      const size = entry.size === null ? "unknown size" : `${entry.size} bytes`;
+      report.errors.push(
+        `${ref}:${entry.path}: structured file exceeds ${maxHashBytes}-byte scan limit (${size})`,
+      );
+      continue;
+    }
     const shouldHash =
       entry.size !== null && entry.size <= maxHashBytes && shouldHashPath(entry.path, state);
     if (!isStructured && !shouldHash) continue;

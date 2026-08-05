@@ -38,14 +38,14 @@ function createRepo(dir: string) {
 }
 
 describe("publish ref resolver", () => {
-  it("accepts a v tag that points at ci-green", () => {
+  it.each(["v0.1.0", "v1.2.3-rc.1"])("accepts release tag %s at ci-green", (tag) => {
     withTempDir((dir) => {
       const sha = createRepo(dir);
       runGit(dir, ["branch", "ci-green", sha]);
-      runGit(dir, ["tag", "--no-sign", "v0.1.0", sha]);
+      runGit(dir, ["tag", "--no-sign", tag, sha]);
       const output = join(dir, "github-output");
 
-      const result = runResolver(dir, "v0.1.0", output);
+      const result = runResolver(dir, tag, output);
 
       expect(result.status).toBe(0);
       expect(readFileSync(output, "utf8")).toBe(`checkout_sha=${sha}\n`);
@@ -71,7 +71,7 @@ describe("publish ref resolver", () => {
     });
   });
 
-  it("rejects tags that do not start with v", () => {
+  it("rejects tags that do not use the release tag format", () => {
     withTempDir((dir) => {
       const sha = createRepo(dir);
       runGit(dir, ["branch", "ci-green", sha]);
@@ -80,7 +80,25 @@ describe("publish ref resolver", () => {
       const result = runResolver(dir, "release-0.1.0");
 
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("Publish tag must start with v");
+      expect(result.stderr).toContain("Publish tag must be a valid vMAJOR.MINOR.PATCH tag");
+    });
+  });
+
+  it.each([
+    "v0.1.0:refs/heads/main",
+    "v0.1.0 candidate",
+    "v0.1",
+    "v01.2.3",
+    "v0.1.0^{}",
+    "v0.1.0+build",
+    "v0.1.0-01",
+  ])("rejects unsafe or malformed publish tag %s before invoking git", (tag) => {
+    withTempDir((dir) => {
+      const result = runResolver(dir, tag);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Publish tag must be a valid vMAJOR.MINOR.PATCH tag");
+      expect(result.stderr).not.toContain("git ls-remote failed");
     });
   });
 

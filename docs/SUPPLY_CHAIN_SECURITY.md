@@ -148,8 +148,8 @@ The only repository workflow allowed to publish npm packages is
 
 - runs only in the canonical `backblaze-labs/b2-mcp` repository;
 - pins every marketplace action to a reviewed commit SHA;
-- checks out the requested `v*` tag only after proving it is reachable from the
-  current `ci-green` history;
+- accepts only a `vMAJOR.MINOR.PATCH[-prerelease]` tag and checks it out only
+  after proving it is reachable from the current `ci-green` history;
 - runs `npm ci` with lifecycle scripts still disabled;
 - builds explicitly, enforces the reviewed runtime package budget, requires
   `dist/index.js` in the packlist, creates an npm tarball with lifecycle scripts

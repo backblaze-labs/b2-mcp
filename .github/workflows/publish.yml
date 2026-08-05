@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: v* tag to publish; must be reachable from ci-green
+        description: vMAJOR.MINOR.PATCH[-prerelease] tag; must be reachable from ci-green
         required: true
         type: string
 
