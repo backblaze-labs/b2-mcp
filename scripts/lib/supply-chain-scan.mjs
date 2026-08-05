@@ -39,6 +39,19 @@ function splitNul(value) {
   return value.split("\0").filter(Boolean);
 }
 
+function outputText(value) {
+  if (typeof value === "string") return value.trim();
+  if (value instanceof Uint8Array) return Buffer.from(value).toString("utf8").trim();
+  return "";
+}
+
+function commandFailureMessage(result, fallback) {
+  const stderr = outputText(result.stderr);
+  if (stderr) return stderr;
+  const error = result.error instanceof Error ? result.error.message : "";
+  return error ? `${fallback}: ${error}` : fallback;
+}
+
 function scanFileBytes(bytes, context, state, report) {
   const hash = createHash("sha256").update(bytes).digest("hex");
   const indicator = state.deniedHashes.get(hash);
@@ -162,7 +175,7 @@ export function refsForBranchScan(root, report) {
     "refs/remotes",
   ]);
   if (result.status !== 0) {
-    report.errors.push(`git refs: ${result.stderr.trim() || "could not list refs"}`);
+    report.errors.push(`git refs: ${commandFailureMessage(result, "could not list refs")}`);
     return [];
   }
 
@@ -179,7 +192,7 @@ export function refsForBranchScan(root, report) {
 function gitLsTreeEntries(root, ref, report) {
   const result = git(root, ["ls-tree", "-r", "-l", "-z", ref]);
   if (result.status !== 0) {
-    report.errors.push(`${ref}: ${result.stderr.trim() || "could not list files"}`);
+    report.errors.push(`${ref}: ${commandFailureMessage(result, "could not list files")}`);
     return [];
   }
 
@@ -200,7 +213,7 @@ function gitLsTreeEntries(root, ref, report) {
 function gitObjectBytes(root, oid, report, context) {
   const result = git(root, ["cat-file", "blob", oid], { encoding: "buffer" });
   if (result.status !== 0) {
-    report.errors.push(`${context}: ${result.stderr.toString().trim() || "could not read blob"}`);
+    report.errors.push(`${context}: ${commandFailureMessage(result, "could not read blob")}`);
     return null;
   }
   return result.stdout;
@@ -254,7 +267,7 @@ export function scanPacklist(root, state, report, expectedPackFiles) {
   });
 
   if (result.status !== 0) {
-    report.errors.push(`npm pack --dry-run: ${result.stderr.trim() || "command failed"}`);
+    report.errors.push(`npm pack --dry-run: ${commandFailureMessage(result, "command failed")}`);
     return;
   }
 
@@ -300,7 +313,7 @@ function validateTarballEntries(tarball, report) {
   const listing = command(path.dirname(tarball), "tar", ["-tzf", tarball], { timeout: 60_000 });
   if (listing.status !== 0) {
     report.errors.push(
-      `tarball:${tarball}: ${listing.stderr.trim() || "could not list tarball entries"}`,
+      `tarball:${tarball}: ${commandFailureMessage(listing, "could not list tarball entries")}`,
     );
     return false;
   }
@@ -319,7 +332,7 @@ function validateTarballEntries(tarball, report) {
   });
   if (typedListing.status !== 0) {
     report.errors.push(
-      `tarball:${tarball}: ${typedListing.stderr.trim() || "could not inspect tarball entries"}`,
+      `tarball:${tarball}: ${commandFailureMessage(typedListing, "could not inspect tarball entries")}`,
     );
     return false;
   }
@@ -347,7 +360,7 @@ export function scanTarball(tarball, state, report) {
     const result = command(tempDir, "tar", ["-xzf", tarball], { timeout: 60_000 });
     if (result.status !== 0) {
       report.errors.push(
-        `tarball:${tarball}: ${result.stderr.trim() || "could not extract tarball"}`,
+        `tarball:${tarball}: ${commandFailureMessage(result, "could not extract tarball")}`,
       );
       return;
     }

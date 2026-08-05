@@ -31,13 +31,19 @@ function withTempDir(run: (dir: string) => void): void {
   }
 }
 
-function runDenylist(rootDir: string, args: string[] = [], denylistPath = denylist) {
+function runDenylist(
+  rootDir: string,
+  args: string[] = [],
+  denylistPath = denylist,
+  extraEnv: NodeJS.ProcessEnv = {},
+) {
   return spawnSync(
     process.execPath,
     [script, "--root", rootDir, "--denylist", denylistPath, ...args],
     {
       cwd: root,
       encoding: "utf8",
+      env: { ...process.env, ...extraEnv },
     },
   );
 }
@@ -223,6 +229,34 @@ describe("supply-chain denylist scanner", () => {
       const caretRange = runDenylist(dir);
       expect(caretRange.status).toBe(1);
       expect(caretRange.stderr).toContain("@thiennq/docs-viewer@1.6.2");
+    });
+  });
+
+  it("detects denied versions allowed by comparator-only manifest ranges", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      writeJson(customDenylist, packageDenylist());
+
+      for (const spec of [">=6", "<7", ">=5 <7", ">= 6 < 7", "npm:keyv@>=6 <7"]) {
+        writeJson(join(dir, "package.json"), {
+          name: "fixture",
+          version: "0.0.0",
+          dependencies: { keyv: spec },
+        });
+        const result = runDenylist(dir, [], customDenylist);
+        expect({ spec, status: result.status }).toEqual({ spec, status: 1 });
+        expect(result.stderr).toContain("denied package keyv@6.0.0");
+      }
+
+      for (const spec of ["<6", ">6", "<=5.9.9", "<6.0.0"]) {
+        writeJson(join(dir, "package.json"), {
+          name: "fixture",
+          version: "0.0.0",
+          dependencies: { keyv: spec },
+        });
+        const result = runDenylist(dir, [], customDenylist);
+        expect({ spec, status: result.status }).toEqual({ spec, status: 0 });
+      }
     });
   });
 
@@ -725,6 +759,49 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("unsafe link entry");
       expect(existsSync(escapedPath)).toBe(false);
+    });
+  });
+
+  posixIt("reports a missing tar executable as a scanner error", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const tarball = join(dir, "fixture.tgz");
+      writeJson(customDenylist, baseDenylist());
+      writeFileSync(tarball, "fixture");
+
+      const result = runDenylist(dir, ["--tarball", tarball], customDenylist, { PATH: "" });
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("scanner-error");
+      expect(result.stderr).toContain("could not list tarball entries");
+    });
+  });
+
+  posixIt("reports a missing typed-listing tar executable as a scanner error", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const tarball = join(dir, "fixture.tgz");
+      const binDir = join(dir, "bin");
+      const fakeTar = join(binDir, "tar");
+      mkdirSync(binDir);
+      writeJson(customDenylist, baseDenylist());
+      writeFileSync(tarball, "fixture");
+      writeFileSync(
+        fakeTar,
+        [
+          `#!${process.execPath}`,
+          'const fs = require("node:fs");',
+          "fs.unlinkSync(process.argv[1]);",
+          'process.stdout.write("package/package.json\\n");',
+        ].join("\n"),
+      );
+      chmodSync(fakeTar, 0o755);
+
+      const result = runDenylist(dir, ["--tarball", tarball], customDenylist, { PATH: binDir });
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("scanner-error");
+      expect(result.stderr).toContain("could not inspect tarball entries");
     });
   });
 

@@ -66,29 +66,83 @@ function versionSatisfiesRange(version, operator, lower, specifiedParts) {
   return version[0] === major;
 }
 
+function nextPartialBoundary(lower, specifiedParts) {
+  if (specifiedParts === 1) return [lower[0] + 1, 0, 0];
+  return [lower[0], lower[1] + 1, 0];
+}
+
+function versionSatisfiesComparator(version, operator, lower, specifiedParts) {
+  const comparison = compareVersionParts(version, lower);
+  if (operator === ">=") return comparison >= 0;
+  if (operator === "<") return comparison < 0;
+  if (operator === "=") return versionSatisfiesRange(version, "", lower, specifiedParts);
+
+  if (specifiedParts === 3) {
+    return operator === ">" ? comparison > 0 : comparison <= 0;
+  }
+
+  const upper = nextPartialBoundary(lower, specifiedParts);
+  const upperComparison = compareVersionParts(version, upper);
+  return operator === ">" ? upperComparison >= 0 : upperComparison < 0;
+}
+
+function comparatorSetAllowsVersion(spec, version) {
+  const sets = spec
+    .replace(/(<=|>=|<|>|=)\s+(?=\d)/g, "$1")
+    .split(/\s*\|\|\s*/)
+    .filter(Boolean);
+  if (sets.length === 0) return null;
+
+  const parsedSets = [];
+  for (const set of sets) {
+    const comparators = [];
+    for (const token of set.trim().split(/\s+/)) {
+      const match = /^(<=|>=|<|>|=)(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(token);
+      if (!match) return null;
+      const [, operator, majorText, minorText, patchText] = match;
+      const specifiedParts = patchText !== undefined ? 3 : minorText !== undefined ? 2 : 1;
+      comparators.push({
+        operator,
+        lower: [Number(majorText), Number(minorText ?? 0), Number(patchText ?? 0)],
+        specifiedParts,
+      });
+    }
+    parsedSets.push(comparators);
+  }
+
+  return parsedSets.some((comparators) =>
+    comparators.every(({ operator, lower, specifiedParts }) =>
+      versionSatisfiesComparator(version, operator, lower, specifiedParts),
+    ),
+  );
+}
+
 export function specMayResolveToVersion(spec, packageName, version) {
   if (typeof spec !== "string") return false;
   if (spec === version || spec === `=${version}`) return true;
   if (spec.includes(`npm:${packageName}@${version}`)) return true;
-  if (versionTokenAppears(spec, version)) return true;
 
   const deniedParts = versionParts(version);
   if (!deniedParts) return false;
 
   const normalized = spec.trim().replace(/^npm:[^@]+@/, "");
   const range = /^([\^~]?)(\d+)(?:\.(\d+|x))?(?:\.(\d+|x))?$/.exec(normalized);
-  if (!range) return false;
+  if (range) {
+    const [, operator, majorText, minorText, patchText] = range;
+    const minorSpecified = minorText !== undefined && minorText !== "x";
+    const patchSpecified = patchText !== undefined && patchText !== "x";
+    const lower = [
+      Number(majorText),
+      minorSpecified ? Number(minorText) : 0,
+      patchSpecified ? Number(patchText) : 0,
+    ];
+    const specifiedParts = patchSpecified ? 3 : minorSpecified ? 2 : 1;
+    return versionSatisfiesRange(deniedParts, operator, lower, specifiedParts);
+  }
 
-  const [, operator, majorText, minorText, patchText] = range;
-  const minorSpecified = minorText !== undefined && minorText !== "x";
-  const patchSpecified = patchText !== undefined && patchText !== "x";
-  const lower = [
-    Number(majorText),
-    minorSpecified ? Number(minorText) : 0,
-    patchSpecified ? Number(patchText) : 0,
-  ];
-  const specifiedParts = patchSpecified ? 3 : minorSpecified ? 2 : 1;
-  return versionSatisfiesRange(deniedParts, operator, lower, specifiedParts);
+  const comparatorResult = comparatorSetAllowsVersion(normalized, deniedParts);
+  if (comparatorResult !== null) return comparatorResult;
+  return versionTokenAppears(spec, version);
 }
 
 function recordPackageFinding(report, context, state, name, version, detail) {
