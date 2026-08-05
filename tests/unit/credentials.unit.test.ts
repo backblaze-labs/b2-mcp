@@ -103,8 +103,9 @@ describe("credential providers", () => {
         },
       }));
       try {
-        const { validateHttpCredentialConfiguration: validate } =
-          await import("../../src/credentials");
+        const { validateHttpCredentialConfiguration: validate } = await import(
+          "../../src/credentials"
+        );
         let caught: unknown;
         try {
           validate();

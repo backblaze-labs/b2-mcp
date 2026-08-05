@@ -16,11 +16,15 @@ import {
 class EndpointOnlyAccountInfo implements AccountInfo {
   constructor(private readonly s3ApiUrl: string) {}
 
-  setAuth(): void {}
+  setAuth(): void {
+    // No-op: this shim only exposes the endpoint methods used by the S3 SDK.
+  }
   getAuth(): AuthorizeAccountResponse | null {
     return null;
   }
-  clear(): void {}
+  clear(): void {
+    // No-op: this shim does not cache B2 auth state.
+  }
   getS3ApiUrl(): string {
     return this.s3ApiUrl;
   }
@@ -33,13 +37,21 @@ class EndpointOnlyAccountInfo implements AccountInfo {
   checkoutUploadUrl(): UploadUrlEntry | null {
     return null;
   }
-  returnUploadUrl(): void {}
-  evictUploadUrl(): void {}
+  returnUploadUrl(): void {
+    // No-op: upload URL pooling is unused for S3 client derivation.
+  }
+  evictUploadUrl(): void {
+    // No-op: upload URL pooling is unused for S3 client derivation.
+  }
   checkoutPartUploadUrl(): UploadUrlEntry | null {
     return null;
   }
-  returnPartUploadUrl(): void {}
-  evictPartUploadUrl(): void {}
+  returnPartUploadUrl(): void {
+    // No-op: part upload URL pooling is unused for S3 client derivation.
+  }
+  evictPartUploadUrl(): void {
+    // No-op: part upload URL pooling is unused for S3 client derivation.
+  }
 
   private unsupported(name: string): never {
     throw new Error(`${name} is not used when deriving B2 S3 client configuration.`);

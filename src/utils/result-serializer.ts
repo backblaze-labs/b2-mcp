@@ -15,7 +15,12 @@ export type McpOutputFormat = (typeof MCP_OUTPUT_FORMATS)[number];
 export const DEFAULT_MCP_OUTPUT_FORMAT: McpOutputFormat = "json";
 
 export type JsonCompatible =
-  null | boolean | number | string | JsonCompatible[] | { [key: string]: JsonCompatible };
+  | null
+  | boolean
+  | number
+  | string
+  | JsonCompatible[]
+  | { [key: string]: JsonCompatible };
 
 interface ResultSerializationOptions {
   outputFormat: McpOutputFormat;

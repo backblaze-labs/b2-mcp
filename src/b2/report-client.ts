@@ -121,7 +121,7 @@ async function raceWithAbort<T>(
   const abort = new Promise<never>((_, reject) => {
     const onAbort = () => {
       const reason = abortReason(signal);
-      promise.catch(() => {});
+      promise.catch(() => undefined);
       reject(reason);
       void Promise.resolve(cleanup?.(reason)).catch(() => undefined);
     };

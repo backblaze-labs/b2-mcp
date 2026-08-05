@@ -220,7 +220,7 @@ function raceWithCallerAbort<T>(promise: Promise<T>, signal: AbortSignal | undef
       if (settled) return;
       settled = true;
       cleanup();
-      promise.catch(() => {});
+      promise.catch(() => undefined);
       reject(abortReason(signal));
     };
     signal.addEventListener("abort", onAbort, { once: true });

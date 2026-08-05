@@ -146,7 +146,7 @@ describe("package surface policy", () => {
   });
 
   it("exact-pins runtime-sensitive lint and typing packages", () => {
-    for (const name of ["@eslint/js", "@types/node", "eslint", "typescript-eslint"]) {
+    for (const name of ["@biomejs/biome", "@types/node"]) {
       expect(pkg.devDependencies[name]).toMatch(/^\d+\.\d+\.\d+$/);
     }
   });

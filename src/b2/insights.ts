@@ -21,6 +21,9 @@ import { z } from "zod";
 import {
   B2Client,
   type FileVersionResult,
+  type ListFileNamesResult,
+  type ListPartsResult,
+  type ListUnfinishedLargeFilesResult,
   type PartInfoResult,
   type UnfinishedLargeFileResult,
 } from "./client.js";
@@ -77,7 +80,9 @@ export function parseCsv(text: string): Array<Record<string, string>> {
   const header = rows[0].map((h) => h.trim());
   return rows.slice(1).map((r) => {
     const obj: Record<string, string> = {};
-    header.forEach((h, idx) => (obj[h] = r[idx] ?? ""));
+    header.forEach((h, idx) => {
+      obj[h] = r[idx] ?? "";
+    });
     return obj;
   });
 }
@@ -973,7 +978,7 @@ export function registerInsightTools(
         let truncated = false;
         let stopReason: "complete" | "max_scan" | "time_budget" = "complete";
         do {
-          let page;
+          let page: ListFileNamesResult;
           try {
             page = await withNativeInsightDeadline(startedAt, TIME_BUDGET_MS, () =>
               b2Client.listFileNames({
@@ -1099,7 +1104,7 @@ export function registerInsightTools(
         let truncated = false;
         let stopReason: "complete" | "max_uploads" | "time_budget" = "complete";
         do {
-          let page;
+          let page: ListUnfinishedLargeFilesResult;
           try {
             page = await withNativeInsightDeadline(startedAt, TIME_BUDGET_MS, () =>
               b2Client.listUnfinishedLargeFiles({
@@ -1158,7 +1163,7 @@ export function registerInsightTools(
           let partMarker: number | undefined;
           let completedPartScan = true;
           do {
-            let parts;
+            let parts: ListPartsResult;
             try {
               parts = await withNativeInsightDeadline(startedAt, TIME_BUDGET_MS, () =>
                 b2Client.listParts({

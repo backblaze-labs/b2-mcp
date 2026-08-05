@@ -212,9 +212,9 @@ function lifecycleAllowed(lockPath, name, version, state) {
 function requiresIntegrity(lockPath, entry) {
   return Boolean(
     lockPath &&
-    lockPath.startsWith("node_modules/") &&
-    !entry.link &&
-    !(typeof entry.resolved === "string" && entry.resolved.startsWith("file:")),
+      lockPath.startsWith("node_modules/") &&
+      !entry.link &&
+      !(typeof entry.resolved === "string" && entry.resolved.startsWith("file:")),
   );
 }
 
