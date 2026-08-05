@@ -1,4 +1,4 @@
-import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, S3Client } from "../s3/aws-sdk-adapter.js";
 import type { ReadableStreamDefaultReader } from "node:stream/web";
 import { B2AuthManager } from "../auth.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";

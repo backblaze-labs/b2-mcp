@@ -1,4 +1,4 @@
-import { S3Client, GetBucketLocationCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetBucketLocationCommand } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";

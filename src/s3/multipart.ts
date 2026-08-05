@@ -7,8 +7,8 @@ import {
   ListMultipartUploadsCommand,
   ListPartsCommand,
   UploadPartCopyCommand,
-} from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+  getSignedUrl,
+} from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";

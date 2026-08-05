@@ -1,0 +1,107 @@
+{
+  "issue": {
+    "number": 75,
+    "url": "https://github.com/backblaze-labs/b2-mcp/issues/75",
+    "planningId": "P1-RUNTIME-02"
+  },
+  "reviewedBaseline": {
+    "date": "2026-08-05",
+    "nodeVersions": ["22.3.0", "24", "26"],
+    "primaryB2Transport": "@backblaze-labs/b2-sdk@0.2.0",
+    "directProductionDependencyCount": 7,
+    "totalProductionPackageCount": 47,
+    "transitiveProductionPackageCount": 46,
+    "packedTarballBytes": 179275,
+    "unpackedPackageBytes": 786032,
+    "packedEntryCount": 165,
+    "cleanConsumerInstallFootprintBytes": 27645756
+  },
+  "limits": {
+    "directProductionDependencyCount": 7,
+    "totalProductionPackageCount": 47,
+    "packedTarballBytes": 200000,
+    "unpackedPackageBytes": 850000,
+    "packedEntryCount": 175,
+    "cleanConsumerInstallFootprintBytes": 30000000
+  },
+  "directProductionDependencies": {
+    "@aws-sdk/client-s3": {
+      "purpose": "Temporary S3-material peer used only through src/s3/aws-sdk-adapter.ts for B2 S3 endpoint reachability, lifecycle, multipart, and usage-report object reads.",
+      "policy": "Must be removed when a stable @backblaze-labs/b2-sdk release covers the approved S3 helper gap.",
+      "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
+      "owner": "@goanpeca"
+    },
+    "@aws-sdk/s3-request-presigner": {
+      "purpose": "Temporary UploadPart presigning peer used only through src/s3/aws-sdk-adapter.ts for s3_presign_upload_part.",
+      "policy": "Must be removed when a stable @backblaze-labs/b2-sdk release exposes first-party S3 multipart presign helpers.",
+      "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
+      "owner": "@goanpeca"
+    },
+    "@backblaze-labs/b2-sdk": {
+      "purpose": "Primary Backblaze B2 transport and public SDK boundary for native B2, raw, S3 helper, and simulator-backed tests.",
+      "policy": "Must remain a stable npm release pinned exactly in package.json and package-lock.json."
+    },
+    "@modelcontextprotocol/server": {
+      "purpose": "Stable MCP server v2 runtime for stdio and Streamable HTTP handling.",
+      "policy": "Use public v2 server exports only; do not add the monolithic v1 SDK or Node adapter packages."
+    },
+    "opossum": {
+      "purpose": "Circuit breaker runtime for bounded provider calls.",
+      "policy": "Exact-pinned because major/runtime support changes can affect the Node engine floor."
+    },
+    "pino": {
+      "purpose": "Structured server logging with existing secret-redaction policy.",
+      "policy": "No wrapper logging package may be added without review."
+    },
+    "zod": {
+      "purpose": "MCP tool input schemas supplied to the server runtime.",
+      "policy": "Schema package additions require review; do not duplicate validation stacks."
+    }
+  },
+  "runtimeImportPolicy": {
+    "allowedBackblazeSdkSpecifiers": [
+      "@backblaze-labs/b2-sdk",
+      "@backblaze-labs/b2-sdk/raw",
+      "@backblaze-labs/b2-sdk/s3"
+    ],
+    "allowedAwsRuntimeImports": [
+      {
+        "source": "src/s3/aws-sdk-adapter.ts",
+        "specifier": "@aws-sdk/client-s3"
+      },
+      {
+        "source": "src/s3/aws-sdk-adapter.ts",
+        "specifier": "@aws-sdk/s3-request-presigner"
+      }
+    ],
+    "forbiddenRuntimeDependencies": [
+      "axios",
+      "@aws-sdk/s3-presigned-post",
+      "@modelcontextprotocol/node",
+      "@modelcontextprotocol/sdk"
+    ]
+  },
+  "temporaryAdapters": [
+    {
+      "name": "s3-material-aws-peer-adapter",
+      "owner": "@goanpeca",
+      "source": "src/s3/aws-sdk-adapter.ts",
+      "dependencies": ["@aws-sdk/client-s3", "@aws-sdk/s3-request-presigner"],
+      "upstreamIssue": "https://github.com/backblaze-labs/b2-sdk-typescript/issues/154",
+      "tests": [
+        "tests/unit/s3-tools.unit.test.ts",
+        "tests/unit/s3-coverage.unit.test.ts",
+        "tests/unit/report-s3-ssrf.unit.test.ts",
+        "tests/contract/sdk-adoption.contract.test.ts",
+        "tests/package/packed-install.package.test.ts"
+      ],
+      "removalCondition": "Remove this adapter and both AWS direct dependencies after a stable @backblaze-labs/b2-sdk release exposes first-party helpers for the retained S3-material operations."
+    }
+  ],
+  "approvedDuplicatePackageVersions": {
+    "real-require": {
+      "versions": ["0.2.0", "1.0.0"],
+      "reason": "Pinned production transitive packages currently require both pino's helper and thread-stream's nested helper."
+    }
+  }
+}

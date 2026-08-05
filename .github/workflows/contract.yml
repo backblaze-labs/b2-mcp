@@ -86,9 +86,34 @@ jobs:
 
           echo "checkout_sha=${ci_green_sha}" >> "$GITHUB_OUTPUT"
 
+  package-budget:
+    name: release package budget
+    needs: guard
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.guard.outputs.checkout-sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - run: npm ci --engine-strict
+      - run: npm run build
+      - run: npm run check:package-budget
+      - name: Upload release package budget reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-package-budget
+          path: reports/package-budget/
+          if-no-files-found: error
+
   contract:
     name: live contract / Node ${{ matrix.node-version }}
-    needs: guard
+    needs: [guard, package-budget]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: live-b2-contract

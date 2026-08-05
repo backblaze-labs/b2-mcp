@@ -17,3 +17,4 @@ CHANGELOG.md @goanpeca
 .github/workflows/ @goanpeca
 package.json @goanpeca
 package-lock.json @goanpeca
+package-budget.json @goanpeca @sophiecarreras

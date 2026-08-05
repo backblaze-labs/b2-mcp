@@ -2,7 +2,7 @@ import {
   S3Client,
   HeadBucketCommand,
   PutBucketLifecycleConfigurationCommand,
-} from "@aws-sdk/client-s3";
+} from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";

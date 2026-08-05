@@ -1,10 +1,10 @@
 import {
   S3Client,
-  type S3ClientConfig as AwsS3ClientConfig,
+  type AwsS3ClientConfig,
   type S3ClientResolvedConfig,
   type ServiceInputTypes,
   type ServiceOutputTypes,
-} from "@aws-sdk/client-s3";
+} from "./aws-sdk-adapter.js";
 import type {
   AccountInfo,
   AuthorizeAccountResponse,
