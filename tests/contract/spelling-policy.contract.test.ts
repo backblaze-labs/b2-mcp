@@ -30,6 +30,10 @@ describe("spelling policy", () => {
     return job;
   }
 
+  function stripAnsi(text: string): string {
+    return text.replace(/\u001b\[[0-9;]*m/g, "");
+  }
+
   it("wires cspell into package scripts and verify", () => {
     expect(pkg.devDependencies.cspell).toBeDefined();
     expect(pkg.scripts.spell).toEqual(expect.stringMatching(/\bcspell\b/));
@@ -54,6 +58,22 @@ describe("spelling policy", () => {
       throw new Error(`cspell config check failed\n${result.stdout}\n${result.stderr}`);
     }
     expect(result.status).toBe(0);
+  });
+
+  it("scans repo files from the cspell config", () => {
+    const result = spawnSync(cspellBin, ["lint", "--config", cspellConfigPath, "--no-progress"], {
+      cwd: root,
+      encoding: "utf8",
+      timeout: 60_000,
+    });
+    const output = stripAnsi(`${result.stdout}\n${result.stderr}`);
+
+    if (result.status !== 0) {
+      throw new Error(`cspell repo scan failed\n${output}`);
+    }
+    const filesChecked = output.match(/Files checked:\s*([0-9]+)/);
+    expect(filesChecked).not.toBeNull();
+    expect(Number(filesChecked?.[1])).toBeGreaterThan(0);
   });
 
   it("gates the deterministic CI jobs on spelling", () => {

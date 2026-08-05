@@ -3,8 +3,7 @@
 # One word per line. Comments allowed (lines starting with `#`). Words are
 # case-insensitive by default.
 #
-# Adding a word here is preferred to inline `// cspell:ignore` directives
-# because the list stays auditable and reusable. Sort within each block.
+# See cspell.config.yaml for dictionary policy. Sort within each block.
 
 # Backblaze + B2
 b2sdk
@@ -40,7 +39,6 @@ Gonza
 sophiecarreras
 
 # Cloud, network, storage, and security terms
-behaviour
 creds
 EOPENBREAKER
 exfiltration

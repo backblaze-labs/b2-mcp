@@ -67,7 +67,7 @@ breaker.on("close", () => logger.info("circuit.close"));
 /**
  * Circuit breaker for long-running data transfers (uploads / large downloads).
  *
- * Identical failure-tripping behaviour to the default breaker, but with the
+ * Identical failure-tripping behavior to the default breaker, but with the
  * per-call timeout DISABLED. A 100 MB part on a slow uplink legitimately takes
  * far longer than the default 150s; timing it out would abort a healthy upload,
  * surface a non-retryable error, and unfairly push the breaker toward open.
