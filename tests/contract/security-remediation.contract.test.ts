@@ -77,9 +77,20 @@ describe("security dependency policy", () => {
     }
   });
 
-  it("keeps vulnerable YAML and Babel transitive packages patched", () => {
-    expect(versionAtLeast(resolvedVersion("node_modules/js-yaml"), "3.15.0")).toBe(true);
-    expect(versionAtLeast(resolvedVersion("node_modules/@babel/core"), "7.29.1")).toBe(true);
+  it("does not reintroduce the removed Jest transform stack", () => {
+    for (const packageName of [
+      "@babel/plugin-transform-modules-commonjs",
+      "@types/jest",
+      "babel-jest",
+      "jest",
+      "jest-junit",
+      "ts-jest",
+    ]) {
+      expect(pkg.devDependencies).not.toHaveProperty(packageName);
+      expect(lock.packages[`node_modules/${packageName}`]).toBeUndefined();
+    }
+    expect(lock.packages["node_modules/@babel/core"]).toBeUndefined();
+    expect(versionAtLeast(resolvedVersion("node_modules/js-yaml"), "4.1.1")).toBe(true);
   });
 
   it("includes the consolidated safe direct dependency updates", () => {
@@ -97,12 +108,6 @@ describe("security dependency policy", () => {
     );
     expect(pkg.dependencies).not.toHaveProperty("axios");
     expect(lock.packages["node_modules/axios"]).toBeUndefined();
-    expectManifestAndLockAtLeast(
-      pkg.devDependencies["@babel/plugin-transform-modules-commonjs"],
-      "node_modules/@babel/plugin-transform-modules-commonjs",
-      "7.29.7",
-      7,
-    );
   });
 
   it("keeps TypeScript on the reviewed 6.0 patch line", () => {

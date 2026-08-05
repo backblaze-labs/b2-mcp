@@ -9,6 +9,7 @@ import { logger } from "../../src/utils/logger";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
 import { z } from "zod";
+import type { MockInstance } from "vitest";
 
 const CONFIGURED_APPLICATION_KEY = "configured-audit-secret-value";
 const CANARY = "B2_MCP_CANARY_SECRET_audit_do_not_leak";
@@ -17,15 +18,15 @@ const cfg = {
   applicationKey: CONFIGURED_APPLICATION_KEY,
 } as B2Config;
 
-let infoSpy: jest.SpyInstance;
-let warnSpy: jest.SpyInstance;
+let infoSpy: MockInstance;
+let warnSpy: MockInstance;
 
 beforeEach(() => {
-  infoSpy = jest.spyOn(logger, "info").mockImplementation(() => undefined as never);
-  warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+  infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+  warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
 });
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => vi.restoreAllMocks());
 
 describe("getRegisteredTools", () => {
   it("returns null when the repo registry is absent", () => {
@@ -54,8 +55,8 @@ describe("getRegisteredTools", () => {
   });
 
   it("passes Zod object schemas to the SDK registration API", () => {
-    const registerTool = jest.fn();
-    const callback = jest.fn();
+    const registerTool = vi.fn();
+    const callback = vi.fn();
     const adapter = new ToolRegistrationAdapter({ registerTool } as unknown as McpServer);
 
     adapter.registerTool(
@@ -79,7 +80,7 @@ describe("getRegisteredTools", () => {
 
 describe("createAuditedToolCallback", () => {
   it("logs tool.call on success and preserves the result", async () => {
-    const original = jest.fn().mockResolvedValue({ isError: false, ok: true });
+    const original = vi.fn().mockResolvedValue({ isError: false, ok: true });
     const wrapped = createAuditedToolCallback("t", original, cfg);
 
     const result = await wrapped({ bucketId: "b" }, {});
@@ -97,7 +98,7 @@ describe("createAuditedToolCallback", () => {
   });
 
   it("enriches the tool.call event with code/status/requestId on a structured error", async () => {
-    const original = jest.fn().mockResolvedValue({
+    const original = vi.fn().mockResolvedValue({
       isError: true,
       content: [
         { type: "text", text: "B2 Error [NoSuchKey] (HTTP 404): missing (requestId: req-7)" },
@@ -120,7 +121,7 @@ describe("createAuditedToolCallback", () => {
   });
 
   it("sanitizes parsed error metadata before audit logging", async () => {
-    const original = jest.fn().mockResolvedValue({
+    const original = vi.fn().mockResolvedValue({
       isError: true,
       content: [
         {
@@ -155,7 +156,7 @@ describe("createAuditedToolCallback", () => {
   });
 
   it("logs tool.error and rethrows when the handler throws", async () => {
-    const original = jest.fn().mockRejectedValue(new Error("boom"));
+    const original = vi.fn().mockRejectedValue(new Error("boom"));
     const wrapped = createAuditedToolCallback("t", original, cfg);
 
     await expect(wrapped({}, {})).rejects.toThrow("boom");

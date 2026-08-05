@@ -25,16 +25,16 @@ function envWithoutB2Credentials(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessE
   for (const name of Object.keys(env)) {
     if (isB2CredentialEnvName(name)) delete env[name];
   }
-  if (!("B2_JEST_LAYER_ENABLE_FIXTURES" in env)) {
-    env.B2_JEST_LAYER_ENABLE_FIXTURES = "true";
+  if (!("B2_VITEST_LAYER_ENABLE_FIXTURES" in env)) {
+    env.B2_VITEST_LAYER_ENABLE_FIXTURES = "true";
   }
   return env;
 }
 
 function removeLayerReports(layer: string): { summaryPath: string; junitPath: string } {
-  const summaryPath = join(root, `reports/jest/${layer}.json`);
+  const summaryPath = join(root, `reports/vitest/${layer}.json`);
   const junitPath = join(root, `reports/junit/${layer}.xml`);
-  mkdirSync(join(root, "reports/jest"), { recursive: true });
+  mkdirSync(join(root, "reports/vitest"), { recursive: true });
   mkdirSync(join(root, "reports/junit"), { recursive: true });
   rmSync(summaryPath, { force: true });
   rmSync(junitPath, { force: true });
@@ -77,18 +77,18 @@ describe("test layer naming", () => {
     expect(unitDistImports).toEqual([]);
   });
 
-  it("does not load third-party JUnit reporters for live layers", () => {
+  it("does not load JUnit reporters for live layers", () => {
     const { junitPath: nonLiveJunitPath } = removeLayerReports("runner-fixture-nonlive");
     const { junitPath: liveJunitPath } = removeLayerReports("runner-fixture-live");
 
-    execFileSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive"], {
+    execFileSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive"], {
       cwd: root,
       env: envWithoutB2Credentials(),
       stdio: "pipe",
       timeout: 30_000,
     });
 
-    execFileSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-live"], {
+    execFileSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-live"], {
       cwd: root,
       env: {
         ...envWithoutB2Credentials(),
@@ -103,10 +103,10 @@ describe("test layer naming", () => {
     expect(existsSync(liveJunitPath)).toBe(false);
   });
 
-  it("does not load third-party JUnit reporters when B2 credentials are present", () => {
+  it("does not load JUnit reporters when B2 credentials are present", () => {
     const { summaryPath, junitPath } = removeLayerReports("runner-fixture-nonlive");
 
-    execFileSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive"], {
+    execFileSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive"], {
       cwd: root,
       env: {
         ...envWithoutB2Credentials(),
@@ -129,13 +129,13 @@ describe("test layer naming", () => {
   ])("keeps %s out of credential-bearing runner output and artifacts", (name, secret) => {
     const { summaryPath, junitPath } = removeLayerReports("runner-fixture-nonlive");
 
-    const result = spawnSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive"], {
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive"], {
       cwd: root,
       encoding: "utf8",
       env: {
         ...envWithoutB2Credentials(),
         [name]: secret,
-        B2_JEST_LAYER_FIXTURE_SECRET_ENV: name,
+        B2_VITEST_LAYER_FIXTURE_SECRET_ENV: name,
       },
       timeout: 30_000,
     });
@@ -156,7 +156,7 @@ describe("test layer naming", () => {
     );
     writeFileSync(junitPath, '<testsuite name="stale" />');
 
-    execFileSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive"], {
+    execFileSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive"], {
       cwd: root,
       env: {
         ...envWithoutB2Credentials(),
@@ -171,7 +171,7 @@ describe("test layer naming", () => {
     expect(existsSync(junitPath)).toBe(false);
   });
 
-  it("does not accept stale summaries when Jest executes no tests", () => {
+  it("does not accept stale summaries when Vitest does not run tests", () => {
     const { summaryPath } = removeLayerReports("runner-fixture-nonlive");
     writeFileSync(
       summaryPath,
@@ -180,7 +180,7 @@ describe("test layer naming", () => {
 
     const result = spawnSync(
       "node",
-      ["scripts/run-jest-layer.mjs", "runner-fixture-nonlive", "--", "--listTests"],
+      ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive", "--", "--help"],
       {
         cwd: root,
         encoding: "utf8",
@@ -194,42 +194,72 @@ describe("test layer naming", () => {
     expect(existsSync(summaryPath)).toBe(false);
   });
 
-  it("rejects unknown layer names with a supported layer list", () => {
-    const result = spawnSync("node", ["scripts/run-jest-layer.mjs", "typo-layer"], {
+  it("fails when a fixture layer executes no assertions", () => {
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive"], {
       cwd: root,
       encoding: "utf8",
-      env: envWithoutB2Credentials({ B2_JEST_LAYER_ENABLE_FIXTURES: "" }),
+      env: envWithoutB2Credentials({
+        B2_VITEST_LAYER_FIXTURE_SKIP_ALL: "true",
+      }),
+      timeout: 30_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("executed no assertions");
+  });
+
+  it("rejects unknown layer names with a supported layer list", () => {
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", "typo-layer"], {
+      cwd: root,
+      encoding: "utf8",
+      env: envWithoutB2Credentials({ B2_VITEST_LAYER_ENABLE_FIXTURES: "" }),
       timeout: 30_000,
     });
 
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("Unknown Jest layer 'typo-layer'");
+    expect(result.stderr).toContain("Unknown Vitest layer 'typo-layer'");
     expect(result.stderr).toContain("Supported layers:");
     expect(result.stderr).toContain("contract-live");
     expect(result.stderr).toContain("protocol-modern");
     expect(result.stderr).not.toContain("runner-fixture");
   });
 
-  it.each(["runner-fixture-live", "runner-fixture-nonlive"])(
-    "rejects custom reporters for %s with B2 credentials",
-    (layer) => {
+  it.each([
+    ["--config=/tmp/evil.vitest.config.mjs", "runner-fixture-nonlive"],
+    ["--globalSetup=/tmp/evil.vitest.setup.mjs", "runner-fixture-nonlive"],
+    ["--config=/tmp/evil.vitest.config.mjs", "runner-fixture-live"],
+  ])("rejects raw Vitest arg %s for %s with B2 credentials", (rawArg, layer) => {
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", layer, "--", rawArg], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...envWithoutB2Credentials(),
+        B2_APPLICATION_KEY_ID: "fake-live-key-id",
+        B2_APPLICATION_KEY: "fake-live-key-secret",
+      },
+      timeout: 30_000,
+    });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("do not accept raw Vitest args");
+  });
+
+  it.each(["--config=/tmp/evil.vitest.config.mjs", "--globalSetup=/tmp/evil.vitest.setup.mjs"])(
+    "rejects raw Vitest arg %s for live layers without ambient credentials",
+    (rawArg) => {
       const result = spawnSync(
         "node",
-        ["scripts/run-jest-layer.mjs", layer, "--", "--reporters=jest-junit"],
+        ["scripts/run-vitest-layer.mjs", "runner-fixture-live", "--", rawArg],
         {
           cwd: root,
           encoding: "utf8",
-          env: {
-            ...envWithoutB2Credentials(),
-            B2_APPLICATION_KEY_ID: "fake-live-key-id",
-            B2_APPLICATION_KEY: "fake-live-key-secret",
-          },
+          env: envWithoutB2Credentials(),
           timeout: 30_000,
         },
       );
 
       expect(result.status).toBe(2);
-      expect(result.stderr).toContain("do not accept custom reporters");
+      expect(result.stderr).toContain("do not accept raw Vitest args");
     },
   );
 
@@ -248,8 +278,20 @@ describe("test layer naming", () => {
     );
   });
 
+  it("enforces the current global coverage floors", () => {
+    const vitestConfig = readFileSync(join(root, "vitest.config.mts"), "utf8");
+    const readme = readFileSync(join(root, "README.md"), "utf8");
+
+    expect(vitestConfig).toMatch(
+      /thresholds:\s*{\s*statements:\s*82,\s*branches:\s*72,\s*functions:\s*86,\s*lines:\s*86,?\s*}/,
+    );
+    expect(readme).toContain(
+      "coverage-S%2082%20%7C%20B%2072%20%7C%20F%2086%20%7C%20L%2086-brightgreen",
+    );
+  });
+
   it("does not route the legacy integration alias to live tests with ambient credentials", () => {
-    const liveSummaryPath = join(root, "reports/jest/integration-live.json");
+    const liveSummaryPath = join(root, "reports/vitest/integration-live.json");
     if (existsSync(liveSummaryPath)) rmSync(liveSummaryPath);
 
     const result = spawnSync("npm", ["run", "test:integration", "--silent"], {
@@ -271,14 +313,14 @@ describe("test layer naming", () => {
   it("omits failure messages from JSON summaries", () => {
     const { summaryPath } = removeLayerReports("runner-fixture-live");
 
-    const result = spawnSync("node", ["scripts/run-jest-layer.mjs", "runner-fixture-live"], {
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-live"], {
       cwd: root,
       encoding: "utf8",
       env: {
         ...envWithoutB2Credentials(),
         B2_APPLICATION_KEY_ID: "fake-live-key-id",
         B2_APPLICATION_KEY: "fake-live-key-secret",
-        B2_JEST_LAYER_FIXTURE_FAIL_WITH_SECRET: "true",
+        B2_VITEST_LAYER_FIXTURE_FAIL_WITH_SECRET: "true",
       },
       timeout: 30_000,
     });

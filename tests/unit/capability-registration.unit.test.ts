@@ -157,7 +157,7 @@ describe("capability-aware registration", () => {
 
 describe("fetchCapabilities", () => {
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
     setB2SdkClientFactoryForTests(null);
     invalidateCapabilityCache();
     delete process.env.B2_REGISTER_ALL_TOOLS;
@@ -218,7 +218,7 @@ describe("fetchCapabilities", () => {
   ])(
     "normalizes shared concurrent %i capability failures for every waiter",
     async (upstreamStatus, expectedStatus, expectedCode) => {
-      const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
       const requestId = `req-shared-${upstreamStatus}`;
       const transport = installAuthorizeFailure(
         upstreamStatus,
@@ -253,7 +253,7 @@ describe("fetchCapabilities", () => {
   );
 
   it("sanitizes capability fetch failure log text, code, and request id", async () => {
-    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const configWithSecrets = {
       ...baseConfig,
       applicationKey: "configured-capability-secret",
@@ -288,7 +288,7 @@ describe("fetchCapabilities", () => {
   });
 
   it("captures capability failure request ids from Headers instances", async () => {
-    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     installAuthorizeFailure(500, "internal_error", "B2 500", {
       "X-Bz-Request-Id": "req-from-headers",
     });

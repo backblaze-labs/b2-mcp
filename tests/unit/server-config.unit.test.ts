@@ -7,12 +7,12 @@
  */
 
 // We need to control process.env and mock process.exit to test loadConfig
-const mockExit = jest.spyOn(process, "exit").mockImplementation((() => {
+const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {
   throw new Error("process.exit called");
 }) as any);
 
 // Silence stderr output from loadConfig error messages
-const mockStderr = jest.spyOn(process.stderr, "write").mockImplementation(() => true);
+const mockStderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
 afterAll(() => {
   mockExit.mockRestore();
@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   process.env = originalEnv;
-  jest.resetModules(); // force fresh import of server.ts each test
+  vi.resetModules(); // force fresh import of server.ts each test
 });
 
 async function loadConfig() {

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added deterministic test-layer scripts, JUnit/Jest summaries, coverage
+- Added deterministic test-layer scripts, JUnit/Vitest summaries, coverage
   summaries, packed-package install coverage, and the `npm run verify`
   no-credential gate.
 - Added live-safe test reporting: live layers keep JSON summaries but avoid
@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
   live test files by stable suffix so `npm test` works from a clean checkout
   without relying on `dist/`.
+- Migrated deterministic test layers from Jest to Vitest projects and extended
+  coverage to every non-live layer.
 - Restored `npm test` typechecking, made package-install
   verification use the npm cache offline, and kept it off the `ci-green`
   deploy-gating path.
@@ -559,7 +561,7 @@ B2 by the new `Contract: v4 tool-surface alignment` integration test.
 
 ### Internal
 - Dependabot `dev-dependencies` group restricted to `minor` and `patch`
-  updates. Major bumps (TypeScript 5→6, Jest 29→30) broke the build and
+  updates. Major bumps (TypeScript 5→6 and test-runner majors) broke the build and
   will be handled manually.
 
 ## [1.2.0] - 2026-05-16

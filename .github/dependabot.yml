@@ -21,7 +21,7 @@ updates:
           - "@aws-sdk/*"
       dev-dependencies:
         dependency-type: development
-        # Hold major bumps for manual review — TS 5→6, Jest 29→30 etc.
+        # Hold major bumps for manual review — TS 5→6, Vitest majors, etc.
         # have broken the build before.
         update-types:
           - minor

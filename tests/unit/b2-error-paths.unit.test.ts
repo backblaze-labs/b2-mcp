@@ -53,7 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
 });
@@ -102,7 +102,7 @@ describe("B2 tool error paths (catch blocks)", () => {
   it.each(["b2_list_groups", "b2_eject_group_member", "b2_list_group_members"])(
     "%s returns a structured Partner API error",
     async (tool) => {
-      jest.spyOn(globalThis, "fetch").mockResolvedValue(
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response(JSON.stringify({ status: 400, code: "bad_request", message: "bad" }), {
           status: 400,
           headers: { "X-Bz-Request-Id": "req-native-error" },

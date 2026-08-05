@@ -3,6 +3,7 @@ import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "..
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { B2ReportClient } from "../../src/b2/report-client";
 import type { McpServer } from "../../src/mcp";
+import type { MockInstance } from "vitest";
 import {
   authorizeResponse,
   b2EndpointName,
@@ -86,15 +87,15 @@ function daysAgo(days: number): string {
 }
 
 describe("insight report S3 endpoint validation", () => {
-  let sendSpy: jest.SpyInstance;
+  let sendSpy: MockInstance;
 
   beforeEach(() => {
     invalidateAuthManagerCache();
-    sendSpy = jest.spyOn(S3Client.prototype as any, "send").mockResolvedValue({ Contents: [] });
+    sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({ Contents: [] });
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
     setB2SdkClientFactoryForTests(null);
     invalidateAuthManagerCache();
   });
@@ -147,7 +148,7 @@ describe("insight report S3 endpoint validation", () => {
   });
 
   it("destroys the per-server report S3 client when the server closes", async () => {
-    const destroySpy = jest.spyOn(B2ReportClient.prototype, "destroy");
+    const destroySpy = vi.spyOn(B2ReportClient.prototype, "destroy");
     const transport = new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
         return new StaticHttpResponse(200, authorizeResponse(["readFiles"]));
@@ -169,10 +170,10 @@ describe("insight report S3 endpoint validation", () => {
   it("streams report downloads and stops at the configured byte cap", async () => {
     let chunksRead = 0;
     const body = {
-      transformToString: jest.fn(() => {
+      transformToString: vi.fn(() => {
         throw new Error("should not buffer the whole object");
       }),
-      destroy: jest.fn(),
+      destroy: vi.fn(),
       async *[Symbol.asyncIterator]() {
         chunksRead++;
         yield Buffer.from("abcdef");
@@ -198,19 +199,19 @@ describe("insight report S3 endpoint validation", () => {
 
   it("aborts a stalled report body read at the request deadline", async () => {
     let resolveNext: ((value: IteratorResult<Buffer>) => void) | undefined;
-    const next = jest.fn(
+    const next = vi.fn(
       () =>
         new Promise<IteratorResult<Buffer>>((resolve) => {
           resolveNext = resolve;
         }),
     );
     const body = {
-      destroy: jest.fn(() => {
+      destroy: vi.fn(() => {
         resolveNext?.({ done: true, value: undefined as never });
       }),
       [Symbol.asyncIterator]: () => ({
         next,
-        return: jest.fn(async () => ({ done: true, value: undefined as never })),
+        return: vi.fn(async () => ({ done: true, value: undefined as never })),
       }),
     };
     sendSpy.mockResolvedValueOnce({ Body: body });

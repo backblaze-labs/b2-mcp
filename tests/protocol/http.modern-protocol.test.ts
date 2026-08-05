@@ -77,7 +77,7 @@ async function replaceHandle(overrides: HttpServerOptions = {}): Promise<void> {
 
 describe("HTTP handler (MCP 2026-07-28)", () => {
   it("returns SDK 405 for GET and DELETE before credential resolution", async () => {
-    const resolve = jest.fn(() => {
+    const resolve = vi.fn(() => {
       throw new Error("credential resolution should not run");
     });
     await replaceHandle({
@@ -102,7 +102,7 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
   });
 
   it("returns SDK protocol errors before credential resolution", async () => {
-    const resolve = jest.fn(() => {
+    const resolve = vi.fn(() => {
       throw new Error("credential resolution should not run");
     });
     await replaceHandle({

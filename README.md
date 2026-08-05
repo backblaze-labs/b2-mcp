@@ -1,5 +1,15 @@
 # Backblaze B2 MCP Server
 
+[![CI](https://github.com/backblaze-labs/b2-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/backblaze-labs/b2-mcp/actions/workflows/test.yml)
+[![CodeQL](https://img.shields.io/badge/CodeQL-enabled-brightgreen?logo=github)](https://github.com/backblaze-labs/b2-mcp/security/code-scanning)
+[![npm](https://img.shields.io/npm/v/@backblaze-labs/b2-mcp?color=cb3837)](https://www.npmjs.com/package/@backblaze-labs/b2-mcp)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.3-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![MCP](https://img.shields.io/badge/MCP-2026--07--28-5b5fc7)](https://modelcontextprotocol.io/specification/2026-07-28)
+[![Coverage floors](https://img.shields.io/badge/coverage-S%2082%20%7C%20B%2072%20%7C%20F%2086%20%7C%20L%2086-brightgreen)](docs/TESTING.md)
+[![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-7-blue)](package-budget.json)
+
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools.
 
 **40 tools, split by what they do:**

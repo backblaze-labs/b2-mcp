@@ -10,7 +10,7 @@
     "declaration": false,
     "declarationMap": false,
     "sourceMap": false,
-    "types": ["node", "jest"]
+    "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*", "tests/**/*"],
   "exclude": ["node_modules", "dist"]

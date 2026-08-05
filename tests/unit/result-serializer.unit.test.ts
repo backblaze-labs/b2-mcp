@@ -139,7 +139,7 @@ describe("result serializer", () => {
   });
 
   it("falls back to compact JSON when TOON encoding fails", () => {
-    const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({ bad: "\uD800" }),
     );
@@ -170,28 +170,28 @@ describe("result serializer", () => {
   });
 
   it("does not load the npm TOON package when JSON mode serializes text", async () => {
-    await jest.isolateModulesAsync(async () => {
-      jest.doMock("@toon-format/toon", () => {
-        throw new Error("TOON package loaded");
-      });
-      try {
-        const serializer = await import("../../src/utils/result-serializer");
-        expect(serializer.serializeStructuredToolResult({ ok: true })).toEqual({
-          content: [{ type: "text", text: '{"ok":true}' }],
-          structuredContent: { ok: true },
-        });
-        expect(
-          serializer.runWithResultSerializationOptions({ outputFormat: "json" }, () =>
-            serializer.serializeStructuredToolResult({ ok: true }),
-          ),
-        ).toEqual({
-          content: [{ type: "text", text: '{"ok":true}' }],
-          structuredContent: { ok: true },
-        });
-      } finally {
-        jest.dontMock("@toon-format/toon");
-      }
+    vi.resetModules();
+    vi.doMock("@toon-format/toon", () => {
+      throw new Error("TOON package loaded");
     });
+    try {
+      const serializer = await import("../../src/utils/result-serializer");
+      expect(serializer.serializeStructuredToolResult({ ok: true })).toEqual({
+        content: [{ type: "text", text: '{"ok":true}' }],
+        structuredContent: { ok: true },
+      });
+      expect(
+        serializer.runWithResultSerializationOptions({ outputFormat: "json" }, () =>
+          serializer.serializeStructuredToolResult({ ok: true }),
+        ),
+      ).toEqual({
+        content: [{ type: "text", text: '{"ok":true}' }],
+        structuredContent: { ok: true },
+      });
+    } finally {
+      vi.doUnmock("@toon-format/toon");
+      vi.resetModules();
+    }
   });
 
   it("does not execute the npm TOON package in TOON mode", async () => {
@@ -202,29 +202,28 @@ describe("result serializer", () => {
     try {
       process.env.B2_APPLICATION_KEY = "B2_MCP_CANARY_APPLICATION_KEY";
       process.env.B2_MASTER_KEY = "B2_MCP_CANARY_MASTER_KEY";
-      await jest.isolateModulesAsync(async () => {
-        jest.doMock("@toon-format/toon", () => {
-          mockObservedEnv = `${process.env.B2_APPLICATION_KEY}:${process.env.B2_MASTER_KEY}`;
-          return {
-            encode: () => mockObservedEnv,
-            decode: () => ({}),
-          };
-        });
-        try {
-          const serializer = await import("../../src/utils/result-serializer");
-          const result = serializer.runWithResultSerializationOptions(
-            { outputFormat: "toon" },
-            () => serializer.serializeStructuredToolResult({ ok: true }),
-          );
-
-          expect(result.content[0].text).toBe("ok: true");
-          expect(JSON.stringify(result)).not.toContain("B2_MCP_CANARY_APPLICATION_KEY");
-          expect(JSON.stringify(result)).not.toContain("B2_MCP_CANARY_MASTER_KEY");
-          expect(mockObservedEnv).toBeUndefined();
-        } finally {
-          jest.dontMock("@toon-format/toon");
-        }
+      vi.resetModules();
+      vi.doMock("@toon-format/toon", () => {
+        mockObservedEnv = `${process.env.B2_APPLICATION_KEY}:${process.env.B2_MASTER_KEY}`;
+        return {
+          encode: () => mockObservedEnv,
+          decode: () => ({}),
+        };
       });
+      try {
+        const serializer = await import("../../src/utils/result-serializer");
+        const result = serializer.runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
+          serializer.serializeStructuredToolResult({ ok: true }),
+        );
+
+        expect(result.content[0].text).toBe("ok: true");
+        expect(JSON.stringify(result)).not.toContain("B2_MCP_CANARY_APPLICATION_KEY");
+        expect(JSON.stringify(result)).not.toContain("B2_MCP_CANARY_MASTER_KEY");
+        expect(mockObservedEnv).toBeUndefined();
+      } finally {
+        vi.doUnmock("@toon-format/toon");
+        vi.resetModules();
+      }
     } finally {
       if (originalApplicationKey === undefined) delete process.env.B2_APPLICATION_KEY;
       else process.env.B2_APPLICATION_KEY = originalApplicationKey;

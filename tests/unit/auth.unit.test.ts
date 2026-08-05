@@ -51,10 +51,10 @@ function deferred<T>() {
 
 describe("B2AuthManager", () => {
   afterEach(() => {
-    jest.useRealTimers();
+    vi.useRealTimers();
     setB2SdkClientFactoryForTests(null);
     _resetRetryBudget();
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("authorizes on first getAuth() call through the SDK", async () => {
@@ -194,7 +194,7 @@ describe("B2AuthManager", () => {
 
   it("ignores the removed process-global SDK factory hook", async () => {
     const removedHook = Symbol.for("@backblaze-labs/b2-mcp/sdk-client-factory");
-    const hookedFactory = jest.fn(() => {
+    const hookedFactory = vi.fn(() => {
       throw new Error(`global hook saw ${mockConfig.applicationKey}`);
     });
     (globalThis as Record<PropertyKey, unknown>)[removedHook] = hookedFactory;
@@ -218,13 +218,13 @@ describe("B2AuthManager", () => {
   });
 
   it("bounds SDK retry attempts with the shared retry budget", async () => {
-    jest.useFakeTimers();
-    jest.spyOn(Math, "random").mockReturnValue(0);
-    jest.spyOn(Date, "now").mockReturnValue(0);
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(Date, "now").mockReturnValue(0);
     _resetRetryBudget();
     for (let i = 0; i < 100; i++) _consumeRetryToken();
     setB2SdkClientFactoryForTests(null);
-    const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       return new Response(
         JSON.stringify({
           status: 503,
@@ -241,11 +241,11 @@ describe("B2AuthManager", () => {
     const pending = manager.getAuth();
     const assertion = expect(pending).rejects.toThrow(/retry budget/i);
 
-    await jest.runAllTimersAsync();
+    await vi.runAllTimersAsync();
 
     await assertion;
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    jest.useRealTimers();
+    vi.useRealTimers();
   });
 
   it("does not replay createBucket after a response-lost failure", async () => {
