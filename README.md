@@ -44,7 +44,7 @@ npm run build          # produces dist/ — required before first run
 
 Replace the path with where you put the folder, then restart Claude Desktop — the B2 tools appear.
 
-> **One non-master application key covers everything** — B2 native, S3, and key management. A **master key is optional**, used _only_ by the Partner API tools (`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`). B2's S3 endpoint rejects master keys, which is why the application key is the primary credential. See [Configuration](#configuration) for the full list.
+> **One non-master application key covers everything active** — B2 native, S3, and key management. The Partner/Groups tool names are currently unavailable SDK-gap stubs; configuring `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` does not activate them until the upstream SDK support lands. B2's S3 endpoint rejects master keys, which is why the application key is the primary credential. See [Configuration](#configuration) for the full list.
 
 > **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP) — plus a compatibility matrix.
 
@@ -58,18 +58,18 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 
 ## Configuration
 
-| Variable                                                      | Required              | Default               | Description                                                                                                               |
-| ------------------------------------------------------------- | --------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse for native B2 and S3-compatible tools                                     |
-| `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                    |
-| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master key — used **only** by Partner API tools                                                                           |
-| `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                     |
-| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                              |
-| `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                            |
-| `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                       |
-| `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments |
-| `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                           |
-| `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                |
+| Variable                                                      | Required              | Default               | Description                                                                                                                |
+| ------------------------------------------------------------- | --------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse for native B2 and S3-compatible tools                                      |
+| `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                     |
+| `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Reserved for Partner/Groups tools; those tools are currently unavailable SDK-gap stubs and are not activated by setting it |
+| `B2_REGION`                                                   | —                     | `us-west-004`         | Region for the S3-compatible endpoint                                                                                      |
+| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                               |
+| `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
+| `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy non-master S3 override (only if your primary key is a master key) — prefer `B2_MASTER_KEY_*`                        |
+| `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments  |
+| `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
+| `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                 |
 
 **Security / policy (safe defaults; override as needed):**
 

@@ -186,17 +186,6 @@ describe("fetchCapabilities", () => {
     return transport;
   }
 
-  function installAuthorizeThrow(err: unknown): void {
-    setB2SdkClientFactoryForTests(() => ({
-      client: {
-        accountInfo: { getAuth: () => null, clear: () => undefined },
-        authorize: async () => {
-          throw err;
-        },
-      } as never,
-    }));
-  }
-
   it("returns the key's capabilities from apiInfo.storageApi.allowed", async () => {
     installAuthorizeResponse(["readFiles", "listBuckets"]);
     expect(await fetchCapabilities(baseConfig)).toEqual(["readFiles", "listBuckets"]);
@@ -260,13 +249,8 @@ describe("fetchCapabilities", () => {
 
   it("captures capability failure request ids from Headers instances", async () => {
     const warnSpy = jest.spyOn(logger, "warn").mockImplementation(() => undefined as never);
-    installAuthorizeThrow({
-      status: 500,
-      code: "internal_error",
-      response: {
-        status: 500,
-        headers: new Headers({ "X-Bz-Request-Id": "req-from-headers" }),
-      },
+    installAuthorizeFailure(500, "internal_error", "B2 500", {
+      "X-Bz-Request-Id": "req-from-headers",
     });
 
     await expect(

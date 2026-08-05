@@ -23,12 +23,9 @@ function redactWebhookUrl(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
   try {
     const u = new URL(raw);
-    if (!u.username && !u.password) return raw;
-    u.username = "";
-    u.password = "";
-    return u.toString();
+    return `${u.protocol}//${u.host}/[redacted]`;
   } catch {
-    return raw;
+    return "[redacted]";
   }
 }
 

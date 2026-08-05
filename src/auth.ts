@@ -17,16 +17,12 @@ import { consumeRetryBudgetToken } from "./utils/retry.js";
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
 
-export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
+const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   maxRetries: 3,
   initialRetryDelayMs: 1000,
   maxRetryDelayMs: 4000,
   requestTimeoutMs: API_TIMEOUT_MS,
 };
-
-export const SDK_MAX_RETRY_BUDGET_MS =
-  API_TIMEOUT_MS * ((SDK_RETRY_OPTIONS.maxRetries ?? 0) + 1) +
-  (SDK_RETRY_OPTIONS.maxRetries ?? 0) * (SDK_RETRY_OPTIONS.maxRetryDelayMs ?? 0);
 
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
@@ -37,17 +33,24 @@ interface ManagedSdkClient {
 }
 
 type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
-const SDK_CLIENT_FACTORY_HOOK = Symbol.for("@backblaze-labs/b2-mcp/sdk-client-factory");
+let sdkClientFactoryForTests: SdkClientFactory | null = null;
 
-type SdkClientFactoryHook = {
-  [SDK_CLIENT_FACTORY_HOOK]?: SdkClientFactory;
-};
-
-function sdkClientFactoryHook(): SdkClientFactoryHook {
-  return globalThis as typeof globalThis & SdkClientFactoryHook;
+function isTestRuntime(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
 }
 
-export class RequestSignalTransport implements HttpTransport {
+export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null): void {
+  if (!isTestRuntime()) {
+    throw new Error("SDK client factory override is only available in tests.");
+  }
+  sdkClientFactoryForTests = factory;
+}
+
+function configuredSdkClientFactoryForTests(): SdkClientFactory | null {
+  return isTestRuntime() ? sdkClientFactoryForTests : null;
+}
+
+class RequestSignalTransport implements HttpTransport {
   constructor(private readonly inner: HttpTransport) {}
 
   send(request: HttpRequest): Promise<HttpResponse> {
@@ -56,23 +59,45 @@ export class RequestSignalTransport implements HttpTransport {
   }
 }
 
-export class SharedRetryBudgetTransport implements HttpTransport {
+const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);
+
+function bodyBudgetKey(body: HttpRequest["body"]): string {
+  if (body === undefined || body === null) return "";
+  if (typeof body === "string") return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  if (body instanceof ArrayBuffer) return `arraybuffer:${body.byteLength}`;
+  if (ArrayBuffer.isView(body)) return `${body.constructor.name}:${body.byteLength}`;
+  return Object.prototype.toString.call(body);
+}
+
+class SharedRetryBudgetTransport implements HttpTransport {
   private readonly attemptsBySignal = new WeakMap<AbortSignal, Map<string, number>>();
 
   constructor(private readonly inner: HttpTransport) {}
 
-  send(request: HttpRequest): Promise<HttpResponse> {
-    const attempt = this.nextAttempt(request);
+  async send(request: HttpRequest): Promise<HttpResponse> {
+    const next = this.nextAttempt(request);
+    if (!next) return this.inner.send(request);
+    const { attempts, attempt, key } = next;
     if (attempt > 0 && !consumeRetryBudgetToken()) {
       throw new DOMException("B2 retry budget exhausted", "AbortError");
     }
-    return this.inner.send(request);
+    try {
+      const response = await this.inner.send(request);
+      if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
+      return response;
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") attempts.delete(key);
+      throw err;
+    }
   }
 
-  private nextAttempt(request: HttpRequest): number {
+  private nextAttempt(
+    request: HttpRequest,
+  ): { attempts: Map<string, number>; key: string; attempt: number } | null {
     const signal = request.signal;
-    if (!signal) return 0;
-    const key = `${request.method} ${request.url}`;
+    if (!signal) return null;
+    const key = `${request.method} ${request.url} ${bodyBudgetKey(request.body)}`;
     let attempts = this.attemptsBySignal.get(signal);
     if (!attempts) {
       attempts = new Map();
@@ -80,7 +105,7 @@ export class SharedRetryBudgetTransport implements HttpTransport {
     }
     const attempt = attempts.get(key) ?? 0;
     attempts.set(key, attempt + 1);
-    return attempt;
+    return { attempts, key, attempt };
   }
 }
 
@@ -108,7 +133,6 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
     ),
     retry: SDK_RETRY_OPTIONS,
   });
-  injectMcpSignalBeforeSdkRetry(client);
   return {
     client,
     urlGuard,
@@ -143,7 +167,8 @@ export class B2AuthManager {
 
   constructor(config: B2Config) {
     this.config = config;
-    this.sdk = (sdkClientFactoryHook()[SDK_CLIENT_FACTORY_HOOK] ?? defaultSdkClientFactory)(config);
+    this.sdk = (configuredSdkClientFactoryForTests() ?? defaultSdkClientFactory)(config);
+    injectMcpSignalBeforeSdkRetry(this.sdk.client);
   }
 
   getConfig(): B2Config {

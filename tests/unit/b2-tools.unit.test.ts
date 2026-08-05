@@ -77,19 +77,7 @@ async function createBucket(
 beforeEach(async () => {
   invalidateAuthManagerCache();
   sim = new B2Simulator({ minimumPartSize: 1000, recommendedPartSize: 1000 });
-  setB2SdkClientFactoryForTests((config) => ({
-    client: new SdkB2Client({
-      applicationKeyId: config.applicationKeyId,
-      applicationKey: config.applicationKey,
-      transport: sim.transport(),
-      retry: {
-        maxRetries: 1,
-        initialRetryDelayMs: 1,
-        maxRetryDelayMs: 1,
-        requestTimeoutMs: 30_000,
-      },
-    }),
-  }));
+  installSdkTransport(sim.transport());
   seed = await seedClient();
   server = createServer(testConfig);
 });
@@ -448,7 +436,7 @@ describe("bucket notification rules", () => {
         isEnabled: true,
         targetConfiguration: {
           targetType: "webhook",
-          url: "https://example.com/hook",
+          url: "https://hooks.slack.com/services/T000/B000/slack-path-token?token=query-token#frag-token",
           hmacSha256SigningSecret: "supersecret",
           customHeaders: [{ name: "Authorization", value: "Bearer webhook-token" }],
         },
@@ -462,7 +450,13 @@ describe("bucket notification rules", () => {
       }),
     );
     expect(set.eventNotificationRules[0].objectNamePrefix).toBe("");
+    expect(set.eventNotificationRules[0].targetConfiguration.url).toBe(
+      "https://hooks.slack.com/[redacted]",
+    );
     expect(JSON.stringify(set)).not.toContain("webhook-token");
+    expect(JSON.stringify(set)).not.toContain("slack-path-token");
+    expect(JSON.stringify(set)).not.toContain("query-token");
+    expect(JSON.stringify(set)).not.toContain("frag-token");
     expect(set.eventNotificationRules[0].targetConfiguration.customHeaders).toEqual({
       Authorization: "[redacted]",
     });
@@ -472,9 +466,13 @@ describe("bucket notification rules", () => {
     );
     const tc = get.eventNotificationRules[0].targetConfiguration;
     expect(tc.hmacSha256SigningSecret).toBe("[redacted]");
+    expect(tc.url).toBe("https://hooks.slack.com/[redacted]");
     expect(tc.customHeaders).toEqual({ Authorization: "[redacted]" });
     expect(JSON.stringify(get)).not.toContain("supersecret");
     expect(JSON.stringify(get)).not.toContain("webhook-token");
+    expect(JSON.stringify(get)).not.toContain("slack-path-token");
+    expect(JSON.stringify(get)).not.toContain("query-token");
+    expect(JSON.stringify(get)).not.toContain("frag-token");
   });
 
   it("scrubs stored webhook URL credentials and record custom headers", async () => {
@@ -497,7 +495,7 @@ describe("bucket notification rules", () => {
               suspensionReason: "",
               targetConfiguration: {
                 targetType: "webhook",
-                url: "https://ops:pa55w0rd@hooks.example.com/b2",
+                url: "https://ops:pa55w0rd@hooks.example.com/b2/slack-token?token=query-token#fragment-token",
                 customHeaders: {
                   Authorization: "Bearer stored-token",
                   "X-Api-Key": "stored-key",
@@ -518,10 +516,13 @@ describe("bucket notification rules", () => {
 
     const json = JSON.stringify(get);
     expect(json).not.toContain("pa55w0rd");
+    expect(json).not.toContain("slack-token");
+    expect(json).not.toContain("query-token");
+    expect(json).not.toContain("fragment-token");
     expect(json).not.toContain("stored-token");
     expect(json).not.toContain("stored-key");
     expect(get.eventNotificationRules[0].targetConfiguration.url).toBe(
-      "https://hooks.example.com/b2",
+      "https://hooks.example.com/[redacted]",
     );
     expect(get.eventNotificationRules[0].targetConfiguration.customHeaders).toEqual({
       Authorization: "[redacted]",
@@ -577,11 +578,16 @@ describe("bucket notification rules", () => {
     const bucket = await createBucket("notify-userinfo");
     const res = await callTool(server, "b2_set_bucket_notification_rules", {
       bucketId: bucket.id,
-      eventNotificationRules: [ruleWith("https://ops:pa55w0rd@example.com/hook")],
+      eventNotificationRules: [
+        ruleWith("https://ops:pa55w0rd@example.com/hook/path-token?token=query-token#frag-token"),
+      ],
     });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/credentials/i);
     expect(res.content[0].text).not.toContain("pa55w0rd");
+    expect(res.content[0].text).not.toContain("path-token");
+    expect(res.content[0].text).not.toContain("query-token");
+    expect(res.content[0].text).not.toContain("frag-token");
   });
 });
 

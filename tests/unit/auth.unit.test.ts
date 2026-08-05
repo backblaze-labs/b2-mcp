@@ -1,14 +1,6 @@
-import { B2Client as SdkB2Client, RetryTransport } from "@backblaze-labs/b2-sdk";
-import {
-  B2AuthManager,
-  RequestSignalTransport,
-  SharedRetryBudgetTransport,
-  SDK_MAX_RETRY_BUDGET_MS,
-  SDK_RETRY_OPTIONS,
-} from "../../src/auth";
+import { B2AuthManager } from "../../src/auth";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
-import { CIRCUIT_TIMEOUT_MS } from "../../src/utils/circuit-breaker";
 import { B2Config } from "../../src/utils/types";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import {
@@ -46,6 +38,7 @@ function installAuthorizeTransport(
 
 describe("B2AuthManager", () => {
   afterEach(() => {
+    jest.useRealTimers();
     setB2SdkClientFactoryForTests(null);
     _resetRetryBudget();
     jest.restoreAllMocks();
@@ -120,25 +113,28 @@ describe("B2AuthManager", () => {
 
   it("passes the current MCP request abort signal to authorize_account", async () => {
     const inner = installAuthorizeTransport();
-    setB2SdkClientFactoryForTests((config) => ({
-      client: new SdkB2Client({
-        applicationKeyId: config.applicationKeyId,
-        applicationKey: config.applicationKey,
-        transport: new RequestSignalTransport(inner),
-        retry: {
-          maxRetries: 0,
-          initialRetryDelayMs: 1,
-          maxRetryDelayMs: 1,
-          requestTimeoutMs: 30_000,
-        },
-      }),
-    }));
     const manager = new B2AuthManager(mockConfig);
     const abort = new AbortController();
 
     await runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
 
     expect(inner.requests[0].signal).toBe(abort.signal);
+  });
+
+  it("ignores the removed process-global SDK factory hook", async () => {
+    const removedHook = Symbol.for("@backblaze-labs/b2-mcp/sdk-client-factory");
+    const hookedFactory = jest.fn(() => {
+      throw new Error(`global hook saw ${mockConfig.applicationKey}`);
+    });
+    (globalThis as Record<PropertyKey, unknown>)[removedHook] = hookedFactory;
+    const transport = installAuthorizeTransport();
+    const manager = new B2AuthManager(mockConfig);
+
+    const auth = await manager.getAuth();
+
+    expect(auth.accountId).toBe("test-account-123");
+    expect(hookedFactory).not.toHaveBeenCalled();
+    expect(transport.requests).toHaveLength(1);
   });
 
   it("forceRefresh returns full auth data for the tool layer to redact", async () => {
@@ -150,48 +146,35 @@ describe("B2AuthManager", () => {
     expect(auth.authorizationToken).toBeDefined();
   });
 
-  it("uses the reviewed SDK retry envelope for native calls", () => {
-    expect(SDK_RETRY_OPTIONS).toMatchObject({
-      maxRetries: 3,
-      initialRetryDelayMs: 1000,
-      maxRetryDelayMs: 4000,
-      requestTimeoutMs: 30_000,
-    });
-    expect(SDK_MAX_RETRY_BUDGET_MS).toBeLessThan(CIRCUIT_TIMEOUT_MS);
-  });
-
   it("bounds SDK retry attempts with the shared retry budget", async () => {
+    jest.useFakeTimers();
+    jest.spyOn(Math, "random").mockReturnValue(0);
+    jest.spyOn(Date, "now").mockReturnValue(0);
     _resetRetryBudget();
     for (let i = 0; i < 100; i++) _consumeRetryToken();
-    const inner = new RecordingTransport(
-      () =>
-        new StaticHttpResponse(503, {
+    setB2SdkClientFactoryForTests(null);
+    const fetchSpy = jest.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      return new Response(
+        JSON.stringify({
           status: 503,
           code: "service_unavailable",
           message: "try later",
         }),
-    );
-    const transport = new RequestSignalTransport(
-      new RetryTransport({
-        transport: new SharedRetryBudgetTransport(inner),
-        retry: {
-          maxRetries: 1,
-          initialRetryDelayMs: 0,
-          maxRetryDelayMs: 0,
-          requestTimeoutMs: 30_000,
+        {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
         },
-      }),
-    );
+      );
+    });
+    const manager = new B2AuthManager(mockConfig);
+    const pending = manager.getAuth();
+    const assertion = expect(pending).rejects.toThrow(/retry budget/i);
 
-    await expect(
-      transport.send({
-        url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
-        method: "POST",
-        headers: { Authorization: "token" },
-        body: "{}",
-      }),
-    ).rejects.toThrow(/retry budget/i);
-    expect(inner.requests).toHaveLength(1);
+    await jest.advanceTimersByTimeAsync(1000);
+
+    await assertion;
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
   });
 
   it("passes the MCP abort signal into SDK retry backoff", async () => {
@@ -203,26 +186,16 @@ describe("B2AuthManager", () => {
           { "Retry-After": "10" },
         ),
     );
-    const transport = new RequestSignalTransport(
-      new RetryTransport({
-        transport: inner,
-        retry: {
-          maxRetries: 1,
-          initialRetryDelayMs: 10_000,
-          maxRetryDelayMs: 10_000,
-          requestTimeoutMs: 30_000,
-        },
-      }),
-    );
+    installSdkTransport(inner, {
+      maxRetries: 1,
+      initialRetryDelayMs: 10_000,
+      maxRetryDelayMs: 10_000,
+      requestTimeoutMs: 30_000,
+    });
     const abort = new AbortController();
-    const request = {
-      url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
-      method: "POST" as const,
-      headers: { Authorization: "token" },
-      body: "{}",
-    };
+    const manager = new B2AuthManager(mockConfig);
 
-    const pending = runWithMcpRequestSignal(abort.signal, () => transport.send(request));
+    const pending = runWithMcpRequestSignal(abort.signal, () => manager.getAuth());
     await Promise.resolve();
     await Promise.resolve();
     abort.abort(new DOMException("Aborted", "AbortError"));

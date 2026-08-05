@@ -3,8 +3,8 @@ import {
   type HttpRequest,
   type HttpResponse,
   type HttpTransport,
+  type RetryOptions,
 } from "@backblaze-labs/b2-sdk";
-import { RequestSignalTransport } from "../../src/auth";
 import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import { B2Config } from "../../src/utils/types";
 
@@ -85,18 +85,21 @@ export function authorizeResponse(capabilities: string[] = []) {
   };
 }
 
-export function installSdkTransport(transport: HttpTransport): void {
+export function installSdkTransport(
+  transport: HttpTransport,
+  retry: Partial<RetryOptions> = {
+    maxRetries: 0,
+    initialRetryDelayMs: 1,
+    maxRetryDelayMs: 1,
+    requestTimeoutMs: 30_000,
+  },
+): void {
   setB2SdkClientFactoryForTests((config: B2Config) => ({
     client: new SdkB2Client({
       applicationKeyId: config.applicationKeyId,
       applicationKey: config.applicationKey,
-      transport: new RequestSignalTransport(transport),
-      retry: {
-        maxRetries: 0,
-        initialRetryDelayMs: 1,
-        maxRetryDelayMs: 1,
-        requestTimeoutMs: 30_000,
-      },
+      transport,
+      retry,
     }),
   }));
 }

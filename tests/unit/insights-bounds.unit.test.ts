@@ -10,6 +10,8 @@
 
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { runWithMcpRequestSignal } from "../../src/request-context";
+import { _resetRetryBudget } from "../../src/utils/retry";
 import type { McpServer } from "../../src/mcp";
 import {
   authorizeResponse,
@@ -64,6 +66,7 @@ const bucketInfo = {
 let server: McpServer;
 
 beforeEach(() => {
+  _resetRetryBudget();
   invalidateAuthManagerCache();
 });
 
@@ -190,6 +193,31 @@ describe("b2_largest_files — scan bound", () => {
     expect(result.scanned).toBe(2);
     expect(result.returned).toBe(2);
     expect(result.files[0].size_bytes).toBe(20);
+  });
+
+  it("does not spend retry budget on successful paginated file listings", async () => {
+    queueB2({
+      fileNamePages: Array.from({ length: 125 }, (_, i) => ({
+        files: [file(`file-${String(i).padStart(3, "0")}`, i + 1)],
+        nextFileName: i === 124 ? null : `file-${String(i + 1).padStart(3, "0")}`,
+      })),
+    });
+    const request = new AbortController();
+
+    const result = parseResult(
+      await runWithMcpRequestSignal(request.signal, () =>
+        callTool(server, "b2_largest_files", {
+          bucket: "test-bucket",
+          limit: 5,
+          max_scan: 1000,
+        }),
+      ),
+    );
+
+    expect(result.truncated).toBe(false);
+    expect(result.scanned).toBe(125);
+    expect(result.returned).toBe(5);
+    expect(result.files.map((f: any) => f.size_bytes)).toEqual([125, 124, 123, 122, 121]);
   });
 });
 
