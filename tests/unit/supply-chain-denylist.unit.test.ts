@@ -793,8 +793,25 @@ describe("supply-chain denylist scanner", () => {
       const result = runDenylist(dir, ["--tarball", tarball], customDenylist);
 
       expect(result.status).toBe(2);
-      expect(result.stderr).toContain("unsafe link entry");
+      expect(result.stderr).toContain("unsafe archive entry type");
       expect(existsSync(escapedPath)).toBe(false);
+    });
+  });
+
+  it("rejects tarball FIFO members before extraction", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const tarball = join(dir, "unsafe-fifo.tgz");
+      writeJson(customDenylist, baseDenylist());
+      writeJson(join(dir, "package.json"), { name: "fixture", version: "0.0.0" });
+      writeTarGz(tarball, [{ name: "pkg/pipe", content: "", type: "6" }]);
+
+      const result = runDenylist(dir, ["--tarball", tarball], customDenylist);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("scanner-error");
+      expect(result.stderr).toContain("unsafe archive entry type");
+      expect(existsSync(join(dir, "pkg/pipe"))).toBe(false);
     });
   });
 

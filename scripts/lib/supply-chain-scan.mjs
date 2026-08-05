@@ -336,12 +336,15 @@ function validateTarballEntries(tarball, report) {
     );
     return false;
   }
-  const linkEntry = typedListing.stdout
+  const unsafeTypeEntry = typedListing.stdout
     .split(/\r?\n/)
+    .map((line) => line.trimStart())
     .filter(Boolean)
-    .find((line) => line.startsWith("l") || line.startsWith("h"));
-  if (linkEntry) {
-    report.errors.push(`tarball:${tarball}: unsafe link entry ${JSON.stringify(linkEntry)}`);
+    .find((line) => !line.startsWith("-") && !line.startsWith("d"));
+  if (unsafeTypeEntry) {
+    report.errors.push(
+      `tarball:${tarball}: unsafe archive entry type ${JSON.stringify(unsafeTypeEntry)}`,
+    );
     return false;
   }
 
