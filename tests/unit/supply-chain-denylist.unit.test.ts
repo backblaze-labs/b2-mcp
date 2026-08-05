@@ -57,17 +57,22 @@ function concatBufferParts(parts: Buffer[]): Buffer {
   return Buffer.concat(parts.map((part) => Uint8Array.from(part)));
 }
 
-function tarFileBlock(name: string, content: string): Buffer {
+function tarFileBlock(
+  name: string,
+  content: string,
+  { type = "0", linkName = "" }: { type?: string; linkName?: string } = {},
+): Buffer {
   const data = Buffer.from(content);
   const header = Buffer.alloc(512);
   header.write(name, 0, 100, "utf8");
   header.write(tarOctal(0o644, 8), 100, 8, "ascii");
   header.write(tarOctal(0, 8), 108, 8, "ascii");
   header.write(tarOctal(0, 8), 116, 8, "ascii");
-  header.write(tarOctal(data.length, 12), 124, 12, "ascii");
+  header.write(tarOctal(type === "0" ? data.length : 0, 12), 124, 12, "ascii");
   header.write(tarOctal(0, 12), 136, 12, "ascii");
   header.fill(0x20, 148, 156);
-  header.write("0", 156, 1, "ascii");
+  header.write(type, 156, 1, "ascii");
+  if (linkName) header.write(linkName, 157, 100, "utf8");
   header.write("ustar\0", 257, 6, "ascii");
   header.write("00", 263, 2, "ascii");
 
@@ -77,12 +82,16 @@ function tarFileBlock(name: string, content: string): Buffer {
   header[154] = 0;
   header[155] = 0x20;
 
+  if (type !== "0") return header;
   const padding = Buffer.alloc((512 - (data.length % 512)) % 512);
   return concatBufferParts([header, data, padding]);
 }
 
-function writeTarGz(path: string, entries: Array<{ name: string; content: string }>): void {
-  const blocks = entries.map((entry) => tarFileBlock(entry.name, entry.content));
+function writeTarGz(
+  path: string,
+  entries: Array<{ name: string; content: string; type?: string; linkName?: string }>,
+): void {
+  const blocks = entries.map((entry) => tarFileBlock(entry.name, entry.content, entry));
   const archive = concatBufferParts([...blocks, Buffer.alloc(1024)]);
   writeFileSync(path, Uint8Array.from(gzipSync(Uint8Array.from(archive))));
 }
@@ -186,6 +195,33 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("devDependencies spec");
       expect(result.stderr).toContain("keyv@6.0.0");
+    });
+  });
+
+  it("handles manifest prerelease and lower-bound range boundaries", () => {
+    withTempDir((dir) => {
+      writeJson(join(dir, "package.json"), {
+        name: "fixture",
+        version: "0.0.0",
+        devDependencies: {
+          keyv: "6.0.0-rc.1",
+        },
+      });
+
+      const prerelease = runDenylist(dir);
+      expect(prerelease.status).toBe(0);
+
+      writeJson(join(dir, "package.json"), {
+        name: "fixture",
+        version: "0.0.0",
+        devDependencies: {
+          "@thiennq/docs-viewer": "^1.6.0",
+        },
+      });
+
+      const caretRange = runDenylist(dir);
+      expect(caretRange.status).toBe(1);
+      expect(caretRange.stderr).toContain("@thiennq/docs-viewer@1.6.2");
     });
   });
 
@@ -419,6 +455,36 @@ describe("supply-chain denylist scanner", () => {
     });
   });
 
+  it("rejects package source paths that escape the denylist root", () => {
+    withTempDir((dir) => {
+      const malformed = join(dir, "repo", "denylist.json");
+      const outside = join(dir, "outside.csv");
+      mkdirSync(join(dir, "repo"));
+      writeFileSync(outside, "Package,Malicious Versions\nkeyv,6.0.0\n");
+      writeJson(malformed, {
+        ...baseDenylist(),
+        packageSources: [
+          {
+            path: "../outside.csv",
+            format: "wiz-keyv-packages-csv",
+            sourceUrl: "https://example.test/ioc",
+            reviewedAt: "2026-08-05",
+            expectedPackages: 1,
+            expectedPackageVersions: 1,
+            reason: "must not be read",
+          },
+        ],
+      });
+
+      const result = runDenylist(join(dir, "repo"), [], malformed);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain(
+        "packageSources[0].path must resolve within the repository root",
+      );
+    });
+  });
+
   it("catches denied packages present only on another fetched branch", () => {
     withTempDir((dir) => {
       const customDenylist = join(dir, "denylist.json");
@@ -551,6 +617,26 @@ describe("supply-chain denylist scanner", () => {
       expect(result.status).toBe(2);
       expect(result.stderr).toContain("scanner-error");
       expect(result.stderr).toContain("unsafe entry path");
+      expect(existsSync(escapedPath)).toBe(false);
+    });
+  });
+
+  it("rejects tarball symlink members before extraction", () => {
+    withTempDir((dir) => {
+      const customDenylist = join(dir, "denylist.json");
+      const tarball = join(dir, "unsafe-link.tgz");
+      const escapedPath = join(dir, "escaped.txt");
+      writeJson(customDenylist, baseDenylist());
+      writeJson(join(dir, "package.json"), { name: "fixture", version: "0.0.0" });
+      writeTarGz(tarball, [
+        { name: "pkg", content: "", type: "2", linkName: dir },
+        { name: "pkg/escaped.txt", content: "do not extract\n" },
+      ]);
+
+      const result = runDenylist(dir, ["--tarball", tarball], customDenylist);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("unsafe link entry");
       expect(existsSync(escapedPath)).toBe(false);
     });
   });
