@@ -15,7 +15,7 @@ Destructive actions are gated, durable B2 secrets never enter the model's contex
 
 ## Quick start
 
-**Prerequisites:** [Node.js 22.13.0 or newer](https://nodejs.org) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need).
+**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need). Use Node.js 22.23.1 or a later patched 22 LTS release for local/deployed 22.x hosts; CI verifies production dependencies at the SDK floor (`>=22.3.0`) and runs the full toolchain on Node.js 22.13.0, 24, and 26.
 
 **1. Build:**
 

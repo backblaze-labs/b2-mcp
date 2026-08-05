@@ -8,6 +8,7 @@
 
 import { readdirSync, readFileSync, statSync } from "fs";
 import { join } from "path";
+import { spawnSync } from "child_process";
 import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 import { readJson, root as ROOT } from "./support";
@@ -16,7 +17,6 @@ const SDK_VERSION = "0.2.0";
 const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz";
 const SDK_INTEGRITY =
   "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==";
-const NODE_FLOOR = ">=22.13.0";
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir)
@@ -152,31 +152,14 @@ describe("SDK adoption contract", () => {
     expect(unresolved).toEqual([]);
   });
 
-  it("keeps the effective Node runtime floor aligned with the SDK", () => {
-    const pkg = readJson<{
-      engines: { node: string };
-    }>("package.json");
-    const lock = readJson<{
-      packages: Record<string, { engines?: { node?: string } }>;
-    }>("package-lock.json");
-    const v1Scope = readFileSync(join(ROOT, "docs/V1_SCOPE.md"), "utf8");
-    const deploy = readFileSync(join(ROOT, "docs/DEPLOY.md"), "utf8");
-    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
-    const ci = readFileSync(join(ROOT, ".github/workflows/test.yml"), "utf8");
+  it("delegates Node runtime and SDK floor policy to check-runtime-policy", () => {
+    const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    });
 
-    expect(pkg.engines.node).toBe(NODE_FLOOR);
-    expect(lock.packages[""]?.engines?.node).toBe(NODE_FLOOR);
-    expect(
-      compareFloor(
-        pkg.engines.node,
-        lock.packages["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node ?? "",
-      ),
-    ).toBeGreaterThanOrEqual(0);
-    expect(v1Scope).toContain("Node.js 22.13.0");
-    expect(deploy).toContain("Node.js 22.13.0 or newer");
-    expect(readme).toContain("Node.js 22.13.0 or newer");
-    expect(ci).toContain("node-version: 22.13.0");
-    expect(ci).toContain("npm ci --engine-strict");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("runtime-policy:");
   });
 
   it("keeps unsupported S3 POST presigning out of runtime dependencies", () => {

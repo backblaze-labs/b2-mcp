@@ -30,12 +30,17 @@ individual deterministic layers are:
 | `npm run test:package`  | Builds, packs, installs offline from npm cache, and verifies installed entry points. |
 | `npm run test:coverage` | Coverage for deterministic source-covering suites: unit, contract, and protocol.     |
 
-Local scripts can call each deterministic layer independently. The deploy-gating
-CI `test` job runs the bundled coverage layer plus slow deterministic lifecycle
-checks once; `test:package` runs in a separate non-blocking package job so npm
-registry availability cannot stall `ci-green`.
-The current CI check names are `lint` and `test`. If branch protection is added,
-use those names, not the retired matrix names `test (20)` or `test (22)`.
+Local scripts can call each deterministic layer independently. The Linux Node
+matrix runs the bundled coverage and slow deterministic lifecycle layers, while
+`test:package` runs in a separate non-blocking package job.
+CI verifies the production dependency graph with `npm ci --omit=dev
+--engine-strict` on the Node.js 22.3.0 package floor. The credential-free full
+toolchain gate runs on Linux for Node.js 22.13.0, 24, and 26 because the
+TypeScript 6-compatible lint toolchain requires Node.js 22.13.0 or newer. It
+also runs `npm run check:runtime-policy`, which fails if workflow or metadata
+runtime policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI
+port parsing, local-path policy, and request shutdown/signal suite runs on
+Linux, Windows, and macOS at the patched Node 22 LTS pin.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
 `typescript-eslint` declares a `<6.1.0` peer range. Widen the TypeScript range
@@ -76,6 +81,12 @@ If a selected layer has zero executed tests because every case was skipped, the
 runner exits nonzero and prints the summary path. A skipped-only run is visible
 evidence, not an authoritative pass.
 
+The `ci-green` production deploy marker depends on both the Node.js 22.3.0
+production-dependency install and the Node 22.13.0 deterministic gate. Node.js
+24 and 26 remain required PR checks, but a regression isolated to those
+non-production current lines does not freeze the production deploy ref. The
+production host is pinned to the patched Node 22 LTS line from `.nvmrc`.
+
 ## MCP Protocol Matrix
 
 Protocol tests cover the SDK v2 serving matrix used in production:
@@ -105,8 +116,8 @@ Credential-free unit tests cover the structured result serializer:
 
 - default compact JSON text output preserves the same `structuredContent`;
 - `B2_MCP_OUTPUT_FORMAT=toon` round-trips through the repo-owned encoder and
-  official `@toon-format/toon@4.1.0` dev/test decoder while preserving the same
-  `structuredContent`;
+  official `@toon-format/toon@4.1.0` dev/test decoder in a sanitized child
+  process while preserving the same `structuredContent`;
 - unknown output formats fail during config resolution;
 - HTTP header-mode readiness rejects unknown output formats and TOON preflight
   failures before serving traffic;
@@ -130,12 +141,38 @@ npm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_
 
 ## Networked Security Gate
 
-The production dependency audit is release-gate evidence and may also become a
-CI gate once #62 resolves or risk-accepts current findings:
+The full lockfile audit is release-gate evidence, a pull-request CI gate, and
+part of the `mark-green` deploy gate on `main` pushes:
 
 ```bash
-npm audit --omit=dev
+npm run audit:supply-chain
 ```
+
+Known exceptions must live in `audit-policy.json` with an expiry, maximum
+severity, dependency path, lockfile version/integrity, and rationale. The
+current policy has no exceptions; adding one requires explicit security-owner
+review.
+
+`scripts/audit-supply-chain.mjs` always runs a real `npm audit` outside
+`NODE_ENV=test`, refuses environment-injected audit fixtures in CI, sets bounded
+npm fetch retry options, and retries transient registry/network failures before
+evaluating advisories. Expired advisory exceptions fail the audit on pull
+requests and on the `main` deploy-gating path required by `mark-green`; the
+`ci-green` ref must not advance after an exception expiry without an affirmative
+policy update or exception removal. `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn`
+is reserved for non-gating reminder jobs or local operator checks and emits a
+GitHub `::warning` annotation.
+
+`mark-green` intentionally fail-closes on npm registry/advisory-service
+availability because `supply-chain-audit` makes a live `npm audit` call and
+`smoke:package` performs a cold lockfile-less consumer `npm install`. If a
+sustained npm outage blocks an urgent unrelated production hotfix, the emergency path is: get
+release-owner and security-owner approval in the incident record, verify the
+same commit passed every non-registry gate locally or in CI, confirm the commit
+is still `refs/heads/main`, then have a maintainer with write access advance
+`ci-green` to that exact SHA and immediately open a follow-up PR or issue that
+records the override. Do not use this path for new dependency changes or any
+audit-policy expiry.
 
 ## Live B2 Smoke Gate
 
@@ -155,5 +192,6 @@ The live path runs through `.github/workflows/smoke.yml`,
 that consumes `B2_*` secrets must use a protected GitHub environment, fail
 loudly when manually dispatched outside `main`, check out `ci-green` before any
 repository code runs with secrets, serialize live write tests, and reference
-only environment-scoped `LIVE_B2_*` secrets. Release-triggered live workflows
-must first prove the `v*` release tag points at `ci-green`.
+only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
+serially on patched Node 22 LTS, Node.js 24, and Node.js 26. Release-triggered
+live workflows must first prove the `v*` release tag points at `ci-green`.

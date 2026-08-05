@@ -37,7 +37,8 @@ server does not depend on `initialize` or `Mcp-Session-Id` in production.
 - A Linux host with sudo
 - A domain name pointed at the host (A record)
 - Open ports 80 (Let's Encrypt only) and 443 inbound
-- Node.js 22.13.0 or newer
+- Node.js 22.23.1 or a later patched 22 LTS release, Node.js 24, or Node.js 26.
+  The package engine floor remains `>=22.3.0` only to match the official B2 SDK.
 
 ## Security baseline
 
@@ -130,7 +131,7 @@ For other providers: any VM with 2 vCPU and 4 GB RAM works.
 
 ```bash
 sudo dnf install -y nodejs git nginx certbot python3-certbot-nginx fail2ban
-node --version  # confirm v22.13+
+node --version  # confirm patched v22 LTS, v24, or v26
 ```
 
 ## Step 3 — Build and run
@@ -532,7 +533,8 @@ It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 The workflow is gated to the canonical repo and protected refs, fails loudly
 when dispatched from a non-main ref, verifies release tags point at `ci-green`,
-and checks out `ci-green` before running package code with live secrets. It is
-then further gated by the `live-b2-smoke` GitHub environment. Configure that
-environment with branch/tag restrictions before storing live B2 secrets there.
-Add required reviewers when the repository plan supports environment reviewers.
+and checks out the resolved `ci-green` commit before running package code with
+live secrets. It is then further gated by the `live-b2-smoke` GitHub environment.
+Configure that environment with branch/tag restrictions before storing live B2
+secrets there. Add required reviewers when the repository plan supports
+environment reviewers.

@@ -15,9 +15,10 @@ name: Smoke
 # failing runs (they don't have the credentials set as secrets).
 #
 # B2 secrets and MCP_URL must live in the protected `live-b2-smoke`
-# environment. The workflow checks out `ci-green` before package code sees
-# secrets and rejects release tags that do not point at `ci-green`. Add required
-# reviewers when the repository plan supports environment reviewers.
+# environment. The workflow checks out the resolved `ci-green` commit before
+# package code sees secrets and rejects release tags that do not point at
+# `ci-green`. Add required reviewers when the repository plan supports
+# environment reviewers.
 
 on:
   workflow_dispatch:
@@ -36,13 +37,12 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     outputs:
-      checkout-ref: ${{ steps.ref.outputs.checkout_ref }}
+      checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
     steps:
       - name: Validate protected live-test ref
         id: ref
         run: |
           set -euo pipefail
-          checkout_ref="ci-green"
           protected_ref="refs/heads/ci-green"
 
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
@@ -55,40 +55,54 @@ jobs:
               echo "::error::release smoke/contract runs only accept v* tags; got ${GITHUB_REF}"
               exit 1
             fi
-            git init --quiet /tmp/live-ref-check
-            cd /tmp/live-ref-check
-            git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-            ci_green_sha="$(git ls-remote origin "${protected_ref}" | awk '{print $1}')"
-            tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}" | awk '{print $1}')"
-            if [[ -z "$tag_sha" ]]; then
-              tag_sha="$(git ls-remote origin "${GITHUB_REF}" | awk '{print $1}')"
-            fi
-            if [[ -z "$ci_green_sha" || -z "$tag_sha" || "$tag_sha" != "$ci_green_sha" ]]; then
-              echo "::error::release tag ${GITHUB_REF_NAME} must point at ${protected_ref}"
-              echo "ci_green_sha=${ci_green_sha:-missing}"
-              echo "tag_sha=${tag_sha:-missing}"
-              exit 1
-            fi
           else
             echo "::error::unsupported live-test event: ${GITHUB_EVENT_NAME}"
             exit 1
           fi
 
-          echo "checkout_ref=${checkout_ref}" >> "$GITHUB_OUTPUT"
+          git init --quiet /tmp/live-ref-check
+          cd /tmp/live-ref-check
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          ci_green_sha="$(git ls-remote origin "${protected_ref}" | awk '{print $1}')"
+          if [[ -z "$ci_green_sha" ]]; then
+            echo "::error::protected ref ${protected_ref} is missing"
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
+            tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}" | awk '{print $1}')"
+            if [[ -z "$tag_sha" ]]; then
+              tag_sha="$(git ls-remote origin "${GITHUB_REF}" | awk '{print $1}')"
+            fi
+            if [[ -z "$tag_sha" || "$tag_sha" != "$ci_green_sha" ]]; then
+              echo "::error::release tag ${GITHUB_REF_NAME} must point at ${protected_ref}"
+              echo "ci_green_sha=${ci_green_sha:-missing}"
+              echo "tag_sha=${tag_sha:-missing}"
+              exit 1
+            fi
+          fi
+
+          echo "checkout_sha=${ci_green_sha}" >> "$GITHUB_OUTPUT"
 
   smoke:
+    name: live smoke / Node ${{ matrix.node-version }}
     needs: guard
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: live-b2-smoke
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        node-version: [22.23.1, 24, 26]
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.guard.outputs.checkout-ref }}
+          ref: ${{ needs.guard.outputs.checkout-sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci --engine-strict
       - name: Validate live B2 environment

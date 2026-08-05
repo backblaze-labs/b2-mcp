@@ -7,22 +7,17 @@ import {
   TOON_IMPLEMENTATION,
   TOON_SPEC_VERSION,
 } from "../../src/utils/result-serializer";
-import type { JsonCompatible } from "../../src/utils/result-serializer";
 import {
   runWithSanitizerOptions,
   SECRET_SANITIZER_REDACTION,
 } from "../../src/utils/secret-sanitizer";
 import { toolJson } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
+import { decodeToon, TOON_DECODER_BLOCKED_ENV } from "./toon-decoder-helper";
 import { readFileSync } from "fs";
 import { join } from "path";
 
 const CANARY = "B2_MCP_CANARY_SECRET_result_serializer";
-
-async function decodeToon(text: string): Promise<JsonCompatible> {
-  const { decode } = await import("@toon-format/toon");
-  return decode(text) as JsonCompatible;
-}
 
 describe("result serializer", () => {
   it("defaults structured tool-result text to compact JSON and keeps structuredContent", async () => {
@@ -256,5 +251,22 @@ describe("result serializer", () => {
     expect(TOON_SPEC_VERSION).toBe("4.1");
     expect(packageJson.dependencies?.["@toon-format/toon"]).toBeUndefined();
     expect(packageJson.devDependencies?.["@toon-format/toon"]).toBe("4.1.0");
+  });
+
+  it("imports the third-party TOON test decoder only in a sanitized child process", async () => {
+    const saved = new Map<string, string | undefined>();
+    for (const name of TOON_DECODER_BLOCKED_ENV) {
+      saved.set(name, process.env[name]);
+      process.env[name] = `canary-${name}`;
+    }
+
+    try {
+      await expect(decodeToon("ok: true")).resolves.toEqual({ ok: true });
+    } finally {
+      for (const [name, value] of saved) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 });
