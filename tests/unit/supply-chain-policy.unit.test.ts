@@ -64,6 +64,10 @@ describe("supply-chain audit policy", () => {
     return workflowJobBlock(workflow, name) ?? "";
   }
 
+  function publishJobBlock(name: string): string {
+    return workflowJobBlock(publishWorkflow, name) ?? "";
+  }
+
   function scopedAuditReport(overrides: Record<string, unknown> = {}) {
     return {
       auditReportVersion: 2,
@@ -202,6 +206,9 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).toContain(
       "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
     );
+    expect(auditJob).toContain('sleep "$attempt"');
+    expect(auditJob).not.toContain("refs/heads/*:refs/remotes/origin/*");
+    expect(auditJob).not.toContain("--all-branches");
     expect(workflow).not.toContain("npm audit --omit=dev");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
     expect(auditJob).toContain("Reject injected audit fixtures");
@@ -231,6 +238,7 @@ describe("supply-chain audit policy", () => {
     );
     expect(packageJson.scripts.test).toBe("npm run typecheck && npm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
+    expect(packageJson.scripts.prepublishOnly).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
@@ -238,11 +246,28 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain(
       "npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
-    expect(publishWorkflow).toContain("--artifacts-dir publish-extracted");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
+    expect(publishWorkflow).toContain("retention-days: 7");
     expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
+    expect(publishWorkflow).not.toContain("tar -xzf");
+  });
+
+  it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {
+    const prepareJob = publishJobBlock("prepare");
+    const publishJob = publishJobBlock("publish");
+
+    expect(prepareJob).not.toContain("id-token: write");
+    expect(prepareJob).toContain("npm run typecheck");
+    expect(prepareJob).toContain("npm run build");
+    expect(prepareJob).toContain("persist-credentials: false");
+    expect(publishJob).toContain("id-token: write");
+    expect(publishJob).not.toContain("npm run typecheck");
+    expect(publishJob).not.toContain("npm run build");
+    expect(publishJob).not.toContain("--ignore-scripts=false");
+    expect(publishJob).toContain("npm publish");
+    expect(publishJob).toContain("--ignore-scripts");
   });
 
   it("pins every marketplace action used by the publish workflow", () => {

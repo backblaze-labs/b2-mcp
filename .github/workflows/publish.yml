@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: v* tag to publish; must point at ci-green
+        description: v* tag to publish; must be reachable from ci-green
         required: true
         type: string
 
@@ -27,6 +27,8 @@ jobs:
     steps:
       # actions/checkout v6, reviewed 2026-08-05.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
       # actions/setup-node v7, reviewed 2026-08-05.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -47,8 +49,20 @@ jobs:
         with:
           ref: ${{ steps.ref.outputs.checkout_sha }}
           fetch-depth: 0
+          persist-credentials: false
       - name: Fetch protected refs for denylist scan
-        run: git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo "::error::Could not fetch protected refs for denylist scan"
+              exit 1
+            fi
+            sleep "$attempt"
+          done
       - run: npm ci --engine-strict
       - run: npm run typecheck
       - run: npm run build
@@ -60,18 +74,16 @@ jobs:
         id: pack
         run: |
           set -euo pipefail
-          mkdir -p publish-package publish-extracted
+          mkdir -p publish-package
           npm pack --ignore-scripts --pack-destination publish-package
           tarball="$(find publish-package -maxdepth 1 -type f -name '*.tgz' | sort | head -n 1)"
           if [[ -z "$tarball" ]]; then
             echo "::error::npm pack did not produce a tarball"
             exit 1
           fi
-          tar -xzf "$tarball" -C publish-extracted
           npm run audit:supply-chain:denylist -- \
             --ref HEAD \
             --ref origin/main \
-            --artifacts-dir publish-extracted \
             --tarball "$tarball"
           echo "tarball_name=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
           echo "tarball_sha256=$(sha256sum "$tarball" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
@@ -81,7 +93,7 @@ jobs:
           name: npm-package
           path: publish-package/*.tgz
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   publish:
     needs: prepare

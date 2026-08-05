@@ -143,12 +143,13 @@ The only repository workflow allowed to publish npm packages is
 
 - runs only in the canonical `backblaze-labs/b2-mcp` repository;
 - pins every marketplace action to a reviewed commit SHA;
-- checks out the `ci-green` commit only after proving the requested `v*` tag
-  points at `ci-green`;
+- checks out the requested `v*` tag only after proving it is reachable from the
+  current `ci-green` history;
 - runs `npm ci` with lifecycle scripts still disabled;
 - builds explicitly, requires `dist/index.js` in the packlist, creates an npm
-  tarball with lifecycle scripts disabled, expands and scans that exact tarball,
-  and uploads it as a short-lived artifact;
+  tarball with lifecycle scripts disabled, scans that exact tarball through the
+  safe denylist extractor, and uploads it as a seven-day artifact for protected
+  environment approval;
 - requires a protected `npm-publish` environment only for the final publish job;
 - verifies the tarball SHA-256 before publishing;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
@@ -156,4 +157,4 @@ The only repository workflow allowed to publish npm packages is
   `npm publish <tarball> --provenance --access public --ignore-scripts`.
 
 Do not publish from a developer workstation or from a workflow that has not
-first resolved the exact `ci-green` commit.
+first proved the release tag is reachable from `ci-green`.

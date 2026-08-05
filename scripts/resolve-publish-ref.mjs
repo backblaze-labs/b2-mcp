@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 function usage() {
   return [
     "Usage: node scripts/resolve-publish-ref.mjs --tag <v*> --remote <url> [--output <path>]",
     "",
-    "Validates that the requested release tag points at refs/heads/ci-green and",
+    "Validates that the requested release tag is reachable from refs/heads/ci-green and",
     "writes checkout_sha=<sha> to the GitHub Actions output file when provided.",
   ].join("\n");
 }
@@ -52,17 +54,69 @@ function parseArgs(argv) {
   return options;
 }
 
-function lsRemote(remote, ref) {
-  const result = spawnSync("git", ["ls-remote", remote, ref], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30_000,
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(result.stderr.trim() || `git ls-remote failed for ${ref}`);
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function runGit(args, { cwd = process.cwd(), timeout = 30_000, retries = 3 } = {}) {
+  let lastResult;
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const result = spawnSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout,
+    });
+    if (!result.error && result.status === 0) return result;
+    lastResult = result;
+    if (attempt < retries) {
+      console.warn(
+        `publish-ref: git ${args[0]} failed on attempt ${attempt}; retrying in ${attempt}s`,
+      );
+      sleep(attempt * 1000);
+    }
   }
+  if (lastResult?.error) throw lastResult.error;
+  throw new Error(lastResult?.stderr.trim() || `git ${args.join(" ")} failed`);
+}
+
+function lsRemote(remote, ref) {
+  const result = runGit(["ls-remote", remote, ref]);
   return result.stdout.trim().split(/\s+/)[0] ?? "";
+}
+
+function fetchReleaseRefs(remote, tag) {
+  const workDir = mkdtempSync(path.join(tmpdir(), "b2-mcp-publish-ref-"));
+  try {
+    runGit(["init", "-b", "verify"], { cwd: workDir });
+    runGit(
+      [
+        "fetch",
+        "--no-tags",
+        remote,
+        "+refs/heads/ci-green:refs/remotes/origin/ci-green",
+        `+refs/tags/${tag}:refs/tags/${tag}`,
+      ],
+      { cwd: workDir, timeout: 120_000 },
+    );
+    const tagSha = runGit(["rev-parse", `refs/tags/${tag}^{}`], { cwd: workDir }).stdout.trim();
+    const ciGreenSha = runGit(["rev-parse", "refs/remotes/origin/ci-green"], {
+      cwd: workDir,
+    }).stdout.trim();
+    const ancestor = spawnSync(
+      "git",
+      ["merge-base", "--is-ancestor", tagSha, "refs/remotes/origin/ci-green"],
+      {
+        cwd: workDir,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 30_000,
+      },
+    );
+    return { tagSha, ciGreenSha, isAncestor: ancestor.status === 0 };
+  } finally {
+    rmSync(workDir, { recursive: true, force: true });
+  }
 }
 
 const options = parseArgs(process.argv.slice(2));
@@ -84,12 +138,24 @@ if (!tagSha) {
   console.error(`::error::refs/tags/${options.tag} is missing`);
   process.exit(1);
 }
-if (tagSha !== ciGreenSha) {
-  console.error(`::error::refs/tags/${options.tag} must point at refs/heads/ci-green`);
+
+const fetched = fetchReleaseRefs(options.remote, options.tag);
+if (lsRemote(options.remote, "refs/heads/ci-green") !== ciGreenSha) {
+  console.error("::error::refs/heads/ci-green changed while resolving release tag");
+  process.exit(1);
+}
+if (fetched.tagSha !== tagSha) {
+  console.error(`::error::refs/tags/${options.tag} changed while resolving release tag`);
+  process.exit(1);
+}
+if (!fetched.isAncestor) {
+  console.error(`::error::refs/tags/${options.tag} must be reachable from refs/heads/ci-green`);
   console.error(`ci_green_sha=${ciGreenSha}`);
   console.error(`tag_sha=${tagSha}`);
   process.exit(1);
 }
 
-if (options.output) appendFileSync(options.output, `checkout_sha=${ciGreenSha}\n`);
-console.log(`publish-ref: ${options.tag} resolves to ci-green ${ciGreenSha}`);
+if (options.output) appendFileSync(options.output, `checkout_sha=${tagSha}\n`);
+console.log(
+  `publish-ref: ${options.tag} resolves to ${tagSha}, reachable from ci-green ${ciGreenSha}`,
+);

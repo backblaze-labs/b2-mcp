@@ -218,4 +218,5 @@ loudly when manually dispatched outside `main`, check out `ci-green` before any
 repository code runs with secrets, serialize live write tests, and reference
 only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
 serially on patched Node 22 LTS, Node.js 24, and Node.js 26. Release-triggered
-live workflows must first prove the `v*` release tag points at `ci-green`.
+live workflows must first prove the `v*` release tag is reachable from
+`ci-green`.

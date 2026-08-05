@@ -52,6 +52,25 @@ describe("publish ref resolver", () => {
     });
   });
 
+  it("accepts a v tag that is an ancestor of the current ci-green tip", () => {
+    withTempDir((dir) => {
+      const tagSha = createRepo(dir);
+      runGit(dir, ["tag", "--no-sign", "v0.1.0", tagSha]);
+      writeFileSync(join(dir, "README.md"), "later green commit\n");
+      runGit(dir, ["add", "README.md"]);
+      runGit(dir, ["commit", "-m", "later"]);
+      const ciGreenSha = runGit(dir, ["rev-parse", "HEAD"]);
+      runGit(dir, ["branch", "ci-green", ciGreenSha]);
+      const output = join(dir, "github-output");
+
+      const result = runResolver(dir, "v0.1.0", output);
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, "utf8")).toBe(`checkout_sha=${tagSha}\n`);
+      expect(result.stdout).toContain(`reachable from ci-green ${ciGreenSha}`);
+    });
+  });
+
   it("rejects tags that do not start with v", () => {
     withTempDir((dir) => {
       const sha = createRepo(dir);
@@ -65,7 +84,7 @@ describe("publish ref resolver", () => {
     });
   });
 
-  it("rejects a release tag that does not point at ci-green", () => {
+  it("rejects a release tag that is not reachable from ci-green", () => {
     withTempDir((dir) => {
       const ciGreenSha = createRepo(dir);
       runGit(dir, ["branch", "ci-green", ciGreenSha]);
@@ -78,7 +97,7 @@ describe("publish ref resolver", () => {
       const result = runResolver(dir, "v0.2.0");
 
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain("must point at refs/heads/ci-green");
+      expect(result.stderr).toContain("must be reachable from refs/heads/ci-green");
       expect(result.stderr).toContain(`ci_green_sha=${ciGreenSha}`);
       expect(result.stderr).toContain(`tag_sha=${tagSha}`);
     });
