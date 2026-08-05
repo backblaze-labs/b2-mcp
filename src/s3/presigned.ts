@@ -43,9 +43,6 @@ export function registerS3PresignedTools(server: ToolRegistrar, b2: B2Client): v
     },
     async (args) => {
       try {
-        if (args.operation !== "GetObject" && args.operation !== "PutObject") {
-          return toolError(new Error("operation must be GetObject or PutObject."));
-        }
         return toolJson(
           await b2.s3PresignObjectUrl({
             bucket: args.bucket,

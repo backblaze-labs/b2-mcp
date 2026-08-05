@@ -4,7 +4,14 @@
  * simulator; only S3-material bucket/multipart operations mock S3Client.send.
  */
 
-import { B2Client as SdkB2Client, BucketType, BufferSource, SSE_B2 } from "@backblaze-labs/b2-sdk";
+import {
+  B2Client as SdkB2Client,
+  Bucket,
+  BucketType,
+  BufferSource,
+  FileAction,
+  SSE_B2,
+} from "@backblaze-labs/b2-sdk";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
@@ -151,6 +158,31 @@ describe("s3_list_objects_v2", () => {
 
     expect(result.objects.map((object: { Key: string }) => object.Key)).toEqual(["b.txt", "c.txt"]);
     expect(result.isTruncated).toBe(false);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("excludes common prefixes from keyCount when using a delimiter", async () => {
+    const bucket = await createBucket("list-bucket");
+    const root = await bucket.upload({
+      fileName: "root.txt",
+      source: new BufferSource(new TextEncoder().encode("root")),
+    });
+    jest.spyOn(Bucket.prototype, "listFileNames").mockResolvedValue({
+      files: [{ ...root, action: FileAction.Folder, fileName: "folder/" }, root],
+      nextFileName: null,
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_list_objects_v2", {
+        bucket: "list-bucket",
+        delimiter: "/",
+      }),
+    );
+
+    expect(result.objects.map((object: { Key: string }) => object.Key)).toEqual(["root.txt"]);
+    expect(result.commonPrefixes).toEqual([{ Prefix: "folder/" }]);
+    expect(result.keyCount).toBe(1);
+    expect(result.keyCount).toBe(result.objects.length);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 });
@@ -491,15 +523,11 @@ describe("s3_get_presigned_url", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("rejects omitted operation instead of relying on runtime defaults", async () => {
-    const result = await callTool(server, "s3_get_presigned_url", {
-      bucket: "my-bucket",
-      key: "photo.jpg",
-    });
+  it("requires operation in the registered input schema", () => {
+    const tool = getRegisteredTools(server)?.["s3_get_presigned_url"];
+    const result = tool?.inputSchema?.safeParse({ bucket: "my-bucket", key: "photo.jpg" });
 
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/operation must be GetObject or PutObject/);
-    expect(sendSpy).not.toHaveBeenCalled();
+    expect(result?.success).toBe(false);
   });
 
   it("generates URLs while the native circuit breaker is open", async () => {

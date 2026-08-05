@@ -1472,7 +1472,7 @@ export class B2Client {
         commonPrefixes,
         isTruncated: nextContinuationToken !== undefined,
         nextContinuationToken,
-        keyCount: files.length,
+        keyCount: objects.length,
       };
     });
   }
