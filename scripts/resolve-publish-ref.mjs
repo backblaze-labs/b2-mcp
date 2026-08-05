@@ -80,9 +80,29 @@ function runGit(args, { cwd = process.cwd(), timeout = 30_000, retries = 3 } = {
   throw new Error(lastResult?.stderr.trim() || `git ${args.join(" ")} failed`);
 }
 
+function lsRemoteRefs(remote, refs) {
+  const result = runGit(["ls-remote", remote, ...refs]);
+  return new Map(
+    result.stdout
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const [sha, ref] = line.split(/\s+/, 2);
+        return [ref, sha];
+      }),
+  );
+}
+
 function lsRemote(remote, ref) {
-  const result = runGit(["ls-remote", remote, ref]);
-  return result.stdout.trim().split(/\s+/)[0] ?? "";
+  return lsRemoteRefs(remote, [ref]).get(ref) ?? "";
+}
+
+function lsRemoteTagCommit(remote, tag) {
+  const tagRef = `refs/tags/${tag}`;
+  const peeledRef = `${tagRef}^{}`;
+  const refs = lsRemoteRefs(remote, [tagRef, peeledRef]);
+  return refs.get(peeledRef) ?? refs.get(tagRef) ?? "";
 }
 
 function fetchReleaseRefs(remote, tag) {
@@ -135,8 +155,7 @@ if (!publishTagPattern.test(options.tag)) {
 }
 
 const ciGreenSha = lsRemote(options.remote, "refs/heads/ci-green");
-let tagSha = lsRemote(options.remote, `refs/tags/${options.tag}^{}`);
-if (!tagSha) tagSha = lsRemote(options.remote, `refs/tags/${options.tag}`);
+const tagSha = lsRemoteTagCommit(options.remote, options.tag);
 
 if (!ciGreenSha) {
   console.error("::error::refs/heads/ci-green is missing");

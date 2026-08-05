@@ -52,6 +52,23 @@ describe("publish ref resolver", () => {
     });
   });
 
+  it("peels an annotated release tag to its commit", () => {
+    withTempDir((dir) => {
+      const sha = createRepo(dir);
+      runGit(dir, ["branch", "ci-green", sha]);
+      runGit(dir, ["tag", "--annotate", "v0.1.0", "--message", "release", sha]);
+      const tagObjectSha = runGit(dir, ["rev-parse", "refs/tags/v0.1.0"]);
+      const output = join(dir, "github-output");
+
+      const result = runResolver(dir, "v0.1.0", output);
+
+      expect(tagObjectSha).not.toBe(sha);
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, "utf8")).toBe(`checkout_sha=${sha}\n`);
+      expect(result.stdout).toContain(`v0.1.0 resolves to ${sha}`);
+    });
+  });
+
   it("accepts a v tag that is an ancestor of the current ci-green tip", () => {
     withTempDir((dir) => {
       const tagSha = createRepo(dir);
