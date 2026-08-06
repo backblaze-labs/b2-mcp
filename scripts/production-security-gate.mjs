@@ -1,5 +1,14 @@
 #!/usr/bin/env node
-import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,14 +73,64 @@ function parseArgs(argv) {
   return options;
 }
 
+function pathInsideRoot(rootDir, target) {
+  const relative = path.relative(rootDir, target);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function pathStrictlyInsideRoot(rootDir, target) {
+  const relative = path.relative(rootDir, target);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function realTargetForWrite(resolved) {
+  let existing = resolved;
+  while (!existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    existing = parent;
+  }
+
+  const realExisting = realpathSync(existing);
+  const tail = path.relative(existing, resolved);
+  return tail ? path.resolve(realExisting, tail) : realExisting;
+}
+
+function ensureAuditDirectory(auditRoot) {
+  if (!existsSync(auditRoot)) mkdirSync(auditRoot, { recursive: false });
+  const stats = lstatSync(auditRoot);
+  if (stats.isSymbolicLink()) {
+    console.error("production-security-gate: .audit/ must not be a symbolic link");
+    process.exit(2);
+  }
+  if (!stats.isDirectory()) {
+    console.error("production-security-gate: .audit/ must be a directory");
+    process.exit(2);
+  }
+
+  const realRoot = realpathSync(root);
+  const realAuditRoot = realpathSync(auditRoot);
+  if (!pathInsideRoot(realRoot, realAuditRoot)) {
+    console.error("production-security-gate: .audit/ real path must be inside the repository");
+    process.exit(2);
+  }
+  return realAuditRoot;
+}
+
 function assertAuditRoot(target) {
   const resolved = path.resolve(root, target);
   const auditRoot = path.join(root, ".audit");
-  if (!resolved.startsWith(`${auditRoot}${path.sep}`)) {
+  if (!pathStrictlyInsideRoot(auditRoot, resolved)) {
     console.error("production-security-gate: audit root must be inside .audit/");
     process.exit(2);
   }
-  return resolved;
+  const realAuditRoot = ensureAuditDirectory(auditRoot);
+  const realTarget = realTargetForWrite(resolved);
+  if (!pathStrictlyInsideRoot(realAuditRoot, realTarget)) {
+    console.error("production-security-gate: audit root real path must be inside .audit/");
+    process.exit(2);
+  }
+  return realTarget;
 }
 
 function packageNameFromNodeModulesPath(lockPath) {

@@ -1,11 +1,15 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -482,6 +486,7 @@ describe("supply-chain audit policy", () => {
 
   it.each([
     { badTarget: "..", sentinelRoot: null },
+    { badTarget: ".audit", sentinelRoot: null },
     {
       badTarget: "../b2-mcp-audit-outside-test",
       sentinelRoot: resolve(root, "../b2-mcp-audit-outside-test"),
@@ -515,6 +520,85 @@ describe("supply-chain audit policy", () => {
       if (sentinel) expect(existsSync(sentinel)).toBe(true);
     } finally {
       if (sentinelRoot) rmSync(sentinelRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a symlinked child path under .audit/", () => {
+    if (process.platform === "win32") return;
+
+    const auditRoot = join(root, ".audit");
+    const outside = mkdtempSync(join(tmpdir(), "b2-mcp-audit-link-outside-"));
+    const link = join(auditRoot, "test-production-link");
+    const sentinel = join(outside, "sentinel");
+
+    mkdirSync(auditRoot, { recursive: true });
+    rmSync(link, { recursive: true, force: true });
+    writeFileSync(sentinel, "do-not-delete", { flag: "wx" });
+
+    try {
+      symlinkSync(outside, link, "dir");
+      const result = spawnSync(
+        process.execPath,
+        [
+          "scripts/production-security-gate.mjs",
+          "--prepare-only",
+          "--audit-root",
+          ".audit/test-production-link/generated",
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+        },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("audit root real path must be inside .audit/");
+      expect(existsSync(sentinel)).toBe(true);
+      expect(existsSync(join(outside, "generated"))).toBe(false);
+    } finally {
+      if (existsSync(link) && lstatSync(link).isSymbolicLink()) unlinkSync(link);
+      else rmSync(link, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a symlinked .audit directory", () => {
+    if (process.platform === "win32") return;
+
+    const auditRoot = join(root, ".audit");
+    const backup = join(root, `.audit-backup-${process.pid}-${Date.now()}`);
+    const outside = mkdtempSync(join(tmpdir(), "b2-mcp-audit-root-outside-"));
+    const sentinel = join(outside, "sentinel");
+    const hadAuditRoot = existsSync(auditRoot);
+
+    try {
+      if (hadAuditRoot) renameSync(auditRoot, backup);
+      writeFileSync(sentinel, "do-not-delete", { flag: "wx" });
+      symlinkSync(outside, auditRoot, "dir");
+
+      const result = spawnSync(
+        process.execPath,
+        [
+          "scripts/production-security-gate.mjs",
+          "--prepare-only",
+          "--audit-root",
+          ".audit/test-production-symlinked-root",
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+        },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(".audit/ must not be a symbolic link");
+      expect(existsSync(sentinel)).toBe(true);
+      expect(existsSync(join(outside, "test-production-symlinked-root"))).toBe(false);
+    } finally {
+      if (existsSync(auditRoot) && lstatSync(auditRoot).isSymbolicLink()) unlinkSync(auditRoot);
+      else rmSync(auditRoot, { recursive: true, force: true });
+      if (hadAuditRoot && existsSync(backup)) renameSync(backup, auditRoot);
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 
