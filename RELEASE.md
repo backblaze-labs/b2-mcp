@@ -60,6 +60,7 @@ Before publishing `v0.1.0`:
     workstation. The publish workflow must prove the `v*` tag is reachable from
     `ci-green`, build explicitly, enforce the runtime package budget, scan the
     generated packlist and tarball, generate and verify a CycloneDX production
-    SBOM artifact, run the protected live B2 contract suite with bounded retry,
-    attach the SBOM to the GitHub Release, verify the tarball SHA-256, and
-    publish the already-scanned tarball with lifecycle scripts disabled.
+    SBOM artifact, run the protected live B2 contract suite once, verify the
+    tarball SHA-256, publish the already-scanned tarball with lifecycle scripts
+    disabled, and attach the SBOM to the GitHub Release only after npm publish
+    succeeds.

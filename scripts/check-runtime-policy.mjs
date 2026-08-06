@@ -196,7 +196,18 @@ requireWorkflowNodeVersionInJob(
   policy.minimumEvidenceNode,
   "package install smoke",
 );
+requireWorkflowNodeVersionInJob(
+  ".github/workflows/test.yml",
+  "runtime-engine-floor",
+  policy.engineFloor.replace(/^>=/, ""),
+  "runtime engine floor",
+);
 requireContains(".github/workflows/test.yml", "pnpm run verify", "local verification entry point");
+requireContains(
+  ".github/workflows/test.yml",
+  "node scripts/packed-consumer-smoke.mjs --tarball",
+  "runtime engine floor package smoke",
+);
 requireWorkflowMatrixInJob(
   ".github/workflows/test.yml",
   "unit-coverage-matrix",
@@ -209,14 +220,14 @@ requireWorkflowMatrixInJob(
   "node-version",
   policy.deterministicLinuxMatrix,
 );
-requireWorkflowMatrixInJob(".github/workflows/test.yml", "cross-platform-minimum", "os", [
+requireWorkflowMatrixInJob(".github/workflows/test.yml", "cross-platform-minimum-matrix", "os", [
   "ubuntu-latest",
   "windows-latest",
   "macos-latest",
 ]);
 requireWorkflowNodeVersionInJob(
   ".github/workflows/test.yml",
-  "cross-platform-minimum",
+  "cross-platform-minimum-matrix",
   policy.crossPlatformNode,
   "cross-platform minimum",
 );

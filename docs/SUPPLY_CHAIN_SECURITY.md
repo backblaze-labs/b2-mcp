@@ -23,8 +23,9 @@ direct doc-lint packages are exact-pinned in `package.json`; the lockfile
 snapshot above remains unchanged after reintroducing that narrow ESLint path.
 Reviewer-owned dependency overrides live only in
 [`../pnpm-workspace.yaml`](../pnpm-workspace.yaml), where the current entries
-pin reviewed transitive fixes for `@hono/node-server`, `brace-expansion`, and
-`js-yaml` without duplicating override policy in `package.json`.
+pin reviewed transitive fixes for `@hono/node-server`, `brace-expansion`,
+`eslint-visitor-keys`, and `js-yaml` without duplicating override policy in
+`package.json`.
 
 Those are not the denied malicious versions recorded in the checked-in Wiz IOC
 snapshot at [`../security/iocs/keyv-packages.csv`](../security/iocs/keyv-packages.csv)
@@ -194,12 +195,13 @@ The only repository workflow allowed to publish npm packages is
   lifecycle scripts disabled, scans that exact tarball through the safe denylist
   extractor, and uploads the tarball plus SBOM as seven-day artifacts for
   protected environment approval;
-- runs the protected live B2 contract suite with bounded retry on the exact
-  publish ref before the npm publish job can start;
+- runs the protected live B2 contract suite once on the exact publish ref before
+  the npm publish job can start;
 - requires a protected `npm-publish` environment only for the final publish job;
 - verifies the tarball SHA-256 before publishing;
 - verifies the SBOM SHA-256 and attaches the SBOM to the pre-created GitHub
-  Release from a separate job that does not hold npm OIDC permission;
+  Release only after the npm publish job succeeds, from a separate job that does
+  not hold npm OIDC permission;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
 - publishes the prebuilt tarball with lifecycle scripts disabled:
   `npm publish <tarball> --provenance --access public --ignore-scripts`.

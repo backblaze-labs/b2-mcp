@@ -33,8 +33,13 @@ Required CI check names for `main` protection:
 - [ ] `MCP contract`
 - [ ] `modern and legacy protocol/transport`
 - [ ] `package install smoke`
+- [ ] `runtime engine floor`
 - [ ] `production dependency audit`
+- [ ] `package budget`
+- [ ] `supply-chain audit`
 - [ ] `CodeQL/workflow security`
+- [ ] `slow/lifecycle`
+- [ ] `cross-platform minimum`
 
 ## Security / Credential Handling
 

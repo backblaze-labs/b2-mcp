@@ -254,6 +254,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:package
+      - name: Pack runtime floor tarball
+        run: |
+          mkdir -p reports/package/floor
+          npm pack --json --ignore-scripts --pack-destination reports/package/floor > reports/package/runtime-floor-pack.json
       - name: Capture npm pack manifest
         run: |
           mkdir -p reports/package
@@ -266,10 +270,41 @@ jobs:
           name: package-install-smoke
           path: |
             reports/package/npm-pack-manifest.json
+            reports/package/runtime-floor-pack.json
+            reports/package/floor/*.tgz
             reports/junit/package.xml
             reports/vitest/package.json
           if-no-files-found: error
           retention-days: 7
+
+  runtime-engine-floor:
+    name: runtime engine floor
+    needs: package-install-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.3.0
+      # actions/download-artifact v6, reviewed 2026-08-06.
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: package-install-smoke
+          path: reports/package-install-smoke
+      - name: Run packed consumer smoke on Node.js 22.3.0
+        run: |
+          set -euo pipefail
+          tarball="$(find reports/package-install-smoke -name '*.tgz' -type f -print -quit)"
+          if [[ -z "$tarball" ]]; then
+            echo "::error::package-install-smoke artifact did not contain a packed tarball"
+            exit 1
+          fi
+          node scripts/packed-consumer-smoke.mjs --tarball "$tarball"
 
   production-dependency-audit-matrix:
     name: production dependency audit / Node ${{ matrix.node-version }}
@@ -467,7 +502,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  cross-platform-minimum:
+  cross-platform-minimum-matrix:
     name: cross-platform minimum / ${{ matrix.os }}
     needs: runtime-policy
     runs-on: ${{ matrix.os }}
@@ -494,17 +529,17 @@ jobs:
       - run: pnpm run build
       - run: pnpm run test:cross-platform
 
-  cross-platform-minimum-required:
+  cross-platform-minimum:
     name: cross-platform minimum
-    needs: cross-platform-minimum
+    needs: cross-platform-minimum-matrix
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require complete cross-platform minimum matrix
         run: |
-          if [[ "${{ needs.cross-platform-minimum.result }}" != "success" ]]; then
-            echo "::error::cross-platform minimum matrix result was ${{ needs.cross-platform-minimum.result }}"
+          if [[ "${{ needs.cross-platform-minimum-matrix.result }}" != "success" ]]; then
+            echo "::error::cross-platform minimum matrix result was ${{ needs.cross-platform-minimum-matrix.result }}"
             exit 1
           fi
 
@@ -517,12 +552,13 @@ jobs:
       - mcp-contract
       - protocol-transport
       - package-install-smoke
+      - runtime-engine-floor
       - production-dependency-audit
       - package-budget
       - supply-chain-audit
       - codeql-workflow-security
       - slow-lifecycle
-      - cross-platform-minimum-required
+      - cross-platform-minimum
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -541,6 +577,7 @@ jobs:
           | Modern MCP protocol | 2026-07-28 over Streamable HTTP and stdio |
           | Legacy MCP fallback | 2025-era stateless initialize compatibility |
           | Linux deterministic Node matrix | 22.23.1, 24, 26 |
+          | Runtime engine floor | Node.js 22.3.0 package install smoke |
           | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
           | Package budget metrics | Uploaded as package-budget artifact |
           | Required issue | backblaze-labs/b2-mcp#50 |
@@ -555,12 +592,13 @@ jobs:
       - mcp-contract
       - protocol-transport
       - package-install-smoke
+      - runtime-engine-floor
       - production-dependency-audit
       - package-budget
       - supply-chain-audit
       - codeql-workflow-security
       - slow-lifecycle
-      - cross-platform-minimum-required
+      - cross-platform-minimum
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:

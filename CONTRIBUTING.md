@@ -19,7 +19,7 @@ corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e536
 pnpm install --frozen-lockfile
 pnpm run build        # clean + tsc → dist/
 pnpm test             # typecheck, then fast unit suite
-pnpm run verify       # full no-credential local gate
+pnpm run verify       # fast no-credential quality gate
 pnpm run lint         # Biome lint for src/, tests/, and scripts/
 pnpm run format:check # checks Biome-supported formatting
 ```
@@ -50,11 +50,11 @@ Test files must follow the layer suffix convention documented in
 ## Pull requests
 
 - Branch off `main`; keep changes focused.
-- `pnpm run verify` must pass before opening a PR. CI runs the bundled
-  deterministic coverage and slow layers on Node.js 22.23.1, 24, and 26, checks
-  production dependency audit evidence on the same matrix, and runs a patched
-  Node 22 LTS cross-platform suite. A separate package-install job stays off the
-  deploy-gating path.
+- `pnpm run verify` must pass before opening a PR. CI runs deterministic
+  coverage, slow lifecycle, and production dependency audit evidence on Node.js
+  22.23.1, 24, and 26, runs a patched Node 22 LTS cross-platform suite, and
+  exercises the advertised Node.js 22.3.0 engine floor with a packed-package
+  smoke. Package-install evidence is a separate required gate.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
 - Update `CHANGELOG.md` under the appropriate heading.

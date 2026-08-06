@@ -239,7 +239,7 @@ pnpm run test:coverage      # deterministic source-covering suites + coverage su
 pnpm run test:diagnostics   # MaxListeners/open-handle warning diagnostics
 pnpm run test:slow          # deterministic high-cost tests, isolated from unit
 pnpm run test:package       # packed-package installation test
-pnpm run verify             # complete no-credential local gate
+pnpm run verify             # fast no-credential quality gate
 pnpm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 pnpm run test:contract:live    # live B2 request-shape checks; requires B2 credentials
 pnpm start                  # stdio transport

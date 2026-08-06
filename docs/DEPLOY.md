@@ -542,6 +542,9 @@ The same script also runs automatically via `.github/workflows/smoke.yml`:
 - After every `release.published` event (so a `gh release create` triggers it)
 - On manual `workflow_dispatch` from the Actions tab when run from `main`
 
+There is no recurring smoke cron until a stable monitored endpoint and
+alert-deduplicated routing are owned outside release CI.
+
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)

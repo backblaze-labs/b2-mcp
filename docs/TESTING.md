@@ -18,8 +18,9 @@ pnpm run verify
 
 `pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, local
 Markdown link validation, the Biome-supported format check, spelling,
-deterministic coverage, and listener diagnostics across all non-live layers,
-including slow lifecycle and packed-package installation tests.
+and listener diagnostics across the fast non-live layers. Coverage, slow
+lifecycle, and packed-package installation evidence stay in distinct scripts and
+CI jobs so their failures do not mask each other.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
@@ -42,9 +43,10 @@ protocol failure, production-audit findings, package-budget drift, and broken
 package installs fail independently. The Linux deterministic Node matrix is
 exactly Node.js 22.23.1, 24, and 26. Slow lifecycle tests run in a dedicated
 bounded job with one Vitest worker, and the cross-platform fast suite runs on
-Linux, Windows, and macOS at Node.js 22.23.1. The coverage aggregate disables file
-parallelism so contract fixture reports, dist rebuilds, and package packing do
-not race each other.
+Linux, Windows, and macOS at Node.js 22.23.1. A separate runtime engine floor job
+runs the packed-consumer install smoke on Node.js 22.3.0. The coverage aggregate
+disables file parallelism so contract fixture reports, dist rebuilds, and
+package packing do not race each other.
 
 The stable required PR check names are:
 
@@ -54,6 +56,7 @@ The stable required PR check names are:
 - `MCP contract`
 - `modern and legacy protocol/transport`
 - `package install smoke`
+- `runtime engine floor`
 - `production dependency audit`
 - `package budget`
 - `supply-chain audit`
@@ -95,8 +98,9 @@ behavior, coverage, protocol, and production dependency audit evidence on the
 required Node.js matrix. The `format/lint/typecheck` job runs the same
 `pnpm run verify` entry point used locally, and `pnpm run check:runtime-policy`
 fails if workflow or metadata runtime policy drifts. Cross-platform coverage
-stays lean: the fast stdio, CLI port parsing, local-path policy, and request
-shutdown/signal suite runs on Linux, Windows, and macOS at Node.js 22.23.1.
+stays lean: the fast stdio, installed CLI/bin, CLI port parsing, local-path
+policy, and request shutdown/signal suite runs on Linux, Windows, and macOS at
+Node.js 22.23.1.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
@@ -145,15 +149,18 @@ evidence, not an authoritative pass.
 
 The owned `ci-green` marker advances only on successful `main` pushes after the
 required deterministic, package, audit, package-budget, supply-chain, workflow
-security, slow lifecycle, and cross-platform jobs pass. It is not a PR deploy
-path. Leak diagnostics remain part of `pnpm run verify` and fail on
+security, runtime floor, slow lifecycle, and cross-platform jobs pass. It is not
+a PR deploy path. Leak diagnostics remain part of `pnpm run verify` and fail on
 `MaxListenersExceededWarning`, EventEmitter leak warnings, or Vitest close-timeout
 open-handle warnings until teardown is clean. Node.js 22.23.1, 24, and 26 are all
-required CI evidence for Phase 1.
+required CI evidence for Phase 1, with Node.js 22.3.0 exercised by the runtime
+engine floor package smoke.
 
 Branch protection for `main` must require the stable check names above, require
 at least one approving review, dismiss stale approvals when new commits are
 pushed, require branches to be up to date before merge, and block force pushes.
+CODEOWNER review is mandatory for protected workflow, package metadata, and
+lockfile policy changes.
 The reviewed settings are recorded in
 [`../.github/branch-protection-main.json`](../.github/branch-protection-main.json).
 Do not add B2 credential requirements to normal pull-request checks. This

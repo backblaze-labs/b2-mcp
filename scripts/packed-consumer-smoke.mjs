@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -67,7 +67,30 @@ function run(command, args, options = {}) {
   );
 }
 
+function parseArgs(argv) {
+  let tarball = null;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--tarball") {
+      const value = argv[index + 1];
+      if (!value) throw new Error("packed-consumer-smoke: --tarball requires a path");
+      tarball = path.resolve(process.cwd(), value);
+      index += 1;
+    } else if (arg.startsWith("--tarball=")) {
+      tarball = path.resolve(process.cwd(), arg.slice("--tarball=".length));
+    } else {
+      throw new Error(`packed-consumer-smoke: unknown argument ${arg}`);
+    }
+  }
+  if (tarball && !statSync(tarball).isFile()) {
+    throw new Error(`packed-consumer-smoke: tarball is not a file: ${tarball}`);
+  }
+  return { tarball };
+}
+
 try {
+  const args = parseArgs(process.argv.slice(2));
+
   run(
     process.execPath,
     [
@@ -81,16 +104,20 @@ try {
     { env: sanitizerBlockedEnv },
   );
 
-  const packed = run(
-    "npm",
-    ["pack", "--json", "--ignore-scripts", "--pack-destination", workspace],
-    {
-      cwd: root,
-      env: sanitizerBlockedEnv,
-    },
-  );
-  const [{ filename }] = JSON.parse(packed.stdout);
-  const tarball = path.join(workspace, filename);
+  let tarball = args.tarball;
+  if (!tarball) {
+    const packed = run(
+      "npm",
+      ["pack", "--json", "--ignore-scripts", "--pack-destination", workspace],
+      {
+        cwd: root,
+        env: sanitizerBlockedEnv,
+      },
+    );
+    const [{ filename }] = JSON.parse(packed.stdout);
+    tarball = path.join(workspace, filename);
+  }
+  const filename = path.basename(tarball);
 
   writeFileSync(
     path.join(workspace, "package.json"),

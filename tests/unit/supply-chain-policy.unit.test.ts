@@ -454,7 +454,8 @@ describe("supply-chain audit policy", () => {
       "format-lint-typecheck",
       "unit-coverage",
       "package-install-smoke",
-      "cross-platform-minimum-required",
+      "runtime-engine-floor",
+      "cross-platform-minimum",
       "production-dependency-audit",
       "package-budget",
       "supply-chain-audit",
@@ -504,7 +505,10 @@ describe("supply-chain audit policy", () => {
     expect(attachSbomJob).toContain("actions: read");
     expect(attachSbomJob).toContain("contents: write");
     expect(attachSbomJob).not.toContain("id-token: write");
+    expect(attachSbomJob).toContain("needs: [prepare, publish]");
+    expect(attachSbomJob).toContain("Attach SBOM to GitHub release after npm publish");
     expect(attachSbomJob).toContain('sha256sum "$sbom"');
+    expect(publishJob).toContain("needs: [prepare, live-contract]");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).not.toContain("contents: write");

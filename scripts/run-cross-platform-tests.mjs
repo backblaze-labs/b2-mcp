@@ -14,6 +14,7 @@ const testFiles = [
   "tests/protocol/stdio.modern-protocol.test.ts",
   "tests/protocol/stdio.transport.modern-protocol.test.ts",
   "tests/protocol/stdio.transport.legacy-protocol.test.ts",
+  "tests/package/packed-install.package.test.ts",
 ];
 const tests = testFiles.map((name) => path.join(root, name));
 

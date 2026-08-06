@@ -2,7 +2,6 @@ name: Smoke
 
 # Runs an end-to-end smoke test against the live server.
 # Triggers:
-#   - schedule:           6-hour heartbeat against the protected live smoke environment
 #   - workflow_dispatch:  manual trigger from the Actions tab, from main only
 #   - release.published:  after a tagged release is published, only when the tag
 #                         points at the ci-green ref
@@ -15,10 +14,11 @@ name: Smoke
 # package code sees secrets and rejects release tags that do not point at
 # `ci-green`. Add required reviewers when the repository plan supports
 # environment reviewers.
+#
+# The 6-hour schedule heartbeat is intentionally disabled until a stable
+# monitored endpoint and alert-deduplication path are owned outside release CI.
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
   workflow_dispatch:
   release:
     types: [published]
@@ -43,9 +43,7 @@ jobs:
           set -euo pipefail
           protected_ref="refs/heads/ci-green"
 
-          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            echo "Scheduled smoke will run against ${protected_ref}"
-          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
               echo "::error::workflow_dispatch must run from main; got ${GITHUB_REF}"
               exit 1

@@ -3,6 +3,9 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync }
 import { createRequire } from "module";
 import { join, relative } from "path";
 import { tmpdir } from "os";
+import { pathToFileURL } from "url";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { readLock, root } from "../contract/support";
 
 const nodeRequire = createRequire(__filename);
@@ -149,7 +152,7 @@ function installPackedConsumer(appDir: string, cacheDir: string): void {
 }
 
 describe("packed package", () => {
-  it("installs from npm pack and exposes the package entry point", () => {
+  it("installs from npm pack and exposes the package entry point", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "b2-mcp-package-"));
 
     try {
@@ -223,7 +226,43 @@ describe("packed package", () => {
         },
       );
 
-      expect(statSync(join(appDir, "node_modules", ".bin", "b2-mcp")).isFile()).toBe(true);
+      const binPath = join(
+        appDir,
+        "node_modules",
+        ".bin",
+        process.platform === "win32" ? "b2-mcp.cmd" : "b2-mcp",
+      );
+      expect(statSync(binPath).isFile()).toBe(true);
+
+      const transport = new StdioClientTransport({
+        command: binPath,
+        cwd: appDir,
+        env: {
+          PATH: process.env.PATH ?? "",
+          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+          ...(process.env.ComSpec ? { ComSpec: process.env.ComSpec } : {}),
+          ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+          B2_REGISTER_ALL_TOOLS: "true",
+          B2_APPLICATION_KEY_ID: "package-bin-key-id",
+          B2_APPLICATION_KEY: "package-bin-key-secret",
+          LOG_LEVEL: "silent",
+          NODE_OPTIONS: `--import ${pathToFileURL(join(root, "scripts/no-network-guard.mjs")).href}`,
+        },
+        stderr: "pipe",
+      });
+      const client = new Client(
+        { name: "b2-mcp-package-bin-smoke", version: "1.0.0" },
+        { versionNegotiation: { mode: "auto", probe: { timeoutMs: 5_000 } } },
+      );
+      try {
+        await client.connect(transport, { timeout: 10_000 });
+        const listed = await client.listTools(undefined, { timeout: 10_000 });
+        expect(listed.tools.map((tool) => tool.name)).toEqual(
+          expect.arrayContaining(["b2_list_buckets", "s3_list_objects_v2"]),
+        );
+      } finally {
+        await client.close().catch(() => undefined);
+      }
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

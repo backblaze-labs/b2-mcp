@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Added deterministic test-layer scripts, JUnit/Vitest summaries, coverage
   summaries, packed-package install coverage, and the `pnpm run verify`
-  no-credential gate.
+  no-credential quality gate.
 - Added live-safe test reporting: live layers keep JSON summaries but avoid
   third-party JUnit reporters while B2 credentials are present.
 - Added the official B2 SDK adoption contract, architecture record, and
@@ -52,8 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Aligned the enforced runtime policy with the official B2 SDK floor:
   `engines.node` is `>=22.3.0`, CI verifies production dependencies and the full
   toolchain on Node.js 22.23.1, 24, and 26, local and live 22.x jobs use a
-  patched Node 22 LTS release, and workflow drift is checked from
-  `runtime-policy.json`.
+  patched Node 22 LTS release, the packed-package smoke runs on the Node.js
+  22.3.0 engine floor, and workflow drift is checked from `runtime-policy.json`.
+- Kept coverage, slow lifecycle, package install, runtime floor, package budget,
+  and supply-chain checks as independent required CI gates, with CODEOWNER
+  review required for protected files.
 - Migrated linting and Biome-supported formatting from ESLint and Prettier to
   Biome while keeping the existing package script names used by CI and
   `pnpm run verify`; Markdown and YAML files are no longer part of the automated
@@ -77,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
   disallowed refs, validate environment secrets before live calls, and avoid
   recurring scheduled contract writes until cleanup automation exists.
+- Made release publishing attach the SBOM only after npm publish succeeds and
+  removed whole-suite retries from live B2 contract publication evidence.
 - Replaced `b2_create_key`, `b2_create_group_member`, and
   `b2_reserve_trial_create_account` with unavailable compatibility stubs until a
   reviewed out-of-band secret sink exists.
