@@ -129,10 +129,19 @@ layers above are the correctness oracle. External clients are advisory evidence
 until they prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned to
-`@modelcontextprotocol/inspector@2.1.0`. The package is not invoked from this
-repo's smoke instructions because it is outside the committed lockfile and
-supply-chain gates; use it only from a separate isolated sandbox with an empty
-environment when interactive inspection is needed.
+`@modelcontextprotocol/inspector@2.1.0` in `package.json` and
+`pnpm-lock.yaml`. Install with the frozen lockfile, build from a non-serving
+checkout, then run the locked Inspector CLI through the repository wrapper:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run smoke:inspector
+```
+
+`smoke:inspector` uses `pnpm exec mcp-inspector` from the locked install, an
+isolated temporary home/cache, fake B2 credentials, and the same no-network
+server guard as `smoke:client`.
 
 The non-interactive external client smoke uses the official
 `@modelcontextprotocol/client@2.0.0` SDK over stdio. It sends fake test
@@ -189,16 +198,19 @@ const client = new Client(
   { versionNegotiation: { mode: { pin: "2026-07-28" } }, defaultCacheTtlMs: 0 },
 );
 const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:3333/mcp"));
-await client.connect(transport);
-await client.listTools(undefined, { cacheMode: "refresh" });
-console.log(
-  JSON.stringify({
-    era: client.getProtocolEra(),
-    protocolVersion: client.getNegotiatedProtocolVersion(),
-    server: client.getServerVersion(),
-  }),
-);
-await client.close();
+try {
+  await client.connect(transport, { timeoutMs: 10_000 });
+  await client.listTools(undefined, { cacheMode: "refresh", timeoutMs: 10_000 });
+  console.log(
+    JSON.stringify({
+      era: client.getProtocolEra(),
+      protocolVersion: client.getNegotiatedProtocolVersion(),
+      server: client.getServerVersion(),
+    }),
+  );
+} finally {
+  await client.close().catch(() => undefined);
+}
 JS
 ```
 

@@ -211,6 +211,53 @@ describe("package budget policy gate", () => {
     }
   });
 
+  it("ignores dev-only pnpm duplicates when checking runtime provenance", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
+      pnpmLockText: [
+        "lockfileVersion: '9.0'",
+        "",
+        "settings:",
+        "  autoInstallPeers: true",
+        "  excludeLinksFromLockfile: false",
+        "",
+        "importers:",
+        "",
+        "  .:",
+        "    dependencies:",
+        "      '@backblaze-labs/b2-sdk':",
+        "        specifier: 0.2.0",
+        "        version: 0.2.0",
+        "    devDependencies:",
+        "      '@backblaze-labs/b2-sdk':",
+        "        specifier: 0.1.0",
+        "        version: 0.1.0",
+        "",
+        "packages:",
+        "",
+        "  '@backblaze-labs/b2-sdk@0.1.0':",
+        "    resolution: {integrity: sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
+        "",
+        "  '@backblaze-labs/b2-sdk@0.2.0':",
+        `    resolution: {integrity: ${sdkProvenance.integrity}}`,
+        "",
+        "snapshots:",
+        "",
+        "  '@backblaze-labs/b2-sdk@0.1.0': {}",
+        "",
+        "  '@backblaze-labs/b2-sdk@0.2.0': {}",
+        "",
+      ].join("\n"),
+    });
+    try {
+      const result = runPolicyFixture(fixtureRoot);
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Status: policy checks passed.");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects transitive production lockfile entries outside the npm registry", () => {
     const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
       lockPackages: {

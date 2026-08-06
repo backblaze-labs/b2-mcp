@@ -141,10 +141,6 @@ function recordCheck(checks, name, ok, detail = "") {
   console.log(`  [${mark}] ${name}${detail ? " - " + detail : ""}`);
 }
 
-function arraysEqual(left, right) {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
 async function runWorker() {
   assertBuiltArtifacts();
   assertWorkerEnvIsSanitized();
@@ -158,7 +154,9 @@ async function runWorker() {
   const helpers = loadContractHelpers();
   const expectedFixture = readJson(EXPECTED_FIXTURE);
   const toolContract = readJson("docs/tool-profile-contract.json");
-  const { evaluateProfileContract } = require(join(root, "scripts/lib/smoke-contract.cjs"));
+  const { arraysEqual, evaluateProfileContract } = require(
+    join(root, "scripts/lib/smoke-contract.cjs"),
+  );
   const serverEnv = createServerEnv();
   assertSmokeServerPreconditions(serverEnv);
 

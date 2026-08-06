@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile reference, and deterministic modern/legacy `tools/list` fixtures.
 - Added an advisory `pnpm run smoke:client` external MCP SDK client smoke for
   local stdio negotiation and contract-surface evidence without live B2 calls.
+- Added a locked `pnpm run smoke:inspector` MCP Inspector CLI smoke that runs
+  with fake credentials from an isolated environment.
 
 ### Changed
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and

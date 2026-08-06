@@ -565,10 +565,13 @@ artifact:
 ```bash
 pnpm run build
 pnpm run smoke:client
+pnpm run smoke:inspector
 ```
 
-The smoke command itself does not rebuild or remove `dist/`; it uses fake test
-credentials, blocks network access in the stdio server child, performs no B2
-tool calls, and compares the negotiated `tools/list` surface to the
-repository-owned modern contract fixture. It is not a substitute for the
-deterministic protocol gate or the live deployment smoke above.
+The smoke commands themselves do not rebuild or remove `dist/`; they use fake
+test credentials, block network access in the stdio server child, and perform no
+B2 tool calls. `smoke:client` compares the negotiated `tools/list` surface to
+the repository-owned modern contract fixture, while `smoke:inspector` provides
+locked Inspector CLI evidence from an isolated temporary environment. They are
+not substitutes for the deterministic protocol gate or the live deployment smoke
+above.

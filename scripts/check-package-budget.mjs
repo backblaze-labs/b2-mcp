@@ -217,7 +217,11 @@ function requireNonEmptyString(value, label) {
 }
 
 function directLockEntry(name) {
-  return packageLock.packages?.[`node_modules/${name}`];
+  const expectedVersion = productionDependencySections
+    .map((section) => packageJson[section]?.[name])
+    .find((specifier) => specifier !== undefined);
+  const entries = productionPackagesFromLock(packageLock).filter((entry) => entry.name === name);
+  return entries.find((entry) => entry.version === expectedVersion) ?? entries[0];
 }
 
 function packageProductionDependencyEntries() {
@@ -521,7 +525,7 @@ function assertDirectDependencyPolicy() {
     if (forbiddenSection) {
       fail(`forbidden runtime dependency is present in package.json: ${name}`);
     }
-    if (packageLock.packages?.[`node_modules/${name}`] !== undefined) {
+    if (productionPackagesFromLock(packageLock).some((entry) => entry.name === name)) {
       fail(`forbidden runtime dependency is present in pnpm-lock.yaml: ${name}`);
     }
   }

@@ -32,7 +32,9 @@ describe("MCP SDK and protocol contract", () => {
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(pkg.devDependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
-    expect(lock.packages["node_modules/@modelcontextprotocol/sdk"]).toBeUndefined();
+    // The pinned Inspector CLI carries the v1 SDK as a dev-only transitive; runtime code must not.
+    const legacySdk = lock.packages["node_modules/@modelcontextprotocol/sdk"];
+    expect(legacySdk?.dev).toBe(true);
   });
 
   it("exposes the SDK v2 entry points required by the serving adapters", async () => {

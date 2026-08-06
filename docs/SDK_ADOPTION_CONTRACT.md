@@ -32,7 +32,9 @@ Phase 1 migration and for the public MCP tool contract freeze.
   the stable v2 server entry points through `createMcpHandler` and `serveStdio`.
   A repository-owned Node HTTP bridge adapts the web-standard handler without
   `@modelcontextprotocol/node` or its web-framework dependency. The monolithic
-  `@modelcontextprotocol/sdk` v1 package is not an allowed dependency.
+  `@modelcontextprotocol/sdk` v1 package is not an allowed direct or runtime
+  dependency; the only allowed lockfile presence is a dev-only transitive of the
+  pinned Inspector CLI.
 
 ## Package Policy
 
