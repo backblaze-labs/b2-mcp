@@ -7,7 +7,6 @@ describe("MCP SDK and protocol contract", () => {
     const pkg = readJson<{
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
-      overrides?: Record<string, string | Record<string, string>>;
     }>("package.json");
     const lock = readLock<{
       packages: Record<string, { dev?: boolean; version?: string }>;
@@ -24,17 +23,16 @@ describe("MCP SDK and protocol contract", () => {
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(nodeVersion);
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
     expect(lock.packages["node_modules/@modelcontextprotocol/client"]?.version).toBe(clientVersion);
-    expect(pkg.overrides?.["@hono/node-server"]).toBe("2.0.10");
-    expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
-      "'@hono/node-server': 2.0.10",
-    );
+    expect(pkg).not.toHaveProperty("overrides");
+    const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
+    expect(workspace).toContain("'@hono/node-server': 2.0.10");
     expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(pkg.devDependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
-    // The pinned Inspector CLI carries the v1 SDK as a dev-only transitive; runtime code must not.
+    // Supplemental tools may carry the v1 SDK only outside runtime dependencies; runtime code must not.
     const legacySdk = lock.packages["node_modules/@modelcontextprotocol/sdk"];
-    expect(legacySdk?.dev).toBe(true);
+    if (legacySdk) expect(legacySdk.dev).toBe(true);
   });
 
   it("exposes the SDK v2 entry points required by the serving adapters", async () => {
@@ -57,6 +55,19 @@ describe("MCP SDK and protocol contract", () => {
     for (const [path, text] of runtimeSource) {
       expect(text, path).not.toMatch(
         /(?:from\s+|import\s*\(|require\s*\()\s*["']@modelcontextprotocol\/node(?:["'/])/,
+      );
+    }
+  });
+
+  it("rejects monolithic MCP SDK v1 imports in repository code", () => {
+    const checkedFiles = ["src", "scripts", "tests"]
+      .flatMap((dir) => listFiles(join(root, dir)))
+      .filter((path) => /\.(?:c|m)?[jt]sx?$/.test(path));
+
+    for (const path of checkedFiles) {
+      const text = readFileSync(path, "utf8");
+      expect(text, path.slice(root.length + 1)).not.toMatch(
+        /(?:from\s+|import\s*\(|require\s*\()\s*["']@modelcontextprotocol\/sdk(?:["'/])/,
       );
     }
   });

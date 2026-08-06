@@ -27,14 +27,15 @@ jobs:
       sbom-name: ${{ steps.sbom.outputs.sbom_name }}
       sbom-sha256: ${{ steps.sbom.outputs.sbom_sha256 }}
     steps:
-      # actions/checkout v6, reviewed 2026-08-05.
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
-      # actions/setup-node v7, reviewed 2026-08-05.
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
@@ -49,7 +50,7 @@ jobs:
           node scripts/resolve-publish-ref.mjs \
             --tag "${PUBLISH_TAG}" \
             --remote "${PUBLISH_REMOTE}"
-      # actions/checkout v6, reviewed 2026-08-05.
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ steps.ref.outputs.checkout_sha }}
@@ -102,7 +103,7 @@ jobs:
             --tarball "$tarball"
           echo "tarball_name=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
           echo "tarball_sha256=$(sha256sum "$tarball" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-      # actions/upload-artifact v6, reviewed 2026-08-05.
+      # actions/upload-artifact v6, reviewed 2026-08-06.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: npm-package
@@ -125,15 +126,16 @@ jobs:
       matrix:
         node-version: [22.23.1, 24, 26]
     steps:
-      # actions/checkout v6, reviewed 2026-08-05.
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ needs.prepare.outputs.checkout-sha }}
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
-      # actions/setup-node v7, reviewed 2026-08-05.
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node-version }}
@@ -154,65 +156,14 @@ jobs:
             fi
           done
           exit "$missing"
-      - name: Run live B2 contract suite with bounded retry
+      - name: Run live B2 contract suite
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3; do
-            if pnpm run test:contract:live; then
-              exit 0
-            fi
-            if [[ "$attempt" == 3 ]]; then
-              echo "::error::Live B2 contract suite failed after ${attempt} attempts"
-              exit 1
-            fi
-            echo "::warning::Live B2 contract suite failed on attempt ${attempt}; retrying"
-            sleep $((attempt * 10))
-          done
-
-  attach-sbom:
-    needs: [prepare, live-contract]
-    if: github.repository == 'backblaze-labs/b2-mcp'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: read
-      contents: write
-    steps:
-      # actions/download-artifact v6, reviewed 2026-08-05.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
-        with:
-          name: npm-package
-          path: publish-package
-      - name: Verify release SBOM
-        env:
-          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
-          EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
-        run: |
-          set -euo pipefail
-          sbom="publish-package/${EXPECTED_SBOM_NAME}"
-          if [[ ! -f "$sbom" ]]; then
-            echo "::error::Expected release SBOM ${sbom} is missing"
-            exit 1
-          fi
-          actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
-          if [[ "$actual_sbom_sha" != "$EXPECTED_SBOM_SHA256" ]]; then
-            echo "::error::Release SBOM SHA-256 mismatch"
-            echo "expected=${EXPECTED_SBOM_SHA256}"
-            echo "actual=${actual_sbom_sha}"
-            exit 1
-          fi
-      - name: Attach SBOM to GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
-          PUBLISH_TAG: ${{ inputs.tag }}
-        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
+        run: pnpm run test:contract:live
 
   publish:
-    needs: [prepare, live-contract, attach-sbom]
+    needs: [prepare, live-contract]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: npm-publish
@@ -222,15 +173,16 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # actions/download-artifact v6, reviewed 2026-08-05.
+      # actions/download-artifact v6, reviewed 2026-08-06.
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
         with:
           name: npm-package
           path: publish-package
-      # actions/setup-node v7, reviewed 2026-08-05.
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
@@ -272,3 +224,42 @@ jobs:
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
         run: npm publish "publish-package/${EXPECTED_TARBALL_NAME}" --provenance --access public --ignore-scripts
+
+  attach-sbom:
+    needs: [prepare, publish]
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      # actions/download-artifact v6, reviewed 2026-08-06.
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: npm-package
+          path: publish-package
+      - name: Verify release SBOM
+        env:
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
+        run: |
+          set -euo pipefail
+          sbom="publish-package/${EXPECTED_SBOM_NAME}"
+          if [[ ! -f "$sbom" ]]; then
+            echo "::error::Expected release SBOM ${sbom} is missing"
+            exit 1
+          fi
+          actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
+          if [[ "$actual_sbom_sha" != "$EXPECTED_SBOM_SHA256" ]]; then
+            echo "::error::Release SBOM SHA-256 mismatch"
+            echo "expected=${EXPECTED_SBOM_SHA256}"
+            echo "actual=${actual_sbom_sha}"
+            exit 1
+          fi
+      - name: Attach SBOM to GitHub release after npm publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber

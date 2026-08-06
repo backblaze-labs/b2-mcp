@@ -164,6 +164,7 @@ describe("doc lint runner", () => {
 
     expect(pkg.scripts["lint:docs"]).toBe("node scripts/run-doc-lint.mjs");
     expect(pkg.scripts["lint:docs:fix"]).toBe("node scripts/run-doc-lint.mjs --fix");
+    expect(pkg.scripts["lint:links"]).toBe("node scripts/check-doc-links.mjs");
   });
 
   it("keeps eslint.config.js limited to parser plus doc-comment plugins", () => {

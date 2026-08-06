@@ -25,7 +25,7 @@ Destructive actions are gated, durable B2 secrets never enter the model's contex
 
 ## Quick start
 
-**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need). Use Node.js 22.23.1 or a later patched 22 LTS release for local/deployed 22.x hosts; CI verifies production dependencies at the SDK floor (`>=22.3.0`) and runs the full toolchain on Node.js 22.23.1, 24, and 26.
+**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need). Use Node.js 22.23.1 or a later patched 22 LTS release for local/deployed 22.x hosts; the package engine remains `>=22.3.0` for consumer compatibility, while CI runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 **1. Build:**
 
@@ -239,7 +239,7 @@ pnpm run test:coverage      # deterministic source-covering suites + coverage su
 pnpm run test:diagnostics   # MaxListeners/open-handle warning diagnostics
 pnpm run test:slow          # deterministic high-cost tests, isolated from unit
 pnpm run test:package       # packed-package installation test
-pnpm run verify             # complete no-credential local gate
+pnpm run verify             # fast no-credential quality gate
 pnpm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 pnpm run test:contract:live    # live B2 request-shape checks; requires B2 credentials
 pnpm start                  # stdio transport
@@ -249,9 +249,9 @@ pnpm run smoke:inspector    # advisory locked Inspector CLI smoke; requires exis
 ```
 
 Compatible MCP Inspector release for isolated manual inspection:
-`@modelcontextprotocol/inspector@2.1.0`. Run it through
-`pnpm run smoke:inspector` so the command uses the committed lockfile and a
-sanitized temporary environment.
+`@modelcontextprotocol/inspector@2.1.0`, which requires Node.js 22.19.0 or
+newer. Run it through `pnpm run smoke:inspector` so the command uses the
+committed lockfile and a sanitized temporary environment.
 
 ## Documentation
 

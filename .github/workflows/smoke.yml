@@ -6,11 +6,6 @@ name: Smoke
 #   - release.published:  after a tagged release is published, only when the tag
 #                         points at the ci-green ref
 #
-# The 6-hour schedule heartbeat was removed: it ran against the hosted demo
-# endpoint, which fails when that server is down/redeployed and produced a steady
-# stream of failure emails unrelated to repo health. Re-add a `schedule:` block
-# once a stable monitored endpoint is in place.
-#
 # Gated to the canonical org repo so personal mirrors don't fire
 # failing runs (they don't have the credentials set as secrets).
 #
@@ -19,6 +14,9 @@ name: Smoke
 # package code sees secrets and rejects release tags that do not point at
 # `ci-green`. Add required reviewers when the repository plan supports
 # environment reviewers.
+#
+# The 6-hour schedule heartbeat is intentionally disabled until a stable
+# monitored endpoint and alert-deduplication path are owned outside release CI.
 
 on:
   workflow_dispatch:
@@ -97,14 +95,16 @@ jobs:
       matrix:
         node-version: [22.23.1, 24, 26]
     steps:
-      # actions/checkout v6, reviewed 2026-08-05.
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ needs.guard.outputs.checkout-sha }}
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
-      # actions/setup-node v7, reviewed 2026-08-05.
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node-version }}

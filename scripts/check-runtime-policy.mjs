@@ -158,11 +158,8 @@ requireEqual(
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
   policy.engineFloor,
 );
-requireEqual(
-  "runtime-policy runtime install floor",
-  `>=${policy.runtimeInstallNode}`,
-  policy.engineFloor,
-);
+requireEqual("runtime-policy runtime install pin", policy.runtimeInstallNode, policy.node22Pinned);
+requireNode22LtsPatch("runtime-policy runtime install pin", policy.runtimeInstallNode, policy);
 
 const nvmrc = read(".nvmrc").trim();
 requireExactNode22Pin(".nvmrc", nvmrc, policy);
@@ -187,48 +184,50 @@ if (
   fail(`pnpm-lock @types/node must resolve to ${policy.typesNodeVersion}`);
 }
 
-const deterministicCurrentMatrix = policy.deterministicLinuxMatrix.filter(
-  (version) => version !== policy.minimumEvidenceNode,
-);
 requireWorkflowNodeVersionInJob(
   ".github/workflows/test.yml",
-  "runtime-engine-floor",
-  policy.runtimeInstallNode,
-  "runtime dependency floor",
-);
-requireWorkflowNodeVersionInJob(
-  ".github/workflows/test.yml",
-  "runtime-engine-floor",
+  "format-lint-typecheck",
   policy.minimumEvidenceNode,
-  "runtime package build toolchain",
+  "primary quality gate",
 );
+requireWorkflowNodeVersionInJob(
+  ".github/workflows/test.yml",
+  "package-install-smoke",
+  policy.minimumEvidenceNode,
+  "package install smoke",
+);
+requireWorkflowNodeVersionInJob(
+  ".github/workflows/test.yml",
+  "runtime-engine-floor",
+  policy.engineFloor.replace(/^>=/, ""),
+  "runtime engine floor",
+);
+requireContains(".github/workflows/test.yml", "pnpm run verify", "local verification entry point");
 requireContains(
   ".github/workflows/test.yml",
-  "node scripts/packed-consumer-smoke.mjs",
-  "packed runtime-floor consumer smoke",
+  "node scripts/packed-consumer-smoke.mjs --tarball",
+  "runtime engine floor package smoke",
 );
 requireWorkflowMatrixInJob(
   ".github/workflows/test.yml",
-  "deterministic-linux-production",
+  "unit-coverage-matrix",
   "node-version",
-  [policy.minimumEvidenceNode],
+  policy.deterministicLinuxMatrix,
 );
-if (deterministicCurrentMatrix.length > 0) {
-  requireWorkflowMatrixInJob(
-    ".github/workflows/test.yml",
-    "deterministic-linux-current",
-    "node-version",
-    deterministicCurrentMatrix,
-  );
-}
-requireWorkflowMatrixInJob(".github/workflows/test.yml", "cross-platform-minimum", "os", [
+requireWorkflowMatrixInJob(
+  ".github/workflows/test.yml",
+  "production-dependency-audit-matrix",
+  "node-version",
+  policy.deterministicLinuxMatrix,
+);
+requireWorkflowMatrixInJob(".github/workflows/test.yml", "cross-platform-minimum-matrix", "os", [
   "ubuntu-latest",
   "windows-latest",
   "macos-latest",
 ]);
 requireWorkflowNodeVersionInJob(
   ".github/workflows/test.yml",
-  "cross-platform-minimum",
+  "cross-platform-minimum-matrix",
   policy.crossPlatformNode,
   "cross-platform minimum",
 );
@@ -253,6 +252,12 @@ for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smo
 requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
 requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("CONTRIBUTING.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("RELEASE.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("CHANGELOG.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("CONTRIBUTING.md", packageJson.packageManager, "package manager pin");
+requireContains("README.md", packageJson.packageManager, "package manager pin");
+requireContains("docs/DEPLOY.md", packageJson.packageManager, "package manager pin");
 
 if (errors.length > 0) {
   for (const error of errors) console.error(`runtime-policy: ${error}`);

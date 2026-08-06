@@ -9,111 +9,119 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   runtime-policy:
+    name: runtime policy
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
       - run: pnpm run check:runtime-policy
 
-  runtime-engine-floor:
-    name: packed runtime consumer / Node 22.3.0
+  format-lint-typecheck:
+    name: format/lint/typecheck
     needs: runtime-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 22.3.0
-          package-manager-cache: false
-      - name: Run Node 22.3.0 runtime compatibility smoke
-        run: node scripts/packed-consumer-smoke.mjs
-
-  package-budget:
-    name: package budget
-    needs: runtime-policy
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-        with:
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 22.23.1
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - run: pnpm run check:package-budget
-      - name: Upload package budget reports
+      - name: Run local verification entry point
+        run: pnpm run verify
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload primary verification reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: package-budget
-          path: reports/package-budget/
-          if-no-files-found: error
+          name: primary-verify-reports
+          path: |
+            reports/junit/*.xml
+            reports/vitest/*.json
+          if-no-files-found: warn
+          retention-days: 7
 
-  deterministic-linux-production:
-    name: deterministic linux production / Node ${{ matrix.node-version }}
+  docs-spelling-links:
+    name: docs/spelling/links
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint:docs
+      - run: pnpm run spell
+      - run: pnpm run lint:links
+
+  unit-coverage-matrix:
+    name: unit coverage Linux / Node ${{ matrix.node-version }}
     needs: runtime-policy
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22.23.1]
+        node-version: [22.23.1, 24, 26]
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run format:check
-      - run: pnpm run lint
-      - run: pnpm run spell
-      - run: pnpm run lint:docs
       - run: pnpm run build
-      - id: typecheck
-        continue-on-error: true
-        run: pnpm run typecheck
-      - id: coverage
-        name: Enforce global coverage floors
-        continue-on-error: true
-        run: pnpm run test:coverage
+      - run: pnpm run test:coverage
       - name: Publish coverage summary
         if: always()
         run: |
           echo "## Coverage summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "Node.js ${{ matrix.node-version }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Required: statements 82%, branches 72%, functions 86%, lines 86%." >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           if [ -f coverage/coverage-summary.json ]; then
@@ -129,197 +137,190 @@ jobs:
             echo '(coverage-summary.json not found)' >> "$GITHUB_STEP_SUMMARY"
           fi
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - id: slow
-        continue-on-error: true
-        run: pnpm run test:slow
-      - id: package-smoke
-        continue-on-error: true
-        run: pnpm run smoke:package
-      - name: Upload test reports
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload coverage and test reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: test-reports-node-${{ matrix.node-version }}
+          name: coverage-and-tests-node-${{ matrix.node-version }}
           path: |
+            coverage/**
             reports/junit/*.xml
             reports/vitest/*.json
-            coverage/**
           if-no-files-found: error
-      - name: Fail on test errors
-        if: >-
-          steps.typecheck.outcome == 'failure' ||
-          steps.coverage.outcome == 'failure' ||
-          steps.slow.outcome == 'failure' ||
-          steps.package-smoke.outcome == 'failure'
-        run: exit 1
+          retention-days: 7
 
-  deterministic-linux-current:
-    name: deterministic linux current / Node ${{ matrix.node-version }}
-    needs: runtime-policy
+  unit-coverage:
+    name: unit/coverage
+    needs: unit-coverage-matrix
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [24, 26]
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-        with:
-          run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run format:check
-      - run: pnpm run lint
-      - run: pnpm run spell
-      - run: pnpm run lint:docs
-      - run: pnpm run build
-      - id: typecheck
-        continue-on-error: true
-        run: pnpm run typecheck
-      - id: coverage
-        name: Enforce global coverage floors
-        continue-on-error: true
-        run: pnpm run test:coverage
-      - name: Publish coverage summary
-        if: always()
+      - name: Require complete coverage matrix
         run: |
-          echo "## Coverage summary" >> "$GITHUB_STEP_SUMMARY"
-          echo "Required: statements 82%, branches 72%, functions 86%, lines 86%." >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          if [ -f coverage/coverage-summary.json ]; then
-            node -e "
-              const s = require('./coverage/coverage-summary.json').total;
-              const fmt = (m) => \`\${m.pct.toFixed(2).padStart(6)}%  (\${m.covered}/\${m.total})\`;
-              console.log('statements:', fmt(s.statements));
-              console.log('branches:  ', fmt(s.branches));
-              console.log('functions: ', fmt(s.functions));
-              console.log('lines:     ', fmt(s.lines));
-            " >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '(coverage-summary.json not found)' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ needs.unit-coverage-matrix.result }}" != "success" ]]; then
+            echo "::error::unit coverage matrix result was ${{ needs.unit-coverage-matrix.result }}"
+            exit 1
           fi
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-      - id: slow
-        continue-on-error: true
-        run: pnpm run test:slow
-      - id: package-smoke
-        continue-on-error: true
-        run: pnpm run smoke:package
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: test-reports-node-${{ matrix.node-version }}
-          path: |
-            reports/junit/*.xml
-            reports/vitest/*.json
-            coverage/**
-          if-no-files-found: error
-      - name: Fail on test errors
-        if: >-
-          steps.typecheck.outcome == 'failure' ||
-          steps.coverage.outcome == 'failure' ||
-          steps.slow.outcome == 'failure' ||
-          steps.package-smoke.outcome == 'failure'
-        run: exit 1
 
-  listener-diagnostics:
-    name: leak diagnostics / Node 22.23.1
+  mcp-contract:
+    name: MCP contract
     needs: runtime-policy
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 22.23.1
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Detect MaxListeners and open-handle warnings
-        run: pnpm run test:diagnostics
-      - name: Upload diagnostic reports
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: listener-diagnostics
-          path: |
-            reports/junit/*.xml
-            reports/vitest/*.json
-          if-no-files-found: error
-
-  cross-platform-minimum:
-    name: cross-platform minimum / ${{ matrix.os }}
-    needs: runtime-policy
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
-        with:
-          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run test:cross-platform
+      - run: pnpm run test:contract
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload contract artifacts and reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: mcp-contract-node-22.23.1
+          path: |
+            docs/tool-profile-contract.json
+            tests/fixtures/tool-contract/*.json
+            reports/junit/contract.xml
+            reports/vitest/contract.json
+          if-no-files-found: error
+          retention-days: 7
 
-  package:
+  protocol-transport:
+    name: modern and legacy protocol/transport
+    needs: runtime-policy
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 15
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:protocol
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload protocol reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: protocol-transport-node-22.23.1
+          path: |
+            reports/junit/protocol-*.xml
+            reports/vitest/protocol-*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  package-install-smoke:
+    name: package install smoke
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:package
-      - name: Upload package test reports
+      - name: Pack runtime floor tarball
+        run: |
+          mkdir -p reports/package/floor
+          npm pack --json --ignore-scripts --pack-destination reports/package/floor > reports/package/runtime-floor-pack.json
+      - name: Capture npm pack manifest
+        run: |
+          mkdir -p reports/package
+          npm pack --json --dry-run > reports/package/npm-pack-manifest.json
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload package manifest and reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: package-test-reports
+          name: package-install-smoke
           path: |
+            reports/package/npm-pack-manifest.json
+            reports/package/runtime-floor-pack.json
+            reports/package/floor/*.tgz
             reports/junit/package.xml
             reports/vitest/package.json
           if-no-files-found: error
+          retention-days: 7
 
-  production-audit:
-    name: production npm audit / Node ${{ matrix.node-version }}
+  runtime-engine-floor:
+    name: runtime engine floor
+    needs: package-install-smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [22.3.0, 24, 26]
+    timeout-minutes: 15
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.3.0
+      # actions/download-artifact v6, reviewed 2026-08-06.
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: package-install-smoke
+          path: reports/package-install-smoke
+      - name: Run packed consumer smoke on Node.js 22.3.0
+        run: |
+          set -euo pipefail
+          tarball="$(find reports/package-install-smoke -name '*.tgz' -type f -print -quit)"
+          if [[ -z "$tarball" ]]; then
+            echo "::error::package-install-smoke artifact did not contain a packed tarball"
+            exit 1
+          fi
+          node scripts/packed-consumer-smoke.mjs --tarball "$tarball"
+
+  production-dependency-audit-matrix:
+    name: production dependency audit / Node ${{ matrix.node-version }}
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.23.1, 24, 26]
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node-version }}
@@ -341,11 +342,59 @@ jobs:
           fi
       - run: node scripts/production-security-gate.mjs
 
-  supply-chain-audit:
-    name: supply-chain audit
+  production-dependency-audit:
+    name: production dependency audit
+    needs: production-dependency-audit-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require complete production dependency audit matrix
+        run: |
+          if [[ "${{ needs.production-dependency-audit-matrix.result }}" != "success" ]]; then
+            echo "::error::production dependency audit matrix result was ${{ needs.production-dependency-audit-matrix.result }}"
+            exit 1
+          fi
+
+  package-budget:
+    name: package budget
+    needs: runtime-policy
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run check:package-budget
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload package budget reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: package-budget
+          path: reports/package-budget/
+          if-no-files-found: error
+          retention-days: 7
+
+  supply-chain-audit:
+    name: supply-chain audit
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           fetch-depth: 0
@@ -357,9 +406,11 @@ jobs:
             echo "::error::origin/main is missing from checkout; fetch-depth: 0 must fetch protected refs"
             exit 1
           fi
-      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
@@ -370,14 +421,28 @@ jobs:
         env:
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
 
-  workflow-security:
-    name: workflow security / zizmor
+  codeql-workflow-security:
+    name: CodeQL/workflow security
+    needs: runtime-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      # github/codeql-action/init v4.37.6, reviewed 2026-08-06.
+      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      # github/codeql-action/analyze v4.37.6, reviewed 2026-08-06.
+      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
+        with:
+          category: "/language:javascript-typescript"
       - name: Run digest-pinned offline zizmor
         env:
           ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
@@ -400,23 +465,140 @@ jobs:
             -- \
             .
 
-  # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
-  # auto-deploy host watches this ref (read-only deploy key), so only CI-green
-  # commits ever reach production. Runs only on a successful main push.
-  mark-green:
+  slow-lifecycle:
+    name: slow/lifecycle
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITEST_MAX_WORKERS: 1
+      VITEST_MIN_WORKERS: 1
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run test:slow -- --maxWorkers=1 --minWorkers=1
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload slow lifecycle reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: slow-lifecycle
+          path: |
+            reports/junit/slow.xml
+            reports/vitest/slow.json
+          if-no-files-found: error
+          retention-days: 7
+
+  cross-platform-minimum-matrix:
+    name: cross-platform minimum / ${{ matrix.os }}
+    needs: runtime-policy
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run test:cross-platform
+
+  cross-platform-minimum:
+    name: cross-platform minimum
+    needs: cross-platform-minimum-matrix
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require complete cross-platform minimum matrix
+        run: |
+          if [[ "${{ needs.cross-platform-minimum-matrix.result }}" != "success" ]]; then
+            echo "::error::cross-platform minimum matrix result was ${{ needs.cross-platform-minimum-matrix.result }}"
+            exit 1
+          fi
+
+  conformance-summary:
+    name: conformance summary
     needs:
-      [
-        runtime-policy,
-        runtime-engine-floor,
-        package-budget,
-        deterministic-linux-production,
-        deterministic-linux-current,
-        listener-diagnostics,
-        cross-platform-minimum,
-        production-audit,
-        supply-chain-audit,
-        workflow-security,
-      ]
+      - format-lint-typecheck
+      - docs-spelling-links
+      - unit-coverage
+      - mcp-contract
+      - protocol-transport
+      - package-install-smoke
+      - runtime-engine-floor
+      - production-dependency-audit
+      - package-budget
+      - supply-chain-audit
+      - codeql-workflow-security
+      - slow-lifecycle
+      - cross-platform-minimum
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Publish Phase 1 conformance summary
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<'SUMMARY'
+          # Phase 1 Conformance
+
+          | Evidence | Revision or scope |
+          | --- | --- |
+          | Modern MCP protocol | 2026-07-28 over Streamable HTTP and stdio |
+          | Legacy MCP fallback | 2025-era stateless initialize compatibility |
+          | Linux deterministic Node matrix | 22.23.1, 24, 26 |
+          | Runtime engine floor | Node.js 22.3.0 package install smoke |
+          | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
+          | Package budget metrics | Uploaded as package-budget artifact |
+          | Required issue | backblaze-labs/b2-mcp#50 |
+          SUMMARY
+
+  mark-green:
+    name: ci-green marker
+    needs:
+      - format-lint-typecheck
+      - docs-spelling-links
+      - unit-coverage
+      - mcp-contract
+      - protocol-transport
+      - package-install-smoke
+      - runtime-engine-floor
+      - production-dependency-audit
+      - package-budget
+      - supply-chain-audit
+      - codeql-workflow-security
+      - slow-lifecycle
+      - cross-platform-minimum
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:
@@ -425,8 +607,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Advance ci-green if main is current
+        with:
+          persist-credentials: true
+      - name: Advance owned ci-green marker if main is current
         run: |
           set -euo pipefail
           tested_sha="$(git rev-parse HEAD)"
@@ -446,4 +631,4 @@ jobs:
           fi
 
           git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force
-          echo "::notice::Advanced ci-green to ${GITHUB_SHA}"
+          echo "::notice::Advanced owned ci-green marker to ${GITHUB_SHA}"

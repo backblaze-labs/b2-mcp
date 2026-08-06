@@ -542,6 +542,9 @@ The same script also runs automatically via `.github/workflows/smoke.yml`:
 - After every `release.published` event (so a `gh release create` triggers it)
 - On manual `workflow_dispatch` from the Actions tab when run from `main`
 
+There is no recurring smoke cron until a stable monitored endpoint and
+alert-deduplicated routing are owned outside release CI.
+
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
@@ -572,6 +575,7 @@ The smoke commands themselves do not rebuild or remove `dist/`; they use fake
 test credentials, block network access in the stdio server child, and perform no
 B2 tool calls. `smoke:client` compares the negotiated `tools/list` surface to
 the repository-owned modern contract fixture, while `smoke:inspector` provides
-locked Inspector CLI evidence from an isolated temporary environment. They are
-not substitutes for the deterministic protocol gate or the live deployment smoke
-above.
+locked Inspector CLI evidence from an isolated temporary environment. The
+Inspector package requires Node.js 22.19.0 or newer, which is covered by the
+patched Node 22 LTS runtime pin. They are not substitutes for the deterministic
+protocol gate or the live deployment smoke above.

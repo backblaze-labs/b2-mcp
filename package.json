@@ -45,7 +45,7 @@
     "test:integration:live": "node scripts/require-live-env.mjs integration && node scripts/run-vitest-layer.mjs integration-live",
     "test:contract:live": "node scripts/require-live-env.mjs contract && node scripts/run-vitest-layer.mjs contract-live",
     "test:package": "pnpm run build && node scripts/run-vitest-layer.mjs package",
-    "verify": "pnpm run typecheck && pnpm run build && pnpm run lint && pnpm run lint:docs && pnpm run format:check && pnpm run spell && pnpm run test:coverage && pnpm run test:diagnostics",
+    "verify": "pnpm run typecheck && pnpm run build && pnpm run lint && pnpm run lint:docs && pnpm run lint:links && pnpm run format:check && pnpm run spell && pnpm run test:diagnostics",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
     "smoke:client": "node scripts/mcp-client-smoke.mjs",
@@ -63,6 +63,7 @@
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts --write",
     "lint:docs": "node scripts/run-doc-lint.mjs",
     "lint:docs:fix": "node scripts/run-doc-lint.mjs --fix",
+    "lint:links": "node scripts/check-doc-links.mjs",
     "format": "node scripts/run-biome.mjs format . --write",
     "format:check": "node scripts/run-biome.mjs format .",
     "spell": "cspell lint --no-progress --gitignore"
@@ -118,17 +119,5 @@
     "CHANGELOG.md",
     "SECURITY.md",
     "LICENSE"
-  ],
-  "overrides": {
-    "@istanbuljs/load-nyc-config": {
-      "js-yaml": "3.15.1"
-    },
-    "@typescript-eslint/visitor-keys": {
-      "eslint-visitor-keys": "4.2.1"
-    },
-    "minimatch@3.1.5": {
-      "brace-expansion": "1.1.18"
-    },
-    "@hono/node-server": "2.0.10"
-  }
+  ]
 }

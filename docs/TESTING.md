@@ -16,10 +16,11 @@ pnpm install --frozen-lockfile
 pnpm run verify
 ```
 
-`pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, the
-Biome-supported format check, spelling, deterministic coverage, and listener
-diagnostics across all non-live layers, including slow lifecycle and
-packed-package installation tests.
+`pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, local
+Markdown link validation, the Biome-supported format check, spelling,
+and listener diagnostics across the fast non-live layers. Coverage, slow
+lifecycle, and packed-package installation evidence stay in distinct scripts and
+CI jobs so their failures do not mask each other.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
@@ -27,6 +28,7 @@ The individual deterministic layers are:
 | `pnpm test`              | Typecheck, then `pnpm run test:unit`.                                                |
 | `pnpm run lint`          | Biome lint for source, test, and script code.                                        |
 | `pnpm run lint:docs`     | TSDoc/JSDoc doc-comment syntax and hygiene gate for non-test `src/**/*.ts` files.    |
+| `pnpm run lint:links`    | Deterministic local Markdown link validation for repository docs.                    |
 | `pnpm run test:unit`     | Fast source unit tests.                                                              |
 | `pnpm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |
 | `pnpm run test:protocol` | Aggregate protocol gate (`test:protocol:modern` + `test:protocol:legacy`).           |
@@ -35,11 +37,33 @@ The individual deterministic layers are:
 | `pnpm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
 | `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners and open-handle warnings. |
 
-Local scripts can call each deterministic layer independently. The Linux Node
-matrix runs the bundled coverage and slow deterministic lifecycle layers, while
-`test:package` runs in a separate non-blocking package job. The coverage
-aggregate disables file parallelism so contract fixture reports, dist rebuilds,
-and package packing do not race each other.
+Local scripts can call each deterministic layer independently. Required PR jobs
+keep the major evidence classes distinct so coverage regression, contract drift,
+protocol failure, production-audit findings, package-budget drift, and broken
+package installs fail independently. The Linux deterministic Node matrix is
+exactly Node.js 22.23.1, 24, and 26. Slow lifecycle tests run in a dedicated
+bounded job with one Vitest worker, and the cross-platform fast suite runs on
+Linux, Windows, and macOS at Node.js 22.23.1. A separate runtime engine floor job
+runs the packed-consumer install smoke on Node.js 22.3.0. The coverage aggregate
+disables file parallelism so contract fixture reports, dist rebuilds, and
+package packing do not race each other.
+
+The stable required PR check names are:
+
+- `format/lint/typecheck`
+- `docs/spelling/links`
+- `unit/coverage`
+- `MCP contract`
+- `modern and legacy protocol/transport`
+- `package install smoke`
+- `runtime engine floor`
+- `production dependency audit`
+- `package budget`
+- `supply-chain audit`
+- `CodeQL/workflow security`
+- `slow/lifecycle`
+- `cross-platform minimum`
+
 Global V8 coverage must remain at or above 82% statements, 72% branches, 86%
 functions, and 86% lines. Raise these floors as coverage improves; lowering
 them requires explicit review and justification. Coverage collection is source
@@ -69,14 +93,14 @@ tracked as comparison evidence for test design, especially simulator behavior,
 retry ownership, pagination, and cancellation. Matching SDK parity is not a
 release blocker for this MCP package; regressions in this repository's critical
 boundaries are.
-CI installs with `pnpm install --frozen-lockfile` and verifies the runtime
-package floor with a packed consumer smoke on Node.js 22.3.0. The credential-free full
-toolchain gate, including `pnpm run lint:docs`, runs on Linux for Node.js
-22.23.1, 24, and 26. It also runs
-`pnpm run check:runtime-policy`, which fails if workflow or metadata runtime
-policy drifts. Cross-platform coverage stays lean: the fast stdio, CLI port
-parsing, local-path policy, and request shutdown/signal suite runs on Linux,
-Windows, and macOS at the patched Node 22 LTS pin.
+CI installs with `pnpm install --frozen-lockfile` and verifies package install
+behavior, coverage, protocol, and production dependency audit evidence on the
+required Node.js matrix. The `format/lint/typecheck` job runs the same
+`pnpm run verify` entry point used locally, and `pnpm run check:runtime-policy`
+fails if workflow or metadata runtime policy drifts. Cross-platform coverage
+stays lean: the fast stdio, installed CLI/bin, CLI port parsing, local-path
+policy, and request shutdown/signal suite runs on Linux, Windows, and macOS at
+Node.js 22.23.1.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
@@ -123,15 +147,25 @@ If a selected layer has zero executed tests because every case was skipped, the
 runner exits nonzero and prints the summary path. A skipped-only run is visible
 evidence, not an authoritative pass.
 
-The `ci-green` production deploy marker depends on both the Node.js 22.3.0
-production-dependency install and the Node 22.23.1 deterministic gate. A
-separate leak diagnostic job runs the unit and protocol layers under
-traced warnings plus Vitest's hanging-process reporter, and fails on
+The owned `ci-green` marker advances only on successful `main` pushes after the
+required deterministic, package, audit, package-budget, supply-chain, workflow
+security, runtime floor, slow lifecycle, and cross-platform jobs pass. It is not
+a PR deploy path. Leak diagnostics remain part of `pnpm run verify` and fail on
 `MaxListenersExceededWarning`, EventEmitter leak warnings, or Vitest close-timeout
-open-handle warnings until teardown is clean. Node.js
-24 and 26 remain required PR checks, but a regression isolated to those
-non-production current lines does not freeze the production deploy ref. The
-production host is pinned to the patched Node 22 LTS line from `.nvmrc`.
+open-handle warnings until teardown is clean. Node.js 22.23.1, 24, and 26 are all
+required CI evidence for Phase 1, with Node.js 22.3.0 exercised by the runtime
+engine floor package smoke.
+
+Branch protection for `main` must require the stable check names above, require
+at least one approving review, dismiss stale approvals when new commits are
+pushed, require branches to be up to date before merge, and block force pushes.
+CODEOWNER review is mandatory for protected workflow, package metadata, and
+lockfile policy changes.
+The reviewed settings are recorded in
+[`../.github/branch-protection-main.json`](../.github/branch-protection-main.json).
+Do not add B2 credential requirements to normal pull-request checks. This
+rollout is blocked until a repository admin applies the checked-in policy and
+reads it back from GitHub matching the committed contexts and review settings.
 
 ## MCP Protocol Matrix
 
@@ -162,10 +196,11 @@ The required PR gate remains repo-native: `pnpm run verify` and the protocol
 layers above are the correctness oracle. External clients are advisory evidence
 until they prove deterministic enough for CI.
 
-Manual Inspector compatibility is pinned to
-`@modelcontextprotocol/inspector@2.1.0` in `package.json` and
-`pnpm-lock.yaml`. Install with the frozen lockfile, build from a non-serving
-checkout, then run the locked Inspector CLI through the repository wrapper:
+Manual Inspector compatibility is pinned by the repository wrapper to
+`@modelcontextprotocol/inspector@2.1.0`. That Inspector release requires
+Node.js 22.19.0 or newer, so it is supplemental evidence for the patched Node
+22 LTS development/runtime pin. Install project dependencies, build from a
+non-serving checkout, then run the locked Inspector CLI through the wrapper:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -173,7 +208,7 @@ pnpm run build
 pnpm run smoke:inspector
 ```
 
-`smoke:inspector` uses `pnpm exec mcp-inspector` from the locked install, an
+`smoke:inspector` uses `pnpm exec mcp-inspector` from the committed lockfile, an
 isolated temporary home/cache, fake B2 credentials, and the same no-network
 server guard as `smoke:client`.
 
@@ -340,8 +375,8 @@ shipped pnpm-locked graph and generate the CycloneDX SBOM attached to the
 GitHub release without installing or re-resolving dependencies.
 
 `mark-green` intentionally fail-closes on npm registry/advisory-service
-availability because `supply-chain-audit` makes a live `npm audit` call and
-`smoke:package` performs a cold lockfile-less consumer `npm install`. If a
+availability because `supply-chain-audit` makes a live `npm audit` call and the
+package install smoke performs a cold lockfile-less consumer `npm install`. If a
 sustained npm outage blocks an urgent unrelated production hotfix, the emergency path is: get
 release-owner and security-owner approval in the incident record, verify the
 same commit passed every non-registry gate locally or in CI, confirm the commit
@@ -369,6 +404,6 @@ that consumes `B2_*` secrets must use a protected GitHub environment, fail
 loudly when manually dispatched outside `main`, check out `ci-green` before any
 repository code runs with secrets, serialize live write tests, and reference
 only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
-serially on patched Node 22 LTS, Node.js 24, and Node.js 26. Release-triggered
+serially on Node.js 22.23.1, Node.js 24, and Node.js 26. Release-triggered
 live workflows must first prove the `v*` release tag is reachable from
 `ci-green`.

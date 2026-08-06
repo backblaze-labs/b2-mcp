@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added deterministic test-layer scripts, JUnit/Vitest summaries, coverage
-  summaries, packed-package install coverage, and the `npm run verify`
-  no-credential gate.
+  summaries, packed-package install coverage, and the `pnpm run verify`
+  no-credential quality gate.
 - Added live-safe test reporting: live layers keep JSON summaries but avoid
   third-party JUnit reporters while B2 credentials are present.
 - Added the official B2 SDK adoption contract, architecture record, and
@@ -39,24 +39,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
-  live test files by stable suffix so `npm test` works from a clean checkout
+  live test files by stable suffix so `pnpm test` works from a clean checkout
   without relying on `dist/`.
 - Migrated deterministic test layers from Jest to Vitest projects and extended
   coverage to every non-live layer.
-- Restored `npm test` typechecking, made package-install
-  verification use the npm cache offline, and kept it off the `ci-green`
+- Restored `pnpm test` typechecking, made package-install
+  verification use the pnpm cache offline, and kept it off the `ci-green`
   deploy-gating path.
 - Canonicalized repository, package, workflow, security, and setup metadata for
   `backblaze-labs/b2-mcp`.
 - Aligned package metadata on the `0.1.0` Phase 1 release line.
 - Aligned the enforced runtime policy with the official B2 SDK floor:
-  `engines.node` is `>=22.3.0`, CI verifies production dependencies at Node.js
-  22.3.0 and the full toolchain on Node.js 22.23.1, 24, and 26, local and live
-  22.x jobs use a patched Node 22 LTS release, and workflow drift is checked
-  from `runtime-policy.json`.
+  `engines.node` is `>=22.3.0`, CI verifies production dependencies and the full
+  toolchain on Node.js 22.23.1, 24, and 26, local and live 22.x jobs use a
+  patched Node 22 LTS release, the packed-package smoke runs on the Node.js
+  22.3.0 engine floor, and workflow drift is checked from `runtime-policy.json`.
+- Kept coverage, slow lifecycle, package install, runtime floor, package budget,
+  and supply-chain checks as independent required CI gates, with CODEOWNER
+  review required for protected files.
 - Migrated linting and Biome-supported formatting from ESLint and Prettier to
-  Biome while keeping the existing npm script names used by CI and
-  `npm run verify`; Markdown and YAML files are no longer part of the automated
+  Biome while keeping the existing package script names used by CI and
+  `pnpm run verify`; Markdown and YAML files are no longer part of the automated
   format gate.
 - Exact-pinned the runtime-sensitive `opossum` dependency and changed the packed
   consumer smoke gate to exercise a fresh lockfile-less npm install path.
@@ -77,6 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
   disallowed refs, validate environment secrets before live calls, and avoid
   recurring scheduled contract writes until cleanup automation exists.
+- Made release publishing attach the SBOM only after npm publish succeeds and
+  removed whole-suite retries from live B2 contract publication evidence.
 - Replaced `b2_create_key`, `b2_create_group_member`, and
   `b2_reserve_trial_create_account` with unavailable compatibility stubs until a
   reviewed out-of-band secret sink exists.

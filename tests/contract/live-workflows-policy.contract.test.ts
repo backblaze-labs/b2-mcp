@@ -114,6 +114,15 @@ describe("live secret workflow policy", () => {
     expect(text).not.toContain("cron:");
   });
 
+  it("keeps recurring live smoke disabled until a monitored endpoint exists", () => {
+    const text = workflowText(".github/workflows/smoke.yml");
+    expect(text).not.toMatch(/^\s{2}schedule:\s*$/m);
+    expect(text).not.toContain("cron:");
+    expect(text).toContain("stable");
+    expect(text).toContain("monitored endpoint");
+    expect(text).toContain("alert-deduplication path");
+  });
+
   it("keeps package-budget off the live contract dependency chain", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = workflowJobBlock(text, "contract") ?? "";

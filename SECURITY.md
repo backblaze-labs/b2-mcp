@@ -14,7 +14,7 @@ patched in place — upgrade to the latest version to receive fixes.
 
 Instead, report it privately via GitHub Security Advisories:
 
-1. Go to the [Security tab](../../security/advisories) of this repository
+1. Go to the [Security tab](https://github.com/backblaze-labs/b2-mcp/security/advisories/new) of this repository
 2. Click **Report a vulnerability**
 3. Provide a clear description, reproduction steps, and impact assessment
 

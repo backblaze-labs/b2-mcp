@@ -71,7 +71,7 @@ the published package.
 
 The monolithic `@modelcontextprotocol/sdk` v1 package is not a direct or
 runtime dependency and must not be imported by production or test code. Its only
-allowed lockfile presence is a dev-only transitive of the pinned Inspector CLI.
+allowed lockfile presence is a dev-only transitive of the locked Inspector CLI.
 HTTP serving is stateless and per request: Host, Origin, caller authentication,
 B2 credential resolution, rate/concurrency limits, body-size limits, drain, and
 shutdown checks run outside the SDK handler; protocol header/body validation
