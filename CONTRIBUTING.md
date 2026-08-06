@@ -14,6 +14,8 @@ release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later patched
 runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 ```bash
+corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
 pnpm install --frozen-lockfile
 pnpm run build        # clean + tsc → dist/
 pnpm test             # typecheck, then fast unit suite

@@ -31,6 +31,8 @@ Destructive actions are gated, durable B2 secrets never enter the model's contex
 
 ```bash
 cd b2-mcp
+corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
 pnpm install
 pnpm run build          # produces dist/ — required before first run
 ```
