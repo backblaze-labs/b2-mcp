@@ -285,9 +285,25 @@ describe("test layer naming", () => {
     expect(vitestConfig).toMatch(
       /thresholds:\s*{\s*statements:\s*82,\s*branches:\s*72,\s*functions:\s*86,\s*lines:\s*86,?\s*}/,
     );
+    expect(vitestConfig).toContain('include: ["src/**/*.ts"]');
+    expect(vitestConfig).toContain('"html"');
+    expect(vitestConfig).toContain('"lcov"');
+    expect(vitestConfig).toContain('"cobertura"');
+    expect(vitestConfig).toContain('"dist/**"');
+    expect(vitestConfig).toContain('"tests/**"');
     expect(readme).toContain(
       "coverage-S%2082%20%7C%20B%2072%20%7C%20F%2086%20%7C%20L%2086-brightgreen",
     );
+  });
+
+  it("keeps leaked-listener diagnostics in the deterministic script surface", () => {
+    const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
+    const script = readFileSync(join(root, "scripts/run-leak-diagnostics.mjs"), "utf8");
+
+    expect(pkg.scripts["test:diagnostics"]).toBe("node scripts/run-leak-diagnostics.mjs");
+    expect(script).toContain("MaxListenersExceededWarning");
+    expect(script).toContain("protocol-modern");
+    expect(script).toContain("protocol-legacy");
   });
 
   it("does not route the legacy integration alias to live tests with ambient credentials", () => {

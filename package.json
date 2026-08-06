@@ -40,6 +40,7 @@
     "test:protocol": "pnpm run build && pnpm run test:protocol:modern && pnpm run test:protocol:legacy",
     "test:slow": "node scripts/run-vitest-layer.mjs slow",
     "test:coverage": "pnpm run build && node scripts/run-vitest-layer.mjs coverage",
+    "test:diagnostics": "node scripts/run-leak-diagnostics.mjs",
     "test:integration": "node scripts/reject-live-alias.mjs integration",
     "test:integration:live": "node scripts/require-live-env.mjs integration && node scripts/run-vitest-layer.mjs integration-live",
     "test:contract:live": "node scripts/require-live-env.mjs contract && node scripts/run-vitest-layer.mjs contract-live",
