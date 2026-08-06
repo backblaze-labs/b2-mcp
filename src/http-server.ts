@@ -210,6 +210,7 @@ const SDK_HEADER_ALLOWLIST = new Set([
   "last-event-id",
   "traceparent",
   "tracestate",
+  "baggage",
 ]);
 
 function sdkHeaderAllowed(name: string): boolean {
@@ -377,6 +378,103 @@ function parsedJsonBody(rawBody: string | undefined): { ok: true; body?: unknown
   } catch {
     return { ok: false };
   }
+}
+
+function requestIdFromParsedBody(body: unknown): string | number | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const id = (body as { id?: unknown }).id;
+  return typeof id === "string" || typeof id === "number" ? id : null;
+}
+
+function jsonRpcErrorBody(code: number, message: string, id: string | number | null): unknown {
+  return {
+    jsonrpc: "2.0",
+    error: { code, message },
+    id,
+  };
+}
+
+function modernMetaVersion(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const params = (body as { params?: unknown }).params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return undefined;
+  const meta = (params as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+  const version = (meta as Record<string, unknown>)["io.modelcontextprotocol/protocolVersion"];
+  return typeof version === "string" ? version : undefined;
+}
+
+function requestMethodFromParsedBody(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const method = (body as { method?: unknown }).method;
+  return typeof method === "string" ? method : undefined;
+}
+
+function toolNameFromParsedBody(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const params = (body as { params?: unknown }).params;
+  if (!params || typeof params !== "object" || Array.isArray(params)) return undefined;
+  const name = (params as { name?: unknown }).name;
+  return typeof name === "string" ? name : undefined;
+}
+
+function modernHeaderRejection(
+  req: http.IncomingMessage,
+  sanitizedHeaders: Record<string, string | string[] | undefined>,
+  rawBody: string | undefined,
+): { status: number; body: unknown } | null {
+  if ((req.method ?? "GET").toUpperCase() !== "POST") return null;
+  if (!isJsonContentType(firstHeaderValue(sanitizedHeaders["content-type"]) ?? null)) return null;
+  const parsed = parsedJsonBody(rawBody);
+  if (!parsed.ok) return null;
+
+  const body = parsed.body;
+  const bodyVersion = modernMetaVersion(body);
+  if (!bodyVersion) return null;
+
+  const id = requestIdFromParsedBody(body);
+  const headerVersion = firstHeaderValue(sanitizedHeaders["mcp-protocol-version"]);
+  const headerMethod = firstHeaderValue(sanitizedHeaders["mcp-method"]);
+  const headerName = firstHeaderValue(sanitizedHeaders["mcp-name"]);
+  const bodyMethod = requestMethodFromParsedBody(body);
+  const bodyName = toolNameFromParsedBody(body);
+
+  if (headerVersion && headerVersion !== bodyVersion) {
+    return {
+      status: 400,
+      body: jsonRpcErrorBody(
+        -32020,
+        "Bad Request: MCP-Protocol-Version header does not match request metadata",
+        id,
+      ),
+    };
+  }
+  if (bodyVersion !== MODERN_MCP_PROTOCOL_VERSION) {
+    return {
+      status: 400,
+      body: jsonRpcErrorBody(-32022, "Unsupported protocol version", id),
+    };
+  }
+  if (!headerVersion) {
+    return {
+      status: 400,
+      body: jsonRpcErrorBody(-32020, "Bad Request: MCP-Protocol-Version header is required", id),
+    };
+  }
+  if (!headerMethod || headerMethod !== bodyMethod) {
+    return {
+      status: 400,
+      body: jsonRpcErrorBody(-32020, "Bad Request: Mcp-Method header does not match request", id),
+    };
+  }
+  if (bodyMethod === "tools/call" && (!headerName || headerName !== bodyName)) {
+    return {
+      status: 400,
+      body: jsonRpcErrorBody(-32020, "Bad Request: Mcp-Name header does not match tool name", id),
+    };
+  }
+
+  return null;
 }
 
 function isProtocolOnlyRejection(
@@ -624,6 +722,11 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       if (rawBody === null) return;
 
       const sanitizedHeaders = sanitizedHeadersFromNode(req.headers);
+      const headerRejection = modernHeaderRejection(req, sanitizedHeaders, rawBody);
+      if (headerRejection) {
+        writeJson(res, headerRejection.status, headerRejection.body);
+        return;
+      }
       if (isProtocolOnlyRejection(req, sanitizedHeaders, rawBody)) {
         await nodeMcpHandler(nodeRequestWithBody(req, rawBody, authInfo), res);
         return;

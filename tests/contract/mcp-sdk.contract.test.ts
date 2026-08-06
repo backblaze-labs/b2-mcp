@@ -1,23 +1,35 @@
+import { readFileSync } from "fs";
 import { join } from "path";
 import { listFiles, readJson, readLock, root } from "./support";
 
 describe("MCP SDK and protocol contract", () => {
-  it("uses the reviewed SDK v2 packages without vulnerable Node adapter dependencies", () => {
+  it("uses the reviewed SDK v2 package split without publishing the Node adapter", () => {
     const pkg = readJson<{
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
+      overrides?: Record<string, string | Record<string, string>>;
     }>("package.json");
-    const lock = readLock<{ packages: Record<string, { version?: string }> }>();
+    const lock = readLock<{
+      packages: Record<string, { dev?: boolean; version?: string }>;
+    }>();
     const serverVersion = pkg.dependencies["@modelcontextprotocol/server"];
+    const nodeVersion = pkg.devDependencies["@modelcontextprotocol/node"];
     const clientVersion = pkg.devDependencies["@modelcontextprotocol/client"];
 
     expect(serverVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(nodeVersion).toBe(serverVersion);
     expect(clientVersion).toBe(serverVersion);
-    expect(lock.packages["node_modules/@modelcontextprotocol/server"]?.version).toBe(serverVersion);
-    expect(lock.packages["node_modules/@modelcontextprotocol/client"]?.version).toBe(clientVersion);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
-    expect(lock.packages["node_modules/@modelcontextprotocol/node"]).toBeUndefined();
-    expect(lock.packages["node_modules/@hono/node-server"]).toBeUndefined();
+    expect(lock.packages["node_modules/@modelcontextprotocol/server"]?.version).toBe(serverVersion);
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(nodeVersion);
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
+    expect(lock.packages["node_modules/@modelcontextprotocol/client"]?.version).toBe(clientVersion);
+    expect(pkg.overrides?.["@hono/node-server"]).toBe("2.0.10");
+    expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
+      "'@hono/node-server': 2.0.10",
+    );
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
+    expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(pkg.devDependencies).not.toHaveProperty("@modelcontextprotocol/sdk");
     expect(lock.packages["node_modules/@modelcontextprotocol/sdk"]).toBeUndefined();
@@ -26,10 +38,12 @@ describe("MCP SDK and protocol contract", () => {
   it("exposes the SDK v2 entry points required by the serving adapters", async () => {
     const serverSdk = await import("@modelcontextprotocol/server");
     const stdioSdk = await import("@modelcontextprotocol/server/stdio");
+    const nodeSdk = await import("@modelcontextprotocol/node");
     const nodeAdapter = await import("../../src/node-http-adapter");
 
     expect(typeof serverSdk.createMcpHandler).toBe("function");
     expect(typeof stdioSdk.serveStdio).toBe("function");
+    expect(typeof nodeSdk.toWebRequest).toBe("function");
     expect(typeof nodeAdapter.createNodeHttpHandler).toBe("function");
   });
 

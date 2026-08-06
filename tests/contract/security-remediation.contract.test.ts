@@ -3,7 +3,10 @@ import { join } from "path";
 import { root, readLock } from "./support";
 
 type PackageLock = {
-  packages: Record<string, { version?: string; peerDependencies?: Record<string, string> }>;
+  packages: Record<
+    string,
+    { dev?: boolean; version?: string; peerDependencies?: Record<string, string> }
+  >;
 };
 
 function versionAtLeast(actual: string, floor: string): boolean {
@@ -57,10 +60,21 @@ describe("security dependency policy", () => {
     expect(versionTuple(lockedVersion)[0]).toBe(expectedMajor);
   };
 
-  it("excludes the vulnerable MCP Node adapter from the published graph", () => {
+  it("keeps the MCP Node adapter out of the published graph while pinning the dev SDK split", () => {
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
-    expect(lock.packages["node_modules/@modelcontextprotocol/node"]).toBeUndefined();
-    expect(lock.packages["node_modules/@hono/node-server"]).toBeUndefined();
+    expect(pkg.devDependencies["@modelcontextprotocol/node"]).toBe(
+      pkg.dependencies["@modelcontextprotocol/server"],
+    );
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(
+      pkg.devDependencies["@modelcontextprotocol/node"],
+    );
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
+    expect(pkg.overrides?.["@hono/node-server"]).toBe("2.0.10");
+    expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
+      "'@hono/node-server': 2.0.10",
+    );
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
+    expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
   });
 

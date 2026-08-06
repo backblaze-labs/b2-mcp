@@ -60,7 +60,7 @@
     },
     "@modelcontextprotocol/server": {
       "purpose": "Stable MCP server v2 runtime for stdio and Streamable HTTP handling.",
-      "policy": "Use public v2 server exports only; do not add the monolithic v1 SDK or Node adapter packages.",
+      "policy": "Use public v2 server exports only; do not add the monolithic v1 SDK.",
       "version": "2.0.0",
       "resolved": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.0.0.tgz",
       "integrity": "sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw=="
@@ -91,7 +91,8 @@
     "allowedBackblazeSdkSpecifiers": [
       "@backblaze-labs/b2-sdk",
       "@backblaze-labs/b2-sdk/raw",
-      "@backblaze-labs/b2-sdk/s3"
+      "@backblaze-labs/b2-sdk/s3",
+      "@backblaze-labs/b2-sdk/simulator"
     ],
     "allowedAwsRuntimeImports": [
       {
@@ -106,7 +107,6 @@
     "forbiddenRuntimeDependencies": [
       "axios",
       "@aws-sdk/s3-presigned-post",
-      "@modelcontextprotocol/node",
       "@modelcontextprotocol/sdk"
     ]
   },

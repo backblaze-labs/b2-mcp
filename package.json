@@ -37,7 +37,7 @@
     "test:contract": "node scripts/run-vitest-layer.mjs contract",
     "test:protocol:modern": "node scripts/run-vitest-layer.mjs protocol-modern",
     "test:protocol:legacy": "node scripts/run-vitest-layer.mjs protocol-legacy",
-    "test:protocol": "pnpm run test:protocol:modern && pnpm run test:protocol:legacy",
+    "test:protocol": "pnpm run build && pnpm run test:protocol:modern && pnpm run test:protocol:legacy",
     "test:slow": "node scripts/run-vitest-layer.mjs slow",
     "test:coverage": "pnpm run build && node scripts/run-vitest-layer.mjs coverage",
     "test:integration": "node scripts/reject-live-alias.mjs integration",
@@ -85,6 +85,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
     "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/node": "2.0.0",
     "@toon-format/toon": "4.1.0",
     "@types/node": "22.3.0",
     "@types/opossum": "^8.1.9",
@@ -121,6 +122,7 @@
     },
     "minimatch@3.1.5": {
       "brace-expansion": "1.1.18"
-    }
+    },
+    "@hono/node-server": "2.0.10"
   }
 }
