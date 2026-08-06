@@ -98,7 +98,6 @@ jobs:
           ref: ${{ needs.guard.outputs.checkout-sha }}
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
         with:
-          version: 11.20.0
           run_install: false
       - uses: actions/setup-node@v7
         with:
@@ -133,7 +132,6 @@ jobs:
           ref: ${{ needs.guard.outputs.checkout-sha }}
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
         with:
-          version: 11.20.0
           run_install: false
       - uses: actions/setup-node@v7
         with:

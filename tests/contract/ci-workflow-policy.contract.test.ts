@@ -9,6 +9,9 @@ const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") 
 };
 
 const pnpmSetupAction = "pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa";
+const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+  packageManager?: string;
+};
 const workflowPaths = [
   ".github/workflows/test.yml",
   ".github/workflows/contract.yml",
@@ -81,6 +84,10 @@ describe("CI workflow policy", () => {
   });
 
   it("sets up pinned pnpm before any workflow job uses pnpm", () => {
+    expect(packageJson.packageManager).toBe(
+      "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
+    );
+
     for (const relativePath of workflowPaths) {
       const workflow = readFileSync(join(root, relativePath), "utf8");
       for (const { name, block } of workflowJobBlocks(workflow)) {
@@ -93,9 +100,14 @@ describe("CI workflow policy", () => {
         const setupIndex = block.indexOf(pnpmSetupAction);
         const setupNodeIndex = block.indexOf("actions/setup-node");
         expect(setupIndex, `${relativePath}:${name} missing pinned pnpm setup`).toBeGreaterThan(-1);
-        expect(block, `${relativePath}:${name} must pin pnpm 11.20.0`).toContain(
-          "version: 11.20.0",
+        const setupStep = block.slice(setupIndex, setupNodeIndex);
+        expect(setupStep, `${relativePath}:${name} must disable action install`).toContain(
+          "run_install: false",
         );
+        expect(
+          setupStep,
+          `${relativePath}:${name} must use packageManager as the pnpm version source`,
+        ).not.toMatch(/^\s+version:/m);
         expect(
           setupIndex,
           `${relativePath}:${name} pnpm setup must precede setup-node`,
