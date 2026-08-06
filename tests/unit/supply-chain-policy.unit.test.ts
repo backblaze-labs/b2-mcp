@@ -253,10 +253,8 @@ describe("supply-chain audit policy", () => {
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
     expect(auditJob).toContain("fetch-depth: 0");
-    expect(auditJob).toContain(
-      "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
-    );
-    expect(auditJob).toContain('sleep "$attempt"');
+    expect(auditJob).toContain("git show-ref --verify --quiet refs/remotes/origin/main");
+    expect(auditJob).not.toContain("git fetch --prune --no-tags origin");
     expect(auditJob).not.toContain("refs/heads/*:refs/remotes/origin/*");
     expect(auditJob).not.toContain("--all-branches");
     expect(workflow).not.toContain("npm audit --omit=dev");

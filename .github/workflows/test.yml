@@ -317,19 +317,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Fetch protected refs for denylist scan
+      - name: Verify protected refs for denylist scan
         run: |
           set -euo pipefail
-          for attempt in 1 2 3; do
-            if git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'; then
-              exit 0
-            fi
-            if [[ "$attempt" == 3 ]]; then
-              echo "::error::Could not fetch protected refs for denylist scan"
-              exit 1
-            fi
-            sleep "$attempt"
-          done
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "::error::origin/main is missing from checkout; fetch-depth: 0 must fetch protected refs"
+            exit 1
+          fi
       - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
         with:
           run_install: false
