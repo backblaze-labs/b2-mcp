@@ -128,15 +128,11 @@ The required PR gate remains repo-native: `pnpm run verify` and the protocol
 layers above are the correctness oracle. External clients are advisory evidence
 until they prove deterministic enough for CI.
 
-Manual inspection is pinned to a reviewed Inspector release:
-
-```bash
-pnpm run build
-B2_REGISTER_ALL_TOOLS=true \
-B2_APPLICATION_KEY_ID=external-smoke-key-id \
-B2_APPLICATION_KEY=external-smoke-key-secret \
-pnpm dlx @modelcontextprotocol/inspector@2.1.0 node ./dist/index.js
-```
+Manual Inspector compatibility is pinned to
+`@modelcontextprotocol/inspector@2.1.0`. The package is not invoked from this
+repo's smoke instructions because it is outside the committed lockfile and
+supply-chain gates; use it only from a separate isolated sandbox with an empty
+environment when interactive inspection is needed.
 
 The non-interactive external client smoke uses the official
 `@modelcontextprotocol/client@2.0.0` SDK over stdio. It sends fake test
@@ -147,8 +143,15 @@ to `tests/fixtures/tool-contract/full.modern.json` and
 `docs/tool-profile-contract.json`.
 
 ```bash
+pnpm run build
 pnpm run smoke:client
 ```
+
+`smoke:client` uses the already-built `dist/` artifact and does not remove or
+rewrite it. It fails clearly when `dist/index.js` or `dist/tool-contract.js` is
+missing. On a deployment host, run it only from a non-serving checkout or from a
+copied release artifact, not from the active checkout used by a supervised
+service.
 
 The command records the SDK client's negotiated protocol era and revision, for
 example:
@@ -156,6 +159,11 @@ example:
 ```text
 negotiatedEra=modern negotiatedProtocol=2026-07-28
 ```
+
+The smoke process starts as a small bootstrap that strips sensitive environment
+variables before importing the MCP client SDK. The server child runs with fake
+B2 credentials, `B2_REGISTER_ALL_TOOLS=true`, and a no-network preload guard; if
+capability discovery or another B2 network path is attempted, the smoke fails.
 
 Modern HTTP can be checked with the same SDK client pattern. Start a local HTTP
 server with fake server-mode credentials:

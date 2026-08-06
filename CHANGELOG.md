@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforcement and PR/release summary artifacts.
 - Added the frozen Phase 1 MCP tool-profile contract artifact, generated
   profile reference, and deterministic modern/legacy `tools/list` fixtures.
+- Added an advisory `pnpm run smoke:client` external MCP SDK client smoke for
+  local stdio negotiation and contract-surface evidence without live B2 calls.
 
 ### Changed
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and

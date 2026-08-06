@@ -54,6 +54,9 @@ import { isDestructiveTool } from "./utils/destructive-gate.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
+export const SERVER_INSTRUCTION_OPENING = "Backblaze B2 operational flow.";
+export const SERVER_CREDENTIAL_SAFETY_INSTRUCTION =
+  "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.";
 
 /**
  * Load and validate configuration from environment variables.
@@ -138,7 +141,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
     },
     {
       instructions: [
-        "Backblaze B2 operational flow.",
+        SERVER_INSTRUCTION_OPENING,
         "",
         "Before making a B2 call:",
         "",
@@ -156,7 +159,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
         "   - For normal B2 operations, identify the missing capability and suggest a scoped key with that capability.",
         "   - For Partner API / Groups API operations, verify that a master application key is being used and that the account is enabled for the relevant partner/group feature.",
         "",
-        "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.",
+        SERVER_CREDENTIAL_SAFETY_INSTRUCTION,
         "",
         "Tool result text format:",
         outputFormatInstructions(outputFormat),

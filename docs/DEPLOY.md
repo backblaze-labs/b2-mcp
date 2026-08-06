@@ -559,13 +559,16 @@ secrets there. Add required reviewers when the repository plan supports
 environment reviewers.
 
 For credential-free supplemental evidence before touching a live deployment, run
-the advisory stdio client smoke:
+the advisory stdio client smoke from a non-serving checkout or copied release
+artifact:
 
 ```bash
+pnpm run build
 pnpm run smoke:client
 ```
 
-That command uses fake test credentials, performs no B2 tool calls, and compares
-the negotiated `tools/list` surface to the repository-owned modern contract
-fixture. It is not a substitute for the deterministic protocol gate or the live
-deployment smoke above.
+The smoke command itself does not rebuild or remove `dist/`; it uses fake test
+credentials, blocks network access in the stdio server child, performs no B2
+tool calls, and compares the negotiated `tools/list` surface to the
+repository-owned modern contract fixture. It is not a substitute for the
+deterministic protocol gate or the live deployment smoke above.

@@ -1,12 +1,11 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { createRequire } from "module";
+import { pathToFileURL } from "url";
 
 const smokeScript = readFileSync(join(__dirname, "../../scripts/smoke-test.mjs"), "utf8");
-const clientSmokeScript = readFileSync(
-  join(__dirname, "../../scripts/mcp-client-smoke.mjs"),
-  "utf8",
-);
+const clientSmokePath = join(__dirname, "../../scripts/mcp-client-smoke.mjs");
+const clientSmokeScript = readFileSync(clientSmokePath, "utf8");
 const smokeContractScript = readFileSync(
   join(__dirname, "../../scripts/lib/smoke-contract.cjs"),
   "utf8",
@@ -14,6 +13,7 @@ const smokeContractScript = readFileSync(
 const packageJson = readFileSync(join(__dirname, "../../package.json"), "utf8");
 const parsedPackageJson = JSON.parse(packageJson) as { scripts: Record<string, string> };
 const testingDoc = readFileSync(join(__dirname, "../../docs/TESTING.md"), "utf8");
+const readme = readFileSync(join(__dirname, "../../README.md"), "utf8");
 const nodeRequire = createRequire(__filename);
 const { evaluateProfileContract } = nodeRequire("../../scripts/lib/smoke-contract.cjs") as {
   evaluateProfileContract: (args: {
@@ -28,6 +28,27 @@ const { evaluateProfileContract } = nodeRequire("../../scripts/lib/smoke-contrac
     checks: Array<{ name: string; ok: boolean; detail: string }>;
   };
 };
+
+interface ClientSmokeModule {
+  assertSmokeServerPreconditions(env: Record<string, string>): void;
+  assertWorkerEnvIsSanitized(env: Record<string, string>): void;
+  createBoundedStderrMonitor(options?: { signal?: string; maxTailBytes?: number }): {
+    observe(chunk: string): void;
+    readonly signalSeen: boolean;
+    readonly tail: string;
+  };
+  createServerEnv(
+    sourceEnv?: Record<string, string>,
+    options?: { registerAllTools?: boolean },
+  ): Record<string, string>;
+  createWorkerEnv(sourceEnv?: Record<string, string>): Record<string, string>;
+  instructionsIncludeRequiredSnippets(instructions: string, snippets: string[]): boolean;
+  sensitiveEnvNames(env: Record<string, string>): string[];
+}
+
+async function loadClientSmokeModule(): Promise<ClientSmokeModule> {
+  return import(pathToFileURL(clientSmokePath).href) as Promise<ClientSmokeModule>;
+}
 
 const profileContract = {
   profiles: {
@@ -81,23 +102,56 @@ describe("smoke script release contract", () => {
     expect(smokeScript).not.toContain("s3_list_buckets");
   });
 
-  it("keeps the supplemental SDK client smoke advisory and contract-backed", () => {
-    expect(parsedPackageJson.scripts["smoke:client"]).toBe(
-      "pnpm run build && node scripts/mcp-client-smoke.mjs",
-    );
+  it("keeps the supplemental SDK client smoke advisory and contract-backed", async () => {
+    const clientSmoke = await loadClientSmokeModule();
+    expect(parsedPackageJson.scripts["smoke:client"]).toBe("node scripts/mcp-client-smoke.mjs");
+    expect(parsedPackageJson.scripts["smoke:client"]).not.toContain("build");
     expect(parsedPackageJson.scripts.verify).not.toContain("smoke:client");
-    expect(clientSmokeScript).toContain('@modelcontextprotocol/client"');
-    expect(clientSmokeScript).toContain('@modelcontextprotocol/client/stdio"');
-    expect(clientSmokeScript).toContain("StdioClientTransport");
-    expect(clientSmokeScript).toContain("B2_REGISTER_ALL_TOOLS");
-    expect(clientSmokeScript).toContain("tests/fixtures/tool-contract/full.modern.json");
-    expect(clientSmokeScript).toContain("docs/tool-profile-contract.json");
-    expect(clientSmokeScript).toContain("getProtocolEra");
-    expect(clientSmokeScript).toContain("getNegotiatedProtocolVersion");
+    expect(clientSmokeScript).toContain("liveToolContractSnapshot");
+    expect(clientSmokeScript).not.toContain("function snapshotFromTools");
+    expect(clientSmokeScript).not.toMatch(
+      /import\s+[^;]*["']@modelcontextprotocol\/client(?:\/stdio)?["']/,
+    );
+    expect(clientSmokeScript).not.toMatch(/stderr\s*\+=|let\s+stderr\s*=\s*["']/);
     expect(clientSmokeScript).not.toContain("@modelcontextprotocol/sdk");
     expect(clientSmokeScript).not.toContain("initialize");
     expect(testingDoc).toContain("@modelcontextprotocol/inspector@2.1.0");
-    expect(testingDoc).toContain("Claude client smoke remains supplemental");
+    expect(`${readme}\n${testingDoc}\n${packageJson}`).not.toMatch(/\bpnpm\s+dlx\b/);
+    expect(testingDoc).toMatch(/Claude[\s\S]{0,120}supplemental/);
+
+    const sourceEnv = {
+      PATH: "/usr/bin",
+      B2_APPLICATION_KEY: "real-b2-secret",
+      AWS_SECRET_ACCESS_KEY: "real-aws-secret",
+      GITHUB_TOKEN: "real-github-token",
+      NPM_TOKEN: "real-npm-token",
+      CUSTOM_TOKEN: "real-custom-token",
+    };
+    const workerEnv = clientSmoke.createWorkerEnv(sourceEnv);
+    expect(workerEnv).toMatchObject({ PATH: "/usr/bin", MCP_CLIENT_SMOKE_WORKER: "1" });
+    expect(clientSmoke.sensitiveEnvNames(workerEnv)).toEqual([]);
+    expect(() => clientSmoke.assertWorkerEnvIsSanitized(sourceEnv)).toThrow(/sensitive/);
+
+    const serverEnv = clientSmoke.createServerEnv(sourceEnv);
+    expect(serverEnv.B2_REGISTER_ALL_TOOLS).toBe("true");
+    expect(serverEnv.B2_APPLICATION_KEY_ID).toBe("external-smoke-key-id");
+    expect(serverEnv.B2_APPLICATION_KEY).toBe("external-smoke-key-secret");
+    expect(serverEnv.NODE_OPTIONS).toContain("scripts/no-network-guard.mjs");
+    expect(serverEnv).not.toHaveProperty("AWS_SECRET_ACCESS_KEY");
+    expect(() =>
+      clientSmoke.assertSmokeServerPreconditions(
+        clientSmoke.createServerEnv({}, { registerAllTools: false }),
+      ),
+    ).toThrow(/B2_REGISTER_ALL_TOOLS/);
+
+    const monitor = clientSmoke.createBoundedStderrMonitor({ maxTailBytes: 8 });
+    monitor.observe("prefix");
+    monitor.observe(`MCP_CLIENT_SMOKE_NETWORK_BLOCKED:${"x".repeat(64)}`);
+    expect(monitor.signalSeen).toBe(true);
+    expect(monitor.tail.length).toBeLessThanOrEqual(8);
+    expect(
+      clientSmoke.instructionsIncludeRequiredSnippets("alpha beta gamma", ["alpha", "gamma"]),
+    ).toBe(true);
   });
 
   it("fails closed unless a profile is expected or any-profile mode is explicit", () => {

@@ -2,45 +2,140 @@
 /**
  * Supplemental MCP client smoke for the local stdio entry point.
  *
- * This uses the official MCP TypeScript SDK v2 client against dist/index.js,
- * negotiates the 2026-07-28 protocol, and compares tools/list to the
- * repository-owned modern full-profile contract fixture. It intentionally does
- * not call any B2 tool, and B2_REGISTER_ALL_TOOLS=true prevents startup
- * capability discovery from making a live B2 network call.
+ * The top-level process is a bootstrap: it builds an allowlisted environment
+ * and spawns a worker. SDK modules are imported only inside the worker after
+ * sensitive parent environment variables have been removed.
  */
 
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { Client } from "@modelcontextprotocol/client";
-import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { liveToolContractSnapshot } from "./smoke-test.mjs";
 
 const require = createRequire(import.meta.url);
+const { sanitizedEnv, secretNamePattern } = require("./lib/sanitized-env.cjs");
+
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const scriptPath = fileURLToPath(import.meta.url);
 const TARGET_PROTOCOL_VERSION = "2026-07-28";
 const EXPECTED_PROFILE = "full";
 const EXPECTED_FIXTURE = "tests/fixtures/tool-contract/full.modern.json";
-const SAFE_ENV_NAMES = [
-  "PATH",
-  "Path",
-  "SystemRoot",
-  "COMSPEC",
-  "PATHEXT",
-  "HOME",
-  "USERPROFILE",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-];
+const WORKER_ENV_NAME = "MCP_CLIENT_SMOKE_WORKER";
+const NETWORK_GUARD_SCRIPT = "scripts/no-network-guard.mjs";
+const NETWORK_GUARD_SIGNAL = "MCP_CLIENT_SMOKE_NETWORK_BLOCKED";
+const DEFAULT_STDERR_TAIL_BYTES = 8192;
 
-const checks = [];
+const fakeServerCredentials = {
+  B2_APPLICATION_KEY_ID: "external-smoke-key-id",
+  B2_APPLICATION_KEY: "external-smoke-key-secret",
+};
 
-function readJson(relativePath) {
+export function readJson(relativePath) {
   return JSON.parse(readFileSync(join(root, relativePath), "utf8"));
 }
 
-function check(name, ok, detail = "") {
+export function createWorkerEnv(sourceEnv = process.env) {
+  return sanitizedEnv(
+    {
+      [WORKER_ENV_NAME]: "1",
+    },
+    { sourceEnv },
+  );
+}
+
+export function createServerEnv(sourceEnv = process.env, options = {}) {
+  const registerAllTools = options.registerAllTools !== false;
+  return sanitizedEnv(
+    {
+      ...(registerAllTools ? { B2_REGISTER_ALL_TOOLS: "true" } : {}),
+      ...fakeServerCredentials,
+      LOG_LEVEL: "info",
+      NODE_OPTIONS: `--import ${pathToFileURL(join(root, NETWORK_GUARD_SCRIPT)).href}`,
+    },
+    {
+      sourceEnv,
+      nonSecretEnvNames: ["B2_REGISTER_ALL_TOOLS", "B2_APPLICATION_KEY_ID", "B2_APPLICATION_KEY"],
+    },
+  );
+}
+
+export function sensitiveEnvNames(env) {
+  return Object.keys(env)
+    .filter((name) => secretNamePattern.test(name))
+    .sort();
+}
+
+export function assertWorkerEnvIsSanitized(env = process.env) {
+  const leaked = sensitiveEnvNames(env);
+  if (leaked.length > 0) {
+    throw new Error(
+      `Refusing to import MCP client SDK with sensitive environment variables present: ${leaked.join(
+        ", ",
+      )}`,
+    );
+  }
+}
+
+export function assertSmokeServerPreconditions(env) {
+  if (env.B2_REGISTER_ALL_TOOLS !== "true") {
+    throw new Error("B2_REGISTER_ALL_TOOLS=true is required for no-network client smoke");
+  }
+  if (!env.NODE_OPTIONS?.includes(NETWORK_GUARD_SCRIPT)) {
+    throw new Error("No-network preload guard is required for client smoke");
+  }
+}
+
+export function createBoundedStderrMonitor({
+  signal = NETWORK_GUARD_SIGNAL,
+  maxTailBytes = DEFAULT_STDERR_TAIL_BYTES,
+} = {}) {
+  let tail = "";
+  let signalSeen = false;
+
+  return {
+    observe(chunk) {
+      const text = chunk.toString();
+      if (text.includes(signal)) signalSeen = true;
+      tail = `${tail}${text}`.slice(-maxTailBytes);
+    },
+    get signalSeen() {
+      return signalSeen;
+    },
+    get tail() {
+      return tail;
+    },
+  };
+}
+
+export function instructionsIncludeRequiredSnippets(instructions, snippets) {
+  return snippets.every((snippet) => instructions.includes(snippet));
+}
+
+function assertBuiltArtifacts() {
+  const missing = ["dist/index.js", "dist/tool-contract.js"].filter(
+    (relativePath) => !existsSync(join(root, relativePath)),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing built artifact(s): ${missing.join(
+        ", ",
+      )}. Run pnpm run build from a non-serving checkout before pnpm run smoke:client.`,
+    );
+  }
+}
+
+function loadContractHelpers() {
+  const helpers = require(join(root, "dist/tool-contract.js"));
+  if (typeof helpers.normalizeTool !== "function" || typeof helpers.fixtureHash !== "function") {
+    throw new Error("dist/tool-contract.js does not export contract helpers");
+  }
+  return helpers;
+}
+
+function recordCheck(checks, name, ok, detail = "") {
   checks.push({ name, ok, detail });
   const mark = ok ? "PASS" : "FAIL";
   console.log(`  [${mark}] ${name}${detail ? " - " + detail : ""}`);
@@ -50,57 +145,24 @@ function arraysEqual(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function smokeEnv() {
-  const inherited = Object.fromEntries(
-    SAFE_ENV_NAMES.flatMap((name) =>
-      process.env[name] === undefined ? [] : [[name, process.env[name]]],
-    ),
-  );
-  const env = {
-    ...inherited,
-    NODE_ENV: "test",
-    B2_REGISTER_ALL_TOOLS: "true",
-    B2_APPLICATION_KEY_ID: "external-smoke-key-id",
-    B2_APPLICATION_KEY: "external-smoke-key-secret",
-  };
-  delete env.FORCE_COLOR;
-  delete env.NO_COLOR;
-  return env;
-}
+async function runWorker() {
+  assertBuiltArtifacts();
+  assertWorkerEnvIsSanitized();
 
-function loadContractHelpers() {
-  try {
-    const helpers = require(join(root, "dist/tool-contract.js"));
-    if (typeof helpers.normalizeTool !== "function" || typeof helpers.fixtureHash !== "function") {
-      throw new Error("dist/tool-contract.js does not export contract helpers");
-    }
-    return helpers;
-  } catch (err) {
-    console.error(
-      `Unable to load compiled contract helpers. Run pnpm run build before this smoke. ${err.message}`,
-    );
-    process.exit(2);
-  }
-}
+  const [{ Client }, { StdioClientTransport }, serverExports] = await Promise.all([
+    import("@modelcontextprotocol/client"),
+    import("@modelcontextprotocol/client/stdio"),
+    import(pathToFileURL(join(root, "dist/server.js")).href),
+  ]);
 
-function snapshotFromTools(tools, helpers) {
-  const sortedTools = [...tools]
-    .filter((tool) => tool?.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const names = sortedTools.map((tool) => tool.name);
-  const normalizedTools = sortedTools.map(helpers.normalizeTool);
-  return {
-    names,
-    hash: helpers.fixtureHash({ names, tools: normalizedTools }),
-  };
-}
-
-async function main() {
   const helpers = loadContractHelpers();
   const expectedFixture = readJson(EXPECTED_FIXTURE);
   const toolContract = readJson("docs/tool-profile-contract.json");
   const { evaluateProfileContract } = require(join(root, "scripts/lib/smoke-contract.cjs"));
+  const serverEnv = createServerEnv();
+  assertSmokeServerPreconditions(serverEnv);
 
+  const checks = [];
   console.log("MCP external client smoke (advisory)");
   console.log(`  transport=stdio targetProtocol=${TARGET_PROTOCOL_VERSION}`);
 
@@ -108,13 +170,11 @@ async function main() {
     command: process.execPath,
     args: [join(root, "dist/index.js")],
     cwd: root,
-    env: smokeEnv(),
+    env: serverEnv,
     stderr: "pipe",
   });
-  let stderr = "";
-  transport.stderr?.on("data", (chunk) => {
-    stderr += chunk.toString();
-  });
+  const stderrMonitor = createBoundedStderrMonitor();
+  transport.stderr?.on("data", (chunk) => stderrMonitor.observe(chunk));
 
   const client = new Client(
     { name: "b2-mcp-external-smoke", version: "1.0.0" },
@@ -138,58 +198,73 @@ async function main() {
     );
     console.log(`  server=${server?.name ?? "unknown"}@${server?.version ?? "unknown"}`);
 
-    check("client negotiated modern protocol era", era === "modern", `era=${era ?? "unknown"}`);
-    check(
+    recordCheck(checks, "client negotiated modern protocol era", era === "modern", `era=${era}`);
+    recordCheck(
+      checks,
       "client negotiated target protocol revision",
       protocolVersion === TARGET_PROTOCOL_VERSION,
       `protocol=${protocolVersion ?? "unknown"}`,
     );
-    check(
+    recordCheck(
+      checks,
       "server/discover advertises target protocol",
       discover.supportedVersions?.includes(TARGET_PROTOCOL_VERSION) === true,
       `supported=${(discover.supportedVersions ?? []).join(",")}`,
     );
-    check("server/discover resultType is complete", discover.resultType === "complete");
-    check(
+    recordCheck(
+      checks,
+      "server/discover resultType is complete",
+      discover.resultType === "complete",
+    );
+    recordCheck(
+      checks,
       "server/discover exposes tool capability",
       typeof discover.capabilities?.tools === "object" && discover.capabilities.tools !== null,
     );
-    check(
+    recordCheck(
+      checks,
       "server name/version is reported",
       server?.name === "backblaze-b2" && typeof server.version === "string",
       `server=${server?.name ?? "unknown"}@${server?.version ?? "unknown"}`,
     );
-    check(
+    recordCheck(
+      checks,
       "instructions are reported",
-      instructions.includes("Backblaze B2 operational flow.") &&
-        instructions.includes("Never log, print, persist, or echo back application keys"),
+      instructionsIncludeRequiredSnippets(instructions, [
+        serverExports.SERVER_INSTRUCTION_OPENING,
+        serverExports.SERVER_CREDENTIAL_SAFETY_INSTRUCTION,
+      ]),
     );
 
     const listed = await client.listTools(undefined, { cacheMode: "refresh", timeoutMs: 10_000 });
-    const snapshot = snapshotFromTools(listed.tools, helpers);
+    const snapshot = liveToolContractSnapshot(listed.tools, helpers);
     const profileResult = evaluateProfileContract({
       snapshot,
       toolContract,
       expectedProfile: EXPECTED_PROFILE,
     });
     for (const result of profileResult.checks) {
-      check(result.name, result.ok, result.detail);
+      recordCheck(checks, result.name, result.ok, result.detail);
     }
-    check(
+    recordCheck(
+      checks,
       `tools/list names match ${EXPECTED_FIXTURE}`,
       arraysEqual(snapshot.names, expectedFixture.names),
       `${snapshot.names.length} tools`,
     );
-    check(
+    recordCheck(
+      checks,
       `tools/list hash matches ${EXPECTED_FIXTURE}`,
       snapshot.hash === expectedFixture.hash,
       `hash=${snapshot.hash.slice(0, 12)}`,
     );
-    check(
+    recordCheck(
+      checks,
       "tools/list includes representative B2 and S3 tools",
       snapshot.names.includes("b2_list_buckets") && snapshot.names.includes("s3_list_objects_v2"),
     );
-    check("startup avoided B2 capability discovery", !stderr.includes("capability.fetch"));
+    await new Promise((resolve) => setImmediate(resolve));
+    recordCheck(checks, "startup avoided B2 network access", !stderrMonitor.signalSeen);
 
     const failed = checks.filter((result) => !result.ok);
     if (failed.length > 0) {
@@ -203,7 +278,30 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error("Fatal:", err.message ?? err);
-  process.exit(1);
-});
+async function runBootstrap() {
+  assertBuiltArtifacts();
+  const child = spawn(process.execPath, [scriptPath], {
+    cwd: root,
+    env: createWorkerEnv(),
+    stdio: "inherit",
+  });
+  const [code, signal] = await once(child, "exit");
+  if (signal) {
+    console.error(`client smoke worker terminated by ${signal}`);
+    process.exitCode = 1;
+    return;
+  }
+  process.exitCode = typeof code === "number" ? code : 1;
+}
+
+async function main() {
+  if (process.env[WORKER_ENV_NAME] === "1") await runWorker();
+  else await runBootstrap();
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("Fatal:", err.message ?? err);
+    process.exit(1);
+  });
+}
