@@ -215,6 +215,15 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(call.status).toBe(200);
   });
 
+  it("accepts modern envelopes with Mcp-Method and no protocol-version header", async () => {
+    const list = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS, "mcp-method": "tools/list" },
+      body: LIST_TOOLS,
+    });
+
+    expect(list.status).toBe(200);
+  });
+
   it("rejects mismatched tool-name mirror headers before credential resolution", async () => {
     const resolve = vi.fn(() => {
       throw new Error("credential resolution should not run");

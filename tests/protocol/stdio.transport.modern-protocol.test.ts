@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import {
   MODERN_META,
   MODERN_PROTOCOL_VERSION,
@@ -37,10 +38,22 @@ describe("stdio transport (MCP 2026-07-28)", () => {
     process.env.NPM_TOKEN = "sentinel-npm-token";
     process.env.AWS_SECRET_ACCESS_KEY = "sentinel-aws-secret";
     try {
-      const env = protocolEnv();
-      expect(env.GITHUB_TOKEN).toBeUndefined();
-      expect(env.NPM_TOKEN).toBeUndefined();
-      expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      const child = spawnSync(
+        process.execPath,
+        [
+          "-e",
+          [
+            "process.stdout.write(JSON.stringify({",
+            "github: process.env.GITHUB_TOKEN ?? null,",
+            "npm: process.env.NPM_TOKEN ?? null,",
+            "aws: process.env.AWS_SECRET_ACCESS_KEY ?? null",
+            "}));",
+          ].join(""),
+        ],
+        { env: protocolEnv(), encoding: "utf8" },
+      );
+      expect(child.status).toBe(0);
+      expect(JSON.parse(child.stdout)).toEqual({ github: null, npm: null, aws: null });
     } finally {
       for (const [name, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[name];

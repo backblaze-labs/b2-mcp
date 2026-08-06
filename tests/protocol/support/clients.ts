@@ -120,11 +120,15 @@ function createClient(options: ClientOptions): Client {
   return new Client({ name: "b2-mcp-protocol-test", version: "1.0.0" }, options);
 }
 
-export async function connectModernStdioClient(): Promise<{
+type StdioClientConnection = {
   client: Client;
   transport: StdioClientTransport;
   stderr: () => string;
-}> {
+};
+
+async function connectStdioClient(
+  versionNegotiation: ClientOptions["versionNegotiation"],
+): Promise<StdioClientConnection> {
   requireBuiltEntrypoints();
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -137,37 +141,17 @@ export async function connectModernStdioClient(): Promise<{
   transport.stderr?.on("data", (chunk) => {
     stderr += chunk.toString();
   });
-  const client = createClient({
-    versionNegotiation: { mode: { pin: MODERN_PROTOCOL_VERSION } },
-    defaultCacheTtlMs: 0,
-  });
+  const client = createClient({ versionNegotiation, defaultCacheTtlMs: 0 });
   await client.connect(transport);
   return { client, transport, stderr: () => stderr };
 }
 
-export async function connectLegacyStdioClient(): Promise<{
-  client: Client;
-  transport: StdioClientTransport;
-  stderr: () => string;
-}> {
-  requireBuiltEntrypoints();
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [SIMULATOR_ENTRYPOINT, "stdio"],
-    cwd: ROOT,
-    env: stdioEnv(),
-    stderr: "pipe",
-  });
-  let stderr = "";
-  transport.stderr?.on("data", (chunk) => {
-    stderr += chunk.toString();
-  });
-  const client = createClient({
-    versionNegotiation: { mode: "legacy" },
-    defaultCacheTtlMs: 0,
-  });
-  await client.connect(transport);
-  return { client, transport, stderr: () => stderr };
+export async function connectModernStdioClient(): Promise<StdioClientConnection> {
+  return connectStdioClient({ mode: { pin: MODERN_PROTOCOL_VERSION } });
+}
+
+export async function connectLegacyStdioClient(): Promise<StdioClientConnection> {
+  return connectStdioClient({ mode: "legacy" });
 }
 
 export interface RecordedHttpRequest {
