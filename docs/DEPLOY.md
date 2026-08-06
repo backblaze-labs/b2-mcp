@@ -523,43 +523,58 @@ Header compatibility mode, where the client still sends B2 credential headers:
 ```bash
 MCP_URL=https://mcp.your-domain.example/mcp \
 B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
+B2_SMOKE_BUCKET=mcp-smoke-fixture \
 B2_KEY_ID=...  B2_KEY=... \
 B2_APP_KEY_ID=...  B2_APP_KEY=... \
 pnpm run smoke
 ```
 
-`B2_APP_KEY_ID` / `B2_APP_KEY` are optional — if absent the S3 check is
-skipped. `B2_MCP_EXPECTED_TOOL_PROFILE` is required for deploy verification and
-must be one of `full`, `phase1-default`, or `read-only`; the smoke test compares
-the live sorted tool names and normalized tool-contract hash against that frozen
-profile. For exploratory local checks only, set `B2_MCP_ALLOW_ANY_TOOL_PROFILE=true`
-to accept any frozen profile. Exit code 0 = pass, 1 = at least one check failed.
+`B2_APP_KEY_ID` / `B2_APP_KEY` enable the S3 bucket probe. Protected smoke runs
+also set `B2_MCP_REQUIRE_SMOKE_BUCKET=1`, which makes a missing
+`B2_SMOKE_BUCKET` or unavailable `s3_head_bucket` check fail instead of turning
+into green skipped evidence. `B2_MCP_EXPECTED_TOOL_PROFILE` is required for
+deploy verification and must be one of `full`, `phase1-default`, or `read-only`;
+the smoke test compares the live sorted tool names and normalized tool-contract
+hash against that frozen profile. For exploratory local checks only, set
+`B2_MCP_ALLOW_ANY_TOOL_PROFILE=true` to accept any frozen profile. Exit code 0 =
+pass, 1 = at least one check failed.
 
 ### CI smoke runs
 
-The same script also runs automatically via `.github/workflows/smoke.yml`:
-
-- After every `release.published` event (so a `gh release create` triggers it)
-- On manual `workflow_dispatch` from the Actions tab when run from `main`
-
-There is no recurring smoke cron until a stable monitored endpoint and
-alert-deduplicated routing are owned outside release CI.
+The same script also runs automatically via `.github/workflows/smoke.yml` on
+manual dispatch from `main`, pushes to `main`, trusted same-repository pull
+requests, and a weekly schedule. Fork pull requests are skipped before protected
+environment secrets are requested.
 
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
+- `vars.B2_SMOKE_BUCKET` — dedicated test-owned bucket for the `s3_head_bucket`
+  probe
 - `vars.B2_MCP_EXPECTED_TOOL_PROFILE` — expected frozen profile for the live
   credential set (`phase1-default`, `read-only`, or `full`)
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 
-The workflow is gated to the canonical repo and protected refs, fails loudly
-when dispatched from a non-main ref, verifies release tags point at `ci-green`,
-and checks out the resolved `ci-green` commit before running package code with
-live secrets. It is then further gated by the `live-b2-smoke` GitHub environment.
-Configure that environment with branch/tag restrictions before storing live B2
-secrets there. Add required reviewers when the repository plan supports
-environment reviewers.
+The workflow is gated to the canonical repo, fails loudly when dispatched from a
+non-main ref, and runs only trusted same-repository code with live secrets. It is
+then further gated by the `live-b2-smoke` GitHub environment. Configure that
+environment with branch restrictions before storing live B2 secrets there. Add
+required reviewers when the repository plan supports environment reviewers.
+
+The protected live contract workflow runs through
+`.github/workflows/contract.yml` on manual dispatch from `main`, pushes to
+`main`, trusted same-repository pull requests, a weekly schedule, and
+`workflow_call` from the publish workflow. It uses the `live-b2-contract`
+environment with `LIVE_B2_KEY_ID` / `LIVE_B2_KEY`, sets
+`B2_INTEGRATION_REQUIRE_CREDENTIALS=1`, and fails a trusted run when credentials
+are missing instead of accepting skipped live tests. Fork pull requests are
+skipped before protected secrets are requested. Each matrix entry uses a unique
+`B2_MCP_LIVE_RUN_PREFIX` rooted at `mcp-contract-`, creates only test-owned
+buckets, objects, multipart uploads, keys, and notification rules, runs
+serially on Node.js 22.3.0, 24, and 26, and invokes
+`scripts/live-b2-janitor.mjs` after the run. The weekly schedule also sweeps
+abandoned `mcp-contract-*` resources.
 
 For credential-free supplemental evidence before touching a live deployment, run
 the advisory stdio client smoke from a non-serving checkout or copied release

@@ -65,7 +65,7 @@ const jobField = (job: string, field: string, value: string) =>
 
 describe("live secret workflow policy", () => {
   it.each(liveWorkflows)(
-    "$path wires the protected environment, protected refs, and serialized Node matrix",
+    "$path wires the protected environment, trusted triggers, and serialized Node matrix",
     ({ path, job, environment }) => {
       const text = workflowText(path);
       expect(text).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
@@ -74,15 +74,17 @@ describe("live secret workflow policy", () => {
       expectYamlScalar(text, "max-parallel", "1");
       expect(text).toMatch(/^\s{2}guard:\s*$/m);
       expect(text).toMatch(/if: github\.repository == 'backblaze-labs\/b2-mcp'/);
+      expect(text).toMatch(/^\s{2}push:\s*$/m);
+      expect(text).toMatch(/^\s{2}pull_request:\s*$/m);
+      expect(text).toMatch(/^\s{2}schedule:\s*$/m);
       expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
-      expect(text).toContain('[[ "$GITHUB_REF" != refs/tags/v* ]]');
-      expect(text).toContain('protected_ref="refs/heads/ci-green"');
+      expect(text).toContain("Skipping fork pull request");
+      expect(text).toContain("github.event.pull_request.head.repo.full_name");
       expect(text).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
-      expect(text).toContain('tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}"');
-      expect(text).toContain('"$tag_sha" != "$ci_green_sha"');
-      expect(text).toContain('echo "checkout_sha=${ci_green_sha}" >> "$GITHUB_OUTPUT"');
+      expect(text).toContain('echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"');
       expect(text).toContain("node-version: ${{ matrix.node-version }}");
       expect(text).not.toContain("node-version-file:");
+      expect(text).not.toContain("release:");
     },
   );
 
@@ -96,11 +98,10 @@ describe("live secret workflow policy", () => {
   );
 
   it.each(liveWorkflows)(
-    "$path checks out the resolved ci-green commit before running package code",
+    "$path checks out the guarded commit before running package code",
     ({ path }) => {
       const text = workflowText(path);
       expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
-      expect(text).toContain('ci_green_sha="$(git ls-remote origin "${protected_ref}"');
       expect(text).not.toContain('checkout_ref="ci-green"');
       expect(text).not.toContain("ref: ci-green");
       expect(text).not.toContain("github.event_name == 'release'");
@@ -108,19 +109,21 @@ describe("live secret workflow policy", () => {
     },
   );
 
-  it("does not schedule recurring live contract writes", () => {
+  it("runs live contracts through workflow_call for release gating", () => {
     const text = workflowText(".github/workflows/contract.yml");
-    expect(text).not.toMatch(/^\s{2}schedule:\s*$/m);
-    expect(text).not.toContain("cron:");
+    expect(text).toMatch(/^\s{2}workflow_call:\s*$/m);
+    expect(text).toContain("checkout-sha:");
+    expect(text).toContain("WORKFLOW_CALL_CHECKOUT_SHA");
+    expect(text).toContain("workflow_call requires a full checkout-sha commit");
   });
 
-  it("keeps recurring live smoke disabled until a monitored endpoint exists", () => {
-    const text = workflowText(".github/workflows/smoke.yml");
-    expect(text).not.toMatch(/^\s{2}schedule:\s*$/m);
-    expect(text).not.toContain("cron:");
-    expect(text).toContain("stable");
-    expect(text).toContain("monitored endpoint");
-    expect(text).toContain("alert-deduplication path");
+  it("adds a scheduled janitor for abandoned test-prefixed resources", () => {
+    const text = workflowText(".github/workflows/contract.yml");
+    expect(text).toContain("abandoned-resource-janitor:");
+    expect(text).toContain("github.event_name == 'schedule'");
+    expect(text).toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
+    expect(text).toContain("Clean current live B2 run resources");
+    expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
   });
 
   it("keeps package-budget off the live contract dependency chain", () => {
@@ -133,22 +136,22 @@ describe("live secret workflow policy", () => {
 
   it("keeps live contract cleanup context visible in logs", () => {
     const text = workflowText(".github/workflows/contract.yml");
-    expect(text).toContain("Print cleanup context");
-    expect(text).toContain("contract_bucket_prefix=mcp-contract-");
-    expect(text).toContain("contract_key_prefix=c-v");
+    expect(text).toContain("live-b2-janitor");
+    expect(text).toContain("mcp-contract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
   });
 
   it("runs the explicit live contract layer with B2 credentials", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = text.slice(text.indexOf("  contract:"));
 
-    expect(contractJob).toContain("pnpm run test:contract:live");
+    expect(contractJob).toContain("pnpm run test:live:b2");
     expect(contractJob).not.toContain("pnpm run test:contract\n");
     expect(contractJob).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
+    expect(contractJob).toContain('B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"');
   });
 
-  it("pins the expected tool profile for live smoke", () => {
+  it("pins the expected tool profile and required test bucket for live smoke", () => {
     const text = workflowText(".github/workflows/smoke.yml");
     const smokeJob = text.slice(text.indexOf("  smoke:"));
 
@@ -156,8 +159,10 @@ describe("live secret workflow policy", () => {
       "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
     );
     expect(smokeJob).toContain(
-      "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_MCP_EXPECTED_TOOL_PROFILE",
+      "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
     );
+    expect(smokeJob).toContain("B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}");
+    expect(smokeJob).toContain('B2_MCP_REQUIRE_SMOKE_BUCKET: "1"');
   });
 
   it.each(liveWorkflows)(

@@ -165,7 +165,11 @@ const nvmrc = read(".nvmrc").trim();
 requireExactNode22Pin(".nvmrc", nvmrc, policy);
 requireExactNode22Pin("environment.yml nodejs", parseEnvironmentNodeVersion(), policy);
 requireEqual("runtime-policy crossPlatformNode", policy.crossPlatformNode, policy.node22Pinned);
-requireEqual("runtime-policy liveNodeMatrix[0]", policy.liveNodeMatrix?.[0], policy.node22Pinned);
+requireEqual(
+  "runtime-policy liveNodeMatrix[0]",
+  policy.liveNodeMatrix?.[0],
+  policy.engineFloor.replace(/^>=/, ""),
+);
 requireEqual(
   "runtime-policy deterministicLinuxMatrix[0]",
   policy.deterministicLinuxMatrix?.[0],

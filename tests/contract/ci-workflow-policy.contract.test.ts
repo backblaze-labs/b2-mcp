@@ -302,13 +302,9 @@ describe("CI workflow policy", () => {
     expect(attachSbomJob).toContain("needs: [prepare, publish]");
     expect(attachSbomJob).toContain("Attach SBOM to GitHub release after npm publish");
     expect(liveContract).toContain("needs: prepare");
-    expect(liveContract).toContain("environment: live-b2-contract");
-    expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
-    expect(liveContract).toContain("node-version: [22.23.1, 24, 26]");
-    expect(liveContract).toContain("Validate live B2 environment");
-    expect(liveContract).toContain("LIVE_B2_KEY_ID");
-    expect(liveContract).toContain("LIVE_B2_KEY");
-    expect(liveContract).toContain("pnpm run test:contract:live");
+    expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");
+    expect(liveContract).toContain("checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}");
+    expect(liveContract).toContain("secrets: inherit");
     expect(liveContract).not.toContain("for attempt in 1 2 3");
     expect(liveContract).not.toContain("retrying");
     expect(publish).toContain("attach-sbom:");

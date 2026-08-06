@@ -10,7 +10,7 @@ const missing = required.filter((name) => !process.env[name]);
 
 if (missing.length) {
   const command =
-    profile === "contract" ? "pnpm run test:contract:live" : "pnpm run test:integration:live";
+    profile === "contract" ? "pnpm run test:live:b2-contract" : "pnpm run test:live:b2-integration";
   console.error(`${command} requires live Backblaze B2 credentials.`);
   console.error(`Missing: ${missing.join(", ")}`);
   console.error("Set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY, then rerun the live command.");

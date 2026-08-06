@@ -198,6 +198,29 @@ describe("test layer naming", () => {
     expect(existsSync(junitPath)).toBe(false);
   });
 
+  it("redacts live smoke bucket names from credential-bearing runner output", () => {
+    const { summaryPath } = removeLayerReports("runner-fixture-nonlive");
+    const smokeBucket = "mcp-contract-smoke-bucket-name";
+
+    const result = spawnSync("node", ["scripts/run-vitest-layer.mjs", "runner-fixture-nonlive"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...envWithoutB2Credentials(),
+        B2_APPLICATION_KEY_ID: "fake-live-key-id",
+        B2_APPLICATION_KEY: "fake-live-key-secret",
+        B2_SMOKE_BUCKET: smokeBucket,
+        B2_VITEST_LAYER_FIXTURE_SECRET_ENV: "B2_SMOKE_BUCKET",
+      },
+      timeout: 30_000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain(smokeBucket);
+    expect(result.stderr).not.toContain(smokeBucket);
+    expect(readFileSync(summaryPath, "utf8")).not.toContain(smokeBucket);
+  });
+
   it("removes stale layer reports before each run", () => {
     const { summaryPath, junitPath } = removeLayerReports("runner-fixture-nonlive");
     writeFileSync(
@@ -316,10 +339,14 @@ describe("test layer naming", () => {
   it("keeps live tests behind explicit live pnpm scripts", () => {
     const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
 
-    expect(pkg.scripts["test:integration:live"]).toContain("require-live-env.mjs integration");
-    expect(pkg.scripts["test:integration:live"]).toContain("integration-live");
-    expect(pkg.scripts["test:contract:live"]).toContain("require-live-env.mjs contract");
-    expect(pkg.scripts["test:contract:live"]).toContain("contract-live");
+    expect(pkg.scripts["test:live:b2-integration"]).toContain("require-live-env.mjs integration");
+    expect(pkg.scripts["test:live:b2-integration"]).toContain("integration-live");
+    expect(pkg.scripts["test:live:b2-contract"]).toContain("require-live-env.mjs contract");
+    expect(pkg.scripts["test:live:b2-contract"]).toContain("contract-live");
+    expect(pkg.scripts["test:live:b2"]).toContain("test:live:b2-contract");
+    expect(pkg.scripts["test:live:b2"]).toContain("test:live:b2-integration");
+    expect(pkg.scripts["test:integration:live"]).toContain("reject-live-alias.mjs integration");
+    expect(pkg.scripts["test:contract:live"]).toContain("reject-live-alias.mjs contract");
     expect(pkg.scripts["test:contract"]).not.toMatch(
       /tests\/live|contract-live|test:contract:live/,
     );
@@ -418,7 +445,7 @@ describe("test layer naming", () => {
   it("keeps live notification contracts on disposable contract buckets", () => {
     const bucketName = contractBucketName("notify");
 
-    expect(bucketName).toMatch(/^mcp-contract-notify-[a-z0-9]+-[a-z0-9]+$/);
+    expect(bucketName).toMatch(/^mcp-contract-[a-z0-9-]+-notify-[a-f0-9]{8}$/);
     expect(isContractBucketName(bucketName, "notify")).toBe(true);
     expect(isContractBucketName("user-production-bucket", "notify")).toBe(false);
   });

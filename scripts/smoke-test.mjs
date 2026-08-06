@@ -19,6 +19,7 @@
  *   B2_SMOKE_BUCKET — known bucket to probe with s3_head_bucket
  *   B2_MCP_EXPECTED_TOOL_PROFILE — full, phase1-default, or read-only
  *   B2_MCP_ALLOW_ANY_TOOL_PROFILE — set to true only for exploratory local smoke runs
+ *   B2_MCP_REQUIRE_SMOKE_BUCKET — set to 1 in protected live runs
  *
  * Optional env for a customer OAuth/resource-server edge:
  *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
@@ -30,6 +31,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { redactB2CredentialValues } from "./b2-credential-env.mjs";
 import smokeContract from "./lib/smoke-contract.cjs";
 
 const { evaluateProfileContract } = smokeContract;
@@ -48,6 +50,7 @@ const {
   B2_SMOKE_BUCKET,
   B2_MCP_EXPECTED_TOOL_PROFILE,
   B2_MCP_ALLOW_ANY_TOOL_PROFILE,
+  B2_MCP_REQUIRE_SMOKE_BUCKET,
   MCP_AUTHORIZATION,
 } = process.env;
 
@@ -58,7 +61,8 @@ let headers = {};
 
 function check(name, ok, detail = "") {
   const mark = ok ? "PASS" : "FAIL";
-  console.log(`  [${mark}] ${name}${detail ? " — " + detail : ""}`);
+  const safeDetail = detail ? redactB2CredentialValues(detail, process.env) : "";
+  console.log(`  [${mark}] ${name}${safeDetail ? " — " + safeDetail : ""}`);
   if (!ok) failures.push(name);
 }
 
@@ -214,6 +218,7 @@ async function main() {
   }
 
   // s3_head_bucket — only when an app key and known smoke bucket were supplied
+  const requireSmokeBucket = B2_MCP_REQUIRE_SMOKE_BUCKET === "1";
   if (B2_APP_KEY_ID && B2_APP_KEY && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
     try {
       await mcp("tools/call", { name: "s3_head_bucket", arguments: { bucket: B2_SMOKE_BUCKET } });
@@ -222,9 +227,13 @@ async function main() {
       check("s3_head_bucket confirms smoke bucket", false, e.message);
     }
   } else {
-    console.log(
-      "  [SKIP] s3_head_bucket — set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable",
-    );
+    const detail =
+      "set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable";
+    if (requireSmokeBucket) {
+      check("s3_head_bucket confirms smoke bucket", false, detail);
+    } else {
+      console.log(`  [SKIP] s3_head_bucket — ${detail}`);
+    }
   }
 
   console.log();
@@ -238,7 +247,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
-    console.error("Fatal:", err.message ?? err);
+    console.error("Fatal:", redactB2CredentialValues(err.message ?? err, process.env));
     process.exit(1);
   });
 }

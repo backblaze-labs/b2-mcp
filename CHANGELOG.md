@@ -80,6 +80,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
   disallowed refs, validate environment secrets before live calls, and avoid
   recurring scheduled contract writes until cleanup automation exists.
+- Reworked live B2 contract workflows to use explicit `test:live:b2-*`
+  commands, protected scheduled/manual/main/trusted-PR triggers, test-owned
+  `mcp-contract-*` resources, serialized Node.js 22.3.0/24/26 coverage,
+  best-effort cleanup, and a scheduled janitor instead of customer bucket
+  fixtures.
 - Made release publishing attach the SBOM only after npm publish succeeds and
   removed whole-suite retries from live B2 contract publication evidence.
 - Replaced `b2_create_key`, `b2_create_group_member`, and

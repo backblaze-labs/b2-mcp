@@ -114,53 +114,13 @@ jobs:
           retention-days: 7
 
   live-contract:
-    name: live contract before publish / Node ${{ matrix.node-version }}
+    name: live contract before publish
     needs: prepare
     if: github.repository == 'backblaze-labs/b2-mcp'
-    runs-on: ubuntu-latest
-    environment: live-b2-contract
-    timeout-minutes: 18
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        node-version: [22.23.1, 24, 26]
-    steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          ref: ${{ needs.prepare.outputs.checkout-sha }}
-          persist-credentials: false
-      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-        with:
-          run_install: false
-      # actions/setup-node v7, reviewed 2026-08-06.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - name: Validate live B2 environment
-        env:
-          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
-          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
-        run: |
-          set -euo pipefail
-          missing=0
-          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::Missing required live-b2-contract secret for ${name}"
-              missing=1
-            fi
-          done
-          exit "$missing"
-      - name: Run live B2 contract suite
-        env:
-          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
-          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
-        run: pnpm run test:contract:live
+    uses: ./.github/workflows/contract.yml
+    with:
+      checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}
+    secrets: inherit
 
   publish:
     needs: [prepare, live-contract]
