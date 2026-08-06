@@ -20,6 +20,16 @@ function writeFixture(
     optionalDependencies?: Record<string, string>;
     npmrcText?: string;
     pnpmLockText?: string;
+    reviewedTransitiveProductionDependencies?: Record<
+      string,
+      {
+        purpose: string;
+        policy: string;
+        version: string;
+        resolved: string;
+        integrity: string;
+      }
+    >;
     lockPackages?: Record<
       string,
       {
@@ -121,6 +131,8 @@ function writeFixture(
           allowedAwsRuntimeImports: [],
           forbiddenRuntimeDependencies: ["axios"],
         },
+        reviewedTransitiveProductionDependencies:
+          options.reviewedTransitiveProductionDependencies ?? {},
         temporaryAdapters: [],
         approvedDuplicatePackageVersions: {},
       },
@@ -131,10 +143,10 @@ function writeFixture(
   return fixtureRoot;
 }
 
-function runPolicyFixture(fixtureRoot: string) {
+function runPolicyFixture(fixtureRoot: string, extraEnv: Record<string, string> = {}) {
   return spawnSync(process.execPath, [script, "--policy-only"], {
     cwd: root,
-    env: { ...process.env, B2_MCP_PACKAGE_BUDGET_ROOT: fixtureRoot },
+    env: { ...process.env, B2_MCP_PACKAGE_BUDGET_ROOT: fixtureRoot, ...extraEnv },
     encoding: "utf8",
   });
 }
@@ -262,7 +274,7 @@ describe("package budget policy gate", () => {
     }
   });
 
-  it("rejects a pnpm default registry override outside npmjs", () => {
+  it("rejects a repo pnpm default registry override outside npmjs", () => {
     const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
       npmrcText: "registry=https://attacker.example/\n",
       pnpmLockText: [
@@ -303,6 +315,61 @@ describe("package budget policy gate", () => {
     }
   });
 
+  it("rejects a repo pnpm scoped registry override outside npmjs", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
+      npmrcText: "@backblaze-labs:registry=https://attacker.example/\n",
+    });
+    try {
+      const result = runPolicyFixture(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        ".npmrc:1 @backblaze-labs:registry must be https://registry.npmjs.org/",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an environment registry override outside npmjs", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";');
+    try {
+      const result = runPolicyFixture(fixtureRoot, {
+        npm_config_registry: "https://attacker.example/",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        "env:npm_config_registry registry must be https://registry.npmjs.org/",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a user npmrc registry override outside npmjs", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";');
+    const home = mkdtempSync(join(tmpdir(), "b2-mcp-package-budget-home-"));
+    try {
+      const userconfig = join(home, ".npmrc");
+      writeFileSync(userconfig, "registry=https://attacker.example/\n");
+      const result = runPolicyFixture(fixtureRoot, {
+        HOME: home,
+        USERPROFILE: home,
+        npm_config_userconfig: userconfig,
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        "registry must be https://registry.npmjs.org/",
+      );
+      expect(`${result.stdout}\n${result.stderr}`).toContain(userconfig);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("counts optionalDependencies as direct production dependencies", () => {
     const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
       optionalDependencies: {
@@ -326,6 +393,38 @@ describe("package budget policy gate", () => {
       );
       expect(`${result.stdout}\n${result.stderr}`).toContain(
         "unapproved direct production dependency: pino",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects reviewed transitive production dependency drift", () => {
+    const fixtureRoot = writeFixture('import "@backblaze-labs/b2-sdk";', {
+      lockPackages: {
+        "node_modules/process-warning": {
+          version: "5.1.0",
+          resolved: "https://registry.npmjs.org/process-warning/-/process-warning-5.1.0.tgz",
+          integrity:
+            "sha512-jQSaVHsPgtyw60e1rQ/A+/ArPEj/S8pS/vFnyGa/gYFXrKk/6RuDkoqVDQ5NI5MmS01698ltlAk0NoDBNLujRw==",
+        },
+      },
+      reviewedTransitiveProductionDependencies: {
+        "process-warning": {
+          purpose: "Fixture reviewed transitive dependency.",
+          policy: "Fixture must fail on version drift.",
+          version: "5.0.0",
+          resolved: "https://registry.npmjs.org/process-warning/-/process-warning-5.0.0.tgz",
+          integrity: "sha512-reviewed",
+        },
+      },
+    });
+    try {
+      const result = runPolicyFixture(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`).toContain(
+        "reviewed transitive dependency process-warning version expected 5.0.0, got 5.1.0",
       );
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });

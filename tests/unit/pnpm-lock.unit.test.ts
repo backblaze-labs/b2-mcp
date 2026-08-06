@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -16,6 +16,7 @@ const { parseYaml, pnpmLockToPackageLock, readPackageManagerLock } = nodeRequire
   };
   readPackageManagerLock: (root: string) => { lockfileVersion: number };
 };
+const root = join(__dirname, "../..");
 
 function registryLock(): unknown {
   return parseYaml(
@@ -74,6 +75,18 @@ function registryLock(): unknown {
 }
 
 describe("pnpm lock adapter", () => {
+  it("matches the pinned pnpm lockfile format", () => {
+    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      packageManager?: string;
+    };
+    const lock = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8")) as {
+      lockfileVersion?: string;
+    };
+
+    expect(packageJson.packageManager).toMatch(/^pnpm@11\.20\.0\+/);
+    expect(lock.lockfileVersion).toBe("9.0");
+  });
+
   it("converts direct, optional, transitive, and peer-suffixed packages", () => {
     const converted = pnpmLockToPackageLock(registryLock(), {
       name: "fixture",
@@ -115,6 +128,46 @@ describe("pnpm lock adapter", () => {
         snapshots: {},
       }),
     ).toThrow(/Unsupported pnpm lock package key/);
+  });
+
+  it.each([
+    ["anchor", "lockfileVersion: &version '9.0'\n"],
+    ["alias", "lockfileVersion: *version\n"],
+    ["block scalar", "lockfileVersion: |\n  9.0\n"],
+    ["folded scalar", "lockfileVersion: >\n  9.0\n"],
+    ["multiline quote", 'lockfileVersion: "9.0\n  continued"\n'],
+    ["complex key", "? lockfileVersion\n: '9.0'\n"],
+  ])("fails closed for unsupported YAML %s syntax", (_name, text) => {
+    expect(() => parseYaml(text)).toThrow(/Unsupported (?:YAML|multiline)/);
+  });
+
+  it.each([
+    ["importer link dependency", { dependencies: { "local-lib": { version: "link:../local" } } }],
+    ["importer file dependency", { dependencies: { "local-lib": { version: "file:../local" } } }],
+    [
+      "importer git dependency",
+      { dependencies: { "local-lib": { version: "github:example/local#abc123" } } },
+    ],
+  ])("fails closed for unsupported %s references", (_name, importer) => {
+    expect(() =>
+      pnpmLockToPackageLock({
+        lockfileVersion: "9.0",
+        importers: { ".": importer },
+        packages: { "root-lib@1.0.0": { resolution: { integrity: "sha512-root" } } },
+        snapshots: { "root-lib@1.0.0": {} },
+      }),
+    ).toThrow(/Unsupported (?:non-registry |pnpm )?dependency reference/);
+  });
+
+  it("fails closed for unsupported snapshot dependency references", () => {
+    expect(() =>
+      pnpmLockToPackageLock({
+        lockfileVersion: "9.0",
+        importers: { ".": { dependencies: { "root-lib": { version: "1.0.0" } } } },
+        packages: { "root-lib@1.0.0": { resolution: { integrity: "sha512-root" } } },
+        snapshots: { "root-lib@1.0.0": { dependencies: { "local-lib": "file:../local" } } },
+      }),
+    ).toThrow(/Unsupported non-registry dependency reference/);
   });
 
   it("keeps package-lock fallback scoped to fixtures without pnpm locks", () => {

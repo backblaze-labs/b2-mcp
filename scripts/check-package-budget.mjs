@@ -39,8 +39,7 @@ function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
 
-function configuredRegistrySettings() {
-  const npmrcPath = path.join(root, ".npmrc");
+function registrySettingsFromFile(npmrcPath, source) {
   if (!existsSync(npmrcPath)) return [];
   return readFileSync(npmrcPath, "utf8")
     .split(/\r?\n/)
@@ -48,9 +47,43 @@ function configuredRegistrySettings() {
     .filter(({ text }) => text && !text.startsWith("#") && !text.startsWith(";"))
     .map(({ line, text }) => {
       const match = text.match(/^((?:@[^:]+:)?registry)\s*=\s*(.+)$/i);
-      return match ? { line, key: match[1], value: match[2].trim() } : null;
+      return match ? { source, line, key: match[1], value: match[2].trim() } : null;
     })
     .filter(Boolean);
+}
+
+function userNpmrcPaths() {
+  const paths = new Set();
+  for (const key of ["npm_config_userconfig", "NPM_CONFIG_USERCONFIG"]) {
+    if (process.env[key]) paths.add(path.resolve(process.env[key]));
+  }
+  for (const key of ["HOME", "USERPROFILE"]) {
+    if (process.env[key]) paths.add(path.resolve(process.env[key], ".npmrc"));
+  }
+  paths.delete(path.resolve(root, ".npmrc"));
+  return [...paths].sort();
+}
+
+function registrySettingsFromEnv() {
+  return Object.entries(process.env)
+    .map(([key, value]) => {
+      const match = key.match(/^(?:npm|pnpm)_config_(.+)$/i);
+      if (!match || value === undefined) return null;
+      const configKey = match[1];
+      if (!/^registry$/i.test(configKey) && !/^@[^:]+:registry$/i.test(configKey)) return null;
+      return { source: `env:${key}`, line: 0, key: configKey, value };
+    })
+    .filter(Boolean);
+}
+
+function configuredRegistrySettings() {
+  return [
+    ...registrySettingsFromFile(path.join(root, ".npmrc"), ".npmrc"),
+    ...userNpmrcPaths().flatMap((npmrcPath) =>
+      registrySettingsFromFile(npmrcPath, `user ${npmrcPath}`),
+    ),
+    ...registrySettingsFromEnv(),
+  ];
 }
 
 function normalizeRegistryUrl(value) {
@@ -65,8 +98,9 @@ function normalizeRegistryUrl(value) {
 function assertDefaultRegistryPolicy() {
   for (const setting of configuredRegistrySettings()) {
     if (normalizeRegistryUrl(setting.value) !== "https://registry.npmjs.org") {
+      const location = setting.line > 0 ? `${setting.source}:${setting.line}` : setting.source;
       fail(
-        `.npmrc:${setting.line} ${setting.key} must be https://registry.npmjs.org/ for pnpm lock provenance, got ${setting.value}`,
+        `${location} ${setting.key} must be https://registry.npmjs.org/ for pnpm lock provenance, got ${setting.value}`,
       );
     }
   }
@@ -154,6 +188,7 @@ function productionPackagesFromLock(lock) {
       name: packageNameFromNodeModulesPath(lockPath),
       version: entry.version,
       resolved: entry.resolved,
+      resolvedSource: entry.resolvedSource,
       integrity: entry.integrity,
     }))
     .sort((left, right) => left.path.localeCompare(right.path));
@@ -259,6 +294,9 @@ function assertBudgetMetadata() {
             `temporary adapter ${adapter.name} dependency ${dependency} is not a direct dependency`,
           );
         }
+        // Only the AWS SDK peer packages are runtime-imported by the temporary
+        // S3 adapter. Type-only peers such as @smithy/types are tracked as
+        // direct adapter dependencies but do not need an allowed runtime import.
         if (dependency.startsWith("@aws-sdk/")) {
           adapterImports.add(`${adapter.source}|${dependency}`);
         }
@@ -298,6 +336,16 @@ function assertBudgetMetadata() {
         requireNonEmptyString(record?.[field], `${label}.${field}`);
       }
     }
+  }
+
+  for (const [name, record] of Object.entries(
+    budget.reviewedTransitiveProductionDependencies ?? {},
+  )) {
+    requireNonEmptyString(record?.purpose, `reviewed transitive dependency ${name} purpose`);
+    requireNonEmptyString(record?.policy, `reviewed transitive dependency ${name} policy`);
+    requireNonEmptyString(record?.version, `reviewed transitive dependency ${name} version`);
+    requireNonEmptyString(record?.resolved, `reviewed transitive dependency ${name} resolved URL`);
+    requireNonEmptyString(record?.integrity, `reviewed transitive dependency ${name} integrity`);
   }
 }
 
@@ -515,6 +563,32 @@ function assertProductionLockfileProvenance(productionPackages) {
   }
 }
 
+function assertReviewedTransitiveProductionDependencies(productionPackages) {
+  for (const [name, record] of Object.entries(
+    budget.reviewedTransitiveProductionDependencies ?? {},
+  )) {
+    const entries = productionPackages.filter((entry) => entry.name === name);
+    if (entries.length === 0) {
+      fail(`reviewed transitive dependency ${name} is missing from pnpm-lock.yaml`);
+      continue;
+    }
+    if (entries.length > 1) {
+      fail(`reviewed transitive dependency ${name} has multiple production entries`);
+      continue;
+    }
+    const [entry] = entries;
+    for (const field of ["version", "resolved", "integrity"]) {
+      if (entry[field] !== record[field]) {
+        fail(
+          `reviewed transitive dependency ${name} ${field} expected ${
+            record[field] ?? "missing"
+          }, got ${entry[field] ?? "missing"}`,
+        );
+      }
+    }
+  }
+}
+
 function assertSdkDependencyPolicy() {
   const sdkSpec = budget.directProductionDependencies?.["@backblaze-labs/b2-sdk"]?.version;
   if (!/^\d+\.\d+\.\d+$/.test(String(sdkSpec ?? ""))) {
@@ -639,6 +713,46 @@ function committedProductionGraphMismatches(repoLock, consumerLock) {
   });
 }
 
+function exactVersionFromDependencySpecifier(specifier) {
+  const match = String(specifier ?? "").match(/^(\d+\.\d+\.\d+(?:[-+][^()\s]+)?)/);
+  return match?.[1] ?? null;
+}
+
+function committedProductionOverrides(lock) {
+  const productionPackages = productionPackagesFromLock(lock);
+  const byName = new Map();
+  for (const entry of productionPackages) {
+    const entries = byName.get(entry.name) ?? [];
+    entries.push(entry);
+    byName.set(entry.name, entries);
+  }
+
+  const overrides = {};
+  for (const [name, entries] of byName) {
+    if (entries.length === 1) overrides[name] = entries[0].version;
+  }
+
+  for (const entry of productionPackages) {
+    const lockEntry = lock.packages?.[entry.path] ?? {};
+    const dependencies = {
+      ...(lockEntry.dependencies ?? {}),
+      ...(lockEntry.optionalDependencies ?? {}),
+    };
+    const dependencyOverrides = {};
+    for (const [name, specifier] of Object.entries(dependencies)) {
+      const version = exactVersionFromDependencySpecifier(specifier);
+      if (version) dependencyOverrides[name] = version;
+      else if (byName.get(name)?.length === 1)
+        dependencyOverrides[name] = byName.get(name)[0].version;
+    }
+    if (Object.keys(dependencyOverrides).length > 0) {
+      overrides[`${entry.name}@${entry.version}`] = dependencyOverrides;
+    }
+  }
+
+  return overrides;
+}
+
 function cleanConsumerInstallMetrics(packResult, tarball, workspace) {
   const appDir = path.join(workspace, "consumer");
   mkdirSync(appDir, { recursive: true });
@@ -652,6 +766,7 @@ function cleanConsumerInstallMetrics(packResult, tarball, workspace) {
         dependencies: {
           [packageJson.name]: `file:${path.relative(appDir, tarball)}`,
         },
+        overrides: committedProductionOverrides(packageLock),
       },
       null,
       2,
@@ -899,6 +1014,7 @@ async function main() {
   assertRuntimeImportPolicy(runtimeImports);
   const productionInventory = productionLockInventoryReport();
   assertProductionLockfileProvenance(productionInventory.packages);
+  assertReviewedTransitiveProductionDependencies(productionInventory.packages);
 
   if (policyOnly) {
     const summary = writePolicyReports(

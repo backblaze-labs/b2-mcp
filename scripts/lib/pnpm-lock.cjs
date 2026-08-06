@@ -4,6 +4,12 @@ const path = require("node:path");
 function unquote(value) {
   const trimmed = String(value).trim();
   if (
+    (trimmed.startsWith("'") && !trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && !trimmed.endsWith('"'))
+  ) {
+    throw new Error(`Unsupported multiline or unterminated YAML scalar: ${trimmed}`);
+  }
+  if (
     (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
     (trimmed.startsWith('"') && trimmed.endsWith('"'))
   ) {
@@ -45,7 +51,7 @@ function parseInlineObject(value) {
   const record = {};
   for (const part of splitTopLevel(body, ",")) {
     const index = part.indexOf(":");
-    if (index === -1) continue;
+    if (index === -1) throw new Error(`Unsupported inline YAML object item: ${part}`);
     record[unquote(part.slice(0, index))] = parseScalar(part.slice(index + 1));
   }
   return record;
@@ -59,6 +65,12 @@ function parseInlineArray(value) {
 
 function parseScalar(value) {
   const trimmed = String(value).trim();
+  if (/^(?:[&*][A-Za-z0-9_-]+|[|>])(?:\s|$)/.test(trimmed)) {
+    throw new Error(`Unsupported YAML scalar construct: ${trimmed}`);
+  }
+  if (/(^|\s)[&*][A-Za-z0-9_-]+(?:\s|$)/.test(trimmed)) {
+    throw new Error(`Unsupported YAML anchor or alias: ${trimmed}`);
+  }
   if (trimmed === "{}") return {};
   if (trimmed === "[]") return [];
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) return parseInlineObject(trimmed);
@@ -79,6 +91,10 @@ function nextContainer(lines, startIndex, indent) {
   return {};
 }
 
+// This intentionally recognizes only the pnpm-lock.yaml subset emitted by the
+// pinned pnpm version. workflow-yaml.cjs parses GitHub workflow snippets and
+// strips inline comments; this parser fails closed on unsupported lockfile YAML
+// instead of trying to behave as a general YAML reader.
 function parseYaml(text) {
   const root = {};
   const stack = [{ indent: -1, value: root }];
@@ -93,13 +109,22 @@ function parseYaml(text) {
     const parent = stack[stack.length - 1].value;
 
     if (trimmed.startsWith("- ")) {
+      if (!Array.isArray(parent)) {
+        throw new Error(`Unsupported YAML list item outside a list at line ${index + 1}`);
+      }
       if (Array.isArray(parent)) parent.push(parseScalar(trimmed.slice(2)));
       continue;
     }
 
     const separator = trimmed.indexOf(":");
-    if (separator === -1 || Array.isArray(parent)) continue;
+    if (separator === -1) throw new Error(`Unsupported YAML line at ${index + 1}: ${trimmed}`);
+    if (Array.isArray(parent)) {
+      throw new Error(`Unsupported YAML mapping inside a list at line ${index + 1}`);
+    }
     const key = unquote(trimmed.slice(0, separator));
+    if (key === "<<" || trimmed.startsWith("? ")) {
+      throw new Error(`Unsupported YAML complex key or merge at line ${index + 1}: ${trimmed}`);
+    }
     const rawValue = trimmed.slice(separator + 1).trim();
     if (!rawValue) {
       const child = nextContainer(lines, index, indent);
@@ -139,6 +164,9 @@ function registryResolution(name, version, resolution = {}) {
   if (typeof resolution.tarball === "string") {
     return { resolved: resolution.tarball, resolvedSource: "lockfile" };
   }
+  // pnpm v9 omits tarball URLs for default-registry packages. This URL is a
+  // normalized coordinate for npm-lock-shaped downstream checks; provenance
+  // policy must pair resolvedSource with default-registry config validation.
   const basename = name.split("/").pop();
   return {
     resolved: `https://registry.npmjs.org/${name}/-/${basename}-${version}.tgz`,
@@ -185,6 +213,9 @@ function assertObject(value, label) {
 
 function assertSupportedLockfileVersion(version) {
   const match = String(version ?? "").match(/^(\d+)(?:\.\d+)?$/);
+  // package.json pins pnpm@11.20.0, which emits lockfileVersion 9. A pnpm
+  // packageManager bump that changes this format must update this parser and
+  // tests in the same review.
   if (!match || Number(match[1]) !== 9) {
     throw new Error(`Unsupported pnpm lockfileVersion: ${version ?? "missing"}`);
   }
