@@ -85,6 +85,7 @@ describe("DeterministicB2NativeFake", () => {
 describe("DeterministicS3ClientFake", () => {
   it("captures success and S3 error responses with AWS-compatible metadata", async () => {
     const fake = new DeterministicS3ClientFake();
+    fake.allowDefault("createMultipartUpload");
 
     await expect(fake.createMultipartUpload({ bucket: "b", key: "k" })).resolves.toMatchObject({
       uploadId: "upload-1",
@@ -103,5 +104,18 @@ describe("DeterministicS3ClientFake", () => {
       "createMultipartUpload",
       "listParts",
     ]);
+  });
+
+  it("fails unqueued operations unless a default is explicitly allowed", async () => {
+    const fake = new DeterministicS3ClientFake();
+
+    await expect(fake.getBucketLocation("b")).rejects.toThrow(
+      /No deterministic S3 fake response queued.*getBucketLocation/,
+    );
+
+    fake.allowDefault("getBucketLocation");
+    await expect(fake.getBucketLocation("b")).resolves.toEqual({
+      locationConstraint: "us-west-004",
+    });
   });
 });

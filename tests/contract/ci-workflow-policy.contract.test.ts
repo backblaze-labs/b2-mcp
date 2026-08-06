@@ -84,9 +84,26 @@ describe("CI workflow policy", () => {
     expect(currentJob).toContain("pnpm run test:slow");
     expect(currentJob).not.toContain("test:package");
     expect(listenerDiagnosticsJob).toContain("pnpm run test:diagnostics");
-    expect(listenerDiagnosticsJob).toContain("Detect MaxListeners and EventEmitter leak warnings");
+    expect(listenerDiagnosticsJob).toContain("Detect MaxListeners and open-handle warnings");
     expect(packageJob).toContain("continue-on-error: true");
     expect(packageJob).toContain("pnpm run test:package");
+  });
+
+  it("does not persist checkout credentials in pull-request jobs that run repo code", () => {
+    for (const { name, block } of workflowJobBlocks(ci)) {
+      if (!block.includes("actions/checkout@")) continue;
+      if (/github\.event_name\s*==\s*'push'/.test(block)) continue;
+      if (!/\b(pnpm|node scripts\/|npm)\b/.test(block)) continue;
+
+      const checkoutSteps = block
+        .split(/(?=^\s+- uses: actions\/checkout@)/m)
+        .filter((step) => step.includes("actions/checkout@"));
+      for (const step of checkoutSteps) {
+        expect(step, `${name} must not persist checkout credentials`).toMatch(
+          /persist-credentials:\s*false/,
+        );
+      }
+    }
   });
 
   it("sets up pinned pnpm before any workflow job uses pnpm", () => {

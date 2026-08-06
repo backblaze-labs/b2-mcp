@@ -17,6 +17,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
   s3 = new DeterministicS3ClientFake();
+  s3.allowDefault("createMultipartUpload", "presignUploadPart", "completeMultipartUpload");
   tools = new ToolHarness();
   registerS3MultipartTools(tools, s3.asPeerClient(), testConfig);
 });
@@ -39,6 +40,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
       isTruncated: true,
       nextPartNumberMarker: "1",
     });
+    s3.allowDefault("uploadPartCopy");
 
     expect(
       parseResult(
@@ -137,6 +139,8 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
   });
 
   it("requires destructive confirmation before aborting an upload", async () => {
+    s3.allowDefault("abortMultipartUpload");
+
     const blocked = await tools.call("s3_abort_multipart_upload", {
       bucket: "b",
       key: "large.bin",

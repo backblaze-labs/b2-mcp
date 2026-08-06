@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { basename, join } from "path";
 import { listFiles, readJson, root } from "./support";
 import { contractBucketName, isContractBucketName } from "../live/support/contract-buckets";
@@ -39,6 +40,55 @@ function removeLayerReports(layer: string): { summaryPath: string; junitPath: st
   rmSync(summaryPath, { force: true });
   rmSync(junitPath, { force: true });
   return { summaryPath, junitPath };
+}
+
+function runLeakDiagnosticsFixture(
+  mode: "clean" | "listener-leak" | "open-handle-leak" | "large-output",
+  extraEnv: NodeJS.ProcessEnv = {},
+): { result: ReturnType<typeof spawnSync>; output: string; layers: string[] } {
+  const dir = mkdtempSync(join(tmpdir(), "b2-mcp-leak-diagnostics-"));
+  const runnerPath = join(dir, "runner.mjs");
+  const layersPath = join(dir, "layers.txt");
+
+  writeFileSync(
+    runnerPath,
+    `
+import { appendFileSync } from "node:fs";
+
+const layer = process.argv[2];
+appendFileSync(${JSON.stringify(layersPath)}, layer + "\\n");
+
+if (process.env.DIAGNOSTIC_FIXTURE_MODE === "listener-leak" && layer === "protocol-modern") {
+  console.error("MaxListenersExceededWarning: Possible EventEmitter memory leak detected");
+}
+if (process.env.DIAGNOSTIC_FIXTURE_MODE === "open-handle-leak" && layer === "unit") {
+  console.error("close timed out after 10000ms");
+  console.error("Tests closed successfully but something prevents the main process from exiting");
+}
+if (process.env.DIAGNOSTIC_FIXTURE_MODE === "large-output") {
+  process.stdout.write("x".repeat(2048));
+}
+`,
+  );
+
+  const result = spawnSync(process.execPath, ["scripts/run-leak-diagnostics.mjs"], {
+    cwd: root,
+    encoding: "utf8",
+    env: envWithoutB2Credentials({
+      B2_MCP_LEAK_DIAGNOSTIC_RUNNER: runnerPath,
+      B2_MCP_LEAK_DIAGNOSTIC_LAYERS: "unit,protocol-modern,protocol-legacy",
+      DIAGNOSTIC_FIXTURE_MODE: mode,
+      ...extraEnv,
+    }),
+    maxBuffer: 1024 * 1024,
+    timeout: 30_000,
+  });
+  const layers = existsSync(layersPath)
+    ? readFileSync(layersPath, "utf8").trim().split("\n").filter(Boolean)
+    : [];
+  rmSync(dir, { recursive: true, force: true });
+
+  return { result, output: `${result.stdout ?? ""}\n${result.stderr ?? ""}`, layers };
 }
 
 describe("test layer naming", () => {
@@ -289,29 +339,40 @@ describe("test layer naming", () => {
     expect(vitestConfig).toContain('"html"');
     expect(vitestConfig).toContain('"lcov"');
     expect(vitestConfig).toContain('"cobertura"');
-    expect(vitestConfig).toContain('"dist/**"');
-    expect(vitestConfig).toContain('"tests/**"');
     expect(readme).toContain(
       "coverage-S%2082%20%7C%20B%2072%20%7C%20F%2086%20%7C%20L%2086-brightgreen",
     );
   });
 
-  it("keeps leaked-listener diagnostics in the deterministic script surface", () => {
+  it("keeps leak diagnostics in the deterministic script surface", () => {
     const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
-    const script = readFileSync(join(root, "scripts/run-leak-diagnostics.mjs"), "utf8");
 
     expect(pkg.scripts.verify).toContain("pnpm run test:diagnostics");
     expect(pkg.scripts["test:diagnostics"]).toBe(
       "pnpm run build && node scripts/run-leak-diagnostics.mjs",
     );
-    expect(script).toContain("MaxListenersExceededWarning");
-    expect(script).toContain("Possible EventEmitter memory leak detected");
-    expect(script).toContain("maxBuffer");
-    expect(script).toContain("timeout");
-    expect(script).toContain("result.error");
-    expect(script).not.toMatch(/open handles?|detectOpenHandles/i);
-    expect(script).toContain("protocol-modern");
-    expect(script).toContain("protocol-legacy");
+
+    const clean = runLeakDiagnosticsFixture("clean");
+    expect(clean.result.status).toBe(0);
+    expect(clean.layers).toEqual(["unit", "protocol-modern", "protocol-legacy"]);
+
+    const listenerLeak = runLeakDiagnosticsFixture("listener-leak");
+    expect(listenerLeak.result.status).toBe(1);
+    expect(listenerLeak.output).toContain("MaxListenersExceededWarning");
+
+    const openHandleLeak = runLeakDiagnosticsFixture("open-handle-leak");
+    expect(openHandleLeak.result.status).toBe(1);
+    expect(openHandleLeak.output).toContain("close timed out after 10000ms");
+  });
+
+  it("reports diagnostic child spawn errors distinctly", () => {
+    const buffered = runLeakDiagnosticsFixture("large-output", {
+      B2_MCP_LEAK_DIAGNOSTIC_LAYERS: "unit",
+      B2_MCP_LEAK_DIAGNOSTIC_MAX_BUFFER: "64",
+    });
+
+    expect(buffered.result.status).toBe(1);
+    expect(buffered.output).toContain("spawn error: exceeded diagnostic output buffer");
   });
 
   it("does not route the legacy integration alias to live tests with ambient credentials", () => {

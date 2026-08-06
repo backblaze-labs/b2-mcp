@@ -1,3 +1,7 @@
+// Shared deterministic test support: MCP tool helpers, a lightweight registrar,
+// a B2 HTTP transport fake, and a B2 S3 peer fake. Keep each section independent
+// so future fixtures can move to focused files without changing test behavior.
+
 import type { HttpRequest, HttpResponse, HttpTransport } from "@backblaze-labs/b2-sdk";
 import { getRegisteredTools } from "../../src/server";
 import type { McpServer, ToolCallback, ToolRegistrar } from "../../src/mcp";
@@ -208,6 +212,7 @@ export type DeterministicS3PeerClient = Pick<
 export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
   readonly requests: CapturedS3Request[] = [];
   destroyed = false;
+  private readonly defaultOperations = new Set<string>();
   private readonly replies = new Map<string, Array<S3Reply<any, any>>>();
 
   respond<TInput, TResult>(operation: string, ...responses: Array<S3Reply<TInput, TResult>>): this {
@@ -219,6 +224,11 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
 
   fail(operation: string, error: Error): this {
     return this.respond(operation, error);
+  }
+
+  allowDefault(...operations: string[]): this {
+    for (const operation of operations) this.defaultOperations.add(operation);
+    return this;
   }
 
   destroy(): void {
@@ -380,9 +390,16 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
       throw signal?.reason ?? abortError();
     }
     const queued = this.replies.get(operation);
-    const reply = queued?.shift();
-    if (reply instanceof Error) throw reply;
-    if (typeof reply === "function") return reply(input, captured);
-    return reply ?? fallback;
+    if (queued && queued.length > 0) {
+      const reply = queued.shift();
+      if (reply instanceof Error) throw reply;
+      if (typeof reply === "function") return reply(input, captured);
+      return reply as TResult;
+    }
+    if (this.defaultOperations.has(operation)) return fallback;
+    throw new Error(
+      `No deterministic S3 fake response queued for operation '${operation}'. ` +
+        "Use respond(), fail(), or allowDefault() in the test setup.",
+    );
   }
 }

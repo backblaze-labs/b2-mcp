@@ -33,7 +33,7 @@ The individual deterministic layers are:
 | `pnpm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Vitest worker.  |
 | `pnpm run test:package`  | Builds, packs, installs through an npm consumer, and verifies installed entry points. |
 | `pnpm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
-| `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners/EventEmitter leak warnings. |
+| `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners and open-handle warnings. |
 
 Local scripts can call each deterministic layer independently. The Linux Node
 matrix runs the bundled coverage and slow deterministic lifecycle layers, while
@@ -125,9 +125,10 @@ evidence, not an authoritative pass.
 
 The `ci-green` production deploy marker depends on both the Node.js 22.3.0
 production-dependency install and the Node 22.23.1 deterministic gate. A
-separate leaked-listener diagnostic job runs the unit and protocol layers under
-traced warnings and fails on `MaxListenersExceededWarning` or EventEmitter leak
-warnings until teardown is clean. Node.js
+separate leak diagnostic job runs the unit and protocol layers under
+traced warnings plus Vitest's hanging-process reporter, and fails on
+`MaxListenersExceededWarning`, EventEmitter leak warnings, or Vitest close-timeout
+open-handle warnings until teardown is clean. Node.js
 24 and 26 remain required PR checks, but a regression isolated to those
 non-production current lines does not freeze the production deploy ref. The
 production host is pinned to the patched Node 22 LTS line from `.nvmrc`.

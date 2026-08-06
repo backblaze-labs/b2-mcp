@@ -4,15 +4,28 @@
 
 import { spawnSync } from "node:child_process";
 
-const layers = ["unit", "protocol-modern", "protocol-legacy"];
-const maxBuffer = 64 * 1024 * 1024;
-const timeout = 2 * 60 * 1000;
+const layers = (process.env.B2_MCP_LEAK_DIAGNOSTIC_LAYERS ?? "unit,protocol-modern,protocol-legacy")
+  .split(",")
+  .map((layer) => layer.trim())
+  .filter(Boolean);
+const runner = process.env.B2_MCP_LEAK_DIAGNOSTIC_RUNNER ?? "scripts/run-vitest-layer.mjs";
+const maxBuffer = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_MAX_BUFFER", 64 * 1024 * 1024);
+const timeout = parsePositiveIntegerEnv("B2_MCP_LEAK_DIAGNOSTIC_TIMEOUT_MS", 2 * 60 * 1000);
 const warningPatterns = [
   /MaxListenersExceededWarning/,
   /Possible EventEmitter memory leak detected/,
+  /close timed out after \d+ms/,
+  /Tests closed successfully but something prevents .* from exiting/,
 ];
 
 let failed = false;
+
+function parsePositiveIntegerEnv(name, fallback) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 for (const layer of layers) {
   const env = { ...process.env };
@@ -21,7 +34,7 @@ for (const layer of layers) {
 
   const result = spawnSync(
     process.execPath,
-    ["scripts/run-vitest-layer.mjs", layer, "--", "--fileParallelism=false"],
+    [runner, layer, "--", "--fileParallelism=false", "--reporter=hanging-process"],
     {
       cwd: process.cwd(),
       env,
