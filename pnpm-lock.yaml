@@ -63,6 +63,9 @@ importers:
       eslint-plugin-tsdoc:
         specifier: 0.5.2
         version: 0.5.2(eslint@9.39.1(supports-color@8.1.1))(supports-color@8.1.1)(typescript@6.0.3)
+      semver:
+        specifier: 7.8.5
+        version: 7.8.5
       ts-node:
         specifier: ^10.9.0
         version: 10.9.2(@types/node@22.3.0)(typescript@6.0.3)

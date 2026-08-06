@@ -93,6 +93,7 @@
     "eslint": "9.39.1",
     "eslint-plugin-jsdoc": "50.8.0",
     "eslint-plugin-tsdoc": "0.5.2",
+    "semver": "7.8.5",
     "ts-node": "^10.9.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
