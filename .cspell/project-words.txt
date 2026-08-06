@@ -18,6 +18,7 @@ biomejs
 cobertura
 corepack
 cspell
+CycloneDX
 iocs
 junit
 MCP
@@ -31,6 +32,8 @@ toon
 tvzf
 ustar
 xvda
+zizmor
+zizmorcore
 zod
 
 # People and account names

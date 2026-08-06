@@ -4,8 +4,12 @@ import { createRequire } from "module";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
-const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey } = nodeRequire(
+  "../../scripts/lib/workflow-yaml.cjs",
+) as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
+  workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
+  yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
 };
 
 const pnpmSetupAction = "pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa";
@@ -19,20 +23,9 @@ const workflowPaths = [
   ".github/workflows/publish.yml",
 ];
 
-function workflowJobBlocks(text: string): Array<{ name: string; block: string }> {
-  const jobsStart = text.search(/^jobs:\s*$/m);
-  if (jobsStart === -1) return [];
-  const jobsText = text.slice(jobsStart);
-  const matches = [...jobsText.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)];
-  return matches.map((match, index) => {
-    const start = match.index ?? 0;
-    const end = matches[index + 1]?.index ?? jobsText.length;
-    return { name: match[1], block: jobsText.slice(start, end) };
-  });
-}
-
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+  const publish = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
 
   function workflowJob(name: string): string {
     const job = workflowJobBlock(ci, name);
@@ -41,7 +34,9 @@ describe("CI workflow policy", () => {
   }
 
   it("defaults workflow permissions to read-only contents", () => {
-    expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
+    const permissions = yamlMappingForKey(ci, "permissions");
+    expect(permissions).toMatchObject({ contents: "read" });
+    expect(permissions).not.toHaveProperty("actions");
   });
 
   it("gates ci-green on supported runtime and platform jobs", () => {
@@ -58,7 +53,9 @@ describe("CI workflow policy", () => {
       "deterministic-linux-production",
       "deterministic-linux-current",
       "cross-platform-minimum",
+      "production-audit",
       "supply-chain-audit",
+      "workflow-security",
     ]) {
       expect(markGreen).toContain(required);
     }
@@ -114,5 +111,41 @@ describe("CI workflow policy", () => {
         ).toBeLessThan(setupNodeIndex);
       }
     }
+  });
+
+  it("runs pinned workflow security analysis with zizmor", () => {
+    const workflowSecurity = workflowJob("workflow-security");
+
+    expect(workflowSecurity).toContain("persist-credentials: false");
+    expect(workflowSecurity).not.toContain("actions: read");
+    expect(workflowSecurity).not.toContain("zizmor-action");
+    expect(workflowSecurity).not.toContain("GH_TOKEN");
+    expect(workflowSecurity).not.toContain("github.token");
+    expect(workflowSecurity).toContain(
+      "ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284",
+    );
+    expect(workflowSecurity).toContain("--network=none");
+    expect(workflowSecurity).toContain("--format=github");
+    expect(workflowSecurity).toContain("--no-online-audits");
+    expect(workflowSecurity).toContain("--min-severity=medium");
+    expect(workflowSecurity).toContain("--min-confidence=medium");
+  });
+
+  it("blocks publishing until the live contract suite passes for the publish ref", () => {
+    const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
+    const publishJob = workflowJobBlock(publish, "publish") ?? "";
+
+    expect(publishJob).toContain("needs: [prepare, live-contract, attach-sbom]");
+    expect(liveContract).toContain("needs: prepare");
+    expect(liveContract).toContain("environment: live-b2-contract");
+    expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
+    expect(liveContract).toContain("node-version: [22.23.1, 24, 26]");
+    expect(liveContract).toContain("Validate live B2 environment");
+    expect(liveContract).toContain("LIVE_B2_KEY_ID");
+    expect(liveContract).toContain("LIVE_B2_KEY");
+    expect(liveContract).toContain("pnpm run test:contract:live");
+    expect(liveContract).toContain("for attempt in 1 2 3");
+    expect(liveContract).toContain("Live B2 contract suite failed after");
+    expect(publish).toContain("attach-sbom:");
   });
 });

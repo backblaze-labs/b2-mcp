@@ -295,6 +295,16 @@ policy update or exception removal. `B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE=warn`
 is reserved for non-gating reminder jobs or local operator checks and emits a
 GitHub `::warning` annotation.
 
+The production npm advisory gate is separate from the full pnpm lockfile audit
+because npm audit requires an npm lockfile. CI runs `pnpm run audit:production`,
+which prepares a production-only audit root in `.audit/npm-production`, derives
+its `package-lock.json` from the committed `pnpm-lock.yaml`, sets bounded npm
+fetch retry options, and evaluates `npm audit --json --omit=dev
+--audit-level=moderate` through `audit-policy.json` exceptions. Release
+publishing uses the same script through `pnpm run release:sbom` to audit the
+shipped pnpm-locked graph and generate the CycloneDX SBOM attached to the
+GitHub release without installing or re-resolving dependencies.
+
 `mark-green` intentionally fail-closes on npm registry/advisory-service
 availability because `supply-chain-audit` makes a live `npm audit` call and
 `smoke:package` performs a cold lockfile-less consumer `npm install`. If a

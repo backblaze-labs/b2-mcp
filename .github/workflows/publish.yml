@@ -24,6 +24,8 @@ jobs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
       tarball-name: ${{ steps.pack.outputs.tarball_name }}
       tarball-sha256: ${{ steps.pack.outputs.tarball_sha256 }}
+      sbom-name: ${{ steps.sbom.outputs.sbom_name }}
+      sbom-sha256: ${{ steps.sbom.outputs.sbom_sha256 }}
     steps:
       # actions/checkout v6, reviewed 2026-08-05.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -74,6 +76,15 @@ jobs:
       - run: pnpm run audit:supply-chain
         env:
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
+      - name: Run production audit and generate release SBOM
+        id: sbom
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/publish-package"
+          pnpm run release:sbom
+          sbom_sha256="$(sha256sum "${GITHUB_WORKSPACE}/publish-package/b2-mcp-production.cdx.json" | awk '{print $1}')"
+          echo "sbom_name=b2-mcp-production.cdx.json" >> "$GITHUB_OUTPUT"
+          echo "sbom_sha256=${sbom_sha256}" >> "$GITHUB_OUTPUT"
       - name: Build and scan publish tarball
         id: pack
         run: |
@@ -95,17 +106,119 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: npm-package
-          path: publish-package/*.tgz
+          path: |
+            publish-package/*.tgz
+            publish-package/*.cdx.json
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  live-contract:
+    name: live contract before publish / Node ${{ matrix.node-version }}
     needs: prepare
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    environment: live-b2-contract
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        node-version: [22.23.1, 24, 26]
+    steps:
+      # actions/checkout v6, reviewed 2026-08-05.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.prepare.outputs.checkout-sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-05.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Validate live B2 environment
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required live-b2-contract secret for ${name}"
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - name: Run live B2 contract suite with bounded retry
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if pnpm run test:contract:live; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo "::error::Live B2 contract suite failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "::warning::Live B2 contract suite failed on attempt ${attempt}; retrying"
+            sleep $((attempt * 10))
+          done
+
+  attach-sbom:
+    needs: [prepare, live-contract]
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      # actions/download-artifact v6, reviewed 2026-08-05.
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: npm-package
+          path: publish-package
+      - name: Verify release SBOM
+        env:
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
+        run: |
+          set -euo pipefail
+          sbom="publish-package/${EXPECTED_SBOM_NAME}"
+          if [[ ! -f "$sbom" ]]; then
+            echo "::error::Expected release SBOM ${sbom} is missing"
+            exit 1
+          fi
+          actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
+          if [[ "$actual_sbom_sha" != "$EXPECTED_SBOM_SHA256" ]]; then
+            echo "::error::Release SBOM SHA-256 mismatch"
+            echo "expected=${EXPECTED_SBOM_SHA256}"
+            echo "actual=${actual_sbom_sha}"
+            exit 1
+          fi
+      - name: Attach SBOM to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
+
+  publish:
+    needs: [prepare, live-contract, attach-sbom]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: npm-publish
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:

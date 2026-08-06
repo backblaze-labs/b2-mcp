@@ -4,6 +4,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 7
+      semver-minor-days: 3
+      semver-patch-days: 3
     open-pull-requests-limit: 5
     groups:
       # The SDK will handle durable B2 credentials after migration. Every bump
@@ -11,26 +16,34 @@ updates:
       b2-sdk:
         patterns:
           - "@backblaze-labs/b2-sdk"
+        update-types:
+          - minor
+          - patch
       # TOON dev/test decoder bumps can change contract-oracle behavior. Keep
       # them isolated from routine dependency drift.
       toon-format:
         patterns:
           - "@toon-format/toon"
+        update-types:
+          - minor
+          - patch
       aws-sdk:
         patterns:
           - "@aws-sdk/*"
+        update-types:
+          - minor
+          - patch
       dev-dependencies:
         dependency-type: development
-        # Hold major bumps for manual review — TS 5→6, Vitest majors, etc.
-        # have broken the build before.
+        # Keep development drift reviewable; majors stay as separate PRs.
         update-types:
           - minor
           - patch
     labels:
       - dependencies
     ignore:
-      # Majors held for manual runtime review. Phase 1 supports Node.js 22.3.0,
-      # 24, and 26; opossum and @types/node major bumps may raise that floor.
+      # These majors can move the effective runtime floor or contract oracle.
+      # Review them manually outside routine dependency refreshes.
       - dependency-name: opossum
         update-types: ["version-update:semver-major"]
       - dependency-name: "@types/node"
@@ -42,6 +55,15 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
     labels:
       - dependencies
       - github-actions

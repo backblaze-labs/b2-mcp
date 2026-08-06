@@ -34,7 +34,9 @@ Before publishing `v0.1.0`:
    `npm run build`, `npm run typecheck`, `npm run lint`,
    `npm run format:check`, `npm test`, `npm run test:integration`,
    `npm run test:contract`, `npm run smoke:package`, and
-   `npm run audit:supply-chain`.
+   `npm run audit:supply-chain`. Also run the production npm advisory gate with
+   `pnpm run audit:production`; use `pnpm run release:sbom` when release SBOM
+   generation is required.
 3. Review `audit-policy.json` and risk-accept only unexpired, documented,
    tightly scoped upstream advisories that have no fixed stable package.
 4. Run the supply-chain denylist branch and artifact workflow in
@@ -44,14 +46,19 @@ Before publishing `v0.1.0`:
 6. Confirm the live B2 smoke evidence required by `docs/TESTING.md`.
 7. Confirm `@backblaze-labs/b2-mcp` is owned by Backblaze on npm and package
    provenance is enabled before publishing or advertising npm install commands.
-8. Confirm the live B2 workflow environments have `LIVE_B2_*` secrets and
-   `MCP_URL` populated, then manually dispatch smoke and contract from `main`.
-   The live jobs run serially on patched Node 22 LTS, Node.js 24, and Node.js 26.
+8. Confirm the live B2 workflow environments have `LIVE_B2_KEY_ID`,
+   `LIVE_B2_KEY`, the smoke-suite `LIVE_B2_*` secrets, and `MCP_URL` populated,
+   then manually dispatch smoke and contract from `main`. Security owns rotation
+   for the live B2 credentials. The live jobs run serially on patched Node 22
+   LTS, Node.js 24, and Node.js 26.
 9. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.
-10. Publish only from the canonical repository through the protected
+10. Create the GitHub Release for the publish tag, then publish only from the
+    canonical repository through the protected
     `.github/workflows/publish.yml` workflow. Do not publish from a developer
     workstation. The publish workflow must prove the `v*` tag is reachable from
     `ci-green`, build explicitly, enforce the runtime package budget, scan the
-    generated packlist and tarball, verify the tarball SHA-256, and publish the
-    already-scanned tarball with lifecycle scripts disabled.
+    generated packlist and tarball, generate and verify a CycloneDX production
+    SBOM artifact, run the protected live B2 contract suite with bounded retry,
+    attach the SBOM to the GitHub Release, verify the tarball SHA-256, and
+    publish the already-scanned tarball with lifecycle scripts disabled.

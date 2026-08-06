@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { createRequire } from "module";
 import { listFiles, readLock, root } from "./support";
 
 type PackageLock = {
@@ -7,6 +8,11 @@ type PackageLock = {
     string,
     { dev?: boolean; version?: string; peerDependencies?: Record<string, string> }
   >;
+};
+
+const nodeRequire = createRequire(__filename);
+const { yamlBlockForKey } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  yamlBlockForKey: (text: string, key: string) => string | null;
 };
 
 function versionAtLeast(actual: string, floor: string): boolean {
@@ -138,6 +144,53 @@ describe("security dependency policy", () => {
     );
     expect(pkg.dependencies).not.toHaveProperty("axios");
     expect(lock.packages["node_modules/axios"]).toBeUndefined();
+  });
+
+  it("keeps Dependabot updates cooled down and leaves majors separate", () => {
+    const dependabot = readFileSync(join(root, ".github/dependabot.yml"), "utf8");
+
+    function groupBlock(group: string): string {
+      const block = yamlBlockForKey(dependabot, group);
+      if (block === null) throw new Error(`Missing Dependabot group ${group}`);
+      return block;
+    }
+
+    function dependencyIgnoreBlock(dependencyName: string): string {
+      const escaped = dependencyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = dependabot.match(
+        new RegExp(
+          `-\\s+dependency-name:\\s+["']?${escaped}["']?[\\s\\S]*?(?=\\n\\s*-\\s+dependency-name:|\\n\\s{2}-\\s+package-ecosystem:|\\s*$)`,
+        ),
+      );
+      if (!match) throw new Error(`Missing Dependabot ignore for ${dependencyName}`);
+      return match[0];
+    }
+
+    expect(dependabot).toContain("package-ecosystem: npm");
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(dependabot).toContain("semver-major-days: 7");
+    expect(dependabot).toContain("semver-minor-days: 3");
+    expect(dependabot).toContain("semver-patch-days: 3");
+    expect(dependabot).toContain("default-days: 7");
+
+    for (const group of [
+      "b2-sdk",
+      "toon-format",
+      "aws-sdk",
+      "dev-dependencies",
+      "github-actions-minor-patch",
+    ]) {
+      const block = groupBlock(group);
+      expect(block, `${group} should include update-types`).toContain("update-types:");
+      expect(block, `${group} should include minor updates`).toContain("- minor");
+      expect(block, `${group} should include patch updates`).toContain("- patch");
+      expect(block, `${group} must not group major updates`).not.toContain("- major");
+    }
+
+    for (const dependencyName of ["opossum", "@types/node", "@toon-format/toon"]) {
+      const block = dependencyIgnoreBlock(dependencyName);
+      expect(block).toContain("version-update:semver-major");
+    }
   });
 
   it("keeps TypeScript on the reviewed 6.0 patch line", () => {

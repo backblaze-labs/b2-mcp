@@ -44,8 +44,11 @@ Phase 1 migration and for the public MCP tool contract freeze.
   code imports it. This freezes npm provenance, engine-floor, and package-review
   policy before migration code starts handling durable B2 credentials.
 - Dependabot or Renovate SDK version bumps require the SDK parity matrix to be
-  reviewed, `pnpm run test:contract` to pass, and the unit drift test for this
-  document to pass.
+  reviewed and the complete SDK/MCP no-credential contract to pass:
+  `pnpm run test:contract`, `pnpm run test:protocol`,
+  `pnpm run test:package`, `pnpm run check:package-budget`, and
+  `pnpm run audit:supply-chain`. The live contract suite must pass before
+  release accepts the SDK upgrade.
 - SDK dependency bumps must not be auto-merged; the `b2-sdk` dependency group
   requires human parity, provenance, and engine-floor review.
 - A release candidate must fail review if it relies on SDK private modules,

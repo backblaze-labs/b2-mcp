@@ -31,6 +31,55 @@ function parseInlineYamlList(value) {
     .filter(Boolean);
 }
 
+function yamlBlockForKey(text, key) {
+  const lines = text.split(/\r?\n/);
+  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(?:#.*)?$`);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = lines[index].match(keyPattern);
+    if (!match) continue;
+
+    const indent = match[1].length;
+    const blockLines = [];
+    for (let child = index + 1; child < lines.length; child += 1) {
+      const childLine = lines[child];
+      if (childLine.trim()) {
+        const childIndent = childLine.match(/^\s*/)?.[0].length ?? 0;
+        if (childIndent <= indent) break;
+      }
+      blockLines.push(childLine);
+    }
+    return blockLines.join("\n");
+  }
+
+  return null;
+}
+
+function yamlMappingForKey(text, key) {
+  const block = yamlBlockForKey(text, key);
+  if (block === null) return null;
+
+  const lines = block.split(/\r?\n/);
+  const childIndents = lines
+    .filter((line) => line.trim() && !line.trim().startsWith("#"))
+    .map((line) => line.match(/^\s*/)?.[0].length ?? 0);
+  if (childIndents.length === 0) return {};
+
+  const childIndent = Math.min(...childIndents);
+  const mapping = {};
+  for (const line of lines) {
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent !== childIndent) continue;
+    const match = line.slice(childIndent).match(/^([^:#]+):\s*(.*)$/);
+    if (!match) continue;
+    const rawValue = match[2].trim();
+    const inlineList = parseInlineYamlList(rawValue);
+    mapping[match[1].trim()] = inlineList ?? unquoteYamlScalar(rawValue);
+  }
+  return mapping;
+}
+
 function yamlValuesForKey(text, key) {
   const lines = text.split(/\r?\n/);
   const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(.*)$`);
@@ -74,15 +123,27 @@ function valuesEqual(actual, expected) {
 }
 
 function workflowJobBlock(text, jobName) {
-  const start = text.search(new RegExp(`^  ${escapeRegExp(jobName)}:\\s*$`, "m"));
-  if (start === -1) return null;
-  const rest = text.slice(start + 1);
-  const next = rest.search(/\n {2}[a-zA-Z0-9_-]+:\s*$/m);
-  return next === -1 ? text.slice(start) : text.slice(start, start + 1 + next);
+  const job = workflowJobBlocks(text).find((candidate) => candidate.name === jobName);
+  return job?.block ?? null;
+}
+
+function workflowJobBlocks(text) {
+  const jobsStart = text.search(/^jobs:\s*$/m);
+  if (jobsStart === -1) return [];
+  const jobsText = text.slice(jobsStart);
+  const matches = [...jobsText.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)];
+  return matches.map((match, index) => {
+    const start = match.index ?? 0;
+    const end = matches[index + 1]?.index ?? jobsText.length;
+    return { name: match[1], block: jobsText.slice(start, end) };
+  });
 }
 
 module.exports = {
   yamlValuesForKey,
+  yamlBlockForKey,
+  yamlMappingForKey,
   valuesEqual,
   workflowJobBlock,
+  workflowJobBlocks,
 };
