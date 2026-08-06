@@ -4,28 +4,10 @@
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
-import { createServer, getRegisteredTools } from "../../src/server";
+import { createServer } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
-import { B2Config } from "../../src/utils/types";
+import { callTool, testConfig } from "../support/deterministic-fakes";
 import type { MockInstance } from "vitest";
-
-const testConfig: B2Config = {
-  applicationKeyId: "k",
-  applicationKey: "s",
-  appKeyId: "k",
-  appKey: "s",
-  masterKeyId: "s",
-  masterKey: "s",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
-
-async function callTool(server: McpServer, name: string, args: Record<string, unknown>) {
-  const tool = getRegisteredTools(server)?.[name];
-  if (!tool) throw new Error(`Tool not found: ${name}`);
-  return tool.execute(args, {} as any);
-}
 
 let server: McpServer;
 let sendSpy: MockInstance;

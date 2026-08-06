@@ -18,8 +18,9 @@
  * are absent so a local editor cannot accidentally call B2.
  */
 
-import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
+import { loadConfig, createServer } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { callTool, parseResult } from "../support/deterministic-fakes";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 // S3-compatible API requires a non-master application key (set B2_APP_KEY_ID).
@@ -35,25 +36,6 @@ const partnerIt = HAS_PARTNER ? test : test.skip;
 // creds. Skipped unless both are set, so a normal live run doesn't require it.
 const TRUNC_BUCKET = process.env.B2_TRUNCATION_BUCKET;
 const truncIt = HAS_S3_CREDS && TRUNC_BUCKET ? test : test.skip;
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function callTool(server: McpServer, toolName: string, args: Record<string, unknown>) {
-  const tool = getRegisteredTools(server)?.[toolName];
-  if (!tool) throw new Error(`Tool not found: ${toolName}`);
-  return tool.execute(args, {} as any);
-}
-
-function parseResult(result: any): any {
-  if (result?.structuredContent !== undefined) return result.structuredContent;
-  const text = result?.content?.[0]?.text;
-  if (!text) return result;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
 
 function isError(result: any): boolean {
   return result?.isError === true;

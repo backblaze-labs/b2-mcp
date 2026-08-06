@@ -1,5 +1,6 @@
 import type { HttpRequest, HttpResponse, HttpTransport } from "@backblaze-labs/b2-sdk";
-import type { ToolCallback, ToolRegistrar } from "../../src/mcp";
+import { getRegisteredTools } from "../../src/server";
+import type { McpServer, ToolCallback, ToolRegistrar } from "../../src/mcp";
 import type {
   B2S3CompletedMultipartPart,
   B2S3LifecycleRule,
@@ -9,12 +10,25 @@ import type {
 } from "../../src/s3/aws-sdk-adapter";
 import { currentMcpRequestSignal } from "../../src/request-context";
 import { abortError } from "../../src/utils/named-error";
+import type { B2Config } from "../../src/utils/types";
 import {
   authorizeResponse,
   b2EndpointName,
   requestJson,
   StaticHttpResponse,
 } from "./sdk-test-helpers";
+
+export const testConfig = {
+  applicationKeyId: "test-key-id",
+  applicationKey: "test-key-secret",
+  appKeyId: "test-app-key-id",
+  appKey: "test-app-key-secret",
+  masterKeyId: "test-master-key-id",
+  masterKey: "test-master-key-secret",
+  region: "us-west-004",
+  allowLocalFiles: true,
+  fileRoot: null,
+} satisfies B2Config;
 
 export class ToolHarness implements ToolRegistrar {
   readonly tools = new Map<string, ToolCallback>();
@@ -35,7 +49,17 @@ export class ToolHarness implements ToolRegistrar {
   }
 }
 
-export function parseToolResult(result: any): any {
+export async function callTool(
+  server: McpServer,
+  name: string,
+  args: Record<string, unknown> = {},
+) {
+  const tool = getRegisteredTools(server)?.[name];
+  if (!tool) throw new Error(`Tool not found: ${name}`);
+  return tool.execute(args, {} as any);
+}
+
+export function parseResult(result: any): any {
   if (result?.structuredContent !== undefined) return result.structuredContent;
   const text = result?.content?.[0]?.text;
   if (!text) return result;
@@ -59,6 +83,12 @@ export interface CapturedB2Request {
   aborted: boolean;
 }
 
+interface DeterministicB2NativeFakeOptions {
+  capabilities?: string[];
+  accountId?: string;
+  allowFallbackResponses?: boolean;
+}
+
 export function b2ErrorResponse(
   status: number,
   code: string,
@@ -77,7 +107,7 @@ export class DeterministicB2NativeFake implements HttpTransport {
   private readonly replies = new Map<string, B2TransportReply[]>();
   private readonly attempts = new Map<string, number>();
 
-  constructor(private readonly options: { capabilities?: string[]; accountId?: string } = {}) {}
+  constructor(private readonly options: DeterministicB2NativeFakeOptions = {}) {}
 
   respond(endpoint: string, ...responses: B2TransportReply[]): this {
     const queue = this.replies.get(endpoint) ?? [];
@@ -123,7 +153,11 @@ export class DeterministicB2NativeFake implements HttpTransport {
         accountId: this.options.accountId ?? "test-account-123",
       });
     }
-    return new StaticHttpResponse(200, {});
+    if (this.options.allowFallbackResponses) return new StaticHttpResponse(200, {});
+    throw new Error(
+      `No deterministic B2 fake response queued for endpoint '${endpoint}'. ` +
+        "Use respond(), fail(), or paginate() in the test setup.",
+    );
   }
 
   requestsFor(endpoint: string): CapturedB2Request[] {
@@ -154,7 +188,24 @@ export function s3ServiceError(
   });
 }
 
-export class DeterministicS3ClientFake {
+export type DeterministicS3PeerClient = Pick<
+  B2S3PeerClient,
+  | "headBucket"
+  | "putBucketLifecycle"
+  | "getBucketLocation"
+  | "createMultipartUpload"
+  | "presignUploadPart"
+  | "completeMultipartUpload"
+  | "abortMultipartUpload"
+  | "listMultipartUploads"
+  | "listParts"
+  | "uploadPartCopy"
+  | "listReportObjectKeys"
+  | "downloadReportObject"
+  | "destroy"
+>;
+
+export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
   readonly requests: CapturedS3Request[] = [];
   destroyed = false;
   private readonly replies = new Map<string, Array<S3Reply<any, any>>>();
@@ -305,8 +356,8 @@ export class DeterministicS3ClientFake {
     return this.next("downloadReportObject", input, { body: "" });
   }
 
-  asPeerClient(): B2S3PeerClient {
-    return this as unknown as B2S3PeerClient;
+  asPeerClient(): DeterministicS3PeerClient {
+    return this;
   }
 
   requestsFor(operation: string): CapturedS3Request[] {

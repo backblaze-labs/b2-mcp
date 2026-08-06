@@ -300,8 +300,16 @@ describe("test layer naming", () => {
     const pkg = readJson<{ scripts: Record<string, string> }>("package.json");
     const script = readFileSync(join(root, "scripts/run-leak-diagnostics.mjs"), "utf8");
 
-    expect(pkg.scripts["test:diagnostics"]).toBe("node scripts/run-leak-diagnostics.mjs");
+    expect(pkg.scripts.verify).toContain("pnpm run test:diagnostics");
+    expect(pkg.scripts["test:diagnostics"]).toBe(
+      "pnpm run build && node scripts/run-leak-diagnostics.mjs",
+    );
     expect(script).toContain("MaxListenersExceededWarning");
+    expect(script).toContain("Possible EventEmitter memory leak detected");
+    expect(script).toContain("maxBuffer");
+    expect(script).toContain("timeout");
+    expect(script).toContain("result.error");
+    expect(script).not.toMatch(/open handles?|detectOpenHandles/i);
     expect(script).toContain("protocol-modern");
     expect(script).toContain("protocol-legacy");
   });

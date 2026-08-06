@@ -238,8 +238,7 @@ jobs:
           node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - name: Detect MaxListeners and open-handle warnings
+      - name: Detect MaxListeners and EventEmitter leak warnings
         run: pnpm run test:diagnostics
       - name: Upload diagnostic reports
         if: always()

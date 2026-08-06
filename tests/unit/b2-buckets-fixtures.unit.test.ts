@@ -1,19 +1,7 @@
 import { registerBucketTools, setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import type { B2Client } from "../../src/b2/client";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
-import { ToolHarness, parseToolResult } from "../support/deterministic-fakes";
-
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
-  appKeyId: "test-app-key-id",
-  appKey: "test-app-key-secret",
-  masterKeyId: "test-master-key-id",
-  masterKey: "test-master-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
+import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
 function bucket(index: number) {
   return {
@@ -94,7 +82,7 @@ describe("B2 bucket tools with deterministic native fake", () => {
   });
 
   it("captures list filters and truncates the surfaced bucket payload", async () => {
-    const result = parseToolResult(
+    const result = parseResult(
       await tools.call("b2_list_buckets", {
         bucketTypes: ["allPrivate"],
         limit: 2,
@@ -140,7 +128,7 @@ describe("B2 bucket tools with deterministic native fake", () => {
   });
 
   it("redacts webhook secrets on get and set notification rules", async () => {
-    const getResult = parseToolResult(
+    const getResult = parseResult(
       await tools.call("b2_get_bucket_notification_rules", { bucketId: "bucket-1" }),
     );
     expect(getResult.eventNotificationRules[0].targetConfiguration).toMatchObject({
@@ -149,7 +137,7 @@ describe("B2 bucket tools with deterministic native fake", () => {
       customHeaders: [{ name: "Authorization", value: "[redacted]" }],
     });
 
-    const setResult = parseToolResult(
+    const setResult = parseResult(
       await tools.call("b2_set_bucket_notification_rules", {
         bucketId: "bucket-1",
         confirm: true,

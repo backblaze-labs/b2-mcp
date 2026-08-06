@@ -2,19 +2,7 @@ import { ReadableStream } from "node:stream/web";
 import { registerS3ObjectTools } from "../../src/s3/objects";
 import type { B2Client, S3DownloadedObject } from "../../src/b2/client";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
-import { ToolHarness, parseToolResult } from "../support/deterministic-fakes";
-
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
-  appKeyId: "test-app-key-id",
-  appKey: "test-app-key-secret",
-  masterKeyId: "test-master-key-id",
-  masterKey: "test-master-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
+import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
 function streamFrom(chunks: Uint8Array[], onCancel: () => void = () => undefined) {
   return new ReadableStream<Uint8Array>({
@@ -144,7 +132,7 @@ describe("S3 object tools with deterministic handler fake", () => {
   });
 
   it("returns small inline objects and forwards list pagination arguments", async () => {
-    const getResult = parseToolResult(
+    const getResult = parseResult(
       await tools.call("s3_get_object", { bucket: "b", key: "hello.txt", range: "bytes=0-4" }),
     );
     nextListObjects = {
@@ -154,7 +142,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       nextContinuationToken: "next",
       keyCount: 1,
     } as any;
-    const listResult = parseToolResult(
+    const listResult = parseResult(
       await tools.call("s3_list_objects_v2", {
         bucket: "b",
         prefix: "a",
@@ -207,7 +195,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(blocked.isError).toBe(true);
     expect(calls.some((call) => call.operation === "s3DeleteObjects")).toBe(false);
 
-    const allowed = parseToolResult(
+    const allowed = parseResult(
       await tools.call("s3_delete_objects", {
         bucket: "b",
         objects: [{ key: "a.txt" }],

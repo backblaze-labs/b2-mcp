@@ -19,28 +19,14 @@
  * are absent so a local editor cannot accidentally call B2.
  */
 
-import { loadConfig, createServer, getRegisteredTools } from "../../src/server";
+import { loadConfig, createServer } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { callTool, parseResult } from "../support/deterministic-fakes";
 import { contractBucketName } from "./support/contract-buckets";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
 const liveIt = HAS_CREDS ? test : test.skip;
 
-async function callTool(server: McpServer, toolName: string, args: Record<string, unknown>) {
-  const tool = getRegisteredTools(server)?.[toolName];
-  if (!tool) throw new Error(`Tool not found: ${toolName}`);
-  return tool.execute(args, {} as any);
-}
-function parseResult(result: any): any {
-  if (result?.structuredContent !== undefined) return result.structuredContent;
-  const text = result?.content?.[0]?.text;
-  if (!text) return result;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
 const isError = (r: any): boolean => r?.isError === true;
 const errText = (r: any): string => r?.content?.[0]?.text ?? "";
 

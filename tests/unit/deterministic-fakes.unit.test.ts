@@ -1,32 +1,15 @@
-import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { createServer, invalidateAuthManagerCache } from "../../src/server";
 import { abortError } from "../../src/utils/named-error";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { installSdkTransport } from "../support/sdk-test-helpers";
 import {
   DeterministicB2NativeFake,
   DeterministicS3ClientFake,
-  parseToolResult,
+  callTool,
+  parseResult,
   s3ServiceError,
+  testConfig,
 } from "../support/deterministic-fakes";
-import type { McpServer } from "../../src/mcp";
-
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
-  appKeyId: "test-app-key-id",
-  appKey: "test-app-key-secret",
-  masterKeyId: "test-master-key-id",
-  masterKey: "test-master-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
-
-async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
-  const tool = getRegisteredTools(server)?.[name];
-  if (!tool) throw new Error(`Tool not found: ${name}`);
-  return tool.execute(args, {} as any);
-}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -62,7 +45,7 @@ describe("DeterministicB2NativeFake", () => {
     });
     const server = createServer(testConfig);
 
-    const result = parseToolResult(await callTool(server, "b2_list_buckets"));
+    const result = parseResult(await callTool(server, "b2_list_buckets"));
 
     expect(result.buckets[0].bucketName).toBe("fixture-bucket");
     expect(fake.requestsFor("b2_list_buckets")).toHaveLength(2);
@@ -85,6 +68,17 @@ describe("DeterministicB2NativeFake", () => {
     ).rejects.toMatchObject({ name: "AbortError" });
 
     expect(fake.requests.some((request) => request.aborted)).toBe(true);
+  });
+
+  it("fails unqueued non-auth endpoints with a descriptive setup error", async () => {
+    const fake = new DeterministicB2NativeFake();
+
+    await expect(
+      fake.send({
+        method: "POST",
+        url: "https://api005.backblazeb2.com/b2api/v2/b2_delete_bucket",
+      }),
+    ).rejects.toThrow(/No deterministic B2 fake response queued.*b2_delete_bucket/);
   });
 });
 

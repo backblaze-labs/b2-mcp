@@ -84,7 +84,7 @@ describe("CI workflow policy", () => {
     expect(currentJob).toContain("pnpm run test:slow");
     expect(currentJob).not.toContain("test:package");
     expect(listenerDiagnosticsJob).toContain("pnpm run test:diagnostics");
-    expect(listenerDiagnosticsJob).toContain("Detect MaxListeners and open-handle warnings");
+    expect(listenerDiagnosticsJob).toContain("Detect MaxListeners and EventEmitter leak warnings");
     expect(packageJob).toContain("continue-on-error: true");
     expect(packageJob).toContain("pnpm run test:package");
   });

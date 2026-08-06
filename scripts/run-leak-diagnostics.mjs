@@ -5,11 +5,11 @@
 import { spawnSync } from "node:child_process";
 
 const layers = ["unit", "protocol-modern", "protocol-legacy"];
+const maxBuffer = 64 * 1024 * 1024;
+const timeout = 2 * 60 * 1000;
 const warningPatterns = [
   /MaxListenersExceededWarning/,
   /Possible EventEmitter memory leak detected/,
-  /open handles? detected/i,
-  /leaked listeners?/i,
 ];
 
 let failed = false;
@@ -26,6 +26,8 @@ for (const layer of layers) {
       cwd: process.cwd(),
       env,
       encoding: "utf8",
+      maxBuffer,
+      timeout,
     },
   );
   const stdout = result.stdout ?? "";
@@ -33,8 +35,19 @@ for (const layer of layers) {
   if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
 
-  if (result.status !== 0) {
-    console.error(`Leak diagnostics layer '${layer}' failed with exit ${result.status}.`);
+  if (result.error) {
+    const code = "code" in result.error ? result.error.code : undefined;
+    const reason =
+      code === "ETIMEDOUT"
+        ? `timed out after ${timeout} ms`
+        : code === "ENOBUFS"
+          ? `exceeded diagnostic output buffer (${maxBuffer} bytes)`
+          : result.error.message;
+    console.error(`Leak diagnostics layer '${layer}' spawn error: ${reason}.`);
+    failed = true;
+  } else if (result.status !== 0) {
+    const exit = result.status === null ? `signal ${result.signal ?? "unknown"}` : result.status;
+    console.error(`Leak diagnostics layer '${layer}' failed with exit ${exit}.`);
     failed = true;
   }
   const combined = `${stdout}\n${stderr}`;

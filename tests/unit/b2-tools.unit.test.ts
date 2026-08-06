@@ -10,6 +10,7 @@ import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "..
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
+import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import {
   authorizeResponse,
   b2EndpointName,
@@ -17,35 +18,6 @@ import {
   RecordingTransport,
   StaticHttpResponse,
 } from "../support/sdk-test-helpers";
-
-async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
-  const tool = getRegisteredTools(server)?.[name];
-  if (!tool) throw new Error(`Tool not found: ${name}`);
-  return tool.execute(args, {} as any);
-}
-
-function parseResult(result: any) {
-  if (result?.structuredContent !== undefined) return result.structuredContent;
-  const text = result?.content?.[0]?.text;
-  if (!text) return result;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
-  appKeyId: "test-app-key-id",
-  appKey: "test-app-key-secret",
-  masterKeyId: "test-app-key-secret",
-  masterKey: "test-app-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
 
 let sim: B2Simulator;
 let seed: SdkB2Client;

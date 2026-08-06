@@ -5,21 +5,10 @@ import { abortError } from "../../src/utils/named-error";
 import {
   DeterministicS3ClientFake,
   ToolHarness,
-  parseToolResult,
+  parseResult,
   s3ServiceError,
+  testConfig,
 } from "../support/deterministic-fakes";
-
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
-  appKeyId: "test-app-key-id",
-  appKey: "test-app-key-secret",
-  masterKeyId: "test-master-key-id",
-  masterKey: "test-master-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
 
 let s3: DeterministicS3ClientFake;
 let tools: ToolHarness;
@@ -52,7 +41,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
     });
 
     expect(
-      parseToolResult(
+      parseResult(
         await tools.call("s3_create_multipart_upload", {
           bucket: "b",
           key: "large.bin",
@@ -64,7 +53,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
     ).toMatchObject({ uploadId: "upload-1", bucket: "b", key: "large.bin" });
 
     expect(
-      parseToolResult(
+      parseResult(
         await tools.call("s3_presign_upload_part", {
           bucket: "b",
           key: "large.bin",
@@ -83,7 +72,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
     });
 
     expect(
-      parseToolResult(
+      parseResult(
         await tools.call("s3_complete_multipart_upload", {
           bucket: "b",
           key: "large.bin",
@@ -94,7 +83,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
     ).toMatchObject({ bucket: "b", key: "large.bin", etag: '"complete-etag"' });
 
     expect(
-      parseToolResult(
+      parseResult(
         await tools.call("s3_list_multipart_uploads", {
           bucket: "b",
           prefix: "large",
@@ -108,7 +97,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
     });
 
     expect(
-      parseToolResult(
+      parseResult(
         await tools.call("s3_list_parts", {
           bucket: "b",
           key: "large.bin",
@@ -123,7 +112,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
     });
 
     expect(
-      parseToolResult(
+      parseResult(
         await tools.call("s3_upload_part_copy", {
           bucket: "b",
           key: "assembled.bin",
@@ -174,7 +163,7 @@ describe("s3 multipart tools with deterministic S3 fake", () => {
       uploadId: "upload-1",
     });
     expect(failed.isError).toBe(true);
-    expect(parseToolResult(failed)).toContain("SlowDown");
+    expect(parseResult(failed)).toContain("SlowDown");
 
     const controller = new AbortController();
     controller.abort(abortError("client disconnected"));
