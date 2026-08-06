@@ -15,14 +15,42 @@ import { fileURLToPath } from "node:url";
 import retryUtils from "./lib/retry-utils.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const configuredRoot = process.env.B2_MCP_PRODUCTION_GATE_ROOT;
+if (configuredRoot && process.env.NODE_ENV !== "test") {
+  console.error("production-security-gate: B2_MCP_PRODUCTION_GATE_ROOT is test-only");
+  process.exit(2);
+}
+const projectRoot = path.resolve(configuredRoot ?? root);
 const require = createRequire(import.meta.url);
 const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const { commandLine, isTransientNpmFailure, runCommandWithRetries } = retryUtils;
 const auditLevel = "moderate";
+const severityRank = { info: 0, low: 1, moderate: 2, high: 3, critical: 4 };
+const minimumRank = severityRank[auditLevel];
 const auditRootDefault = ".audit/npm-production";
 const sbomFormat = "cyclonedx";
-const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-const convertedLock = readPackageManagerLock(root);
+const packageJson = JSON.parse(readFileSync(path.join(projectRoot, "package.json"), "utf8"));
+const convertedLock = readPackageManagerLock(projectRoot);
+const allowTestInjection = process.env.NODE_ENV === "test";
+const injectedPolicyJson = process.env.B2_MCP_AUDIT_POLICY_JSON;
+const injectedToday = process.env.B2_MCP_AUDIT_TODAY;
+if (injectedPolicyJson && !allowTestInjection) {
+  console.error(
+    "production-security-gate: refusing B2_MCP_AUDIT_POLICY_JSON outside NODE_ENV=test",
+  );
+  process.exit(1);
+}
+if (injectedToday && !allowTestInjection) {
+  console.error("production-security-gate: refusing B2_MCP_AUDIT_TODAY outside NODE_ENV=test");
+  process.exit(1);
+}
+const auditPolicy = JSON.parse(
+  injectedPolicyJson ?? readFileSync(path.join(projectRoot, "audit-policy.json"), "utf8"),
+);
+const allowedAdvisories = new Map(
+  (auditPolicy.allowedAdvisories ?? []).map((entry) => [`${entry.name}:${entry.source}`, entry]),
+);
+const expiryWarningDays = 30;
 
 function usage() {
   return [
@@ -108,7 +136,7 @@ function ensureAuditDirectory(auditRoot) {
     process.exit(2);
   }
 
-  const realRoot = realpathSync(root);
+  const realRoot = realpathSync(projectRoot);
   const realAuditRoot = realpathSync(auditRoot);
   if (!pathInsideRoot(realRoot, realAuditRoot)) {
     console.error("production-security-gate: .audit/ real path must be inside the repository");
@@ -118,8 +146,8 @@ function ensureAuditDirectory(auditRoot) {
 }
 
 function assertAuditRoot(target) {
-  const resolved = path.resolve(root, target);
-  const auditRoot = path.join(root, ".audit");
+  const resolved = path.resolve(projectRoot, target);
+  const auditRoot = path.join(projectRoot, ".audit");
   if (!pathStrictlyInsideRoot(auditRoot, resolved)) {
     console.error("production-security-gate: audit root must be inside .audit/");
     process.exit(2);
@@ -167,6 +195,24 @@ function productionPackageEntries() {
     .sort((left, right) => left.lockPath.localeCompare(right.lockPath));
 }
 
+function productionPackages() {
+  return Object.fromEntries(
+    Object.entries(convertedLock.packages ?? {})
+      .filter(
+        ([lockPath, entry]) =>
+          lockPath === "" || (lockPath.includes("node_modules/") && !entry.dev),
+      )
+      .map(([lockPath, entry]) => {
+        if (lockPath === "") {
+          const rootEntry = { ...entry };
+          delete rootEntry.devDependencies;
+          return [lockPath, rootEntry];
+        }
+        return [lockPath, { ...entry, dev: false }];
+      }),
+  );
+}
+
 function productionManifest() {
   // npm audit needs only manifest fields that can affect the production
   // resolution graph or package identity. Test/dev scripts, exports, bins, and
@@ -197,7 +243,7 @@ function packageLock() {
     version: packageJson.version,
     lockfileVersion: 3,
     requires: true,
-    packages: convertedLock.packages,
+    packages: productionPackages(),
   };
 }
 
@@ -212,9 +258,9 @@ function prepareAuditRoot(target) {
     path.join(target, "package-lock.json"),
     `${JSON.stringify(packageLock(), null, 2)}\n`,
   );
-  copyFileSync(path.join(root, ".npmrc"), path.join(target, ".npmrc"));
+  copyFileSync(path.join(projectRoot, ".npmrc"), path.join(target, ".npmrc"));
   console.log(
-    `production-security-gate: prepared ${path.relative(root, target)} from pnpm-lock.yaml`,
+    `production-security-gate: prepared ${path.relative(projectRoot, target)} from pnpm-lock.yaml`,
   );
 }
 
@@ -229,15 +275,197 @@ function npmAuditEnv() {
   };
 }
 
+function npmAuditRetryReason(audit) {
+  if (audit.error) {
+    return isTransientNpmFailure(audit) ? "npm audit registry/network failure" : null;
+  }
+
+  const parsed = parseAuditReport(audit);
+  if (parsed.error) {
+    return isTransientNpmFailure(audit, parsed.error)
+      ? "npm audit returned a transient non-report response"
+      : null;
+  }
+  if (!parsed.report?.auditReportVersion && isTransientNpmFailure(audit)) {
+    return "npm audit returned a transient non-report response";
+  }
+  return null;
+}
+
+function parseAuditReport(audit) {
+  try {
+    return { report: JSON.parse(audit.stdout || "{}") };
+  } catch (error) {
+    return { error };
+  }
+}
+
+function sortedJson(value) {
+  return JSON.stringify([...(value ?? [])].sort());
+}
+
+function isRealDate(value) {
+  if (typeof value !== "string") return false;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
+function referenceDate() {
+  if (!injectedToday) return new Date().toISOString().slice(0, 10);
+  if (!isRealDate(injectedToday)) {
+    throw new Error(`B2_MCP_AUDIT_TODAY must be a real YYYY-MM-DD date, got ${injectedToday}`);
+  }
+  return injectedToday;
+}
+
+function daysUntil(date, today) {
+  const expiresAt = Date.parse(`${date}T00:00:00Z`);
+  const todayAt = Date.parse(`${today}T00:00:00Z`);
+  return Math.ceil((expiresAt - todayAt) / 86_400_000);
+}
+
+function lockPackageForException(exception) {
+  for (const node of exception.nodes ?? []) {
+    const entry = convertedLock.packages?.[node];
+    if (entry) return entry;
+  }
+  return convertedLock.packages?.[`node_modules/${exception.name}`];
+}
+
+function recordExpiryFinding(key, exception, today, warnings, details) {
+  if (!isRealDate(exception.expires)) {
+    details.push(
+      `exception expires must be a real YYYY-MM-DD calendar date, got ${JSON.stringify(
+        exception.expires,
+      )}`,
+    );
+    return;
+  }
+
+  const days = daysUntil(exception.expires, today);
+  if (exception.expires < today) {
+    details.push(
+      `exception expired on ${exception.expires}; deploy-gating and release checks must fail closed until audit-policy.json is updated or the exception is removed`,
+    );
+  } else if (days <= expiryWarningDays) {
+    warnings.push(
+      `${key}: exception expires in ${days} day${days === 1 ? "" : "s"} on ${exception.expires}`,
+    );
+  }
+}
+
+function exceptionFailures(key, exception, vulnerability, via, today, warnings) {
+  const details = [];
+  const packageEntry = lockPackageForException(exception);
+  const viaEntry = convertedLock.packages?.[exception.via?.path];
+
+  recordExpiryFinding(key, exception, today, warnings, details);
+  if (severityRank[exception.maxSeverity] === undefined) {
+    details.push(`exception maxSeverity is invalid: ${exception.maxSeverity}`);
+  } else if (severityRank[via.severity] > severityRank[exception.maxSeverity]) {
+    details.push(`severity ${via.severity} exceeds allowed ${exception.maxSeverity}`);
+  }
+  if (vulnerability.isDirect !== exception.isDirect) {
+    details.push(`isDirect expected ${exception.isDirect}, got ${vulnerability.isDirect}`);
+  }
+  if (sortedJson(vulnerability.nodes) !== sortedJson(exception.nodes)) {
+    details.push(
+      `nodes expected ${sortedJson(exception.nodes)}, got ${sortedJson(vulnerability.nodes)}`,
+    );
+  }
+  if (sortedJson(vulnerability.effects) !== sortedJson(exception.effects)) {
+    details.push(
+      `effects expected ${sortedJson(exception.effects)}, got ${sortedJson(vulnerability.effects)}`,
+    );
+  }
+  if (packageEntry?.version !== exception.package?.version) {
+    details.push(
+      `package version expected ${exception.package?.version}, got ${packageEntry?.version}`,
+    );
+  }
+  if (packageEntry?.integrity !== exception.package?.integrity) {
+    details.push(`package integrity drifted for ${exception.name}`);
+  }
+  if (viaEntry?.version !== exception.via?.version) {
+    details.push(
+      `via package version expected ${exception.via?.version}, got ${viaEntry?.version}`,
+    );
+  }
+  if (viaEntry?.dependencies?.[exception.name] !== exception.via?.dependencyRange) {
+    details.push(
+      `via dependency range expected ${exception.via?.dependencyRange}, got ${viaEntry?.dependencies?.[exception.name]}`,
+    );
+  }
+
+  return details;
+}
+
+function evaluateAuditReport(report) {
+  const today = referenceDate();
+  const failures = [];
+  const warnings = [];
+  const allowedFindings = [];
+  const matchedAllowed = new Set();
+
+  for (const vulnerability of Object.values(report.vulnerabilities ?? {})) {
+    for (const via of vulnerability.via ?? []) {
+      if (typeof via === "string") continue;
+      const key = `${via.name}:${via.source}`;
+      if (severityRank[via.severity] === undefined) {
+        failures.push(`${key} has unknown severity: ${via.severity}`);
+        continue;
+      }
+      if (severityRank[via.severity] < minimumRank) continue;
+      const exception = allowedAdvisories.get(key);
+      if (exception) {
+        matchedAllowed.add(key);
+        const details = exceptionFailures(key, exception, vulnerability, via, today, warnings);
+        if (details.length > 0) {
+          failures.push(`${key}: ${details.join("; ")}`);
+          continue;
+        }
+        allowedFindings.push(`${key} (${via.severity}) allowed until ${exception.expires}`);
+        continue;
+      }
+      failures.push(`${key} ${via.severity}: ${via.title}`);
+    }
+  }
+
+  for (const key of [...allowedAdvisories.keys()].sort()) {
+    if (!matchedAllowed.has(key)) {
+      console.warn(
+        `production-security-gate: ${key} exception did not match a current audit finding`,
+      );
+    }
+  }
+  for (const finding of allowedFindings.sort()) {
+    console.warn(`production-security-gate: ${finding}`);
+  }
+  for (const warning of warnings.sort()) {
+    console.warn(`::warning::production-security-gate: ${warning}`);
+  }
+
+  return failures;
+}
+
 function runNpmAudit(target) {
-  const args = ["audit", "--omit=dev", `--audit-level=${auditLevel}`];
+  const args = ["audit", "--json", "--omit=dev", `--audit-level=${auditLevel}`];
   const result = runCommandWithRetries("npm", args, {
     attempts: 3,
     retryDelayMs: 1_000,
     retryLabel: "npm production audit",
-    shouldRetry: (audit) => audit.status !== 0 && isTransientNpmFailure(audit),
-    retryMessage: ({ attempt, attempts }) =>
-      `production-security-gate: npm audit transient failure on attempt ${attempt}/${attempts}; retrying`,
+    shouldRetry: (audit) => npmAuditRetryReason(audit) !== null,
+    retryMessage: ({ result: audit, attempt, attempts }) =>
+      `production-security-gate: ${npmAuditRetryReason(audit)} on attempt ${attempt}/${attempts}; retrying`,
     spawnOptions: {
       cwd: target,
       encoding: "utf8",
@@ -247,40 +475,59 @@ function runNpmAudit(target) {
     },
   });
 
-  if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
-  if (result.status !== 0) {
+  const parsed = parseAuditReport(result);
+  if (parsed.error || !parsed.report?.auditReportVersion) {
+    if (result.stdout) process.stderr.write(result.stdout);
     console.error(
-      `production-security-gate: ${commandLine("npm", args)} failed with ${result.status}`,
+      `production-security-gate: ${commandLine("npm", args)} did not return audit JSON`,
     );
-    process.exit(result.status ?? 1);
+    if (parsed.error) throw parsed.error;
+    process.exit(result.status || 1);
   }
+
+  const failures = evaluateAuditReport(parsed.report);
+  if (failures.length > 0) {
+    for (const failure of failures.sort()) {
+      console.error(`::error::production-security-gate: ${failure}`);
+    }
+    process.exit(1);
+  }
+  console.log("production-security-gate: no unallowed moderate/high/critical advisories");
 }
 
-function directProductionRefs(refByNameVersion) {
+function componentRef(name, version) {
+  return `${name}@${String(version).replace(/\(.*\)$/, "")}`;
+}
+
+function directProductionRefs(componentRefs) {
   return Object.keys({
     ...(packageJson.dependencies ?? {}),
     ...(packageJson.optionalDependencies ?? {}),
   })
     .map((name) => {
       const direct = convertedLock.packages?.[`node_modules/${name}`];
-      return direct?.version ? refByNameVersion.get(`${name}@${direct.version}`) : null;
+      if (!direct?.version) return null;
+      const ref = componentRef(name, direct.version);
+      return componentRefs.has(ref) ? ref : null;
     })
     .filter(Boolean)
     .sort();
 }
 
 function writeCycloneDxSbom(sbomPath) {
-  const absolutePath = path.resolve(root, sbomPath);
+  const absolutePath = path.resolve(projectRoot, sbomPath);
   const components = productionPackageEntries();
-  const refByNameVersion = new Map(
-    components.map((entry) => [`${entry.name}@${entry.version}`, `${entry.name}@${entry.version}`]),
-  );
+  // npm sbom cannot consume this pnpm-derived lock without re-shaping the
+  // physical install tree into npm's nested node_modules model, and npm install
+  // would re-resolve the graph. Keep this writer small and schema-covered so
+  // the release SBOM stays tied to the committed pnpm-lock.yaml versions.
+  const componentRefs = new Set(components.map((entry) => componentRef(entry.name, entry.version)));
   const dependencyRows = [
     {
       ref: `${packageJson.name}@${packageJson.version}`,
-      dependsOn: directProductionRefs(refByNameVersion),
+      dependsOn: directProductionRefs(componentRefs),
     },
   ];
 
@@ -290,10 +537,10 @@ function writeCycloneDxSbom(sbomPath) {
       ...entry.optionalDependencies,
     };
     dependencyRows.push({
-      ref: refByNameVersion.get(`${entry.name}@${entry.version}`),
+      ref: componentRef(entry.name, entry.version),
       dependsOn: Object.entries(dependencies)
-        .map(([name, version]) => refByNameVersion.get(`${name}@${version}`))
-        .filter(Boolean)
+        .map(([name, version]) => componentRef(name, version))
+        .filter((ref) => componentRefs.has(ref))
         .sort(),
     });
   }
@@ -313,7 +560,7 @@ function writeCycloneDxSbom(sbomPath) {
       },
     },
     components: components.map((entry) => ({
-      "bom-ref": refByNameVersion.get(`${entry.name}@${entry.version}`),
+      "bom-ref": componentRef(entry.name, entry.version),
       type: "library",
       name: entry.name,
       version: entry.version,
@@ -332,7 +579,7 @@ function writeCycloneDxSbom(sbomPath) {
   mkdirSync(path.dirname(absolutePath), { recursive: true });
   writeFileSync(absolutePath, `${JSON.stringify(sbom, null, 2)}\n`);
   console.log(
-    `production-security-gate: wrote ${sbomFormat} SBOM with ${components.length} production components to ${path.relative(root, absolutePath)}`,
+    `production-security-gate: wrote ${sbomFormat} SBOM with ${components.length} production components to ${path.relative(projectRoot, absolutePath)}`,
   );
 }
 

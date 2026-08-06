@@ -6,7 +6,6 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -260,6 +259,165 @@ describe("supply-chain audit policy", () => {
     });
   }
 
+  function emptyNpmAuditReport() {
+    return {
+      auditReportVersion: 2,
+      vulnerabilities: {},
+      metadata: { vulnerabilities: { total: 0 } },
+    };
+  }
+
+  function productionNpmAuditReport() {
+    return {
+      auditReportVersion: 2,
+      vulnerabilities: {
+        zod: {
+          name: "zod",
+          severity: "high",
+          isDirect: true,
+          via: [
+            {
+              source: 998000,
+              name: "zod",
+              dependency: "zod",
+              title: "Direct production advisory",
+              url: "https://github.com/advisories/direct-production-fixture",
+              severity: "high",
+              range: "<4.4.4",
+            },
+          ],
+          effects: [],
+          range: "<4.4.4",
+          nodes: ["node_modules/zod"],
+          fixAvailable: false,
+        },
+      },
+      metadata: { vulnerabilities: { high: 1, total: 1 } },
+    };
+  }
+
+  function fakeNpmAudit(dir: string, report: unknown, exitCode: number) {
+    const fakeNpm = join(dir, process.platform === "win32" ? "npm.cmd" : "npm");
+    writeFileSync(
+      fakeNpm,
+      [
+        "#!/usr/bin/env node",
+        "const args = process.argv.slice(2);",
+        "if (args[0] !== 'audit' || !args.includes('--json')) {",
+        "  console.error(`unexpected npm args: ${args.join(' ')}`);",
+        "  process.exit(2);",
+        "}",
+        `console.log(JSON.stringify(${JSON.stringify(report)}));`,
+        `process.exit(${exitCode});`,
+      ].join("\n"),
+    );
+    chmodSync(fakeNpm, 0o755);
+    return fakeNpm;
+  }
+
+  function productionGateEnv(fakeNpmDir: string, extraEnv: Record<string, string> = {}) {
+    return {
+      ...process.env,
+      PATH: `${fakeNpmDir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+      NODE_ENV: "test",
+      B2_MCP_AUDIT_TODAY: "2026-09-30",
+      ...extraEnv,
+    };
+  }
+
+  function writeProductionGateInputs(fixtureRoot: string, lockText?: string) {
+    writeFileSync(join(fixtureRoot, ".npmrc"), npmrc);
+    writeFileSync(
+      join(fixtureRoot, "audit-policy.json"),
+      JSON.stringify({ allowedAdvisories: [] }),
+    );
+    writeFileSync(
+      join(fixtureRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: "b2-mcp-production-gate-fixture",
+          version: "0.0.0",
+          private: true,
+          dependencies: { parent: "1.0.0" },
+        },
+        null,
+        2,
+      ),
+    );
+    writeFileSync(
+      join(fixtureRoot, "pnpm-lock.yaml"),
+      lockText ??
+        [
+          "lockfileVersion: '9.0'",
+          "importers:",
+          "  .:",
+          "    dependencies:",
+          "      parent:",
+          "        specifier: 1.0.0",
+          "        version: 1.0.0",
+          "packages:",
+          "  parent@1.0.0:",
+          "    resolution: {integrity: sha512-parent}",
+          "snapshots:",
+          "  parent@1.0.0: {}",
+          "",
+        ].join("\n"),
+    );
+  }
+
+  function expectCycloneDx15LibrarySbom(sbom: {
+    $schema?: string;
+    bomFormat?: string;
+    specVersion?: string;
+    version?: number;
+    metadata?: {
+      component?: { "bom-ref"?: string; type?: string; name?: string; version?: string };
+    };
+    components?: Array<{
+      "bom-ref"?: string;
+      type?: string;
+      name?: string;
+      version?: string;
+      purl?: string;
+    }>;
+    dependencies?: Array<{ ref?: string; dependsOn?: string[] }>;
+  }) {
+    expect(sbom.$schema).toBe("http://cyclonedx.org/schema/bom-1.5.schema.json");
+    expect(sbom.bomFormat).toBe("CycloneDX");
+    expect(sbom.specVersion).toBe("1.5");
+    expect(sbom.version).toBe(1);
+    expect(sbom.metadata?.component).toMatchObject({
+      type: "library",
+      name: expect.any(String),
+      version: expect.any(String),
+    });
+    expect(sbom.metadata?.component?.["bom-ref"]).toBe(
+      `${sbom.metadata?.component?.name}@${sbom.metadata?.component?.version}`,
+    );
+    expect(Array.isArray(sbom.components)).toBe(true);
+    expect(Array.isArray(sbom.dependencies)).toBe(true);
+    const refs = new Set([
+      sbom.metadata?.component?.["bom-ref"],
+      ...(sbom.components ?? []).map((component) => component["bom-ref"]),
+    ]);
+    for (const component of sbom.components ?? []) {
+      expect(component).toMatchObject({
+        "bom-ref": `${component.name}@${component.version}`,
+        type: "library",
+        name: expect.any(String),
+        version: expect.any(String),
+        purl: expect.stringMatching(/^pkg:npm\//),
+      });
+    }
+    for (const dependency of sbom.dependencies ?? []) {
+      expect(refs.has(dependency.ref)).toBe(true);
+      expect(Array.isArray(dependency.dependsOn)).toBe(true);
+      for (const ref of dependency.dependsOn ?? []) {
+        expect(refs.has(ref)).toBe(true);
+      }
+    }
+  }
+
   it("runs the full lockfile audit on the ci-green deploy-gating path", () => {
     const productionJob = jobBlock("deterministic-linux-production");
     const currentJob = jobBlock("deterministic-linux-current");
@@ -271,6 +429,7 @@ describe("supply-chain audit policy", () => {
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
     expect(auditJob).toContain("pnpm run audit:production");
+    expect(auditJob).toContain("node-version: [22.3.0, 24, 26]");
     expect(auditJob).not.toContain("prepare-production-npm-audit.mjs");
     expect(auditJob).not.toContain("npm install --package-lock-only");
     expect(auditJob).toContain("fetch-depth: 0");
@@ -283,6 +442,8 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
     expect(auditJob).toContain("Reject injected audit fixtures");
     expect(auditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
+    expect(auditJob).toContain("B2_MCP_AUDIT_POLICY_JSON is test-only");
+    expect(auditJob).toContain("B2_MCP_PRODUCTION_GATE_ROOT is test-only");
     expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail");
     expect(auditJob).not.toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: warn");
     expect(productionJob).not.toContain("pnpm run audit:supply-chain");
@@ -300,6 +461,9 @@ describe("supply-chain audit policy", () => {
   });
 
   it("disables normal lifecycle scripts and isolates npm publishing", () => {
+    const attachSbomJob = publishJobBlock("attach-sbom");
+    const publishJob = publishJobBlock("publish");
+
     expect(npmrc).toMatch(/^ignore-scripts=true$/m);
     expect(packageJson.scripts["audit:supply-chain"]).toContain(
       "pnpm run audit:supply-chain:denylist --packlist",
@@ -332,9 +496,13 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("Attach SBOM to GitHub release");
     expect(publishWorkflow).toContain("gh release upload");
     expect(publishWorkflow).toContain("contents: write");
+    expect(attachSbomJob).toContain("contents: write");
+    expect(attachSbomJob).not.toContain("id-token: write");
+    expect(attachSbomJob).toContain('sha256sum "$sbom"');
+    expect(publishJob).toContain("contents: read");
+    expect(publishJob).not.toContain("contents: write");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
-    expect(publishWorkflow).toContain('sha256sum "$sbom"');
     expect(publishWorkflow).toContain("retention-days: 7");
     expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
@@ -417,13 +585,18 @@ describe("supply-chain audit policy", () => {
 
   it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {
     const prepareJob = publishJobBlock("prepare");
+    const attachSbomJob = publishJobBlock("attach-sbom");
     const publishJob = publishJobBlock("publish");
 
     expect(prepareJob).not.toContain("id-token: write");
     expect(prepareJob).toContain("pnpm run typecheck");
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
+    expect(attachSbomJob).toContain("contents: write");
+    expect(attachSbomJob).not.toContain("id-token: write");
     expect(publishJob).toContain("id-token: write");
+    expect(publishJob).toContain("contents: read");
+    expect(publishJob).not.toContain("contents: write");
     expect(publishJob).not.toContain("pnpm run typecheck");
     expect(publishJob).not.toContain("pnpm run build");
     expect(publishJob).not.toContain("--ignore-scripts=false");
@@ -465,7 +638,15 @@ describe("supply-chain audit policy", () => {
         private?: boolean;
       };
       const packageLock = JSON.parse(readFileSync(join(target, "package-lock.json"), "utf8")) as {
-        packages: Record<string, { dev?: boolean; version?: string }>;
+        packages: Record<
+          string,
+          {
+            dependencies?: Record<string, string>;
+            dev?: boolean;
+            devDependencies?: unknown;
+            version?: string;
+          }
+        >;
       };
 
       expect(result.status).toBe(0);
@@ -477,7 +658,11 @@ describe("supply-chain audit policy", () => {
       expect(packageLock.packages["node_modules/zod"].version).toBe(
         lock.packages["node_modules/zod"].version,
       );
-      expect(packageLock.packages["node_modules/@biomejs/biome"].dev).toBe(true);
+      expect(packageLock.packages[""].devDependencies).toBeUndefined();
+      for (const name of Object.keys(packageJson.dependencies)) {
+        expect(packageLock.packages[`node_modules/${name}`]?.dev).toBe(false);
+      }
+      expect(packageLock.packages["node_modules/@biomejs/biome"]).toBeUndefined();
       expect(readFileSync(join(target, ".npmrc"), "utf8")).toContain("ignore-scripts=true");
     } finally {
       rmSync(target, { recursive: true, force: true });
@@ -565,14 +750,13 @@ describe("supply-chain audit policy", () => {
   it("refuses a symlinked .audit directory", () => {
     if (process.platform === "win32") return;
 
-    const auditRoot = join(root, ".audit");
-    const backup = join(root, `.audit-backup-${process.pid}-${Date.now()}`);
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-audit-fixture-"));
+    const auditRoot = join(fixtureRoot, ".audit");
     const outside = mkdtempSync(join(tmpdir(), "b2-mcp-audit-root-outside-"));
     const sentinel = join(outside, "sentinel");
-    const hadAuditRoot = existsSync(auditRoot);
 
     try {
-      if (hadAuditRoot) renameSync(auditRoot, backup);
+      writeProductionGateInputs(fixtureRoot);
       writeFileSync(sentinel, "do-not-delete", { flag: "wx" });
       symlinkSync(outside, auditRoot, "dir");
 
@@ -586,6 +770,11 @@ describe("supply-chain audit policy", () => {
         ],
         {
           cwd: root,
+          env: {
+            ...process.env,
+            NODE_ENV: "test",
+            B2_MCP_PRODUCTION_GATE_ROOT: fixtureRoot,
+          },
           encoding: "utf8",
         },
       );
@@ -596,9 +785,157 @@ describe("supply-chain audit policy", () => {
       expect(existsSync(join(outside, "test-production-symlinked-root"))).toBe(false);
     } finally {
       if (existsSync(auditRoot) && lstatSync(auditRoot).isSymbolicLink()) unlinkSync(auditRoot);
-      else rmSync(auditRoot, { recursive: true, force: true });
-      if (hadAuditRoot && existsSync(backup)) renameSync(backup, auditRoot);
       rmSync(outside, { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails the production npm audit gate for an unaccepted production advisory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-production-audit-fail-"));
+    const target = ".audit/test-production-advisory-fail";
+
+    try {
+      fakeNpmAudit(dir, productionNpmAuditReport(), 1);
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/production-security-gate.mjs", "--audit-root", target],
+        {
+          cwd: root,
+          env: productionGateEnv(dir, {
+            B2_MCP_AUDIT_POLICY_JSON: JSON.stringify({ allowedAdvisories: [] }),
+          }),
+          encoding: "utf8",
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("zod:998000 high: Direct production advisory");
+    } finally {
+      rmSync(join(root, target), { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("honors scoped audit-policy exceptions in the production npm audit gate", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-production-audit-allow-"));
+    const target = ".audit/test-production-advisory-allow";
+
+    try {
+      fakeNpmAudit(dir, productionNpmAuditReport(), 1);
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/production-security-gate.mjs", "--audit-root", target],
+        {
+          cwd: root,
+          env: productionGateEnv(dir, {
+            B2_MCP_AUDIT_POLICY_JSON: JSON.stringify({
+              allowedAdvisories: [
+                {
+                  ...directPnpmPolicy.allowedAdvisories[0],
+                  nodes: ["node_modules/zod"],
+                },
+              ],
+            }),
+          }),
+          encoding: "utf8",
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("zod:998000 (high) allowed until 2026-10-01");
+      expect(result.stdout).toContain("no unallowed moderate/high/critical advisories");
+    } finally {
+      rmSync(join(root, target), { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes a CycloneDX 1.5 production SBOM from the pnpm-locked graph", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-production-sbom-"));
+    const target = ".audit/test-production-sbom";
+    const sbomPath = `${target}/b2-mcp-production.cdx.json`;
+
+    try {
+      fakeNpmAudit(dir, emptyNpmAuditReport(), 0);
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/production-security-gate.mjs", "--audit-root", target, "--sbom", sbomPath],
+        {
+          cwd: root,
+          env: productionGateEnv(dir),
+          encoding: "utf8",
+        },
+      );
+      const sbom = JSON.parse(readFileSync(join(root, sbomPath), "utf8"));
+
+      expect(result.status).toBe(0);
+      expectCycloneDx15LibrarySbom(sbom);
+      expect(sbom.components.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(join(root, target), { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves SBOM dependency edges for peer-suffixed pnpm snapshot versions", () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-production-peer-sbom-"));
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-production-peer-npm-"));
+    const target = ".audit/peer-sbom";
+    const sbomPath = `${target}/fixture.cdx.json`;
+
+    writeProductionGateInputs(
+      fixtureRoot,
+      [
+        "lockfileVersion: '9.0'",
+        "importers:",
+        "  .:",
+        "    dependencies:",
+        "      parent:",
+        "        specifier: 1.0.0",
+        "        version: 1.0.0(peer@2.0.0)",
+        "packages:",
+        "  parent@1.0.0:",
+        "    resolution: {integrity: sha512-parent}",
+        "  child@1.0.0:",
+        "    resolution: {integrity: sha512-child}",
+        "  peer@2.0.0:",
+        "    resolution: {integrity: sha512-peer}",
+        "snapshots:",
+        "  parent@1.0.0(peer@2.0.0):",
+        "    dependencies:",
+        "      child: 1.0.0(peer@2.0.0)",
+        "      peer: 2.0.0",
+        "  child@1.0.0(peer@2.0.0): {}",
+        "  peer@2.0.0: {}",
+        "",
+      ].join("\n"),
+    );
+
+    try {
+      fakeNpmAudit(dir, emptyNpmAuditReport(), 0);
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/production-security-gate.mjs", "--audit-root", target, "--sbom", sbomPath],
+        {
+          cwd: root,
+          env: productionGateEnv(dir, {
+            B2_MCP_PRODUCTION_GATE_ROOT: fixtureRoot,
+          }),
+          encoding: "utf8",
+        },
+      );
+      const sbom = JSON.parse(readFileSync(join(fixtureRoot, sbomPath), "utf8"));
+      const parentDependencies = sbom.dependencies.find(
+        (entry: { ref?: string }) => entry.ref === "parent@1.0.0",
+      );
+
+      expect(result.status).toBe(0);
+      expectCycloneDx15LibrarySbom(sbom);
+      expect(parentDependencies?.dependsOn).toContain("child@1.0.0");
+      expect(parentDependencies?.dependsOn).toContain("peer@2.0.0");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true });
     }
   });
 
@@ -618,12 +955,14 @@ describe("supply-chain audit policy", () => {
         'try { attempt = Number(fs.readFileSync(state, "utf8")); } catch {}',
         "attempt += 1;",
         "fs.writeFileSync(state, String(attempt));",
+        "const args = process.argv.slice(2);",
+        "if (args[0] !== 'audit' || !args.includes('--json')) process.exit(2);",
         "if (attempt === 1) {",
         '  console.error("npm ERR! code EAI_AGAIN");',
         '  console.error("npm ERR! advisory endpoint timed out");',
         "  process.exit(1);",
         "}",
-        'console.log("found 0 vulnerabilities");',
+        `console.log(JSON.stringify(${JSON.stringify(emptyNpmAuditReport())}));`,
         "process.exit(0);",
       ].join("\n"),
     );
@@ -646,8 +985,8 @@ describe("supply-chain audit policy", () => {
       );
 
       expect(result.status).toBe(0);
-      expect(result.stdout).toContain("found 0 vulnerabilities");
-      expect(result.stderr).toContain("npm audit transient failure");
+      expect(result.stdout).toContain("no unallowed moderate/high/critical advisories");
+      expect(result.stderr).toContain("npm audit returned a transient non-report response");
       expect(readFileSync(state, "utf8")).toBe("2");
     } finally {
       rmSync(join(root, target), { recursive: true, force: true });

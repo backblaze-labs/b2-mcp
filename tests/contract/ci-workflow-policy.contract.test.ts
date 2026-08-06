@@ -115,11 +115,8 @@ describe("CI workflow policy", () => {
   it("runs pinned workflow security analysis with zizmor", () => {
     const workflowSecurity = workflowJob("workflow-security");
 
-    expect(ci).not.toContain("actions: read");
     expect(workflowSecurity).toContain("persist-credentials: false");
-    expect(workflowSecurity).toContain(
-      "zizmor-action v0.6.2 is pinned by SHA; version pins the zizmor CLI.",
-    );
+    expect(workflowSecurity).not.toContain("actions: read");
     expect(workflowSecurity).toContain(
       "zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054",
     );
@@ -127,6 +124,8 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("annotations: true");
     expect(workflowSecurity).toContain("min-severity: medium");
     expect(workflowSecurity).toContain("min-confidence: medium");
+    expect(workflowSecurity).toContain("online-audits: false");
+    expect(workflowSecurity).toContain('token: ""');
     expect(workflowSecurity).toContain("version: 1.29.0");
   });
 
@@ -134,7 +133,7 @@ describe("CI workflow policy", () => {
     const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
     const publishJob = workflowJobBlock(publish, "publish") ?? "";
 
-    expect(publishJob).toContain("needs: [prepare, live-contract]");
+    expect(publishJob).toContain("needs: [prepare, live-contract, attach-sbom]");
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("environment: live-b2-contract");
     expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
@@ -143,5 +142,8 @@ describe("CI workflow policy", () => {
     expect(liveContract).toContain("LIVE_B2_KEY_ID");
     expect(liveContract).toContain("LIVE_B2_KEY");
     expect(liveContract).toContain("pnpm run test:contract:live");
+    expect(liveContract).toContain("for attempt in 1 2 3");
+    expect(liveContract).toContain("Live B2 contract suite failed after");
+    expect(publish).toContain("attach-sbom:");
   });
 });

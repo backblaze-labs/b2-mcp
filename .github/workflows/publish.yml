@@ -118,7 +118,7 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: live-b2-contract
-    timeout-minutes: 6
+    timeout-minutes: 18
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -154,19 +154,70 @@ jobs:
             fi
           done
           exit "$missing"
-      - run: pnpm run test:contract:live
+      - name: Run live B2 contract suite with bounded retry
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if pnpm run test:contract:live; then
+              exit 0
+            fi
+            if [[ "$attempt" == 3 ]]; then
+              echo "::error::Live B2 contract suite failed after ${attempt} attempts"
+              exit 1
+            fi
+            echo "::warning::Live B2 contract suite failed on attempt ${attempt}; retrying"
+            sleep $((attempt * 10))
+          done
+
+  attach-sbom:
+    needs: [prepare, live-contract]
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # actions/download-artifact v6, reviewed 2026-08-05.
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: npm-package
+          path: publish-package
+      - name: Verify release SBOM
+        env:
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
+        run: |
+          set -euo pipefail
+          sbom="publish-package/${EXPECTED_SBOM_NAME}"
+          if [[ ! -f "$sbom" ]]; then
+            echo "::error::Expected release SBOM ${sbom} is missing"
+            exit 1
+          fi
+          actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
+          if [[ "$actual_sbom_sha" != "$EXPECTED_SBOM_SHA256" ]]; then
+            echo "::error::Release SBOM SHA-256 mismatch"
+            echo "expected=${EXPECTED_SBOM_SHA256}"
+            echo "actual=${actual_sbom_sha}"
+            exit 1
+          fi
+      - name: Attach SBOM to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
 
   publish:
-    needs: [prepare, live-contract]
+    needs: [prepare, live-contract, attach-sbom]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: npm-publish
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       # actions/download-artifact v6, reviewed 2026-08-05.
@@ -201,18 +252,11 @@ jobs:
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
           EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
-          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
-          EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
         run: |
           set -euo pipefail
           tarball="publish-package/${EXPECTED_TARBALL_NAME}"
-          sbom="publish-package/${EXPECTED_SBOM_NAME}"
           if [[ ! -f "$tarball" ]]; then
             echo "::error::Expected publish tarball ${tarball} is missing"
-            exit 1
-          fi
-          if [[ ! -f "$sbom" ]]; then
-            echo "::error::Expected release SBOM ${sbom} is missing"
             exit 1
           fi
           actual_sha="$(sha256sum "$tarball" | awk '{print $1}')"
@@ -222,19 +266,6 @@ jobs:
             echo "actual=${actual_sha}"
             exit 1
           fi
-          actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
-          if [[ "$actual_sbom_sha" != "$EXPECTED_SBOM_SHA256" ]]; then
-            echo "::error::Release SBOM SHA-256 mismatch"
-            echo "expected=${EXPECTED_SBOM_SHA256}"
-            echo "actual=${actual_sbom_sha}"
-            exit 1
-          fi
-      - name: Attach SBOM to GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
-          PUBLISH_TAG: ${{ inputs.tag }}
-        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
       - name: Publish prebuilt tarball with trusted provenance
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}

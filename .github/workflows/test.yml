@@ -272,9 +272,13 @@ jobs:
           if-no-files-found: error
 
   supply-chain-audit:
-    name: supply-chain audit
+    name: supply-chain audit / Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [22.3.0, 24, 26]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -297,7 +301,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 22.23.1
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Reject injected audit fixtures
@@ -305,6 +309,14 @@ jobs:
           set -euo pipefail
           if [[ -n "${B2_MCP_AUDIT_REPORT_JSON:-}" ]]; then
             echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
+            exit 1
+          fi
+          if [[ -n "${B2_MCP_AUDIT_POLICY_JSON:-}" ]]; then
+            echo "::error::B2_MCP_AUDIT_POLICY_JSON is test-only and must not reach CI audit jobs"
+            exit 1
+          fi
+          if [[ -n "${B2_MCP_PRODUCTION_GATE_ROOT:-}" ]]; then
+            echo "::error::B2_MCP_PRODUCTION_GATE_ROOT is test-only and must not reach CI audit jobs"
             exit 1
           fi
       - run: pnpm run audit:production
@@ -321,13 +333,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      # zizmor-action v0.6.2 is pinned by SHA; version pins the zizmor CLI.
+      # Action release v0.6.2 is pinned by SHA; with.version pins zizmor CLI 1.29.0.
       - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054
         with:
           advanced-security: false
           annotations: true
           min-severity: medium
           min-confidence: medium
+          online-audits: false
+          token: ""
           version: 1.29.0
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
