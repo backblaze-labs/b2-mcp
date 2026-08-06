@@ -11,7 +11,7 @@ description: Configure and review B2 Object Lock retention and legal holds witho
 - Trigger: The user asks why a file cannot be deleted or overwritten because of retention or legal hold.
 - Trigger: The user asks to shorten retention, clear retention, bypass governance, or turn legal hold off.
 
-## Tools Used
+## Tools Referenced
 
 - `b2_list_buckets`
 - `b2_create_bucket`

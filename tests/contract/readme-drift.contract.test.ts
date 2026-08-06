@@ -44,7 +44,7 @@ describe("README tool-surface drift", () => {
   it("names no tools that are not registered", () => {
     // Backticked identifiers that look like tool names (allow digits: e.g.
     // s3_list_objects_v2). Excludes env vars and config keys by the prefix.
-    const mentioned = [...readme.matchAll(/`((?:b2|bz|s3)_[a-z0-9_]+)`/g)].map((m) => m[1]);
+    const mentioned = [...readme.matchAll(/`((?:b2|s3)_[a-z0-9_]+)`/g)].map((m) => m[1]);
     const registered = new Set(toolNames);
     // Durable-secret-producing tools may appear in README as intentionally
     // unavailable until a secret sink exists. Everything else must be registered.

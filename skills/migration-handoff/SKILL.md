@@ -11,7 +11,7 @@ description: Move workloads into or within B2 using direct transfer paths, serve
 - Trigger: The user asks for a cutover checklist, preflight validation, or post-migration verification.
 - Trigger: The user asks to avoid sending migration payload bytes through the model or MCP server.
 
-## Tools Used
+## Tools Referenced
 
 - `b2_list_buckets`
 - `b2_create_bucket`
@@ -19,6 +19,7 @@ description: Move workloads into or within B2 using direct transfer paths, serve
 - `s3_head_bucket`
 - `s3_get_bucket_location`
 - `s3_list_objects_v2`
+- `s3_list_object_versions`
 - `s3_head_object`
 - `s3_copy_object`
 - `s3_get_presigned_url`
@@ -51,14 +52,15 @@ Before cutover, pause and confirm the rollback plan, read-only window if any, an
 1. Establish migration scope: source, destination bucket and prefix, object count, total bytes, metadata requirements, Object Lock needs, lifecycle rules, downtime tolerance, and rollback plan.
 2. Use `b2_list_buckets`, `s3_head_bucket`, and `s3_get_bucket_location` to verify destination readiness. Create a new bucket only when the target policy is clear.
 3. Align bucket settings with `b2_create_bucket` or `b2_update_bucket`. Keep Object Lock, encryption, lifecycle, and public/private state explicit.
-4. Inventory source and destination with `s3_list_objects_v2`. Use `s3_head_object` for spot checks and metadata verification.
+4. Inventory source and destination current objects with `s3_list_objects_v2`. When version history, delete markers, retention, legal hold, or Object Lock history matters, also run paginated `s3_list_object_versions` and build a per-version and delete-marker manifest with bucket, key, version ID, current/delete-marker state, size, ETag or checksum when available, retention mode and date, legal hold state, and verification status. Stop before cutover if required history or protection metadata cannot be inventoried and verified.
 5. Choose the transfer path:
-   - B2-to-B2 object: prefer `s3_copy_object` or `s3_upload_part_copy` for large objects when possible.
+   - B2-to-B2 small object: prefer `s3_copy_object`.
+   - B2-to-B2 large object: start with `s3_create_multipart_upload`, copy each planned byte range with `s3_upload_part_copy`, capture the returned part ETags in the checkpoint, then call `s3_complete_multipart_upload` only after every part is recorded.
    - External-to-B2 object: generate PutObject presigned URLs or multipart upload URLs and have the migration client upload directly.
-   - Large objects: coordinate `s3_create_multipart_upload`, `s3_presign_upload_part`, client upload, and `s3_complete_multipart_upload`.
+   - External-to-B2 large object: coordinate `s3_create_multipart_upload`, `s3_presign_upload_part`, client upload, and `s3_complete_multipart_upload`.
 6. Before starting any large-object transfer, write a durable non-secret checkpoint outside chat and outside the model context. Include destination bucket and key, intended overwrite or version behavior, `uploadId`, planned part numbers, completed part numbers, captured ETags, presigned URL expiry per part, retry count, last error class, transfer batch ID, and whether completion has run.
 7. Use bounded retries with exponential backoff for transient 408, 429, 500, 502, 503, and 504 failures. Refresh expired presigned URLs before retrying an upload part. Do not call `s3_complete_multipart_upload` until every intended part number has a recorded ETag in the checkpoint.
 8. After a client or session restart, load the checkpoint first. Verify the destination object with `s3_head_object`; if it is not complete, use `s3_list_multipart_uploads` and `s3_list_parts` to reconcile uploaded parts, refresh only expired part URLs, and resume from the first missing or failed part.
 9. If a multipart upload is stale or unsafe to resume, summarize the destination bucket/key, `uploadId`, completed parts, and overwrite intent before calling `s3_abort_multipart_upload`. Abort only after explicit user confirmation and `confirm: true` when the server requires it.
-10. Verify counts, sizes, and spot-check metadata after transfer. Keep versioning and retention requirements visible when comparing source and destination.
+10. Verify counts, sizes, current-object metadata, and any per-version/delete-marker manifest after transfer. Keep versioning and retention requirements visible when comparing source and destination.
 11. For cutover, summarize remaining deltas, DNS or application configuration steps outside B2, rollback trigger, and final read/write switchover timing.

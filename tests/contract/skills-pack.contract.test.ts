@@ -1,14 +1,22 @@
+import { spawnSync } from "child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { spawnSync } from "child_process";
-import { createRequire } from "module";
-import { root } from "./support";
+import { readJson, root } from "./support";
 
-const nodeRequire = createRequire(__filename);
-const { EXPECTED_PHASE1_SKILL_NAMES } = nodeRequire("../../scripts/validate-pack.cjs") as {
-  EXPECTED_PHASE1_SKILL_NAMES: string[];
-};
+interface SkillsManifest {
+  packName: string;
+  skills: Array<{ name: string; path: string; description: string }>;
+}
+
+const skillsManifest = readJson<SkillsManifest>("skills/manifest.json");
+const expectedPhase1SkillNames = skillsManifest.skills.map((skill) => skill.name);
+
+const noGatedSafety = [
+  "Pause for explicit user confirmation before risky actions. The server also enforces `B2_DESTRUCTIVE_POLICY`.",
+  "",
+  "No destructive or protection-weakening tools are used.",
+].join("\n");
 
 function runValidator(args: string[] = [], cwd = root) {
   return spawnSync(process.execPath, ["scripts/validate-pack.cjs", ...args], {
@@ -20,6 +28,19 @@ function runValidator(args: string[] = [], cwd = root) {
 
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeManifest(dir: string, names = expectedPhase1SkillNames): void {
+  mkdirSync(join(dir, "skills"), { recursive: true });
+  writeJson(join(dir, "skills", "manifest.json"), {
+    schemaVersion: 1,
+    packName: skillsManifest.packName,
+    skills: names.map((name) => ({
+      name,
+      path: `skills/${name}/SKILL.md`,
+      description: `Fixture skill for ${name}.`,
+    })),
+  });
 }
 
 function skillBody(name: string, tools = ["b2_list_buckets"], safety = noGatedSafety): string {
@@ -34,7 +55,7 @@ description: Demonstrate the validator fixture for ${name}.
 
 - Trigger: The user asks for a validator fixture.
 
-## Tools Used
+## Tools Referenced
 
 ${tools.map((tool) => `- \`${tool}\``).join("\n")}
 
@@ -52,19 +73,14 @@ ${safety}
 `;
 }
 
-const noGatedSafety = [
-  "Pause for explicit user confirmation before risky actions. The server also enforces `B2_DESTRUCTIVE_POLICY`.",
-  "",
-  "No destructive or protection-weakening tools are used.",
-].join("\n");
-
 function writeSkill(dir: string, name: string, body = skillBody(name)): void {
   mkdirSync(join(dir, "skills", name), { recursive: true });
   writeFileSync(join(dir, "skills", name, "SKILL.md"), body);
 }
 
 function writePhase1Skills(dir: string, overrides: Record<string, string> = {}): void {
-  for (const name of EXPECTED_PHASE1_SKILL_NAMES) {
+  writeManifest(dir);
+  for (const name of expectedPhase1SkillNames) {
     writeSkill(dir, name, overrides[name]);
   }
 }
@@ -89,7 +105,7 @@ describe("B2 skills pack validator", () => {
     const result = runValidator();
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain(`validated ${EXPECTED_PHASE1_SKILL_NAMES.length} skill`);
+    expect(result.stdout).toContain(`validated ${expectedPhase1SkillNames.length} skill`);
   });
 
   it("rejects tool drift from the registered tool surface", () => {
@@ -112,9 +128,8 @@ describe("B2 skills pack validator", () => {
   it("rejects missing expected Phase 1 skills", () => {
     const dir = fixtureRoot();
     try {
-      for (const name of EXPECTED_PHASE1_SKILL_NAMES.filter(
-        (skill) => skill !== "backup-restore",
-      )) {
+      writeManifest(dir);
+      for (const name of expectedPhase1SkillNames.filter((skill) => skill !== "backup-restore")) {
         writeSkill(dir, name);
       }
 
@@ -127,7 +142,7 @@ describe("B2 skills pack validator", () => {
     }
   });
 
-  it("rejects bare destructive tool references missing from Tools Used", () => {
+  it("rejects bare destructive tool references missing from Tools Referenced", () => {
     const dir = fixtureRoot();
     try {
       writePhase1Skills(dir, {
@@ -140,14 +155,14 @@ describe("B2 skills pack validator", () => {
       const result = runValidator(["--root", dir]);
 
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("tool references missing from Tools Used");
+      expect(result.stderr).toContain("tool references missing from Tools Referenced");
       expect(result.stderr).toContain("s3_delete_object");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it("rejects HTML-commented destructive tool references missing from Tools Used", () => {
+  it("rejects HTML-commented destructive tool references missing from Tools Referenced", () => {
     const dir = fixtureRoot();
     try {
       writePhase1Skills(dir, {
@@ -160,7 +175,7 @@ describe("B2 skills pack validator", () => {
       const result = runValidator(["--root", dir]);
 
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("tool references missing from Tools Used");
+      expect(result.stderr).toContain("tool references missing from Tools Referenced");
       expect(result.stderr).toContain("s3_delete_objects");
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -187,6 +202,107 @@ describe("B2 skills pack validator", () => {
 
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("safety gate for b2_delete_key must state confirm: true");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects skills missing a required section", () => {
+    const dir = fixtureRoot();
+    try {
+      writePhase1Skills(dir, {
+        "backup-restore": skillBody("backup-restore").replace(
+          "\n## Byte Path\n\nNever route object bytes through the model. Never route object bytes through the MCP server. No object bytes are involved.\n",
+          "\n",
+        ),
+      });
+
+      const result = runValidator(["--root", dir]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("missing required section '## Byte Path'");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Byte Path sections missing required guarantees", () => {
+    const dir = fixtureRoot();
+    try {
+      writePhase1Skills(dir, {
+        "backup-restore": skillBody("backup-restore").replace(
+          "Never route object bytes through the MCP server. No object bytes are involved.",
+          "Keep payload bytes out of the server path.",
+        ),
+      });
+
+      const result = runValidator(["--root", dir]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte Path must state 'never route object bytes through the mcp server'",
+      );
+      expect(result.stderr).toContain("Byte Path must name a direct handoff");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing frontmatter metadata", () => {
+    const dir = fixtureRoot();
+    try {
+      writePhase1Skills(dir, {
+        "backup-restore": skillBody("backup-restore").replace(
+          "description: Demonstrate the validator fixture for backup-restore.",
+          "description: ",
+        ),
+      });
+
+      const result = runValidator(["--root", dir]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("frontmatter requires non-empty description");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects Safety Gates sections missing required prose", () => {
+    const dir = fixtureRoot();
+    try {
+      writePhase1Skills(dir, {
+        "backup-restore": skillBody(
+          "backup-restore",
+          ["b2_list_buckets"],
+          "No destructive or protection-weakening tools are used.",
+        ),
+      });
+
+      const result = runValidator(["--root", dir]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Safety Gates must require a pause");
+      expect(result.stderr).toContain("Safety Gates must require explicit user confirmation");
+      expect(result.stderr).toContain("Safety Gates must reference B2_DESTRUCTIVE_POLICY");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects presigned URL-shaped content in shipped skills", () => {
+    const dir = fixtureRoot();
+    try {
+      writePhase1Skills(dir, {
+        "backup-restore": skillBody("backup-restore").replace(
+          "1. List the bucket metadata.",
+          "https://example.invalid/object?X-Amz-Signature=abcdef1234567890\n1. List the bucket metadata.",
+        ),
+      });
+
+      const result = runValidator(["--root", dir]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("credential-shaped content must not appear");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

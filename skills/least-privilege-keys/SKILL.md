@@ -11,7 +11,7 @@ description: Audit and rotate scoped B2 application keys without exposing durabl
 - Trigger: The user asks to rotate, retire, or audit application keys.
 - Trigger: The user asks for a safer key plan before enabling mutating or destructive B2 tools.
 
-## Tools Used
+## Tools Referenced
 
 - `b2_authorize_account`
 - `b2_list_buckets`

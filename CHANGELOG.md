@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added a bundled Phase 1 B2 skills pack (`skills/**/SKILL.md`) with a
-  `validate:skills` gate, contract coverage, CI wiring, README loading docs,
-  and npm package inclusion.
+- Added a bundled Phase 1 B2 skills pack (`skills/manifest.json` and
+  `skills/**/SKILL.md`) with a `validate:skills` gate, contract coverage, CI
+  wiring, README loading docs, and npm package inclusion.
 - Added deterministic test-layer scripts, JUnit/Vitest summaries, coverage
   summaries, packed-package install coverage, and the `npm run verify`
   no-credential gate.

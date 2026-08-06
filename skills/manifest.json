@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "packName": "backblaze-b2-phase1",
+  "displayName": "Backblaze B2 Phase 1 Skills Pack",
+  "version": "1.0.0",
+  "issue": 105,
+  "issueUrl": "https://github.com/backblaze-labs/b2-mcp/issues/105",
+  "phase": "Phase 1",
+  "skills": [
+    {
+      "name": "backup-restore",
+      "path": "skills/backup-restore/SKILL.md",
+      "description": "Plan and execute B2 backup and restore workflows while keeping object bytes off the MCP control plane."
+    },
+    {
+      "name": "incident-response",
+      "path": "skills/incident-response/SKILL.md",
+      "description": "Triage B2 security or operations incidents with read-first evidence collection and gated containment actions."
+    },
+    {
+      "name": "least-privilege-keys",
+      "path": "skills/least-privilege-keys/SKILL.md",
+      "description": "Audit and rotate scoped B2 application keys without exposing durable secrets through MCP."
+    },
+    {
+      "name": "lifecycle-cost-hygiene",
+      "path": "skills/lifecycle-cost-hygiene/SKILL.md",
+      "description": "Find B2 storage waste and apply lifecycle rules with explicit approval for any deletion schedule."
+    },
+    {
+      "name": "migration-handoff",
+      "path": "skills/migration-handoff/SKILL.md",
+      "description": "Move workloads into or within B2 using direct transfer paths, server-side copy, and verification checkpoints."
+    },
+    {
+      "name": "object-lock-retention",
+      "path": "skills/object-lock-retention/SKILL.md",
+      "description": "Configure and review B2 Object Lock retention and legal holds without weakening protection accidentally."
+    }
+  ]
+}

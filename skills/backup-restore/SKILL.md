@@ -11,7 +11,7 @@ description: Plan and execute B2 backup and restore workflows while keeping obje
 - Trigger: The user asks to restore objects from B2, verify backup completeness, or produce a restore drill plan.
 - Trigger: The user asks for a repeatable backup workflow that includes manifests, version checks, and recovery validation.
 
-## Tools Used
+## Tools Referenced
 
 - `b2_list_buckets`
 - `s3_head_bucket`

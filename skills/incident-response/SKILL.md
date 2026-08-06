@@ -11,7 +11,7 @@ description: Triage B2 security or operations incidents with read-first evidence
 - Trigger: The user asks to contain a B2 incident while preserving evidence.
 - Trigger: The user asks for a step-by-step response plan that avoids accidental data loss during cleanup.
 
-## Tools Used
+## Tools Referenced
 
 - `b2_authorize_account`
 - `b2_list_buckets`

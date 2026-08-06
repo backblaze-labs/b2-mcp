@@ -108,6 +108,7 @@
     "dist/**/*",
     "docs/tool-profile-contract.json",
     "docs/TOOL_PROFILES.md",
+    "skills/manifest.json",
     "skills/**/SKILL.md",
     "tests/fixtures/tool-contract/*.json",
     "README.md",

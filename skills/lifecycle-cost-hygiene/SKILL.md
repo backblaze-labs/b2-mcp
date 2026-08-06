@@ -11,7 +11,7 @@ description: Find B2 storage waste and apply lifecycle rules with explicit appro
 - Trigger: The user asks to add lifecycle rules, expire old versions, hide old objects, or cancel incomplete multipart uploads.
 - Trigger: The user asks for a storage cost hygiene review before or after a backup, migration, or incident.
 
-## Tools Used
+## Tools Referenced
 
 - `b2_list_buckets`
 - `b2_largest_files`
@@ -49,5 +49,6 @@ Rules that only cancel incomplete multipart uploads are still operationally impo
    - Narrow prefixes before expiring data.
    - Prefer noncurrent-version expiration only after restore and retention needs are clear.
    - Avoid broad current-version deletion unless the user has a separate deletion runbook.
-6. For lifecycle changes, show the exact rule shape and affected scope before calling `s3_put_bucket_lifecycle` or `b2_update_bucket`.
-7. After applying a rule, re-read bucket or lifecycle metadata and summarize the expected future effect. Do not claim immediate storage reduction until B2 lifecycle processing has run.
+6. Before any `s3_put_bucket_lifecycle` call, capture the current full lifecycle configuration as a rollback snapshot. Build the complete merged replacement configuration, not a partial rule patch, and review unchanged rules alongside the proposed new or edited rules.
+7. For lifecycle changes, show the exact full rule set and affected scope before calling `s3_put_bucket_lifecycle` or `b2_update_bucket`.
+8. After applying a rule, re-read bucket or lifecycle metadata and verify unchanged rules are still present. Summarize the expected future effect and do not claim immediate storage reduction until B2 lifecycle processing has run.

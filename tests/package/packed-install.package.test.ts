@@ -27,12 +27,13 @@ const { runNpmCommandWithRetries } = nodeRequire("../../scripts/lib/retry-utils.
     stdout?: string;
   };
 };
-const { expectedPhase1SkillPaths } = nodeRequire("../../scripts/validate-pack.cjs") as {
-  expectedPhase1SkillPaths: () => string[];
-};
 
 interface PackFile {
   path: string;
+}
+
+interface SkillsManifest {
+  skills: Array<{ path: string }>;
 }
 
 interface PackResult {
@@ -63,6 +64,13 @@ interface PackageJson {
 
 function readNpmLock(path: string): PackageLock {
   return JSON.parse(readFileSync(path, "utf8")) as PackageLock;
+}
+
+function expectedSkillPackPaths(): string[] {
+  const manifest = JSON.parse(
+    readFileSync(join(root, "skills", "manifest.json"), "utf8"),
+  ) as SkillsManifest;
+  return ["skills/manifest.json", ...manifest.skills.map((skill) => skill.path)];
 }
 
 function packageNameFromNodeModulesPath(lockPath: string): string {
@@ -178,7 +186,7 @@ describe("packed package", () => {
           "dist/index.js",
           "dist/http-server.js",
           "README.md",
-          ...expectedPhase1SkillPaths(),
+          ...expectedSkillPackPaths(),
         ]),
       );
 
