@@ -243,8 +243,14 @@ pnpm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID /
 pnpm run test:contract:live    # live B2 request-shape checks; requires B2 credentials
 pnpm start                  # stdio transport
 pnpm run start:http --port 3000      # MCP 2026-07-28 HTTP transport
-pnpm dlx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspector
+pnpm run smoke:client       # advisory SDK client smoke; requires existing dist/, no B2 calls
+pnpm run smoke:inspector    # advisory locked Inspector CLI smoke; requires existing dist/
 ```
+
+Compatible MCP Inspector release for isolated manual inspection:
+`@modelcontextprotocol/inspector@2.1.0`. Run it through
+`pnpm run smoke:inspector` so the command uses the committed lockfile and a
+sanitized temporary environment.
 
 ## Documentation
 

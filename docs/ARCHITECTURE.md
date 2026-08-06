@@ -69,12 +69,13 @@ its `2.0.0` release pulls a vulnerable Node adapter transitively, and a package
 manager override would protect this checkout without protecting consumers of
 the published package.
 
-The monolithic `@modelcontextprotocol/sdk` v1 package is not a dependency and
-must not be imported by production or test code. HTTP serving is stateless and
-per request: Host, Origin, caller authentication, B2 credential resolution,
-rate/concurrency limits, body-size limits, drain, and shutdown checks run
-outside the SDK handler; protocol header/body validation remains inside
-`createMcpHandler`.
+The monolithic `@modelcontextprotocol/sdk` v1 package is not a direct or
+runtime dependency and must not be imported by production or test code. Its only
+allowed lockfile presence is a dev-only transitive of the pinned Inspector CLI.
+HTTP serving is stateless and per request: Host, Origin, caller authentication,
+B2 credential resolution, rate/concurrency limits, body-size limits, drain, and
+shutdown checks run outside the SDK handler; protocol header/body validation
+remains inside `createMcpHandler`.
 
 The repository-owned Node request adapter receives only an allowlisted
 MCP/header set; B2

@@ -122,6 +122,102 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Supplemental External Client Smoke
+
+The required PR gate remains repo-native: `pnpm run verify` and the protocol
+layers above are the correctness oracle. External clients are advisory evidence
+until they prove deterministic enough for CI.
+
+Manual Inspector compatibility is pinned to
+`@modelcontextprotocol/inspector@2.1.0` in `package.json` and
+`pnpm-lock.yaml`. Install with the frozen lockfile, build from a non-serving
+checkout, then run the locked Inspector CLI through the repository wrapper:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run smoke:inspector
+```
+
+`smoke:inspector` uses `pnpm exec mcp-inspector` from the locked install, an
+isolated temporary home/cache, fake B2 credentials, and the same no-network
+server guard as `smoke:client`.
+
+The non-interactive external client smoke uses the official
+`@modelcontextprotocol/client@2.0.0` SDK over stdio. It sends fake test
+credentials, sets `B2_REGISTER_ALL_TOOLS=true` so startup performs no B2
+capability-discovery network call, validates `server/discover`, server
+name/version, instructions, and `tools/list`, then compares the returned surface
+to `tests/fixtures/tool-contract/full.modern.json` and
+`docs/tool-profile-contract.json`.
+
+```bash
+pnpm run build
+pnpm run smoke:client
+```
+
+`smoke:client` uses the already-built `dist/` artifact and does not remove or
+rewrite it. It fails clearly when `dist/index.js` or `dist/tool-contract.js` is
+missing. On a deployment host, run it only from a non-serving checkout or from a
+copied release artifact, not from the active checkout used by a supervised
+service.
+
+The command records the SDK client's negotiated protocol era and revision, for
+example:
+
+```text
+negotiatedEra=modern negotiatedProtocol=2026-07-28
+```
+
+The smoke process starts as a small bootstrap that strips sensitive environment
+variables before importing the MCP client SDK. The server child runs with fake
+B2 credentials, `B2_REGISTER_ALL_TOOLS=true`, and a no-network preload guard; if
+capability discovery or another B2 network path is attempted, the smoke fails.
+
+Modern HTTP can be checked with the same SDK client pattern. Start a local HTTP
+server with fake server-mode credentials:
+
+```bash
+pnpm run build
+B2_HTTP_CREDENTIAL_MODE=server \
+B2_REGISTER_ALL_TOOLS=true \
+B2_APPLICATION_KEY_ID=external-smoke-key-id \
+B2_APPLICATION_KEY=external-smoke-key-secret \
+B2_ALLOWED_HOSTS=127.0.0.1 \
+node dist/http-server.js --port 3333
+```
+
+Then connect with a modern-pinned SDK HTTP client and record negotiation:
+
+```bash
+node --input-type=module <<'JS'
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+const client = new Client(
+  { name: "b2-mcp-http-smoke", version: "1.0.0" },
+  { versionNegotiation: { mode: { pin: "2026-07-28" } }, defaultCacheTtlMs: 0 },
+);
+const transport = new StreamableHTTPClientTransport(new URL("http://127.0.0.1:3333/mcp"));
+try {
+  await client.connect(transport, { timeoutMs: 10_000 });
+  await client.listTools(undefined, { cacheMode: "refresh", timeoutMs: 10_000 });
+  console.log(
+    JSON.stringify({
+      era: client.getProtocolEra(),
+      protocolVersion: client.getNegotiatedProtocolVersion(),
+      server: client.getServerVersion(),
+    }),
+  );
+} finally {
+  await client.close().catch(() => undefined);
+}
+JS
+```
+
+Claude client smoke remains supplemental. Record one dated Claude Desktop or
+Claude.ai Custom Connector run after the selected Claude surface exposes the
+`2026-07-28` protocol; do not make that vendor run a required gate.
+
 ## Tool Result Serialization
 
 Credential-free unit tests cover the structured result serializer:

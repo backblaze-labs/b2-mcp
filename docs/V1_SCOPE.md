@@ -465,8 +465,10 @@ reintroduced.
 
 The modern MCP baseline is `@modelcontextprotocol/server` v2 through
 `createMcpHandler` and `serveStdio`. The monolithic
-`@modelcontextprotocol/sdk` v1 package has been removed. Add other public v2
-packages only when the implementation imports their supported APIs.
+`@modelcontextprotocol/sdk` v1 package has been removed from direct/runtime
+dependencies. Its only allowed lockfile presence is a dev-only transitive of the
+pinned Inspector CLI. Add other public v2 packages only when the implementation
+imports their supported APIs.
 
 Phase 1 does not require HTTP+SSE, protocol-level sessions, GET streams, DELETE
 session termination, event replay, Roots, Sampling, MCP Logging, Tasks, MCP Apps,

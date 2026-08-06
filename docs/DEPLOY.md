@@ -557,3 +557,21 @@ live secrets. It is then further gated by the `live-b2-smoke` GitHub environment
 Configure that environment with branch/tag restrictions before storing live B2
 secrets there. Add required reviewers when the repository plan supports
 environment reviewers.
+
+For credential-free supplemental evidence before touching a live deployment, run
+the advisory stdio client smoke from a non-serving checkout or copied release
+artifact:
+
+```bash
+pnpm run build
+pnpm run smoke:client
+pnpm run smoke:inspector
+```
+
+The smoke commands themselves do not rebuild or remove `dist/`; they use fake
+test credentials, block network access in the stdio server child, and perform no
+B2 tool calls. `smoke:client` compares the negotiated `tools/list` surface to
+the repository-owned modern contract fixture, while `smoke:inspector` provides
+locked Inspector CLI evidence from an isolated temporary environment. They are
+not substitutes for the deterministic protocol gate or the live deployment smoke
+above.

@@ -47,6 +47,8 @@
     "verify": "pnpm run typecheck && pnpm run build && pnpm run lint && pnpm run lint:docs && pnpm run format:check && pnpm run spell && pnpm run test:coverage",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
+    "smoke:client": "node scripts/mcp-client-smoke.mjs",
+    "smoke:inspector": "node scripts/mcp-inspector-smoke.mjs",
     "generate:tool-contract": "pnpm run build && node scripts/generate-tool-contract.mjs",
     "smoke:package": "pnpm run build && node scripts/packed-consumer-smoke.mjs",
     "check:runtime-policy": "node scripts/check-runtime-policy.mjs",
@@ -85,6 +87,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
     "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/inspector": "2.1.0",
     "@modelcontextprotocol/node": "2.0.0",
     "@toon-format/toon": "4.1.0",
     "@types/node": "22.3.0",

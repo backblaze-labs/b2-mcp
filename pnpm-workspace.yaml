@@ -1,2 +1,6 @@
+allowBuilds:
+  '@modelcontextprotocol/inspector': false
+minimumReleaseAgeExclude:
+  - '@modelcontextprotocol/inspector@2.1.0'
 overrides:
   '@hono/node-server': 2.0.10
