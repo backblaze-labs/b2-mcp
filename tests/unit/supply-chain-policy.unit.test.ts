@@ -51,6 +51,7 @@ describe("supply-chain audit policy", () => {
   };
   const auditFixturePackage = lock.packages["node_modules/acorn"];
   const auditFixtureVia = lock.packages["node_modules/acorn-walk"];
+  const zodPackage = lock.packages["node_modules/zod"];
   const exceptionPolicy = {
     allowedAdvisories: [
       {
@@ -69,6 +70,26 @@ describe("supply-chain audit policy", () => {
         },
         expires: "2026-10-01",
         reason: "Test-only exception fixture for policy behavior.",
+      },
+    ],
+  };
+  const directPnpmPolicy = {
+    allowedAdvisories: [
+      {
+        name: "zod",
+        source: 998000,
+        maxSeverity: "high",
+        isDirect: true,
+        nodes: [".>zod"],
+        effects: [],
+        package: { version: zodPackage.version, integrity: zodPackage.integrity },
+        via: {
+          path: "node_modules/zod",
+          name: "zod",
+          version: zodPackage.version,
+        },
+        expires: "2026-10-01",
+        reason: "Test-only direct pnpm advisory exception fixture.",
       },
     ],
   };
@@ -176,6 +197,22 @@ describe("supply-chain audit policy", () => {
         },
       },
       metadata: { vulnerabilities: { high: 1, total: 1 } },
+    };
+  }
+
+  function directPnpmAuditReport() {
+    return {
+      advisories: {
+        998000: {
+          id: 998000,
+          module_name: "zod",
+          severity: "high",
+          title: "Direct dependency advisory",
+          url: "https://github.com/advisories/direct-pnpm-fixture",
+          vulnerable_versions: "<4.4.4",
+          findings: [{ version: zodPackage.version, paths: [".>zod"], dev: false }],
+        },
+      },
     };
   }
 
@@ -453,6 +490,48 @@ describe("supply-chain audit policy", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("evilpkg:1001 high: High severity advisory");
+  });
+
+  it("derives direct pnpm advisories from finding paths", () => {
+    const result = runAudit(directPnpmAuditReport(), {}, directPnpmPolicy);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("zod:998000 (high) allowed until 2026-10-01");
+  });
+
+  it("evaluates parseable pnpm audit reports with severity exit codes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-audit-exit-"));
+    const fakePnpm = join(dir, "pnpm");
+    writeFileSync(
+      fakePnpm,
+      [
+        "#!/usr/bin/env node",
+        `const report = ${JSON.stringify(scopedAuditReport())};`,
+        "console.log(JSON.stringify(report));",
+        "process.exit(16);",
+      ].join("\n"),
+    );
+    chmodSync(fakePnpm, 0o755);
+
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        NODE_ENV: "test",
+        B2_MCP_AUDIT_POLICY_JSON: JSON.stringify(exceptionPolicy),
+      };
+      delete env.B2_MCP_AUDIT_REPORT_JSON;
+      const result = spawnSync(process.execPath, ["scripts/audit-supply-chain.mjs"], {
+        cwd: root,
+        env,
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain("acorn:999000");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("retries transient pnpm audit registry failures before evaluating advisories", () => {

@@ -96,6 +96,26 @@ function parseAuditReport(audit) {
   }
 }
 
+function directPackageFromPnpmPath(pathValue) {
+  if (typeof pathValue !== "string") return null;
+  const segments = pathValue
+    .split(">")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments[0] !== ".") return null;
+  return segments[1] ?? null;
+}
+
+function isDirectPnpmAdvisory(advisory, name) {
+  if (typeof advisory.isDirect === "boolean") return advisory.isDirect;
+  return (advisory.findings ?? []).some((finding) => {
+    if (finding?.dev === true) return false;
+    return (finding?.paths ?? []).some(
+      (pathValue) => directPackageFromPnpmPath(pathValue) === name,
+    );
+  });
+}
+
 function normalizePnpmAdvisory(advisory) {
   const name = advisory.module_name ?? advisory.name;
   if (!name) return null;
@@ -104,7 +124,7 @@ function normalizePnpmAdvisory(advisory) {
   return {
     name,
     severity: advisory.severity,
-    isDirect: Boolean(advisory.isDirect),
+    isDirect: isDirectPnpmAdvisory(advisory, name),
     via: [
       {
         source,
@@ -195,14 +215,6 @@ function runPackageAudit() {
   if (parsed.error) {
     logAuditFailure(audit, "pnpm audit did not return parseable JSON");
     throw parsed.error;
-  }
-
-  if (audit.status && audit.status > 1) {
-    logAuditFailure(
-      audit,
-      "pnpm audit failed before advisory evaluation; registry/network failures are logged separately when retried",
-    );
-    process.exit(audit.status);
   }
 
   if (!parsed.auditReportVersion) {
