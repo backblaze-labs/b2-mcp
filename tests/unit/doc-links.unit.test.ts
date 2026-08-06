@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 import { spawnSync } from "child_process";
 import { root } from "../contract/support";
 
@@ -42,6 +42,24 @@ describe("Markdown link checker", () => {
       expect(result.stderr).toContain("broken local link: docs/missing.md");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects local links outside the repository using normalized paths", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-doc-links-contained-"));
+    const outside = `${dir}-outside`;
+    try {
+      mkdirSync(outside);
+      writeFileSync(join(outside, "outside.md"), "# Outside\n");
+      writeFileSync(join(dir, "README.md"), `[Outside](../${basename(outside)}/outside.md)\n`);
+
+      const result = runDocLinks(dir);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("links outside the repository");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 

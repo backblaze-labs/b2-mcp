@@ -128,6 +128,7 @@ describe("CI workflow policy", () => {
     expect(qualityJob).toContain("node-version: 22.23.1");
     expect(qualityJob).toContain("pnpm run verify");
     expect(qualityJob).toContain("primary-verify-reports");
+    expect(qualityJob).not.toContain("coverage/**");
   });
 
   it("keeps docs, coverage, contract, protocol, package, audit, and slow gates distinct", () => {

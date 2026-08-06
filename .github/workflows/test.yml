@@ -64,7 +64,6 @@ jobs:
           path: |
             reports/junit/*.xml
             reports/vitest/*.json
-            coverage/**
           if-no-files-found: warn
           retention-days: 7
 

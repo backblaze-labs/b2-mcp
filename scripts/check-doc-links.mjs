@@ -11,7 +11,8 @@ const markdownLinkPattern = /!?\[[^\]\n]+\]\(([^)\n]+)\)/g;
 const referenceDefinitionPattern = /^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*(\S+)/gm;
 
 function isInsideRoot(candidate, rootDir) {
-  return candidate === rootDir || candidate.startsWith(`${rootDir}${path.sep}`);
+  const relative = path.relative(rootDir, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function listMarkdownFiles(dir, { rootRealpath, visited }) {
@@ -111,6 +112,7 @@ function linkPath(target) {
 
 export function docLinkFindings({ rootDir = root } = {}) {
   const findings = [];
+  const rootPath = path.resolve(rootDir);
   const rootRealpath = realpathSync(rootDir);
   for (const file of listMarkdownFiles(rootDir, { rootRealpath, visited: new Set() })) {
     const text = stripMarkdownCode(readFileSync(file, "utf8"));
@@ -125,10 +127,10 @@ export function docLinkFindings({ rootDir = root } = {}) {
       if (!targetPath) continue;
 
       const resolved = path.resolve(
-        targetPath.startsWith("/") ? rootDir : path.dirname(file),
+        targetPath.startsWith("/") ? rootPath : path.dirname(file),
         targetPath.startsWith("/") ? targetPath.slice(1) : targetPath,
       );
-      if (!resolved.startsWith(`${rootDir}${path.sep}`) && resolved !== rootDir) {
+      if (!isInsideRoot(resolved, rootPath)) {
         findings.push(`${path.relative(rootDir, file)} links outside the repository: ${target}`);
         continue;
       }
