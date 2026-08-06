@@ -12,15 +12,35 @@ const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey } = nodeRequire(
   yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
 };
 
-const pnpmSetupAction = "pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa";
+const pnpmSetupAction = "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86";
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   packageManager?: string;
+};
+const branchProtection = JSON.parse(
+  readFileSync(join(root, ".github/branch-protection-main.json"), "utf8"),
+) as {
+  required_status_checks?: { strict?: boolean; contexts?: string[] };
+  required_pull_request_reviews?: {
+    dismiss_stale_reviews?: boolean;
+    required_approving_review_count?: number;
+  };
+  allow_force_pushes?: boolean;
 };
 const workflowPaths = [
   ".github/workflows/test.yml",
   ".github/workflows/contract.yml",
   ".github/workflows/smoke.yml",
   ".github/workflows/publish.yml",
+];
+const requiredJobNames = [
+  "format/lint/typecheck",
+  "docs/spelling/links",
+  "unit/coverage",
+  "MCP contract",
+  "modern and legacy protocol/transport",
+  "package install smoke",
+  "production dependency audit",
+  "CodeQL/workflow security",
 ];
 
 describe("CI workflow policy", () => {
@@ -33,57 +53,108 @@ describe("CI workflow policy", () => {
     return job;
   }
 
-  it("defaults workflow permissions to read-only contents", () => {
+  it("defaults workflow permissions to read-only contents and cancels superseded PRs", () => {
     const permissions = yamlMappingForKey(ci, "permissions");
     expect(permissions).toMatchObject({ contents: "read" });
     expect(permissions).not.toHaveProperty("actions");
+    expect(ci).toContain(
+      "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
+    );
+    expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 
-  it("gates ci-green on supported runtime and platform jobs", () => {
-    const markGreen = workflowJob("mark-green");
-    const productionJob = workflowJob("deterministic-linux-production");
-    const currentJob = workflowJob("deterministic-linux-current");
-    const listenerDiagnosticsJob = workflowJob("listener-diagnostics");
-    const packageBudgetJob = workflowJob("package-budget");
-    const packageJob = workflowJob("package");
+  it("exposes stable required check names", () => {
+    for (const name of requiredJobNames) {
+      expect(ci).toContain(`name: ${name}`);
+    }
+  });
 
+  it("documents branch protection with the exact required check names", () => {
+    expect(branchProtection.required_status_checks?.strict).toBe(true);
+    expect(branchProtection.required_status_checks?.contexts).toEqual(requiredJobNames);
+    expect(
+      branchProtection.required_pull_request_reviews?.required_approving_review_count,
+    ).toBeGreaterThanOrEqual(1);
+    expect(branchProtection.required_pull_request_reviews?.dismiss_stale_reviews).toBe(true);
+    expect(branchProtection.allow_force_pushes).toBe(false);
+  });
+
+  it("gates the owned ci-green marker on all required Phase 1 evidence jobs", () => {
+    const markGreen = workflowJob("mark-green");
     for (const required of [
-      "runtime-policy",
-      "runtime-engine-floor",
+      "format-lint-typecheck",
+      "docs-spelling-links",
+      "unit-coverage",
+      "mcp-contract",
+      "protocol-transport",
+      "package-install-smoke",
+      "production-dependency-audit",
       "package-budget",
-      "deterministic-linux-production",
-      "deterministic-linux-current",
-      "listener-diagnostics",
-      "cross-platform-minimum",
-      "production-audit",
       "supply-chain-audit",
-      "workflow-security",
+      "codeql-workflow-security",
+      "slow-lifecycle",
+      "cross-platform-minimum",
     ]) {
       expect(markGreen).toContain(required);
     }
-    expect(markGreen).not.toMatch(/^\s*package,?\s*$/m);
-    expect(packageBudgetJob).toContain("pnpm run check:package-budget");
-    expect(packageBudgetJob).toContain("Upload package budget reports");
-    expect(productionJob).toContain("pnpm run build");
-    expect(productionJob).toContain("name: Enforce global coverage floors");
-    expect(productionJob).toContain("pnpm run test:coverage");
-    expect(productionJob).toContain("name: Publish coverage summary");
-    expect(productionJob).toContain("GITHUB_STEP_SUMMARY");
-    expect(productionJob).toContain("coverage/**");
-    expect(productionJob).toContain("pnpm run test:slow");
-    expect(productionJob).toContain("pnpm run smoke:package");
-    expect(productionJob).not.toContain("test:package");
-    expect(currentJob).toContain("pnpm run test:coverage");
-    expect(currentJob).toContain("name: Enforce global coverage floors");
-    expect(currentJob).toContain("name: Publish coverage summary");
-    expect(currentJob).toContain("GITHUB_STEP_SUMMARY");
-    expect(currentJob).toContain("coverage/**");
-    expect(currentJob).toContain("pnpm run test:slow");
-    expect(currentJob).not.toContain("test:package");
-    expect(listenerDiagnosticsJob).toContain("pnpm run test:diagnostics");
-    expect(listenerDiagnosticsJob).toContain("Detect MaxListeners and open-handle warnings");
-    expect(packageJob).toContain("continue-on-error: true");
+    expect(markGreen).toContain("github.ref == 'refs/heads/main'");
+    expect(markGreen).toContain("github.event_name == 'push'");
+    expect(markGreen).toContain("Advanced owned ci-green marker");
+  });
+
+  it("runs the same local verify entry point in the primary quality job", () => {
+    const qualityJob = workflowJob("format-lint-typecheck");
+    expect(qualityJob).toContain("node-version: 22.3.0");
+    expect(qualityJob).toContain("pnpm run verify");
+    expect(qualityJob).toContain("primary-verify-reports");
+  });
+
+  it("keeps docs, coverage, contract, protocol, package, audit, and slow gates distinct", () => {
+    const docsJob = workflowJob("docs-spelling-links");
+    const coverageJob = workflowJob("unit-coverage-matrix");
+    const coverageAggregateJob = workflowJob("unit-coverage");
+    const contractJob = workflowJob("mcp-contract");
+    const protocolJob = workflowJob("protocol-transport");
+    const packageJob = workflowJob("package-install-smoke");
+    const auditJob = workflowJob("production-dependency-audit-matrix");
+    const auditAggregateJob = workflowJob("production-dependency-audit");
+    const budgetJob = workflowJob("package-budget");
+    const slowJob = workflowJob("slow-lifecycle");
+
+    expect(docsJob).toContain("pnpm run lint:docs");
+    expect(docsJob).toContain("pnpm run spell");
+    expect(docsJob).toContain("pnpm run lint:links");
+    expect(coverageJob).toContain("node-version: [22.3.0, 24, 26]");
+    expect(coverageJob).toContain("pnpm run test:coverage");
+    expect(coverageJob).toContain("coverage/**");
+    expect(coverageJob).toContain("retention-days: 7");
+    expect(coverageAggregateJob).toContain("name: unit/coverage");
+    expect(coverageAggregateJob).toContain("needs: unit-coverage-matrix");
+    expect(contractJob).toContain("pnpm run test:contract");
+    expect(contractJob).toContain("docs/tool-profile-contract.json");
+    expect(protocolJob).toContain("pnpm run test:protocol");
+    expect(protocolJob).toContain("protocol-*.json");
     expect(packageJob).toContain("pnpm run test:package");
+    expect(packageJob).toContain("npm-pack-manifest.json");
+    expect(auditJob).toContain("node-version: [22.3.0, 24, 26]");
+    expect(auditJob).toContain("node scripts/production-security-gate.mjs");
+    expect(auditAggregateJob).toContain("name: production dependency audit");
+    expect(auditAggregateJob).toContain("needs: production-dependency-audit-matrix");
+    expect(budgetJob).toContain("pnpm run check:package-budget");
+    expect(budgetJob).toContain("reports/package-budget/");
+    expect(slowJob).toContain("timeout-minutes: 20");
+    expect(slowJob).toContain("VITEST_MAX_WORKERS: 1");
+    expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1 --minWorkers=1");
+  });
+
+  it("publishes a compact conformance summary with protocol and budget evidence", () => {
+    const summaryJob = workflowJob("conformance-summary");
+    expect(summaryJob).toContain("Modern MCP protocol | 2026-07-28");
+    expect(summaryJob).toContain(
+      "Legacy MCP fallback | 2025-era stateless initialize compatibility",
+    );
+    expect(summaryJob).toContain("Linux deterministic Node matrix | 22.3.0, 24, 26");
+    expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
   });
 
   it("does not persist checkout credentials in pull-request jobs that run repo code", () => {
@@ -105,7 +176,7 @@ describe("CI workflow policy", () => {
 
   it("sets up pinned pnpm before any workflow job uses pnpm", () => {
     expect(packageJson.packageManager).toBe(
-      "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
+      "pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183",
     );
 
     for (const relativePath of workflowPaths) {
@@ -136,11 +207,18 @@ describe("CI workflow policy", () => {
     }
   });
 
-  it("runs pinned workflow security analysis with zizmor", () => {
-    const workflowSecurity = workflowJob("workflow-security");
+  it("runs pinned CodeQL and workflow security analysis", () => {
+    const workflowSecurity = workflowJob("codeql-workflow-security");
 
+    expect(workflowSecurity).toContain("name: CodeQL/workflow security");
+    expect(workflowSecurity).toContain("security-events: write");
+    expect(workflowSecurity).toContain(
+      "github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3",
+    );
+    expect(workflowSecurity).toContain(
+      "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
+    );
     expect(workflowSecurity).toContain("persist-credentials: false");
-    expect(workflowSecurity).not.toContain("actions: read");
     expect(workflowSecurity).not.toContain("zizmor-action");
     expect(workflowSecurity).not.toContain("GH_TOKEN");
     expect(workflowSecurity).not.toContain("github.token");
@@ -154,6 +232,13 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("--min-confidence=medium");
   });
 
+  it("keeps the cross-platform fast suite on the minimum Node runtime", () => {
+    const crossPlatformJob = workflowJob("cross-platform-minimum");
+    expect(crossPlatformJob).toContain("os: [ubuntu-latest, windows-latest, macos-latest]");
+    expect(crossPlatformJob).toContain("node-version: 22.3.0");
+    expect(crossPlatformJob).toContain("pnpm run test:cross-platform");
+  });
+
   it("blocks publishing until the live contract suite passes for the publish ref", () => {
     const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
     const publishJob = workflowJobBlock(publish, "publish") ?? "";
@@ -162,7 +247,7 @@ describe("CI workflow policy", () => {
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("environment: live-b2-contract");
     expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
-    expect(liveContract).toContain("node-version: [22.23.1, 24, 26]");
+    expect(liveContract).toContain("node-version: [22.3.0, 24, 26]");
     expect(liveContract).toContain("Validate live B2 environment");
     expect(liveContract).toContain("LIVE_B2_KEY_ID");
     expect(liveContract).toContain("LIVE_B2_KEY");

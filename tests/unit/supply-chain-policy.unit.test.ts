@@ -419,12 +419,12 @@ describe("supply-chain audit policy", () => {
   }
 
   it("runs the full lockfile audit on the ci-green deploy-gating path", () => {
-    const productionJob = jobBlock("deterministic-linux-production");
-    const currentJob = jobBlock("deterministic-linux-current");
-    const productionAuditJob = jobBlock("production-audit");
+    const coverageJob = jobBlock("unit-coverage");
+    const productionAuditJob = jobBlock("production-dependency-audit-matrix");
+    const productionAuditAggregateJob = jobBlock("production-dependency-audit");
     const auditJob = jobBlock("supply-chain-audit");
     const markGreenJob = jobBlock("mark-green");
-    expect(workflow).toContain("production-audit:");
+    expect(workflow).toContain("production-dependency-audit:");
     expect(workflow).toContain("supply-chain-audit:");
     expect(workflow).toContain("pnpm run audit:supply-chain");
     expect(workflow).toContain(
@@ -446,18 +446,19 @@ describe("supply-chain audit policy", () => {
     expect(productionAuditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
     expect(productionAuditJob).toContain("B2_MCP_AUDIT_POLICY_JSON is test-only");
     expect(productionAuditJob).toContain("B2_MCP_PRODUCTION_GATE_ROOT is test-only");
+    expect(productionAuditAggregateJob).toContain("needs: production-dependency-audit-matrix");
     expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail");
     expect(auditJob).not.toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: warn");
-    expect(productionJob).not.toContain("pnpm run audit:supply-chain");
-    expect(currentJob).not.toContain("pnpm run audit:supply-chain");
+    expect(coverageJob).not.toContain("pnpm run audit:supply-chain");
     for (const required of [
-      "runtime-engine-floor",
-      "deterministic-linux-production",
-      "deterministic-linux-current",
+      "format-lint-typecheck",
+      "unit-coverage",
+      "package-install-smoke",
       "cross-platform-minimum",
-      "production-audit",
+      "production-dependency-audit",
+      "package-budget",
       "supply-chain-audit",
-      "workflow-security",
+      "codeql-workflow-security",
     ]) {
       expect(markGreenJob).toContain(required);
     }
@@ -581,11 +582,10 @@ describe("supply-chain audit policy", () => {
   });
 
   it("runs doc lint without persisted checkout credentials", () => {
-    for (const name of ["deterministic-linux-production", "deterministic-linux-current"]) {
-      const job = jobBlock(name);
-      expect(job).toContain("persist-credentials: false");
-      expect(job).toContain("pnpm run lint:docs");
-    }
+    const job = jobBlock("docs-spelling-links");
+    expect(job).toContain("persist-credentials: false");
+    expect(job).toContain("pnpm run lint:docs");
+    expect(job).toContain("pnpm run lint:links");
   });
 
   it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {
@@ -619,6 +619,23 @@ describe("supply-chain audit policy", () => {
 
     for (const action of uses) {
       expect(action.ref).toMatch(/^[a-f0-9]{40}$/);
+    }
+  });
+
+  it.each(allWorkflows)("documents every marketplace action pin used by %s", (_name, text) => {
+    const lines = text.split(/\r?\n/);
+    for (const [index, line] of lines.entries()) {
+      const match = line.match(/uses:\s*([^@\s]+)@([a-f0-9]{40})/);
+      if (!match) continue;
+      const nearbyComment = lines
+        .slice(Math.max(0, index - 3), index)
+        .reverse()
+        .find((candidate) => candidate.trim().startsWith("#"));
+      expect(nearbyComment, `${match[1]}@${match[2]} must have a release comment`).toMatch(
+        new RegExp(
+          `${match[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} .*reviewed 20\\d{2}-\\d{2}-\\d{2}`,
+        ),
+      );
     }
   });
 
@@ -1009,7 +1026,7 @@ describe("supply-chain audit policy", () => {
     expect(markGreenJob).toContain("git ls-remote origin refs/heads/main");
     expect(markGreenJob).toContain("Skipping ci-green update for stale run");
     expect(markGreenJob).toContain('git push origin "${GITHUB_SHA}:refs/heads/ci-green" --force');
-    expect(markGreenJob).toContain("Advanced ci-green to");
+    expect(markGreenJob).toContain("Advanced owned ci-green marker to");
   });
 
   it("refuses environment-injected audit fixtures outside tests", () => {

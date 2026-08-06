@@ -213,7 +213,7 @@ function assertObject(value, label) {
 
 function assertSupportedLockfileVersion(version) {
   const match = String(version ?? "").match(/^(\d+)(?:\.\d+)?$/);
-  // package.json pins pnpm@11.20.0, which emits lockfileVersion 9. A pnpm
+  // package.json pins pnpm@10.23.0, which emits lockfileVersion 9. A pnpm
   // packageManager bump that changes this format must update this parser and
   // tests in the same review.
   if (!match || Number(match[1]) !== 9) {

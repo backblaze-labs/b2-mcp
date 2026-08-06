@@ -140,7 +140,7 @@ describe("smoke script release contract", () => {
     expect(clientSmokeScript).not.toContain("@modelcontextprotocol/sdk");
     expect(clientSmokeScript).not.toContain("initialize");
     expect(testingDoc).toContain("@modelcontextprotocol/inspector@2.1.0");
-    expect(`${readme}\n${testingDoc}\n${packageJson}`).not.toMatch(/\bpnpm\s+dlx\b/);
+    expect(testingDoc).toContain("Node.js 22.19.0 or newer");
     expect(testingDoc).toMatch(/Claude[\s\S]{0,120}supplemental/);
 
     const sourceEnv = {
@@ -180,10 +180,6 @@ describe("smoke script release contract", () => {
 
   it("keeps Inspector smoke locked, sanitized, and supplemental", async () => {
     const inspectorSmoke = await loadInspectorSmokeModule();
-    const lock = readLock<{
-      packages: Record<string, { dev?: boolean; integrity?: string; version?: string }>;
-    }>();
-    const lockedInspector = lock.packages["node_modules/@modelcontextprotocol/inspector"];
     const sourceEnv = {
       PATH: "/usr/bin",
       B2_APPLICATION_KEY: "real-b2-secret",
@@ -192,26 +188,24 @@ describe("smoke script release contract", () => {
       NPM_TOKEN: "real-npm-token",
     };
 
-    expect(parsedPackageJson.devDependencies["@modelcontextprotocol/inspector"]).toBe("2.1.0");
+    expect(parsedPackageJson.devDependencies).not.toHaveProperty("@modelcontextprotocol/inspector");
     expect(parsedPackageJson.scripts["smoke:inspector"]).toBe(
       "node scripts/mcp-inspector-smoke.mjs",
     );
     expect(parsedPackageJson.scripts.verify).not.toContain("smoke:inspector");
-    expect(lockedInspector?.version).toBe("2.1.0");
-    expect(lockedInspector?.dev).toBe(true);
-    expect(lockedInspector?.integrity).toMatch(/^sha512-/);
-    expect(pnpmWorkspace).toContain("'@modelcontextprotocol/inspector': false");
-    expect(pnpmWorkspace).toContain("@modelcontextprotocol/inspector@2.1.0");
+    const lock = readLock<{ packages: Record<string, unknown> }>();
+    expect(lock.packages["node_modules/@modelcontextprotocol/inspector"]).toBeUndefined();
+    expect(pnpmWorkspace).not.toContain("@modelcontextprotocol/inspector");
     expect(inspectorSmoke.INSPECTOR_PACKAGE).toBe("@modelcontextprotocol/inspector");
     expect(inspectorSmoke.INSPECTOR_VERSION).toBe("2.1.0");
     expect(inspectorSmoke.pnpmExecArgs()).toEqual([
-      "exec",
-      "mcp-inspector",
+      "dlx",
+      "@modelcontextprotocol/inspector@2.1.0",
       ...inspectorSmoke.defaultInspectorCliArgs(),
     ]);
     expect(inspectorSmoke.pnpmExecArgs(["--cli", "--help"])).toEqual([
-      "exec",
-      "mcp-inspector",
+      "dlx",
+      "@modelcontextprotocol/inspector@2.1.0",
       "--cli",
       "--help",
     ]);
@@ -262,11 +256,9 @@ describe("smoke script release contract", () => {
     expect(env).not.toHaveProperty("AWS_SECRET_ACCESS_KEY");
     expect(env).not.toHaveProperty("GITHUB_TOKEN");
     expect(env).not.toHaveProperty("NPM_TOKEN");
-    expect(`${readme}\n${testingDoc}\n${packageJson}`).not.toContain(
-      ["pnpm", "dlx", "@modelcontextprotocol/inspector"].join(" "),
-    );
+    expect(`${readme}\n${testingDoc}`).toContain("pnpm dlx @modelcontextprotocol/inspector@2.1.0");
     expect(inspectorSmokeScript).toContain("pnpmExecArgs");
-    expect(inspectorSmokeScript).not.toContain("pnpm dlx");
+    expect(inspectorSmokeScript).toContain("dlx");
   });
 
   it("fails closed unless a profile is expected or any-profile mode is explicit", () => {

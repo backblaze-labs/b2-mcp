@@ -83,7 +83,7 @@ describe("pnpm lock adapter", () => {
       lockfileVersion?: string;
     };
 
-    expect(packageJson.packageManager).toMatch(/^pnpm@11\.20\.0\+/);
+    expect(packageJson.packageManager).toMatch(/^pnpm@10\.23\.0\+/);
     expect(lock.lockfileVersion).toBe("9.0");
   });
 

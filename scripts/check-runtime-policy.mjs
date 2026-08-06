@@ -187,40 +187,31 @@ if (
   fail(`pnpm-lock @types/node must resolve to ${policy.typesNodeVersion}`);
 }
 
-const deterministicCurrentMatrix = policy.deterministicLinuxMatrix.filter(
-  (version) => version !== policy.minimumEvidenceNode,
-);
 requireWorkflowNodeVersionInJob(
   ".github/workflows/test.yml",
-  "runtime-engine-floor",
-  policy.runtimeInstallNode,
-  "runtime dependency floor",
-);
-requireWorkflowNodeVersionInJob(
-  ".github/workflows/test.yml",
-  "runtime-engine-floor",
+  "format-lint-typecheck",
   policy.minimumEvidenceNode,
-  "runtime package build toolchain",
+  "primary quality gate",
 );
-requireContains(
+requireWorkflowNodeVersionInJob(
   ".github/workflows/test.yml",
-  "node scripts/packed-consumer-smoke.mjs",
-  "packed runtime-floor consumer smoke",
+  "package-install-smoke",
+  policy.minimumEvidenceNode,
+  "package install smoke",
+);
+requireContains(".github/workflows/test.yml", "pnpm run verify", "local verification entry point");
+requireWorkflowMatrixInJob(
+  ".github/workflows/test.yml",
+  "unit-coverage-matrix",
+  "node-version",
+  policy.deterministicLinuxMatrix,
 );
 requireWorkflowMatrixInJob(
   ".github/workflows/test.yml",
-  "deterministic-linux-production",
+  "production-dependency-audit-matrix",
   "node-version",
-  [policy.minimumEvidenceNode],
+  policy.deterministicLinuxMatrix,
 );
-if (deterministicCurrentMatrix.length > 0) {
-  requireWorkflowMatrixInJob(
-    ".github/workflows/test.yml",
-    "deterministic-linux-current",
-    "node-version",
-    deterministicCurrentMatrix,
-  );
-}
 requireWorkflowMatrixInJob(".github/workflows/test.yml", "cross-platform-minimum", "os", [
   "ubuntu-latest",
   "windows-latest",

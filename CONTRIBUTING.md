@@ -15,7 +15,7 @@ runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 ```bash
 corepack enable pnpm
-corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+corepack prepare 'pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183' --activate
 pnpm install --frozen-lockfile
 pnpm run build        # clean + tsc → dist/
 pnpm test             # typecheck, then fast unit suite

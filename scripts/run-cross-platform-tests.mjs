@@ -10,7 +10,10 @@ const testFiles = [
   "tests/unit/fs-guard.unit.test.ts",
   "tests/unit/http-server.unit.test.ts",
   "tests/unit/http-transport.unit.test.ts",
+  "tests/contract/tools-schema.contract.test.ts",
   "tests/protocol/stdio.modern-protocol.test.ts",
+  "tests/protocol/stdio.transport.modern-protocol.test.ts",
+  "tests/protocol/stdio.transport.legacy-protocol.test.ts",
 ];
 const tests = testFiles.map((name) => path.join(root, name));
 

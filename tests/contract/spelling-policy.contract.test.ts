@@ -73,18 +73,16 @@ describe("spelling policy", () => {
     expect(Number(filesChecked?.[1])).toBeGreaterThan(0);
   });
 
-  it("gates the deterministic CI jobs on spelling", () => {
-    for (const jobName of ["deterministic-linux-production", "deterministic-linux-current"]) {
-      const job = workflowJob(jobName);
-      const lintStep = job.indexOf("pnpm run lint");
-      const spellStep = job.indexOf("pnpm run spell");
-      const buildStep = job.indexOf("pnpm run build");
+  it("gates the dedicated docs CI job on spelling", () => {
+    const job = workflowJob("docs-spelling-links");
+    const docsLintStep = job.indexOf("pnpm run lint:docs");
+    const spellStep = job.indexOf("pnpm run spell");
+    const linkStep = job.indexOf("pnpm run lint:links");
 
-      expect(lintStep).toBeGreaterThan(-1);
-      expect(spellStep).toBeGreaterThan(-1);
-      expect(buildStep).toBeGreaterThan(-1);
-      expect(spellStep).toBeGreaterThan(lintStep);
-      expect(spellStep).toBeLessThan(buildStep);
-    }
+    expect(docsLintStep).toBeGreaterThan(-1);
+    expect(spellStep).toBeGreaterThan(-1);
+    expect(linkStep).toBeGreaterThan(-1);
+    expect(spellStep).toBeGreaterThan(docsLintStep);
+    expect(linkStep).toBeGreaterThan(spellStep);
   });
 });
