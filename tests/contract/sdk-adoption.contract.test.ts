@@ -11,7 +11,7 @@ import { join } from "path";
 import { spawnSync } from "child_process";
 import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
-import { readJson, root as ROOT } from "./support";
+import { readJson, readLock, root as ROOT } from "./support";
 
 const SDK_VERSION = "0.2.0";
 const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz";
@@ -103,12 +103,12 @@ describe("SDK adoption contract", () => {
       dependencies: Record<string, string>;
       engines: { node: string };
     }>("package.json");
-    const lock = readJson<{
+    const lock = readLock<{
       packages: Record<
         string,
         { version?: string; resolved?: string; integrity?: string; engines?: { node?: string } }
       >;
-    }>("package-lock.json");
+    }>();
     const sdk = lock.packages["node_modules/@backblaze-labs/b2-sdk"];
 
     expect(pkg.dependencies["@backblaze-labs/b2-sdk"]).toBe(SDK_VERSION);
@@ -245,7 +245,7 @@ describe("SDK adoption contract", () => {
 
   it("keeps unsupported S3 POST presigning out of runtime dependencies", () => {
     const pkg = readJson<{ dependencies: Record<string, string> }>("package.json");
-    const lock = readJson<{ packages: Record<string, unknown> }>("package-lock.json");
+    const lock = readLock<{ packages: Record<string, unknown> }>();
 
     expect(pkg.dependencies).not.toHaveProperty("@aws-sdk/s3-presigned-post");
     expect(lock.packages["node_modules/@aws-sdk/s3-presigned-post"]).toBeUndefined();

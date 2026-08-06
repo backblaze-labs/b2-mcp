@@ -130,7 +130,9 @@ const localBiomeShim = join(
 const biomeEntrypoint = join(root, "node_modules", "@biomejs", "biome", "bin", "biome");
 
 if (!existsSync(localBiomeShim) || !existsSync(biomeEntrypoint)) {
-  console.error("Local Biome is not installed. Run npm ci before npm run lint or format.");
+  console.error(
+    "Local Biome is not installed. Run pnpm install --frozen-lockfile before pnpm run lint or format.",
+  );
   process.exit(1);
 }
 

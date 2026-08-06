@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import workflowYaml from "./lib/workflow-yaml.cjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
+const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const errors = [];
 const { valuesEqual, workflowJobBlock: parseWorkflowJobBlock, yamlValuesForKey } = workflowYaml;
 
@@ -146,14 +149,10 @@ function requireNoLegacyRuntimeJobs(policy) {
 
 const policy = readJson("runtime-policy.json");
 const packageJson = readJson("package.json");
-const lock = readJson("package-lock.json");
+const lock = readPackageManagerLock(root);
 
 requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineFloor);
-requireEqual(
-  "package-lock root engines.node",
-  lock.packages?.[""]?.engines?.node,
-  policy.engineFloor,
-);
+requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineFloor);
 requireEqual(
   "Backblaze SDK engine floor",
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
@@ -185,7 +184,7 @@ if (String(packageJson.devDependencies?.["@types/node"] ?? "") !== policy.typesN
 if (
   String(lock.packages?.["node_modules/@types/node"]?.version ?? "") !== policy.typesNodeVersion
 ) {
-  fail(`package-lock @types/node must resolve to ${policy.typesNodeVersion}`);
+  fail(`pnpm-lock @types/node must resolve to ${policy.typesNodeVersion}`);
 }
 
 const deterministicCurrentMatrix = policy.deterministicLinuxMatrix.filter(

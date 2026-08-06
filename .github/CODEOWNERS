@@ -16,5 +16,5 @@ CHANGELOG.md @goanpeca
 # CI, package metadata, and release automation.
 .github/workflows/ @goanpeca
 package.json @goanpeca
-package-lock.json @goanpeca
+pnpm-lock.yaml @goanpeca
 package-budget.json @goanpeca @sophiecarreras

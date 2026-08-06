@@ -8,7 +8,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.3-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-5b5fc7)](https://modelcontextprotocol.io/specification/2026-07-28)
 [![Coverage floors](https://img.shields.io/badge/coverage-S%2082%20%7C%20B%2072%20%7C%20F%2086%20%7C%20L%2086-brightgreen)](docs/TESTING.md)
-[![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-7-blue)](package-budget.json)
+[![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-8-blue)](package-budget.json)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools.
 
@@ -31,8 +31,10 @@ Destructive actions are gated, durable B2 secrets never enter the model's contex
 
 ```bash
 cd b2-mcp
-npm install
-npm run build          # produces dist/ — required before first run
+corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+pnpm install
+pnpm run build          # produces dist/ — required before first run
 ```
 
 **2. Connect Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -228,20 +230,20 @@ Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitorin
 ## Development
 
 ```bash
-npm run build              # clean + compile to dist/
-npm run typecheck          # type-check src + tests (no emit)
-npm test                   # typecheck, then fast unit tests
-npm run test:contract      # deterministic MCP/package/schema contracts
-npm run test:protocol      # modern + legacy MCP protocol behavior
-npm run test:coverage      # deterministic source-covering suites + coverage summary
-npm run test:slow          # deterministic high-cost tests, isolated from unit
-npm run test:package       # packed-package installation test
-npm run verify             # complete no-credential local gate
-npm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
-npm run test:contract:live    # live B2 request-shape checks; requires B2 credentials
-npm start                  # stdio transport
-npm run start:http -- --port 3000   # MCP 2026-07-28 HTTP transport
-npx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspector
+pnpm run build              # clean + compile to dist/
+pnpm run typecheck          # type-check src + tests (no emit)
+pnpm test                   # typecheck, then fast unit tests
+pnpm run test:contract      # deterministic MCP/package/schema contracts
+pnpm run test:protocol      # modern + legacy MCP protocol behavior
+pnpm run test:coverage      # deterministic source-covering suites + coverage summary
+pnpm run test:slow          # deterministic high-cost tests, isolated from unit
+pnpm run test:package       # packed-package installation test
+pnpm run verify             # complete no-credential local gate
+pnpm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+pnpm run test:contract:live    # live B2 request-shape checks; requires B2 credentials
+pnpm start                  # stdio transport
+pnpm run start:http --port 3000      # MCP 2026-07-28 HTTP transport
+pnpm dlx @modelcontextprotocol/inspector node ./dist/index.js   # interactive inspector
 ```
 
 ## Documentation

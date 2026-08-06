@@ -17,22 +17,22 @@ function isTransientNpmFailure(result, extraError = null) {
   return transientNpmFailurePattern.test(output);
 }
 
-function runNpmCommandWithRetries(args, options = {}) {
+function runCommandWithRetries(command, args, options = {}) {
   const attempts = options.attempts ?? 1;
   if (!Number.isInteger(attempts) || attempts < 1) {
     throw new Error(`attempts must be a positive integer, got ${attempts}`);
   }
 
-  const label = options.retryLabel ?? commandLine("npm", args);
+  const label = options.retryLabel ?? commandLine(command, args);
   const delayMs = options.retryDelayMs ?? 1_000;
   const shouldRetry = options.shouldRetry ?? ((result) => isTransientNpmFailure(result));
   const retryMessage =
     options.retryMessage ??
     (({ attempt, attempts: totalAttempts }) =>
-      `npm: retrying ${label} after transient registry failure (${attempt}/${totalAttempts})`);
+      `${command}: retrying ${label} after transient registry failure (${attempt}/${totalAttempts})`);
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = spawnSync("npm", args, options.spawnOptions ?? {});
+    const result = spawnSync(command, args, options.spawnOptions ?? {});
     if (attempt < attempts && shouldRetry(result, attempt)) {
       console.warn(retryMessage({ label, attempt, attempts, result }));
       sleep(delayMs * attempt);
@@ -44,9 +44,14 @@ function runNpmCommandWithRetries(args, options = {}) {
   throw new Error(`${label} failed without a result`);
 }
 
+function runNpmCommandWithRetries(args, options = {}) {
+  return runCommandWithRetries("npm", args, options);
+}
+
 module.exports = {
   commandLine,
   isTransientNpmFailure,
+  runCommandWithRetries,
   runNpmCommandWithRetries,
   sleep,
 };

@@ -15,10 +15,13 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
-      - run: npm run check:runtime-policy
+      - run: pnpm run check:runtime-policy
 
   runtime-engine-floor:
     name: packed runtime consumer / Node 22.3.0
@@ -27,15 +30,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
-          cache: npm
-      - run: npm ci --engine-strict
-      - run: npm run build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.3.0
+          package-manager-cache: false
       - name: Run Node 22.3.0 runtime compatibility smoke
         run: node scripts/packed-consumer-smoke.mjs
 
@@ -46,13 +53,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
-          cache: npm
-      - run: npm ci --engine-strict
-      - run: npm run build
-      - run: npm run check:package-budget
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run check:package-budget
       - name: Upload package budget reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -74,23 +84,26 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
-      - run: npm ci --engine-strict
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm run spell
-      - run: npm run lint:docs
-      - run: npm run build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+      - run: pnpm run lint
+      - run: pnpm run spell
+      - run: pnpm run lint:docs
+      - run: pnpm run build
       - id: typecheck
         continue-on-error: true
-        run: npm run typecheck
+        run: pnpm run typecheck
       - id: coverage
         name: Enforce global coverage floors
         continue-on-error: true
-        run: npm run test:coverage
+        run: pnpm run test:coverage
       - name: Publish coverage summary
         if: always()
         run: |
@@ -112,10 +125,10 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - id: slow
         continue-on-error: true
-        run: npm run test:slow
+        run: pnpm run test:slow
       - id: package-smoke
         continue-on-error: true
-        run: npm run smoke:package
+        run: pnpm run smoke:package
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -148,23 +161,26 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node-version }}
-          cache: npm
-      - run: npm ci --engine-strict
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm run spell
-      - run: npm run lint:docs
-      - run: npm run build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+      - run: pnpm run lint
+      - run: pnpm run spell
+      - run: pnpm run lint:docs
+      - run: pnpm run build
       - id: typecheck
         continue-on-error: true
-        run: npm run typecheck
+        run: pnpm run typecheck
       - id: coverage
         name: Enforce global coverage floors
         continue-on-error: true
-        run: npm run test:coverage
+        run: pnpm run test:coverage
       - name: Publish coverage summary
         if: always()
         run: |
@@ -186,10 +202,10 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - id: slow
         continue-on-error: true
-        run: npm run test:slow
+        run: pnpm run test:slow
       - id: package-smoke
         continue-on-error: true
-        run: npm run smoke:package
+        run: pnpm run smoke:package
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -220,25 +236,31 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
-          cache: npm
-      - run: npm ci --engine-strict
-      - run: npm run build
-      - run: npm run test:cross-platform
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run test:cross-platform
 
   package:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
-          cache: npm
-      - run: npm ci --engine-strict
-      - run: npm run test:package
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:package
       - name: Upload package test reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -270,11 +292,14 @@ jobs:
             fi
             sleep "$attempt"
           done
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.23.1
-          cache: npm
-      - run: npm ci --engine-strict
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Reject injected audit fixtures
         run: |
           set -euo pipefail
@@ -282,8 +307,8 @@ jobs:
             echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
             exit 1
           fi
-      - run: npm run audit:supply-chain:denylist -- --ref HEAD --ref origin/main --packlist
-      - run: npm run audit:supply-chain
+      - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist
+      - run: pnpm run audit:supply-chain
         env:
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
 

@@ -5,18 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-npm run build          # compile TypeScript → dist/ (src only)
-npm run typecheck      # type-check src + ALL tests, no emit (tsconfig.typecheck.json)
-npm test               # runs `typecheck` first, then unit tests — no credentials needed
-npm run test:contract  # deterministic MCP/schema/workflow contracts
-npm run test:protocol  # deterministic modern + legacy MCP protocol behavior
-npm run test:integration:live  # live tests — requires real B2 credentials in env
-npm run start          # stdio transport (local Claude Desktop use)
-npm run start:http     # Streamable HTTP transport — add --port 3000
+pnpm run build          # compile TypeScript -> dist/ (src only)
+pnpm run typecheck      # type-check src + ALL tests, no emit (tsconfig.typecheck.json)
+pnpm test               # runs `typecheck` first, then unit tests, no credentials needed
+pnpm run test:contract  # deterministic MCP/schema/workflow contracts
+pnpm run test:protocol  # deterministic modern + legacy MCP protocol behavior
+pnpm run test:integration:live  # live tests, requires real B2 credentials in env
+pnpm run start          # stdio transport (local Claude Desktop use)
+pnpm run start:http     # Streamable HTTP transport, add --port 3000
 ```
 
-> `npm run build` uses `tsconfig.json`, which **excludes `tests/`** — so it does
-> not catch compile errors in test files. `npm run typecheck` (wired into `npm test`)
+> `pnpm run build` uses `tsconfig.json`, which **excludes `tests/`** — so it does
+> not catch compile errors in test files. `pnpm run typecheck` (wired into `pnpm test`)
 > compiles `src` **and** `tests` via `tsconfig.typecheck.json`, so live-test
 > compile errors are caught with no credentials. This closed a real gap where a
 > broken live-test reference only surfaced on a credentialed run.
@@ -24,25 +24,25 @@ npm run start:http     # Streamable HTTP transport — add --port 3000
 Run a single unit test file:
 
 ```bash
-npx vitest run --config vitest.config.mts --project=unit tests/unit/auth.unit.test.ts
+pnpm exec vitest run --config vitest.config.mts --project=unit tests/unit/auth.unit.test.ts
 ```
 
 Run a single test by name:
 
 ```bash
-npx vitest run --config vitest.config.mts --project=unit --testNamePattern="should cache the token"
+pnpm exec vitest run --config vitest.config.mts --project=unit --testNamePattern="should cache the token"
 ```
 
 Integration tests require env vars. A single non-master application key works for B2 native, S3, **and** key management (`b2_create_key`/`list_keys`/`delete_key` only need `writeKeys`/`listKeys`/`deleteKeys`). A master key is only needed to exercise the Partner API tests — set `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` for those (the master key is used only by those tools; the application key drives everything else):
 
 ```bash
 # Most users — one (non-master) application key covers native + S3 + key mgmt:
-B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy npm run test:integration:live
+B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy pnpm run test:integration:live
 
 # Add a master key ONLY for Partner API flows:
 B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
 B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
-npm run test:integration:live
+pnpm run test:integration:live
 ```
 
 ## Architecture
@@ -114,7 +114,7 @@ To run the Partner Groups test, supply a **master** key via `B2_MASTER_KEY_*` (P
 ```bash
 B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
 B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
-B2_PARTNER_LIVE=1 npm run test:integration:live
+B2_PARTNER_LIVE=1 pnpm run test:integration:live
 ```
 
 ## HTTP transport: per-request credentials & hardening

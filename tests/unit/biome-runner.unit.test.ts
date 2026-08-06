@@ -95,7 +95,7 @@ describe("Biome runner", () => {
         throw err;
       }
 
-      const result = spawnSync("npm", ["run", "format:check"], {
+      const result = spawnSync("pnpm", ["run", "format:check"], {
         cwd: root,
         encoding: "utf8",
         env: cleanEnv(),

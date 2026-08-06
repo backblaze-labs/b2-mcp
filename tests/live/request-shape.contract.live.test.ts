@@ -12,9 +12,9 @@
  * future shape regression fails here instead of in production.
  *
  * Run with:
- *   npm run test:contract:live
+ *   pnpm run test:contract:live
  *
- * The npm script fails fast when B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+ * The pnpm script fails fast when B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
  * are absent. Direct Vitest selection skips this file's cases when credentials
  * are absent so a local editor cannot accidentally call B2.
  */

@@ -1,5 +1,5 @@
 import { join } from "path";
-import { listFiles, readJson, root } from "./support";
+import { listFiles, readJson, readLock, root } from "./support";
 
 describe("MCP SDK and protocol contract", () => {
   it("uses the reviewed SDK v2 packages without vulnerable Node adapter dependencies", () => {
@@ -7,7 +7,7 @@ describe("MCP SDK and protocol contract", () => {
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
     }>("package.json");
-    const lock = readJson<{ packages: Record<string, { version?: string }> }>("package-lock.json");
+    const lock = readLock<{ packages: Record<string, { version?: string }> }>();
     const serverVersion = pkg.dependencies["@modelcontextprotocol/server"];
     const clientVersion = pkg.devDependencies["@modelcontextprotocol/client"];
 

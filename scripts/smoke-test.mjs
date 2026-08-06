@@ -153,7 +153,7 @@ async function loadContractHelpers() {
     return helpers;
   } catch (err) {
     console.error(
-      `Unable to load compiled tool-contract helpers from ${helperPath}. Run npm run build before npm run smoke. ${err.message}`,
+      `Unable to load compiled tool-contract helpers from ${helperPath}. Run pnpm run build before pnpm run smoke. ${err.message}`,
     );
     process.exit(2);
   }

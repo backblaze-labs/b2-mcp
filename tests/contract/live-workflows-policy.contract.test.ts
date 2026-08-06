@@ -133,8 +133,8 @@ describe("live secret workflow policy", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = text.slice(text.indexOf("  contract:"));
 
-    expect(contractJob).toContain("npm run test:contract:live");
-    expect(contractJob).not.toContain("npm run test:contract\n");
+    expect(contractJob).toContain("pnpm run test:contract:live");
+    expect(contractJob).not.toContain("pnpm run test:contract\n");
     expect(contractJob).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
   });

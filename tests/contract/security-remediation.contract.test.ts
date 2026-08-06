@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { root } from "./support";
+import { root, readLock } from "./support";
 
 type PackageLock = {
   packages: Record<string, { version?: string; peerDependencies?: Record<string, string> }>;
@@ -34,7 +34,7 @@ describe("security dependency policy", () => {
     devDependencies: Record<string, string>;
     overrides?: Record<string, string>;
   };
-  const lock = JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")) as PackageLock;
+  const lock = readLock<PackageLock>();
 
   const resolvedVersion = (path: string): string => {
     const version = lock.packages[path]?.version;

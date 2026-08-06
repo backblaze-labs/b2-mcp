@@ -14,7 +14,7 @@ Phase 1 migration and for the public MCP tool contract freeze.
 ## Binding Decision
 
 - Runtime B2 integration must consume a stable npm release of
-  `@backblaze-labs/b2-sdk`, pinned at one reviewed version in `package-lock.json`.
+  `@backblaze-labs/b2-sdk`, pinned at one reviewed version in `pnpm-lock.yaml`.
 - The reviewed version for this record is `0.2.0`. Release builds may consume
   npm artifacts only, not unpublished Git branches, local SDK checkouts, SDK
   private files, or package-internal `dist/internal/*` modules.
@@ -42,7 +42,7 @@ Phase 1 migration and for the public MCP tool contract freeze.
   code imports it. This freezes npm provenance, engine-floor, and package-review
   policy before migration code starts handling durable B2 credentials.
 - Dependabot or Renovate SDK version bumps require the SDK parity matrix to be
-  reviewed, `npm run test:contract` to pass, and the unit drift test for this
+  reviewed, `pnpm run test:contract` to pass, and the unit drift test for this
   document to pass.
 - SDK dependency bumps must not be auto-merged; the `b2-sdk` dependency group
   requires human parity, provenance, and engine-floor review.

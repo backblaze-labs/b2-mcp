@@ -6,6 +6,10 @@ function stripInlineComment(value) {
   return value.replace(/\s+#.*$/, "").trim();
 }
 
+// Workflow policy tests need only small GitHub Actions snippets and deliberately
+// strip inline comments. pnpm-lock.cjs has a separate fail-closed parser for the
+// stricter pnpm-lock.yaml trust boundary, so these helpers are not
+// interchangeable YAML primitives.
 function unquoteYamlScalar(value) {
   const trimmed = stripInlineComment(value);
   if (
