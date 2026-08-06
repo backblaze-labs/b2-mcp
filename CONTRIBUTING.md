@@ -74,13 +74,26 @@ tools must respect the existing guardrails:
 - **Never log credentials, tokens, presigned URLs, or signing secrets**, and
   redact any secret a B2 response echoes back before returning it to the model.
 
-## Dependencies and `pnpm audit`
+## Dependencies and production audit
 
 Production dependencies ship in `dist/`, and development dependencies run in
 CI, so review the full lockfile with `pnpm run audit:supply-chain` before
 release. `audit-policy.json` holds narrow, expiring exceptions for known
-upstream advisories; the current policy has no exceptions. Do not add untracked
-high or critical production or development-toolchain findings.
+upstream advisories; the current policy has no exceptions. CI also generates an
+ephemeral production-only npm audit root from `dependencies` and runs
+`npm audit --omit=dev --audit-level=moderate`, which currently reports no
+production vulnerabilities. Do not add untracked moderate, high, or critical
+production findings, and do not add untracked high or critical
+development-toolchain findings.
+
+To check the production npm audit gate locally:
+
+```bash
+node scripts/prepare-production-npm-audit.mjs .audit/npm-production
+cd .audit/npm-production
+npm install --package-lock-only --omit=dev --ignore-scripts
+npm audit --omit=dev --audit-level=moderate
+```
 
 Runtime dependency ownership and package footprint are gated by
 `package-budget.json`:
@@ -108,6 +121,12 @@ run the package-budget check, and call out the metric delta in the PR. Do not
 add compatibility packages for Node.js 18/20, browsers, Bun, Deno, HTTP, stream,
 abort, retry, or schema wrapping when Node 22+ built-ins, the MCP server
 package, or public B2 SDK exports cover the need.
+
+`@backblaze-labs/b2-sdk` bumps require the complete SDK/MCP no-credential
+contract before review: `pnpm run test:contract`, `pnpm run test:protocol`,
+`pnpm run test:package`, `pnpm run check:package-budget`, and
+`pnpm run audit:supply-chain`. The live contract suite must pass before release
+accepts the SDK upgrade.
 
 `@types/node` tracks the Node 22.3.0 runtime floor so TypeScript does not allow
 newer Node standard-library APIs that would fail for minimum-supported

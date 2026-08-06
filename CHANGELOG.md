@@ -91,6 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   publishing to a protected prebuilt-tarball workflow, and documented the
   branch/artifact/tarball scan plus host and credential response runbook for
   issue #89.
+- Added the production npm audit gate, release SBOM artifact generation, pinned
+  zizmor workflow scanning, and cooled-down Dependabot grouping for issue #62.
 - Hardened the denylist scanner internals with importable schema, lockfile, and
   scanner modules; tarballs with path traversal or link members are rejected
   before extraction, and release tags may publish after later `ci-green` moves

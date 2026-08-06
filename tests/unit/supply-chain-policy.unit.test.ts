@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
@@ -19,8 +19,13 @@ const semver = nodeRequire("semver") as {
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const workflowDirectory = join(root, ".github/workflows");
+  const allWorkflows = readdirSync(workflowDirectory)
+    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+    .map((name) => [name, readFileSync(join(workflowDirectory, name), "utf8")] as const);
   const npmrc = readFileSync(join(root, ".npmrc"), "utf8");
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
     scripts: Record<string, string>;
   };
@@ -252,6 +257,12 @@ describe("supply-chain audit policy", () => {
     expect(workflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
+    expect(auditJob).toContain(
+      "node scripts/prepare-production-npm-audit.mjs .audit/npm-production",
+    );
+    expect(auditJob).toContain("working-directory: .audit/npm-production");
+    expect(auditJob).toContain("npm install --package-lock-only --omit=dev --ignore-scripts");
+    expect(auditJob).toContain("npm audit --omit=dev --audit-level=moderate");
     expect(auditJob).toContain("fetch-depth: 0");
     expect(auditJob).toContain(
       "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
@@ -259,7 +270,6 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).toContain('sleep "$attempt"');
     expect(auditJob).not.toContain("refs/heads/*:refs/remotes/origin/*");
     expect(auditJob).not.toContain("--all-branches");
-    expect(workflow).not.toContain("npm audit --omit=dev");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
     expect(auditJob).toContain("Reject injected audit fixtures");
     expect(auditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
@@ -296,8 +306,17 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
+    expect(publishWorkflow).toContain(
+      "node scripts/prepare-production-npm-audit.mjs .audit/npm-production",
+    );
+    expect(publishWorkflow).toContain("npm audit --omit=dev --audit-level=moderate");
+    expect(publishWorkflow).toContain("npm sbom --omit=dev --sbom-format=cyclonedx");
+    expect(publishWorkflow).toContain("publish-package/*.cdx.json");
+    expect(publishWorkflow).toContain("sbom-sha256");
+    expect(publishWorkflow).toContain("EXPECTED_SBOM_SHA256");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
+    expect(publishWorkflow).toContain('sha256sum "$sbom"');
     expect(publishWorkflow).toContain("retention-days: 7");
     expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
@@ -394,10 +413,7 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).toContain("--ignore-scripts");
   });
 
-  it.each([
-    ["CI", workflow],
-    ["publish", publishWorkflow],
-  ])("pins every marketplace action used by the %s workflow", (_name, workflowText) => {
+  it.each(allWorkflows)("pins every marketplace action used by %s", (_name, workflowText) => {
     const uses = [...workflowText.matchAll(/uses:\s*([^@\s]+)@([^\s#]+)/g)].map((match) => ({
       action: match[1],
       ref: match[2],
@@ -406,6 +422,35 @@ describe("supply-chain audit policy", () => {
     expect(uses.length).toBeGreaterThan(0);
     for (const action of uses) {
       expect(action.ref).toMatch(/^[a-f0-9]{40}$/);
+    }
+  });
+
+  it("prepares an isolated npm production audit manifest", () => {
+    const target = join(root, ".audit/test-production-manifest");
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/prepare-production-npm-audit.mjs", ".audit/test-production-manifest"],
+        {
+          cwd: root,
+          encoding: "utf8",
+        },
+      );
+      const productionPackage = JSON.parse(readFileSync(join(target, "package.json"), "utf8")) as {
+        dependencies: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        private?: boolean;
+      };
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(".audit/test-production-manifest");
+      expect(productionPackage.private).toBe(true);
+      expect(productionPackage.dependencies).toEqual(packageJson.dependencies);
+      expect(productionPackage.devDependencies).toBeUndefined();
+      expect(readFileSync(join(target, ".npmrc"), "utf8")).toContain("ignore-scripts=true");
+    } finally {
+      rmSync(target, { recursive: true, force: true });
     }
   });
 

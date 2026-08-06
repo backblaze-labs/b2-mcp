@@ -34,7 +34,9 @@ Before publishing `v0.1.0`:
    `npm run build`, `npm run typecheck`, `npm run lint`,
    `npm run format:check`, `npm test`, `npm run test:integration`,
    `npm run test:contract`, `npm run smoke:package`, and
-   `npm run audit:supply-chain`.
+   `npm run audit:supply-chain`. Also generate the ephemeral production npm
+   audit root with `scripts/prepare-production-npm-audit.mjs` and run
+   `npm audit --omit=dev --audit-level=moderate`.
 3. Review `audit-policy.json` and risk-accept only unexpired, documented,
    tightly scoped upstream advisories that have no fixed stable package.
 4. Run the supply-chain denylist branch and artifact workflow in
@@ -53,5 +55,6 @@ Before publishing `v0.1.0`:
     `.github/workflows/publish.yml` workflow. Do not publish from a developer
     workstation. The publish workflow must prove the `v*` tag is reachable from
     `ci-green`, build explicitly, enforce the runtime package budget, scan the
-    generated packlist and tarball, verify the tarball SHA-256, and publish the
-    already-scanned tarball with lifecycle scripts disabled.
+    generated packlist and tarball, generate and verify a CycloneDX production
+    SBOM artifact, verify the tarball SHA-256, and publish the already-scanned
+    tarball with lifecycle scripts disabled.

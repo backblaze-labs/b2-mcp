@@ -24,6 +24,8 @@ jobs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
       tarball-name: ${{ steps.pack.outputs.tarball_name }}
       tarball-sha256: ${{ steps.pack.outputs.tarball_sha256 }}
+      sbom-name: ${{ steps.sbom.outputs.sbom_name }}
+      sbom-sha256: ${{ steps.sbom.outputs.sbom_sha256 }}
     steps:
       # actions/checkout v6, reviewed 2026-08-05.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -70,10 +72,29 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm run check:package-budget
+      - run: node scripts/prepare-production-npm-audit.mjs .audit/npm-production
+      - name: Generate npm production audit lock
+        working-directory: .audit/npm-production
+        run: npm install --package-lock-only --omit=dev --ignore-scripts
+      - name: Run npm production audit
+        working-directory: .audit/npm-production
+        run: npm audit --omit=dev --audit-level=moderate
       - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js
       - run: pnpm run audit:supply-chain
         env:
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
+      - name: Generate release SBOM
+        id: sbom
+        working-directory: .audit/npm-production
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/publish-package"
+          npm install --omit=dev --ignore-scripts
+          npm sbom --omit=dev --sbom-format=cyclonedx \
+            > "${GITHUB_WORKSPACE}/publish-package/b2-mcp-production.cdx.json"
+          sbom_sha256="$(sha256sum "${GITHUB_WORKSPACE}/publish-package/b2-mcp-production.cdx.json" | awk '{print $1}')"
+          echo "sbom_name=b2-mcp-production.cdx.json" >> "$GITHUB_OUTPUT"
+          echo "sbom_sha256=${sbom_sha256}" >> "$GITHUB_OUTPUT"
       - name: Build and scan publish tarball
         id: pack
         run: |
@@ -95,7 +116,9 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: npm-package
-          path: publish-package/*.tgz
+          path: |
+            publish-package/*.tgz
+            publish-package/*.cdx.json
           if-no-files-found: error
           retention-days: 7
 
@@ -141,11 +164,18 @@ jobs:
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
           EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
         run: |
           set -euo pipefail
           tarball="publish-package/${EXPECTED_TARBALL_NAME}"
+          sbom="publish-package/${EXPECTED_SBOM_NAME}"
           if [[ ! -f "$tarball" ]]; then
             echo "::error::Expected publish tarball ${tarball} is missing"
+            exit 1
+          fi
+          if [[ ! -f "$sbom" ]]; then
+            echo "::error::Expected release SBOM ${sbom} is missing"
             exit 1
           fi
           actual_sha="$(sha256sum "$tarball" | awk '{print $1}')"
@@ -153,6 +183,13 @@ jobs:
             echo "::error::Publish tarball SHA-256 mismatch"
             echo "expected=${EXPECTED_TARBALL_SHA256}"
             echo "actual=${actual_sha}"
+            exit 1
+          fi
+          actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
+          if [[ "$actual_sbom_sha" != "$EXPECTED_SBOM_SHA256" ]]; then
+            echo "::error::Release SBOM SHA-256 mismatch"
+            echo "expected=${EXPECTED_SBOM_SHA256}"
+            echo "actual=${actual_sbom_sha}"
             exit 1
           fi
       - name: Publish prebuilt tarball with trusted provenance

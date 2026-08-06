@@ -140,6 +140,47 @@ describe("security dependency policy", () => {
     expect(lock.packages["node_modules/axios"]).toBeUndefined();
   });
 
+  it("keeps Dependabot updates cooled down and leaves majors separate", () => {
+    const dependabot = readFileSync(join(root, ".github/dependabot.yml"), "utf8");
+
+    function groupBlock(group: string): string {
+      const marker = `      ${group}:\n`;
+      const start = dependabot.indexOf(marker);
+      if (start === -1) throw new Error(`Missing Dependabot group ${group}`);
+      const rest = dependabot.slice(start + marker.length);
+      const endMarkers = [
+        rest.search(/^ {6}[A-Za-z0-9_-]+:\s*$/m),
+        rest.search(/^ {4}labels:\s*$/m),
+        rest.search(/^ {2}- package-ecosystem:/m),
+      ].filter((index) => index >= 0);
+      const end = endMarkers.length > 0 ? Math.min(...endMarkers) : rest.length;
+      return rest.slice(0, end);
+    }
+
+    expect(dependabot).toContain("package-ecosystem: npm");
+    expect(dependabot).toContain("package-ecosystem: github-actions");
+    expect(dependabot).toContain("semver-major-days: 7");
+    expect(dependabot).toContain("semver-minor-days: 3");
+    expect(dependabot).toContain("semver-patch-days: 3");
+    expect(dependabot).toContain("default-days: 3");
+
+    for (const group of [
+      "b2-sdk",
+      "toon-format",
+      "aws-sdk",
+      "dev-dependencies",
+      "github-actions-minor-patch",
+    ]) {
+      const block = groupBlock(group);
+      expect(block, `${group} should include update-types`).toContain("update-types:");
+      expect(block, `${group} should include minor updates`).toContain("- minor");
+      expect(block, `${group} should include patch updates`).toContain("- patch");
+      expect(block, `${group} must not group major updates`).not.toContain("- major");
+    }
+
+    expect(dependabot).not.toContain("version-update:semver-major");
+  });
+
   it("keeps TypeScript on the reviewed 6.0 patch line", () => {
     const range = pkg.devDependencies.typescript;
     const [major, minor] = versionTuple(rangeFloor(range));

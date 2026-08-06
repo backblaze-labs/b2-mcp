@@ -307,6 +307,13 @@ jobs:
             echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
             exit 1
           fi
+      - run: node scripts/prepare-production-npm-audit.mjs .audit/npm-production
+      - name: Generate npm production audit lock
+        working-directory: .audit/npm-production
+        run: npm install --package-lock-only --omit=dev --ignore-scripts
+      - name: Run npm production audit
+        working-directory: .audit/npm-production
+        run: npm audit --omit=dev --audit-level=moderate
       - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist
       - run: pnpm run audit:supply-chain
         env:

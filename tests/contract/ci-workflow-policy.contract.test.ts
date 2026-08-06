@@ -17,6 +17,7 @@ const workflowPaths = [
   ".github/workflows/contract.yml",
   ".github/workflows/smoke.yml",
   ".github/workflows/publish.yml",
+  ".github/workflows/security.yml",
 ];
 
 function workflowJobBlocks(text: string): Array<{ name: string; block: string }> {
@@ -114,5 +115,18 @@ describe("CI workflow policy", () => {
         ).toBeLessThan(setupNodeIndex);
       }
     }
+  });
+
+  it("runs pinned workflow security analysis with zizmor", () => {
+    const workflow = readFileSync(join(root, ".github/workflows/security.yml"), "utf8");
+
+    expect(workflow).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*\n\s+actions:\s*read\s*$/m);
+    expect(workflow).toContain("persist-credentials: false");
+    expect(workflow).toContain("zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054");
+    expect(workflow).toContain("advanced-security: false");
+    expect(workflow).toContain("annotations: true");
+    expect(workflow).toContain("min-severity: medium");
+    expect(workflow).toContain("min-confidence: medium");
+    expect(workflow).toContain("version: 1.29.0");
   });
 });
