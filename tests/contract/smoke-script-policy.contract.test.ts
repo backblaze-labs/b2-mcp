@@ -3,10 +3,17 @@ import { join } from "path";
 import { createRequire } from "module";
 
 const smokeScript = readFileSync(join(__dirname, "../../scripts/smoke-test.mjs"), "utf8");
+const clientSmokeScript = readFileSync(
+  join(__dirname, "../../scripts/mcp-client-smoke.mjs"),
+  "utf8",
+);
 const smokeContractScript = readFileSync(
   join(__dirname, "../../scripts/lib/smoke-contract.cjs"),
   "utf8",
 );
+const packageJson = readFileSync(join(__dirname, "../../package.json"), "utf8");
+const parsedPackageJson = JSON.parse(packageJson) as { scripts: Record<string, string> };
+const testingDoc = readFileSync(join(__dirname, "../../docs/TESTING.md"), "utf8");
 const nodeRequire = createRequire(__filename);
 const { evaluateProfileContract } = nodeRequire("../../scripts/lib/smoke-contract.cjs") as {
   evaluateProfileContract: (args: {
@@ -72,6 +79,25 @@ describe("smoke script release contract", () => {
     expect(smokeScript).toContain("B2_SMOKE_BUCKET");
     expect(smokeScript).toContain("s3_head_bucket");
     expect(smokeScript).not.toContain("s3_list_buckets");
+  });
+
+  it("keeps the supplemental SDK client smoke advisory and contract-backed", () => {
+    expect(parsedPackageJson.scripts["smoke:client"]).toBe(
+      "pnpm run build && node scripts/mcp-client-smoke.mjs",
+    );
+    expect(parsedPackageJson.scripts.verify).not.toContain("smoke:client");
+    expect(clientSmokeScript).toContain('@modelcontextprotocol/client"');
+    expect(clientSmokeScript).toContain('@modelcontextprotocol/client/stdio"');
+    expect(clientSmokeScript).toContain("StdioClientTransport");
+    expect(clientSmokeScript).toContain("B2_REGISTER_ALL_TOOLS");
+    expect(clientSmokeScript).toContain("tests/fixtures/tool-contract/full.modern.json");
+    expect(clientSmokeScript).toContain("docs/tool-profile-contract.json");
+    expect(clientSmokeScript).toContain("getProtocolEra");
+    expect(clientSmokeScript).toContain("getNegotiatedProtocolVersion");
+    expect(clientSmokeScript).not.toContain("@modelcontextprotocol/sdk");
+    expect(clientSmokeScript).not.toContain("initialize");
+    expect(testingDoc).toContain("@modelcontextprotocol/inspector@2.1.0");
+    expect(testingDoc).toContain("Claude client smoke remains supplemental");
   });
 
   it("fails closed unless a profile is expected or any-profile mode is explicit", () => {

@@ -47,6 +47,7 @@
     "verify": "pnpm run typecheck && pnpm run build && pnpm run lint && pnpm run lint:docs && pnpm run format:check && pnpm run spell && pnpm run test:coverage",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
+    "smoke:client": "pnpm run build && node scripts/mcp-client-smoke.mjs",
     "generate:tool-contract": "pnpm run build && node scripts/generate-tool-contract.mjs",
     "smoke:package": "pnpm run build && node scripts/packed-consumer-smoke.mjs",
     "check:runtime-policy": "node scripts/check-runtime-policy.mjs",
