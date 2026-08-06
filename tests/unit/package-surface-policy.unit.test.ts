@@ -1,9 +1,14 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
 import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
+const nodeRequire = createRequire(__filename);
+const { expectedPhase1SkillPaths } = nodeRequire("../../scripts/validate-pack.cjs") as {
+  expectedPhase1SkillPaths: () => string[];
+};
 
 function readJson<T>(relativePath: string): T {
   return JSON.parse(readFileSync(join(root, relativePath), "utf8")) as T;
@@ -50,12 +55,36 @@ describe("package surface policy", () => {
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
     expect(files).toContain("docs/tool-profile-contract.json");
-    expect(files).toContain("skills/backup-restore/SKILL.md");
-    expect(files).toContain("skills/incident-response/SKILL.md");
+    expect(pkg.files).toContain("skills/**/SKILL.md");
+    expect(pkg.files).not.toContain("skills/**/*");
+    const expectedSkillPaths = expectedPhase1SkillPaths().sort();
+    expect(files.filter((file) => file.startsWith("skills/")).sort()).toEqual(expectedSkillPaths);
     for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
       Object.values(profile.fixtures),
     )) {
       expect(files).toContain(fixturePath);
+    }
+  });
+
+  it("does not pack non-SKILL files from skill directories", () => {
+    const extraSkillFile = join(root, "skills", "backup-restore", ".env");
+    writeFileSync(extraSkillFile, "B2_APPLICATION_KEY=not-a-real-placeholder\n");
+
+    try {
+      const packed = spawnSync("npm", ["pack", "--json", "--ignore-scripts", "--dry-run"], {
+        cwd: root,
+        encoding: "utf8",
+        env: npmEnv(),
+      });
+      expect(packed.status).toBe(0);
+      const files = parseJsonArray(packed.stdout)[0].files.map((file) => file.path);
+
+      expect(files).not.toContain("skills/backup-restore/.env");
+      expect(files.filter((file) => file.startsWith("skills/")).sort()).toEqual(
+        expectedPhase1SkillPaths().sort(),
+      );
+    } finally {
+      rmSync(extraSkillFile, { force: true });
     }
   });
 

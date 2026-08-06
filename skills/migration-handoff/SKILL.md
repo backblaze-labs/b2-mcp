@@ -24,7 +24,10 @@ description: Move workloads into or within B2 using direct transfer paths, serve
 - `s3_get_presigned_url`
 - `s3_create_multipart_upload`
 - `s3_presign_upload_part`
+- `s3_list_multipart_uploads`
+- `s3_list_parts`
 - `s3_complete_multipart_upload`
+- `s3_abort_multipart_upload`
 - `s3_upload_part_copy`
 
 ## Byte Path
@@ -39,6 +42,7 @@ Pause for explicit user confirmation before any migration step that can overwrit
 
 - `b2_update_bucket`: use `confirm: true` only when changing public access, Object Lock, lifecycle deletion, default retention, or replication settings.
 - `s3_get_presigned_url`: when `operation` is `PutObject`, confirm the destination bucket, prefix, expiry, overwrite plan, and transfer client identity before using `confirm: true`.
+- `s3_abort_multipart_upload`: confirm the destination bucket, key, upload ID, completed parts, and cleanup intent before using `confirm: true`.
 
 Before cutover, pause and confirm the rollback plan, read-only window if any, and verification threshold.
 
@@ -52,5 +56,9 @@ Before cutover, pause and confirm the rollback plan, read-only window if any, an
    - B2-to-B2 object: prefer `s3_copy_object` or `s3_upload_part_copy` for large objects when possible.
    - External-to-B2 object: generate PutObject presigned URLs or multipart upload URLs and have the migration client upload directly.
    - Large objects: coordinate `s3_create_multipart_upload`, `s3_presign_upload_part`, client upload, and `s3_complete_multipart_upload`.
-6. Verify counts, sizes, and spot-check metadata after transfer. Keep versioning and retention requirements visible when comparing source and destination.
-7. For cutover, summarize remaining deltas, DNS or application configuration steps outside B2, rollback trigger, and final read/write switchover timing.
+6. Before starting any large-object transfer, write a durable non-secret checkpoint outside chat and outside the model context. Include destination bucket and key, intended overwrite or version behavior, `uploadId`, planned part numbers, completed part numbers, captured ETags, presigned URL expiry per part, retry count, last error class, transfer batch ID, and whether completion has run.
+7. Use bounded retries with exponential backoff for transient 408, 429, 500, 502, 503, and 504 failures. Refresh expired presigned URLs before retrying an upload part. Do not call `s3_complete_multipart_upload` until every intended part number has a recorded ETag in the checkpoint.
+8. After a client or session restart, load the checkpoint first. Verify the destination object with `s3_head_object`; if it is not complete, use `s3_list_multipart_uploads` and `s3_list_parts` to reconcile uploaded parts, refresh only expired part URLs, and resume from the first missing or failed part.
+9. If a multipart upload is stale or unsafe to resume, summarize the destination bucket/key, `uploadId`, completed parts, and overwrite intent before calling `s3_abort_multipart_upload`. Abort only after explicit user confirmation and `confirm: true` when the server requires it.
+10. Verify counts, sizes, and spot-check metadata after transfer. Keep versioning and retention requirements visible when comparing source and destination.
+11. For cutover, summarize remaining deltas, DNS or application configuration steps outside B2, rollback trigger, and final read/write switchover timing.

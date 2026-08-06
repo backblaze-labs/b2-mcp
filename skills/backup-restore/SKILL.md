@@ -21,16 +21,17 @@ description: Plan and execute B2 backup and restore workflows while keeping obje
 - `s3_get_presigned_url`
 - `s3_create_multipart_upload`
 - `s3_presign_upload_part`
+- `s3_list_multipart_uploads`
+- `s3_list_parts`
 - `s3_complete_multipart_upload`
 - `s3_abort_multipart_upload`
-- `s3_put_object`
 - `b2_unfinished_uploads`
 
 ## Byte Path
 
-Never route object bytes through the model. Never route object bytes through the MCP server. Use the MCP tools for planning, metadata, manifests, presigned URL creation, and multipart coordination only.
+Never route object bytes through the model. Never route object bytes through the MCP server. Use the MCP tools for planning, metadata, manifests, presigned URL creation, multipart coordination, and non-secret checkpoint review only.
 
-For backup data, prefer a client-to-B2 upload path with short-lived presigned URLs or multipart upload URLs. Use `s3_put_object` only for small manifests, checksums, and sidecar files that are safe to carry on the control plane.
+For every uploaded object, including manifests, checksums, and sidecar files, use a client-to-B2 upload path with short-lived presigned URLs or multipart upload URLs. Do not use inline upload tools for this workflow.
 
 For restores, generate a GetObject presigned URL and have the client download directly from B2 to the target restore location. Do not ask the model to inspect file contents unless the user explicitly supplies a small non-sensitive sample.
 
@@ -49,9 +50,13 @@ Do not delete old backups in this skill. Hand off deletion, lifecycle expiration
 2. Verify the target bucket with `b2_list_buckets` and `s3_head_bucket`. Stop if the key cannot see the bucket or lacks write capability.
 3. Inventory existing backup objects with `s3_list_objects_v2` and `s3_list_object_versions`. Use prefix filters; do not scan unrelated tenant or application data.
 4. Choose the byte path:
-   - Small manifest or checksum object: use `s3_put_object`.
+   - Small manifest, checksum, or sidecar object: use `s3_get_presigned_url` with `operation` set to `PutObject`, then have the client upload directly to B2.
    - Normal backup object: use `s3_get_presigned_url` with `operation` set to `PutObject`, then have the client upload directly to B2.
    - Large object: use `s3_create_multipart_upload`, `s3_presign_upload_part`, client-to-B2 part uploads, and `s3_complete_multipart_upload`.
-5. Record non-secret metadata: bucket, key, size, checksum, upload time, version ID when available, and restore command. Never record application keys or presigned URL values in durable notes.
-6. Validate the backup with `s3_head_object` for expected size and metadata. For a restore drill, generate a GetObject presigned URL and have the client download directly to a temporary restore path.
-7. Check for abandoned multipart uploads with `b2_unfinished_uploads`. If cleanup is needed, pause and confirm before aborting any upload.
+5. Before starting any large-object transfer, write a durable non-secret checkpoint outside chat and outside the model context. Include destination bucket and key, intended overwrite or version behavior, `uploadId`, planned part numbers, completed part numbers, captured ETags, presigned URL expiry per part, retry count, last error class, and whether completion has run.
+6. Use bounded retries with exponential backoff for transient 408, 429, 500, 502, 503, and 504 failures. Refresh expired presigned URLs before retrying an upload part. Do not call `s3_complete_multipart_upload` until every intended part number has a recorded ETag in the checkpoint.
+7. After a client or session restart, load the checkpoint first. Verify the destination object with `s3_head_object`; if it is not complete, use `s3_list_multipart_uploads` and `s3_list_parts` to reconcile uploaded parts, refresh only expired part URLs, and resume from the first missing or failed part.
+8. If the checkpoint is stale or the user wants cleanup, summarize the destination bucket/key, `uploadId`, completed parts, and overwrite intent before calling `s3_abort_multipart_upload`. Abort only after explicit user confirmation and `confirm: true` when the server requires it.
+9. Record non-secret metadata: bucket, key, size, checksum, upload time, version ID when available, checkpoint path, and restore command. Never record application keys, presigned URL values, or object bytes in durable notes.
+10. Validate the backup with `s3_head_object` for expected size and metadata. For a restore drill, generate a GetObject presigned URL and have the client download directly to a temporary restore path.
+11. Check for abandoned multipart uploads with `b2_unfinished_uploads`. If cleanup is needed, pause and confirm before aborting any upload.

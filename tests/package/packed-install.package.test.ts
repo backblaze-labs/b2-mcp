@@ -27,6 +27,9 @@ const { runNpmCommandWithRetries } = nodeRequire("../../scripts/lib/retry-utils.
     stdout?: string;
   };
 };
+const { expectedPhase1SkillPaths } = nodeRequire("../../scripts/validate-pack.cjs") as {
+  expectedPhase1SkillPaths: () => string[];
+};
 
 interface PackFile {
   path: string;
@@ -175,7 +178,7 @@ describe("packed package", () => {
           "dist/index.js",
           "dist/http-server.js",
           "README.md",
-          "skills/backup-restore/SKILL.md",
+          ...expectedPhase1SkillPaths(),
         ]),
       );
 
