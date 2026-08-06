@@ -76,7 +76,8 @@ export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null):
 }
 
 function configuredSdkClientFactoryForTests(): SdkClientFactory | null {
-  return isTestRuntime() ? sdkClientFactoryForTests : null;
+  if (!isTestRuntime()) return null;
+  return sdkClientFactoryForTests;
 }
 
 class RequestSignalTransport implements HttpTransport {

@@ -11,10 +11,10 @@
     "directProductionDependencyCount": 8,
     "totalProductionPackageCount": 47,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 228193,
-    "unpackedPackageBytes": 1123560,
-    "packedEntryCount": 177,
-    "cleanConsumerInstallFootprintBytes": 27972172
+    "packedTarballBytes": 231252,
+    "unpackedPackageBytes": 1136830,
+    "packedEntryCount": 181,
+    "cleanConsumerInstallFootprintBytes": 27996586
   },
   "limits": {
     "directProductionDependencyCount": 8,
@@ -60,7 +60,7 @@
     },
     "@modelcontextprotocol/server": {
       "purpose": "Stable MCP server v2 runtime for stdio and Streamable HTTP handling.",
-      "policy": "Use public v2 server exports only; do not add the monolithic v1 SDK or Node adapter packages.",
+      "policy": "Use public v2 server exports only; do not add the monolithic v1 SDK.",
       "version": "2.0.0",
       "resolved": "https://registry.npmjs.org/@modelcontextprotocol/server/-/server-2.0.0.tgz",
       "integrity": "sha512-YhHWdHfpFMQfd0prsEnxKeS3Qz3ytIGmsS0sth4KDjnacIT7hxk6hXHkJ9KysxlkvTM+WZAtQbbcUhdoP4Hvtw=="
@@ -106,7 +106,6 @@
     "forbiddenRuntimeDependencies": [
       "axios",
       "@aws-sdk/s3-presigned-post",
-      "@modelcontextprotocol/node",
       "@modelcontextprotocol/sdk"
     ]
   },

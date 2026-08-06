@@ -8,6 +8,7 @@
 
 import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import { invalidateAuthManagerCache, invalidateCapabilityCache } from "../../src/server";
+import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
   JSON_HEADERS,
   closeHttpServer,
@@ -18,6 +19,9 @@ import {
   saveEnv,
   setDefaultHttpTestEnv,
 } from "../support/http";
+import { closeClient, connectHttpClient } from "./support/clients";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -33,6 +37,8 @@ afterAll(() => {
 });
 
 beforeEach(async () => {
+  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(simulator.transport());
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
@@ -42,6 +48,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
   await closeHttpServer(handle);
 });
@@ -59,7 +66,71 @@ function legacyInit(protocolVersion: string): string {
   });
 }
 
+function legacyRequest(method: string, params: Record<string, unknown> = {}, id = 1): string {
+  return JSON.stringify({ jsonrpc: "2.0", id, method, params });
+}
+
+function legacyCallTool(name: string, args: Record<string, unknown> = {}, id = 1): string {
+  return legacyRequest("tools/call", { name, arguments: args }, id);
+}
+
+function parseMcpBody(body: string): any {
+  if (body.trimStart().startsWith("{")) return JSON.parse(body);
+  const data = body
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trim())
+    .join("\n");
+  return JSON.parse(data);
+}
+
 describe("HTTP legacy protocol fallback (2025 era)", () => {
+  it("serves initialize, list, and representative calls through the SDK HTTP client", async () => {
+    const { client, requests } = await connectHttpClient(port, {
+      era: "legacy",
+      headers: creds,
+      cachePartition: "legacy-tenant",
+    });
+    try {
+      expect(client.getProtocolEra()).toBe("legacy");
+      expect(client.getServerVersion()?.name).toBe("backblaze-b2");
+
+      const listed = await client.listTools(undefined, { cacheMode: "refresh" });
+      const toolNames = listed.tools.map((tool) => tool.name);
+      expect(toolNames).toContain("b2_list_buckets");
+      expect(toolNames).toContain("s3_list_objects_v2");
+
+      const bucketName = "protocol-http-legacy";
+      expect(
+        (
+          await client.callTool({
+            name: "b2_create_bucket",
+            arguments: { bucketName, bucketType: "allPrivate" },
+          })
+        ).isError,
+      ).not.toBe(true);
+      expect((await client.callTool({ name: "b2_list_buckets", arguments: {} })).isError).not.toBe(
+        true,
+      );
+      expect(
+        (
+          await client.callTool({
+            name: "s3_list_objects_v2",
+            arguments: { bucket: bucketName },
+          })
+        ).isError,
+      ).not.toBe(true);
+
+      const posts = requests.filter((record) => record.method === "POST");
+      expect(posts.length).toBeGreaterThan(0);
+      expect(requests.every((record) => record.method !== "DELETE")).toBe(true);
+      expect(posts.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
+      expect(posts.every((record) => record.headers["mcp-method"] === undefined)).toBe(true);
+    } finally {
+      await closeClient(client);
+    }
+  });
+
   it.each(["2025-03-26", "2025-06-18"])(
     "serves %s initialize through the stateless transition fallback",
     async (protocolVersion) => {
@@ -83,6 +154,40 @@ describe("HTTP legacy protocol fallback (2025 era)", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers["mcp-session-id"]).toBeUndefined();
+    expect(handle.sessions.size).toBe(0);
+  });
+
+  it("serves raw stateless legacy list and calls without session affinity", async () => {
+    const bucketName = "protocol-http-raw";
+    const init = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: legacyInit("2025-06-18"),
+    });
+    const listed = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: legacyRequest("tools/list", {}, 2),
+    });
+    const created = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: legacyCallTool("b2_create_bucket", { bucketName, bucketType: "allPrivate" }, 3),
+    });
+    const b2Call = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: legacyCallTool("b2_list_buckets", {}, 4),
+    });
+    const s3Call = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: legacyCallTool("s3_list_objects_v2", { bucket: bucketName }, 5),
+    });
+
+    for (const res of [init, listed, created, b2Call, s3Call]) {
+      expect(res.status).toBe(200);
+      expect(res.headers["mcp-session-id"]).toBeUndefined();
+      expect(parseMcpBody(res.body).error).toBeUndefined();
+    }
+    expect(parseMcpBody(listed.body).result.tools.length).toBeGreaterThan(0);
+    expect(JSON.stringify(parseMcpBody(b2Call.body).result)).toContain(bucketName);
+    expect(JSON.stringify(parseMcpBody(s3Call.body).result)).toContain("objects");
     expect(handle.sessions.size).toBe(0);
   });
 });

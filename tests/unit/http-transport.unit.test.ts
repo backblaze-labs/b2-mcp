@@ -216,6 +216,7 @@ function modernBody(method: string, params: Record<string, unknown> = {}, id = 1
 function modernHeaders(method: string, name?: string): Record<string, string> {
   return {
     ...JSON_HEADERS,
+    "mcp-protocol-version": "2026-07-28",
     "mcp-method": method,
     ...(name && { "mcp-name": name }),
   };

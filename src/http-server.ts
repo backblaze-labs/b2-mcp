@@ -208,8 +208,10 @@ const SDK_HEADER_ALLOWLIST = new Set([
   "content-type",
   "content-length",
   "last-event-id",
+  // W3C trace context propagation: baggage is caller-supplied and forwarded only to the SDK boundary.
   "traceparent",
   "tracestate",
+  "baggage",
 ]);
 
 function sdkHeaderAllowed(name: string): boolean {
@@ -365,12 +367,16 @@ export function createPreparedMcpServerFactory(
 }
 
 const MODERN_MCP_PROTOCOL_VERSION = "2026-07-28";
+// SDK v2 uses -32020 for mirrored header/body disagreement.
+const JSON_RPC_HEADER_BODY_MISMATCH = -32020;
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function parsedJsonBody(rawBody: string | undefined): { ok: true; body?: unknown } | { ok: false } {
+type ParsedJsonBody = { ok: true; body?: unknown } | { ok: false };
+
+function parsedJsonBody(rawBody: string | undefined): ParsedJsonBody {
   if (rawBody === undefined || rawBody.length === 0) return { ok: true };
   try {
     return { ok: true, body: JSON.parse(rawBody) };
@@ -379,18 +385,68 @@ function parsedJsonBody(rawBody: string | undefined): { ok: true; body?: unknown
   }
 }
 
-function isProtocolOnlyRejection(
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function requestIdFromParsedBody(body: unknown): string | number | null {
+  const id = asRecord(body)?.id;
+  return typeof id === "string" || typeof id === "number" ? id : null;
+}
+
+function jsonRpcErrorBody(
+  code: number,
+  message: string,
+  id: string | number | null,
+  data?: unknown,
+): unknown {
+  return {
+    jsonrpc: "2.0",
+    error: { code, message, ...(data !== undefined && { data }) },
+    id,
+  };
+}
+
+function requestMethodFromParsedBody(body: unknown): string | undefined {
+  const method = asRecord(body)?.method;
+  return typeof method === "string" ? method : undefined;
+}
+
+function toolNameFromParsedBody(body: unknown): string | undefined {
+  const params = asRecord(asRecord(body)?.params);
+  const name = params?.name;
+  return typeof name === "string" ? name : undefined;
+}
+
+interface ProtocolRejection {
+  status: number;
+  body: unknown;
+  code: number;
+  reason: string;
+  requestId: string | number | null;
+}
+
+interface ProtocolPreflight {
+  protocolOnly: boolean;
+  rejection?: ProtocolRejection;
+  sdkHeaders?: Record<string, string | string[] | undefined>;
+}
+
+function classifyProtocolPreflight(
   req: http.IncomingMessage,
   sanitizedHeaders: Record<string, string | string[] | undefined>,
-  rawBody: string | undefined,
-): boolean {
+  parsed: ParsedJsonBody,
+): ProtocolPreflight {
   const httpMethod = (req.method ?? "GET").toUpperCase();
-  if (httpMethod === "GET" || httpMethod === "DELETE") return true;
-  if (httpMethod !== "POST") return false;
-  if (!isJsonContentType(firstHeaderValue(sanitizedHeaders["content-type"]) ?? null)) return true;
+  if (httpMethod === "GET" || httpMethod === "DELETE") return { protocolOnly: true };
+  if (httpMethod !== "POST") return { protocolOnly: false };
+  if (!isJsonContentType(firstHeaderValue(sanitizedHeaders["content-type"]) ?? null)) {
+    return { protocolOnly: true };
+  }
 
-  const parsed = parsedJsonBody(rawBody);
-  if (!parsed.ok) return false;
+  if (!parsed.ok) return { protocolOnly: false };
   const outcome = classifyInboundRequest({
     httpMethod,
     protocolVersionHeader: firstHeaderValue(sanitizedHeaders["mcp-protocol-version"]),
@@ -399,9 +455,66 @@ function isProtocolOnlyRejection(
     body: parsed.body,
   });
 
-  if (outcome.kind === "reject") return true;
-  return (
-    outcome.kind === "modern" && outcome.classification.revision !== MODERN_MCP_PROTOCOL_VERSION
+  if (outcome.kind === "reject") return { protocolOnly: true };
+  if (outcome.kind !== "modern") return { protocolOnly: false };
+  if (outcome.classification.revision !== MODERN_MCP_PROTOCOL_VERSION) {
+    return { protocolOnly: true };
+  }
+
+  const sdkHeaders = inferredModernHeaders(
+    sanitizedHeaders,
+    outcome.classification.revision,
+    parsed.body,
+  );
+  const headerName = firstHeaderValue(sanitizedHeaders["mcp-name"]);
+  const bodyMethod = requestMethodFromParsedBody(parsed.body);
+  if (bodyMethod !== "tools/call" || !headerName) return { protocolOnly: false, sdkHeaders };
+
+  const bodyName = toolNameFromParsedBody(parsed.body);
+  if (headerName === bodyName) return { protocolOnly: false, sdkHeaders };
+
+  const requestId = requestIdFromParsedBody(parsed.body);
+  return {
+    protocolOnly: false,
+    rejection: {
+      status: 400,
+      code: JSON_RPC_HEADER_BODY_MISMATCH,
+      reason: "mcp-name-mismatch",
+      requestId,
+      body: jsonRpcErrorBody(
+        JSON_RPC_HEADER_BODY_MISMATCH,
+        "Bad Request: Mcp-Name header does not match tool name",
+        requestId,
+        { mismatch: { header: headerName, body: bodyName ?? null } },
+      ),
+    },
+  };
+}
+
+function inferredModernHeaders(
+  sanitizedHeaders: Record<string, string | string[] | undefined>,
+  revision: string,
+  body: unknown,
+): Record<string, string | string[] | undefined> {
+  const headers = { ...sanitizedHeaders };
+  const bodyMethod = requestMethodFromParsedBody(body);
+  const bodyName = toolNameFromParsedBody(body);
+  headers["mcp-protocol-version"] ??= revision;
+  if (bodyMethod) headers["mcp-method"] ??= bodyMethod;
+  if (bodyMethod === "tools/call" && bodyName) headers["mcp-name"] ??= bodyName;
+  return headers;
+}
+
+function logProtocolRejection(req: http.IncomingMessage, rejection: ProtocolRejection): void {
+  logger.warn(
+    {
+      code: rejection.code,
+      reason: rejection.reason,
+      method: req.method,
+      path: req.url,
+      requestId: rejection.requestId,
+    },
+    "mcp.http.protocol_rejected",
   );
 }
 
@@ -409,11 +522,12 @@ function nodeRequestWithBody(
   req: http.IncomingMessage,
   body: string | undefined,
   authInfo: AuthInfo | null | undefined,
+  headers: Record<string, string | string[] | undefined> = sanitizedHeadersFromNode(req.headers),
 ) {
   return {
     method: req.method,
     url: req.url,
-    headers: sanitizedHeadersFromNode(req.headers),
+    headers,
     ...(authInfo && { auth: authInfo }),
     async *[Symbol.asyncIterator]() {
       if (body !== undefined) yield body;
@@ -624,8 +738,18 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       if (rawBody === null) return;
 
       const sanitizedHeaders = sanitizedHeadersFromNode(req.headers);
-      if (isProtocolOnlyRejection(req, sanitizedHeaders, rawBody)) {
-        await nodeMcpHandler(nodeRequestWithBody(req, rawBody, authInfo), res);
+      const parsedBody = req.method === "POST" ? parsedJsonBody(rawBody) : ({ ok: true } as const);
+      const protocolPreflight = classifyProtocolPreflight(req, sanitizedHeaders, parsedBody);
+      if (protocolPreflight.rejection) {
+        logProtocolRejection(req, protocolPreflight.rejection);
+        writeJson(res, protocolPreflight.rejection.status, protocolPreflight.rejection.body);
+        return;
+      }
+      if (protocolPreflight.protocolOnly) {
+        await nodeMcpHandler(
+          nodeRequestWithBody(req, rawBody, authInfo, protocolPreflight.sdkHeaders),
+          res,
+        );
         return;
       }
 
@@ -673,7 +797,10 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       const prepared: PreparedMcpRequest = { resolved, capabilities, servers: new Set() };
       try {
         await preparedRequestScope.run(prepared, () =>
-          nodeMcpHandler(nodeRequestWithBody(req, rawBody, authInfo), res),
+          nodeMcpHandler(
+            nodeRequestWithBody(req, rawBody, authInfo, protocolPreflight.sdkHeaders),
+            res,
+          ),
         );
       } finally {
         await closePreparedServers(prepared);

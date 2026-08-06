@@ -1,9 +1,12 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { root, readLock } from "./support";
+import { listFiles, readLock, root } from "./support";
 
 type PackageLock = {
-  packages: Record<string, { version?: string; peerDependencies?: Record<string, string> }>;
+  packages: Record<
+    string,
+    { dev?: boolean; version?: string; peerDependencies?: Record<string, string> }
+  >;
 };
 
 function versionAtLeast(actual: string, floor: string): boolean {
@@ -57,11 +60,38 @@ describe("security dependency policy", () => {
     expect(versionTuple(lockedVersion)[0]).toBe(expectedMajor);
   };
 
-  it("excludes the vulnerable MCP Node adapter from the published graph", () => {
+  it("keeps the MCP Node adapter out of the published graph while pinning the dev SDK split", () => {
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/node");
-    expect(lock.packages["node_modules/@modelcontextprotocol/node"]).toBeUndefined();
-    expect(lock.packages["node_modules/@hono/node-server"]).toBeUndefined();
+    expect(pkg.devDependencies["@modelcontextprotocol/node"]).toBe(
+      pkg.dependencies["@modelcontextprotocol/server"],
+    );
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(
+      pkg.devDependencies["@modelcontextprotocol/node"],
+    );
+    expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
+    expect(pkg.overrides?.["@hono/node-server"]).toBe("2.0.10");
+    expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
+      "'@hono/node-server': 2.0.10",
+    );
+    expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
+    expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
+  });
+
+  it("keeps the B2 SDK simulator out of production source and built output", () => {
+    const dist = join(root, "dist");
+    const productionFiles = [
+      ...listFiles(join(root, "src")),
+      ...(existsSync(dist) ? listFiles(dist) : []),
+    ].filter((path) => /\.(?:c|m)?[jt]s$/.test(path) && !path.endsWith(".d.ts"));
+
+    for (const path of productionFiles) {
+      const text = readFileSync(path, "utf8");
+      expect(text, path).not.toMatch(
+        /(?:from\s+|import\s*\(|require\s*\()\s*["']@backblaze-labs\/b2-sdk\/simulator["']/,
+      );
+      expect(text, path).not.toContain("B2_MCP_TEST_SDK_SIMULATOR");
+    }
   });
 
   it("keeps every brace-expansion resolution above its advisory floor", () => {
