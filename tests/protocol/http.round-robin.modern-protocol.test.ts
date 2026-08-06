@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { join } from "path";
 import {
   HTTP_CREDS,
+  SIMULATOR_ENTRYPOINT,
   modernBody,
   modernHeaders,
   protocolEnv,
@@ -51,19 +52,16 @@ async function waitForHealth(port: number): Promise<void> {
 async function startReplica(name: string): Promise<Replica> {
   requireBuiltEntrypoints();
   const port = await freePort();
-  const child = spawn(
-    process.execPath,
-    [join(__dirname, "../../dist/http-server.js"), "--port", String(port)],
-    {
-      cwd: join(__dirname, "../.."),
-      env: protocolEnv({
-        LOG_LEVEL: "silent",
-        B2_ALLOWED_HOSTS: "127.0.0.1,localhost",
-        B2_HTTP_CREDENTIAL_MODE: "headers",
-      }),
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
+  const child = spawn(process.execPath, [SIMULATOR_ENTRYPOINT, "http", "--port", String(port)], {
+    cwd: join(__dirname, "../.."),
+    env: protocolEnv({
+      LOG_LEVEL: "silent",
+      B2_ALLOWED_HOSTS: "127.0.0.1,localhost",
+      B2_HTTP_CREDENTIAL_MODE: "headers",
+      B2_REGISTER_ALL_TOOLS: "false",
+    }),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const replica: Replica = { name, port, child, stderr: "" };
   child.stderr?.on("data", (chunk) => {
     replica.stderr += chunk.toString();
@@ -169,17 +167,17 @@ describe("HTTP round-robin replica smoke (MCP 2026-07-28)", () => {
       headers: { ...HTTP_CREDS, ...modernHeaders("server/discover") },
       body: modernBody("server/discover", {}, 1),
     });
-    const listA = await request(proxy.port, "POST", "/mcp", {
+    const listAReplicaB = await request(proxy.port, "POST", "/mcp", {
       headers: { ...HTTP_CREDS, ...modernHeaders("tools/list") },
       body: modernBody("tools/list", {}, 2),
     });
+    const listAReplicaA = await request(proxy.port, "POST", "/mcp", {
+      headers: { ...HTTP_CREDS, ...modernHeaders("tools/list") },
+      body: modernBody("tools/list", {}, 3),
+    });
     const callA = await request(proxy.port, "POST", "/mcp", {
       headers: { ...HTTP_CREDS, ...modernHeaders("tools/call", "b2_list_buckets") },
-      body: modernBody("tools/call", { name: "b2_list_buckets", arguments: {} }, 3),
-    });
-    const listASecondReplica = await request(proxy.port, "POST", "/mcp", {
-      headers: { ...HTTP_CREDS, ...modernHeaders("tools/list") },
-      body: modernBody("tools/list", {}, 4),
+      body: modernBody("tools/call", { name: "b2_list_buckets", arguments: {} }, 4),
     });
     const listBPrincipal = await request(proxy.port, "POST", "/mcp", {
       headers: {
@@ -191,9 +189,9 @@ describe("HTTP round-robin replica smoke (MCP 2026-07-28)", () => {
     });
 
     expect(discover.status).toBe(200);
-    expect(listA.status).toBe(200);
+    expect(listAReplicaB.status).toBe(200);
+    expect(listAReplicaA.status).toBe(200);
     expect(callA.status).toBe(200);
-    expect(listASecondReplica.status).toBe(200);
     expect(listBPrincipal.status).toBe(200);
     expect(proxy.seen.slice(0, 5)).toEqual([
       "replica-a",
@@ -202,21 +200,25 @@ describe("HTTP round-robin replica smoke (MCP 2026-07-28)", () => {
       "replica-b",
       "replica-a",
     ]);
-    for (const res of [discover, listA, callA, listASecondReplica, listBPrincipal]) {
+    for (const res of [discover, listAReplicaB, listAReplicaA, callA, listBPrincipal]) {
       expect(res.headers["mcp-session-id"]).toBeUndefined();
     }
 
-    const firstNames = parseBody(listA.body).result.tools.map(
+    const firstNames = parseBody(listAReplicaB.body).result.tools.map(
       (tool: { name: string }) => tool.name,
     );
-    const secondNames = parseBody(listASecondReplica.body).result.tools.map(
+    const secondNames = parseBody(listAReplicaA.body).result.tools.map(
       (tool: { name: string }) => tool.name,
     );
     const otherPrincipalNames = parseBody(listBPrincipal.body).result.tools.map(
       (tool: { name: string }) => tool.name,
     );
     expect(secondNames).toEqual(firstNames);
-    expect(otherPrincipalNames).toEqual(firstNames);
+    expect(firstNames).toContain("b2_create_bucket");
+    expect(otherPrincipalNames).toContain("b2_list_buckets");
+    expect(otherPrincipalNames).toContain("s3_list_objects_v2");
+    expect(otherPrincipalNames).not.toContain("b2_create_bucket");
+    expect(otherPrincipalNames).not.toEqual(firstNames);
     expect(parseBody(callA.body).result.isError).not.toBe(true);
 
     await stopReplica(replicas[0]);

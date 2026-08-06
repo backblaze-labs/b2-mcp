@@ -208,6 +208,29 @@ describe("B2AuthManager", () => {
     expect(transport.requests).toHaveLength(1);
   });
 
+  it("does not activate a simulator-backed SDK from environment variables alone", async () => {
+    const previous = process.env.B2_MCP_TEST_SDK_SIMULATOR;
+    process.env.B2_MCP_TEST_SDK_SIMULATOR = "true";
+    setB2SdkClientFactoryForTests(null);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(authorizeResponse(["listBuckets"])), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    try {
+      const manager = new B2AuthManager(mockConfig);
+      await expect(manager.getAuth()).resolves.toMatchObject({
+        accountId: "test-account-123",
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.B2_MCP_TEST_SDK_SIMULATOR;
+      else process.env.B2_MCP_TEST_SDK_SIMULATOR = previous;
+    }
+  });
+
   it("forceRefresh returns full auth data for the tool layer to redact", async () => {
     installAuthorizeTransport();
     const manager = new B2AuthManager(mockConfig);

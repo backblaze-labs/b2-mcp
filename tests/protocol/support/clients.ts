@@ -29,22 +29,39 @@ export const JSON_HEADERS = {
   accept: "application/json, text/event-stream",
 };
 
-const ROOT = join(__dirname, "../../..");
+export const ROOT = join(__dirname, "../../..");
 const DIST_INDEX = join(ROOT, "dist/index.js");
 const DIST_HTTP = join(ROOT, "dist/http-server.js");
+export const SIMULATOR_ENTRYPOINT = join(__dirname, "simulator-entrypoint.mjs");
 const REQUEST_TIMEOUT_MS = 5_000;
+const SAFE_ENV_NAMES = [
+  "PATH",
+  "Path",
+  "SystemRoot",
+  "COMSPEC",
+  "PATHEXT",
+  "HOME",
+  "USERPROFILE",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+];
 
 export function requireBuiltEntrypoints(): void {
-  if (!existsSync(DIST_INDEX) || !existsSync(DIST_HTTP)) {
+  if (!existsSync(DIST_INDEX) || !existsSync(DIST_HTTP) || !existsSync(SIMULATOR_ENTRYPOINT)) {
     throw new Error("Protocol transport tests require built dist entry points. Run npm run build.");
   }
 }
 
 export function protocolEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const inherited = Object.fromEntries(
+    SAFE_ENV_NAMES.flatMap((name) =>
+      process.env[name] === undefined ? [] : [[name, process.env[name] as string]],
+    ),
+  );
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...inherited,
     NODE_ENV: "test",
-    B2_MCP_TEST_SDK_SIMULATOR: "true",
     B2_REGISTER_ALL_TOOLS: "true",
     B2_APPLICATION_KEY_ID: "protocol-key-id",
     B2_APPLICATION_KEY: "protocol-key-secret",
@@ -111,7 +128,7 @@ export async function connectModernStdioClient(): Promise<{
   requireBuiltEntrypoints();
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [DIST_INDEX],
+    args: [SIMULATOR_ENTRYPOINT, "stdio"],
     cwd: ROOT,
     env: stdioEnv(),
     stderr: "pipe",
@@ -136,7 +153,7 @@ export async function connectLegacyStdioClient(): Promise<{
   requireBuiltEntrypoints();
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [DIST_INDEX],
+    args: [SIMULATOR_ENTRYPOINT, "stdio"],
     cwd: ROOT,
     env: stdioEnv(),
     stderr: "pipe",
@@ -212,7 +229,7 @@ export class RawStdioSession {
 
   start(extraEnv: NodeJS.ProcessEnv = {}): void {
     requireBuiltEntrypoints();
-    this.child = spawn(process.execPath, [DIST_INDEX], {
+    this.child = spawn(process.execPath, [SIMULATOR_ENTRYPOINT, "stdio"], {
       cwd: ROOT,
       env: protocolEnv(extraEnv),
       stdio: ["pipe", "pipe", "pipe"],

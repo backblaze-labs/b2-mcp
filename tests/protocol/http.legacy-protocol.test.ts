@@ -8,6 +8,7 @@
 
 import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import { invalidateAuthManagerCache, invalidateCapabilityCache } from "../../src/server";
+import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
   JSON_HEADERS,
   closeHttpServer,
@@ -19,6 +20,8 @@ import {
   setDefaultHttpTestEnv,
 } from "../support/http";
 import { closeClient, connectHttpClient } from "./support/clients";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -30,12 +33,12 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  delete process.env.B2_MCP_TEST_SDK_SIMULATOR;
   restoreEnv(savedHttpEnv);
 });
 
 beforeEach(async () => {
-  process.env.B2_MCP_TEST_SDK_SIMULATOR = "true";
+  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(simulator.transport());
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
@@ -45,6 +48,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
   await closeHttpServer(handle);
 });

@@ -9,6 +9,8 @@ import {
   type HttpServerHandle,
   type HttpServerOptions,
 } from "../../src/http-server";
+import { invalidateAuthManagerCache } from "../../src/server";
+import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
   JSON_HEADERS,
   closeHttpServer,
@@ -26,6 +28,8 @@ import {
   modernBody,
   modernHeaders,
 } from "./support/clients";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -37,12 +41,12 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  delete process.env.B2_MCP_TEST_SDK_SIMULATOR;
   restoreEnv(savedHttpEnv);
 });
 
 beforeEach(async () => {
-  process.env.B2_MCP_TEST_SDK_SIMULATOR = "true";
+  const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
+  installSdkTransport(simulator.transport());
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
@@ -51,6 +55,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setB2SdkClientFactoryForTests(null);
+  invalidateAuthManagerCache();
   await closeHttpServer(handle);
 });
 
@@ -195,7 +201,21 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(resolve).not.toHaveBeenCalled();
   });
 
-  it("requires method and name mirror headers before credential resolution", async () => {
+  it("accepts headerless modern envelopes during the compatibility window", async () => {
+    const list = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: LIST_TOOLS,
+    });
+    const call = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...JSON_HEADERS },
+      body: callToolBody("b2_list_buckets"),
+    });
+
+    expect(list.status).toBe(200);
+    expect(call.status).toBe(200);
+  });
+
+  it("rejects mismatched tool-name mirror headers before credential resolution", async () => {
     const resolve = vi.fn(() => {
       throw new Error("credential resolution should not run");
     });
@@ -207,19 +227,16 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       },
     });
 
-    const missingMethod = await request(port, "POST", "/mcp", {
-      headers: { ...JSON_HEADERS, "mcp-protocol-version": MODERN_PROTOCOL_VERSION },
-      body: LIST_TOOLS,
-    });
-    const missingName = await request(port, "POST", "/mcp", {
-      headers: modernHeaders("tools/call"),
+    const mismatch = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("tools/call", "s3_list_objects_v2"),
       body: callToolBody("b2_list_buckets"),
     });
 
-    expect(missingMethod.status).toBe(400);
-    expect(parsedJson(missingMethod.body).error.code).toBe(-32020);
-    expect(missingName.status).toBe(400);
-    expect(parsedJson(missingName.body).error.code).toBe(-32020);
+    expect(mismatch.status).toBe(400);
+    expect(parsedJson(mismatch.body).error).toMatchObject({
+      code: -32020,
+      data: { mismatch: { header: "s3_list_objects_v2", body: "b2_list_buckets" } },
+    });
     expect(resolve).not.toHaveBeenCalled();
   });
 

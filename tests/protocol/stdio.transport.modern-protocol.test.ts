@@ -4,6 +4,7 @@ import {
   RawStdioSession,
   closeClient,
   connectModernStdioClient,
+  protocolEnv,
 } from "./support/clients";
 
 function resultOf(frame: any): any {
@@ -24,6 +25,28 @@ describe("stdio transport (MCP 2026-07-28)", () => {
   afterEach(async () => {
     await raw?.close();
     raw = null;
+  });
+
+  it("does not copy parent secret variables into spawned protocol processes", () => {
+    const previous = {
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+    };
+    process.env.GITHUB_TOKEN = "sentinel-github-token";
+    process.env.NPM_TOKEN = "sentinel-npm-token";
+    process.env.AWS_SECRET_ACCESS_KEY = "sentinel-aws-secret";
+    try {
+      const env = protocolEnv();
+      expect(env.GITHUB_TOKEN).toBeUndefined();
+      expect(env.NPM_TOKEN).toBeUndefined();
+      expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 
   it("serves discover, list, and representative tool calls through the SDK client", async () => {

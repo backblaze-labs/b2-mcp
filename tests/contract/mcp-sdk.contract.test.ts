@@ -47,6 +47,18 @@ describe("MCP SDK and protocol contract", () => {
     expect(typeof nodeAdapter.createNodeHttpHandler).toBe("function");
   });
 
+  it("keeps the MCP Node adapter out of runtime source imports", () => {
+    const runtimeSource = listFiles(join(root, "src"))
+      .filter((path) => /\.(?:c|m)?tsx?$/.test(path))
+      .map((path) => [path, readJsonOrText(path)] as const);
+
+    for (const [path, text] of runtimeSource) {
+      expect(text, path).not.toMatch(
+        /(?:from\s+|import\s*\(|require\s*\()\s*["']@modelcontextprotocol\/node(?:["'/])/,
+      );
+    }
+  });
+
   it("keeps modern and legacy protocol behavior in separately named tests", () => {
     const protocolTests = listFiles(join(root, "tests/protocol")).map((path) =>
       path.slice(root.length + 1),
@@ -56,3 +68,7 @@ describe("MCP SDK and protocol contract", () => {
     expect(protocolTests.some((path) => path.endsWith(".legacy-protocol.test.ts"))).toBe(true);
   });
 });
+
+function readJsonOrText(path: string): string {
+  return readFileSync(path, "utf8");
+}

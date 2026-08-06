@@ -10,14 +10,12 @@ import {
   type HttpTransport,
   type RetryOptions,
 } from "@backblaze-labs/b2-sdk";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { abortError, isAbortError } from "./utils/named-error.js";
 import { isTestRuntime } from "./utils/runtime.js";
-import { verificationFingerprintConfig } from "./credentials.js";
 
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
@@ -61,7 +59,6 @@ interface ManagedSdkClient {
 
 type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
 let sdkClientFactoryForTests: SdkClientFactory | null = null;
-const sdkSimulatorClientsForTests = new Map<string, ManagedSdkClient>();
 
 type DomExceptionConstructor = new (message?: string, name?: string) => Error;
 
@@ -75,35 +72,12 @@ export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null):
   if (!isTestRuntime()) {
     throw new Error("SDK client factory override is only available in tests.");
   }
-  sdkSimulatorClientsForTests.clear();
   sdkClientFactoryForTests = factory;
 }
 
 function configuredSdkClientFactoryForTests(): SdkClientFactory | null {
   if (!isTestRuntime()) return null;
-  if (sdkClientFactoryForTests) return sdkClientFactoryForTests;
-  if (process.env.B2_MCP_TEST_SDK_SIMULATOR !== "true") return null;
-  return (config) => {
-    const cacheKey = verificationFingerprintConfig(config);
-    const existing = sdkSimulatorClientsForTests.get(cacheKey);
-    if (existing) return existing;
-    const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-    const client = {
-      client: new SdkB2Client({
-        applicationKeyId: config.applicationKeyId,
-        applicationKey: config.applicationKey,
-        transport: createMcpHttpTransport(simulator.transport(), {
-          maxRetries: 0,
-          initialRetryDelayMs: 1,
-          maxRetryDelayMs: 1,
-          requestTimeoutMs: API_TIMEOUT_MS,
-        }),
-        retry: { maxRetries: 0, requestTimeoutMs: API_TIMEOUT_MS },
-      }),
-    };
-    sdkSimulatorClientsForTests.set(cacheKey, client);
-    return client;
-  };
+  return sdkClientFactoryForTests;
 }
 
 class RequestSignalTransport implements HttpTransport {
