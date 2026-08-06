@@ -53,6 +53,7 @@ describe("CI workflow policy", () => {
       "deterministic-linux-production",
       "deterministic-linux-current",
       "cross-platform-minimum",
+      "production-audit",
       "supply-chain-audit",
       "workflow-security",
     ]) {
@@ -117,16 +118,17 @@ describe("CI workflow policy", () => {
 
     expect(workflowSecurity).toContain("persist-credentials: false");
     expect(workflowSecurity).not.toContain("actions: read");
+    expect(workflowSecurity).not.toContain("zizmor-action");
+    expect(workflowSecurity).not.toContain("GH_TOKEN");
+    expect(workflowSecurity).not.toContain("github.token");
     expect(workflowSecurity).toContain(
-      "zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054",
+      "ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284",
     );
-    expect(workflowSecurity).toContain("advanced-security: false");
-    expect(workflowSecurity).toContain("annotations: true");
-    expect(workflowSecurity).toContain("min-severity: medium");
-    expect(workflowSecurity).toContain("min-confidence: medium");
-    expect(workflowSecurity).toContain("online-audits: false");
-    expect(workflowSecurity).toContain('token: ""');
-    expect(workflowSecurity).toContain("version: 1.29.0");
+    expect(workflowSecurity).toContain("--network=none");
+    expect(workflowSecurity).toContain("--format=github");
+    expect(workflowSecurity).toContain("--no-online-audits");
+    expect(workflowSecurity).toContain("--min-severity=medium");
+    expect(workflowSecurity).toContain("--min-confidence=medium");
   });
 
   it("blocks publishing until the live contract suite passes for the publish ref", () => {

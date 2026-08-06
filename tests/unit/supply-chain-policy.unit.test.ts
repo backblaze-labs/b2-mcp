@@ -421,17 +421,21 @@ describe("supply-chain audit policy", () => {
   it("runs the full lockfile audit on the ci-green deploy-gating path", () => {
     const productionJob = jobBlock("deterministic-linux-production");
     const currentJob = jobBlock("deterministic-linux-current");
+    const productionAuditJob = jobBlock("production-audit");
     const auditJob = jobBlock("supply-chain-audit");
     const markGreenJob = jobBlock("mark-green");
+    expect(workflow).toContain("production-audit:");
     expect(workflow).toContain("supply-chain-audit:");
     expect(workflow).toContain("pnpm run audit:supply-chain");
     expect(workflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
-    expect(auditJob).toContain("pnpm run audit:production");
-    expect(auditJob).toContain("node-version: [22.3.0, 24, 26]");
-    expect(auditJob).not.toContain("prepare-production-npm-audit.mjs");
-    expect(auditJob).not.toContain("npm install --package-lock-only");
+    expect(productionAuditJob).toContain("node scripts/production-security-gate.mjs");
+    expect(productionAuditJob).toContain("node-version: [22.3.0, 24, 26]");
+    expect(productionAuditJob).toContain("package-manager-cache: false");
+    expect(productionAuditJob).not.toContain("pnpm install");
+    expect(productionAuditJob).not.toContain("prepare-production-npm-audit.mjs");
+    expect(productionAuditJob).not.toContain("npm install --package-lock-only");
     expect(auditJob).toContain("fetch-depth: 0");
     expect(auditJob).toContain(
       "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
@@ -440,10 +444,10 @@ describe("supply-chain audit policy", () => {
     expect(auditJob).not.toContain("refs/heads/*:refs/remotes/origin/*");
     expect(auditJob).not.toContain("--all-branches");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");
-    expect(auditJob).toContain("Reject injected audit fixtures");
-    expect(auditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
-    expect(auditJob).toContain("B2_MCP_AUDIT_POLICY_JSON is test-only");
-    expect(auditJob).toContain("B2_MCP_PRODUCTION_GATE_ROOT is test-only");
+    expect(productionAuditJob).toContain("Reject injected audit fixtures");
+    expect(productionAuditJob).toContain("B2_MCP_AUDIT_REPORT_JSON is test-only");
+    expect(productionAuditJob).toContain("B2_MCP_AUDIT_POLICY_JSON is test-only");
+    expect(productionAuditJob).toContain("B2_MCP_PRODUCTION_GATE_ROOT is test-only");
     expect(auditJob).toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail");
     expect(auditJob).not.toContain("B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: warn");
     expect(productionJob).not.toContain("pnpm run audit:supply-chain");
@@ -453,6 +457,7 @@ describe("supply-chain audit policy", () => {
       "deterministic-linux-production",
       "deterministic-linux-current",
       "cross-platform-minimum",
+      "production-audit",
       "supply-chain-audit",
       "workflow-security",
     ]) {

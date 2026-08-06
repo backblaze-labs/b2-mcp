@@ -271,14 +271,43 @@ jobs:
             reports/vitest/package.json
           if-no-files-found: error
 
-  supply-chain-audit:
-    name: supply-chain audit / Node ${{ matrix.node-version }}
+  production-audit:
+    name: production npm audit / Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         node-version: [22.3.0, 24, 26]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ matrix.node-version }}
+          package-manager-cache: false
+      - name: Reject injected audit fixtures
+        run: |
+          set -euo pipefail
+          if [[ -n "${B2_MCP_AUDIT_REPORT_JSON:-}" ]]; then
+            echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
+            exit 1
+          fi
+          if [[ -n "${B2_MCP_AUDIT_POLICY_JSON:-}" ]]; then
+            echo "::error::B2_MCP_AUDIT_POLICY_JSON is test-only and must not reach CI audit jobs"
+            exit 1
+          fi
+          if [[ -n "${B2_MCP_PRODUCTION_GATE_ROOT:-}" ]]; then
+            echo "::error::B2_MCP_PRODUCTION_GATE_ROOT is test-only and must not reach CI audit jobs"
+            exit 1
+          fi
+      - run: node scripts/production-security-gate.mjs
+
+  supply-chain-audit:
+    name: supply-chain audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -301,25 +330,9 @@ jobs:
           run_install: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Reject injected audit fixtures
-        run: |
-          set -euo pipefail
-          if [[ -n "${B2_MCP_AUDIT_REPORT_JSON:-}" ]]; then
-            echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
-            exit 1
-          fi
-          if [[ -n "${B2_MCP_AUDIT_POLICY_JSON:-}" ]]; then
-            echo "::error::B2_MCP_AUDIT_POLICY_JSON is test-only and must not reach CI audit jobs"
-            exit 1
-          fi
-          if [[ -n "${B2_MCP_PRODUCTION_GATE_ROOT:-}" ]]; then
-            echo "::error::B2_MCP_PRODUCTION_GATE_ROOT is test-only and must not reach CI audit jobs"
-            exit 1
-          fi
-      - run: pnpm run audit:production
       - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist
       - run: pnpm run audit:supply-chain
         env:
@@ -333,16 +346,27 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      # Action release v0.6.2 is pinned by SHA; with.version pins zizmor CLI 1.29.0.
-      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054
-        with:
-          advanced-security: false
-          annotations: true
-          min-severity: medium
-          min-confidence: medium
-          online-audits: false
-          token: ""
-          version: 1.29.0
+      - name: Run digest-pinned offline zizmor
+        env:
+          ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
+        run: |
+          set -euo pipefail
+          docker pull "${ZIZMOR_IMAGE}"
+          docker run \
+            --rm \
+            --network=none \
+            --volume "${GITHUB_WORKSPACE}:/workspace:ro" \
+            --workdir /workspace \
+            "${ZIZMOR_IMAGE}" \
+            --persona=regular \
+            --format=github \
+            --collect=default \
+            --no-online-audits \
+            --min-severity=medium \
+            --min-confidence=medium \
+            --color=never \
+            -- \
+            .
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green
@@ -356,6 +380,7 @@ jobs:
         deterministic-linux-production,
         deterministic-linux-current,
         cross-platform-minimum,
+        production-audit,
         supply-chain-audit,
         workflow-security,
       ]
