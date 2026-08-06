@@ -19,41 +19,11 @@ import type { McpServer } from "../../src/mcp";
 import { B2Client } from "../../src/b2/client";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import { installSdkTransport } from "../support/sdk-test-helpers";
 import type { MockInstance } from "vitest";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
-  const tool = getRegisteredTools(server)?.[name];
-  if (!tool) throw new Error(`Tool not found: ${name}`);
-  return tool.execute(args, {} as any);
-}
-
-function parseResult(result: any) {
-  if (result?.structuredContent !== undefined) return result.structuredContent;
-  const text = result?.content?.[0]?.text;
-  if (!text) return result;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
-}
-
 // ── Fixtures ──────────────────────────────────────────────────────────────────
-
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
-  appKeyId: "test-app-key-id",
-  appKey: "test-app-key-secret",
-  masterKeyId: "test-master-key-id",
-  masterKey: "test-app-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
 
 let server: McpServer;
 let sim: B2Simulator;

@@ -3,10 +3,10 @@
  * transport responses that classify to typed B2 errors.
  */
 
-import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { createServer, invalidateAuthManagerCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
-import { B2Config } from "../../src/utils/types";
+import { callTool, testConfig } from "../support/deterministic-fakes";
 import {
   authorizeResponse,
   b2EndpointName,
@@ -14,24 +14,6 @@ import {
   RecordingTransport,
   StaticHttpResponse,
 } from "../support/sdk-test-helpers";
-
-const config: B2Config = {
-  applicationKeyId: "k",
-  applicationKey: "s",
-  appKeyId: "k",
-  appKey: "s",
-  masterKeyId: "s",
-  masterKey: "s",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
-};
-
-async function callTool(server: McpServer, name: string, args: Record<string, unknown>) {
-  const tool = getRegisteredTools(server)?.[name];
-  if (!tool) throw new Error(`Tool not found: ${name}`);
-  return tool.execute(args, {} as any);
-}
 
 let server: McpServer;
 
@@ -49,7 +31,7 @@ beforeEach(() => {
       );
     }),
   );
-  server = createServer(config);
+  server = createServer(testConfig);
 });
 
 afterEach(() => {

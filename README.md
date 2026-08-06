@@ -236,6 +236,7 @@ pnpm test                   # typecheck, then fast unit tests
 pnpm run test:contract      # deterministic MCP/package/schema contracts
 pnpm run test:protocol      # modern + legacy MCP protocol behavior
 pnpm run test:coverage      # deterministic source-covering suites + coverage summary
+pnpm run test:diagnostics   # MaxListeners/open-handle warning diagnostics
 pnpm run test:slow          # deterministic high-cost tests, isolated from unit
 pnpm run test:package       # packed-package installation test
 pnpm run verify             # complete no-credential local gate

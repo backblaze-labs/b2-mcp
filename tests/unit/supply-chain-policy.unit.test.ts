@@ -437,10 +437,8 @@ describe("supply-chain audit policy", () => {
     expect(productionAuditJob).not.toContain("prepare-production-npm-audit.mjs");
     expect(productionAuditJob).not.toContain("npm install --package-lock-only");
     expect(auditJob).toContain("fetch-depth: 0");
-    expect(auditJob).toContain(
-      "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
-    );
-    expect(auditJob).toContain('sleep "$attempt"');
+    expect(auditJob).toContain("git show-ref --verify --quiet refs/remotes/origin/main");
+    expect(auditJob).not.toContain("git fetch --prune --no-tags origin");
     expect(auditJob).not.toContain("refs/heads/*:refs/remotes/origin/*");
     expect(auditJob).not.toContain("--all-branches");
     expect(auditJob).not.toContain("if: github.event_name == 'pull_request'");

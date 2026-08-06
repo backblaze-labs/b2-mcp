@@ -43,6 +43,7 @@ describe("CI workflow policy", () => {
     const markGreen = workflowJob("mark-green");
     const productionJob = workflowJob("deterministic-linux-production");
     const currentJob = workflowJob("deterministic-linux-current");
+    const listenerDiagnosticsJob = workflowJob("listener-diagnostics");
     const packageBudgetJob = workflowJob("package-budget");
     const packageJob = workflowJob("package");
 
@@ -52,6 +53,7 @@ describe("CI workflow policy", () => {
       "package-budget",
       "deterministic-linux-production",
       "deterministic-linux-current",
+      "listener-diagnostics",
       "cross-platform-minimum",
       "production-audit",
       "supply-chain-audit",
@@ -67,6 +69,7 @@ describe("CI workflow policy", () => {
     expect(productionJob).toContain("pnpm run test:coverage");
     expect(productionJob).toContain("name: Publish coverage summary");
     expect(productionJob).toContain("GITHUB_STEP_SUMMARY");
+    expect(productionJob).toContain("coverage/**");
     expect(productionJob).toContain("pnpm run test:slow");
     expect(productionJob).toContain("pnpm run smoke:package");
     expect(productionJob).not.toContain("test:package");
@@ -74,10 +77,30 @@ describe("CI workflow policy", () => {
     expect(currentJob).toContain("name: Enforce global coverage floors");
     expect(currentJob).toContain("name: Publish coverage summary");
     expect(currentJob).toContain("GITHUB_STEP_SUMMARY");
+    expect(currentJob).toContain("coverage/**");
     expect(currentJob).toContain("pnpm run test:slow");
     expect(currentJob).not.toContain("test:package");
+    expect(listenerDiagnosticsJob).toContain("pnpm run test:diagnostics");
+    expect(listenerDiagnosticsJob).toContain("Detect MaxListeners and open-handle warnings");
     expect(packageJob).toContain("continue-on-error: true");
     expect(packageJob).toContain("pnpm run test:package");
+  });
+
+  it("does not persist checkout credentials in pull-request jobs that run repo code", () => {
+    for (const { name, block } of workflowJobBlocks(ci)) {
+      if (!block.includes("actions/checkout@")) continue;
+      if (/github\.event_name\s*==\s*'push'/.test(block)) continue;
+      if (!/\b(pnpm|node scripts\/|npm)\b/.test(block)) continue;
+
+      const checkoutSteps = block
+        .split(/(?=^\s+- uses: actions\/checkout@)/m)
+        .filter((step) => step.includes("actions/checkout@"));
+      for (const step of checkoutSteps) {
+        expect(step, `${name} must not persist checkout credentials`).toMatch(
+          /persist-credentials:\s*false/,
+        );
+      }
+    }
   });
 
   it("sets up pinned pnpm before any workflow job uses pnpm", () => {

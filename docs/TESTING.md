@@ -17,8 +17,9 @@ pnpm run verify
 ```
 
 `pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, the
-Biome-supported format check, spelling, and deterministic coverage across all
-non-live layers, including slow lifecycle and packed-package installation tests.
+Biome-supported format check, spelling, deterministic coverage, and listener
+diagnostics across all non-live layers, including slow lifecycle and
+packed-package installation tests.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
@@ -32,6 +33,7 @@ The individual deterministic layers are:
 | `pnpm run test:slow`     | Deterministic high-cost lifecycle tests with explicit timeout and one Vitest worker.  |
 | `pnpm run test:package`  | Builds, packs, installs through an npm consumer, and verifies installed entry points. |
 | `pnpm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
+| `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners and open-handle warnings. |
 
 Local scripts can call each deterministic layer independently. The Linux Node
 matrix runs the bundled coverage and slow deterministic lifecycle layers, while
@@ -40,7 +42,33 @@ aggregate disables file parallelism so contract fixture reports, dist rebuilds,
 and package packing do not race each other.
 Global V8 coverage must remain at or above 82% statements, 72% branches, 86%
 functions, and 86% lines. Raise these floors as coverage improves; lowering
-them requires explicit review and justification.
+them requires explicit review and justification. Coverage collection is source
+only: `src/**/*.ts`, excluding `dist/`, declarations, generated files, and test
+files. The current Phase 1 floor is a ratchet: when `coverage/coverage-summary.json`
+shows every global percentage at least two points above the floor for three
+consecutive main-branch runs, raise the matching threshold in `vitest.config.mts`,
+the README badge, this document, and the CI summary text in the same PR. Lowering
+a threshold requires a time-bounded exception in the PR description and a
+follow-up issue.
+
+Critical modules have direct branch tests or documented invariants in addition
+to the global floor:
+
+| Area                 | Modules                                                                                     | Phase 1 target                  |
+| -------------------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
+| Credentials          | `src/credentials.ts`, `src/auth.ts`                                                         | No secret echo; 90%+ statements |
+| Secret redaction     | `src/utils/secret-sanitizer.ts`, audited tool wrapping                                      | Canary redaction branch tests   |
+| Destructive actions  | `src/utils/destructive-gate.ts`, bucket/object/multipart delete handlers                    | Confirm/block/allow branches    |
+| Filesystem boundary  | `src/utils/fs-guard.ts`, S3 local file upload/download paths                                | Root escape and symlink tests   |
+| Transport boundary   | `src/http-server.ts`, `src/node-http-adapter.ts`, stdio and HTTP protocol suites            | Close/abort/listener tests      |
+
+The v1.0.0 target is 90% statements, 80% branches, 90% functions, and 90% lines
+globally, with credential/redaction/destructive/filesystem modules kept at 95%+
+statements or covered by explicit invariant tests. The SDK reference baseline is
+tracked as comparison evidence for test design, especially simulator behavior,
+retry ownership, pagination, and cancellation. Matching SDK parity is not a
+release blocker for this MCP package; regressions in this repository's critical
+boundaries are.
 CI installs with `pnpm install --frozen-lockfile` and verifies the runtime
 package floor with a packed consumer smoke on Node.js 22.3.0. The credential-free full
 toolchain gate, including `pnpm run lint:docs`, runs on Linux for Node.js
@@ -87,6 +115,8 @@ credentials suppresses the JUnit reporter.
 - JUnit XML: `reports/junit/<layer>.xml`
 - Vitest JSON summary: `reports/vitest/<layer>.json`
 - Coverage summary: `coverage/coverage-summary.json` from `pnpm run test:coverage`
+- HTML coverage report: `coverage/index.html` from `pnpm run test:coverage`
+- LCOV info: `coverage/lcov.info` from `pnpm run test:coverage`
 - Cobertura XML: `coverage/cobertura-coverage.xml` from `pnpm run test:coverage`
 
 If a selected layer has zero executed tests because every case was skipped, the
@@ -94,7 +124,11 @@ runner exits nonzero and prints the summary path. A skipped-only run is visible
 evidence, not an authoritative pass.
 
 The `ci-green` production deploy marker depends on both the Node.js 22.3.0
-production-dependency install and the Node 22.23.1 deterministic gate. Node.js
+production-dependency install and the Node 22.23.1 deterministic gate. A
+separate leak diagnostic job runs the unit and protocol layers under
+traced warnings plus Vitest's hanging-process reporter, and fails on
+`MaxListenersExceededWarning`, EventEmitter leak warnings, or Vitest close-timeout
+open-handle warnings until teardown is clean. Node.js
 24 and 26 remain required PR checks, but a regression isolated to those
 non-production current lines does not freeze the production deploy ref. The
 production host is pinned to the patched Node 22 LTS line from `.nvmrc`.

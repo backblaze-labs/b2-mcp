@@ -5,9 +5,20 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
+type B2S3MultipartClient = Pick<
+  B2S3PeerClient,
+  | "createMultipartUpload"
+  | "presignUploadPart"
+  | "completeMultipartUpload"
+  | "abortMultipartUpload"
+  | "listMultipartUploads"
+  | "listParts"
+  | "uploadPartCopy"
+>;
+
 export function registerS3MultipartTools(
   server: ToolRegistrar,
-  s3: B2S3PeerClient,
+  s3: B2S3MultipartClient,
   config: B2Config,
 ): void {
   server.registerTool(

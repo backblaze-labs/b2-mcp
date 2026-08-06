@@ -1,9 +1,13 @@
 import { S3Client } from "@aws-sdk/client-s3";
-import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { createServer, invalidateAuthManagerCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { B2ReportClient } from "../../src/b2/report-client";
-import type { McpServer } from "../../src/mcp";
 import type { MockInstance } from "vitest";
+import {
+  callTool,
+  parseResult,
+  testConfig as sharedTestConfig,
+} from "../support/deterministic-fakes";
 import {
   authorizeResponse,
   b2EndpointName,
@@ -12,23 +16,13 @@ import {
   StaticHttpResponse,
 } from "../support/sdk-test-helpers";
 
-const testConfig = {
-  applicationKeyId: "test-key-id",
-  applicationKey: "test-key-secret",
+const ssrfConfig = {
+  ...sharedTestConfig,
   appKeyId: "legacy-s3-key-id",
   appKey: "legacy-s3-secret",
-  masterKeyId: "test-key-id",
-  masterKey: "test-key-secret",
-  region: "us-west-004",
-  allowLocalFiles: true,
-  fileRoot: null,
+  masterKeyId: sharedTestConfig.applicationKeyId,
+  masterKey: sharedTestConfig.applicationKey,
 };
-
-async function callTool(server: McpServer, name: string, args: Record<string, unknown> = {}) {
-  const tool = getRegisteredTools(server)?.[name];
-  if (!tool) throw new Error(`Tool not found: ${name}`);
-  return tool.execute(args, {} as any);
-}
 
 function maliciousAuthorizeResponse(overrides: { s3ApiUrl?: string; apiUrl?: string }) {
   const response = authorizeResponse(["readFiles"]);
@@ -55,11 +49,6 @@ function reportAuth() {
     absoluteMinimumPartSize: 5 * 1024 * 1024,
     capabilities: ["readFiles"],
   };
-}
-
-function parseToolJson(result: any): any {
-  if (result?.structuredContent !== undefined) return result.structuredContent;
-  return JSON.parse(result.content[0].text);
 }
 
 function reportCsv(
@@ -116,7 +105,7 @@ describe("insight report S3 endpoint validation", () => {
       return new StaticHttpResponse(200, {});
     });
     installSdkTransport(transport);
-    const server = createServer(testConfig);
+    const server = createServer(ssrfConfig);
 
     const result = await callTool(server, toolName, args);
 
@@ -138,7 +127,7 @@ describe("insight report S3 endpoint validation", () => {
       throw new Error(`unexpected token-bearing request to ${request.url}`);
     });
     installSdkTransport(transport);
-    const server = createServer(testConfig);
+    const server = createServer(ssrfConfig);
 
     const result = await callTool(server, "b2_list_buckets", {});
 
@@ -156,7 +145,7 @@ describe("insight report S3 endpoint validation", () => {
       return new StaticHttpResponse(200, {});
     });
     installSdkTransport(transport);
-    const server = createServer(testConfig);
+    const server = createServer(ssrfConfig);
 
     const result = await callTool(server, "b2_usage_growth", { period: "month", limit: 1 });
     expect(result.isError).not.toBe(true);
@@ -183,7 +172,7 @@ describe("insight report S3 endpoint validation", () => {
     };
     sendSpy.mockResolvedValueOnce({ Body: body });
     const client = new B2ReportClient({
-      getConfig: () => testConfig,
+      getConfig: () => ssrfConfig,
       getAuth: async () => reportAuth(),
     } as never);
 
@@ -216,7 +205,7 @@ describe("insight report S3 endpoint validation", () => {
     };
     sendSpy.mockResolvedValueOnce({ Body: body });
     const client = new B2ReportClient({
-      getConfig: () => testConfig,
+      getConfig: () => ssrfConfig,
       getAuth: async () => reportAuth(),
     } as never);
 
@@ -248,7 +237,7 @@ describe("insight report S3 endpoint validation", () => {
     sendSpy.mockImplementation(async function (this: S3Client, command: any) {
       const credentials = await this.config.credentials();
       seenAccessKeys.push(credentials.accessKeyId);
-      const usingBroadOverride = credentials.accessKeyId === testConfig.appKeyId;
+      const usingBroadOverride = credentials.accessKeyId === ssrfConfig.appKeyId;
       const keys = usingBroadOverride ? broadKeys : tenantKeys;
       const account = usingBroadOverride ? "outside-account" : "tenant-account";
       const commandName = command.constructor.name;
@@ -283,19 +272,19 @@ describe("insight report S3 endpoint validation", () => {
       return new StaticHttpResponse(200, {});
     });
     installSdkTransport(transport);
-    const server = createServer(testConfig);
+    const server = createServer(ssrfConfig);
 
     const result = await callTool(server, toolName, args);
-    const text = JSON.stringify(parseToolJson(result));
+    const text = JSON.stringify(parseResult(result));
     const authHeader = transport.requests[0].headers?.Authorization ?? "";
     const authorizedCredential = Buffer.from(authHeader.replace(/^Basic\s+/i, ""), "base64")
       .toString("utf8")
       .split(":")[0];
 
     expect(result.isError).not.toBe(true);
-    expect(authorizedCredential).toBe(testConfig.applicationKeyId);
-    expect(seenAccessKeys).toEqual(expect.arrayContaining([testConfig.applicationKeyId]));
-    expect(seenAccessKeys).not.toContain(testConfig.appKeyId);
+    expect(authorizedCredential).toBe(ssrfConfig.applicationKeyId);
+    expect(seenAccessKeys).toEqual(expect.arrayContaining([ssrfConfig.applicationKeyId]));
+    expect(seenAccessKeys).not.toContain(ssrfConfig.appKeyId);
     expect(text).toContain("tenant-account");
     expect(text).not.toContain("outside-account");
   });
