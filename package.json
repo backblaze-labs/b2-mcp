@@ -53,6 +53,8 @@
     "check:package-budget": "node scripts/check-package-budget.mjs",
     "audit:supply-chain": "pnpm run audit:supply-chain:denylist --packlist && node scripts/audit-supply-chain.mjs",
     "audit:supply-chain:denylist": "node scripts/check-supply-chain-denylist.mjs",
+    "audit:production": "node scripts/production-security-gate.mjs",
+    "release:sbom": "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",
     "lint": "node scripts/run-biome.mjs lint src tests scripts",
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts --write",

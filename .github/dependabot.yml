@@ -40,6 +40,15 @@ updates:
           - patch
     labels:
       - dependencies
+    ignore:
+      # These majors can move the effective runtime floor or contract oracle.
+      # Review them manually outside routine dependency refreshes.
+      - dependency-name: opossum
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@toon-format/toon"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /

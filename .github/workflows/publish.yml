@@ -72,26 +72,16 @@ jobs:
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm run check:package-budget
-      - run: node scripts/prepare-production-npm-audit.mjs .audit/npm-production
-      - name: Generate npm production audit lock
-        working-directory: .audit/npm-production
-        run: npm install --package-lock-only --omit=dev --ignore-scripts
-      - name: Run npm production audit
-        working-directory: .audit/npm-production
-        run: npm audit --omit=dev --audit-level=moderate
       - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js
       - run: pnpm run audit:supply-chain
         env:
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
-      - name: Generate release SBOM
+      - name: Run production audit and generate release SBOM
         id: sbom
-        working-directory: .audit/npm-production
         run: |
           set -euo pipefail
           mkdir -p "${GITHUB_WORKSPACE}/publish-package"
-          npm install --omit=dev --ignore-scripts
-          npm sbom --omit=dev --sbom-format=cyclonedx \
-            > "${GITHUB_WORKSPACE}/publish-package/b2-mcp-production.cdx.json"
+          pnpm run release:sbom
           sbom_sha256="$(sha256sum "${GITHUB_WORKSPACE}/publish-package/b2-mcp-production.cdx.json" | awk '{print $1}')"
           echo "sbom_name=b2-mcp-production.cdx.json" >> "$GITHUB_OUTPUT"
           echo "sbom_sha256=${sbom_sha256}" >> "$GITHUB_OUTPUT"
@@ -122,14 +112,61 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  live-contract:
+    name: live contract before publish / Node ${{ matrix.node-version }}
     needs: prepare
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    environment: live-b2-contract
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        node-version: [22.23.1, 24, 26]
+    steps:
+      # actions/checkout v6, reviewed 2026-08-05.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.prepare.outputs.checkout-sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-05.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Validate live B2 environment
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing required live-b2-contract secret for ${name}"
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - run: pnpm run test:contract:live
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+
+  publish:
+    needs: [prepare, live-contract]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: npm-publish
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       # actions/download-artifact v6, reviewed 2026-08-05.
@@ -192,6 +229,12 @@ jobs:
             echo "actual=${actual_sbom_sha}"
             exit 1
           fi
+      - name: Attach SBOM to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
       - name: Publish prebuilt tarball with trusted provenance
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}

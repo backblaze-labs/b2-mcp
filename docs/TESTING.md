@@ -200,11 +200,13 @@ is reserved for non-gating reminder jobs or local operator checks and emits a
 GitHub `::warning` annotation.
 
 The production npm advisory gate is separate from the full pnpm lockfile audit
-because this repository does not commit an npm lockfile. CI prepares a
-production-only audit root in `.audit/npm-production`, generates an npm
-`package-lock.json` there with lifecycle scripts disabled, and runs
-`npm audit --omit=dev --audit-level=moderate`. Release publishing reuses that
-production root to generate the CycloneDX SBOM artifact.
+because npm audit requires an npm lockfile. CI runs `pnpm run audit:production`,
+which prepares a production-only audit root in `.audit/npm-production`, derives
+its `package-lock.json` from the committed `pnpm-lock.yaml`, sets bounded npm
+fetch retry options, and runs `npm audit --omit=dev --audit-level=moderate`.
+Release publishing uses the same script through `pnpm run release:sbom` to audit
+the shipped pnpm-locked graph and generate the CycloneDX SBOM attached to the
+GitHub release.
 
 `mark-green` intentionally fail-closes on npm registry/advisory-service
 availability because `supply-chain-audit` makes a live `npm audit` call and

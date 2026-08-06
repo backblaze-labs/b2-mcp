@@ -4,8 +4,12 @@ import { createRequire } from "module";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
-const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey } = nodeRequire(
+  "../../scripts/lib/workflow-yaml.cjs",
+) as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
+  workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
+  yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
 };
 
 const pnpmSetupAction = "pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa";
@@ -17,23 +21,11 @@ const workflowPaths = [
   ".github/workflows/contract.yml",
   ".github/workflows/smoke.yml",
   ".github/workflows/publish.yml",
-  ".github/workflows/security.yml",
 ];
-
-function workflowJobBlocks(text: string): Array<{ name: string; block: string }> {
-  const jobsStart = text.search(/^jobs:\s*$/m);
-  if (jobsStart === -1) return [];
-  const jobsText = text.slice(jobsStart);
-  const matches = [...jobsText.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)];
-  return matches.map((match, index) => {
-    const start = match.index ?? 0;
-    const end = matches[index + 1]?.index ?? jobsText.length;
-    return { name: match[1], block: jobsText.slice(start, end) };
-  });
-}
 
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+  const publish = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
 
   function workflowJob(name: string): string {
     const job = workflowJobBlock(ci, name);
@@ -42,7 +34,9 @@ describe("CI workflow policy", () => {
   }
 
   it("defaults workflow permissions to read-only contents", () => {
-    expect(ci).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
+    const permissions = yamlMappingForKey(ci, "permissions");
+    expect(permissions).toMatchObject({ contents: "read" });
+    expect(permissions).not.toHaveProperty("actions");
   });
 
   it("gates ci-green on supported runtime and platform jobs", () => {
@@ -60,6 +54,7 @@ describe("CI workflow policy", () => {
       "deterministic-linux-current",
       "cross-platform-minimum",
       "supply-chain-audit",
+      "workflow-security",
     ]) {
       expect(markGreen).toContain(required);
     }
@@ -118,15 +113,35 @@ describe("CI workflow policy", () => {
   });
 
   it("runs pinned workflow security analysis with zizmor", () => {
-    const workflow = readFileSync(join(root, ".github/workflows/security.yml"), "utf8");
+    const workflowSecurity = workflowJob("workflow-security");
 
-    expect(workflow).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*\n\s+actions:\s*read\s*$/m);
-    expect(workflow).toContain("persist-credentials: false");
-    expect(workflow).toContain("zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054");
-    expect(workflow).toContain("advanced-security: false");
-    expect(workflow).toContain("annotations: true");
-    expect(workflow).toContain("min-severity: medium");
-    expect(workflow).toContain("min-confidence: medium");
-    expect(workflow).toContain("version: 1.29.0");
+    expect(ci).not.toContain("actions: read");
+    expect(workflowSecurity).toContain("persist-credentials: false");
+    expect(workflowSecurity).toContain(
+      "zizmor-action v0.6.2 is pinned by SHA; version pins the zizmor CLI.",
+    );
+    expect(workflowSecurity).toContain(
+      "zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054",
+    );
+    expect(workflowSecurity).toContain("advanced-security: false");
+    expect(workflowSecurity).toContain("annotations: true");
+    expect(workflowSecurity).toContain("min-severity: medium");
+    expect(workflowSecurity).toContain("min-confidence: medium");
+    expect(workflowSecurity).toContain("version: 1.29.0");
+  });
+
+  it("blocks publishing until the live contract suite passes for the publish ref", () => {
+    const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
+    const publishJob = workflowJobBlock(publish, "publish") ?? "";
+
+    expect(publishJob).toContain("needs: [prepare, live-contract]");
+    expect(liveContract).toContain("needs: prepare");
+    expect(liveContract).toContain("environment: live-b2-contract");
+    expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
+    expect(liveContract).toContain("node-version: [22.23.1, 24, 26]");
+    expect(liveContract).toContain("Validate live B2 environment");
+    expect(liveContract).toContain("LIVE_B2_KEY_ID");
+    expect(liveContract).toContain("LIVE_B2_KEY");
+    expect(liveContract).toContain("pnpm run test:contract:live");
   });
 });

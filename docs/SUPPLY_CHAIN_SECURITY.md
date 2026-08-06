@@ -81,14 +81,12 @@ The default supply-chain audit runs the denylist gate before the live pnpm audit
 pnpm run audit:supply-chain
 ```
 
-CI also prepares an ephemeral npm production manifest under `.audit/` and runs
-the npm advisory gate required for release candidates:
+CI also prepares an ephemeral npm production audit root under `.audit/` from the
+committed `pnpm-lock.yaml` and runs the npm advisory gate required for release
+candidates:
 
 ```bash
-node scripts/prepare-production-npm-audit.mjs .audit/npm-production
-cd .audit/npm-production
-npm install --package-lock-only --omit=dev --ignore-scripts
-npm audit --omit=dev --audit-level=moderate
+pnpm run audit:production
 ```
 
 Filesystem scan failures are reported as scanner errors instead of aborting the
@@ -183,14 +181,17 @@ The only repository workflow allowed to publish npm packages is
   after proving it is reachable from the current `ci-green` history;
 - runs `pnpm install --frozen-lockfile` with lifecycle scripts still disabled;
 - builds explicitly, enforces the reviewed runtime package budget, requires
-  `dist/index.js` in the packlist, runs the npm production audit, creates a
-  production CycloneDX SBOM, creates an npm tarball with lifecycle scripts
-  disabled, scans that exact tarball through the safe denylist extractor, and
-  uploads the tarball plus SBOM as seven-day artifacts for protected environment
-  approval;
+  `dist/index.js` in the packlist, runs the npm production audit and CycloneDX
+  SBOM flow through `pnpm run release:sbom`, creates an npm tarball with
+  lifecycle scripts disabled, scans that exact tarball through the safe denylist
+  extractor, and uploads the tarball plus SBOM as seven-day artifacts for
+  protected environment approval;
+- runs the protected live B2 contract suite on the exact publish ref before the
+  npm publish job can start;
 - requires a protected `npm-publish` environment only for the final publish job;
 - verifies the tarball SHA-256 before publishing;
-- verifies the SBOM SHA-256 before publishing;
+- verifies the SBOM SHA-256 and attaches the SBOM to the GitHub release before
+  publishing;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
 - publishes the prebuilt tarball with lifecycle scripts disabled:
   `npm publish <tarball> --provenance --access public --ignore-scripts`.

@@ -307,17 +307,28 @@ jobs:
             echo "::error::B2_MCP_AUDIT_REPORT_JSON is test-only and must not reach CI audit jobs"
             exit 1
           fi
-      - run: node scripts/prepare-production-npm-audit.mjs .audit/npm-production
-      - name: Generate npm production audit lock
-        working-directory: .audit/npm-production
-        run: npm install --package-lock-only --omit=dev --ignore-scripts
-      - name: Run npm production audit
-        working-directory: .audit/npm-production
-        run: npm audit --omit=dev --audit-level=moderate
+      - run: pnpm run audit:production
       - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist
       - run: pnpm run audit:supply-chain
         env:
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
+
+  workflow-security:
+    name: workflow security / zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # zizmor-action v0.6.2 is pinned by SHA; version pins the zizmor CLI.
+      - uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054
+        with:
+          advanced-security: false
+          annotations: true
+          min-severity: medium
+          min-confidence: medium
+          version: 1.29.0
 
   # Publish a `ci-green` ref at the commit that passed lint + tests on main. The
   # auto-deploy host watches this ref (read-only deploy key), so only CI-green
@@ -332,6 +343,7 @@ jobs:
         deterministic-linux-current,
         cross-platform-minimum,
         supply-chain-audit,
+        workflow-security,
       ]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest

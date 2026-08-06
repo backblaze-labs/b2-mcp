@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { createRequire } from "module";
 import { listFiles, readLock, root } from "./support";
 
 type PackageLock = {
@@ -7,6 +8,11 @@ type PackageLock = {
     string,
     { dev?: boolean; version?: string; peerDependencies?: Record<string, string> }
   >;
+};
+
+const nodeRequire = createRequire(__filename);
+const { yamlBlockForKey } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  yamlBlockForKey: (text: string, key: string) => string | null;
 };
 
 function versionAtLeast(actual: string, floor: string): boolean {
@@ -144,17 +150,20 @@ describe("security dependency policy", () => {
     const dependabot = readFileSync(join(root, ".github/dependabot.yml"), "utf8");
 
     function groupBlock(group: string): string {
-      const marker = `      ${group}:\n`;
-      const start = dependabot.indexOf(marker);
-      if (start === -1) throw new Error(`Missing Dependabot group ${group}`);
-      const rest = dependabot.slice(start + marker.length);
-      const endMarkers = [
-        rest.search(/^ {6}[A-Za-z0-9_-]+:\s*$/m),
-        rest.search(/^ {4}labels:\s*$/m),
-        rest.search(/^ {2}- package-ecosystem:/m),
-      ].filter((index) => index >= 0);
-      const end = endMarkers.length > 0 ? Math.min(...endMarkers) : rest.length;
-      return rest.slice(0, end);
+      const block = yamlBlockForKey(dependabot, group);
+      if (block === null) throw new Error(`Missing Dependabot group ${group}`);
+      return block;
+    }
+
+    function dependencyIgnoreBlock(dependencyName: string): string {
+      const escaped = dependencyName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = dependabot.match(
+        new RegExp(
+          `-\\s+dependency-name:\\s+["']?${escaped}["']?[\\s\\S]*?(?=\\n\\s*-\\s+dependency-name:|\\n\\s{2}-\\s+package-ecosystem:|\\s*$)`,
+        ),
+      );
+      if (!match) throw new Error(`Missing Dependabot ignore for ${dependencyName}`);
+      return match[0];
     }
 
     expect(dependabot).toContain("package-ecosystem: npm");
@@ -178,7 +187,10 @@ describe("security dependency policy", () => {
       expect(block, `${group} must not group major updates`).not.toContain("- major");
     }
 
-    expect(dependabot).not.toContain("version-update:semver-major");
+    for (const dependencyName of ["opossum", "@types/node", "@toon-format/toon"]) {
+      const block = dependencyIgnoreBlock(dependencyName);
+      expect(block).toContain("version-update:semver-major");
+    }
   });
 
   it("keeps TypeScript on the reviewed 6.0 patch line", () => {

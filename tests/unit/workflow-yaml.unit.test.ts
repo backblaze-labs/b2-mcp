@@ -1,16 +1,20 @@
 import { createRequire } from "module";
 
 const nodeRequire = createRequire(__filename);
-const { valuesEqual, workflowJobBlock, yamlValuesForKey } = nodeRequire(
-  "../../scripts/lib/workflow-yaml.cjs",
-) as {
-  valuesEqual: (actual: string[], expected: string[]) => boolean;
-  workflowJobBlock: (text: string, jobName: string) => string | null;
-  yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
-};
+const { valuesEqual, workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey } =
+  nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+    valuesEqual: (actual: string[], expected: string[]) => boolean;
+    workflowJobBlock: (text: string, jobName: string) => string | null;
+    workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
+    yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
+    yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
+  };
 
 describe("workflow YAML helper", () => {
   const workflow = [
+    "permissions:",
+    "  actions: read",
+    "  contents: read",
     "jobs:",
     "  runtime-policy:",
     "    strategy:",
@@ -30,9 +34,17 @@ describe("workflow YAML helper", () => {
   ].join("\n");
 
   it("extracts workflow job blocks", () => {
+    expect(workflowJobBlocks(workflow).map((job) => job.name)).toEqual(["runtime-policy", "smoke"]);
     expect(workflowJobBlock(workflow, "runtime-policy")).toContain("node-version:");
     expect(workflowJobBlock(workflow, "runtime-policy")).not.toContain("os:");
     expect(workflowJobBlock(workflow, "missing")).toBeNull();
+  });
+
+  it("extracts mapping values independent of key order", () => {
+    expect(yamlMappingForKey(workflow, "permissions")).toEqual({
+      actions: "read",
+      contents: "read",
+    });
   });
 
   it("extracts block and inline matrix values independent of formatting", () => {

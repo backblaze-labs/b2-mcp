@@ -1,6 +1,15 @@
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import { spawnSync } from "child_process";
 import { createRequire } from "module";
 
@@ -257,12 +266,9 @@ describe("supply-chain audit policy", () => {
     expect(workflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
-    expect(auditJob).toContain(
-      "node scripts/prepare-production-npm-audit.mjs .audit/npm-production",
-    );
-    expect(auditJob).toContain("working-directory: .audit/npm-production");
-    expect(auditJob).toContain("npm install --package-lock-only --omit=dev --ignore-scripts");
-    expect(auditJob).toContain("npm audit --omit=dev --audit-level=moderate");
+    expect(auditJob).toContain("pnpm run audit:production");
+    expect(auditJob).not.toContain("prepare-production-npm-audit.mjs");
+    expect(auditJob).not.toContain("npm install --package-lock-only");
     expect(auditJob).toContain("fetch-depth: 0");
     expect(auditJob).toContain(
       "git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'",
@@ -283,6 +289,7 @@ describe("supply-chain audit policy", () => {
       "deterministic-linux-current",
       "cross-platform-minimum",
       "supply-chain-audit",
+      "workflow-security",
     ]) {
       expect(markGreenJob).toContain(required);
     }
@@ -296,6 +303,12 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts["audit:supply-chain:denylist"]).toBe(
       "node scripts/check-supply-chain-denylist.mjs",
     );
+    expect(packageJson.scripts["audit:production"]).toBe(
+      "node scripts/production-security-gate.mjs",
+    );
+    expect(packageJson.scripts["release:sbom"]).toBe(
+      "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
+    );
     expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
     expect(packageJson.scripts.prepublishOnly).toBeUndefined();
@@ -306,14 +319,15 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
-    expect(publishWorkflow).toContain(
-      "node scripts/prepare-production-npm-audit.mjs .audit/npm-production",
-    );
-    expect(publishWorkflow).toContain("npm audit --omit=dev --audit-level=moderate");
-    expect(publishWorkflow).toContain("npm sbom --omit=dev --sbom-format=cyclonedx");
+    expect(publishWorkflow).toContain("pnpm run release:sbom");
+    expect(publishWorkflow).not.toContain("prepare-production-npm-audit.mjs");
+    expect(publishWorkflow).not.toContain("npm sbom");
     expect(publishWorkflow).toContain("publish-package/*.cdx.json");
     expect(publishWorkflow).toContain("sbom-sha256");
     expect(publishWorkflow).toContain("EXPECTED_SBOM_SHA256");
+    expect(publishWorkflow).toContain("Attach SBOM to GitHub release");
+    expect(publishWorkflow).toContain("gh release upload");
+    expect(publishWorkflow).toContain("contents: write");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$sbom"');
@@ -419,19 +433,23 @@ describe("supply-chain audit policy", () => {
       ref: match[2],
     }));
 
-    expect(uses.length).toBeGreaterThan(0);
     for (const action of uses) {
       expect(action.ref).toMatch(/^[a-f0-9]{40}$/);
     }
   });
 
-  it("prepares an isolated npm production audit manifest", () => {
+  it("prepares an isolated npm production audit lock from pnpm-lock.yaml", () => {
     const target = join(root, ".audit/test-production-manifest");
 
     try {
       const result = spawnSync(
         process.execPath,
-        ["scripts/prepare-production-npm-audit.mjs", ".audit/test-production-manifest"],
+        [
+          "scripts/production-security-gate.mjs",
+          "--prepare-only",
+          "--audit-root",
+          ".audit/test-production-manifest",
+        ],
         {
           cwd: root,
           encoding: "utf8",
@@ -442,15 +460,114 @@ describe("supply-chain audit policy", () => {
         devDependencies?: Record<string, string>;
         private?: boolean;
       };
+      const packageLock = JSON.parse(readFileSync(join(target, "package-lock.json"), "utf8")) as {
+        packages: Record<string, { dev?: boolean; version?: string }>;
+      };
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(".audit/test-production-manifest");
+      expect(result.stdout).toContain("pnpm-lock.yaml");
       expect(productionPackage.private).toBe(true);
       expect(productionPackage.dependencies).toEqual(packageJson.dependencies);
       expect(productionPackage.devDependencies).toBeUndefined();
+      expect(packageLock.packages["node_modules/zod"].version).toBe(
+        lock.packages["node_modules/zod"].version,
+      );
+      expect(packageLock.packages["node_modules/@biomejs/biome"].dev).toBe(true);
       expect(readFileSync(join(target, ".npmrc"), "utf8")).toContain("ignore-scripts=true");
     } finally {
       rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { badTarget: "..", sentinelRoot: null },
+    {
+      badTarget: "../b2-mcp-audit-outside-test",
+      sentinelRoot: resolve(root, "../b2-mcp-audit-outside-test"),
+    },
+    {
+      badTarget: join(tmpdir(), "b2-mcp-audit-outside"),
+      sentinelRoot: join(tmpdir(), "b2-mcp-audit-outside"),
+    },
+    { badTarget: ".audit-evil", sentinelRoot: resolve(root, ".audit-evil") },
+  ])("refuses audit roots outside .audit/ for $badTarget", ({ badTarget, sentinelRoot }) => {
+    const sentinel = sentinelRoot ? join(sentinelRoot, "sentinel") : null;
+
+    if (sentinelRoot && sentinel) {
+      rmSync(sentinelRoot, { recursive: true, force: true });
+      mkdirSync(sentinelRoot, { recursive: true });
+      writeFileSync(sentinel, "do-not-delete", { flag: "wx" });
+    }
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/production-security-gate.mjs", "--prepare-only", "--audit-root", badTarget],
+        {
+          cwd: root,
+          encoding: "utf8",
+        },
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("audit root must be inside .audit/");
+      if (sentinel) expect(existsSync(sentinel)).toBe(true);
+    } finally {
+      if (sentinelRoot) rmSync(sentinelRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("retries transient npm production audit registry failures", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-production-audit-"));
+    const target = ".audit/test-production-retry";
+    const state = join(dir, "attempts");
+    const fakeNpm = join(dir, process.platform === "win32" ? "npm.cmd" : "npm");
+
+    writeFileSync(
+      fakeNpm,
+      [
+        "#!/usr/bin/env node",
+        'const fs = require("node:fs");',
+        "const state = process.env.B2_MCP_FAKE_NPM_STATE;",
+        "let attempt = 0;",
+        'try { attempt = Number(fs.readFileSync(state, "utf8")); } catch {}',
+        "attempt += 1;",
+        "fs.writeFileSync(state, String(attempt));",
+        "if (attempt === 1) {",
+        '  console.error("npm ERR! code EAI_AGAIN");',
+        '  console.error("npm ERR! advisory endpoint timed out");',
+        "  process.exit(1);",
+        "}",
+        'console.log("found 0 vulnerabilities");',
+        "process.exit(0);",
+      ].join("\n"),
+    );
+    chmodSync(fakeNpm, 0o755);
+
+    try {
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${dir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+        B2_MCP_FAKE_NPM_STATE: state,
+      };
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/production-security-gate.mjs", "--audit-root", target],
+        {
+          cwd: root,
+          env,
+          encoding: "utf8",
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("found 0 vulnerabilities");
+      expect(result.stderr).toContain("npm audit transient failure");
+      expect(readFileSync(state, "utf8")).toBe("2");
+    } finally {
+      rmSync(join(root, target), { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

@@ -79,20 +79,17 @@ tools must respect the existing guardrails:
 Production dependencies ship in `dist/`, and development dependencies run in
 CI, so review the full lockfile with `pnpm run audit:supply-chain` before
 release. `audit-policy.json` holds narrow, expiring exceptions for known
-upstream advisories; the current policy has no exceptions. CI also generates an
-ephemeral production-only npm audit root from `dependencies` and runs
-`npm audit --omit=dev --audit-level=moderate`, which currently reports no
-production vulnerabilities. Do not add untracked moderate, high, or critical
-production findings, and do not add untracked high or critical
-development-toolchain findings.
+upstream advisories; the current policy has no exceptions. CI also runs
+`pnpm run audit:production`, which derives an npm audit lock from the committed
+`pnpm-lock.yaml` and gates on `npm audit --omit=dev --audit-level=moderate`.
+That gate currently reports no production vulnerabilities. Do not add untracked
+moderate, high, or critical production findings, and do not add untracked high
+or critical development-toolchain findings.
 
 To check the production npm audit gate locally:
 
 ```bash
-node scripts/prepare-production-npm-audit.mjs .audit/npm-production
-cd .audit/npm-production
-npm install --package-lock-only --omit=dev --ignore-scripts
-npm audit --omit=dev --audit-level=moderate
+pnpm run audit:production
 ```
 
 Runtime dependency ownership and package footprint are gated by
