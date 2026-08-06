@@ -501,9 +501,11 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("Attach SBOM to GitHub release");
     expect(publishWorkflow).toContain("gh release upload");
     expect(publishWorkflow).toContain("contents: write");
+    expect(attachSbomJob).toContain("actions: read");
     expect(attachSbomJob).toContain("contents: write");
     expect(attachSbomJob).not.toContain("id-token: write");
     expect(attachSbomJob).toContain('sha256sum "$sbom"');
+    expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).not.toContain("contents: write");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
@@ -597,9 +599,11 @@ describe("supply-chain audit policy", () => {
     expect(prepareJob).toContain("pnpm run typecheck");
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
+    expect(attachSbomJob).toContain("actions: read");
     expect(attachSbomJob).toContain("contents: write");
     expect(attachSbomJob).not.toContain("id-token: write");
     expect(publishJob).toContain("id-token: write");
+    expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).not.toContain("contents: write");
     expect(publishJob).not.toContain("pnpm run typecheck");
