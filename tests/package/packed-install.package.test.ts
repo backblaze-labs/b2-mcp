@@ -1,8 +1,32 @@
 import { execFileSync } from "child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { createRequire } from "module";
 import { join, relative } from "path";
 import { tmpdir } from "os";
 import { readLock, root } from "../contract/support";
+
+const nodeRequire = createRequire(__filename);
+const { runNpmCommandWithRetries } = nodeRequire("../../scripts/lib/retry-utils.cjs") as {
+  runNpmCommandWithRetries: (
+    args: string[],
+    options?: {
+      attempts?: number;
+      retryLabel?: string;
+      spawnOptions?: {
+        cwd?: string;
+        encoding?: BufferEncoding;
+        stdio?: "pipe";
+        timeout?: number;
+      };
+    },
+  ) => {
+    error?: Error;
+    signal?: NodeJS.Signals | null;
+    status: number | null;
+    stderr?: string;
+    stdout?: string;
+  };
+};
 
 interface PackFile {
   path: string;
@@ -77,6 +101,53 @@ function committedProductionGraphMismatches(
   });
 }
 
+function assertSuccessfulNpmResult(
+  result: ReturnType<typeof runNpmCommandWithRetries>,
+  label: string,
+): void {
+  if (!result.error && result.status === 0) return;
+  throw new Error(
+    [
+      `${label} failed with status ${result.status ?? "unknown"}`,
+      result.error ? `error: ${result.error.message}` : "",
+      result.signal ? `signal: ${result.signal}` : "",
+      result.stdout ? `stdout:\n${result.stdout}` : "",
+      result.stderr ? `stderr:\n${result.stderr}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+}
+
+function installPackedConsumer(appDir: string, cacheDir: string): void {
+  const result = runNpmCommandWithRetries(
+    [
+      "install",
+      "--omit=dev",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--fetch-retries=3",
+      "--fetch-retry-factor=2",
+      "--fetch-retry-mintimeout=1000",
+      "--fetch-retry-maxtimeout=10000",
+      "--cache",
+      cacheDir,
+    ],
+    {
+      attempts: 3,
+      retryLabel: "packed consumer npm install",
+      spawnOptions: {
+        cwd: appDir,
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 180_000,
+      },
+    },
+  );
+  assertSuccessfulNpmResult(result, "packed consumer npm install");
+}
+
 describe("packed package", () => {
   it("installs from npm pack and exposes the package entry point", () => {
     const tmp = mkdtempSync(join(tmpdir(), "b2-mcp-package-"));
@@ -117,23 +188,7 @@ describe("packed package", () => {
           2,
         ),
       );
-      execFileSync(
-        "npm",
-        [
-          "install",
-          "--omit=dev",
-          "--ignore-scripts",
-          "--no-audit",
-          "--no-fund",
-          "--cache",
-          cacheDir,
-        ],
-        {
-          cwd: appDir,
-          stdio: "pipe",
-          timeout: 180_000,
-        },
-      );
+      installPackedConsumer(appDir, cacheDir);
 
       expect(
         committedProductionGraphMismatches(
