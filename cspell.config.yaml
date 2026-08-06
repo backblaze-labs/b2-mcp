@@ -43,6 +43,7 @@ files:
   - 'src/**/*.ts'
   - 'tests/**/*.ts'
   - 'scripts/**/*.{mjs,cjs}'
+  - 'skills/**/*.md'
   - 'docs/**/*.md'
   - '*.md'
   - 'CLAUDE.md'

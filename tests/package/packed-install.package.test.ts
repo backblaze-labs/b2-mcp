@@ -171,7 +171,12 @@ describe("packed package", () => {
       const packedPaths = pack.files.map((file) => file.path).sort();
 
       expect(packedPaths).toEqual(
-        expect.arrayContaining(["dist/index.js", "dist/http-server.js", "README.md"]),
+        expect.arrayContaining([
+          "dist/index.js",
+          "dist/http-server.js",
+          "README.md",
+          "skills/backup-restore/SKILL.md",
+        ]),
       );
 
       const tarball = join(packDir, pack.filename);

@@ -50,6 +50,8 @@ describe("package surface policy", () => {
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
     expect(files).toContain("docs/tool-profile-contract.json");
+    expect(files).toContain("skills/backup-restore/SKILL.md");
+    expect(files).toContain("skills/incident-response/SKILL.md");
     for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
       Object.values(profile.fixtures),
     )) {

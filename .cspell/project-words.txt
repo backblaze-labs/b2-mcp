@@ -39,12 +39,26 @@ Gonza
 sophiecarreras
 
 # Cloud, network, storage, and security terms
+billable
+client-to-B2
 creds
+cutover
+egress
 EOPENBREAKER
 exfiltration
+multipart
+noncurrent
 noout
 paginators
+preflight
+runbook
+runbooks
 sessionful
+sidecar
+SIEM
+switchover
+tenant
+tenants
 unallowed
 unparseable
 unreviewed

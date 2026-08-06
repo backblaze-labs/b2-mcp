@@ -96,6 +96,7 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run spell
       - run: pnpm run lint:docs
+      - run: pnpm run validate:skills
       - run: pnpm run build
       - id: typecheck
         continue-on-error: true
@@ -173,6 +174,7 @@ jobs:
       - run: pnpm run lint
       - run: pnpm run spell
       - run: pnpm run lint:docs
+      - run: pnpm run validate:skills
       - run: pnpm run build
       - id: typecheck
         continue-on-error: true

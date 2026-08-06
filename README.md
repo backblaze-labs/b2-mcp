@@ -68,6 +68,26 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 
 ---
 
+## Skills pack
+
+This repo ships a Phase 1 B2 skills pack in [`skills/`](skills/). The MCP server is the action layer; the skills are client-loaded Markdown playbooks for backup and restore, least-privilege keys, Object Lock, lifecycle and cost hygiene, migration handoff, and incident response.
+
+Validate the pack before publishing or changing it:
+
+```bash
+pnpm run validate:skills
+```
+
+Load the pack in clients that support skills:
+
+- **Claude Code:** copy or symlink each skill directory into `~/.claude/skills/`, then restart the session.
+- **Claude.ai / Claude Desktop:** open Settings -> Capabilities -> Skills and import the directories under `skills/`.
+- **Other MCP clients with Markdown skills:** import each `skills/<name>/SKILL.md` or skill directory according to the client's skills documentation.
+
+Skills add no B2 endpoint or credential capability. They sequence the existing MCP tools, keep object data on direct client-to-B2 or server-side-copy paths, and require an explicit confirmation pause before destructive or protection-weakening calls.
+
+---
+
 ## Configuration
 
 | Variable                                                      | Required              | Default               | Description                                                                                                                |
@@ -238,6 +258,7 @@ pnpm run test:protocol      # modern + legacy MCP protocol behavior
 pnpm run test:coverage      # deterministic source-covering suites + coverage summary
 pnpm run test:slow          # deterministic high-cost tests, isolated from unit
 pnpm run test:package       # packed-package installation test
+pnpm run validate:skills    # validate bundled B2 skill playbooks
 pnpm run verify             # complete no-credential local gate
 pnpm run test:integration:live # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 pnpm run test:contract:live    # live B2 request-shape checks; requires B2 credentials

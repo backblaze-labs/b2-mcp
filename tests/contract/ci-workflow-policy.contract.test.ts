@@ -66,6 +66,7 @@ describe("CI workflow policy", () => {
     expect(packageBudgetJob).toContain("pnpm run check:package-budget");
     expect(packageBudgetJob).toContain("Upload package budget reports");
     expect(productionJob).toContain("pnpm run build");
+    expect(productionJob).toContain("pnpm run validate:skills");
     expect(productionJob).toContain("name: Enforce global coverage floors");
     expect(productionJob).toContain("pnpm run test:coverage");
     expect(productionJob).toContain("name: Publish coverage summary");
@@ -74,6 +75,7 @@ describe("CI workflow policy", () => {
     expect(productionJob).toContain("pnpm run smoke:package");
     expect(productionJob).not.toContain("test:package");
     expect(currentJob).toContain("pnpm run test:coverage");
+    expect(currentJob).toContain("pnpm run validate:skills");
     expect(currentJob).toContain("name: Enforce global coverage floors");
     expect(currentJob).toContain("name: Publish coverage summary");
     expect(currentJob).toContain("GITHUB_STEP_SUMMARY");
