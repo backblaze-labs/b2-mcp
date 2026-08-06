@@ -54,6 +54,10 @@ async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void
 
 const LIST_TOOLS = modernBody("tools/list");
 
+function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
+  return modernBody("tools/call", { name, arguments: args }, id);
+}
+
 beforeAll(() => {
   setDefaultHttpTestEnv();
 });
@@ -189,5 +193,73 @@ describe("HTTP transport guards (MCP 2026-07-28)", () => {
     expect(settled).toBeInstanceOf(Error);
     await waitFor(() => sawAbort);
     expect(sawAbort).toBe(true);
+  });
+
+  it("returns 429 when the per-credential in-flight cap is exhausted", async () => {
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    const entered = deferred<void>();
+    const gate = deferred<void>();
+    await startHandle({
+      mcpHandler: {
+        fetch: async () => {
+          entered.resolve();
+          await gate.promise;
+          return Response.json({ jsonrpc: "2.0", id: 1, result: { content: [] } });
+        },
+        close: () => undefined,
+      },
+    });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: callToolBody("b2_list_buckets"),
+    });
+    await entered.promise; // first request holds the only per-credential slot
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: callToolBody("b2_list_buckets"),
+    });
+    expect(second.status).toBe(429);
+    expect(JSON.parse(second.body).error).toMatch(/credential/i);
+
+    gate.resolve();
+    await first;
+  });
+
+  it("rejects a JSON-RPC batch body", async () => {
+    await startHandle();
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: JSON.stringify([JSON.parse(LIST_TOOLS), JSON.parse(LIST_TOOLS)]),
+    });
+    const parsed = JSON.parse(res.body);
+    expect(res.status === 400 || parsed.error !== undefined).toBe(true);
+    expect(parsed.result).toBeUndefined();
+  });
+
+  it("ignores malformed W3C trace context without rejecting the request", async () => {
+    const captured: { traceparent?: string | null } = {};
+    await startHandle({
+      mcpHandler: {
+        fetch: async (req: Request) => {
+          captured.traceparent = req.headers.get("traceparent");
+          return Response.json({ jsonrpc: "2.0", id: 1, result: { tools: [] } });
+        },
+        close: () => undefined,
+      },
+    });
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: {
+        ...creds,
+        ...modernHeaders("tools/list"),
+        traceparent: "not-a-valid-traceparent",
+      },
+      body: LIST_TOOLS,
+    });
+
+    expect(res.status).toBe(200);
+    expect(captured.traceparent).toBe("not-a-valid-traceparent");
   });
 });
