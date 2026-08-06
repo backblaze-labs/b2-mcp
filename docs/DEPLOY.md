@@ -37,7 +37,7 @@ server does not depend on `initialize` or `Mcp-Session-Id` in production.
 - A Linux host with sudo
 - A domain name pointed at the host (A record)
 - Open ports 80 (Let's Encrypt only) and 443 inbound
-- Node.js 22.3.0 or a later patched 22 LTS release, Node.js 24, or Node.js 26.
+- Node.js 22.23.1 or a later patched 22 LTS release, Node.js 24, or Node.js 26.
   The package engine floor remains `>=22.3.0` only to match the official B2 SDK.
 
 ## Security baseline
@@ -134,8 +134,8 @@ For other providers: any VM with 2 vCPU and 4 GB RAM works.
 sudo dnf install -y nodejs git nginx certbot python3-certbot-nginx fail2ban
 node --version  # confirm patched v22 LTS, v24, or v26
 sudo corepack enable pnpm
-corepack prepare 'pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183' --activate
-pnpm --version  # confirm 10.23.0
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+pnpm --version  # confirm 11.20.0
 ```
 
 ## Step 3 — Build and run
@@ -490,7 +490,7 @@ still choose affinity for operational reasons.
 ```bash
 cd /home/ec2-user/b2-mcp
 sudo corepack enable pnpm
-corepack prepare 'pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183' --activate
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
 git pull
 pnpm install --frozen-lockfile
 pnpm run build
@@ -572,8 +572,7 @@ The smoke commands themselves do not rebuild or remove `dist/`; they use fake
 test credentials, block network access in the stdio server child, and perform no
 B2 tool calls. `smoke:client` compares the negotiated `tools/list` surface to
 the repository-owned modern contract fixture, while `smoke:inspector` provides
-pinned Inspector CLI evidence from an isolated temporary environment through
-`pnpm dlx @modelcontextprotocol/inspector@2.1.0`. The Inspector package requires
-Node.js 22.19.0 or newer and is not part of the default Node.js 22.3.0 CI
-install graph. They are not substitutes for the deterministic protocol gate or
-the live deployment smoke above.
+locked Inspector CLI evidence from an isolated temporary environment. The
+Inspector package requires Node.js 22.19.0 or newer, which is covered by the
+patched Node 22 LTS runtime pin. They are not substitutes for the deterministic
+protocol gate or the live deployment smoke above.

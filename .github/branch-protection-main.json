@@ -9,7 +9,11 @@
       "modern and legacy protocol/transport",
       "package install smoke",
       "production dependency audit",
-      "CodeQL/workflow security"
+      "package budget",
+      "supply-chain audit",
+      "CodeQL/workflow security",
+      "slow/lifecycle",
+      "cross-platform minimum"
     ]
   },
   "enforce_admins": true,

@@ -229,7 +229,6 @@ function productionManifest() {
     peerDependencies: packageJson.peerDependencies,
     bundleDependencies: packageJson.bundleDependencies,
     bundledDependencies: packageJson.bundledDependencies,
-    overrides: packageJson.overrides,
   };
   for (const key of Object.keys(manifest)) {
     if (manifest[key] === undefined) delete manifest[key];

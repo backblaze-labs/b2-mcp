@@ -7,7 +7,6 @@ describe("MCP SDK and protocol contract", () => {
     const pkg = readJson<{
       dependencies: Record<string, string>;
       devDependencies: Record<string, string>;
-      overrides?: Record<string, string | Record<string, string>>;
     }>("package.json");
     const lock = readLock<{
       packages: Record<string, { dev?: boolean; version?: string }>;
@@ -24,10 +23,9 @@ describe("MCP SDK and protocol contract", () => {
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.version).toBe(nodeVersion);
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
     expect(lock.packages["node_modules/@modelcontextprotocol/client"]?.version).toBe(clientVersion);
-    expect(pkg.overrides?.["@hono/node-server"]).toBe("2.0.10");
-    expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
-      "'@hono/node-server': 2.0.10",
-    );
+    expect(pkg).not.toHaveProperty("overrides");
+    const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
+    expect(workspace).toContain("'@hono/node-server': 2.0.10");
     expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
     expect(pkg.dependencies).not.toHaveProperty("@modelcontextprotocol/sdk");

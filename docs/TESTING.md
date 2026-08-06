@@ -40,9 +40,9 @@ Local scripts can call each deterministic layer independently. Required PR jobs
 keep the major evidence classes distinct so coverage regression, contract drift,
 protocol failure, production-audit findings, package-budget drift, and broken
 package installs fail independently. The Linux deterministic Node matrix is
-exactly Node.js 22.3.0, 24, and 26. Slow lifecycle tests run in a dedicated
+exactly Node.js 22.23.1, 24, and 26. Slow lifecycle tests run in a dedicated
 bounded job with one Vitest worker, and the cross-platform fast suite runs on
-Linux, Windows, and macOS at Node.js 22.3.0. The coverage aggregate disables file
+Linux, Windows, and macOS at Node.js 22.23.1. The coverage aggregate disables file
 parallelism so contract fixture reports, dist rebuilds, and package packing do
 not race each other.
 
@@ -55,7 +55,12 @@ The stable required PR check names are:
 - `modern and legacy protocol/transport`
 - `package install smoke`
 - `production dependency audit`
+- `package budget`
+- `supply-chain audit`
 - `CodeQL/workflow security`
+- `slow/lifecycle`
+- `cross-platform minimum`
+
 Global V8 coverage must remain at or above 82% statements, 72% branches, 86%
 functions, and 86% lines. Raise these floors as coverage improves; lowering
 them requires explicit review and justification. Coverage collection is source
@@ -91,7 +96,7 @@ required Node.js matrix. The `format/lint/typecheck` job runs the same
 `pnpm run verify` entry point used locally, and `pnpm run check:runtime-policy`
 fails if workflow or metadata runtime policy drifts. Cross-platform coverage
 stays lean: the fast stdio, CLI port parsing, local-path policy, and request
-shutdown/signal suite runs on Linux, Windows, and macOS at Node.js 22.3.0.
+shutdown/signal suite runs on Linux, Windows, and macOS at Node.js 22.23.1.
 
 TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
@@ -143,7 +148,7 @@ required deterministic, package, audit, package-budget, supply-chain, workflow
 security, slow lifecycle, and cross-platform jobs pass. It is not a PR deploy
 path. Leak diagnostics remain part of `pnpm run verify` and fail on
 `MaxListenersExceededWarning`, EventEmitter leak warnings, or Vitest close-timeout
-open-handle warnings until teardown is clean. Node.js 22.3.0, 24, and 26 are all
+open-handle warnings until teardown is clean. Node.js 22.23.1, 24, and 26 are all
 required CI evidence for Phase 1.
 
 Branch protection for `main` must require the stable check names above, require
@@ -151,7 +156,9 @@ at least one approving review, dismiss stale approvals when new commits are
 pushed, require branches to be up to date before merge, and block force pushes.
 The reviewed settings are recorded in
 [`../.github/branch-protection-main.json`](../.github/branch-protection-main.json).
-Do not add B2 credential requirements to normal pull-request checks.
+Do not add B2 credential requirements to normal pull-request checks. This
+rollout is blocked until a repository admin applies the checked-in policy and
+reads it back from GitHub matching the committed contexts and review settings.
 
 ## MCP Protocol Matrix
 
@@ -184,10 +191,9 @@ until they prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned by the repository wrapper to
 `@modelcontextprotocol/inspector@2.1.0`. That Inspector release requires
-Node.js 22.19.0 or newer, so it is supplemental evidence and is intentionally
-kept outside the default Node.js 22.3.0 install graph. Install project
-dependencies, build from a non-serving checkout, then run the pinned Inspector
-CLI through the wrapper:
+Node.js 22.19.0 or newer, so it is supplemental evidence for the patched Node
+22 LTS development/runtime pin. Install project dependencies, build from a
+non-serving checkout, then run the locked Inspector CLI through the wrapper:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -195,7 +201,7 @@ pnpm run build
 pnpm run smoke:inspector
 ```
 
-`smoke:inspector` uses `pnpm dlx @modelcontextprotocol/inspector@2.1.0`, an
+`smoke:inspector` uses `pnpm exec mcp-inspector` from the committed lockfile, an
 isolated temporary home/cache, fake B2 credentials, and the same no-network
 server guard as `smoke:client`.
 
@@ -391,6 +397,6 @@ that consumes `B2_*` secrets must use a protected GitHub environment, fail
 loudly when manually dispatched outside `main`, check out `ci-green` before any
 repository code runs with secrets, serialize live write tests, and reference
 only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
-serially on Node.js 22.3.0, Node.js 24, and Node.js 26. Release-triggered
+serially on Node.js 22.23.1, Node.js 24, and Node.js 26. Release-triggered
 live workflows must first prove the `v*` release tag is reachable from
 `ci-green`.

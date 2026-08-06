@@ -34,7 +34,7 @@ Phase 1 migration and for the public MCP tool contract freeze.
   `@modelcontextprotocol/node` or its web-framework dependency. The monolithic
   `@modelcontextprotocol/sdk` v1 package is not an allowed direct or runtime
   dependency; the only allowed lockfile presence is a dev-only transitive of the
-  pinned Inspector CLI.
+  locked Inspector CLI.
 
 ## Package Policy
 

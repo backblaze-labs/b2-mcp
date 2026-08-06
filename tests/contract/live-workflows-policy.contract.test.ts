@@ -114,6 +114,14 @@ describe("live secret workflow policy", () => {
     expect(text).not.toContain("cron:");
   });
 
+  it("keeps live smoke on a scheduled heartbeat through ci-green", () => {
+    const text = workflowText(".github/workflows/smoke.yml");
+    expect(text).toMatch(/^\s{2}schedule:\s*$/m);
+    expect(text).toContain('cron: "17 */6 * * *"');
+    expect(text).toContain('[[ "$GITHUB_EVENT_NAME" == "schedule" ]]');
+    expect(text).toContain("Scheduled smoke will run against ${protected_ref}");
+  });
+
   it("keeps package-budget off the live contract dependency chain", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = workflowJobBlock(text, "contract") ?? "";

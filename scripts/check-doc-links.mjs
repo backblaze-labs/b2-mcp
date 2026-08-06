@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,17 +8,28 @@ const root = path.resolve(
 );
 const skippedDirs = new Set([".git", "coverage", "dist", "node_modules", "reports"]);
 const markdownLinkPattern = /!?\[[^\]\n]+\]\(([^)\n]+)\)/g;
+const referenceDefinitionPattern = /^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*(\S+)/gm;
 
-function listMarkdownFiles(dir) {
+function isInsideRoot(candidate, rootDir) {
+  return candidate === rootDir || candidate.startsWith(`${rootDir}${path.sep}`);
+}
+
+function listMarkdownFiles(dir, { rootRealpath, visited }) {
+  const dirRealpath = realpathSync(dir);
+  if (!isInsideRoot(dirRealpath, rootRealpath) || visited.has(dirRealpath)) return [];
+  visited.add(dirRealpath);
+
   const entries = readdirSync(dir)
     .map((name) => path.join(dir, name))
     .sort();
   const files = [];
   for (const entry of entries) {
     const name = path.basename(entry);
-    const stat = statSync(entry);
+    const stat = lstatSync(entry);
+    if (stat.isSymbolicLink()) continue;
     if (stat.isDirectory()) {
-      if (!skippedDirs.has(name)) files.push(...listMarkdownFiles(entry));
+      if (!skippedDirs.has(name))
+        files.push(...listMarkdownFiles(entry, { rootRealpath, visited }));
     } else if (entry.endsWith(".md")) {
       files.push(entry);
     }
@@ -26,8 +37,54 @@ function listMarkdownFiles(dir) {
   return files;
 }
 
-function stripCodeFences(text) {
-  return text.replace(/^```[\s\S]*?^```/gm, (block) => "\n".repeat(block.split("\n").length - 1));
+function stripInlineCode(line) {
+  let output = "";
+  for (let index = 0; index < line.length; ) {
+    if (line[index] !== "`") {
+      output += line[index];
+      index += 1;
+      continue;
+    }
+
+    let ticks = 1;
+    while (line[index + ticks] === "`") ticks += 1;
+    const closing = line.indexOf("`".repeat(ticks), index + ticks);
+    if (closing === -1) {
+      output += line.slice(index);
+      break;
+    }
+    index = closing + ticks;
+  }
+  return output;
+}
+
+function stripMarkdownCode(text) {
+  const lines = text.split(/\r?\n/);
+  const output = [];
+  let fence = null;
+
+  for (const line of lines) {
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fence) {
+      output.push("");
+      if (fenceMatch?.[1].startsWith(fence.char) && fenceMatch[1].length >= fence.length) {
+        fence = null;
+      }
+      continue;
+    }
+    if (fenceMatch) {
+      fence = { char: fenceMatch[1][0], length: fenceMatch[1].length };
+      output.push("");
+      continue;
+    }
+    if (/^(?: {4}|\t)/.test(line)) {
+      output.push("");
+      continue;
+    }
+    output.push(stripInlineCode(line));
+  }
+
+  return output.join("\n");
 }
 
 function normalizeTarget(rawTarget) {
@@ -54,9 +111,13 @@ function linkPath(target) {
 
 export function docLinkFindings({ rootDir = root } = {}) {
   const findings = [];
-  for (const file of listMarkdownFiles(rootDir)) {
-    const text = stripCodeFences(readFileSync(file, "utf8"));
-    for (const match of text.matchAll(markdownLinkPattern)) {
+  const rootRealpath = realpathSync(rootDir);
+  for (const file of listMarkdownFiles(rootDir, { rootRealpath, visited: new Set() })) {
+    const text = stripMarkdownCode(readFileSync(file, "utf8"));
+    for (const match of [
+      ...text.matchAll(markdownLinkPattern),
+      ...text.matchAll(referenceDefinitionPattern),
+    ]) {
       if (match[0].startsWith("!")) continue;
       const target = normalizeTarget(match[1]);
       if (!target || target.startsWith("#") || isExternalTarget(target)) continue;

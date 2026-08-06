@@ -205,6 +205,19 @@ function collectProductionKeys(lock) {
   return production;
 }
 
+function collectDirectProductionKeys(lock) {
+  const importer = lock.importers?.["."] ?? {};
+  const direct = new Set();
+
+  for (const section of ["dependencies", "optionalDependencies"]) {
+    for (const [name, entry] of Object.entries(importer[section] ?? {})) {
+      direct.add(dependencySnapshotKey(name, entry?.version ?? entry, `importer ${section}`));
+    }
+  }
+
+  return direct;
+}
+
 function assertObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`pnpm lock ${label} must be an object`);
@@ -213,7 +226,7 @@ function assertObject(value, label) {
 
 function assertSupportedLockfileVersion(version) {
   const match = String(version ?? "").match(/^(\d+)(?:\.\d+)?$/);
-  // package.json pins pnpm@10.23.0, which emits lockfileVersion 9. A pnpm
+  // package.json pins pnpm@11.20.0, which emits lockfileVersion 9. A pnpm
   // packageManager bump that changes this format must update this parser and
   // tests in the same review.
   if (!match || Number(match[1]) !== 9) {
@@ -236,6 +249,7 @@ function validatePnpmLockShape(lock) {
 function pnpmLockToPackageLock(lock, packageJson = {}) {
   validatePnpmLockShape(lock);
   const productionKeys = collectProductionKeys(lock);
+  const directProductionKeys = collectDirectProductionKeys(lock);
   const packageRecords = [];
 
   for (const [key, metadata] of Object.entries(lock.packages ?? {})) {
@@ -260,6 +274,8 @@ function pnpmLockToPackageLock(lock, packageJson = {}) {
       metadata: metadata ?? {},
       snapshot: lock.snapshots?.[matchingSnapshotKey] ?? {},
       production: productionKeys.has(matchingSnapshotKey) || productionKeys.has(key),
+      directProduction:
+        directProductionKeys.has(matchingSnapshotKey) || directProductionKeys.has(key),
     });
   }
 
@@ -312,9 +328,11 @@ function pnpmLockToPackageLock(lock, packageJson = {}) {
   };
 
   for (const records of byName.values()) {
-    records.sort((left, right) =>
-      left.version.localeCompare(right.version, undefined, { numeric: true }),
-    );
+    records.sort((left, right) => {
+      if (left.directProduction !== right.directProduction) return left.directProduction ? -1 : 1;
+      if (left.production !== right.production) return left.production ? -1 : 1;
+      return left.version.localeCompare(right.version, undefined, { numeric: true });
+    });
     for (const [index, record] of records.entries()) {
       const resolution = record.metadata.resolution ?? {};
       const { resolved, resolvedSource } = registryResolution(

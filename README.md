@@ -25,14 +25,14 @@ Destructive actions are gated, durable B2 secrets never enter the model's contex
 
 ## Quick start
 
-**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need). Use Node.js 22.3.0 or a later patched 22 LTS release for local/deployed 22.x hosts; CI verifies production dependencies at the SDK floor (`>=22.3.0`) and runs the full toolchain on Node.js 22.3.0, 24, and 26.
+**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need). Use Node.js 22.23.1 or a later patched 22 LTS release for local/deployed 22.x hosts; the package engine remains `>=22.3.0` for consumer compatibility, while CI runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 **1. Build:**
 
 ```bash
 cd b2-mcp
 corepack enable pnpm
-corepack prepare 'pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183' --activate
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
 pnpm install
 pnpm run build          # produces dist/ — required before first run
 ```
@@ -245,14 +245,13 @@ pnpm run test:contract:live    # live B2 request-shape checks; requires B2 crede
 pnpm start                  # stdio transport
 pnpm run start:http --port 3000      # MCP 2026-07-28 HTTP transport
 pnpm run smoke:client       # advisory SDK client smoke; requires existing dist/, no B2 calls
-pnpm run smoke:inspector    # advisory pinned Inspector CLI smoke; requires existing dist/
+pnpm run smoke:inspector    # advisory locked Inspector CLI smoke; requires existing dist/
 ```
 
 Compatible MCP Inspector release for isolated manual inspection:
 `@modelcontextprotocol/inspector@2.1.0`, which requires Node.js 22.19.0 or
-newer. Run it through `pnpm run smoke:inspector` so the command uses
-`pnpm dlx @modelcontextprotocol/inspector@2.1.0` and a sanitized temporary
-environment.
+newer. Run it through `pnpm run smoke:inspector` so the command uses the
+committed lockfile and a sanitized temporary environment.
 
 ## Documentation
 

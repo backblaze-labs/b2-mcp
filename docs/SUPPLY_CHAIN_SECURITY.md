@@ -21,9 +21,10 @@ for `pnpm run lint:docs`, where it validates TSDoc syntax and JSDoc hygiene for
 the exported TypeScript tool/handler surface that Biome cannot validate. The
 direct doc-lint packages are exact-pinned in `package.json`; the lockfile
 snapshot above remains unchanged after reintroducing that narrow ESLint path.
-The `@typescript-eslint/visitor-keys` override keeps its `eslint-visitor-keys`
-resolution on a Node.js 22.3-compatible release so the full lockfile still
-installs under the advertised package engine floor with `pnpm install --frozen-lockfile`.
+Reviewer-owned dependency overrides live only in
+[`../pnpm-workspace.yaml`](../pnpm-workspace.yaml), where the current entries
+pin reviewed transitive fixes for `@hono/node-server`, `brace-expansion`, and
+`js-yaml` without duplicating override policy in `package.json`.
 
 Those are not the denied malicious versions recorded in the checked-in Wiz IOC
 snapshot at [`../security/iocs/keyv-packages.csv`](../security/iocs/keyv-packages.csv)

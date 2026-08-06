@@ -75,13 +75,12 @@ describe("security dependency policy", () => {
       pkg.devDependencies["@modelcontextprotocol/node"],
     );
     expect(lock.packages["node_modules/@modelcontextprotocol/node"]?.dev).toBe(true);
-    expect(pkg.overrides?.["@hono/node-server"]).toBe("2.0.10");
+    expect(pkg).not.toHaveProperty("overrides");
     expect(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")).toContain(
       "'@hono/node-server': 2.0.10",
     );
     expect(lock.packages["node_modules/@hono/node-server"]?.version).toBe("2.0.10");
     expect(lock.packages["node_modules/@hono/node-server"]?.dev).toBe(true);
-    expect(pkg.overrides ?? {}).not.toHaveProperty("hono");
   });
 
   it("keeps the B2 SDK simulator out of production source and built output", () => {

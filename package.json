@@ -2,7 +2,7 @@
   "name": "@backblaze-labs/b2-mcp",
   "version": "0.1.0",
   "description": "MCP server for Backblaze B2 with frozen Phase 1 B2 and S3-compatible tool profiles",
-  "packageManager": "pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183",
+  "packageManager": "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -96,7 +96,8 @@
     "@types/node": "22.3.0",
     "@types/opossum": "^8.1.9",
     "@vitest/coverage-v8": "^4.1.10",
-    "cspell": "9.4.0",
+    "@modelcontextprotocol/inspector": "2.1.0",
+    "cspell": "^10.0.1",
     "eslint": "9.39.1",
     "eslint-plugin-jsdoc": "50.8.0",
     "eslint-plugin-tsdoc": "0.5.2",
@@ -104,7 +105,6 @@
     "ts-node": "^10.9.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
-    "vite": "6.4.3",
     "vitest": "^4.1.10"
   },
   "engines": {
@@ -119,18 +119,5 @@
     "CHANGELOG.md",
     "SECURITY.md",
     "LICENSE"
-  ],
-  "overrides": {
-    "@istanbuljs/load-nyc-config": {
-      "js-yaml": "3.15.1"
-    },
-    "@typescript-eslint/visitor-keys": {
-      "eslint-visitor-keys": "4.2.1"
-    },
-    "minimatch@3.1.5": {
-      "brace-expansion": "1.1.18"
-    },
-    "@hono/node-server": "2.0.10",
-    "vite": "6.4.3"
-  }
+  ]
 }

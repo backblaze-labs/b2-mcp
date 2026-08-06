@@ -158,11 +158,8 @@ requireEqual(
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
   policy.engineFloor,
 );
-requireEqual(
-  "runtime-policy runtime install floor",
-  `>=${policy.runtimeInstallNode}`,
-  policy.engineFloor,
-);
+requireEqual("runtime-policy runtime install pin", policy.runtimeInstallNode, policy.node22Pinned);
+requireNode22LtsPatch("runtime-policy runtime install pin", policy.runtimeInstallNode, policy);
 
 const nvmrc = read(".nvmrc").trim();
 requireExactNode22Pin(".nvmrc", nvmrc, policy);
@@ -244,6 +241,12 @@ for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smo
 requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
 requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("CONTRIBUTING.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("RELEASE.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("CHANGELOG.md", policy.crossPlatformNode, "patched Node 22 pin");
+requireContains("CONTRIBUTING.md", packageJson.packageManager, "package manager pin");
+requireContains("README.md", packageJson.packageManager, "package manager pin");
+requireContains("docs/DEPLOY.md", packageJson.packageManager, "package manager pin");
 
 if (errors.length > 0) {
   for (const error of errors) console.error(`runtime-policy: ${error}`);

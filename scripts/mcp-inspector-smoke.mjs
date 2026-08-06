@@ -72,8 +72,8 @@ export function pnpmInvocation(sourceEnv = process.env) {
 
 export function pnpmExecArgs(userArgs = [], rootDir = root) {
   return [
-    "dlx",
-    `${INSPECTOR_PACKAGE}@${INSPECTOR_VERSION}`,
+    "exec",
+    "mcp-inspector",
     ...(userArgs.length > 0 ? userArgs : defaultInspectorCliArgs(rootDir)),
   ];
 }

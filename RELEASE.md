@@ -28,13 +28,14 @@ Before publishing `v0.1.0`:
 1. Confirm `docs/V1_SCOPE.md` still matches the implemented package, runtime,
    tool profiles, and MCP transport contract.
 2. Confirm operators use a patched Node 22 LTS release (`.nvmrc`) or Node.js 24
-   or 26. Keep CI production-dependency installation evidence on Node.js 22.3.0
-   and full toolchain evidence on Node.js 22.23.1. Build release artifacts on
-   the patched Node 22 LTS pin, then run the deterministic local gate: `npm ci`,
-   `npm run build`, `npm run typecheck`, `npm run lint`,
-   `npm run format:check`, `npm test`, `npm run test:integration`,
-   `npm run test:contract`, `npm run smoke:package`, and
-   `npm run audit:supply-chain`. Also run the production npm advisory gate with
+   or 26. Keep CI production-dependency, deterministic, and live workflow
+   evidence on Node.js 22.23.1, 24, and 26. Build release artifacts on the
+   patched Node 22 LTS pin, then run the deterministic local gate:
+   `pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run typecheck`,
+   `pnpm run lint`, `pnpm run format:check`, `pnpm test`,
+   `pnpm run test:contract`, `pnpm run test:protocol`,
+   `pnpm run test:package`, and `pnpm run audit:supply-chain`.
+   Also run the production npm advisory gate with
    `pnpm run audit:production`; use `pnpm run release:sbom` when release SBOM
    generation is required.
 3. Review `audit-policy.json` and risk-accept only unexpired, documented,

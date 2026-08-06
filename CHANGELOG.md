@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Added deterministic test-layer scripts, JUnit/Vitest summaries, coverage
-  summaries, packed-package install coverage, and the `npm run verify`
+  summaries, packed-package install coverage, and the `pnpm run verify`
   no-credential gate.
 - Added live-safe test reporting: live layers keep JSON summaries but avoid
   third-party JUnit reporters while B2 credentials are present.
@@ -39,24 +39,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Split unit, contract, modern protocol, legacy protocol, slow, package, and
-  live test files by stable suffix so `npm test` works from a clean checkout
+  live test files by stable suffix so `pnpm test` works from a clean checkout
   without relying on `dist/`.
 - Migrated deterministic test layers from Jest to Vitest projects and extended
   coverage to every non-live layer.
-- Restored `npm test` typechecking, made package-install
-  verification use the npm cache offline, and kept it off the `ci-green`
+- Restored `pnpm test` typechecking, made package-install
+  verification use the pnpm cache offline, and kept it off the `ci-green`
   deploy-gating path.
 - Canonicalized repository, package, workflow, security, and setup metadata for
   `backblaze-labs/b2-mcp`.
 - Aligned package metadata on the `0.1.0` Phase 1 release line.
 - Aligned the enforced runtime policy with the official B2 SDK floor:
-  `engines.node` is `>=22.3.0`, CI verifies production dependencies at Node.js
-  22.3.0 and the full toolchain on Node.js 22.23.1, 24, and 26, local and live
-  22.x jobs use a patched Node 22 LTS release, and workflow drift is checked
-  from `runtime-policy.json`.
+  `engines.node` is `>=22.3.0`, CI verifies production dependencies and the full
+  toolchain on Node.js 22.23.1, 24, and 26, local and live 22.x jobs use a
+  patched Node 22 LTS release, and workflow drift is checked from
+  `runtime-policy.json`.
 - Migrated linting and Biome-supported formatting from ESLint and Prettier to
-  Biome while keeping the existing npm script names used by CI and
-  `npm run verify`; Markdown and YAML files are no longer part of the automated
+  Biome while keeping the existing package script names used by CI and
+  `pnpm run verify`; Markdown and YAML files are no longer part of the automated
   format gate.
 - Exact-pinned the runtime-sensitive `opossum` dependency and changed the packed
   consumer smoke gate to exercise a fresh lockfile-less npm install path.

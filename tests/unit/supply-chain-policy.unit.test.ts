@@ -431,7 +431,7 @@ describe("supply-chain audit policy", () => {
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist",
     );
     expect(productionAuditJob).toContain("node scripts/production-security-gate.mjs");
-    expect(productionAuditJob).toContain("node-version: [22.3.0, 24, 26]");
+    expect(productionAuditJob).toContain("node-version: [22.23.1, 24, 26]");
     expect(productionAuditJob).toContain("package-manager-cache: false");
     expect(productionAuditJob).not.toContain("pnpm install");
     expect(productionAuditJob).not.toContain("prepare-production-npm-audit.mjs");
@@ -454,11 +454,12 @@ describe("supply-chain audit policy", () => {
       "format-lint-typecheck",
       "unit-coverage",
       "package-install-smoke",
-      "cross-platform-minimum",
+      "cross-platform-minimum-required",
       "production-dependency-audit",
       "package-budget",
       "supply-chain-audit",
       "codeql-workflow-security",
+      "slow-lifecycle",
     ]) {
       expect(markGreenJob).toContain(required);
     }

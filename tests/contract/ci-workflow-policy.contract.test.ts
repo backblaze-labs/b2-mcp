@@ -4,12 +4,13 @@ import { createRequire } from "module";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
-const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey } = nodeRequire(
+const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey } = nodeRequire(
   "../../scripts/lib/workflow-yaml.cjs",
 ) as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
   workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
   yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
+  yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
 
 const pnpmSetupAction = "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86";
@@ -40,7 +41,11 @@ const requiredJobNames = [
   "modern and legacy protocol/transport",
   "package install smoke",
   "production dependency audit",
+  "package budget",
+  "supply-chain audit",
   "CodeQL/workflow security",
+  "slow/lifecycle",
+  "cross-platform minimum",
 ];
 
 describe("CI workflow policy", () => {
@@ -93,7 +98,7 @@ describe("CI workflow policy", () => {
       "supply-chain-audit",
       "codeql-workflow-security",
       "slow-lifecycle",
-      "cross-platform-minimum",
+      "cross-platform-minimum-required",
     ]) {
       expect(markGreen).toContain(required);
     }
@@ -102,9 +107,25 @@ describe("CI workflow policy", () => {
     expect(markGreen).toContain("Advanced owned ci-green marker");
   });
 
+  it("requires every ci-green dependency in branch protection", () => {
+    const contexts = branchProtection.required_status_checks?.contexts ?? [];
+    const markGreen = workflowJob("mark-green");
+    const needs = yamlValuesForKey(markGreen, "needs").find(Array.isArray) as string[] | undefined;
+    expect(needs).toBeDefined();
+
+    for (const jobId of needs ?? []) {
+      const job = workflowJob(jobId);
+      const jobName = job.match(/^\s+name:\s*(.+)$/m)?.[1]?.trim();
+      expect(jobName, `${jobId} must declare a stable check name`).toBeTruthy();
+      expect(contexts, `${jobId} (${jobName}) must be required by branch protection`).toContain(
+        jobName,
+      );
+    }
+  });
+
   it("runs the same local verify entry point in the primary quality job", () => {
     const qualityJob = workflowJob("format-lint-typecheck");
-    expect(qualityJob).toContain("node-version: 22.3.0");
+    expect(qualityJob).toContain("node-version: 22.23.1");
     expect(qualityJob).toContain("pnpm run verify");
     expect(qualityJob).toContain("primary-verify-reports");
   });
@@ -120,11 +141,12 @@ describe("CI workflow policy", () => {
     const auditAggregateJob = workflowJob("production-dependency-audit");
     const budgetJob = workflowJob("package-budget");
     const slowJob = workflowJob("slow-lifecycle");
+    const crossPlatformAggregateJob = workflowJob("cross-platform-minimum-required");
 
     expect(docsJob).toContain("pnpm run lint:docs");
     expect(docsJob).toContain("pnpm run spell");
     expect(docsJob).toContain("pnpm run lint:links");
-    expect(coverageJob).toContain("node-version: [22.3.0, 24, 26]");
+    expect(coverageJob).toContain("node-version: [22.23.1, 24, 26]");
     expect(coverageJob).toContain("pnpm run test:coverage");
     expect(coverageJob).toContain("coverage/**");
     expect(coverageJob).toContain("retention-days: 7");
@@ -136,7 +158,7 @@ describe("CI workflow policy", () => {
     expect(protocolJob).toContain("protocol-*.json");
     expect(packageJob).toContain("pnpm run test:package");
     expect(packageJob).toContain("npm-pack-manifest.json");
-    expect(auditJob).toContain("node-version: [22.3.0, 24, 26]");
+    expect(auditJob).toContain("node-version: [22.23.1, 24, 26]");
     expect(auditJob).toContain("node scripts/production-security-gate.mjs");
     expect(auditAggregateJob).toContain("name: production dependency audit");
     expect(auditAggregateJob).toContain("needs: production-dependency-audit-matrix");
@@ -145,6 +167,8 @@ describe("CI workflow policy", () => {
     expect(slowJob).toContain("timeout-minutes: 20");
     expect(slowJob).toContain("VITEST_MAX_WORKERS: 1");
     expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1 --minWorkers=1");
+    expect(crossPlatformAggregateJob).toContain("name: cross-platform minimum");
+    expect(crossPlatformAggregateJob).toContain("needs: cross-platform-minimum");
   });
 
   it("publishes a compact conformance summary with protocol and budget evidence", () => {
@@ -153,7 +177,7 @@ describe("CI workflow policy", () => {
     expect(summaryJob).toContain(
       "Legacy MCP fallback | 2025-era stateless initialize compatibility",
     );
-    expect(summaryJob).toContain("Linux deterministic Node matrix | 22.3.0, 24, 26");
+    expect(summaryJob).toContain("Linux deterministic Node matrix | 22.23.1, 24, 26");
     expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
   });
 
@@ -176,7 +200,7 @@ describe("CI workflow policy", () => {
 
   it("sets up pinned pnpm before any workflow job uses pnpm", () => {
     expect(packageJson.packageManager).toBe(
-      "pnpm@10.23.0+sha256.a1cdd7b468386a9d78a081da05d6049d7e598db62a299db92df21a7062a4b183",
+      "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
     );
 
     for (const relativePath of workflowPaths) {
@@ -235,7 +259,7 @@ describe("CI workflow policy", () => {
   it("keeps the cross-platform fast suite on the minimum Node runtime", () => {
     const crossPlatformJob = workflowJob("cross-platform-minimum");
     expect(crossPlatformJob).toContain("os: [ubuntu-latest, windows-latest, macos-latest]");
-    expect(crossPlatformJob).toContain("node-version: 22.3.0");
+    expect(crossPlatformJob).toContain("node-version: 22.23.1");
     expect(crossPlatformJob).toContain("pnpm run test:cross-platform");
   });
 
@@ -247,7 +271,7 @@ describe("CI workflow policy", () => {
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("environment: live-b2-contract");
     expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
-    expect(liveContract).toContain("node-version: [22.3.0, 24, 26]");
+    expect(liveContract).toContain("node-version: [22.23.1, 24, 26]");
     expect(liveContract).toContain("Validate live B2 environment");
     expect(liveContract).toContain("LIVE_B2_KEY_ID");
     expect(liveContract).toContain("LIVE_B2_KEY");
