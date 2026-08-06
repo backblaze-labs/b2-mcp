@@ -115,6 +115,30 @@ describe("Markdown link checker", () => {
     }
   });
 
+  it("rejects local links whose symlink target escapes the repository", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-doc-links-target-symlink-"));
+    const outside = mkdtempSync(join(tmpdir(), "b2-mcp-doc-links-target-outside-"));
+    try {
+      mkdirSync(join(dir, "docs"));
+      writeFileSync(join(outside, "outside.md"), "# Outside\n");
+      try {
+        symlinkSync(join(outside, "outside.md"), join(dir, "docs/target.md"), "file");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EPERM") return;
+        throw error;
+      }
+      writeFileSync(join(dir, "README.md"), "[Target](docs/target.md)\n");
+
+      const result = runDocLinks(dir);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("links outside the repository: docs/target.md");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it("checks reference-style local link definitions", () => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-doc-links-reference-"));
     try {

@@ -136,6 +136,11 @@ export function docLinkFindings({ rootDir = root } = {}) {
       }
       if (!existsSync(resolved)) {
         findings.push(`${path.relative(rootDir, file)} has a broken local link: ${target}`);
+        continue;
+      }
+      const realTarget = realpathSync(resolved);
+      if (!isInsideRoot(realTarget, rootRealpath)) {
+        findings.push(`${path.relative(rootDir, file)} links outside the repository: ${target}`);
       }
     }
   }
