@@ -171,7 +171,7 @@ describe("security dependency policy", () => {
     expect(dependabot).toContain("semver-major-days: 7");
     expect(dependabot).toContain("semver-minor-days: 3");
     expect(dependabot).toContain("semver-patch-days: 3");
-    expect(dependabot).toContain("default-days: 3");
+    expect(dependabot).toContain("default-days: 7");
 
     for (const group of [
       "b2-sdk",
