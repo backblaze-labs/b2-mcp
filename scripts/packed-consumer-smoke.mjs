@@ -123,6 +123,42 @@ function installedBin(name) {
   );
 }
 
+function installedPackageFile(relativePath) {
+  return path.join(workspace, "node_modules", "@backblaze-labs", "b2-mcp", relativePath);
+}
+
+function referenceNginxProxyHeaders(nginxConfig) {
+  const mcpLocation = nginxConfig.match(/location\s+=\s+\/mcp\s+\{(?<body>[\s\S]*?)\n\s{4}\}/)
+    ?.groups?.body;
+  assert(mcpLocation, "reference nginx /mcp location missing");
+  return new Map(
+    Array.from(mcpLocation.matchAll(/proxy_set_header\s+([^\s]+)\s+([^;]+);/g)).map((match) => [
+      match[1],
+      match[2],
+    ]),
+  );
+}
+
+function smokeReferenceNginxConfig() {
+  const nginxConfig = readFileSync(
+    installedPackageFile("deploy/customer-hosted/nginx.conf"),
+    "utf8",
+  );
+  const headers = referenceNginxProxyHeaders(nginxConfig);
+  assert(
+    nginxConfig.includes("proxy_pass_request_headers off;"),
+    "reference nginx should rebuild upstream request headers",
+  );
+  assert(
+    headers.get("Content-Type") === "$http_content_type",
+    "reference nginx should forward the incoming request Content-Type",
+  );
+  assert(
+    !nginxConfig.includes("proxy_set_header Content-Type $content_type;"),
+    "reference nginx should not forward nginx response Content-Type",
+  );
+}
+
 function packageRuntimeEnv(extra = {}) {
   return sanitizedEnv(
     {
@@ -683,6 +719,8 @@ try {
   } else {
     const b2McpBin = installedBin("b2-mcp");
     const serverAliasBin = installedBin("b2-mcp-server");
+
+    smokeReferenceNginxConfig();
 
     for (const bin of [b2McpBin, serverAliasBin]) {
       const help = runPath(bin, ["--help"]);

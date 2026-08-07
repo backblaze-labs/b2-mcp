@@ -215,6 +215,8 @@ describe("package surface policy", () => {
     );
     expect(nginx).toContain('proxy_set_header Connection "";');
     expect(nginx).toContain("proxy_set_header X-Forwarded-For $remote_addr;");
+    expect(nginx).toContain("proxy_set_header Content-Type $http_content_type;");
+    expect(nginx).not.toContain("proxy_set_header Content-Type $content_type;");
 
     expect(envExample).toContain("B2_ALLOWED_HOSTS=mcp.example.com");
     expect(envExample).toContain("B2_ALLOWED_ORIGINS=https://client.example.com");
