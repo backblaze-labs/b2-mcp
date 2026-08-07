@@ -53,8 +53,9 @@ Before publishing `v0.1.0`:
    provenance is enabled before publishing or advertising npm install commands.
 8. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
    `LIVE_B2_KEY` plus environment variable `B2_LIVE_TEST_ACCOUNT_ID`. Confirm
-   `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus `MCP_URL`,
-   `B2_SMOKE_BUCKET`, and `B2_MCP_EXPECTED_TOOL_PROFILE`. Do not duplicate live
+   `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus
+   environment variables `MCP_URL`, `B2_SMOKE_BUCKET`, and
+   `B2_MCP_EXPECTED_TOOL_PROFILE`. Do not duplicate live
    B2 credentials at repository scope or in `npm-publish`; the called contract
    workflow resolves them from `live-b2-contract`. Manually dispatch smoke and
    contract from `main`. Security owns credential rotation. The live jobs run
