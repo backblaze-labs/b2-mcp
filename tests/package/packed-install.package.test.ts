@@ -9,7 +9,10 @@ import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { readLock, root } from "../contract/support";
 
 const nodeRequire = createRequire(__filename);
-const { runNpmCommandWithRetries } = nodeRequire("../../scripts/lib/retry-utils.cjs") as {
+const { npmInvocation, runNpmCommandWithRetries } = nodeRequire(
+  "../../scripts/lib/retry-utils.cjs",
+) as {
+  npmInvocation: (args: string[]) => { command: string; args: string[] };
   runNpmCommandWithRetries: (
     args: string[],
     options?: {
@@ -165,7 +168,8 @@ describe("packed package", () => {
       const repoPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageJson;
       const repoLock = readLock<PackageLock>();
 
-      const packOutput = execFileSync("npm", ["pack", "--json", "--pack-destination", packDir], {
+      const packCommand = npmInvocation(["pack", "--json", "--pack-destination", packDir]);
+      const packOutput = execFileSync(packCommand.command, packCommand.args, {
         cwd: root,
         encoding: "utf8",
         timeout: 120_000,

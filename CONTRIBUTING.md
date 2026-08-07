@@ -33,8 +33,8 @@ mamba run -n b2-mcp pnpm install --frozen-lockfile
 ```
 
 Live tests need real B2 credentials and are not run in the default suite. Use
-`pnpm run test:integration:live` for live integration behavior and
-`pnpm run test:contract:live` for live request-shape checks; both require
+`pnpm run test:live:b2-integration` for live integration behavior and
+`pnpm run test:live:b2-contract` for live request-shape checks; both require
 `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY`.
 
 Biome is the sole formatter in this repository. The `format` and `format:check`

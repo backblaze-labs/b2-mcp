@@ -1,9 +1,14 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
 import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
+const nodeRequire = createRequire(__filename);
+const { npmInvocation } = nodeRequire("../../scripts/lib/retry-utils.cjs") as {
+  npmInvocation: (args: string[]) => { command: string; args: string[] };
+};
 
 function readJson<T>(relativePath: string): T {
   return JSON.parse(readFileSync(join(root, relativePath), "utf8")) as T;
@@ -34,7 +39,8 @@ describe("package surface policy", () => {
   const readme = readFileSync(join(root, "README.md"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
-    const packed = spawnSync("npm", ["pack", "--json", "--ignore-scripts", "--dry-run"], {
+    const npmPack = npmInvocation(["pack", "--json", "--ignore-scripts", "--dry-run"]);
+    const packed = spawnSync(npmPack.command, npmPack.args, {
       cwd: root,
       encoding: "utf8",
       env: npmEnv(),

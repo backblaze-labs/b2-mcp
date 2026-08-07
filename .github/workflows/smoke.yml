@@ -1,94 +1,100 @@
-name: Smoke
+name: Live B2 Smoke
 
-# Runs an end-to-end smoke test against the live server.
-# Triggers:
-#   - workflow_dispatch:  manual trigger from the Actions tab, from main only
-#   - release.published:  after a tagged release is published, only when the tag
-#                         points at the ci-green ref
-#
-# Gated to the canonical org repo so personal mirrors don't fire
-# failing runs (they don't have the credentials set as secrets).
-#
-# B2 secrets and MCP_URL must live in the protected `live-b2-smoke`
-# environment. The workflow checks out the resolved `ci-green` commit before
-# package code sees secrets and rejects release tags that do not point at
-# `ci-green`. Add required reviewers when the repository plan supports
-# environment reviewers.
-#
-# The 6-hour schedule heartbeat is intentionally disabled until a stable
-# monitored endpoint and alert-deduplication path are owned outside release CI.
+# End-to-end smoke against a deployed MCP endpoint using the protected live B2
+# smoke environment. The smoke bucket must be a dedicated test-owned bucket.
 
 on:
   workflow_dispatch:
-  release:
-    types: [published]
+  deployment_status:
+  schedule:
+    - cron: "47 9 * * 1"
 
 permissions:
   contents: read
 
 concurrency:
-  group: live-b2-smoke-${{ github.repository }}
-  cancel-in-progress: false
+  group: live-b2-smoke-${{ github.repository }}-${{ github.event.deployment.environment || github.ref_name || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   guard:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     outputs:
+      should-run: ${{ steps.ref.outputs.should_run }}
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
     steps:
-      - name: Validate protected live-test ref
+      - name: Resolve trusted live-smoke ref
         id: ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DEPLOYMENT_ENVIRONMENT: ${{ github.event.deployment.environment || '' }}
+          DEPLOYMENT_STATE: ${{ github.event.deployment_status.state || '' }}
+          DEPLOYMENT_SHA: ${{ github.event.deployment.sha || '' }}
+          EXPECTED_DEPLOYMENT_ENVIRONMENT: ${{ vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT || 'production' }}
         run: |
           set -euo pipefail
-          protected_ref="refs/heads/ci-green"
+          should_run=true
+          checkout_sha="${GITHUB_SHA}"
 
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
-              echo "::error::workflow_dispatch must run from main; got ${GITHUB_REF}"
+          case "${EVENT_NAME}" in
+            workflow_dispatch)
+              if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+                echo "::error::workflow_dispatch must run from main; got ${GITHUB_REF}"
+                exit 1
+              fi
+              ;;
+            schedule)
+              if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+                echo "::error::${EVENT_NAME} live smoke runs must target main; got ${GITHUB_REF}"
+                exit 1
+              fi
+              ;;
+            deployment_status)
+              if [[ "${DEPLOYMENT_STATE}" != "success" ]]; then
+                should_run=false
+                checkout_sha=""
+              elif [[ "${DEPLOYMENT_ENVIRONMENT}" != "${EXPECTED_DEPLOYMENT_ENVIRONMENT}" ]]; then
+                should_run=false
+                checkout_sha=""
+              elif [[ ! "${DEPLOYMENT_SHA}" =~ ^[a-f0-9]{40}$ ]]; then
+                echo "::error::deployment_status live smoke requires a full deployed SHA."
+                exit 1
+              else
+                git init --quiet /tmp/live-smoke-ref-check
+                cd /tmp/live-smoke-ref-check
+                git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+                git fetch --no-tags origin \
+                  '+refs/heads/main:refs/remotes/origin/main' \
+                  '+refs/heads/ci-green:refs/remotes/origin/ci-green'
+                if ! git cat-file -e "${DEPLOYMENT_SHA}^{commit}"; then
+                  echo "::error::deployment_status SHA is not reachable from protected refs."
+                  exit 1
+                fi
+                if ! git merge-base --is-ancestor "${DEPLOYMENT_SHA}" refs/remotes/origin/main &&
+                  ! git merge-base --is-ancestor "${DEPLOYMENT_SHA}" refs/remotes/origin/ci-green; then
+                  echo "::error::deployment_status SHA must be reachable from protected main or ci-green before live smoke secrets are exposed."
+                  exit 1
+                fi
+                checkout_sha="${DEPLOYMENT_SHA}"
+              fi
+              ;;
+            *)
+              echo "::error::unsupported live-smoke event: ${EVENT_NAME}"
               exit 1
-            fi
-          elif [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
-            if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
-              echo "::error::release smoke/contract runs only accept v* tags; got ${GITHUB_REF}"
-              exit 1
-            fi
-          else
-            echo "::error::unsupported live-test event: ${GITHUB_EVENT_NAME}"
-            exit 1
-          fi
+              ;;
+          esac
 
-          git init --quiet /tmp/live-ref-check
-          cd /tmp/live-ref-check
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          ci_green_sha="$(git ls-remote origin "${protected_ref}" | awk '{print $1}')"
-          if [[ -z "$ci_green_sha" ]]; then
-            echo "::error::protected ref ${protected_ref} is missing"
-            exit 1
-          fi
-
-          if [[ "$GITHUB_EVENT_NAME" == "release" ]]; then
-            tag_sha="$(git ls-remote origin "${GITHUB_REF}^{}" | awk '{print $1}')"
-            if [[ -z "$tag_sha" ]]; then
-              tag_sha="$(git ls-remote origin "${GITHUB_REF}" | awk '{print $1}')"
-            fi
-            if [[ -z "$tag_sha" || "$tag_sha" != "$ci_green_sha" ]]; then
-              echo "::error::release tag ${GITHUB_REF_NAME} must point at ${protected_ref}"
-              echo "ci_green_sha=${ci_green_sha:-missing}"
-              echo "tag_sha=${tag_sha:-missing}"
-              exit 1
-            fi
-          fi
-
-          echo "checkout_sha=${ci_green_sha}" >> "$GITHUB_OUTPUT"
+          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
+          echo "checkout_sha=${checkout_sha}" >> "$GITHUB_OUTPUT"
 
   smoke:
-    name: live smoke / Node ${{ matrix.node-version }}
+    name: live B2 smoke / Node ${{ matrix.node-version }}
     needs: guard
-    if: github.repository == 'backblaze-labs/b2-mcp'
+    if: needs.guard.outputs.should-run == 'true'
     runs-on: ubuntu-latest
     environment: live-b2-smoke
-    timeout-minutes: 5
+    timeout-minutes: 8
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -110,29 +116,39 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Validate live B2 environment
+      - run: pnpm run build
+      - name: Validate live B2 smoke environment
         env:
           MCP_URL: ${{ vars.MCP_URL }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
           B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+          B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
+          B2_MCP_REQUIRE_SMOKE_BUCKET: "1"
         run: |
           set -euo pipefail
+          for value in "${B2_SMOKE_BUCKET:-}"; do
+            if [[ -n "$value" ]]; then echo "::add-mask::$value"; fi
+          done
           missing=0
-          for name in MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_MCP_EXPECTED_TOOL_PROFILE; do
+          for name in MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-smoke variable or secret for ${name}"
               missing=1
             fi
           done
           exit "$missing"
-      - run: pnpm run smoke
+      - name: Run live B2 smoke
+        timeout-minutes: 4
         env:
           MCP_URL: ${{ vars.MCP_URL }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
           B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+          B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
+          B2_MCP_REQUIRE_SMOKE_BUCKET: "1"
+        run: pnpm run smoke

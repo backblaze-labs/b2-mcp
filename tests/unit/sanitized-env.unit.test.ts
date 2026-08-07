@@ -1,4 +1,6 @@
 import { createRequire } from "module";
+import { join } from "path";
+import { pathToFileURL } from "url";
 
 const nodeRequire = createRequire(__filename);
 const { sanitizedEnv } = nodeRequire("../../scripts/lib/sanitized-env.cjs") as {
@@ -22,5 +24,37 @@ describe("sanitized child-process env", () => {
         { sourceEnv: {}, nonSecretEnvNames: ["B2_REGISTER_ALL_TOOLS"] },
       ).B2_REGISTER_ALL_TOOLS,
     ).toBe("true");
+  });
+});
+
+describe("B2 log redaction", () => {
+  it("redacts account ids, generated live resources, tokens, and presigned URLs", async () => {
+    const { redactB2CredentialValues } = (await import(
+      pathToFileURL(join(__dirname, "../../scripts/b2-credential-env.mjs")).href
+    )) as {
+      redactB2CredentialValues: (text: string, env?: Record<string, string>) => string;
+    };
+    const text = [
+      'accountId="acct-123"',
+      '"applicationKey":"created-secret"',
+      '"authorizationToken":"auth-token"',
+      "upload_authorization_token=upload-token",
+      "bucket=mcp-contract-123-1-n22-23-1-integration-abcd",
+      "https://example.s3.us-west-004.backblazeb2.com/key?X-Amz-Signature=abc123",
+      "https://f004.backblazeb2.com/file/bucket/key.txt?Authorization=b2-native-token",
+    ].join(" ");
+
+    const redacted = redactB2CredentialValues(text, {});
+
+    expect(redacted).not.toContain("acct-123");
+    expect(redacted).not.toContain("created-secret");
+    expect(redacted).not.toContain("auth-token");
+    expect(redacted).not.toContain("upload-token");
+    expect(redacted).not.toContain("mcp-contract-123");
+    expect(redacted).not.toContain("X-Amz-Signature");
+    expect(redacted).not.toContain("b2-native-token");
+    expect(redacted).toContain('"applicationKey":"[REDACTED_B2_CREDENTIAL]"');
+    expect(redacted).toContain("[REDACTED_B2_RESOURCE]");
+    expect(redacted).toContain("[REDACTED_B2_PRESIGNED_URL]");
   });
 });

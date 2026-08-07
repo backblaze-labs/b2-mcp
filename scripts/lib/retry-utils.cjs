@@ -11,6 +11,28 @@ function commandLine(command, args) {
   return [command, ...args].join(" ");
 }
 
+function npmInvocation(args = []) {
+  if (process.platform === "win32")
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", "npm", ...args] };
+  return { command: "npm", args };
+}
+
+function commandInvocation(command, args = []) {
+  switch (command) {
+    case "npm":
+      return npmInvocation(args);
+    case "node":
+      return { command: process.platform === "win32" ? "node.exe" : "node", args };
+    case "pnpm":
+      if (process.platform === "win32") {
+        return { command: "cmd.exe", args: ["/d", "/s", "/c", "pnpm", ...args] };
+      }
+      return { command: "pnpm", args };
+    default:
+      throw new Error(`Unsupported retry command: ${command}`);
+  }
+}
+
 function isTransientNpmFailure(result, extraError = null) {
   if (result.error?.code === "ETIMEDOUT") return true;
   const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}\n${extraError?.message ?? ""}`;
@@ -24,6 +46,7 @@ function runCommandWithRetries(command, args, options = {}) {
   }
 
   const label = options.retryLabel ?? commandLine(command, args);
+  const invocation = commandInvocation(command, args);
   const delayMs = options.retryDelayMs ?? 1_000;
   const shouldRetry = options.shouldRetry ?? ((result) => isTransientNpmFailure(result));
   const retryMessage =
@@ -32,7 +55,7 @@ function runCommandWithRetries(command, args, options = {}) {
       `${command}: retrying ${label} after transient registry failure (${attempt}/${totalAttempts})`);
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = spawnSync(command, args, options.spawnOptions ?? {});
+    const result = spawnSync(invocation.command, invocation.args, options.spawnOptions ?? {});
     if (attempt < attempts && shouldRetry(result, attempt)) {
       console.warn(retryMessage({ label, attempt, attempts, result }));
       sleep(delayMs * attempt);
@@ -49,8 +72,10 @@ function runNpmCommandWithRetries(args, options = {}) {
 }
 
 module.exports = {
+  commandInvocation,
   commandLine,
   isTransientNpmFailure,
+  npmInvocation,
   runCommandWithRetries,
   runNpmCommandWithRetries,
   sleep,

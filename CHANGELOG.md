@@ -77,9 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Read-only credentials no longer expose or allow `PutObject` on
   `s3_get_presigned_url`; upload presigned URLs now require the same
   confirmation policy as destructive write paths.
-- Hardened live B2 workflows to run package code from `ci-green`, fail loudly on
-  disallowed refs, validate environment secrets before live calls, and avoid
-  recurring scheduled contract writes until cleanup automation exists.
+- Reworked live B2 contract workflows to use explicit `test:live:b2-*`
+  commands, protected manual/main/scheduled/release triggers, `ci-green`
+  validation for reusable release calls, test-owned `mcp-contract-*` resources,
+  serialized Node.js 22.23.1/24/26 coverage, best-effort cleanup, and a
+  scheduled janitor instead of customer bucket fixtures.
+- Hardened live smoke and cleanup by correlating smoke with successful
+  deployment SHAs, adding bounded MCP retries/timeouts, requiring a live
+  test-account allowlist before janitor deletion, and clearing Object Lock
+  protections before bypass-governance version cleanup.
 - Made release publishing attach the SBOM only after npm publish succeeds and
   removed whole-suite retries from live B2 contract publication evidence.
 - Replaced `b2_create_key`, `b2_create_group_member`, and

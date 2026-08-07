@@ -194,7 +194,7 @@ describe("CI workflow policy", () => {
     expect(budgetJob).toContain("reports/package-budget/");
     expect(slowJob).toContain("timeout-minutes: 20");
     expect(slowJob).toContain("VITEST_MAX_WORKERS: 1");
-    expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1 --minWorkers=1");
+    expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1");
     expect(crossPlatformAggregateJob).toContain("name: cross-platform minimum");
     expect(crossPlatformMatrixJob).toContain("name: cross-platform minimum / ${{ matrix.os }}");
     expect(crossPlatformAggregateJob).toContain("needs: cross-platform-minimum-matrix");
@@ -265,6 +265,7 @@ describe("CI workflow policy", () => {
     const workflowSecurity = workflowJob("codeql-workflow-security");
 
     expect(workflowSecurity).toContain("name: CodeQL/workflow security");
+    expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
       "github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3",
@@ -272,6 +273,7 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain(
       "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
     );
+    expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
     expect(workflowSecurity).not.toContain("zizmor-action");
     expect(workflowSecurity).not.toContain("GH_TOKEN");
@@ -302,13 +304,10 @@ describe("CI workflow policy", () => {
     expect(attachSbomJob).toContain("needs: [prepare, publish]");
     expect(attachSbomJob).toContain("Attach SBOM to GitHub release after npm publish");
     expect(liveContract).toContain("needs: prepare");
-    expect(liveContract).toContain("environment: live-b2-contract");
-    expect(liveContract).toContain("ref: ${{ needs.prepare.outputs.checkout-sha }}");
-    expect(liveContract).toContain("node-version: [22.23.1, 24, 26]");
-    expect(liveContract).toContain("Validate live B2 environment");
-    expect(liveContract).toContain("LIVE_B2_KEY_ID");
-    expect(liveContract).toContain("LIVE_B2_KEY");
-    expect(liveContract).toContain("pnpm run test:contract:live");
+    expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");
+    expect(liveContract).toContain("checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}");
+    expect(liveContract).toContain("LIVE_B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
+    expect(liveContract).toContain("LIVE_B2_KEY: ${{ secrets.LIVE_B2_KEY }}");
     expect(liveContract).not.toContain("for attempt in 1 2 3");
     expect(liveContract).not.toContain("retrying");
     expect(publish).toContain("attach-sbom:");

@@ -121,7 +121,18 @@ describe("smoke script release contract", () => {
 
   it("uses the registered S3 bucket probe with an explicit smoke bucket", () => {
     expect(smokeScript).toContain("B2_SMOKE_BUCKET");
+    expect(smokeScript).toContain("B2_MCP_REQUIRE_SMOKE_BUCKET");
     expect(smokeScript).toContain("s3_head_bucket");
+    expect(smokeScript).toContain("assertToolSuccess");
+    expect(smokeScript).toContain("result?.isError");
+    expect(smokeScript).toContain("MCP_REQUEST_TIMEOUT_MS");
+    expect(smokeScript).toContain("MCP_REQUEST_ATTEMPTS");
+    expect(smokeScript).toContain("AbortController");
+    expect(smokeScript).toContain("RetryableSmokeRequestError");
+    expect(smokeScript).toContain("isRetryableNetworkError");
+    expect(smokeScript).toContain("smokeRequestLabel");
+    expect(smokeScript).toContain('check("s3_head_bucket confirms smoke bucket", false');
+    expect(smokeScript).toContain("redactB2CredentialValues");
     expect(smokeScript).not.toContain("s3_list_buckets");
   });
 

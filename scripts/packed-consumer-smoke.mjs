@@ -12,7 +12,7 @@ const runtimePolicy = JSON.parse(readFileSync(path.join(root, "runtime-policy.js
 const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-consumer-"));
 const home = path.join(workspace, "home");
 const npmCache = path.join(workspace, "npm-cache");
-const { commandLine, runNpmCommandWithRetries } = retryUtils;
+const { commandInvocation, commandLine, runNpmCommandWithRetries } = retryUtils;
 const { sanitizedEnv: baseSanitizedEnv } = envUtils;
 // These names intentionally look like credentials. The child-process probe below
 // verifies sanitizedEnv strips them before any npm or package process starts.
@@ -34,6 +34,7 @@ function sanitizedEnv(extra = {}, options = {}) {
 }
 
 function run(command, args, options = {}) {
+  const invocation = commandInvocation(command, args);
   const spawnOptions = {
     cwd: options.cwd ?? workspace,
     env: sanitizedEnv(options.env, { nonSecretEnvNames: options.nonSecretEnvNames }),
@@ -51,7 +52,7 @@ function run(command, args, options = {}) {
             `packed-consumer-smoke: retrying ${label} after transient registry failure (${attempt}/${attempts})`,
           spawnOptions,
         })
-      : spawnSync(command, args, spawnOptions);
+      : spawnSync(invocation.command, invocation.args, spawnOptions);
   const failed = result.error || (options.allowFailure !== true && result.status !== 0);
   if (!failed) return result;
 
@@ -92,7 +93,7 @@ try {
   const args = parseArgs(process.argv.slice(2));
 
   run(
-    process.execPath,
+    "node",
     [
       "-e",
       [
@@ -146,7 +147,7 @@ try {
     timeout: 180_000,
   });
   run(
-    process.execPath,
+    "node",
     [
       "-e",
       [
@@ -210,7 +211,7 @@ try {
     "dist",
     "index.js",
   );
-  const withoutCreds = run(process.execPath, [entrypoint], {
+  const withoutCreds = run("node", [entrypoint], {
     allowFailure: true,
     env: {
       ...sanitizerBlockedEnv,

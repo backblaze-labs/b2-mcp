@@ -427,6 +427,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
       security-events: write
     steps:
@@ -443,6 +444,7 @@ jobs:
       - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
         with:
           category: "/language:javascript-typescript"
+          upload: never
       - name: Run digest-pinned offline zizmor
         env:
           ZIZMOR_IMAGE: ghcr.io/zizmorcore/zizmor:1.29.0@sha256:863026d54f91271b10b60b67ad8054cb37120167e162482597db102b3026a284
@@ -489,7 +491,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run test:slow -- --maxWorkers=1 --minWorkers=1
+      - run: pnpm run test:slow -- --maxWorkers=1
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload slow lifecycle reports
         if: always()

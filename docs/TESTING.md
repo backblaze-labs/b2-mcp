@@ -122,8 +122,8 @@ Test files must use these suffixes so scripts do not depend on accidental paths:
 | `tests/protocol/*.legacy-protocol.test.ts` | `test:protocol:legacy`  |
 | `tests/slow/*.slow.test.ts`                | `test:slow`             |
 | `tests/package/*.package.test.ts`          | `test:package`          |
-| `tests/live/*.integration.live.test.ts`    | `test:integration:live` |
-| `tests/live/*.contract.live.test.ts`       | `test:contract:live`    |
+| `tests/live/*.integration.live.test.ts`    | `test:live:b2-integration` |
+| `tests/live/*.contract.live.test.ts`       | `test:live:b2-contract`    |
 
 Do not put credential-free assertions in live files. Source unit tests must
 import `src/`; only the slow/package layers may build or inspect `dist/`.
@@ -312,8 +312,9 @@ These live commands are outside the deterministic PR gate and fail fast when the
 required credentials are not present:
 
 ```bash
-pnpm run test:integration:live # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
-pnpm run test:contract:live    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+pnpm run test:live:b2-integration # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+pnpm run test:live:b2-contract    # requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
+pnpm run test:live:b2             # runs both live suites
 ```
 
 ## Networked Security Gate
@@ -392,18 +393,36 @@ normal PRs and untrusted forks.
 
 Required properties:
 
-- scoped, non-master application key;
-- throwaway bucket or tightly scoped prefix;
-- one controlled write/read/delete round trip when the key allows writes;
-- teardown that cannot affect unrelated objects;
-- logs and tool responses checked for credential redaction.
+- dedicated live B2 test account, not a customer account;
+- least-privilege non-master application key with bucket, file, Object Lock,
+  notification, lifecycle, and S3-compatible capabilities needed by the suite;
+- unique `B2_MCP_LIVE_RUN_PREFIX` for every run, rooted at `mcp-contract-`;
+- test-owned buckets, objects, multipart uploads, notification rules, and keys
+  only; live tests must never choose an arbitrary listed bucket as writable;
+- best-effort `afterAll` cleanup plus workflow janitor cleanup through
+  `scripts/live-b2-janitor.mjs`;
+- best-effort log hygiene redacting B2 credentials, account IDs, presigned URLs,
+  live run prefixes, and smoke bucket names. This is not a containment boundary;
+  live secrets must never share a job with unreviewed pull-request code.
 
-The live path runs through `.github/workflows/smoke.yml`,
-`.github/workflows/contract.yml`, or a protected manual equivalent. Any workflow
-that consumes `B2_*` secrets must use a protected GitHub environment, fail
-loudly when manually dispatched outside `main`, check out `ci-green` before any
-repository code runs with secrets, serialize live write tests, and reference
-only environment-scoped `LIVE_B2_*` secrets. Protected live workflows run
-serially on Node.js 22.23.1, Node.js 24, and Node.js 26. Release-triggered
-live workflows must first prove the `v*` release tag is reachable from
-`ci-green`.
+The live path runs through `.github/workflows/contract.yml` and
+`.github/workflows/smoke.yml`. Both run on manual dispatch from `main` and
+trusted scheduled paths; contract also runs on pushes to `main`, while smoke
+runs on successful deployment status events using the deployed SHA after
+checking that the deployment environment is approved and the SHA is reachable
+from protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
+because live credentials must not be exposed to PR-head code. Trusted runs set
+`B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the smoke equivalent and fail loudly
+when credentials or required variables are absent; a skipped-only trusted run is
+not accepted as release evidence. The contract janitor also requires
+`B2_LIVE_TEST_ACCOUNT_ID` and refuses deletion when the authorized account ID
+does not match that dedicated test-account allowlist. The protected live matrix
+is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26. Contract runs and
+the scheduled abandoned-resource janitor also share a live-resource concurrency
+lock, so a global `mcp-contract-*` sweep cannot delete fixtures from an active
+release gate.
+
+Release publication uses `.github/workflows/publish.yml`, which resolves the
+publish tag against `ci-green` and then calls the protected live contract
+workflow through `workflow_call` before npm publish. `release.published` is not
+a pre-release gate and is not used for live contract evidence.

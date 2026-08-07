@@ -19,6 +19,7 @@
  *   B2_SMOKE_BUCKET — known bucket to probe with s3_head_bucket
  *   B2_MCP_EXPECTED_TOOL_PROFILE — full, phase1-default, or read-only
  *   B2_MCP_ALLOW_ANY_TOOL_PROFILE — set to true only for exploratory local smoke runs
+ *   B2_MCP_REQUIRE_SMOKE_BUCKET — set to 1 in protected live runs
  *
  * Optional env for a customer OAuth/resource-server edge:
  *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
@@ -30,6 +31,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { redactB2CredentialValues } from "./b2-credential-env.mjs";
 import smokeContract from "./lib/smoke-contract.cjs";
 
 const { evaluateProfileContract } = smokeContract;
@@ -48,6 +50,7 @@ const {
   B2_SMOKE_BUCKET,
   B2_MCP_EXPECTED_TOOL_PROFILE,
   B2_MCP_ALLOW_ANY_TOOL_PROFILE,
+  B2_MCP_REQUIRE_SMOKE_BUCKET,
   MCP_AUTHORIZATION,
 } = process.env;
 
@@ -55,42 +58,106 @@ const failures = [];
 let nextId = 1;
 let mcpUrl = MCP_URL;
 let headers = {};
+const MCP_REQUEST_TIMEOUT_MS = 10_000;
+const MCP_REQUEST_ATTEMPTS = 3;
+const MCP_REQUEST_BACKOFF_MS = 400;
+
+class RetryableSmokeRequestError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RetryableSmokeRequestError";
+  }
+}
 
 function check(name, ok, detail = "") {
   const mark = ok ? "PASS" : "FAIL";
-  console.log(`  [${mark}] ${name}${detail ? " — " + detail : ""}`);
+  const safeDetail = detail ? redactB2CredentialValues(detail, process.env) : "";
+  console.log(`  [${mark}] ${name}${safeDetail ? " — " + safeDetail : ""}`);
   if (!ok) failures.push(name);
 }
 
-async function mcp(method, params = {}) {
+function smokeRequestLabel(method, params = {}) {
+  return method === "tools/call" && params.name ? `${method} ${params.name}` : method;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status) {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+function isRetryableNetworkError(err) {
+  return /(?:fetch failed|network|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED)/i.test(
+    err?.message || String(err),
+  );
+}
+
+export function configureSmokeRequestContextForTests(url, requestHeaders = {}) {
+  mcpUrl = url;
+  headers = { ...requestHeaders };
+  nextId = 1;
+}
+
+export async function mcp(method, params = {}) {
   const name = method === "tools/call" ? params.name : undefined;
-  const response = await fetch(mcpUrl, {
-    method: "POST",
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "Mcp-Method": method,
-      ...(name && { "Mcp-Name": name }),
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: nextId++,
-      method,
-      params: {
-        ...params,
-        _meta: {
-          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-          "io.modelcontextprotocol/clientCapabilities": {},
-        },
+  const label = smokeRequestLabel(method, params);
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: nextId++,
+    method,
+    params: {
+      ...params,
+      _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
       },
-    }),
+    },
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.error) {
-    throw new Error(body.error?.message ?? `HTTP ${response.status}`);
+
+  for (let attempt = 1; attempt <= MCP_REQUEST_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MCP_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(mcpUrl, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "Mcp-Method": method,
+          ...(name && { "Mcp-Name": name }),
+        },
+        body,
+        signal: controller.signal,
+      });
+      const responseBody = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = responseBody.error?.message ?? `HTTP ${response.status}`;
+        if (isRetryableStatus(response.status)) {
+          throw new RetryableSmokeRequestError(`${label} failed: ${message}`);
+        }
+        throw new Error(`${label} failed: ${message}`);
+      }
+      if (responseBody.error) throw new Error(`${label} failed: ${responseBody.error.message}`);
+      return responseBody.result;
+    } catch (err) {
+      const timedOut = controller.signal.aborted;
+      const message = timedOut
+        ? `${label} timed out after ${MCP_REQUEST_TIMEOUT_MS}ms`
+        : err?.message || String(err);
+      const retryable =
+        timedOut || err instanceof RetryableSmokeRequestError || isRetryableNetworkError(err);
+      if (!retryable || attempt === MCP_REQUEST_ATTEMPTS) {
+        throw new Error(retryable ? `${message} after ${attempt} attempt(s)` : message);
+      }
+      await delay(MCP_REQUEST_BACKOFF_MS * attempt);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  return body.result;
+  throw new Error(`${label} failed before receiving a response`);
 }
 
 function parseToolJson(result) {
@@ -100,6 +167,12 @@ function parseToolJson(result) {
   } catch {
     return null;
   }
+}
+
+export function assertToolSuccess(result, label) {
+  if (result?.isError !== true) return result;
+  const detail = result.content?.[0]?.text || `${label} returned an MCP tool error`;
+  throw new Error(detail);
 }
 
 export function sortedToolNames(tools) {
@@ -193,7 +266,10 @@ async function main() {
 
   // b2_authorize_account — exercises the primary key path
   try {
-    const r = await mcp("tools/call", { name: "b2_authorize_account", arguments: {} });
+    const r = assertToolSuccess(
+      await mcp("tools/call", { name: "b2_authorize_account", arguments: {} }),
+      "b2_authorize_account",
+    );
     const parsed = parseToolJson(r);
     check("b2_authorize_account returns accountId", !!parsed?.accountId);
   } catch (e) {
@@ -203,7 +279,10 @@ async function main() {
   // b2_list_buckets — exercises a B2 native read when this credential exposes it
   if (toolNames.has("b2_list_buckets")) {
     try {
-      const r = await mcp("tools/call", { name: "b2_list_buckets", arguments: {} });
+      const r = assertToolSuccess(
+        await mcp("tools/call", { name: "b2_list_buckets", arguments: {} }),
+        "b2_list_buckets",
+      );
       const parsed = parseToolJson(r);
       check("b2_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
     } catch (e) {
@@ -214,17 +293,28 @@ async function main() {
   }
 
   // s3_head_bucket — only when an app key and known smoke bucket were supplied
+  const requireSmokeBucket = B2_MCP_REQUIRE_SMOKE_BUCKET === "1";
   if (B2_APP_KEY_ID && B2_APP_KEY && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
     try {
-      await mcp("tools/call", { name: "s3_head_bucket", arguments: { bucket: B2_SMOKE_BUCKET } });
+      assertToolSuccess(
+        await mcp("tools/call", {
+          name: "s3_head_bucket",
+          arguments: { bucket: B2_SMOKE_BUCKET },
+        }),
+        "s3_head_bucket",
+      );
       check("s3_head_bucket confirms smoke bucket", true);
     } catch (e) {
       check("s3_head_bucket confirms smoke bucket", false, e.message);
     }
   } else {
-    console.log(
-      "  [SKIP] s3_head_bucket — set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable",
-    );
+    const detail =
+      "set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable";
+    if (requireSmokeBucket) {
+      check("s3_head_bucket confirms smoke bucket", false, detail);
+    } else {
+      console.log(`  [SKIP] s3_head_bucket — ${detail}`);
+    }
   }
 
   console.log();
@@ -238,7 +328,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
-    console.error("Fatal:", err.message ?? err);
+    console.error("Fatal:", redactB2CredentialValues(err.message ?? err, process.env));
     process.exit(1);
   });
 }
