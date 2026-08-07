@@ -55,11 +55,16 @@ Before publishing `v0.1.0`:
    `LIVE_B2_KEY` plus environment variable `B2_LIVE_TEST_ACCOUNT_ID`. Confirm
    `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus
    environment variables `MCP_URL`, `B2_SMOKE_BUCKET`, and
-   `B2_MCP_EXPECTED_TOOL_PROFILE`. Do not duplicate live
-   B2 credentials at repository scope or in `npm-publish`; the called contract
-   workflow resolves them from `live-b2-contract`. Manually dispatch smoke and
-   contract from `main`. Security owns credential rotation. The live jobs run
-   serially on Node.js 22.23.1, Node.js 24, and Node.js 26.
+   `B2_MCP_EXPECTED_TOOL_PROFILE`. If deployment smoke should accept an
+   environment other than `production`, set repository or organization variable
+   `B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT`; do not put it only in
+   `live-b2-smoke`. Confirm the contract key authorizes the configured
+   `B2_LIVE_TEST_ACCOUNT_ID` and has `bypassGovernance`, `deleteKeys`,
+   `listKeys`, and `writeKeys`. Do not duplicate live B2 credentials at
+   repository scope or in `npm-publish`; the called contract workflow resolves
+   them from `live-b2-contract`. Manually dispatch smoke and contract from
+   `main`. Security owns credential rotation. The live jobs run serially on
+   Node.js 22.23.1, Node.js 24, and Node.js 26.
 9. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.
 10. Create the GitHub Release for the publish tag, then publish only from the

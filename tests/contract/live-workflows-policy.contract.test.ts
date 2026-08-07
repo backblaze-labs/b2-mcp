@@ -4,9 +4,10 @@ import { createRequire } from "module";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
-const { workflowJobBlock, yamlValuesForKey } = nodeRequire(
+const { workflowJobBlock, yamlBlockForKey, yamlValuesForKey } = nodeRequire(
   "../../scripts/lib/workflow-yaml.cjs",
 ) as {
+  yamlBlockForKey: (text: string, key: string) => string | null;
   workflowJobBlock: (text: string, jobName: string) => string | null;
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
@@ -29,7 +30,7 @@ const liveWorkflows = [
     environment: "live-b2-smoke",
     concurrency:
       "live-b2-smoke-${{ github.repository }}-${{ github.event.deployment.environment || github.ref_name || github.run_id }}",
-    cancelsInProgress: true,
+    cancelsInProgress: false,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_APP_KEY_ID", "LIVE_B2_APP_KEY"],
   },
 ];
@@ -79,7 +80,8 @@ describe("live secret workflow policy", () => {
       expect(text).toMatch(/if: github\.repository == 'backblaze-labs\/b2-mcp'/);
       expect(text).toMatch(/^\s{2}schedule:\s*$/m);
       if (path.endsWith("contract.yml")) {
-        expect(text).toMatch(/^\s{2}push:\s*$/m);
+        expect(text).not.toMatch(/^\s{2}push:\s*$/m);
+        expect(text).toMatch(/^\s{2}workflow_call:\s*$/m);
         expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
       } else {
         expect(text).toMatch(/^\s{2}deployment_status:\s*$/m);
@@ -87,6 +89,9 @@ describe("live secret workflow policy", () => {
         expect(text).toContain("DEPLOYMENT_ENVIRONMENT: ${{ github.event.deployment.environment");
         expect(text).toContain("DEPLOYMENT_STATE: ${{ github.event.deployment_status.state");
         expect(text).toContain("DEPLOYMENT_SHA: ${{ github.event.deployment.sha");
+        expect(text).toContain(
+          "# Repository or organization variable; this guard intentionally does",
+        );
         expect(text).toContain(
           "EXPECTED_DEPLOYMENT_ENVIRONMENT: ${{ vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT || 'production' }}",
         );
@@ -136,12 +141,11 @@ describe("live secret workflow policy", () => {
 
   it("runs live contracts through workflow_call for release gating", () => {
     const text = workflowText(".github/workflows/contract.yml");
-    const workflowCall = text.slice(
-      text.indexOf("  workflow_call:"),
-      text.indexOf("\n\npermissions:"),
-    );
+    const workflowCall = yamlBlockForKey(text, "workflow_call") ?? "";
     expect(text).toMatch(/^\s{2}workflow_call:\s*$/m);
+    expect(workflowCall).not.toBe("");
     expect(text).toContain("checkout-sha:");
+    expect(workflowCall).toContain("checkout-sha:");
     expect(workflowCall).not.toContain("secrets:");
     expect(workflowCall).not.toContain("LIVE_B2_KEY_ID");
     expect(workflowCall).not.toContain("LIVE_B2_KEY");
@@ -153,16 +157,17 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("workflow_call checkout-sha must be reachable from refs/heads/ci-green");
   });
 
-  it("adds a scheduled janitor for abandoned test-prefixed resources", () => {
+  it("fails the live run when per-run cleanup leaks resources", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = workflowJobBlock(text, "contract") ?? "";
-    const janitorJob = workflowJobBlock(text, "abandoned-resource-janitor") ?? "";
-    expect(text).toContain("abandoned-resource-janitor:");
-    expect(text).toContain("github.event_name == 'schedule'");
-    expect(text).toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
+    expect(text).not.toContain("abandoned-resource-janitor:");
+    expect(text).not.toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
     expect(text).toContain("Clean current live B2 run resources");
     expect(text).toContain("B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}");
-    expect(text).toContain("--best-effort");
+    expect(contractJob).toContain(
+      'node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}"',
+    );
+    expect(contractJob).not.toContain("--best-effort");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
     expect(text).toContain('cron: "17 9 * * *"');
     expect(text).toMatch(
@@ -173,7 +178,6 @@ describe("live secret workflow policy", () => {
       ),
     );
     expect(contractJob).not.toContain("concurrency:");
-    expect(janitorJob).not.toContain("concurrency:");
   });
 
   it("keeps package-budget off the live contract dependency chain", () => {
@@ -197,6 +201,17 @@ describe("live secret workflow policy", () => {
     expect(text.indexOf("await assertLiveTestAccount(server)")).toBeLessThan(
       text.indexOf('callTool(server, "b2_create_bucket"'),
     );
+    const workflow = workflowText(".github/workflows/contract.yml");
+    expect(workflow).toContain("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
+    expect(workflow).toContain(
+      'const requiredCapabilities = ["bypassGovernance", "deleteKeys", "listKeys", "writeKeys"];',
+    );
+    const liveTests = [
+      workflowText("tests/live/b2.integration.live.test.ts"),
+      workflowText("tests/live/request-shape.contract.live.test.ts"),
+    ].join("\n");
+    expect(liveTests).toContain('mode: "governance"');
+    expect(liveTests).not.toContain('mode: "compliance"');
   });
 
   it("runs the explicit live contract layer with B2 credentials", () => {

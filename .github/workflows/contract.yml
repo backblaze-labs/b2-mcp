@@ -2,15 +2,13 @@ name: Live B2 Contract
 
 # Live B2 contract and integration evidence. Mocked tests previously missed
 # request-shape regressions in notification rules and Object Lock payloads, so
-# these reviewed main/schedule/release jobs exercise real B2 requests. They do
+# these reviewed manual/schedule/release jobs exercise real B2 requests. They do
 # not run on pull_request because protected credentials must never share a job
 # with unreviewed PR-head package code, and they create/delete only
 # `mcp-contract-*` resources in the dedicated protected live test account.
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
   schedule:
     - cron: "17 9 * * *"
   workflow_call:
@@ -57,7 +55,7 @@ jobs:
                 exit 1
               fi
               ;;
-            push|schedule)
+            schedule)
               if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
                 echo "::error::${EVENT_NAME} live contract runs must target main; got ${GITHUB_REF}"
                 exit 1
@@ -144,7 +142,25 @@ jobs:
               missing=1
             fi
           done
-          exit "$missing"
+          if [[ "$missing" != 0 ]]; then exit "$missing"; fi
+          node --input-type=module <<'NODE'
+          import { B2AuthManager } from "./dist/auth.js";
+          import { loadConfig } from "./dist/server.js";
+
+          const requiredCapabilities = ["bypassGovernance", "deleteKeys", "listKeys", "writeKeys"];
+          const auth = await new B2AuthManager(loadConfig()).getAuth();
+          if (auth.accountId !== process.env.B2_LIVE_TEST_ACCOUNT_ID) {
+            throw new Error("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
+          }
+          const missingCapabilities = requiredCapabilities.filter(
+            (capability) => !auth.capabilities.includes(capability),
+          );
+          if (missingCapabilities.length > 0) {
+            throw new Error(
+              `live B2 contract key is missing required capability: ${missingCapabilities.join(", ")}`,
+            );
+          }
+          NODE
       - name: Run live B2 contract and integration suites
         timeout-minutes: 12
         env:
@@ -167,35 +183,4 @@ jobs:
             echo "::notice::dist/server.js is missing; no live resources should have been created before build."
             exit 0
           fi
-          node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}" --best-effort
-
-  abandoned-resource-janitor:
-    name: abandoned live B2 janitor
-    needs: [guard, contract]
-    if: always() && needs.guard.outputs.should-run == 'true' && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    environment: live-b2-contract
-    timeout-minutes: 10
-    steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          ref: ${{ needs.guard.outputs.checkout-sha }}
-          persist-credentials: false
-      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-        with:
-          run_install: false
-      # actions/setup-node v7, reviewed 2026-08-06.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: 22.23.1
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm run build
-      - name: Sweep abandoned test-prefixed B2 resources
-        env:
-          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
-          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
-          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
-        run: node scripts/live-b2-janitor.mjs --prefix mcp-contract-
+          node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}"

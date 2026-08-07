@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: live-b2-smoke-${{ github.repository }}-${{ github.event.deployment.environment || github.ref_name || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   guard:
@@ -31,6 +31,8 @@ jobs:
           DEPLOYMENT_ENVIRONMENT: ${{ github.event.deployment.environment || '' }}
           DEPLOYMENT_STATE: ${{ github.event.deployment_status.state || '' }}
           DEPLOYMENT_SHA: ${{ github.event.deployment.sha || '' }}
+          # Repository or organization variable; this guard intentionally does
+          # not bind the live-b2-smoke environment before it decides to run.
           EXPECTED_DEPLOYMENT_ENVIRONMENT: ${{ vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT || 'production' }}
         run: |
           set -euo pipefail
