@@ -100,11 +100,14 @@ The compose file runs two B2 MCP replicas and one nginx reverse proxy. It never
 publishes raw port 3000 to the host; replicas are reachable only on the private
 Docker network. The application container runs as the non-root `node` user,
 uses a read-only root filesystem, drops Linux capabilities, and receives only a
-small `/tmp` tmpfs. Local file access remains disabled. If you enable
-`B2_ALLOW_LOCAL_FILES=true`, mount exactly one sandbox directory at `/sandbox`
-and set `B2_FILE_ROOT=/sandbox`. The checked-in `.dockerignore` excludes
-`b2-mcp.env`, `.env*`, `secrets/`, and local certificate material from Docker
-build contexts if you rebuild after configuration.
+small `/tmp` tmpfs. The nginx container drops all Linux capabilities except the
+small root-image startup set needed to bind 80/443, prepare cache/run
+directories, and switch workers to the `nginx` user. Local file access remains
+disabled. If you enable `B2_ALLOW_LOCAL_FILES=true`, mount exactly one sandbox
+directory at `/sandbox` and set `B2_FILE_ROOT=/sandbox`. The checked-in
+`.dockerignore` excludes `b2-mcp.env`, `.env*`, `secrets/`, and local
+certificate material from Docker build contexts if you rebuild after
+configuration.
 
 `/health` and `/ready` are intentionally internal-only. They validate
 configuration, not B2 reachability, so routine probes do not call B2. Their JSON
@@ -166,7 +169,8 @@ backend containers are started, not after both are healthy. A single
 misconfigured replica stays visible as `unhealthy` in `docker compose ps`
 without blocking nginx startup or the healthy survivor. If you change
 `nginx.conf` or the pinned nginx image, recreate nginx after at least one
-backend is healthy:
+backend is healthy. The proxy clears the backend `Connection` header so the
+upstream keepalive pool is reused:
 
 ```bash
 docker compose up -d --no-deps nginx

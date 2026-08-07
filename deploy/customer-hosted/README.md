@@ -10,6 +10,9 @@ behind nginx, and keeps raw port 3000 private to the Docker network.
 - The container runs as the non-root `node` user.
 - Compose sets `read_only: true`, drops Linux capabilities, and provides only a
   small `/tmp` tmpfs.
+- nginx drops all Linux capabilities except the small root-image startup set
+  needed to bind 80/443, prepare cache/run directories, and switch workers to
+  the `nginx` user.
 - Compose bounds the default `json-file` logs for every service.
 - Local file access stays off. If you enable `B2_ALLOW_LOCAL_FILES=true`, mount
   only one explicit sandbox at `/sandbox` and set `B2_FILE_ROOT=/sandbox`.
@@ -19,6 +22,8 @@ behind nginx, and keeps raw port 3000 private to the Docker network.
 - Modern MCP HTTP is stateless. The two replicas need no sticky sessions.
 - nginx re-resolves replica DNS through Docker's embedded resolver so a
   recreated backend is picked up without restarting the proxy.
+- nginx clears the proxied `Connection` header so its backend keepalive pool is
+  reused.
 - The server does not advertise `subscriptions/listen`; no event bus is needed.
   If a future deployment advertises it, use a shared event bus and document
   subscription limits before enabling it.

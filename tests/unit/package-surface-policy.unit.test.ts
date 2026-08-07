@@ -185,9 +185,13 @@ describe("package surface policy", () => {
     expect(nginx).toContain("error_page 500 502 503 504 = @oauth_unavailable;");
 
     expect(compose).not.toContain("condition: service_healthy");
+    for (const capability of ["CHOWN", "NET_BIND_SERVICE", "SETGID", "SETUID"]) {
+      expect(compose).toContain(`- ${capability}`);
+    }
     expect(compose).toContain('driver: "json-file"');
     expect(compose).toContain('max-size: "10m"');
     expect(compose).toContain('max-file: "5"');
+    expect(nginx).toContain('proxy_set_header Connection "";');
 
     expect(envExample).toContain("B2_ALLOWED_HOSTS=mcp.example.com");
     expect(envExample).toContain("B2_ALLOWED_ORIGINS=https://client.example.com");

@@ -57,7 +57,10 @@ services:
     cap_drop:
       - ALL
     cap_add:
+      - CHOWN
       - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
     security_opt:
       - no-new-privileges:true
     volumes:
