@@ -58,6 +58,16 @@ const failures = [];
 let nextId = 1;
 let mcpUrl = MCP_URL;
 let headers = {};
+const MCP_REQUEST_TIMEOUT_MS = 10_000;
+const MCP_REQUEST_ATTEMPTS = 3;
+const MCP_REQUEST_BACKOFF_MS = 400;
+
+class RetryableSmokeRequestError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "RetryableSmokeRequestError";
+  }
+}
 
 function check(name, ok, detail = "") {
   const mark = ok ? "PASS" : "FAIL";
@@ -66,35 +76,88 @@ function check(name, ok, detail = "") {
   if (!ok) failures.push(name);
 }
 
-async function mcp(method, params = {}) {
+function smokeRequestLabel(method, params = {}) {
+  return method === "tools/call" && params.name ? `${method} ${params.name}` : method;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status) {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+function isRetryableNetworkError(err) {
+  return /(?:fetch failed|network|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|ECONNREFUSED)/i.test(
+    err?.message || String(err),
+  );
+}
+
+export function configureSmokeRequestContextForTests(url, requestHeaders = {}) {
+  mcpUrl = url;
+  headers = { ...requestHeaders };
+  nextId = 1;
+}
+
+export async function mcp(method, params = {}) {
   const name = method === "tools/call" ? params.name : undefined;
-  const response = await fetch(mcpUrl, {
-    method: "POST",
-    headers: {
-      ...headers,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "Mcp-Method": method,
-      ...(name && { "Mcp-Name": name }),
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: nextId++,
-      method,
-      params: {
-        ...params,
-        _meta: {
-          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-          "io.modelcontextprotocol/clientCapabilities": {},
-        },
+  const label = smokeRequestLabel(method, params);
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: nextId++,
+    method,
+    params: {
+      ...params,
+      _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
       },
-    }),
+    },
   });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.error) {
-    throw new Error(body.error?.message ?? `HTTP ${response.status}`);
+
+  for (let attempt = 1; attempt <= MCP_REQUEST_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), MCP_REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(mcpUrl, {
+        method: "POST",
+        headers: {
+          ...headers,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "Mcp-Method": method,
+          ...(name && { "Mcp-Name": name }),
+        },
+        body,
+        signal: controller.signal,
+      });
+      const responseBody = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = responseBody.error?.message ?? `HTTP ${response.status}`;
+        if (isRetryableStatus(response.status)) {
+          throw new RetryableSmokeRequestError(`${label} failed: ${message}`);
+        }
+        throw new Error(`${label} failed: ${message}`);
+      }
+      if (responseBody.error) throw new Error(`${label} failed: ${responseBody.error.message}`);
+      return responseBody.result;
+    } catch (err) {
+      const timedOut = controller.signal.aborted;
+      const message = timedOut
+        ? `${label} timed out after ${MCP_REQUEST_TIMEOUT_MS}ms`
+        : err?.message || String(err);
+      const retryable =
+        timedOut || err instanceof RetryableSmokeRequestError || isRetryableNetworkError(err);
+      if (!retryable || attempt === MCP_REQUEST_ATTEMPTS) {
+        throw new Error(retryable ? `${message} after ${attempt} attempt(s)` : message);
+      }
+      await delay(MCP_REQUEST_BACKOFF_MS * attempt);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
-  return body.result;
+  throw new Error(`${label} failed before receiving a response`);
 }
 
 function parseToolJson(result) {
@@ -106,7 +169,7 @@ function parseToolJson(result) {
   }
 }
 
-function assertToolSuccess(result, label) {
+export function assertToolSuccess(result, label) {
   if (result?.isError !== true) return result;
   const detail = result.content?.[0]?.text || `${label} returned an MCP tool error`;
   throw new Error(detail);

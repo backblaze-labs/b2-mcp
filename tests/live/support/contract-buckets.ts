@@ -1,27 +1,6 @@
-import { createRequire } from "module";
 import type { McpServer } from "../../../src/mcp";
 import { callTool, parseResult } from "../../support/deterministic-fakes";
-
-const nodeRequire = createRequire(__filename);
-const liveB2Contract = nodeRequire("../../../scripts/lib/live-b2-contract.cjs") as {
-  CONTRACT_BUCKET_PREFIX: string;
-  CONTRACT_KEY_PREFIX_ENV: string;
-  bucketMatchesPrefix: (bucketName: string, prefix: string) => boolean;
-  cleanupContractBucketWithTools: (
-    callTool: (name: string, args: Record<string, unknown>) => Promise<any>,
-    bucket: ContractBucketRef,
-    options?: Record<string, unknown>,
-  ) => Promise<boolean>;
-  contractBucketName: (label: string, options?: { prefix?: string; randomHex?: string }) => string;
-  contractObjectKey: (label: string, leafName?: string, options?: { prefix?: string }) => string;
-  contractRuleName: (label: string, options?: { prefix?: string }) => string;
-  isContractBucketName: (bucketName: string, label?: string) => boolean;
-  isError: (result: any) => boolean;
-  liveErrorText: (result: any) => string;
-  liveRunPrefix: (env?: NodeJS.ProcessEnv) => string;
-  normalizeLivePrefix: (value?: string) => string;
-  redactKnownLiveResourceDetails: (value: unknown, options?: { prefix?: string }) => string;
-};
+import { liveB2Contract } from "../../support/live-b2-contract-types";
 
 export const CONTRACT_BUCKET_PREFIX = liveB2Contract.CONTRACT_BUCKET_PREFIX;
 export const CONTRACT_KEY_PREFIX_ENV = liveB2Contract.CONTRACT_KEY_PREFIX_ENV;

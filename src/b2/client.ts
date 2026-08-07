@@ -347,6 +347,7 @@ export interface S3DeleteObjectsOptions {
   bucket: string;
   objects: Array<{ key: string; versionId?: string }>;
   quiet?: boolean;
+  bypassGovernance?: boolean;
 }
 
 export interface S3DeleteObjectsResult {
@@ -1348,6 +1349,9 @@ export class B2Client {
               target.versionId,
             );
             await bucket.deleteFileVersion(target.key, fileId(target.versionId), {
+              ...(options.bypassGovernance !== undefined
+                ? { bypassGovernance: options.bypassGovernance }
+                : {}),
               ...(signal !== undefined ? { signal } : {}),
             });
             deletedVersionId = target.versionId;

@@ -6,8 +6,15 @@ const CONTRACT_BUCKET_PREFIX = "mcp-contract-";
 const CONTRACT_KEY_PREFIX_ENV = "B2_MCP_LIVE_RUN_PREFIX";
 const MAX_BUCKET_NAME_LENGTH = 50;
 const MAX_LIVE_PREFIX_LENGTH = 29;
+const CLEANUP_PAGINATION_GUARD_PAGES = 1000;
+const REDACTION_PLACEHOLDERS = Object.freeze({
+  credential: "[REDACTED_B2_CREDENTIAL]",
+  presignedUrl: "[REDACTED_B2_PRESIGNED_URL]",
+  resource: "[REDACTED_B2_RESOURCE]",
+  run: "[REDACTED_B2_RUN]",
+});
 const PRESIGNED_URL_PATTERN =
-  /https:\/\/[^\s"'<>]*(?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token)[^\s"'<>]*/gi;
+  /https:\/\/[^\s"'<>]*(?:X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|[?&]Authorization=)[^\s"'<>]*/gi;
 const LIVE_B2_RESOURCE_PATTERN = /\bmcp-contract-[a-z0-9][a-z0-9-]*/gi;
 const localRunPrefix = `${CONTRACT_BUCKET_PREFIX}local-${Date.now().toString(36)}-${process.pid.toString(36)}`;
 
@@ -89,9 +96,10 @@ function redactKnownLiveResourceDetails(value, options = {}) {
   let text = typeof value === "string" ? value : JSON.stringify(value) || String(value);
   const prefix = options.prefix ? normalizeLivePrefix(options.prefix) : liveRunPrefix();
   text = text
-    .replace(PRESIGNED_URL_PATTERN, "[redacted-presigned-url]")
-    .replace(LIVE_B2_RESOURCE_PATTERN, "[live-b2-resource]");
-  if (prefix) text = text.replace(new RegExp(escapeRegExp(prefix), "g"), "[live-b2-run]");
+    .replace(PRESIGNED_URL_PATTERN, REDACTION_PLACEHOLDERS.presignedUrl)
+    .replace(LIVE_B2_RESOURCE_PATTERN, REDACTION_PLACEHOLDERS.resource);
+  if (prefix)
+    text = text.replace(new RegExp(escapeRegExp(prefix), "g"), REDACTION_PLACEHOLDERS.run);
   return text;
 }
 
@@ -165,7 +173,7 @@ async function clearNotificationRules(callTool, bucket, options = {}) {
 async function abortMultipartUploads(callTool, bucketName, options = {}) {
   let keyMarker;
   let uploadIdMarker;
-  for (let page = 0; page < 1000; page++) {
+  for (let page = 0; page < CLEANUP_PAGINATION_GUARD_PAGES; page++) {
     const listed = await callOptional(
       callTool,
       "s3_list_multipart_uploads",
@@ -211,26 +219,39 @@ async function clearObjectLockForVersions(callTool, versions, options = {}) {
   if (options.dryRun) return;
   for (const version of versions) {
     if (!version.Key || !version.VersionId) continue;
-    await callOptional(callTool, "b2_update_file_legal_hold", {
-      fileId: version.VersionId,
-      fileName: version.Key,
-      legalHold: "off",
-      confirm: true,
-    });
-    await callOptional(callTool, "b2_update_file_retention", {
-      fileId: version.VersionId,
-      fileName: version.Key,
-      fileRetention: { mode: null, retainUntilTimestamp: null },
-      bypassGovernance: true,
-      confirm: true,
-    });
+    const legalHold = await callOptional(
+      callTool,
+      "b2_update_file_legal_hold",
+      {
+        fileId: version.VersionId,
+        fileName: version.Key,
+        legalHold: "off",
+        confirm: true,
+      },
+      options,
+    );
+    if (isError(legalHold)) recordCleanupError(options, "legal-hold cleanup failed", legalHold);
+
+    const retention = await callOptional(
+      callTool,
+      "b2_update_file_retention",
+      {
+        fileId: version.VersionId,
+        fileName: version.Key,
+        fileRetention: { mode: null, retainUntilTimestamp: null },
+        bypassGovernance: true,
+        confirm: true,
+      },
+      options,
+    );
+    if (isError(retention)) recordCleanupError(options, "retention cleanup failed", retention);
   }
 }
 
 async function deleteObjectVersions(callTool, bucketName, options = {}) {
   let keyMarker;
   let versionIdMarker;
-  for (let page = 0; page < 1000; page++) {
+  for (let page = 0; page < CLEANUP_PAGINATION_GUARD_PAGES; page++) {
     const listed = await callOptional(
       callTool,
       "s3_list_object_versions",
@@ -261,6 +282,7 @@ async function deleteObjectVersions(callTool, bucketName, options = {}) {
           bucket: bucketName,
           objects,
           quiet: false,
+          bypassGovernance: true,
           confirm: true,
         },
         options,
@@ -321,12 +343,14 @@ async function cleanupContractBucketWithTools(callTool, bucket, options = {}) {
 }
 
 module.exports = {
+  CLEANUP_PAGINATION_GUARD_PAGES,
   CONTRACT_BUCKET_PREFIX,
   CONTRACT_KEY_PREFIX_ENV,
   LIVE_B2_RESOURCE_PATTERN,
   MAX_BUCKET_NAME_LENGTH,
   MAX_LIVE_PREFIX_LENGTH,
   PRESIGNED_URL_PATTERN,
+  REDACTION_PLACEHOLDERS,
   abortMultipartUploads,
   bucketMatchesPrefix,
   cleanupContractBucketWithTools,

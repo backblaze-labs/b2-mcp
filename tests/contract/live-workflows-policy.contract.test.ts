@@ -21,13 +21,16 @@ const liveWorkflows = [
     environment: "live-b2-contract",
     concurrency:
       "live-b2-contract-${{ github.repository }}-${{ inputs['concurrency-scope'] || github.ref_name || github.run_id }}",
+    cancelsInProgress: false,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY"],
   },
   {
     path: ".github/workflows/smoke.yml",
     job: "smoke",
     environment: "live-b2-smoke",
-    concurrency: "live-b2-smoke-${{ github.repository }}-${{ github.ref_name || github.run_id }}",
+    concurrency:
+      "live-b2-smoke-${{ github.repository }}-${{ github.event.deployment.environment || github.ref_name || github.run_id }}",
+    cancelsInProgress: true,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_APP_KEY_ID", "LIVE_B2_APP_KEY"],
   },
 ];
@@ -75,9 +78,17 @@ describe("live secret workflow policy", () => {
       expectYamlScalar(text, "max-parallel", "1");
       expect(text).toMatch(/^\s{2}guard:\s*$/m);
       expect(text).toMatch(/if: github\.repository == 'backblaze-labs\/b2-mcp'/);
-      expect(text).toMatch(/^\s{2}push:\s*$/m);
       expect(text).toMatch(/^\s{2}schedule:\s*$/m);
-      expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
+      if (path.endsWith("contract.yml")) {
+        expect(text).toMatch(/^\s{2}push:\s*$/m);
+        expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
+      } else {
+        expect(text).toMatch(/^\s{2}deployment_status:\s*$/m);
+        expect(text).not.toMatch(/^\s{2}push:\s*$/m);
+        expect(text).toContain("DEPLOYMENT_STATE: ${{ github.event.deployment_status.state");
+        expect(text).toContain("DEPLOYMENT_SHA: ${{ github.event.deployment.sha");
+        expect(text).toContain('checkout_sha="${DEPLOYMENT_SHA}"');
+      }
       expect(text).not.toMatch(/^\s{2}pull_request:\s*$/m);
       expect(text).not.toContain("PR_HEAD_SHA");
       expect(text).not.toContain("github.event.pull_request.head.sha");
@@ -91,11 +102,11 @@ describe("live secret workflow policy", () => {
   );
 
   it.each(liveWorkflows)(
-    "$path serializes runs and never cancels in-progress cleanup",
-    ({ path, concurrency }) => {
+    "$path uses the expected live-workflow concurrency policy",
+    ({ path, concurrency, cancelsInProgress }) => {
       const text = workflowText(path);
       expect(text).toMatch(topLevelMappingEntry("concurrency", "group", concurrency));
-      expect(text).toContain("cancel-in-progress: false");
+      expect(text).toContain(`cancel-in-progress: ${cancelsInProgress}`);
     },
   );
 
@@ -134,6 +145,8 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("github.event_name == 'schedule'");
     expect(text).toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
     expect(text).toContain("Clean current live B2 run resources");
+    expect(text).toContain("B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}");
+    expect(text).toContain("--best-effort");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
     expect(text).toContain('cron: "17 9 * * *"');
     expect(contractJob).toContain("group: live-b2-contract-${{ github.repository }}-resources");

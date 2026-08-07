@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import liveB2Contract from "./lib/live-b2-contract.cjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const { LIVE_B2_RESOURCE_PATTERN, PRESIGNED_URL_PATTERN } = liveB2Contract;
+const { LIVE_B2_RESOURCE_PATTERN, PRESIGNED_URL_PATTERN, REDACTION_PLACEHOLDERS } = liveB2Contract;
 
 export const b2CredentialPolicy = JSON.parse(
   readFileSync(join(root, "scripts", "b2-credential-env.json"), "utf8"),
@@ -88,16 +88,19 @@ export function b2LogSensitiveEnvValues(env = process.env) {
 export function redactB2CredentialValues(text, env = process.env) {
   let redacted = String(text ?? "");
   redacted = redacted
-    .replace(PRESIGNED_URL_PATTERN, "[REDACTED_B2_PRESIGNED_URL]")
-    .replace(LIVE_B2_RESOURCE_PATTERN, "[REDACTED_B2_RESOURCE]")
+    .replace(PRESIGNED_URL_PATTERN, REDACTION_PLACEHOLDERS.presignedUrl)
+    .replace(LIVE_B2_RESOURCE_PATTERN, REDACTION_PLACEHOLDERS.resource)
     .replace(SENSITIVE_LOG_FIELD, (match, quote, field, separator) => {
       const valueQuote = /["']$/.test(separator) ? separator.at(-1) : "";
       return SENSITIVE_LOG_FIELDS.has(field)
-        ? `${quote}${field}${separator}[REDACTED_B2_CREDENTIAL]${valueQuote}`
+        ? `${quote}${field}${separator}${REDACTION_PLACEHOLDERS.credential}${valueQuote}`
         : match;
     });
   for (const value of b2LogSensitiveEnvValues(env)) {
-    redacted = redacted.replace(new RegExp(escapeRegExp(value), "g"), "[REDACTED_B2_CREDENTIAL]");
+    redacted = redacted.replace(
+      new RegExp(escapeRegExp(value), "g"),
+      REDACTION_PLACEHOLDERS.credential,
+    );
   }
   return redacted;
 }

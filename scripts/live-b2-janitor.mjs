@@ -10,6 +10,7 @@ import liveB2Contract from "./lib/live-b2-contract.cjs";
 
 const {
   CONTRACT_BUCKET_PREFIX,
+  CLEANUP_PAGINATION_GUARD_PAGES,
   bucketMatchesPrefix,
   cleanupContractBucketWithTools,
   createCleanupStats,
@@ -22,16 +23,23 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 function usage(message) {
   if (message) console.error(message);
   console.error(
-    "Usage: node scripts/live-b2-janitor.mjs [--prefix <test-prefix>] [--exclude-prefix <active-prefix>] [--dry-run]",
+    "Usage: node scripts/live-b2-janitor.mjs [--prefix <test-prefix>] [--exclude-prefix <active-prefix>] [--dry-run] [--best-effort]",
   );
 }
 
-function parseArgs(argv) {
-  const options = { prefix: CONTRACT_BUCKET_PREFIX, excludePrefixes: [], dryRun: false };
+export function parseArgs(argv) {
+  const options = {
+    prefix: CONTRACT_BUCKET_PREFIX,
+    excludePrefixes: [],
+    dryRun: false,
+    bestEffort: false,
+  };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--best-effort") {
+      options.bestEffort = true;
     } else if (arg === "--prefix") {
       const value = argv[++index];
       if (!value) throw new Error("--prefix requires a value");
@@ -53,6 +61,10 @@ function exactSecretMissing() {
   return b2CredentialPolicy.liveRequired.filter((name) => !process.env[name]);
 }
 
+function expectedLiveTestAccountId() {
+  return String(process.env.B2_LIVE_TEST_ACCOUNT_ID ?? "").trim();
+}
+
 function fingerprint(value) {
   return createHash("sha256").update(String(value)).digest("hex").slice(0, 12);
 }
@@ -69,14 +81,15 @@ async function loadRuntime() {
   const authModule = await import(pathToFileURL(join(root, "dist/auth.js")).href);
   const clientModule = await import(pathToFileURL(join(root, "dist/b2/client.js")).href);
   const config = serverModule.loadConfig();
+  const authManager = new authModule.B2AuthManager(config);
   const server = serverModule.createServer({
     ...config,
     destructivePolicy: "allow",
   });
   const tools = serverModule.getRegisteredTools(server);
   if (!tools) throw new Error("Built server did not expose registered tools.");
-  const b2Client = new clientModule.B2Client(new authModule.B2AuthManager(config));
-  return { b2Client, tools };
+  const b2Client = new clientModule.B2Client(authManager);
+  return { authManager, b2Client, tools };
 }
 
 async function callTool(tools, name, args) {
@@ -85,9 +98,9 @@ async function callTool(tools, name, args) {
   return tool.execute(args, {});
 }
 
-async function cleanupKeys(b2Client, stats, options) {
+export async function cleanupKeys(b2Client, stats, options) {
   let startApplicationKeyId;
-  for (let page = 0; page < 1000; page++) {
+  for (let page = 0; page < CLEANUP_PAGINATION_GUARD_PAGES; page++) {
     let listed;
     try {
       listed = await b2Client.listKeys({
@@ -128,6 +141,23 @@ async function cleanupKeys(b2Client, stats, options) {
   console.error("live-b2-janitor: key cleanup exceeded pagination guard");
 }
 
+export async function assertExpectedLiveTestAccount(authManager, expectedAccountId, options) {
+  if (!expectedAccountId) {
+    throw new Error("B2_LIVE_TEST_ACCOUNT_ID is required before live B2 janitor deletion.");
+  }
+  const auth = await authManager.getAuth();
+  if (auth.accountId !== expectedAccountId) {
+    throw new Error(
+      `authorized account fingerprint=${fingerprint(
+        auth.accountId,
+      )} does not match B2_LIVE_TEST_ACCOUNT_ID fingerprint=${fingerprint(expectedAccountId)}`,
+    );
+  }
+  if (options?.log) {
+    options.log(`authorized account fingerprint=${fingerprint(auth.accountId)}`);
+  }
+}
+
 function selectedBuckets(buckets, options) {
   return buckets.filter(
     (bucket) =>
@@ -156,8 +186,17 @@ async function main() {
     process.exit(2);
   }
 
-  const { b2Client, tools } = await loadRuntime();
+  const { authManager, b2Client, tools } = await loadRuntime();
   const stats = createCleanupStats();
+  try {
+    await assertExpectedLiveTestAccount(authManager, expectedLiveTestAccountId(), {
+      log: (message) => console.log(`live-b2-janitor: ${message}`),
+    });
+  } catch (err) {
+    console.error(`live-b2-janitor: ${redactDetail(err?.message ?? err, options.prefix)}`);
+    process.exit(2);
+  }
+
   let buckets;
   try {
     buckets = selectedBuckets((await b2Client.listBuckets({})).buckets ?? [], options);
@@ -190,14 +229,18 @@ async function main() {
     `live-b2-janitor: summary buckets=${stats.buckets} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} keys=${stats.keys} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
   );
   if (stats.errors || stats.leakedBuckets) {
+    const annotation = options.bestEffort ? "warning" : "error";
     console.error(
-      `::error title=Live B2 janitor::cleanup_errors=${stats.errors} leaked_buckets=${stats.leakedBuckets}`,
+      `::${annotation} title=Live B2 janitor::cleanup_errors=${stats.errors} leaked_buckets=${stats.leakedBuckets}`,
     );
+    if (options.bestEffort) return;
     process.exit(1);
   }
 }
 
-main().catch((err) => {
-  console.error(`live-b2-janitor: ${redactB2CredentialValues(err?.message ?? err, process.env)}`);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(`live-b2-janitor: ${redactB2CredentialValues(err?.message ?? err, process.env)}`);
+    process.exit(1);
+  });
+}

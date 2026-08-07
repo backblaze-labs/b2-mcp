@@ -1,6 +1,10 @@
 name: Live B2 Contract
 
-# Live B2 contract and integration evidence. These jobs create and delete only
+# Live B2 contract and integration evidence. Mocked tests previously missed
+# request-shape regressions in notification rules and Object Lock payloads, so
+# these reviewed main/schedule/release jobs exercise real B2 requests. They do
+# not run on pull_request because protected credentials must never share a job
+# with unreviewed PR-head package code, and they create/delete only
 # `mcp-contract-*` resources in the dedicated protected live test account.
 
 on:
@@ -138,12 +142,14 @@ jobs:
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
         run: |
           set -euo pipefail
           echo "::add-mask::${B2_MCP_LIVE_RUN_PREFIX}"
+          if [[ -n "${B2_LIVE_TEST_ACCOUNT_ID:-}" ]]; then echo "::add-mask::${B2_LIVE_TEST_ACCOUNT_ID}"; fi
           missing=0
-          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY B2_INTEGRATION_REQUIRE_CREDENTIALS B2_MCP_LIVE_RUN_PREFIX; do
+          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY B2_LIVE_TEST_ACCOUNT_ID B2_INTEGRATION_REQUIRE_CREDENTIALS B2_MCP_LIVE_RUN_PREFIX; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-contract variable or secret for ${name}"
               missing=1
@@ -155,6 +161,7 @@ jobs:
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
           B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
         run: pnpm run test:live:b2
@@ -163,6 +170,7 @@ jobs:
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
         run: |
           set -euo pipefail
@@ -170,7 +178,7 @@ jobs:
             echo "::notice::dist/server.js is missing; no live resources should have been created before build."
             exit 0
           fi
-          node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}"
+          node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}" --best-effort
 
   abandoned-resource-janitor:
     name: abandoned live B2 janitor
@@ -203,4 +211,5 @@ jobs:
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
         run: node scripts/live-b2-janitor.mjs --prefix mcp-contract-

@@ -41,6 +41,7 @@ describe("B2 log redaction", () => {
       "upload_authorization_token=upload-token",
       "bucket=mcp-contract-123-1-n22-23-1-integration-abcd",
       "https://example.s3.us-west-004.backblazeb2.com/key?X-Amz-Signature=abc123",
+      "https://f004.backblazeb2.com/file/bucket/key.txt?Authorization=b2-native-token",
     ].join(" ");
 
     const redacted = redactB2CredentialValues(text, {});
@@ -51,6 +52,7 @@ describe("B2 log redaction", () => {
     expect(redacted).not.toContain("upload-token");
     expect(redacted).not.toContain("mcp-contract-123");
     expect(redacted).not.toContain("X-Amz-Signature");
+    expect(redacted).not.toContain("b2-native-token");
     expect(redacted).toContain('"applicationKey":"[REDACTED_B2_CREDENTIAL]"');
     expect(redacted).toContain("[REDACTED_B2_RESOURCE]");
     expect(redacted).toContain("[REDACTED_B2_PRESIGNED_URL]");

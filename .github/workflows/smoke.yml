@@ -5,8 +5,7 @@ name: Live B2 Smoke
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
+  deployment_status:
   schedule:
     - cron: "47 9 * * 1"
 
@@ -14,8 +13,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-b2-smoke-${{ github.repository }}-${{ github.ref_name || github.run_id }}
-  cancel-in-progress: false
+  group: live-b2-smoke-${{ github.repository }}-${{ github.event.deployment.environment || github.ref_name || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   guard:
@@ -29,6 +28,8 @@ jobs:
         id: ref
         env:
           EVENT_NAME: ${{ github.event_name }}
+          DEPLOYMENT_STATE: ${{ github.event.deployment_status.state || '' }}
+          DEPLOYMENT_SHA: ${{ github.event.deployment.sha || '' }}
         run: |
           set -euo pipefail
           should_run=true
@@ -41,10 +42,21 @@ jobs:
                 exit 1
               fi
               ;;
-            push|schedule)
+            schedule)
               if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
                 echo "::error::${EVENT_NAME} live smoke runs must target main; got ${GITHUB_REF}"
                 exit 1
+              fi
+              ;;
+            deployment_status)
+              if [[ "${DEPLOYMENT_STATE}" != "success" ]]; then
+                should_run=false
+                checkout_sha=""
+              elif [[ ! "${DEPLOYMENT_SHA}" =~ ^[a-f0-9]{40}$ ]]; then
+                echo "::error::deployment_status live smoke requires a full deployed SHA."
+                exit 1
+              else
+                checkout_sha="${DEPLOYMENT_SHA}"
               fi
               ;;
             *)

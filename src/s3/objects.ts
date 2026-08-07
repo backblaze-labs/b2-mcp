@@ -261,6 +261,12 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
           .optional()
           .default(true)
           .describe("If true, only return errors (not successes) in the response."),
+        bypassGovernance: z
+          .boolean()
+          .optional()
+          .describe(
+            "If true, bypass governance-mode Object Lock retention when deleting specific versions. Requires bypassGovernance capability.",
+          ),
         confirm: z.boolean().optional().describe(CONFIRM_DESC),
       },
     },
@@ -273,6 +279,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
             bucket: args.bucket,
             objects: args.objects as DeleteObjectEntry[],
             quiet: args.quiet ?? true,
+            bypassGovernance: args.bypassGovernance,
           })),
         });
       } catch (err) {

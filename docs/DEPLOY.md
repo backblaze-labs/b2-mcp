@@ -542,9 +542,11 @@ pass, 1 = at least one check failed.
 ### CI smoke runs
 
 The same script also runs automatically via `.github/workflows/smoke.yml` on
-manual dispatch from `main`, pushes to `main`, and a weekly schedule. It does
-not run on `pull_request`, because live smoke credentials must not share a job
-with unreviewed PR-head code.
+manual dispatch from `main`, successful GitHub deployment status events, and a
+weekly schedule. Deployment-triggered smoke checks out the deployed SHA, so the
+tool contract being asserted matches the endpoint under test. It does not run
+on `pull_request`, because live smoke credentials must not share a job with
+unreviewed PR-head code.
 
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
@@ -567,7 +569,8 @@ The protected live contract workflow runs through
 `main`, a daily schedule, and `workflow_call` from the publish workflow. The
 reusable release path validates that the checkout SHA is reachable from the
 protected `ci-green` ref before exposing live credentials. It uses the
-`live-b2-contract` environment with `LIVE_B2_KEY_ID` / `LIVE_B2_KEY`, sets
+`live-b2-contract` environment with `LIVE_B2_KEY_ID` / `LIVE_B2_KEY` and
+`vars.B2_LIVE_TEST_ACCOUNT_ID`, sets
 `B2_INTEGRATION_REQUIRE_CREDENTIALS=1`, and fails a trusted run when credentials
 are missing instead of accepting skipped live tests. It does not run on
 `pull_request`, because redaction and `add-mask` are only best-effort log
@@ -576,10 +579,18 @@ matrix entry uses a unique `B2_MCP_LIVE_RUN_PREFIX` rooted at `mcp-contract-`,
 creates only test-owned
 buckets, objects, multipart uploads, keys, and notification rules, runs
 serially on Node.js 22.23.1, 24, and 26, and invokes
-`scripts/live-b2-janitor.mjs` after the run. The daily schedule also sweeps
-abandoned `mcp-contract-*` resources, with the sweep sharing the live-resource
-concurrency lock used by contract runs so it cannot overlap an active release
-gate.
+`scripts/live-b2-janitor.mjs` after the run. The janitor verifies the authorized
+account matches `B2_LIVE_TEST_ACCOUNT_ID` before any delete; the per-run cleanup
+logs best-effort failures without flipping an otherwise-passing test job, while
+the scheduled abandoned-resource sweep still exits non-zero on residual errors.
+The daily schedule also sweeps abandoned `mcp-contract-*` resources, with the
+sweep sharing the live-resource concurrency lock used by contract runs so it
+cannot overlap an active release gate.
+
+Set `vars.B2_LIVE_TEST_ACCOUNT_ID` to the dedicated test account ID in the
+`live-b2-contract` environment. The janitor compares it with the account ID
+returned by authorization and refuses cleanup before issuing any delete when the
+values differ.
 
 For credential-free supplemental evidence before touching a live deployment, run
 the advisory stdio client smoke from a non-serving checkout or copied release
