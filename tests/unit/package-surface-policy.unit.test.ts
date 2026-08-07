@@ -38,6 +38,8 @@ function npmPackDryRunFiles(cwd = root): string[] {
 }
 
 function dockerIgnoreMatcher(patternText: string): (relativePath: string) => boolean {
+  // Best-effort local invariant for the simple checked-in patterns below. It is
+  // not a complete Docker .dockerignore parser.
   const patterns = patternText
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -87,6 +89,7 @@ describe("package surface policy", () => {
     expect(files).not.toContain("runtime-policy.json");
     expect(files).not.toContain("audit-policy.json");
     expect(files).not.toContain("package-budget.json");
+    expect(files).toContain(".dockerignore");
     expect(files).toContain("package.json");
     expect(files).toContain("deploy/customer-hosted/.dockerignore");
     expect(files).toContain("deploy/customer-hosted/Dockerfile");
@@ -95,6 +98,8 @@ describe("package surface policy", () => {
     expect(files).toContain("deploy/customer-hosted/container-entrypoint.sh");
     expect(files).toContain("deploy/customer-hosted/docker-compose.yml");
     expect(files).toContain("deploy/customer-hosted/nginx.conf");
+    expect(files).toContain("deploy/customer-hosted/pnpm-lock.yaml");
+    expect(files).toContain("deploy/customer-hosted/pnpm-workspace.yaml");
     expect(files).toContain("docs/CLIENTS.md");
     expect(files).toContain("docs/DEPLOY.md");
     expect(files).toContain("docs/tool-profile-contract.json");
@@ -103,6 +108,15 @@ describe("package surface policy", () => {
     )) {
       expect(files).toContain(fixturePath);
     }
+  });
+
+  it("keeps packaged deployment lockfiles mirrored from the reviewed lockfiles", () => {
+    expect(readFileSync(join(root, "deploy/customer-hosted/pnpm-lock.yaml"), "utf8")).toBe(
+      readFileSync(join(root, "pnpm-lock.yaml"), "utf8"),
+    );
+    expect(readFileSync(join(root, "deploy/customer-hosted/pnpm-workspace.yaml"), "utf8")).toBe(
+      readFileSync(join(root, "pnpm-workspace.yaml"), "utf8"),
+    );
   });
 
   it("excludes local deployment secrets from npm pack and Docker build contexts", () => {
@@ -131,6 +145,10 @@ describe("package surface policy", () => {
         join(tempRoot, "package.json"),
         readFileSync(join(root, "package.json"), "utf8"),
       );
+      writeFileSync(
+        join(tempRoot, ".dockerignore"),
+        readFileSync(join(root, ".dockerignore"), "utf8"),
+      );
       for (const fileName of [
         ".dockerignore",
         "Dockerfile",
@@ -158,12 +176,19 @@ describe("package surface policy", () => {
       const isDockerIgnored = dockerIgnoreMatcher(
         readFileSync(join(deployRoot, ".dockerignore"), "utf8"),
       );
+      const isRootDockerIgnored = dockerIgnoreMatcher(
+        readFileSync(join(tempRoot, ".dockerignore"), "utf8"),
+      );
       for (const relativePath of localSecretPaths) {
         expect(isDockerIgnored(relativePath)).toBe(true);
+        expect(isRootDockerIgnored(`deploy/customer-hosted/${relativePath}`)).toBe(true);
       }
       expect(isDockerIgnored("b2-mcp.env.example")).toBe(false);
       expect(isDockerIgnored("Dockerfile")).toBe(false);
       expect(isDockerIgnored("nginx.conf")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/b2-mcp.env.example")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/Dockerfile")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/nginx.conf")).toBe(false);
     } finally {
       rmSync(tempRoot, { recursive: true, force: true });
     }
@@ -180,10 +205,20 @@ describe("package surface policy", () => {
     const deployReadme = readFileSync(join(root, "deploy/customer-hosted/README.md"), "utf8");
     const deployDoc = readFileSync(join(root, "docs/DEPLOY.md"), "utf8");
 
-    expect(dockerfile).toMatch(/^FROM node:22\.23\.1-bookworm-slim@sha256:[a-f0-9]{64}$/m);
+    expect(
+      dockerfile.match(/^FROM node:22\.23\.1-bookworm-slim@sha256:[a-f0-9]{64}.*$/gm),
+    ).toHaveLength(2);
     expect(compose).toMatch(/image: nginx:1\.29-alpine@sha256:[a-f0-9]{64}/);
     expect(dockerfile).not.toMatch(/^ARG B2_MCP_VERSION=/m);
     expect(dockerfile).toContain('test -n "$B2_MCP_VERSION"');
+    expect(dockerfile).toContain(
+      "COPY package.json deploy/customer-hosted/pnpm-lock.yaml deploy/customer-hosted/pnpm-workspace.yaml ./",
+    );
+    expect(dockerfile).toContain("pnpm install --prod --frozen-lockfile --ignore-scripts");
+    expect(dockerfile).not.toContain("npm install -g");
+    expect(dockerfile).not.toContain("@backblaze-labs/b2-mcp@${B2_MCP_VERSION}");
+    expect(compose).toContain("context: ../..");
+    expect(compose).toContain("dockerfile: deploy/customer-hosted/Dockerfile");
     expect(compose).toContain("B2_MCP_VERSION: ${B2_MCP_VERSION:?");
     expect(compose).not.toContain("B2_MCP_VERSION:-");
     for (const text of [dockerfile, compose, deployReadme, deployDoc]) {
@@ -194,9 +229,15 @@ describe("package surface policy", () => {
     expect(nginx).toContain("zone b2_mcp_backend 64k;");
     expect(nginx).toMatch(/server b2-mcp-a:3000 resolve /);
     expect(nginx).toMatch(/server b2-mcp-b:3000 resolve /);
-    expect(nginx).toContain("proxy_connect_timeout 2s;");
-    expect(nginx).toContain("proxy_send_timeout 2s;");
-    expect(nginx).toContain("proxy_read_timeout 3s;");
+    expect(nginx).toMatch(
+      /location\s+=\s+\/_oauth2\/validate\s+\{[\s\S]*proxy_connect_timeout\s+\d+s;/,
+    );
+    expect(nginx).toMatch(
+      /location\s+=\s+\/_oauth2\/validate\s+\{[\s\S]*proxy_send_timeout\s+\d+s;/,
+    );
+    expect(nginx).toMatch(
+      /location\s+=\s+\/_oauth2\/validate\s+\{[\s\S]*proxy_read_timeout\s+\d+s;/,
+    );
     expect(nginx).toContain("error_page 500 502 503 504 = @oauth_unavailable;");
 
     expect(compose).not.toContain("condition: service_healthy");
@@ -204,8 +245,7 @@ describe("package surface policy", () => {
       expect(compose).toContain(`- ${capability}`);
     }
     expect(compose).toContain('driver: "json-file"');
-    expect(compose).toContain('max-size: "10m"');
-    expect(compose).toContain('max-file: "5"');
+    expect(compose).toContain("logging: *bounded-logging");
     expect(compose).not.toContain("/etc/letsencrypt:/etc/letsencrypt:ro");
     expect(compose).toContain(
       "/etc/letsencrypt/live/mcp.example.com:/etc/letsencrypt/live/mcp.example.com:ro",
@@ -223,7 +263,8 @@ describe("package surface policy", () => {
     expect(nginx).toContain('"https://client.example.com" 1;');
     expect(envExample).toContain("aggregate traffic per replica");
     expect(deployReadme).toContain("aggregate per-replica caps");
-    expect(deployDoc).toContain("aggregate per-replica cap");
+    expect(deployDoc).toContain("canonical source for build/run steps");
+    expect(deployDoc).toContain("deploy/customer-hosted/README.md");
   });
 
   it("retries a transient lockfile-less packed-consumer install", () => {

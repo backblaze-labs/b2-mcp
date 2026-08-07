@@ -48,12 +48,22 @@ plugin. Node.js is installed inside the image.
 
 ## Supported container reference
 
-The release package includes a complete container reference:
+The supported container operator runbook is
+[`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md). Treat
+that README as the canonical source for build/run steps, secret injection,
+nginx OAuth and mTLS policy, rolling deploys, pinned image updates, bounded
+logging, and capacity guidance. This section only shows how to fetch the
+published reference files.
+
+The release package includes:
 
 - `deploy/customer-hosted/Dockerfile`
 - `deploy/customer-hosted/docker-compose.yml`
 - `deploy/customer-hosted/nginx.conf`
 - `deploy/customer-hosted/b2-mcp.env.example`
+- `deploy/customer-hosted/pnpm-lock.yaml`
+- `deploy/customer-hosted/pnpm-workspace.yaml`
+- `.dockerignore`
 
 Fetch it from the package artifact instead of cloning the repository on the
 production host:
@@ -65,129 +75,18 @@ tar -xzf backblaze-labs-b2-mcp-*.tgz -C b2-mcp-release --strip-components=1
 cd b2-mcp-release/deploy/customer-hosted
 ```
 
-Build the image before creating local credential files. The image version is
-derived from the unpacked package's `package.json`, so release bumps do not
-require hand-editing the Dockerfile or compose file:
+Then follow the canonical runbook in
+[`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md). In
+brief, export `B2_MCP_VERSION` from the unpacked package's `package.json`, run
+`docker compose build` before creating local credential files, update
+`nginx.conf` plus `b2-mcp.env` together, create secrets outside the published
+examples, and start with `docker compose up -d --no-build`.
 
-```bash
-export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
-docker build --build-arg B2_MCP_VERSION="$B2_MCP_VERSION" \
-  -t "b2-mcp-reference:$B2_MCP_VERSION" .
-```
-
-Then configure the deployment:
-
-```bash
-cp b2-mcp.env.example b2-mcp.env
-mkdir -p secrets
-printf '%s' 'your-application-key-id' > secrets/b2_application_key_id
-printf '%s' 'your-application-key-secret' > secrets/b2_application_key
-chmod 600 secrets/b2_application_key_id secrets/b2_application_key
-```
-
-Before starting it, replace `mcp.example.com`, the narrow Let's Encrypt `live`
-and `archive` volume paths, certificate paths, the OAuth validator upstream,
-and allowed origins in `nginx.conf`, then keep `B2_ALLOWED_HOSTS` and
-`B2_ALLOWED_ORIGINS` in `b2-mcp.env` in sync with those proxy settings. Keep
-`127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the container health check. The
-deployment is not safe until TLS and caller auth are active.
-
-```bash
-docker compose up -d --no-build
-```
-
-The compose file runs two B2 MCP replicas and one nginx reverse proxy. It never
-publishes raw port 3000 to the host; replicas are reachable only on the private
-Docker network. The application container runs as the non-root `node` user,
-uses a read-only root filesystem, drops Linux capabilities, and receives only a
-small `/tmp` tmpfs. The nginx container drops all Linux capabilities except the
-small root-image startup set needed to bind 80/443, prepare cache/run
-directories, and switch workers to the `nginx` user. Local file access remains
-disabled. If you enable `B2_ALLOW_LOCAL_FILES=true`, mount exactly one sandbox
-directory at `/sandbox` and set `B2_FILE_ROOT=/sandbox`. The checked-in
-`.dockerignore` excludes `b2-mcp.env`, `.env*`, `secrets/`, and local
-certificate material from Docker build contexts if you rebuild after
-configuration.
-
-`/health` and `/ready` are intentionally internal-only. They validate
-configuration, not B2 reachability, so routine probes do not call B2. Their JSON
-body includes `version`, `inFlightRequests`, and `openSubscriptions`; nginx
-returns 404 for those paths publicly. The container `HEALTHCHECK` uses
-`/ready` over the private network.
-
-The container entrypoint supports secret-manager file injection via
-`B2_APPLICATION_KEY_ID_FILE`, `B2_APPLICATION_KEY_FILE`,
-`B2_MASTER_KEY_ID_FILE`, `B2_MASTER_KEY_FILE`, `B2_APP_KEY_ID_FILE`, and
-`B2_APP_KEY_FILE`, plus matching `B2_CREDENTIAL_<REF>_*_FILE` names for
-principal-mode credential maps. Kubernetes Secrets, ECS Secrets Manager
-injection, Docker secrets, and systemd credentials can all populate either the
-direct env vars or these mounted files.
-
-The nginx example publishes OAuth protected-resource metadata at both
-`/.well-known/oauth-protected-resource` and
-`/.well-known/oauth-protected-resource/mcp`, returns RFC 6750 bearer challenges
-with `resource_metadata` and `scope`, and delegates token validation to an
-internal `/_oauth2/validate` subrequest. That validator must reject expired
-tokens, wrong issuers, missing audience/resource
-`https://mcp.example.com/mcp`, and missing `b2:mcp` scope. Inbound `X-B2-*` and
-trusted identity headers are stripped by rebuilding the upstream header set.
-Only `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, and explicitly permitted
-`Mcp-Param-*` hints are forwarded, and they remain metering/routing hints rather
-than authorization facts. As the public edge, nginx overwrites
-`X-Forwarded-For` with the verified socket peer. If you place another trusted
-proxy in front, configure `real_ip` with explicit trusted CIDRs before relying
-on forwarded client IPs. The MCP SDK's header/body equality validation still
-runs behind nginx. Validator connect/send/read timeouts are intentionally short;
-timeout or validator error responses fail the MCP request with bounded 503
-behavior.
-
-For mTLS/workload identity, enable `ssl_client_certificate` and
-`ssl_verify_client` in `nginx.conf`, enforce `$ssl_client_verify = SUCCESS`
-before proxying, and add trusted identity headers only after certificate
-validation. Strip inbound copies from the public request path.
-
-Modern MCP HTTP is stateless and does not require sticky sessions. The
-recommended SDK v2 legacy fallback used by this server is also stateless; do
-not add affinity unless a separate sessionful legacy path is explicitly
-introduced. The server does not advertise `subscriptions/listen`, so no shared
-event bus is required. Capability caches are per replica, secret-bound, and
-TTL-bounded; after credential rotation, restart replicas or wait for
-`B2_CAPABILITY_CACHE_TTL_MS`. If a future version advertises subscriptions, add
-a shared event bus and document subscription fan-out and invalidation limits
-before enabling it.
-
-Roll one backend at a time and wait for it to become healthy before replacing
-the next one:
-
-```bash
-export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
-docker compose up -d --no-deps --build b2-mcp-a
-docker compose ps b2-mcp-a
-docker compose up -d --no-deps --build b2-mcp-b
-docker compose ps b2-mcp-b
-```
-
-nginx uses Docker's embedded resolver for upstream replicas and starts after
-backend containers are started, not after both are healthy. A single
-misconfigured replica stays visible as `unhealthy` in `docker compose ps`
-without blocking nginx startup or the healthy survivor. If you change
-`nginx.conf` or the pinned nginx image, recreate nginx after at least one
-backend is healthy. The proxy clears the backend `Connection` header so the
-upstream keepalive pool is reused:
-
-```bash
-docker compose up -d --no-deps nginx
-```
-
-The Node base image and nginx proxy image are pinned as `tag@sha256:digest`.
-To update either image, inspect the replacement tag, review upstream release
-notes, replace the tag and digest together, and run the deployment policy tests:
-
-```bash
-docker buildx imagetools inspect node:<version>-bookworm-slim
-docker buildx imagetools inspect nginx:<version>-alpine
-pnpm exec vitest run tests/unit/package-surface-policy.unit.test.ts
-```
+The image installs production dependencies from the packaged
+`deploy/customer-hosted/pnpm-lock.yaml` with a frozen, script-disabled pnpm
+install and then copies the packaged `dist/` tree. If dependencies or image
+digests change, update them through the runbook and run the deployment policy
+tests before publishing.
 
 ## Security baseline
 
@@ -205,7 +104,7 @@ two **you must set for any internet-facing HTTP deployment** are marked ⚠️.
 | **Tool-result text**    | `B2_MCP_OUTPUT_FORMAT=json\|toon` selects only the LLM-facing `TextContent.text` serialization for structured successes. `structuredContent` and MCP envelopes remain JSON. Keep `json` during rolling deploys unless every client explicitly supports TOON. | `json`            |
 | **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`; in `server` mode the shared server-held key makes this an aggregate per-replica cap.                                                                          | on                |
 | **SDK retries**         | Native SDK calls use 3 retries with 1s exponential backoff capped at 4s and a 30s per-attempt timeout; expired auth tokens are refreshed by the SDK retry transport.                                                                                         | configured        |
-| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; in `server` mode the per-key cap applies to the shared key per replica.                                                                | 1000 / 200        |
+| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; in `server` mode the per-key cap applies to the shared key per replica. The container reference raises the per-key cap to 200.        | 1000 / 20         |
 | **Local file access**   | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                                                          | off               |
 | **Capability cache**    | Capability discovery is cached by a secret-bound verifier or verified principal, with non-secret labels for logs. `B2_CAPABILITY_CACHE_TTL_MS` and `B2_CAPABILITY_CACHE_MAX_ENTRIES` bound staleness and size. Lookup failures fail closed.                  | 5 minutes / 10000 |
 | **Webhook targets**     | `b2_set_bucket_notification_rules` is gated by `B2_DESTRUCTIVE_POLICY`, enforces HTTPS, and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                    | enforced          |

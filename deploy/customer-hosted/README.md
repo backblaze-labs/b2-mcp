@@ -1,8 +1,9 @@
 # Customer-Hosted Reference Deployment
 
 This directory is a reference deployment for the MCP 2026-07-28 HTTP transport.
-It builds a container from the published npm package, runs two server replicas
-behind nginx, and keeps raw port 3000 private to the Docker network.
+It builds a container from the packaged application files and reviewed lockfile,
+runs two server replicas behind nginx, and keeps raw port 3000 private to the
+Docker network.
 
 ## Security Envelope
 
@@ -36,13 +37,17 @@ behind nginx, and keeps raw port 3000 private to the Docker network.
   with explicit trusted CIDRs before relying on forwarded client IPs.
 - nginx disables shared proxy caching; never translate MCP
   `cacheScope: "private"` into an intermediary cache.
+- The application image installs production dependencies with
+  `pnpm install --prod --frozen-lockfile --ignore-scripts` from the committed
+  `pnpm-lock.yaml` mirrored into this directory; it does not install
+  `@backblaze-labs/b2-mcp` from a mutable registry resolution during image
+  build.
 
 ## Build And Run
 
 ```bash
 export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
-docker build --build-arg B2_MCP_VERSION="$B2_MCP_VERSION" \
-  -t "b2-mcp-reference:$B2_MCP_VERSION" .
+docker compose build
 
 cp b2-mcp.env.example b2-mcp.env
 mkdir -p secrets
@@ -53,9 +58,14 @@ chmod 600 secrets/b2_application_key_id secrets/b2_application_key
 docker compose up -d --no-build
 ```
 
-Build the image before creating local credential files. The checked-in
-`.dockerignore` also excludes `b2-mcp.env`, `.env*`, `secrets/`, and local
-certificate material from later `docker compose build` contexts.
+Build the image before creating local credential files. The compose build uses
+the package root as its context so it can read `package.json`, `dist/`, and the
+deploy-local `pnpm-lock.yaml` / `pnpm-workspace.yaml` copies; release packages
+include those files. If you build from a source checkout instead of a release
+package, run `pnpm run build` at the repository root before
+`docker compose build`. The checked-in root and deployment `.dockerignore` files
+exclude `b2-mcp.env`, `.env*`, `secrets/`, and local certificate material from
+later build contexts.
 
 Replace `mcp.example.com`, the narrow Let's Encrypt `live` and `archive`
 volume paths, certificate paths, OAuth validator upstream, and allowed origins
@@ -119,15 +129,20 @@ one backend is healthy:
 docker compose up -d --no-deps nginx
 ```
 
-## Updating Pinned Images
+## Updating Pinned Images And Dependencies
 
 The Node base image and nginx proxy image are pinned as `tag@sha256:digest`.
 To update either image, inspect the replacement tag, review upstream release
-notes, replace the tag and digest together, and run the deployment policy tests:
+notes, replace the tag and digest together, and run the deployment policy tests.
+When package dependencies change, update the root `pnpm-lock.yaml` through the
+normal package-manager workflow, refresh the copies in this directory, and keep
+`pnpm-workspace.yaml` overrides in sync; the Docker build fails if the
+production install would require a lockfile refresh.
 
 ```bash
 docker buildx imagetools inspect node:<version>-bookworm-slim
 docker buildx imagetools inspect nginx:<version>-alpine
+docker compose build
 pnpm exec vitest run tests/unit/package-surface-policy.unit.test.ts
 ```
 

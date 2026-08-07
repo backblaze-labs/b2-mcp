@@ -12,6 +12,7 @@ import {
 } from "../../src/http-server";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
 
 describe("configFromHeaders", () => {
   const baseEnv = { ...process.env };
@@ -196,6 +197,14 @@ describe("createInFlightLimiter", () => {
 });
 
 describe("health and readiness endpoints", () => {
+  beforeEach(() => {
+    _resetRateLimiter();
+  });
+
+  afterEach(() => {
+    _resetRateLimiter();
+  });
+
   it("rejects disallowed Host before returning readiness metadata", async () => {
     const savedHosts = process.env.B2_ALLOWED_HOSTS;
     process.env.B2_ALLOWED_HOSTS = "mcp.example.com";
@@ -222,6 +231,68 @@ describe("health and readiness endpoints", () => {
     } finally {
       if (savedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
       else process.env.B2_ALLOWED_HOSTS = savedHosts;
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("allows loopback health probes when localhost is not in the host allowlist", async () => {
+    const savedHosts = process.env.B2_ALLOWED_HOSTS;
+    process.env.B2_ALLOWED_HOSTS = "mcp.example.com";
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          return undefined;
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+
+      for (const path of ["/health", "/ready"]) {
+        const res = await request(port, "GET", path, {
+          headers: { host: `localhost:${port}` },
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.body).not.toContain("Host/Origin not allowed");
+      }
+    } finally {
+      if (savedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
+      else process.env.B2_ALLOWED_HOSTS = savedHosts;
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("does not rate-limit health probes with the data-plane MCP bucket", async () => {
+    const sourceRateKey = deriveRateKey("http:127.0.0.1");
+    for (let index = 0; index < rateLimiterConfig.burst; index += 1) {
+      expect(allowRequest(sourceRateKey)).toBe(true);
+    }
+    expect(allowRequest(sourceRateKey)).toBe(false);
+
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          return undefined;
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready");
+
+      expect(res.status).toBe(200);
+    } finally {
       await closeHttpServer(handle);
     }
   });

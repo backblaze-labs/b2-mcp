@@ -116,6 +116,7 @@
     "node": ">=22.3.0"
   },
   "files": [
+    ".dockerignore",
     "dist/**/*",
     "deploy/customer-hosted/.dockerignore",
     "deploy/customer-hosted/Dockerfile",
@@ -124,6 +125,8 @@
     "deploy/customer-hosted/container-entrypoint.sh",
     "deploy/customer-hosted/docker-compose.yml",
     "deploy/customer-hosted/nginx.conf",
+    "deploy/customer-hosted/pnpm-lock.yaml",
+    "deploy/customer-hosted/pnpm-workspace.yaml",
     "docs/CLIENTS.md",
     "docs/DEPLOY.md",
     "docs/tool-profile-contract.json",

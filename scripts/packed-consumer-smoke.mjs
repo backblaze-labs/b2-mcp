@@ -127,10 +127,31 @@ function installedPackageFile(relativePath) {
   return path.join(workspace, "node_modules", "@backblaze-labs", "b2-mcp", relativePath);
 }
 
+function nginxBlockBody(config, directivePattern, label) {
+  const directive = directivePattern.exec(config);
+  assert(directive, `${label} missing`);
+  const openBrace = config.indexOf("{", directive.index);
+  assert(openBrace >= 0, `${label} missing opening brace`);
+
+  let depth = 0;
+  for (let index = openBrace; index < config.length; index += 1) {
+    const char = config[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return config.slice(openBrace + 1, index);
+    }
+  }
+
+  throw new Error(`${label} missing closing brace`);
+}
+
 function referenceNginxProxyHeaders(nginxConfig) {
-  const mcpLocation = nginxConfig.match(/location\s+=\s+\/mcp\s+\{(?<body>[\s\S]*?)\n\s{4}\}/)
-    ?.groups?.body;
-  assert(mcpLocation, "reference nginx /mcp location missing");
+  const mcpLocation = nginxBlockBody(
+    nginxConfig,
+    /location\s+=\s+\/mcp\s*\{/,
+    "reference nginx /mcp location",
+  );
   return new Map(
     Array.from(mcpLocation.matchAll(/proxy_set_header\s+([^\s]+)\s+([^;]+);/g)).map((match) => [
       match[1],

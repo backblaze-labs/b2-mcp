@@ -234,6 +234,24 @@ function requestLimitKey(req: http.IncomingMessage): string {
   return `http:${req.socket.remoteAddress ?? "unknown"}`;
 }
 
+function isLoopbackRemoteAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === "::1" || address === "0:0:0:0:0:0:0:1") return true;
+  return /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(address);
+}
+
+function isLoopbackHostName(hostname: string): boolean {
+  return LOCALHOST_NAMES.has(hostname) || /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+function isLoopbackHealthProbe(req: http.IncomingMessage): boolean {
+  if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) return false;
+  const host = Array.isArray(req.headers.host) ? "" : (req.headers.host ?? "");
+  if (!isLoopbackHostName(hostWithoutPort(host))) return false;
+  const origin = Array.isArray(req.headers.origin) ? "" : (req.headers.origin ?? "");
+  return !origin || isLoopbackHostName(originHostname(origin));
+}
+
 function contentLengthExceedsLimit(headers: http.IncomingHttpHeaders): boolean {
   const raw = firstHeaderValue(headers["content-length"]);
   if (!raw) return false;
@@ -692,16 +710,13 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       return;
     }
 
-    if (!hostOriginAllowed(req)) {
+    if (!hostOriginAllowed(req) && !(isHealthEndpoint && isLoopbackHealthProbe(req))) {
       writeJson(res, 403, { error: "Host/Origin not allowed" });
       return;
     }
 
     if (isHealthEndpoint) {
-      if (!allowRequest(deriveRateKey(requestLimitKey(req)))) {
-        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
-        return;
-      }
+      // Health/readiness are control-plane probes and must not share data-plane rate buckets.
       const ready = readiness();
       if (!ready.ok) {
         writeJson(res, 503, healthBody("error", ready.error));
