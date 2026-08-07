@@ -93,7 +93,7 @@ try {
   const args = parseArgs(process.argv.slice(2));
 
   run(
-    process.execPath,
+    "node",
     [
       "-e",
       [
@@ -147,7 +147,7 @@ try {
     timeout: 180_000,
   });
   run(
-    process.execPath,
+    "node",
     [
       "-e",
       [
@@ -211,7 +211,7 @@ try {
     "dist",
     "index.js",
   );
-  const withoutCreds = run(process.execPath, [entrypoint], {
+  const withoutCreds = run("node", [entrypoint], {
     allowFailure: true,
     env: {
       ...sanitizerBlockedEnv,

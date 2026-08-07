@@ -78,7 +78,13 @@ function isSafeLivePrefix(prefix) {
 function bucketMatchesPrefix(bucketName, prefix) {
   const normalizedPrefix =
     prefix === CONTRACT_BUCKET_PREFIX ? CONTRACT_BUCKET_PREFIX : normalizeLivePrefix(prefix);
-  return String(bucketName ?? "").startsWith(normalizedPrefix);
+  const resourceName = String(bucketName ?? "");
+  if (normalizedPrefix === CONTRACT_BUCKET_PREFIX) {
+    return resourceName.startsWith(CONTRACT_BUCKET_PREFIX);
+  }
+  if (!resourceName.startsWith(normalizedPrefix)) return false;
+  const boundary = resourceName.charAt(normalizedPrefix.length);
+  return boundary === "" || boundary === "-" || boundary === "/";
 }
 
 function isContractBucketName(bucketName, label, options = {}) {

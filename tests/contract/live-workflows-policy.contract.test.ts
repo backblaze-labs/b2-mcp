@@ -19,8 +19,7 @@ const liveWorkflows = [
     path: ".github/workflows/contract.yml",
     job: "contract",
     environment: "live-b2-contract",
-    concurrency:
-      "live-b2-contract-${{ github.repository }}-${{ inputs['concurrency-scope'] || github.ref_name || github.run_id }}",
+    concurrency: "live-b2-contract-${{ github.repository }}-resources",
     cancelsInProgress: false,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY"],
   },
@@ -126,7 +125,6 @@ describe("live secret workflow policy", () => {
     const text = workflowText(".github/workflows/contract.yml");
     expect(text).toMatch(/^\s{2}workflow_call:\s*$/m);
     expect(text).toContain("checkout-sha:");
-    expect(text).toContain("concurrency-scope:");
     expect(text).toContain("LIVE_B2_KEY_ID:");
     expect(text).toContain("LIVE_B2_KEY:");
     expect(text).toContain("WORKFLOW_CALL_CHECKOUT_SHA");
@@ -149,8 +147,15 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("--best-effort");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
     expect(text).toContain('cron: "17 9 * * *"');
-    expect(contractJob).toContain("group: live-b2-contract-${{ github.repository }}-resources");
-    expect(janitorJob).toContain("group: live-b2-contract-${{ github.repository }}-resources");
+    expect(text).toMatch(
+      topLevelMappingEntry(
+        "concurrency",
+        "group",
+        "live-b2-contract-${{ github.repository }}-resources",
+      ),
+    );
+    expect(contractJob).not.toContain("concurrency:");
+    expect(janitorJob).not.toContain("concurrency:");
   });
 
   it("keeps package-budget off the live contract dependency chain", () => {

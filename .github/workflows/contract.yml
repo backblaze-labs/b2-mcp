@@ -19,11 +19,6 @@ on:
         description: Exact release candidate commit SHA resolved by the caller.
         required: true
         type: string
-      concurrency-scope:
-        description: Stable queue name for release-gate calls.
-        required: false
-        type: string
-        default: release
     secrets:
       LIVE_B2_KEY_ID:
         required: true
@@ -34,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-b2-contract-${{ github.repository }}-${{ inputs['concurrency-scope'] || github.ref_name || github.run_id }}
+  group: live-b2-contract-${{ github.repository }}-resources
   cancel-in-progress: false
 
 jobs:
@@ -110,9 +105,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-b2-contract
     timeout-minutes: 18
-    concurrency:
-      group: live-b2-contract-${{ github.repository }}-resources
-      cancel-in-progress: false
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -187,9 +179,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: live-b2-contract
     timeout-minutes: 10
-    concurrency:
-      group: live-b2-contract-${{ github.repository }}-resources
-      cancel-in-progress: false
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803

@@ -17,7 +17,7 @@ interface JanitorModule {
       deleteKey(applicationKeyId: string): Promise<void>;
     },
     stats: CleanupStats,
-    options: { prefix: string; dryRun?: boolean },
+    options: { prefix: string; excludePrefixes?: string[]; dryRun?: boolean },
   ): Promise<void>;
   parseArgs(argv: string[]): {
     prefix: string;
@@ -88,6 +88,7 @@ describe("live B2 janitor", () => {
 
     await janitor.cleanupKeys(b2Client, cleanupStats, {
       prefix: "mcp-contract-123",
+      excludePrefixes: [],
       dryRun: false,
     });
 
@@ -95,6 +96,47 @@ describe("live B2 janitor", () => {
     expect(deleted).toEqual(["run-key"]);
     expect(cleanupStats.keys).toBe(1);
     expect(cleanupStats.errors).toBe(0);
+  });
+
+  it("applies prefix boundaries and exclusions to key cleanup", async () => {
+    const janitor = await loadJanitor();
+    const deleted: string[] = [];
+    const b2Client = {
+      async listKeys() {
+        return {
+          keys: [
+            { applicationKeyId: "run-key", keyName: "mcp-contract-run1-restricted" },
+            { applicationKeyId: "nearby-key", keyName: "mcp-contract-run10-restricted" },
+            { applicationKeyId: "excluded-key", keyName: "mcp-contract-run2-restricted" },
+          ],
+          nextApplicationKeyId: null,
+        };
+      },
+      async deleteKey(applicationKeyId: string) {
+        deleted.push(applicationKeyId);
+      },
+    };
+    const cleanupStats = stats();
+
+    await janitor.cleanupKeys(b2Client, cleanupStats, {
+      prefix: "mcp-contract-",
+      excludePrefixes: ["mcp-contract-run2"],
+      dryRun: false,
+    });
+
+    expect(deleted).toEqual(["run-key", "nearby-key"]);
+    expect(cleanupStats.keys).toBe(2);
+    expect(cleanupStats.errors).toBe(0);
+
+    deleted.length = 0;
+    const scopedStats = stats();
+    await janitor.cleanupKeys(b2Client, scopedStats, {
+      prefix: "mcp-contract-run1",
+      excludePrefixes: [],
+      dryRun: false,
+    });
+    expect(deleted).toEqual(["run-key"]);
+    expect(scopedStats.keys).toBe(1);
   });
 
   it("parses best-effort cleanup mode separately from scheduled cleanup", async () => {

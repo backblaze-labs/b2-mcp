@@ -120,7 +120,6 @@ jobs:
     uses: ./.github/workflows/contract.yml
     with:
       checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}
-      concurrency-scope: release
     secrets:
       LIVE_B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
       LIVE_B2_KEY: ${{ secrets.LIVE_B2_KEY }}

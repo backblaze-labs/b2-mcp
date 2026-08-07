@@ -14,6 +14,21 @@ describe("live B2 contract helper", () => {
     expect(bucket.length).toBeLessThanOrEqual(50);
   });
 
+  it("requires a generated-name boundary for run-specific prefix matches", () => {
+    expect(
+      liveB2Contract.bucketMatchesPrefix("mcp-contract-run1-bucket", "mcp-contract-run1"),
+    ).toBe(true);
+    expect(
+      liveB2Contract.bucketMatchesPrefix("mcp-contract-run1/key.txt", "mcp-contract-run1"),
+    ).toBe(true);
+    expect(
+      liveB2Contract.bucketMatchesPrefix("mcp-contract-run10-bucket", "mcp-contract-run1"),
+    ).toBe(false);
+    expect(liveB2Contract.bucketMatchesPrefix("mcp-contract-run10-bucket", "mcp-contract-")).toBe(
+      true,
+    );
+  });
+
   it("counts dry-run bucket contents before skipping destructive cleanup", async () => {
     const stats = liveB2Contract.createCleanupStats();
     const calls: string[] = [];

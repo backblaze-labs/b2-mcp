@@ -163,8 +163,8 @@ describe("B2 Bucket and key tools", () => {
         );
         expect(result).toHaveProperty("keys");
         expect(Array.isArray(result.keys)).toBe(true);
-        expect(JSON.stringify(result)).not.toContain("applicationKey");
         for (const key of result.keys) {
+          expect(key).not.toHaveProperty("applicationKey");
           if (expectedNames.has(key.keyName)) {
             seenNames.add(key.keyName);
             expect(key.capabilities).toEqual(expect.arrayContaining(["listFiles", "readFiles"]));

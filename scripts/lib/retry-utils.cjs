@@ -1,6 +1,4 @@
 const { spawnSync } = require("node:child_process");
-const { existsSync } = require("node:fs");
-const path = require("node:path");
 
 const transientNpmFailurePattern =
   /(?:EAI_AGAIN|ECONNRESET|ETIMEDOUT|ENOTFOUND|ECONNREFUSED|EPIPE|fetch failed|network socket|network timeout|registry|rate limit|429|503|504)/i;
@@ -14,23 +12,20 @@ function commandLine(command, args) {
 }
 
 function npmInvocation(args = []) {
-  if (process.platform !== "win32") return { command: "npm", args };
-  const npmCli = path.join(
-    path.dirname(process.execPath),
-    "node_modules",
-    "npm",
-    "bin",
-    "npm-cli.js",
-  );
-  if (existsSync(npmCli)) return { command: process.execPath, args: [npmCli, ...args] };
-  return {
-    command: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
-    args: ["/d", "/s", "/c", "npm", ...args],
-  };
+  return { command: process.platform === "win32" ? "npm.cmd" : "npm", args };
 }
 
 function commandInvocation(command, args = []) {
-  return command === "npm" ? npmInvocation(args) : { command, args };
+  switch (command) {
+    case "npm":
+      return npmInvocation(args);
+    case "node":
+      return { command: process.platform === "win32" ? "node.exe" : "node", args };
+    case "pnpm":
+      return { command: process.platform === "win32" ? "pnpm.cmd" : "pnpm", args };
+    default:
+      throw new Error(`Unsupported retry command: ${command}`);
+  }
 }
 
 function isTransientNpmFailure(result, extraError = null) {

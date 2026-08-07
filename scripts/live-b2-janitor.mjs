@@ -116,7 +116,12 @@ export async function cleanupKeys(b2Client, stats, options) {
     }
 
     for (const key of listed.keys ?? []) {
-      if (!key.keyName?.startsWith(options.prefix)) continue;
+      if (!bucketMatchesPrefix(key.keyName, options.prefix)) continue;
+      if (
+        (options.excludePrefixes ?? []).some((prefix) => bucketMatchesPrefix(key.keyName, prefix))
+      ) {
+        continue;
+      }
       if (key.applicationKeyId === process.env.B2_APPLICATION_KEY_ID) continue;
       stats.keys++;
       console.log(`live-b2-janitor: deleting key fingerprint=${fingerprint(key.keyName)}`);
