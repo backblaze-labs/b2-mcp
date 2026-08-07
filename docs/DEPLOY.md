@@ -544,9 +544,12 @@ pass, 1 = at least one check failed.
 The same script also runs automatically via `.github/workflows/smoke.yml` on
 manual dispatch from `main`, successful GitHub deployment status events, and a
 weekly schedule. Deployment-triggered smoke checks out the deployed SHA, so the
-tool contract being asserted matches the endpoint under test. It does not run
-on `pull_request`, because live smoke credentials must not share a job with
-unreviewed PR-head code.
+tool contract being asserted matches the endpoint under test. Deployment status
+events are accepted only for the approved deployment environment and only when
+the deployed SHA is reachable from protected `main` or `ci-green`; preview
+deployments for unmerged PR code are ignored before secrets are exposed. It
+does not run on `pull_request`, because live smoke credentials must not share a
+job with unreviewed PR-head code.
 
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
@@ -555,6 +558,8 @@ It depends on these protected `live-b2-smoke` environment secrets and variable:
   probe
 - `vars.B2_MCP_EXPECTED_TOOL_PROFILE` — expected frozen profile for the live
   credential set (`phase1-default`, `read-only`, or `full`)
+- `vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT` — approved deployment environment
+  for deployment-triggered smoke, defaulting to `production`
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 

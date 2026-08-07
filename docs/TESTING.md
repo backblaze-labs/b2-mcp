@@ -408,17 +408,19 @@ Required properties:
 The live path runs through `.github/workflows/contract.yml` and
 `.github/workflows/smoke.yml`. Both run on manual dispatch from `main` and
 trusted scheduled paths; contract also runs on pushes to `main`, while smoke
-runs on successful deployment status events using the deployed SHA. Neither
-workflow runs on `pull_request`, because live credentials must not be exposed to
-PR-head code. Trusted runs set `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the
-smoke equivalent and fail loudly when credentials or required variables are
-absent; a skipped-only trusted run is not accepted as release evidence. The
-contract janitor also requires `B2_LIVE_TEST_ACCOUNT_ID` and refuses deletion
-when the authorized account ID does not match that dedicated test-account
-allowlist. The protected live matrix is serialized on Node.js 22.23.1, Node.js
-24, and Node.js 26. Contract runs and the scheduled abandoned-resource janitor
-also share a live-resource concurrency lock, so a global `mcp-contract-*` sweep
-cannot delete fixtures from an active release gate.
+runs on successful deployment status events using the deployed SHA after
+checking that the deployment environment is approved and the SHA is reachable
+from protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
+because live credentials must not be exposed to PR-head code. Trusted runs set
+`B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the smoke equivalent and fail loudly
+when credentials or required variables are absent; a skipped-only trusted run is
+not accepted as release evidence. The contract janitor also requires
+`B2_LIVE_TEST_ACCOUNT_ID` and refuses deletion when the authorized account ID
+does not match that dedicated test-account allowlist. The protected live matrix
+is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26. Contract runs and
+the scheduled abandoned-resource janitor also share a live-resource concurrency
+lock, so a global `mcp-contract-*` sweep cannot delete fixtures from an active
+release gate.
 
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract

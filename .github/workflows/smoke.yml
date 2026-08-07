@@ -28,8 +28,10 @@ jobs:
         id: ref
         env:
           EVENT_NAME: ${{ github.event_name }}
+          DEPLOYMENT_ENVIRONMENT: ${{ github.event.deployment.environment || '' }}
           DEPLOYMENT_STATE: ${{ github.event.deployment_status.state || '' }}
           DEPLOYMENT_SHA: ${{ github.event.deployment.sha || '' }}
+          EXPECTED_DEPLOYMENT_ENVIRONMENT: ${{ vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT || 'production' }}
         run: |
           set -euo pipefail
           should_run=true
@@ -52,10 +54,28 @@ jobs:
               if [[ "${DEPLOYMENT_STATE}" != "success" ]]; then
                 should_run=false
                 checkout_sha=""
+              elif [[ "${DEPLOYMENT_ENVIRONMENT}" != "${EXPECTED_DEPLOYMENT_ENVIRONMENT}" ]]; then
+                should_run=false
+                checkout_sha=""
               elif [[ ! "${DEPLOYMENT_SHA}" =~ ^[a-f0-9]{40}$ ]]; then
                 echo "::error::deployment_status live smoke requires a full deployed SHA."
                 exit 1
               else
+                git init --quiet /tmp/live-smoke-ref-check
+                cd /tmp/live-smoke-ref-check
+                git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+                git fetch --no-tags origin \
+                  '+refs/heads/main:refs/remotes/origin/main' \
+                  '+refs/heads/ci-green:refs/remotes/origin/ci-green'
+                if ! git cat-file -e "${DEPLOYMENT_SHA}^{commit}"; then
+                  echo "::error::deployment_status SHA is not reachable from protected refs."
+                  exit 1
+                fi
+                if ! git merge-base --is-ancestor "${DEPLOYMENT_SHA}" refs/remotes/origin/main &&
+                  ! git merge-base --is-ancestor "${DEPLOYMENT_SHA}" refs/remotes/origin/ci-green; then
+                  echo "::error::deployment_status SHA must be reachable from protected main or ci-green before live smoke secrets are exposed."
+                  exit 1
+                fi
                 checkout_sha="${DEPLOYMENT_SHA}"
               fi
               ;;

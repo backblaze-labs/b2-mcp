@@ -84,8 +84,21 @@ describe("live secret workflow policy", () => {
       } else {
         expect(text).toMatch(/^\s{2}deployment_status:\s*$/m);
         expect(text).not.toMatch(/^\s{2}push:\s*$/m);
+        expect(text).toContain("DEPLOYMENT_ENVIRONMENT: ${{ github.event.deployment.environment");
         expect(text).toContain("DEPLOYMENT_STATE: ${{ github.event.deployment_status.state");
         expect(text).toContain("DEPLOYMENT_SHA: ${{ github.event.deployment.sha");
+        expect(text).toContain(
+          "EXPECTED_DEPLOYMENT_ENVIRONMENT: ${{ vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT || 'production' }}",
+        );
+        expect(text).toContain(
+          '[[ "${DEPLOYMENT_ENVIRONMENT}" != "${EXPECTED_DEPLOYMENT_ENVIRONMENT}" ]]',
+        );
+        expect(text).toContain("refs/heads/main");
+        expect(text).toContain("refs/heads/ci-green");
+        expect(text).toContain("git merge-base --is-ancestor");
+        expect(text).toContain(
+          "deployment_status SHA must be reachable from protected main or ci-green",
+        );
         expect(text).toContain('checkout_sha="${DEPLOYMENT_SHA}"');
       }
       expect(text).not.toMatch(/^\s{2}pull_request:\s*$/m);
