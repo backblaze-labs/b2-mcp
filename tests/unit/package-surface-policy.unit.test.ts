@@ -180,9 +180,19 @@ describe("package surface policy", () => {
       "tls/client.crt",
       "tls/client.p12",
     ];
+    const rootSecretPaths = [
+      ".env.production",
+      "secrets/b2_application_key",
+      "certs/fullchain.pem",
+      "tls/client.p12",
+      "private.key",
+    ];
 
     try {
       mkdirSync(deployRoot, { recursive: true });
+      mkdirSync(join(tempRoot, "secrets"), { recursive: true });
+      mkdirSync(join(tempRoot, "certs"), { recursive: true });
+      mkdirSync(join(tempRoot, "tls"), { recursive: true });
       mkdirSync(join(deployRoot, "secrets"), { recursive: true });
       mkdirSync(join(deployRoot, "certs"), { recursive: true });
       mkdirSync(join(deployRoot, "tls"), { recursive: true });
@@ -211,10 +221,16 @@ describe("package surface policy", () => {
       for (const relativePath of localSecretPaths) {
         writeFileSync(join(deployRoot, relativePath), "local-secret-test-value");
       }
+      for (const relativePath of rootSecretPaths) {
+        writeFileSync(join(tempRoot, relativePath), "root-secret-test-value");
+      }
 
       const files = npmPackDryRunFiles(tempRoot);
       for (const relativePath of localSecretPaths) {
         expect(files).not.toContain(`deploy/customer-hosted/${relativePath}`);
+      }
+      for (const relativePath of rootSecretPaths) {
+        expect(files).not.toContain(relativePath);
       }
       expect(files).toContain("deploy/customer-hosted/b2-mcp.env.example");
 
@@ -228,9 +244,15 @@ describe("package surface policy", () => {
         expect(isDockerIgnored(relativePath)).toBe(true);
         expect(isRootDockerIgnored(`deploy/customer-hosted/${relativePath}`)).toBe(true);
       }
+      for (const relativePath of rootSecretPaths) {
+        expect(isRootDockerIgnored(relativePath)).toBe(true);
+      }
       expect(isDockerIgnored("b2-mcp.env.example")).toBe(false);
       expect(isDockerIgnored("Dockerfile")).toBe(false);
       expect(isDockerIgnored("nginx.conf")).toBe(false);
+      expect(isRootDockerIgnored("package.json")).toBe(false);
+      expect(isRootDockerIgnored("dist/index.js")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/pnpm-lock.yaml")).toBe(false);
       expect(isRootDockerIgnored("deploy/customer-hosted/b2-mcp.env.example")).toBe(false);
       expect(isRootDockerIgnored("deploy/customer-hosted/Dockerfile")).toBe(false);
       expect(isRootDockerIgnored("deploy/customer-hosted/nginx.conf")).toBe(false);
