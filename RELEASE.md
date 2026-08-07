@@ -132,6 +132,19 @@ exists. For the first public package only:
    signature plus provenance and SBOM attestations, and it must not overwrite an
    existing versioned image whose recorded revision differs from the verified
    checkout SHA.
+4. If GHCR has the version/release tags but the retry fails because the digest is
+   unsigned or missing trusted attestations, delete that specific GHCR package
+   version and rerun the same tag:
+
+   ```bash
+   VERSION=0.1.0
+   version_id="$(
+     gh api orgs/backblaze-labs/packages/container/b2-mcp/versions \
+       --jq ".[] | select(.metadata.container.tags[]? == \"${VERSION}\") | .id" \
+       | head -n 1
+   )"
+   gh api --method DELETE "orgs/backblaze-labs/packages/container/b2-mcp/versions/${version_id}"
+   ```
 
 ## Prerelease
 

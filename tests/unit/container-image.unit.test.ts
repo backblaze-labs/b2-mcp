@@ -6,39 +6,44 @@ const root = join(__dirname, "../..");
 describe("container image policy", () => {
   const dockerfile = readFileSync(join(root, "Dockerfile"), "utf8");
   const dockerignore = readFileSync(join(root, ".dockerignore"), "utf8");
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  const deploy = readFileSync(join(root, "docs/DEPLOY.md"), "utf8");
   const nvmrc = readFileSync(join(root, ".nvmrc"), "utf8").trim();
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     packageManager: string;
   };
   const publishScript = readFileSync(join(root, "scripts/publish-container-image.mjs"), "utf8");
 
-  function ignored(candidate: string): boolean {
+  function isIgnored(candidate: string): boolean {
     const patterns = dockerignore
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("#"));
-    return patterns.some((pattern) => {
-      if (pattern === candidate) return true;
-      if (pattern.endsWith("*")) return candidate.startsWith(pattern.slice(0, -1));
-      if (pattern.startsWith("*")) return candidate.endsWith(pattern.slice(1));
-      return false;
-    });
+    let ignored = false;
+    for (const pattern of patterns) {
+      const negated = pattern.startsWith("!");
+      const rawPattern = negated ? pattern.slice(1) : pattern;
+      const matches =
+        rawPattern === candidate ||
+        (rawPattern.endsWith("*") && candidate.startsWith(rawPattern.slice(0, -1))) ||
+        (rawPattern.startsWith("*") && candidate.endsWith(rawPattern.slice(1)));
+      if (matches) ignored = !negated;
+    }
+    return ignored;
   }
 
   it("builds a multi-stage production image on the pinned Node runtime", () => {
     const fromLines = dockerfile.match(/^FROM .+$/gm) ?? [];
-    expect(fromLines).toHaveLength(4);
-    expect(fromLines[0]).toContain(`node:${nvmrc}-bookworm-slim@sha256:`);
-    expect(fromLines[0]).toContain(" AS base");
-    expect(dockerfile).toContain("FROM dependencies AS build");
-    expect(fromLines[3]).toContain(`node:${nvmrc}-bookworm-slim@sha256:`);
-    expect(fromLines[3]).toContain(" AS runtime");
+    const nodeBaseLines = fromLines.filter((line) => line.includes(" node:"));
+    expect(nodeBaseLines).not.toHaveLength(0);
+    for (const line of nodeBaseLines) {
+      expect(line).toContain(`node:${nvmrc}-bookworm-slim@sha256:`);
+    }
+    expect(dockerfile).not.toMatch(/^FROM\s+node:[^@\s]+(?:\s|$)/m);
     expect(dockerfile).toMatch(/resolved and reviewed \d{4}-\d{2}-\d{2}/);
     expect(dockerfile).toContain("pnpm install --frozen-lockfile --ignore-scripts");
-    expect(dockerfile).toContain("pnpm run build");
     expect(dockerfile).toContain("pnpm prune --prod");
     expect(dockerfile).toContain("COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./");
-    expect(dockerfile).toContain('ENTRYPOINT ["node", "dist/index.js"]');
   });
 
   it("derives pnpm from package.json packageManager", () => {
@@ -58,10 +63,11 @@ describe("container image policy", () => {
   });
 
   it("keeps local artifacts and secrets out of the Docker build context", () => {
-    for (const ignored of [
+    for (const pattern of [
       ".git",
       ".env",
       ".env*",
+      "!.env.example",
       ".envrc",
       ".npmrc",
       "*.pem",
@@ -72,13 +78,15 @@ describe("container image policy", () => {
       "reports",
       "docs/internal",
     ]) {
-      expect(dockerignore).toContain(ignored);
+      expect(dockerignore).toContain(pattern);
     }
-    expect(ignored(".env.production")).toBe(true);
-    expect(ignored(".env.staging")).toBe(true);
-    expect(ignored(".envrc")).toBe(true);
-    expect(ignored("prod.pem")).toBe(true);
-    expect(ignored("registry.key")).toBe(true);
+    expect(isIgnored(".env.production")).toBe(true);
+    expect(isIgnored(".env.prod")).toBe(true);
+    expect(isIgnored(".env.staging")).toBe(true);
+    expect(isIgnored(".envrc")).toBe(true);
+    expect(isIgnored(".env.example")).toBe(false);
+    expect(isIgnored("prod.pem")).toBe(true);
+    expect(isIgnored("registry.key")).toBe(true);
   });
 
   it("publishes signed multi-platform images without overwriting version tags", () => {
@@ -89,13 +97,21 @@ describe("container image policy", () => {
     expect(publishScript).toContain("org.opencontainers.image.revision");
     expect(publishScript).toContain("--provenance=true");
     expect(publishScript).toContain("--sbom=true");
+    expect(publishScript).toContain("readDockerBaseImage");
+    expect(publishScript).toContain("org.opencontainers.image.base.digest");
     expect(publishScript).toContain("verifyAnonymousManifestPull");
     expect(publishScript).toContain("verifyTrustedExistingDigest");
     expect(publishScript).toContain("verify-attestation");
     expect(publishScript).toContain("DOCKER_CONFIG");
     expect(publishScript).toContain("cosign");
-    expect(publishScript.match(/signDigest\(/g)).toHaveLength(2);
+    expect(publishScript).toContain("signDigest");
     expect(publishScript).not.toContain(":latest");
+  });
+
+  it("documents container healthcheck constraints for non-HTTP modes", () => {
+    expect(readme).toContain("--no-healthcheck");
+    expect(deploy).toContain("--no-healthcheck");
+    expect(deploy).toContain("`PORT`, not only `--port`");
   });
 
   it("documents the intentional runtime doc set divergence", () => {

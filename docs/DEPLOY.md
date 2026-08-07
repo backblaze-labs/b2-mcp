@@ -217,6 +217,7 @@ Stdio clients can use the same image by overriding the transport argument:
 B2_MCP_VERSION=VERSION # replace with the release version you want
 B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm -i \
+  --no-healthcheck \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
   -e B2_APPLICATION_KEY=your-application-key-secret \
   "$B2_MCP_IMAGE" stdio
@@ -228,7 +229,10 @@ the GHCR image reference above with `b2-mcp:local`.
 HTTP container examples intentionally bind the host side to `127.0.0.1` and set
 `B2_ALLOWED_HOSTS`. If you publish the port through a reverse proxy or external
 load balancer, set `B2_ALLOWED_HOSTS` to the public host names before accepting
-traffic. The application drains in-flight requests for up to 10 seconds on
+traffic. The image healthcheck applies to HTTP mode; stdio containers should
+pass `--no-healthcheck`. If changing the HTTP listen port in a container, set
+`PORT`, not only `--port`, so the healthcheck probes the same port the server
+binds. The application drains in-flight requests for up to 10 seconds on
 SIGTERM, so set the platform stop grace period above that window; with Docker,
 use `--stop-timeout 20`.
 

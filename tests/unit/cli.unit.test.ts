@@ -3,7 +3,7 @@ import { PortUsageError } from "../../src/utils/config";
 
 describe("CLI argument parsing", () => {
   it("defaults to stdio transport", () => {
-    expect(parseCliArgs([])).toEqual({ action: "run", transport: "stdio" });
+    expect(parseCliArgs([], {})).toEqual({ action: "run", transport: "stdio" });
   });
 
   it("accepts HTTP transport and port flags", () => {
@@ -41,7 +41,7 @@ describe("CLI argument parsing", () => {
     expect(() => parseCliArgs([], { B2_MCP_TRANSPORT: "sse" })).toThrow(CliUsageError);
     expect(() => parseCliArgs(["http", "--port", "0"])).toThrow(PortUsageError);
     expect(() => parseCliArgs(["http", "--port", "3000abc"])).toThrow("Invalid port: 3000abc");
-    expect(() => parseCliArgs(["--port", "3000"])).toThrow(CliUsageError);
+    expect(() => parseCliArgs(["--port", "3000"], {})).toThrow(CliUsageError);
     expect(() => parseCliArgs(["--session"])).toThrow(CliUsageError);
   });
 });

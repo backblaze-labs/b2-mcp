@@ -92,6 +92,7 @@ stdin open:
 B2_MCP_VERSION=VERSION # replace with the release version you want
 B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm -i \
+  --no-healthcheck \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
   -e B2_APPLICATION_KEY=your-application-key-secret \
   "$B2_MCP_IMAGE" stdio
@@ -100,6 +101,10 @@ docker run --rm -i \
 See [`docs/DEPLOY.md`](docs/DEPLOY.md) for hardened HTTP examples with
 signature verification, `B2_ALLOWED_ORIGINS`, rate limits, and in-flight
 request caps.
+
+The image healthcheck applies to HTTP mode. For stdio containers, pass
+`--no-healthcheck`. For HTTP containers, set the listen port through `PORT` so
+the healthcheck probes the same port the server binds.
 
 ---
 

@@ -214,13 +214,15 @@ The only repository workflow allowed to publish npm packages is
   keyless signing, behind the protected `ghcr-publish` environment;
 - publishes a multi-platform GHCR manifest for `linux/amd64` and `linux/arm64`,
   attaches BuildKit provenance and SBOM attestations, signs the manifest digest
-  with cosign keyless signing, records the digest in workflow output, and refuses
-  to overwrite an existing version tag whose manifest revision differs from the
-  verified checkout SHA;
+  with cosign keyless signing, records the image digest and pinned Node base
+  digest in release metadata, and refuses to overwrite an existing version tag
+  whose manifest revision differs from the verified checkout SHA;
 - treats an already-published version tag as idempotent only after verifying the
   existing digest's prior cosign signature plus provenance and SBOM attestations
   from this release workflow, so the workflow does not sign a digest based only
-  on caller-controlled OCI annotations;
+  on caller-controlled OCI annotations; if a first publish dies after pushing
+  tags but before signing, delete the unsigned GHCR package version documented in
+  `RELEASE.md` and rerun the same tag;
 - verifies the pushed version tag through an anonymous manifest inspection before
   the GitHub Release job can run, so a private first-publish GHCR package fails
   the workflow until an owner sets the package visibility to Public and reruns

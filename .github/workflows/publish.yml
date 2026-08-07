@@ -287,7 +287,7 @@ jobs:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     environment: ghcr-publish
-    timeout-minutes: 20
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write

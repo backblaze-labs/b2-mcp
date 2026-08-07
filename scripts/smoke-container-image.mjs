@@ -7,6 +7,8 @@ const DEFAULT_MISSING_CREDENTIALS_PORT = 3107;
 const DEFAULT_ATTEMPTS = 30;
 const DEFAULT_DELAY_MS = 2_000;
 
+// retry-utils.cjs is for retrying registry/tool commands with blocking sleeps.
+// This smoke path needs non-retrying Docker lifecycle commands plus async waits.
 function usage() {
   return [
     "Usage: node scripts/smoke-container-image.mjs --image <image> [--build]",

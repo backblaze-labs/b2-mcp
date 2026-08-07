@@ -2,6 +2,7 @@
 .audit
 .claude
 .env*
+!.env.example
 .envrc
 .idea
 .vscode
