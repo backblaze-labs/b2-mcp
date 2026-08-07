@@ -331,6 +331,13 @@ describe("package surface policy", () => {
     expect(nginx).toContain('"https://client.example.com" 1;');
     expect(envExample).toContain("aggregate traffic per replica");
     expect(deployReadme).toContain("aggregate per-replica caps");
+    expect(deployReadme).toContain("chmod 700 secrets");
+    expect(deployReadme).toContain(
+      "chmod 0444 secrets/b2_application_key_id secrets/b2_application_key",
+    );
+    expect(deployReadme).not.toContain(
+      "chmod 600 secrets/b2_application_key_id secrets/b2_application_key",
+    );
     expect(deployDoc).toContain("canonical source for build/run steps");
     expect(deployDoc).toContain("deploy/customer-hosted/README.md");
   });

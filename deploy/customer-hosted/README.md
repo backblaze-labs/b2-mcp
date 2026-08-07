@@ -53,7 +53,8 @@ cp b2-mcp.env.example b2-mcp.env
 mkdir -p secrets
 printf '%s' 'your-application-key-id' > secrets/b2_application_key_id
 printf '%s' 'your-application-key-secret' > secrets/b2_application_key
-chmod 600 secrets/b2_application_key_id secrets/b2_application_key
+chmod 700 secrets
+chmod 0444 secrets/b2_application_key_id secrets/b2_application_key
 
 docker compose up -d --no-build
 ```
@@ -66,6 +67,12 @@ package, run `pnpm run build` at the repository root before
 `docker compose build`. The checked-in root and deployment `.dockerignore` files
 exclude `b2-mcp.env`, `.env*`, `secrets/`, and local certificate material from
 later build contexts.
+
+Compose mounts these local secret files read-only into a container that runs as
+the `node` UID. Keep the parent `secrets/` directory private on the host, but
+make the individual mounted files readable inside the container. If host policy
+requires owner-only secret files, change their numeric owner to the container
+UID before using `chmod 0400`.
 
 Replace `mcp.example.com`, the narrow Let's Encrypt `live` and `archive`
 volume paths, certificate paths, OAuth validator upstream, and allowed origins
