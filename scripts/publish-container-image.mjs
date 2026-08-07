@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const REQUIRED_PLATFORMS = ["linux/amd64", "linux/arm64"];
 const RETRYABLE_OUTPUT =
@@ -20,13 +22,16 @@ function run(command, args, options = {}) {
   const attempts = options.attempts ?? 3;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const result = spawnSync(command, args, {
-      encoding: options.input ? "utf8" : undefined,
+      encoding: options.input || options.capture ? "utf8" : undefined,
+      env: options.env,
       input: options.input,
       stdio: options.capture ? "pipe" : options.input ? ["pipe", "inherit", "inherit"] : "inherit",
     });
     if (result.status === 0) return result;
     const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
-    if (attempt < attempts && RETRYABLE_OUTPUT.test(output)) {
+    const shouldRetry =
+      attempt < attempts && (options.retryAll === false ? RETRYABLE_OUTPUT.test(output) : true);
+    if (shouldRetry) {
       console.warn(
         `container-publish: retrying ${command} ${args.join(" ")} after transient failure (${attempt}/${attempts})`,
       );
@@ -41,12 +46,12 @@ function run(command, args, options = {}) {
   throw new Error(`${command} ${args.join(" ")} failed without a result`);
 }
 
-function inspectImage(ref, { optional = false } = {}) {
+function inspectImage(ref, { optional = false, env } = {}) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const result = spawnSync(
       "docker",
       ["buildx", "imagetools", "inspect", ref, "--format", "{{json .}}"],
-      { encoding: "utf8" },
+      { encoding: "utf8", env },
     );
     if (result.status === 0) return JSON.parse(result.stdout);
     const output = `${result.stdout}\n${result.stderr}`;
@@ -123,6 +128,21 @@ function signDigest(registryImage, digest) {
   });
 }
 
+function verifyAnonymousManifestPull(ref) {
+  const dockerConfig = mkdtempSync(join(tmpdir(), "b2-mcp-ghcr-anonymous-"));
+  try {
+    inspectImage(ref, {
+      env: { ...process.env, DOCKER_CONFIG: dockerConfig },
+    });
+  } catch (err) {
+    throw new Error(
+      `Anonymous GHCR manifest pull failed for ${ref}. Make the ghcr.io package public in GitHub Packages, then rerun the publish workflow. ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    rmSync(dockerConfig, { recursive: true, force: true });
+  }
+}
+
 function publish() {
   const checkoutSha = requiredEnv("CHECKOUT_SHA");
   const publishTag = requiredEnv("PUBLISH_TAG");
@@ -150,6 +170,7 @@ function publish() {
       throw new Error(`${releaseRef} already exists with a different digest`);
     }
     createTagIfMissing(releaseRef, `${registryImage}@${digest}`);
+    verifyAnonymousManifestPull(versionRef);
     signDigest(registryImage, digest);
     writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
     console.log(`${versionRef} already exists for ${checkoutSha}; treated as idempotent`);
@@ -160,6 +181,7 @@ function publish() {
     requireExpectedManifest(existingRelease, releaseRef, checkoutSha);
     const digest = manifestDigest(existingRelease);
     createTagIfMissing(versionRef, `${registryImage}@${digest}`);
+    verifyAnonymousManifestPull(versionRef);
     signDigest(registryImage, digest);
     writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
     console.log(`${releaseRef} already exists for ${checkoutSha}; restored missing version tag`);
@@ -205,6 +227,7 @@ function publish() {
   if (manifestDigest(publishedRelease) !== digest) {
     throw new Error(`${versionRef} and ${releaseRef} resolved to different digests`);
   }
+  verifyAnonymousManifestPull(versionRef);
   signDigest(registryImage, digest);
   writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
 }

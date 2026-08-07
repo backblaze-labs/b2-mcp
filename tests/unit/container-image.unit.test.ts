@@ -89,6 +89,8 @@ describe("container image policy", () => {
     expect(publishScript).toContain("org.opencontainers.image.revision");
     expect(publishScript).toContain("--provenance=true");
     expect(publishScript).toContain("--sbom=true");
+    expect(publishScript).toContain("verifyAnonymousManifestPull");
+    expect(publishScript).toContain("DOCKER_CONFIG");
     expect(publishScript).toContain("cosign");
     expect(publishScript).not.toContain(":latest");
   });

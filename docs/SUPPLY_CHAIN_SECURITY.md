@@ -206,10 +206,9 @@ The only repository workflow allowed to publish npm packages is
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
 - verifies checksums and creates or updates the GitHub Release after npm publish
-  succeeds, from a separate job that does not hold npm OIDC permission; the
-  GHCR job also starts after npm publish and is idempotent, so a Docker/GHCR
-  retry does not require re-cutting the npm version or block GitHub Release
-  creation;
+  and the public GHCR manifest check succeed, from a separate job that does not
+  hold npm OIDC permission; the GHCR job is idempotent, so a Docker/GHCR retry
+  does not require re-cutting the npm version;
 - builds, smokes, and publishes the GHCR image from the same verified checkout
   SHA after npm publish succeeds, using `packages: write` and OIDC only for
   keyless signing;
@@ -218,6 +217,10 @@ The only repository workflow allowed to publish npm packages is
   with cosign keyless signing, records the digest in workflow output, and refuses
   to overwrite an existing version tag whose manifest revision differs from the
   verified checkout SHA;
+- verifies the pushed version tag through an anonymous manifest inspection before
+  the GitHub Release job can run, so a private first-publish GHCR package fails
+  the workflow until an owner sets the package visibility to Public and reruns
+  the same tag;
 - publishes only immutable container tags: the package version without a leading
   `v` and the matching signed release tag; no mutable `latest` tag is produced;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;

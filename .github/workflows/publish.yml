@@ -317,7 +317,7 @@ jobs:
         run: node scripts/publish-container-image.mjs
 
   github-release:
-    needs: [prepare, publish]
+    needs: [prepare, publish, container-image]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 5

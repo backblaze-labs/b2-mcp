@@ -319,8 +319,7 @@ describe("CI workflow policy", () => {
     expect(containerImageJob).toContain("sigstore/cosign-installer");
     expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
     expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
-    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
-    expect(githubReleaseJob).not.toContain("container-image");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish, container-image]");
     expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");

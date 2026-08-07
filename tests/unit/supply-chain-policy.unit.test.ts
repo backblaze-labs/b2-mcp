@@ -519,8 +519,7 @@ describe("supply-chain audit policy", () => {
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");
     expect(githubReleaseJob).not.toContain("id-token: write");
-    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
-    expect(githubReleaseJob).not.toContain("container-image");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish, container-image]");
     expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
     expect(githubReleaseJob).toContain('sha256sum "$sbom"');
     expect(githubReleaseJob).toContain("sha256sum --check");
