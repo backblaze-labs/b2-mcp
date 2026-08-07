@@ -282,6 +282,7 @@ describe("package surface policy", () => {
       "COPY package.json deploy/customer-hosted/pnpm-lock.yaml deploy/customer-hosted/pnpm-workspace.yaml ./",
     );
     expect(dockerfile).toContain("pnpm install --prod --frozen-lockfile --ignore-scripts");
+    expect(dockerfile).toContain("chmod 0555 /usr/local/lib/b2-mcp/dist/index.js");
     expect(dockerfile).not.toContain("npm install -g");
     expect(dockerfile).not.toContain("@backblaze-labs/b2-mcp@${B2_MCP_VERSION}");
     expect(compose).toContain("context: ../..");

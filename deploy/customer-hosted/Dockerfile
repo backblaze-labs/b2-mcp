@@ -29,6 +29,7 @@ COPY --chown=root:root dist ./dist
 
 RUN test -n "$B2_MCP_VERSION" \
   && B2_MCP_VERSION="$B2_MCP_VERSION" node -e 'const pkg = require("./package.json"); if (pkg.version !== process.env.B2_MCP_VERSION) { throw new Error(`package version ${pkg.version} does not match B2_MCP_VERSION ${process.env.B2_MCP_VERSION}`); }' \
+  && chmod 0555 /usr/local/lib/b2-mcp/dist/index.js \
   && ln -s /usr/local/lib/b2-mcp/dist/index.js /usr/local/bin/b2-mcp \
   && ln -s /usr/local/lib/b2-mcp/dist/index.js /usr/local/bin/b2-mcp-server \
   && mkdir -p /sandbox /tmp/b2-mcp \
