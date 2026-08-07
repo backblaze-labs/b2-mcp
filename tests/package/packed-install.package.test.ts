@@ -181,6 +181,9 @@ describe("packed package", () => {
         expect.arrayContaining([
           "dist/index.js",
           "dist/http-server.js",
+          "deploy/customer-hosted/Dockerfile",
+          "deploy/customer-hosted/docker-compose.yml",
+          "deploy/customer-hosted/nginx.conf",
           "docs/CLIENTS.md",
           "docs/DEPLOY.md",
           "README.md",

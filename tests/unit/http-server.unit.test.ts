@@ -4,11 +4,13 @@
  */
 
 import {
+  buildHttpServer,
   configFromHeaders,
   createInFlightLimiter,
   deriveRateKey,
   getPort,
 } from "../../src/http-server";
+import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 
 describe("configFromHeaders", () => {
@@ -190,6 +192,75 @@ describe("createInFlightLimiter", () => {
     expect(limiter.acquire("credential:c")).toMatchObject({ ok: false, status: 503 });
     limiter.release("credential:a");
     expect(limiter.acquire("credential:c")).toEqual({ ok: true });
+  });
+});
+
+describe("health and readiness endpoints", () => {
+  it("exposes internal readiness metadata without resolving B2 credentials", async () => {
+    let validated = 0;
+    let resolved = 0;
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          validated++;
+        },
+        resolve() {
+          resolved++;
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready");
+      const body = JSON.parse(res.body);
+
+      expect(res.status).toBe(200);
+      expect(body).toMatchObject({
+        status: "ok",
+        server: "backblaze-b2-mcp",
+        activeSessions: 0,
+        inFlightRequests: 0,
+        openSubscriptions: 0,
+      });
+      expect(typeof body.version).toBe("string");
+      expect(validated).toBe(1);
+      expect(resolved).toBe(0);
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("reports not-ready when configuration validation fails", async () => {
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          throw new Error("invalid test config");
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready");
+      const body = JSON.parse(res.body);
+
+      expect(res.status).toBe(503);
+      expect(body).toMatchObject({
+        status: "error",
+        error: "Credential configuration invalid",
+        inFlightRequests: 0,
+        openSubscriptions: 0,
+      });
+    } finally {
+      await closeHttpServer(handle);
+    }
   });
 });
 

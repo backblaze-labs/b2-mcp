@@ -256,6 +256,9 @@ Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_
 
 Running it safely:
 
+- **Use the reference deployment for hosted HTTP** — `deploy/customer-hosted`
+  contains the supported container, compose, and nginx/OAuth edge example and is
+  included in the npm release package.
 - **Use a least-privilege key** — create and rotate scoped B2 application keys outside the MCP tool flow; a non-master key is correct for normal storage operations.
 - **Presigned URLs are different from durable secrets** — `s3_get_presigned_url` and `s3_presign_upload_part` return short-lived bearer capabilities with `expiresIn` / `expiresAt`. Treat the URL as sensitive until expiry, but it is not a long-lived B2 application key.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.

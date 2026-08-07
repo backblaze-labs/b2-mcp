@@ -578,6 +578,18 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     }
   }
 
+  function healthBody(status: "ok" | "error", error?: string): Record<string, unknown> {
+    return {
+      status,
+      ...(error && { error }),
+      server: "backblaze-b2-mcp",
+      version: VERSION,
+      activeSessions: 0,
+      inFlightRequests: inFlight.active,
+      openSubscriptions: 0,
+    };
+  }
+
   const idleSweep = setInterval(() => {
     const now = Date.now();
     sweepIdleBuckets(now);
@@ -671,24 +683,13 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/health") {
+    if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/ready")) {
       const ready = readiness();
       if (!ready.ok) {
-        writeJson(res, 503, {
-          status: "error",
-          error: ready.error,
-          server: "backblaze-b2-mcp",
-          version: VERSION,
-          activeSessions: 0,
-        });
+        writeJson(res, 503, healthBody("error", ready.error));
         return;
       }
-      writeJson(res, 200, {
-        status: "ok",
-        server: "backblaze-b2-mcp",
-        version: VERSION,
-        activeSessions: 0,
-      });
+      writeJson(res, 200, healthBody("ok"));
       return;
     }
 

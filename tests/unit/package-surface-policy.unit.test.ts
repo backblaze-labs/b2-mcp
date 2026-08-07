@@ -55,6 +55,9 @@ describe("package surface policy", () => {
     expect(files).not.toContain("audit-policy.json");
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
+    expect(files).toContain("deploy/customer-hosted/Dockerfile");
+    expect(files).toContain("deploy/customer-hosted/docker-compose.yml");
+    expect(files).toContain("deploy/customer-hosted/nginx.conf");
     expect(files).toContain("docs/CLIENTS.md");
     expect(files).toContain("docs/DEPLOY.md");
     expect(files).toContain("docs/tool-profile-contract.json");

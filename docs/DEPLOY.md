@@ -1,8 +1,11 @@
 # Self-hosting the B2 MCP server
 
-This guide walks through deploying the MCP 2026-07-28 HTTP transport behind
-nginx with Let's Encrypt TLS on AWS EC2. The same recipe works on any Linux VM
-— only the AWS-specific steps differ.
+This guide covers the supported customer-hosted deployment for the MCP
+2026-07-28 HTTP transport. The recommended path is the checked-in container
+reference under `deploy/customer-hosted`, which is included in the npm release
+package so production hosts do not need to clone or build the repository. The
+systemd runbook later in this document remains a VM-oriented fallback for
+operators who intentionally manage the Node.js runtime themselves.
 
 If you only need local stdio use (Claude Desktop on your laptop), follow the
 README's Quick Start instead — none of this is required.
@@ -39,6 +42,97 @@ server does not depend on `initialize` or `Mcp-Session-Id` in production.
 - Open ports 80 (Let's Encrypt only) and 443 inbound
 - Node.js 22.23.1 or a later patched 22 LTS release, Node.js 24, or Node.js 26.
   The package engine floor remains `>=22.3.0` only to match the official B2 SDK.
+
+For the container path, the production host needs Docker Engine plus the Compose
+plugin. Node.js is installed inside the image.
+
+## Supported container reference
+
+The release package includes a complete container reference:
+
+- `deploy/customer-hosted/Dockerfile`
+- `deploy/customer-hosted/docker-compose.yml`
+- `deploy/customer-hosted/nginx.conf`
+- `deploy/customer-hosted/b2-mcp.env.example`
+
+Fetch it from the package artifact instead of cloning the repository on the
+production host:
+
+```bash
+npm pack @backblaze-labs/b2-mcp@0.1.0
+mkdir b2-mcp-release
+tar -xzf backblaze-labs-b2-mcp-0.1.0.tgz -C b2-mcp-release --strip-components=1
+cd b2-mcp-release/deploy/customer-hosted
+```
+
+Then configure the deployment:
+
+```bash
+cp b2-mcp.env.example b2-mcp.env
+mkdir -p secrets
+printf '%s' 'your-application-key-id' > secrets/b2_application_key_id
+printf '%s' 'your-application-key-secret' > secrets/b2_application_key
+chmod 600 secrets/b2_application_key_id secrets/b2_application_key
+```
+
+Before starting it, replace `mcp.example.com`, certificate paths, the OAuth
+validator upstream, and allowed origins in `nginx.conf`. The deployment is not
+safe until TLS and caller auth are active.
+
+```bash
+docker compose build --build-arg B2_MCP_VERSION=0.1.0
+docker compose up -d
+```
+
+The compose file runs two B2 MCP replicas and one nginx reverse proxy. It never
+publishes raw port 3000 to the host; replicas are reachable only on the private
+Docker network. The application container runs as the non-root `node` user,
+uses a read-only root filesystem, drops Linux capabilities, and receives only a
+small `/tmp` tmpfs. Local file access remains disabled. If you enable
+`B2_ALLOW_LOCAL_FILES=true`, mount exactly one sandbox directory at `/sandbox`
+and set `B2_FILE_ROOT=/sandbox`.
+
+`/health` and `/ready` are intentionally internal-only. They validate
+configuration, not B2 reachability, so routine probes do not call B2. Their JSON
+body includes `version`, `inFlightRequests`, and `openSubscriptions`; nginx
+returns 404 for those paths publicly. The container `HEALTHCHECK` uses
+`/ready` over the private network.
+
+The container entrypoint supports secret-manager file injection via
+`B2_APPLICATION_KEY_ID_FILE`, `B2_APPLICATION_KEY_FILE`,
+`B2_MASTER_KEY_ID_FILE`, `B2_MASTER_KEY_FILE`, `B2_APP_KEY_ID_FILE`, and
+`B2_APP_KEY_FILE`, plus matching `B2_CREDENTIAL_<REF>_*_FILE` names for
+principal-mode credential maps. Kubernetes Secrets, ECS Secrets Manager
+injection, Docker secrets, and systemd credentials can all populate either the
+direct env vars or these mounted files.
+
+The nginx example publishes OAuth protected-resource metadata at both
+`/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-protected-resource/mcp`, returns RFC 6750 bearer challenges
+with `resource_metadata` and `scope`, and delegates token validation to an
+internal `/_oauth2/validate` subrequest. That validator must reject expired
+tokens, wrong issuers, missing audience/resource
+`https://mcp.example.com/mcp`, and missing `b2:mcp` scope. Inbound `X-B2-*` and
+trusted identity headers are stripped by rebuilding the upstream header set.
+Only `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, and explicitly permitted
+`Mcp-Param-*` hints are forwarded, and they remain metering/routing hints rather
+than authorization facts. The MCP SDK's header/body equality validation still
+runs behind nginx.
+
+For mTLS/workload identity, enable `ssl_client_certificate` and
+`ssl_verify_client` in `nginx.conf`, enforce `$ssl_client_verify = SUCCESS`
+before proxying, and add trusted identity headers only after certificate
+validation. Strip inbound copies from the public request path.
+
+Modern MCP HTTP is stateless and does not require sticky sessions. The
+recommended SDK v2 legacy fallback used by this server is also stateless; do
+not add affinity unless a separate sessionful legacy path is explicitly
+introduced. The server does not advertise `subscriptions/listen`, so no shared
+event bus is required. Capability caches are per replica, secret-bound, and
+TTL-bounded; after credential rotation, restart replicas or wait for
+`B2_CAPABILITY_CACHE_TTL_MS`. If a future version advertises subscriptions, add
+a shared event bus and document subscription fan-out and invalidation limits
+before enabling it.
 
 ## Security baseline
 
@@ -429,8 +523,11 @@ server {
     }
 
     location = /health {
-        proxy_pass http://127.0.0.1:3000;
-        access_log off;
+        return 404;
+    }
+
+    location = /ready {
+        return 404;
     }
 
     location / { return 404; }

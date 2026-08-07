@@ -117,6 +117,7 @@
   },
   "files": [
     "dist/**/*",
+    "deploy/customer-hosted/**/*",
     "docs/CLIENTS.md",
     "docs/DEPLOY.md",
     "docs/tool-profile-contract.json",
