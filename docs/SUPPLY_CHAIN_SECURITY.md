@@ -211,7 +211,7 @@ The only repository workflow allowed to publish npm packages is
   does not require re-cutting the npm version;
 - builds, smokes, and publishes the GHCR image from the same verified checkout
   SHA after npm publish succeeds, using `packages: write` and OIDC only for
-  keyless signing;
+  keyless signing, behind the protected `ghcr-publish` environment;
 - publishes a multi-platform GHCR manifest for `linux/amd64` and `linux/arm64`,
   attaches BuildKit provenance and SBOM attestations, signs the manifest digest
   with cosign keyless signing, records the digest in workflow output, and refuses

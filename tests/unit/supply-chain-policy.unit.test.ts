@@ -524,6 +524,7 @@ describe("supply-chain audit policy", () => {
     expect(githubReleaseJob).toContain('sha256sum "$sbom"');
     expect(githubReleaseJob).toContain("sha256sum --check");
     expect(containerImageJob).toContain("needs: [prepare, publish]");
+    expect(containerImageJob).toContain("environment: ghcr-publish");
     expect(containerImageJob).toContain("packages: write");
     expect(containerImageJob).toContain("id-token: write");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");

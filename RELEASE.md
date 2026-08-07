@@ -56,7 +56,9 @@ Before publishing `v0.1.0`:
    initial push creates a private package, set the package visibility to Public
    in GitHub Packages and rerun the same publish tag. The workflow fails until
    an anonymous manifest inspection succeeds.
-9. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
+9. Confirm the `ghcr-publish` GitHub environment exists, requires trusted
+   release approval, and restricts deployments to protected release refs.
+10. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
    `LIVE_B2_KEY` plus environment variable `B2_LIVE_TEST_ACCOUNT_ID`. Confirm
    `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus
    environment variables `MCP_URL`, `B2_SMOKE_BUCKET`, and
@@ -70,9 +72,9 @@ Before publishing `v0.1.0`:
    them from `live-b2-contract`. Manually dispatch smoke and contract from
    `main`. Security owns credential rotation. The live jobs run serially on
    Node.js 22.23.1, Node.js 24, and Node.js 26.
-10. Confirm any claimed MCP SDK package split is either implemented or tracked as
+11. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.
-11. Create the GitHub Release for the publish tag, then publish only from the
+12. Create the GitHub Release for the publish tag, then publish only from the
     canonical repository through the protected
     `.github/workflows/publish.yml` workflow. Do not publish from a developer
     workstation. The publish workflow must prove the `v*` tag is reachable from

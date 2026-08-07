@@ -311,6 +311,7 @@ describe("CI workflow policy", () => {
 
     expect(publishJob).toContain("needs: [prepare, live-contract]");
     expect(containerImageJob).toContain("needs: [prepare, publish]");
+    expect(containerImageJob).toContain("environment: ghcr-publish");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
     expect(containerImageJob).toContain("packages: write");
     expect(containerImageJob).toContain("id-token: write");
