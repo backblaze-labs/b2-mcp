@@ -273,6 +273,7 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain(
       "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
     );
+    expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");
     expect(workflowSecurity).not.toContain("zizmor-action");
     expect(workflowSecurity).not.toContain("GH_TOKEN");
