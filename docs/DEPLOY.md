@@ -85,12 +85,12 @@ printf '%s' 'your-application-key-secret' > secrets/b2_application_key
 chmod 600 secrets/b2_application_key_id secrets/b2_application_key
 ```
 
-Before starting it, replace `mcp.example.com`, certificate paths, the OAuth
-validator upstream, and allowed origins in `nginx.conf`, then keep
-`B2_ALLOWED_HOSTS` and `B2_ALLOWED_ORIGINS` in `b2-mcp.env` in sync with those
-proxy settings. Keep `127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the
-container health check. The deployment is not safe until TLS and caller auth are
-active.
+Before starting it, replace `mcp.example.com`, the narrow Let's Encrypt `live`
+and `archive` volume paths, certificate paths, the OAuth validator upstream,
+and allowed origins in `nginx.conf`, then keep `B2_ALLOWED_HOSTS` and
+`B2_ALLOWED_ORIGINS` in `b2-mcp.env` in sync with those proxy settings. Keep
+`127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the container health check. The
+deployment is not safe until TLS and caller auth are active.
 
 ```bash
 docker compose up -d --no-build

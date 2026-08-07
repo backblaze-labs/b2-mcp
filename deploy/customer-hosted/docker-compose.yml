@@ -65,7 +65,8 @@ services:
       - no-new-privileges:true
     volumes:
       - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /etc/letsencrypt/live/mcp.example.com:/etc/letsencrypt/live/mcp.example.com:ro
+      - /etc/letsencrypt/archive/mcp.example.com:/etc/letsencrypt/archive/mcp.example.com:ro
       - /var/www/letsencrypt:/var/www/letsencrypt:ro
     networks:
       - b2-mcp-private

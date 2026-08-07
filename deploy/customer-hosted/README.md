@@ -57,12 +57,12 @@ Build the image before creating local credential files. The checked-in
 `.dockerignore` also excludes `b2-mcp.env`, `.env*`, `secrets/`, and local
 certificate material from later `docker compose build` contexts.
 
-Replace `mcp.example.com`, certificate paths, OAuth validator upstream, and
-allowed origins in `nginx.conf`, then keep `B2_ALLOWED_HOSTS` and
-`B2_ALLOWED_ORIGINS` in `b2-mcp.env` in sync with those proxy settings before
-exposing the host. Keep `127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the
-container health check. The deployment is not safe until TLS and caller auth
-are active.
+Replace `mcp.example.com`, the narrow Let's Encrypt `live` and `archive`
+volume paths, certificate paths, OAuth validator upstream, and allowed origins
+in `nginx.conf`, then keep `B2_ALLOWED_HOSTS` and `B2_ALLOWED_ORIGINS` in
+`b2-mcp.env` in sync with those proxy settings before exposing the host. Keep
+`127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the container health check. The
+deployment is not safe until TLS and caller auth are active.
 
 Production secret managers should inject server-held credentials as environment
 variables or files mounted under `/run/secrets`. The entrypoint supports

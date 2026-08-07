@@ -206,6 +206,13 @@ describe("package surface policy", () => {
     expect(compose).toContain('driver: "json-file"');
     expect(compose).toContain('max-size: "10m"');
     expect(compose).toContain('max-file: "5"');
+    expect(compose).not.toContain("/etc/letsencrypt:/etc/letsencrypt:ro");
+    expect(compose).toContain(
+      "/etc/letsencrypt/live/mcp.example.com:/etc/letsencrypt/live/mcp.example.com:ro",
+    );
+    expect(compose).toContain(
+      "/etc/letsencrypt/archive/mcp.example.com:/etc/letsencrypt/archive/mcp.example.com:ro",
+    );
     expect(nginx).toContain('proxy_set_header Connection "";');
     expect(nginx).toContain("proxy_set_header X-Forwarded-For $remote_addr;");
 
