@@ -118,7 +118,8 @@ exists. For the first public package only:
    tag/package/changelog consistency, runs `pnpm run verify`, requires live
    contract success, builds one tarball, runs an npm dry-run publish, records
    checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
-   and creates or updates the GitHub Release from the same artifact.
+   publishes the matching GHCR container image, and creates or updates the
+   GitHub Release from the same verified ref.
 
 ## Prerelease
 

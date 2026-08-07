@@ -66,6 +66,12 @@ The canonical npm package is:
 - Canonical CLI binary: `b2-mcp`
 - Transition CLI alias: `b2-mcp-server`
 
+The canonical container image is:
+
+- Registry image: `ghcr.io/backblaze-labs/b2-mcp`
+- Version tag: package version without the leading `v` (for example, `0.1.0`)
+- Compatibility tag: signed release tag (for example, `v0.1.0`)
+
 Inherited package names from the incoming repository are not canonical Phase 1
 metadata.
 
@@ -83,7 +89,8 @@ Node.js `>=22.3.0` is the package engine floor for Phase 1.
 CI must continuously verify production dependency installation and the full
 implementation, tests, and package toolchain on Node.js 22.23.1, 24, and 26.
 CI must also exercise the packed-package install smoke on Node.js 22.3.0 so the
-published engine floor remains backed by evidence.
+published engine floor remains backed by evidence, and build the Docker image
+with an HTTP readiness smoke so the container distribution remains deployable.
 Operators should use a current patched release within one of those supported
 major lines. Other Node.js lines are not part of the `v0.1.0` support contract.
 

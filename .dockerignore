@@ -1,0 +1,20 @@
+.git
+.audit
+.claude
+.env
+.env.local
+.env.*.local
+.idea
+.vscode
+coverage
+dist
+node_modules
+probe-output
+reports
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# Internal-only docs are never sent to the Docker build context.
+docs/STRATEGY-*.md
+docs/internal

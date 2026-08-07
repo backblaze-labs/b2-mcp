@@ -206,7 +206,10 @@ The only repository workflow allowed to publish npm packages is
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
 - verifies checksums and creates or updates the GitHub Release only after the
-  npm publish job succeeds, from a separate job that does not hold npm OIDC
+  npm publish and container-image jobs succeed, from a separate job that does
+  not hold npm OIDC permission;
+- builds, smokes, and publishes the GHCR image from the same verified checkout
+  SHA after npm publish succeeds, using only `packages: write` and no npm OIDC
   permission;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
 - publishes the prebuilt tarball with lifecycle scripts disabled:

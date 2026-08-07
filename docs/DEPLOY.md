@@ -148,6 +148,55 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
+### Container image option
+
+Release images are published to GHCR as
+`ghcr.io/backblaze-labs/b2-mcp:<package-version>`. The image uses the same
+Node.js 22.23.1 runtime pin as `.nvmrc`, defaults to HTTP through
+`B2_MCP_TRANSPORT=http`, and contains only the built server plus production
+dependencies.
+
+Single-tenant HTTP behind a reverse proxy:
+
+```bash
+docker run --rm --name b2-mcp \
+  -p 127.0.0.1:3000:3000 \
+  -e B2_HTTP_CREDENTIAL_MODE=server \
+  -e B2_APPLICATION_KEY_ID=your-application-key-id \
+  -e B2_APPLICATION_KEY=your-application-key-secret \
+  -e B2_ALLOWED_HOSTS=mcp.your-domain.example \
+  -e B2_ALLOWED_ORIGINS=https://mcp.your-domain.example \
+  -e B2_MCP_RATE_LIMIT_RPS=60 \
+  -e B2_MCP_RATE_LIMIT_BURST=120 \
+  -e B2_MAX_SESSIONS=1000 \
+  -e B2_MAX_SESSIONS_PER_KEY=20 \
+  ghcr.io/backblaze-labs/b2-mcp:0.1.0
+```
+
+Header-credential compatibility mode keeps B2 credentials out of the container
+environment and requires each MCP request to include the reviewed
+`X-B2-MCP-Key-Id` / `X-B2-MCP-Key` headers:
+
+```bash
+docker run --rm --name b2-mcp \
+  -p 127.0.0.1:3000:3000 \
+  -e B2_HTTP_CREDENTIAL_MODE=headers \
+  -e B2_ALLOWED_HOSTS=mcp.your-domain.example \
+  ghcr.io/backblaze-labs/b2-mcp:0.1.0
+```
+
+Stdio clients can use the same image by overriding the transport argument:
+
+```bash
+docker run --rm -i \
+  -e B2_APPLICATION_KEY_ID=your-application-key-id \
+  -e B2_APPLICATION_KEY=your-application-key-secret \
+  ghcr.io/backblaze-labs/b2-mcp:0.1.0 stdio
+```
+
+For a local image from source, run `docker build -t b2-mcp:local .` and replace
+the GHCR image reference above with `b2-mcp:local`.
+
 ## Step 4 — Hardened systemd unit
 
 `/etc/systemd/system/b2-mcp.service`:

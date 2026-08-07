@@ -388,6 +388,65 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  container-image:
+    name: container image
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Build Docker image
+        run: |
+          set -euo pipefail
+          docker build --pull --tag "b2-mcp:${GITHUB_SHA}" .
+      - name: Smoke HTTP health with env credentials
+        run: |
+          set -euo pipefail
+          container_id="$(
+            docker run \
+              --detach \
+              --publish 127.0.0.1:3106:3000 \
+              --env B2_HTTP_CREDENTIAL_MODE=server \
+              --env B2_APPLICATION_KEY_ID=ci-key-id \
+              --env B2_APPLICATION_KEY=ci-key-secret \
+              --env B2_ALLOWED_HOSTS=127.0.0.1 \
+              "b2-mcp:${GITHUB_SHA}"
+          )"
+          trap 'docker rm -f "${container_id}" >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://127.0.0.1:3106/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "${container_id}"
+          exit 1
+      - name: Smoke missing credential readiness
+        run: |
+          set -euo pipefail
+          container_id="$(
+            docker run \
+              --detach \
+              --publish 127.0.0.1:3107:3000 \
+              --env B2_HTTP_CREDENTIAL_MODE=server \
+              "b2-mcp:${GITHUB_SHA}"
+          )"
+          trap 'docker rm -f "${container_id}" >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            http_status="$(curl -sS -o health.json -w '%{http_code}' http://127.0.0.1:3107/health || true)"
+            if [[ "${http_status}" == "503" ]]; then
+              cat health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          cat health.json || true
+          docker logs "${container_id}"
+          exit 1
+
   supply-chain-audit:
     name: supply-chain audit
     needs: runtime-policy
@@ -557,6 +616,7 @@ jobs:
       - runtime-engine-floor
       - production-dependency-audit
       - package-budget
+      - container-image
       - supply-chain-audit
       - codeql-workflow-security
       - slow-lifecycle
@@ -582,6 +642,7 @@ jobs:
           | Runtime engine floor | Node.js 22.3.0 package install smoke |
           | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
           | Package budget metrics | Uploaded as package-budget artifact |
+          | Container image | Docker build plus HTTP health/readiness smoke |
           | Required issue | backblaze-labs/b2-mcp#50 |
           SUMMARY
 
@@ -597,6 +658,7 @@ jobs:
       - runtime-engine-floor
       - production-dependency-audit
       - package-budget
+      - container-image
       - supply-chain-audit
       - codeql-workflow-security
       - slow-lifecycle

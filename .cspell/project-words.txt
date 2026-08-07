@@ -19,6 +19,7 @@ cobertura
 corepack
 cspell
 CycloneDX
+GHCR
 iocs
 junit
 MCP

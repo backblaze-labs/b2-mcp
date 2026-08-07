@@ -20,7 +20,7 @@ export function helpText(): string {
     "Usage: b2-mcp [stdio|http] [options]",
     "",
     "Options:",
-    "  --transport <stdio|http>  Transport to serve (default: stdio)",
+    "  --transport <stdio|http>  Transport to serve (default: B2_MCP_TRANSPORT or stdio)",
     "  --port <port>             HTTP listen port (default: PORT or 3000)",
     "  --version                 Print the package version",
     "  --help                    Show this help",
@@ -36,8 +36,14 @@ function parseTransport(raw: string): CliTransport {
   throw new CliUsageError(`Invalid transport: ${raw}`);
 }
 
-export function parseCliArgs(argv: string[]): CliOptions {
+function envTransport(env: NodeJS.ProcessEnv): CliTransport | null {
+  const raw = env.B2_MCP_TRANSPORT?.trim().toLowerCase();
+  return raw ? parseTransport(raw) : null;
+}
+
+export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions {
   const options: CliOptions = { action: "run", transport: "stdio" };
+  let explicitTransport = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -45,17 +51,20 @@ export function parseCliArgs(argv: string[]): CliOptions {
     if (arg === "--version" || arg === "-v") return { ...options, action: "version" };
     if (arg === "stdio" || arg === "http") {
       options.transport = parseTransport(arg);
+      explicitTransport = true;
       continue;
     }
     if (arg === "--transport") {
       const value = argv[index + 1];
       if (!value) throw new CliUsageError("--transport requires stdio or http");
       options.transport = parseTransport(value);
+      explicitTransport = true;
       index += 1;
       continue;
     }
     if (arg.startsWith("--transport=")) {
       options.transport = parseTransport(arg.slice("--transport=".length));
+      explicitTransport = true;
       continue;
     }
     const portArg = readPortArg(argv, index);
@@ -65,6 +74,10 @@ export function parseCliArgs(argv: string[]): CliOptions {
       continue;
     }
     throw new CliUsageError(`Unknown argument: ${arg}`);
+  }
+
+  if (!explicitTransport) {
+    options.transport = envTransport(env) ?? options.transport;
   }
 
   if (options.port !== undefined && options.transport !== "http") {

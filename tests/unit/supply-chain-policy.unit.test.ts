@@ -458,6 +458,7 @@ describe("supply-chain audit policy", () => {
       "cross-platform-minimum",
       "production-dependency-audit",
       "package-budget",
+      "container-image",
       "supply-chain-audit",
       "codeql-workflow-security",
       "slow-lifecycle",
@@ -468,6 +469,7 @@ describe("supply-chain audit policy", () => {
 
   it("disables normal lifecycle scripts and isolates npm publishing", () => {
     const githubReleaseJob = publishJobBlock("github-release");
+    const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
 
     expect(npmrc).toMatch(/^ignore-scripts=true$/m);
@@ -517,10 +519,16 @@ describe("supply-chain audit policy", () => {
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");
     expect(githubReleaseJob).not.toContain("id-token: write");
-    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish, container-image]");
     expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
     expect(githubReleaseJob).toContain('sha256sum "$sbom"');
     expect(githubReleaseJob).toContain("sha256sum --check");
+    expect(containerImageJob).toContain("needs: [prepare, publish]");
+    expect(containerImageJob).toContain("packages: write");
+    expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
+    expect(containerImageJob).toContain("docker build");
+    expect(containerImageJob).toContain("docker push");
+    expect(containerImageJob).not.toContain("id-token: write");
     expect(publishJob).toContain("needs: [prepare, live-contract]");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
@@ -644,6 +652,7 @@ describe("supply-chain audit policy", () => {
   it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {
     const prepareJob = publishJobBlock("prepare");
     const githubReleaseJob = publishJobBlock("github-release");
+    const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
 
     expect(prepareJob).not.toContain("id-token: write");
@@ -654,6 +663,8 @@ describe("supply-chain audit policy", () => {
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");
     expect(githubReleaseJob).not.toContain("id-token: write");
+    expect(containerImageJob).toContain("packages: write");
+    expect(containerImageJob).not.toContain("id-token: write");
     expect(publishJob).toContain("id-token: write");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");

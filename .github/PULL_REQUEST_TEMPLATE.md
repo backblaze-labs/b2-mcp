@@ -36,6 +36,7 @@ Required CI check names for `main` protection:
 - [ ] `runtime engine floor`
 - [ ] `production dependency audit`
 - [ ] `package budget`
+- [ ] `container image`
 - [ ] `supply-chain audit`
 - [ ] `CodeQL/workflow security`
 - [ ] `slow/lifecycle`
