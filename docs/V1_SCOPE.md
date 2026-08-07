@@ -69,8 +69,14 @@ The canonical npm package is:
 The canonical container image is:
 
 - Registry image: `ghcr.io/backblaze-labs/b2-mcp`
-- Version tag: package version without the leading `v` (for example, `0.1.0`)
-- Compatibility tag: signed release tag (for example, `v0.1.0`)
+- Immutable version tag: package version without the leading `v` (for example,
+  `0.1.0`)
+- Immutable compatibility tag: signed release tag (for example, `v0.1.0`)
+- Supported platforms: `linux/amd64` and `linux/arm64`
+
+The release workflow does not publish a mutable `latest` container tag. Consumers
+should deploy by immutable version tag or, preferably, by the signed digest
+recorded by the release workflow.
 
 Inherited package names from the incoming repository are not canonical Phase 1
 metadata.
@@ -91,6 +97,9 @@ implementation, tests, and package toolchain on Node.js 22.23.1, 24, and 26.
 CI must also exercise the packed-package install smoke on Node.js 22.3.0 so the
 published engine floor remains backed by evidence, and build the Docker image
 with an HTTP readiness smoke so the container distribution remains deployable.
+Release publishing must verify the pushed GHCR manifest contains both supported
+platforms, attach provenance/SBOM attestations, sign the digest, and refuse to
+overwrite an existing version tag that does not match the verified checkout SHA.
 Operators should use a current patched release within one of those supported
 major lines. Other Node.js lines are not part of the `v0.1.0` support contract.
 

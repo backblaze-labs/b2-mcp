@@ -68,32 +68,38 @@ Create and rotate application keys outside the MCP workflow, such as in the Back
 
 ### Docker quick start
 
-The published image defaults to the HTTP transport and reads configuration only
-from environment variables. Use the version tag that matches the package
-release:
+The published image defaults to the HTTP transport, reads configuration only
+from environment variables, and does not publish a mutable `latest` tag. Choose
+the version tag that matches the package release:
 
 ```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm --name b2-mcp \
+  --stop-timeout 20 \
   -p 127.0.0.1:3000:3000 \
   -e B2_HTTP_CREDENTIAL_MODE=server \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
   -e B2_APPLICATION_KEY=your-application-key-secret \
   -e B2_ALLOWED_HOSTS=localhost,127.0.0.1 \
-  ghcr.io/backblaze-labs/b2-mcp:0.1.0
+  "$B2_MCP_IMAGE"
 ```
 
 For stdio clients inside a container, pass the transport explicitly and keep
 stdin open:
 
 ```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm -i \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
   -e B2_APPLICATION_KEY=your-application-key-secret \
-  ghcr.io/backblaze-labs/b2-mcp:0.1.0 stdio
+  "$B2_MCP_IMAGE" stdio
 ```
 
 See [`docs/DEPLOY.md`](docs/DEPLOY.md) for hardened HTTP examples with
-`B2_ALLOWED_ORIGINS`, rate limits, and in-flight request caps.
+signature verification, `B2_ALLOWED_ORIGINS`, rate limits, and in-flight
+request caps.
 
 ---
 

@@ -289,6 +289,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      id-token: write
       packages: write
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
@@ -296,59 +297,27 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.checkout-sha }}
           persist-credentials: false
-      - name: Build, smoke, and publish GHCR image
+      # docker/setup-qemu-action v3.6.0, reviewed 2026-08-07.
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
+      # docker/setup-buildx-action v3.11.1, reviewed 2026-08-07.
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      # sigstore/cosign-installer v3.9.2, reviewed 2026-08-07.
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159
+      - name: Smoke local Docker image
+        env:
+          CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
+        run: node scripts/smoke-container-image.mjs --build --image "b2-mcp-release-smoke:${CHECKOUT_SHA}"
+      - name: Publish signed multi-platform GHCR image
+        id: image
         env:
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
           GHCR_TOKEN: ${{ github.token }}
           PUBLISH_TAG: ${{ inputs.tag }}
           REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
-        run: |
-          set -euo pipefail
-          version="${PUBLISH_TAG#v}"
-          image="${REGISTRY_IMAGE}:${version}"
-          docker build \
-            --pull \
-            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-            --label "org.opencontainers.image.revision=${CHECKOUT_SHA}" \
-            --label "org.opencontainers.image.version=${version}" \
-            --tag "${image}" \
-            --tag "${REGISTRY_IMAGE}:${PUBLISH_TAG}" \
-            .
-
-          container_id="$(
-            docker run \
-              --detach \
-              --publish 127.0.0.1:3106:3000 \
-              --env B2_HTTP_CREDENTIAL_MODE=server \
-              --env B2_APPLICATION_KEY_ID=release-smoke-key-id \
-              --env B2_APPLICATION_KEY=release-smoke-key-secret \
-              --env B2_ALLOWED_HOSTS=127.0.0.1 \
-              "${image}"
-          )"
-          trap 'docker rm -f "${container_id}" >/dev/null 2>&1 || true' EXIT
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -fsS http://127.0.0.1:3106/health; then
-              break
-            fi
-            if [[ "${attempt}" == "10" ]]; then
-              docker logs "${container_id}"
-              exit 1
-            fi
-            sleep 1
-          done
-          docker rm -f "${container_id}" >/dev/null
-          trap - EXIT
-
-          echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          docker push "${image}"
-          docker push "${REGISTRY_IMAGE}:${PUBLISH_TAG}"
-          if [[ ! "${version}" =~ - ]]; then
-            docker tag "${image}" "${REGISTRY_IMAGE}:latest"
-            docker push "${REGISTRY_IMAGE}:latest"
-          fi
+        run: node scripts/publish-container-image.mjs
 
   github-release:
-    needs: [prepare, publish, container-image]
+    needs: [prepare, publish]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 5

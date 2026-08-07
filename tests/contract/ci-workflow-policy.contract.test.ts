@@ -196,11 +196,9 @@ describe("CI workflow policy", () => {
     expect(budgetJob).toContain("pnpm run check:package-budget");
     expect(budgetJob).toContain("reports/package-budget/");
     expect(containerJob).toContain("name: container image");
-    expect(containerJob).toContain("docker build --pull");
-    expect(containerJob).toContain("B2_HTTP_CREDENTIAL_MODE=server");
-    expect(containerJob).toContain("http://127.0.0.1:3106/health");
-    expect(containerJob).toContain("http://127.0.0.1:3107/health");
-    expect(containerJob).toContain('"503"');
+    expect(containerJob).toContain(
+      'node scripts/smoke-container-image.mjs --build --image "b2-mcp:${GITHUB_SHA}"',
+    );
     expect(slowJob).toContain("timeout-minutes: 20");
     expect(slowJob).toContain("VITEST_MAX_WORKERS: 1");
     expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1");
@@ -315,8 +313,14 @@ describe("CI workflow policy", () => {
     expect(containerImageJob).toContain("needs: [prepare, publish]");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
     expect(containerImageJob).toContain("packages: write");
-    expect(containerImageJob).toContain("docker push");
-    expect(githubReleaseJob).toContain("needs: [prepare, publish, container-image]");
+    expect(containerImageJob).toContain("id-token: write");
+    expect(containerImageJob).toContain("docker/setup-qemu-action");
+    expect(containerImageJob).toContain("docker/setup-buildx-action");
+    expect(containerImageJob).toContain("sigstore/cosign-installer");
+    expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
+    expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
+    expect(githubReleaseJob).not.toContain("container-image");
     expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");

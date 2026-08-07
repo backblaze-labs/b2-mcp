@@ -205,15 +205,43 @@ The only repository workflow allowed to publish npm packages is
 - verifies the tarball SHA-256 and npm `dist.integrity` before publishing;
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
-- verifies checksums and creates or updates the GitHub Release only after the
-  npm publish and container-image jobs succeed, from a separate job that does
-  not hold npm OIDC permission;
+- verifies checksums and creates or updates the GitHub Release after npm publish
+  succeeds, from a separate job that does not hold npm OIDC permission; the
+  GHCR job also starts after npm publish and is idempotent, so a Docker/GHCR
+  retry does not require re-cutting the npm version or block GitHub Release
+  creation;
 - builds, smokes, and publishes the GHCR image from the same verified checkout
-  SHA after npm publish succeeds, using only `packages: write` and no npm OIDC
-  permission;
+  SHA after npm publish succeeds, using `packages: write` and OIDC only for
+  keyless signing;
+- publishes a multi-platform GHCR manifest for `linux/amd64` and `linux/arm64`,
+  attaches BuildKit provenance and SBOM attestations, signs the manifest digest
+  with cosign keyless signing, records the digest in workflow output, and refuses
+  to overwrite an existing version tag whose manifest revision differs from the
+  verified checkout SHA;
+- publishes only immutable container tags: the package version without a leading
+  `v` and the matching signed release tag; no mutable `latest` tag is produced;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
 - publishes the prebuilt tarball with lifecycle scripts disabled:
   `npm publish <tarball> --provenance --access public --ignore-scripts`.
 
 Do not publish from a developer workstation or from a workflow that has not
 first proved the release tag is reachable from `ci-green`.
+
+## Container Base Image Pinning
+
+`Dockerfile` pins the Node.js base image by immutable digest, with the readable
+`node:<version>-bookworm-slim` tag retained only as a comment. Treat that digest
+as the container equivalent of a lockfile entry.
+
+To update it:
+
+1. Confirm `.nvmrc`, `runtime-policy.json`, and package `engines.node` still
+   agree on the supported Node.js line.
+2. Resolve the new multi-platform Node image digest:
+   `docker buildx imagetools inspect node:<version>-bookworm-slim`.
+3. Update every `FROM node:<version>-bookworm-slim@sha256:...` line in
+   `Dockerfile` with the same reviewed index digest and update the review date
+   comment.
+4. Run `pnpm run test:unit`, `pnpm run test:contract`, and the container CI
+   smoke path before release. The `container image` tests fail if a future
+   `FROM` line uses a floating tag.

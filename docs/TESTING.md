@@ -45,9 +45,11 @@ exactly Node.js 22.23.1, 24, and 26. Slow lifecycle tests run in a dedicated
 bounded job with one Vitest worker, and the cross-platform fast suite runs on
 Linux, Windows, and macOS at Node.js 22.23.1. A separate runtime engine floor job
 runs the packed-consumer install smoke on Node.js 22.3.0. A separate container
-image job builds the Docker image and smokes HTTP readiness with and without
-server-held credentials. The coverage aggregate disables file parallelism so
-contract fixture reports, dist rebuilds, and package packing do not race each
+image job runs `scripts/smoke-container-image.mjs`, which builds the Docker
+image and smokes HTTP readiness with and without server-held credentials. The
+release workflow reuses the same smoke script before publishing the signed
+multi-platform GHCR manifest. The coverage aggregate disables file parallelism
+so contract fixture reports, dist rebuilds, and package packing do not race each
 other.
 
 The stable required PR check names are:

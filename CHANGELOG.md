@@ -8,8 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Added a production Docker image, container CI smoke coverage, GHCR release
-  publishing, and Docker run docs for HTTP and stdio transports.
+- Added a digest-pinned production Docker image, container CI smoke coverage,
+  signed multi-platform GHCR release publishing, and Docker run docs for HTTP
+  and stdio transports.
 
 ## [0.1.0] - 2026-08-07
 

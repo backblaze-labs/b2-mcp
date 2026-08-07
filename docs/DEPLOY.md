@@ -154,12 +154,35 @@ Release images are published to GHCR as
 `ghcr.io/backblaze-labs/b2-mcp:<package-version>`. The image uses the same
 Node.js 22.23.1 runtime pin as `.nvmrc`, defaults to HTTP through
 `B2_MCP_TRANSPORT=http`, and contains only the built server plus production
-dependencies.
+dependencies. Releases publish immutable version tags only:
+`:<package-version>` and the matching signed tag such as `:v0.2.0`. There is no
+public `:latest` tag.
+
+Before running a release image, verify its keyless signature and attestations
+against this repository's release workflow identity:
+
+```bash
+B2_MCP_IMAGE=ghcr.io/backblaze-labs/b2-mcp@sha256:DIGEST_FROM_RELEASE
+cosign verify "$B2_MCP_IMAGE" \
+  --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify-attestation "$B2_MCP_IMAGE" \
+  --type slsaprovenance \
+  --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify-attestation "$B2_MCP_IMAGE" \
+  --type spdxjson \
+  --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
 
 Single-tenant HTTP behind a reverse proxy:
 
 ```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm --name b2-mcp \
+  --stop-timeout 20 \
   -p 127.0.0.1:3000:3000 \
   -e B2_HTTP_CREDENTIAL_MODE=server \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
@@ -170,7 +193,7 @@ docker run --rm --name b2-mcp \
   -e B2_MCP_RATE_LIMIT_BURST=120 \
   -e B2_MAX_SESSIONS=1000 \
   -e B2_MAX_SESSIONS_PER_KEY=20 \
-  ghcr.io/backblaze-labs/b2-mcp:0.1.0
+  "$B2_MCP_IMAGE"
 ```
 
 Header-credential compatibility mode keeps B2 credentials out of the container
@@ -178,24 +201,36 @@ environment and requires each MCP request to include the reviewed
 `X-B2-MCP-Key-Id` / `X-B2-MCP-Key` headers:
 
 ```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm --name b2-mcp \
+  --stop-timeout 20 \
   -p 127.0.0.1:3000:3000 \
   -e B2_HTTP_CREDENTIAL_MODE=headers \
   -e B2_ALLOWED_HOSTS=mcp.your-domain.example \
-  ghcr.io/backblaze-labs/b2-mcp:0.1.0
+  "$B2_MCP_IMAGE"
 ```
 
 Stdio clients can use the same image by overriding the transport argument:
 
 ```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
 docker run --rm -i \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
   -e B2_APPLICATION_KEY=your-application-key-secret \
-  ghcr.io/backblaze-labs/b2-mcp:0.1.0 stdio
+  "$B2_MCP_IMAGE" stdio
 ```
 
 For a local image from source, run `docker build -t b2-mcp:local .` and replace
 the GHCR image reference above with `b2-mcp:local`.
+
+HTTP container examples intentionally bind the host side to `127.0.0.1` and set
+`B2_ALLOWED_HOSTS`. If you publish the port through a reverse proxy or external
+load balancer, set `B2_ALLOWED_HOSTS` to the public host names before accepting
+traffic. The application drains in-flight requests for up to 10 seconds on
+SIGTERM, so set the platform stop grace period above that window; with Docker,
+use `--stop-timeout 20`.
 
 ## Step 4 — Hardened systemd unit
 

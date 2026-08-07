@@ -1,9 +1,8 @@
 .git
 .audit
 .claude
-.env
-.env.local
-.env.*.local
+.env*
+.envrc
 .idea
 .vscode
 coverage
@@ -11,7 +10,14 @@ dist
 node_modules
 probe-output
 reports
+.npmrc
+*.cert
+*.crt
+*.key
 *.log
+*.p12
+*.pem
+*.pfx
 *.tsbuildinfo
 .DS_Store
 

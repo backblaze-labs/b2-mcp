@@ -118,8 +118,11 @@ exists. For the first public package only:
    tag/package/changelog consistency, runs `pnpm run verify`, requires live
    contract success, builds one tarball, runs an npm dry-run publish, records
    checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
-   publishes the matching GHCR container image, and creates or updates the
-   GitHub Release from the same verified ref.
+   starts the idempotent GHCR container-image publish from the same verified
+   ref, and creates or updates the GitHub Release after npm publish succeeds.
+   A Docker/GHCR failure can be retried against the same tag; it must not
+   overwrite an existing versioned image whose recorded revision differs from
+   the verified checkout SHA.
 
 ## Prerelease
 
