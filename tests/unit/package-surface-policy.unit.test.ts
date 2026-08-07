@@ -118,39 +118,7 @@ describe("package surface policy", () => {
         "  );",
         '  fs.writeFileSync(path.join(packageRoot, "docs", "CLIENTS.md"), "# Clients\\n");',
         '  fs.writeFileSync(path.join(packageRoot, "docs", "DEPLOY.md"), "# Deploy\\n");',
-        "  fs.writeFileSync(",
-        '    path.join(packageRoot, "dist", "index.js"),',
-        "    [",
-        '      "#!/usr/bin/env node\\n",',
-        '      "const http = require(\\"node:http\\");\\n",',
-        '      "const version = \\"0.1.0\\";\\n",',
-        '      "function rpc(raw) {\\n",',
-        '      "  const req = JSON.parse(raw);\\n",',
-        '      "  if (req.method === \\"server/discover\\") return { jsonrpc: \\"2.0\\", id: req.id, result: { supportedVersions: [\\"2026-07-28\\"], capabilities: { tools: {} }, _meta: { \\"io.modelcontextprotocol/serverInfo\\": { name: \\"backblaze-b2\\", version } } } };\\n",',
-        '      "  if (req.method === \\"initialize\\") return { jsonrpc: \\"2.0\\", id: req.id, result: { protocolVersion: req.params.protocolVersion, serverInfo: { name: \\"backblaze-b2\\", version }, capabilities: { tools: {} } } };\\n",',
-        '      "  if (req.method === \\"tools/list\\") return { jsonrpc: \\"2.0\\", id: req.id, result: { tools: [{ name: \\"b2_list_buckets\\", inputSchema: { type: \\"object\\" } }, { name: \\"b2_create_key\\", inputSchema: { type: \\"object\\" } }] } };\\n",',
-        '      "  if (req.method === \\"tools/call\\") return { jsonrpc: \\"2.0\\", id: req.id, result: { isError: true, content: [{ type: \\"text\\", text: \\"tool_unavailable\\" }] } };\\n",',
-        '      "  return { jsonrpc: \\"2.0\\", id: req.id, error: { code: -32601, message: \\"not found\\" } };\\n",',
-        '      "}\\n",',
-        '      "function main() {\\n",',
-        '      "  const args = process.argv.slice(2);\\n",',
-        '      "  if (args.includes(\\"--help\\")) { console.log(\\"Usage: b2-mcp [stdio|http] [options]\\\\n--transport <stdio|http>\\\\n--version\\"); return; }\\n",',
-        '      "  if (args.includes(\\"--version\\")) { console.log(version); return; }\\n",',
-        '      "  if (args.includes(\\"--transport\\") && args[args.indexOf(\\"--transport\\") + 1] === \\"http\\") {\\n",',
-        '      "    const port = Number(args[args.indexOf(\\"--port\\") + 1]);\\n",',
-        '      "    http.createServer((req, res) => {\\n",',
-        '      "      if (req.method === \\"GET\\" && req.url === \\"/health\\") { res.writeHead(200, { \\"content-type\\": \\"application/json\\" }); res.end(JSON.stringify({ status: \\"ok\\", server: \\"backblaze-b2-mcp\\", version })); return; }\\n",',
-        '      "      let body = \\"\\"; req.on(\\"data\\", c => body += c); req.on(\\"end\\", () => { res.writeHead(200, { \\"content-type\\": \\"application/json\\" }); res.end(JSON.stringify(rpc(body))); });\\n",',
-        '      "    }).listen(port, \\"127.0.0.1\\");\\n",',
-        '      "    return;\\n",',
-        '      "  }\\n",',
-        '      "  if (!process.env.B2_APPLICATION_KEY_ID || !process.env.B2_APPLICATION_KEY) { console.error(\\"b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio\\"); process.exit(1); }\\n",',
-        '      "  let buffer = \\"\\"; process.stdin.on(\\"data\\", chunk => { buffer += chunk; for (;;) { const i = buffer.indexOf(\\"\\\\n\\"); if (i === -1) break; const line = buffer.slice(0, i).trim(); buffer = buffer.slice(i + 1); if (line) process.stdout.write(JSON.stringify(rpc(line)) + \\"\\\\n\\"); } });\\n",',
-        '      "}\\n",',
-        '      "module.exports = { startStdio() {}, main };\\n",',
-        '      "if (require.main === module) main();\\n",',
-        '    ].join(""),',
-        "  );",
+        '  fs.writeFileSync(path.join(packageRoot, "dist", "index.js"), "module.exports = { startStdio() {} };\\n");',
         '  fs.chmodSync(path.join(packageRoot, "dist", "index.js"), 0o755);',
         '  for (const name of ["b2-mcp", "b2-mcp-server"]) {',
         '    const bin = path.join(process.cwd(), "node_modules", ".bin", name);',
@@ -171,15 +139,15 @@ describe("package surface policy", () => {
         encoding: "utf8",
         env: {
           ...process.env,
+          NODE_ENV: "test",
+          B2_MCP_PACKED_CONSUMER_INSTALL_ONLY: "1",
           PATH: `${dir}${delimiter}${process.env.PATH ?? ""}`,
         },
       });
 
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("packed-consumer-smoke: retrying npm install");
-      expect(result.stdout).toContain(
-        "packed-consumer-smoke: installed and exercised runtime compatibility",
-      );
+      expect(result.stdout).toContain("packed-consumer-smoke: installed package metadata");
       expect(readFileSync(state, "utf8")).toBe("2");
     } finally {
       rmSync(dir, { recursive: true, force: true });

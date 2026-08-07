@@ -85,6 +85,39 @@ describe("release scripts", () => {
     });
   });
 
+  it("includes the issue 64 release automation entry in v0.1.0 notes", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/extract-release-notes.mjs", "--version", "0.1.0"],
+      { cwd: root, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("issue #64 release verification");
+  });
+
+  it("derives safe npm dist-tags for stable and prerelease versions", () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        [
+          'import { npmDistTag } from "./scripts/lib/release-utils.mjs";',
+          "process.stdout.write(JSON.stringify([",
+          '  npmDistTag("0.1.0"),',
+          '  npmDistTag("0.2.0-rc.1"),',
+          '  npmDistTag("0.2.0-preview.1"),',
+          "]));",
+        ].join("\n"),
+      ],
+      { cwd: root, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(["latest", "rc", "next"]);
+  });
+
   it("verifies tag, metadata, package files, and changelog agreement", () => {
     withFixture((fixtureRoot) => {
       const result = spawnSync(

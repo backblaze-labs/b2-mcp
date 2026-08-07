@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-
-const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { pathToFileURL } from "node:url";
+import { releaseRoot } from "./lib/release-utils.mjs";
 
 function usage() {
   return [
@@ -81,14 +80,6 @@ export function extractReleaseNotes(changelogText, version) {
 
 export function extractReleaseNotesFromRoot(root, version) {
   return extractReleaseNotes(readFileSync(path.join(root, "CHANGELOG.md"), "utf8"), version);
-}
-
-function releaseRoot() {
-  const configured = process.env.B2_MCP_RELEASE_ROOT;
-  if (configured && process.env.NODE_ENV !== "test") {
-    throw new Error("B2_MCP_RELEASE_ROOT is test-only");
-  }
-  return path.resolve(configured ?? defaultRoot);
 }
 
 function main() {

@@ -132,7 +132,19 @@ jobs:
       - name: Dry-run npm publish from verified tarball
         env:
           EXPECTED_TARBALL_NAME: ${{ steps.pack.outputs.tarball_name }}
-        run: npm publish "publish-package/${EXPECTED_TARBALL_NAME}" --dry-run --access public --ignore-scripts
+        run: |
+          set -euo pipefail
+          npm_tag="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { npmDistTag } from "./scripts/lib/release-utils.mjs";
+            const [pack] = JSON.parse(readFileSync("publish-package/npm-pack.json", "utf8"));
+            process.stdout.write(npmDistTag(pack.version));
+          ')"
+          npm publish "publish-package/${EXPECTED_TARBALL_NAME}" \
+            --dry-run \
+            --access public \
+            --ignore-scripts \
+            --tag "${npm_tag}"
       - name: Write artifact checksums
         id: checksums
         run: |
@@ -241,12 +253,16 @@ jobs:
         run: |
           set -euo pipefail
           tarball="publish-package/${EXPECTED_TARBALL_NAME}"
-          package_spec="$(node -e '
-            const fs = require("fs");
+          package_metadata="$(node -e '
             const cp = require("child_process");
             const pkg = JSON.parse(cp.execFileSync("tar", ["-xOf", process.argv[1], "package/package.json"], { encoding: "utf8" }));
-            process.stdout.write(`${pkg.name}@${pkg.version}`);
+            const prerelease = String(pkg.version).split("-")[1];
+            const channel = prerelease ? prerelease.split(".")[0].toLowerCase() : "";
+            const tag = prerelease && ["alpha", "beta", "canary", "next", "rc"].includes(channel) ? channel : prerelease ? "next" : "latest";
+            process.stdout.write(JSON.stringify({ spec: `${pkg.name}@${pkg.version}`, tag }));
           ' "$tarball")"
+          package_spec="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).spec)' "$package_metadata")"
+          npm_tag="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).tag)' "$package_metadata")"
           if registry_integrity="$(npm view "${package_spec}" dist.integrity --json 2>/tmp/npm-view-error)"; then
             registry_integrity="$(node -e 'const value = JSON.parse(process.argv[1] || "null"); process.stdout.write(value || "");' "$registry_integrity")"
             if [[ "$registry_integrity" == "$EXPECTED_TARBALL_INTEGRITY" ]]; then
@@ -262,7 +278,11 @@ jobs:
             cat /tmp/npm-view-error
             exit 1
           fi
-          npm publish "$tarball" --provenance --access public --ignore-scripts
+          npm publish "$tarball" \
+            --provenance \
+            --access public \
+            --ignore-scripts \
+            --tag "$npm_tag"
 
   github-release:
     needs: [prepare, publish]
@@ -358,6 +378,8 @@ jobs:
           gh release upload "${PUBLISH_TAG}" \
             "publish-package/${EXPECTED_TARBALL_NAME}" \
             "publish-package/${EXPECTED_SBOM_NAME}" \
+            "publish-package/${EXPECTED_RELEASE_NOTES_NAME}" \
+            "publish-package/npm-pack.json" \
             "publish-package/${EXPECTED_CHECKSUMS_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --clobber

@@ -497,7 +497,10 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("pnpm run release:sbom");
     expect(publishWorkflow).toContain("node scripts/extract-release-notes.mjs");
     expect(publishWorkflow).toContain("Dry-run npm publish from verified tarball");
-    expect(publishWorkflow).toContain("--dry-run --access public --ignore-scripts");
+    expect(publishWorkflow).toContain("--dry-run");
+    expect(publishWorkflow).toContain("--access public");
+    expect(publishWorkflow).toContain("--ignore-scripts");
+    expect(publishWorkflow).toContain('--tag "${npm_tag}"');
     expect(publishWorkflow).not.toContain("prepare-production-npm-audit.mjs");
     expect(publishWorkflow).not.toContain("npm sbom");
     expect(publishWorkflow).toContain("publish-package/*.cdx.json");
@@ -525,9 +528,40 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
     expect(publishWorkflow).toContain("retention-days: 7");
-    expect(publishWorkflow).toContain("--provenance --access public --ignore-scripts");
+    expect(publishWorkflow).toContain("--provenance");
+    expect(publishWorkflow).toContain('--tag "$npm_tag"');
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
     expect(publishWorkflow).not.toContain("tar -xzf");
+  });
+
+  it("keeps release checksum entries aligned with uploaded GitHub assets", () => {
+    const checksumStep = publishWorkflow.match(/sha256sum (.+) > SHA256SUMS/)?.[1] ?? "";
+    const githubReleaseJob = publishJobBlock("github-release");
+    const uploadBlock =
+      githubReleaseJob.match(/gh release upload "\$\{PUBLISH_TAG\}"[\s\S]+?--clobber/)?.[0] ?? "";
+
+    expect(checksumStep).toContain("*.tgz");
+    expect(checksumStep).toContain("*.cdx.json");
+    expect(checksumStep).toContain("release-notes.md");
+    expect(checksumStep).toContain("npm-pack.json");
+    expect(uploadBlock).toContain("EXPECTED_TARBALL_NAME");
+    expect(uploadBlock).toContain("EXPECTED_SBOM_NAME");
+    expect(uploadBlock).toContain("EXPECTED_RELEASE_NOTES_NAME");
+    expect(uploadBlock).toContain("npm-pack.json");
+    expect(uploadBlock).toContain("EXPECTED_CHECKSUMS_NAME");
+  });
+
+  it("derives npm dist-tags so prereleases do not publish as latest", () => {
+    const prepareJob = publishJobBlock("prepare");
+    const publishJob = publishJobBlock("publish");
+
+    expect(prepareJob).toContain("npmDistTag(pack.version)");
+    expect(prepareJob).toContain('--tag "${npm_tag}"');
+    expect(publishJob).toContain('const prerelease = String(pkg.version).split("-")[1]');
+    expect(publishJob).toContain(
+      'const tag = prerelease && ["alpha", "beta", "canary", "next", "rc"].includes(channel) ? channel : prerelease ? "next" : "latest"',
+    );
+    expect(publishJob).toContain('--tag "$npm_tag"');
   });
 
   it("exact-pins executable doc lint tooling", () => {

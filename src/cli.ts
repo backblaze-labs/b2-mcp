@@ -1,3 +1,5 @@
+import { readPortArg } from "./utils/config.js";
+
 type CliTransport = "stdio" | "http";
 
 interface CliOptions {
@@ -29,14 +31,6 @@ export function helpText(): string {
   ].join("\n");
 }
 
-function parsePort(raw: string): number {
-  const port = Number(raw);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new CliUsageError(`Invalid port: ${raw}`);
-  }
-  return port;
-}
-
 function parseTransport(raw: string): CliTransport {
   if (raw === "stdio" || raw === "http") return raw;
   throw new CliUsageError(`Invalid transport: ${raw}`);
@@ -64,15 +58,10 @@ export function parseCliArgs(argv: string[]): CliOptions {
       options.transport = parseTransport(arg.slice("--transport=".length));
       continue;
     }
-    if (arg === "--port") {
-      const value = argv[index + 1];
-      if (!value) throw new CliUsageError("--port requires a value");
-      options.port = parsePort(value);
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith("--port=")) {
-      options.port = parsePort(arg.slice("--port=".length));
+    const portArg = readPortArg(argv, index);
+    if (portArg) {
+      options.port = portArg.port;
+      index = portArg.nextIndex;
       continue;
     }
     throw new CliUsageError(`Unknown argument: ${arg}`);

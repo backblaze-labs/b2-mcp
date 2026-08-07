@@ -251,6 +251,11 @@ describe("getPort", () => {
     expect(() => getPort()).toThrow(/Invalid port/);
   });
 
+  it("uses the same strict port validation as the unified CLI", () => {
+    process.argv.push("--port", "3000abc");
+    expect(() => getPort()).toThrow("Invalid port: 3000abc");
+  });
+
   it("throws on port <= 0", () => {
     process.argv.push("--port", "0");
     expect(() => getPort()).toThrow(/Invalid port/);

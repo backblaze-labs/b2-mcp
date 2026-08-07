@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { extractReleaseNotesFromRoot } from "./extract-release-notes.mjs";
+import { assert, releaseRoot } from "./lib/release-utils.mjs";
 
-const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const canonicalRepository = "git+https://github.com/backblaze-labs/b2-mcp.git";
 const canonicalIssues = "https://github.com/backblaze-labs/b2-mcp/issues";
 const canonicalHomepage = "https://github.com/backblaze-labs/b2-mcp#readme";
@@ -48,18 +48,6 @@ function parseArgs(argv) {
   }
   if (!tag) throw new Error("--tag is required");
   return { tag };
-}
-
-function releaseRoot() {
-  const configured = process.env.B2_MCP_RELEASE_ROOT;
-  if (configured && process.env.NODE_ENV !== "test") {
-    throw new Error("B2_MCP_RELEASE_ROOT is test-only");
-  }
-  return path.resolve(configured ?? defaultRoot);
-}
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
 }
 
 function packageJson(root) {

@@ -195,6 +195,16 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(blocked.isError).toBe(true);
     expect(calls.some((call) => call.operation === "s3DeleteObjects")).toBe(false);
 
+    const blockedBypass = parseResult(
+      await tools.call("s3_delete_objects", {
+        bucket: "b",
+        objects: [{ key: "a.txt", versionId: "v1" }],
+        bypassGovernance: true,
+      }),
+    );
+    expect(blockedBypass).toContain("bypass governance-mode Object Lock retention");
+    expect(calls.some((call) => call.operation === "s3DeleteObjects")).toBe(false);
+
     const allowed = parseResult(
       await tools.call("s3_delete_objects", {
         bucket: "b",

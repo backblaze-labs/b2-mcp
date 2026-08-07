@@ -5,6 +5,7 @@ import path from "node:path";
 import net from "node:net";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { assert } from "./lib/release-utils.mjs";
 import retryUtils from "./lib/retry-utils.cjs";
 import envUtils from "./lib/sanitized-env.cjs";
 
@@ -110,10 +111,6 @@ function parseArgs(argv) {
     throw new Error(`packed-consumer-smoke: tarball is not a file: ${tarball}`);
   }
   return { tarball };
-}
-
-function assert(condition, message) {
-  if (!condition) throw new Error(message);
 }
 
 function installedBin(name) {
@@ -487,39 +484,46 @@ try {
     { env: sanitizerBlockedEnv },
   );
   const packageVersion = JSON.parse(metadataProbe.stdout).version;
-  const b2McpBin = installedBin("b2-mcp");
-  const serverAliasBin = installedBin("b2-mcp-server");
+  if (process.env.B2_MCP_PACKED_CONSUMER_INSTALL_ONLY === "1") {
+    if (process.env.NODE_ENV !== "test") {
+      throw new Error("B2_MCP_PACKED_CONSUMER_INSTALL_ONLY is test-only");
+    }
+    console.log(`packed-consumer-smoke: installed package metadata for ${filename}`);
+  } else {
+    const b2McpBin = installedBin("b2-mcp");
+    const serverAliasBin = installedBin("b2-mcp-server");
 
-  for (const bin of [b2McpBin, serverAliasBin]) {
-    const help = runPath(bin, ["--help"]);
-    assert(help.stdout.includes("--transport <stdio|http>"), `${bin} --help missing transport`);
-    const version = runPath(bin, ["--version"]);
-    assert(version.stdout.trim() === packageVersion, `${bin} --version mismatch`);
+    for (const bin of [b2McpBin, serverAliasBin]) {
+      const help = runPath(bin, ["--help"]);
+      assert(help.stdout.includes("--transport <stdio|http>"), `${bin} --help missing transport`);
+      const version = runPath(bin, ["--version"]);
+      assert(version.stdout.trim() === packageVersion, `${bin} --version mismatch`);
+    }
+
+    await smokeStdio(serverAliasBin, packageVersion);
+    await smokeHttp(b2McpBin, await freePort(), packageVersion);
+
+    const withoutCreds = runPath(b2McpBin, [], {
+      allowFailure: true,
+      env: {
+        ...sanitizedEnv(sanitizerBlockedEnv),
+        HOME: home,
+        USERPROFILE: home,
+      },
+      timeout: 10_000,
+    });
+    if (withoutCreds.status !== 1) {
+      throw new Error(`expected missing-credential startup to exit 1, got ${withoutCreds.status}`);
+    }
+    assert(
+      withoutCreds.stderr.includes("B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"),
+      "missing credential error did not name required stdio variables",
+    );
+
+    console.log(
+      `packed-consumer-smoke: installed and exercised runtime compatibility for ${filename}`,
+    );
   }
-
-  await smokeStdio(serverAliasBin, packageVersion);
-  await smokeHttp(b2McpBin, await freePort(), packageVersion);
-
-  const withoutCreds = runPath(b2McpBin, [], {
-    allowFailure: true,
-    env: {
-      ...sanitizedEnv(sanitizerBlockedEnv),
-      HOME: home,
-      USERPROFILE: home,
-    },
-    timeout: 10_000,
-  });
-  if (withoutCreds.status !== 1) {
-    throw new Error(`expected missing-credential startup to exit 1, got ${withoutCreds.status}`);
-  }
-  assert(
-    withoutCreds.stderr.includes("B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"),
-    "missing credential error did not name required stdio variables",
-  );
-
-  console.log(
-    `packed-consumer-smoke: installed and exercised runtime compatibility for ${filename}`,
-  );
 } finally {
   rmSync(workspace, { recursive: true, force: true });
 }

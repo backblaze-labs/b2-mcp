@@ -88,6 +88,25 @@ describe("destructive-gate", () => {
     });
   });
 
+  describe("s3_delete_objects Object Lock bypass text", () => {
+    it("keeps the plain delete effect unchanged", () => {
+      const r = checkDestructive("s3_delete_objects", { bucket: "b", objects: [] }, cfg());
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain("permanently delete multiple objects (irreversible)");
+      expect(r.message).not.toMatch(/Object Lock|retention/i);
+    });
+
+    it("states when governance-mode Object Lock retention is bypassed", () => {
+      const r = checkDestructive(
+        "s3_delete_objects",
+        { bucket: "b", objects: [], bypassGovernance: true },
+        cfg(),
+      );
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain("bypass governance-mode Object Lock retention");
+    });
+  });
+
   describe("presigned write URLs are gated by operation", () => {
     it("gates PutObject presigning by default", () => {
       const r = checkDestructive(

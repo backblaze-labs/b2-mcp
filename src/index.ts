@@ -26,6 +26,7 @@ import { CredentialResolutionError } from "./credentials.js";
 import { logger } from "./utils/logger.js";
 import { VERSION } from "./version.js";
 import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
+import { PortUsageError } from "./utils/config.js";
 
 export async function startStdio(): Promise<void> {
   const config = loadConfig();
@@ -78,7 +79,7 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
 // Only run when invoked directly (not when imported by tests).
 if (require.main === module) {
   runCli().catch((err) => {
-    if (err instanceof CliUsageError) {
+    if (err instanceof CliUsageError || err instanceof PortUsageError) {
       process.stderr.write(`b2-mcp: ${err.message}\n\n${helpText()}\n`);
       process.exit(2);
     }

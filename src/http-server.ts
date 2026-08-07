@@ -10,7 +10,7 @@
 import * as http from "http";
 import * as crypto from "crypto";
 import { AsyncLocalStorage } from "async_hooks";
-import { parseIntEnv } from "./utils/config.js";
+import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
 import {
   classifyInboundRequest,
   createMcpHandler,
@@ -43,7 +43,6 @@ import {
   validateHttpCredentialConfiguration,
 } from "./credentials.js";
 
-const DEFAULT_PORT = 3000;
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
 const SHUTDOWN_DRAIN_MS = 10 * 1000; // 10 seconds to drain on SIGTERM
@@ -147,18 +146,7 @@ export function getPort(
   argv = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  const idx = argv.indexOf("--port");
-  const raw =
-    idx !== -1 && argv[idx + 1]
-      ? argv[idx + 1]
-      : (argv.find((arg) => arg.startsWith("--port="))?.slice("--port=".length) ??
-        env.PORT ??
-        String(DEFAULT_PORT));
-  const port = parseInt(raw, 10);
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-    throw new Error(`Invalid port: ${raw}`);
-  }
-  return port;
+  return resolveHttpPort(argv, env);
 }
 
 export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
