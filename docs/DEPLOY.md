@@ -592,6 +592,12 @@ The daily schedule also sweeps abandoned `mcp-contract-*` resources, with the
 sweep sharing the live-resource concurrency lock used by contract runs so it
 cannot overlap an active release gate.
 
+Configure the live contract credentials only on the `live-b2-contract`
+environment. GitHub does not let a reusable-workflow caller bind an environment,
+so `publish.yml` passes only `checkout-sha`; the jobs inside `contract.yml` bind
+the environment and resolve its secrets and variables for every trigger. Do not
+duplicate these B2 credentials as repository-level or `npm-publish` secrets.
+
 Set `vars.B2_LIVE_TEST_ACCOUNT_ID` to the dedicated test account ID in the
 `live-b2-contract` environment. The janitor compares it with the account ID
 returned by authorization and refuses cleanup before issuing any delete when the

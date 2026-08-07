@@ -136,10 +136,15 @@ describe("live secret workflow policy", () => {
 
   it("runs live contracts through workflow_call for release gating", () => {
     const text = workflowText(".github/workflows/contract.yml");
+    const workflowCall = text.slice(
+      text.indexOf("  workflow_call:"),
+      text.indexOf("\n\npermissions:"),
+    );
     expect(text).toMatch(/^\s{2}workflow_call:\s*$/m);
     expect(text).toContain("checkout-sha:");
-    expect(text).toContain("LIVE_B2_KEY_ID:");
-    expect(text).toContain("LIVE_B2_KEY:");
+    expect(workflowCall).not.toContain("secrets:");
+    expect(workflowCall).not.toContain("LIVE_B2_KEY_ID");
+    expect(workflowCall).not.toContain("LIVE_B2_KEY");
     expect(text).toContain("WORKFLOW_CALL_CHECKOUT_SHA");
     expect(text).toContain('event_kind="workflow_call"');
     expect(text).toContain("workflow_call requires a full checkout-sha commit");

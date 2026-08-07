@@ -394,8 +394,10 @@ normal PRs and untrusted forks.
 Required properties:
 
 - dedicated live B2 test account, not a customer account;
-- least-privilege non-master application key with bucket, file, Object Lock,
-  notification, lifecycle, and S3-compatible capabilities needed by the suite;
+- dedicated account-level application key with the bucket, file, Object Lock,
+  notification, lifecycle, and key-management capabilities needed by the suite;
+  it must not be bucket- or prefix-restricted, and the dedicated account is the
+  isolation boundary because `writeKeys` grants full account access;
 - unique `B2_MCP_LIVE_RUN_PREFIX` for every run, rooted at `mcp-contract-`;
 - test-owned buckets, objects, multipart uploads, notification rules, and keys
   only; live tests must never choose an arbitrary listed bucket as writable;
@@ -424,5 +426,9 @@ release gate.
 
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract
-workflow through `workflow_call` before npm publish. `release.published` is not
-a pre-release gate and is not used for live contract evidence.
+workflow through `workflow_call` before npm publish. The caller passes only the
+reviewed checkout SHA. The called workflow's jobs bind `live-b2-contract` and
+resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and `B2_LIVE_TEST_ACCOUNT_ID` there;
+those values must not be duplicated or forwarded from repository or
+`npm-publish` secrets. `release.published` is not a pre-release gate and is not
+used for live contract evidence.

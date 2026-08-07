@@ -51,12 +51,14 @@ Before publishing `v0.1.0`:
    issue or PR and approved by the release owner and security owner.
 7. Confirm `@backblaze-labs/b2-mcp` is owned by Backblaze on npm and package
    provenance is enabled before publishing or advertising npm install commands.
-8. Confirm the live B2 workflow environments have `LIVE_B2_KEY_ID`,
-   `LIVE_B2_KEY`, the smoke-suite `LIVE_B2_*` secrets, `MCP_URL`, and
-   `B2_SMOKE_BUCKET` populated from the dedicated test account, then manually
-   dispatch smoke and contract from `main`. Security owns rotation for the live
-   B2 credentials. The live jobs run serially on Node.js 22.23.1, Node.js 24, and
-   Node.js 26.
+8. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
+   `LIVE_B2_KEY` plus environment variable `B2_LIVE_TEST_ACCOUNT_ID`. Confirm
+   `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus `MCP_URL`,
+   `B2_SMOKE_BUCKET`, and `B2_MCP_EXPECTED_TOOL_PROFILE`. Do not duplicate live
+   B2 credentials at repository scope or in `npm-publish`; the called contract
+   workflow resolves them from `live-b2-contract`. Manually dispatch smoke and
+   contract from `main`. Security owns credential rotation. The live jobs run
+   serially on Node.js 22.23.1, Node.js 24, and Node.js 26.
 9. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.
 10. Create the GitHub Release for the publish tag, then publish only from the
