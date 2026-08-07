@@ -12,7 +12,9 @@ function commandLine(command, args) {
 }
 
 function npmInvocation(args = []) {
-  return { command: process.platform === "win32" ? "npm.cmd" : "npm", args };
+  if (process.platform === "win32")
+    return { command: "cmd.exe", args: ["/d", "/s", "/c", "npm", ...args] };
+  return { command: "npm", args };
 }
 
 function commandInvocation(command, args = []) {
@@ -22,7 +24,10 @@ function commandInvocation(command, args = []) {
     case "node":
       return { command: process.platform === "win32" ? "node.exe" : "node", args };
     case "pnpm":
-      return { command: process.platform === "win32" ? "pnpm.cmd" : "pnpm", args };
+      if (process.platform === "win32") {
+        return { command: "cmd.exe", args: ["/d", "/s", "/c", "pnpm", ...args] };
+      }
+      return { command: "pnpm", args };
     default:
       throw new Error(`Unsupported retry command: ${command}`);
   }
