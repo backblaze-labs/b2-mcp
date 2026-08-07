@@ -158,22 +158,26 @@ dependencies. Releases publish immutable version tags only:
 `:<package-version>` and the matching signed tag such as `:v0.2.0`. There is no
 public `:latest` tag.
 
-Before running a release image, verify its keyless signature and attestations
-against this repository's release workflow identity:
+Before running a release image, verify its keyless signature against this
+repository's release workflow identity and confirm the signed image index
+contains BuildKit attestation manifests for the platform images:
 
 ```bash
 B2_MCP_IMAGE=ghcr.io/backblaze-labs/b2-mcp@sha256:DIGEST_FROM_RELEASE
 cosign verify "$B2_MCP_IMAGE" \
   --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation "$B2_MCP_IMAGE" \
-  --type slsaprovenance \
-  --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
-cosign verify-attestation "$B2_MCP_IMAGE" \
-  --type spdxjson \
-  --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker buildx imagetools inspect "$B2_MCP_IMAGE" --format '{{json .}}' \
+  | jq -e '
+      .manifest.manifests as $manifests
+      | [$manifests[]
+          | select(.platform.os != "unknown")
+          | .digest] as $images
+      | [$manifests[]
+          | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")
+          | .annotations["vnd.docker.reference.digest"]] as $attested
+      | all($images[]; . as $digest | $attested | index($digest))
+    '
 ```
 
 Single-tenant HTTP behind a reverse proxy:

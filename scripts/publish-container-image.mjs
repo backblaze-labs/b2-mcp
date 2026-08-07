@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const REQUIRED_PLATFORMS = ["linux/amd64", "linux/arm64"];
+const BUILDKIT_ATTESTATION_TYPE = "attestation-manifest";
+const SPDX_PREDICATE_TYPE = "https://spdx.dev/Document";
+const SLSA_PREDICATE_PREFIX = "https://slsa.dev/provenance/";
 const RETRYABLE_OUTPUT =
   /(?:429|500|502|503|504|denied: retry|EOF|ECONNRESET|ETIMEDOUT|rate limit|timeout|temporary|temporarily|unavailable)/i;
 
@@ -68,6 +71,20 @@ function inspectImage(ref, { optional = false, env } = {}) {
   return null;
 }
 
+function inspectRawManifest(ref) {
+  const result = run("docker", ["buildx", "imagetools", "inspect", ref, "--raw"], {
+    attempts: 3,
+    capture: true,
+  });
+  try {
+    return JSON.parse(result.stdout);
+  } catch (err) {
+    throw new Error(
+      `Could not parse raw manifest for ${ref}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 function manifestDigest(info) {
   const digest = info?.manifest?.digest;
   if (typeof digest !== "string" || !digest.startsWith("sha256:")) {
@@ -89,6 +106,22 @@ function manifestPlatforms(info) {
     .map((platform) => `${platform.os}/${platform.architecture}`);
 }
 
+function requiredPlatformManifests(info, ref) {
+  const manifests = info?.manifest?.manifests ?? [];
+  return REQUIRED_PLATFORMS.map((required) => {
+    const manifest = manifests.find((entry) => {
+      const platform = entry.platform;
+      return platform?.os && platform?.architecture
+        ? `${platform.os}/${platform.architecture}` === required
+        : false;
+    });
+    if (typeof manifest?.digest !== "string" || !manifest.digest.startsWith("sha256:")) {
+      throw new Error(`${ref} is missing platform ${required}`);
+    }
+    return { platform: required, digest: manifest.digest };
+  });
+}
+
 function requireExpectedManifest(info, ref, checkoutSha) {
   const revision = manifestRevision(info);
   if (revision !== checkoutSha) {
@@ -100,6 +133,46 @@ function requireExpectedManifest(info, ref, checkoutSha) {
   for (const required of REQUIRED_PLATFORMS) {
     if (!platforms.includes(required)) {
       throw new Error(`${ref} is missing platform ${required}`);
+    }
+  }
+}
+
+function requireBuildKitAttestations(info, ref, registryImage) {
+  const manifests = info?.manifest?.manifests ?? [];
+  const attestationsBySubject = new Map();
+  for (const entry of manifests) {
+    const annotations = entry.annotations ?? {};
+    if (annotations["vnd.docker.reference.type"] !== BUILDKIT_ATTESTATION_TYPE) continue;
+    const subjectDigest = annotations["vnd.docker.reference.digest"];
+    if (
+      typeof subjectDigest === "string" &&
+      subjectDigest.startsWith("sha256:") &&
+      typeof entry.digest === "string" &&
+      entry.digest.startsWith("sha256:")
+    ) {
+      attestationsBySubject.set(subjectDigest, entry.digest);
+    }
+  }
+
+  for (const { platform, digest } of requiredPlatformManifests(info, ref)) {
+    const attestationDigest = attestationsBySubject.get(digest);
+    if (!attestationDigest) {
+      throw new Error(`${ref} is missing a BuildKit attestation manifest for ${platform}`);
+    }
+
+    const rawAttestation = inspectRawManifest(`${registryImage}@${attestationDigest}`);
+    const predicateTypes = new Set(
+      (rawAttestation.layers ?? [])
+        .map((layer) => layer.annotations?.["in-toto.io/predicate-type"])
+        .filter((predicateType) => typeof predicateType === "string"),
+    );
+    if (
+      ![...predicateTypes].some((predicateType) => predicateType.startsWith(SLSA_PREDICATE_PREFIX))
+    ) {
+      throw new Error(`${ref} BuildKit attestation for ${platform} is missing SLSA provenance`);
+    }
+    if (!predicateTypes.has(SPDX_PREDICATE_TYPE)) {
+      throw new Error(`${ref} BuildKit attestation for ${platform} is missing an SPDX SBOM`);
     }
   }
 }
@@ -170,11 +243,6 @@ function verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, git
   run("cosign", ["verify", ...args, ref], {
     attempts: 3,
   });
-  for (const type of ["slsaprovenance", "spdxjson"]) {
-    run("cosign", ["verify-attestation", "--type", type, ...args, ref], {
-      attempts: 3,
-    });
-  }
 }
 
 function verifyAnonymousManifestPull(ref) {
@@ -211,6 +279,7 @@ function finishExistingImage({
     throw new Error(`${secondaryRef} already exists with a different digest`);
   }
   verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, githubRepository);
+  requireBuildKitAttestations(primaryInfo, primaryRef, registryImage);
   createTagIfMissing(secondaryRef, `${registryImage}@${digest}`);
   verifyAnonymousManifestPull(summaryRef);
   writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef });
@@ -318,6 +387,7 @@ function publish() {
   if (manifestDigest(publishedRelease) !== digest) {
     throw new Error(`${versionRef} and ${releaseRef} resolved to different digests`);
   }
+  requireBuildKitAttestations(publishedVersion, versionRef, registryImage);
   signDigest(registryImage, digest);
   verifyAnonymousManifestPull(versionRef);
   writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });

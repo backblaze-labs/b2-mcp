@@ -101,7 +101,12 @@ describe("container image policy", () => {
     expect(publishScript).toContain("org.opencontainers.image.base.digest");
     expect(publishScript).toContain("verifyAnonymousManifestPull");
     expect(publishScript).toContain("verifyTrustedExistingDigest");
-    expect(publishScript).toContain("verify-attestation");
+    expect(publishScript).toContain("requireBuildKitAttestations");
+    expect(publishScript).toContain("vnd.docker.reference.type");
+    expect(publishScript).toContain("in-toto.io/predicate-type");
+    expect(publishScript).toContain("https://spdx.dev/Document");
+    expect(publishScript).toContain("https://slsa.dev/provenance/");
+    expect(publishScript).not.toContain("verify-attestation");
     expect(publishScript).toContain("DOCKER_CONFIG");
     expect(publishScript).toContain("cosign");
     expect(publishScript).toContain("signDigest");

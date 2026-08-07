@@ -33,6 +33,7 @@ opossum
 pino
 presigner
 QEMU
+SLSA
 spdxjson
 slsaprovenance
 SUIDSGID
