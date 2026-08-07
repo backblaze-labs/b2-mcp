@@ -525,6 +525,8 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).not.toContain("contents: write");
+    expect(publishJob).toContain("node-version: 24.19.0");
+    expect(publishJob).toContain("bundles npm >=11.5.1");
     expect(publishJob).toContain("npm view");
     expect(publishJob).toContain("already exists on npm with matching integrity");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
