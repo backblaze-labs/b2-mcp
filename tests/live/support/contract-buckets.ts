@@ -53,6 +53,33 @@ function serverToolCaller(server: McpServer) {
   return (name: string, args: Record<string, unknown>) => callTool(server, name, args);
 }
 
+function expectedLiveTestAccountId(): string {
+  return String(process.env.B2_LIVE_TEST_ACCOUNT_ID ?? "").trim();
+}
+
+async function assertLiveTestAccount(server: McpServer): Promise<void> {
+  const expectedAccountId = expectedLiveTestAccountId();
+  if (!expectedAccountId) {
+    if (process.env.B2_INTEGRATION_REQUIRE_CREDENTIALS === "1") {
+      throw new Error("B2_LIVE_TEST_ACCOUNT_ID is required before live B2 fixture mutation.");
+    }
+    return;
+  }
+
+  const authorized = await callTool(server, "b2_authorize_account", {});
+  if (liveB2Contract.isError(authorized)) {
+    throw new Error(
+      `Live contract prerequisite failed - could not verify live test account: ${redactedLiveResourceDetail(
+        liveErrorText(authorized),
+      )}`,
+    );
+  }
+  const accountId = parseResult(authorized)?.accountId;
+  if (accountId !== expectedAccountId) {
+    throw new Error("Live contract account allowlist mismatch; refusing fixture mutation.");
+  }
+}
+
 export const liveRunPrefix = liveB2Contract.liveRunPrefix;
 export const normalizeLivePrefix = liveB2Contract.normalizeLivePrefix;
 export const bucketMatchesPrefix = liveB2Contract.bucketMatchesPrefix;
@@ -72,9 +99,14 @@ export async function cleanupContractBucket(
 
 export function createContractBucketTracker(server: McpServer): ContractBucketTracker {
   const trackedBuckets = new Map<string, ContractBucketRef>();
+  let verifiedLiveTestAccount = false;
 
   const tracker: ContractBucketTracker = {
     async createBucket(label, options = {}) {
+      if (!verifiedLiveTestAccount) {
+        await assertLiveTestAccount(server);
+        verifiedLiveTestAccount = true;
+      }
       const bucketName = contractBucketName(label);
       const created = await callTool(server, "b2_create_bucket", {
         bucketName,

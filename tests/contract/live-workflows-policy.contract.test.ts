@@ -185,6 +185,15 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("mcp-contract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
   });
 
+  it("verifies the live test account before creating fixture buckets", () => {
+    const text = workflowText("tests/live/support/contract-buckets.ts");
+    expect(text).toContain("B2_LIVE_TEST_ACCOUNT_ID");
+    expect(text).toContain("Live contract account allowlist mismatch");
+    expect(text.indexOf("await assertLiveTestAccount(server)")).toBeLessThan(
+      text.indexOf('callTool(server, "b2_create_bucket"'),
+    );
+  });
+
   it("runs the explicit live contract layer with B2 credentials", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = text.slice(text.indexOf("  contract:"));
