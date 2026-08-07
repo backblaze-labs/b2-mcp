@@ -99,8 +99,9 @@ published engine floor remains backed by evidence, and build the Docker image
 with an HTTP readiness smoke so the container distribution remains deployable.
 Release publishing must verify the pushed GHCR manifest contains both supported
 platforms, attach provenance/SBOM attestations, verify anonymous manifest
-access, sign the digest, and refuse to overwrite an existing version tag that
-does not match the verified checkout SHA.
+access, sign newly built digests, require trusted prior signature and
+attestations before accepting an existing digest, and refuse to overwrite an
+existing version tag that does not match the verified checkout SHA.
 Operators should use a current patched release within one of those supported
 major lines. Other Node.js lines are not part of the `v0.1.0` support contract.
 

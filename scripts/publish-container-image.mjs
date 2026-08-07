@@ -128,6 +128,35 @@ function signDigest(registryImage, digest) {
   });
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function trustArgs(githubServerUrl, githubRepository) {
+  const identity = `^${escapeRegex(githubServerUrl.replace(/\/$/, ""))}/${escapeRegex(githubRepository)}/\\.github/workflows/publish\\.yml@refs/tags/v`;
+  return [
+    "--certificate-identity-regexp",
+    identity,
+    "--certificate-oidc-issuer",
+    "https://token.actions.githubusercontent.com",
+  ];
+}
+
+function verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, githubRepository) {
+  const ref = `${registryImage}@${digest}`;
+  const args = trustArgs(githubServerUrl, githubRepository);
+  run("cosign", ["verify", ...args, ref], {
+    attempts: 3,
+    retryAll: false,
+  });
+  for (const type of ["slsaprovenance", "spdxjson"]) {
+    run("cosign", ["verify-attestation", "--type", type, ...args, ref], {
+      attempts: 3,
+      retryAll: false,
+    });
+  }
+}
+
 function verifyAnonymousManifestPull(ref) {
   const dockerConfig = mkdtempSync(join(tmpdir(), "b2-mcp-ghcr-anonymous-"));
   try {
@@ -169,9 +198,9 @@ function publish() {
     if (existingRelease && manifestDigest(existingRelease) !== digest) {
       throw new Error(`${releaseRef} already exists with a different digest`);
     }
+    verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, githubRepository);
     createTagIfMissing(releaseRef, `${registryImage}@${digest}`);
     verifyAnonymousManifestPull(versionRef);
-    signDigest(registryImage, digest);
     writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
     console.log(`${versionRef} already exists for ${checkoutSha}; treated as idempotent`);
     return;
@@ -180,9 +209,9 @@ function publish() {
   if (existingRelease) {
     requireExpectedManifest(existingRelease, releaseRef, checkoutSha);
     const digest = manifestDigest(existingRelease);
+    verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, githubRepository);
     createTagIfMissing(versionRef, `${registryImage}@${digest}`);
     verifyAnonymousManifestPull(versionRef);
-    signDigest(registryImage, digest);
     writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
     console.log(`${releaseRef} already exists for ${checkoutSha}; restored missing version tag`);
     return;

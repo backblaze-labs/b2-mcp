@@ -90,8 +90,11 @@ describe("container image policy", () => {
     expect(publishScript).toContain("--provenance=true");
     expect(publishScript).toContain("--sbom=true");
     expect(publishScript).toContain("verifyAnonymousManifestPull");
+    expect(publishScript).toContain("verifyTrustedExistingDigest");
+    expect(publishScript).toContain("verify-attestation");
     expect(publishScript).toContain("DOCKER_CONFIG");
     expect(publishScript).toContain("cosign");
+    expect(publishScript.match(/signDigest\(/g)).toHaveLength(2);
     expect(publishScript).not.toContain(":latest");
   });
 

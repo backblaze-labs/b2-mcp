@@ -127,8 +127,10 @@ exists. For the first public package only:
    checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
    publishes and anonymously verifies the idempotent GHCR container image from
    the same verified ref, and then creates or updates the GitHub Release. A
-   Docker/GHCR failure can be retried against the same tag; it must not overwrite
-   an existing versioned image whose recorded revision differs from the verified
+   Docker/GHCR failure can be retried against the same tag; it must not sign an
+   existing digest unless that digest already has this workflow's trusted
+   signature plus provenance and SBOM attestations, and it must not overwrite an
+   existing versioned image whose recorded revision differs from the verified
    checkout SHA.
 
 ## Prerelease
