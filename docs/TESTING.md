@@ -394,35 +394,44 @@ normal PRs and untrusted forks.
 Required properties:
 
 - dedicated live B2 test account, not a customer account;
-- least-privilege non-master application key with bucket, file, Object Lock,
-  notification, lifecycle, and S3-compatible capabilities needed by the suite;
+- dedicated account-level application key with the bucket, file, Object Lock,
+  notification, lifecycle, and key-management capabilities needed by the suite;
+  it must not be bucket- or prefix-restricted, and the dedicated account is the
+  isolation boundary because `writeKeys` grants full account access. The
+  workflow validation step and fixture helpers both enforce the
+  `B2_LIVE_TEST_ACCOUNT_ID` allowlist before live fixture mutation or cleanup;
 - unique `B2_MCP_LIVE_RUN_PREFIX` for every run, rooted at `mcp-contract-`;
 - test-owned buckets, objects, multipart uploads, notification rules, and keys
   only; live tests must never choose an arbitrary listed bucket as writable;
-- best-effort `afterAll` cleanup plus workflow janitor cleanup through
-  `scripts/live-b2-janitor.mjs`;
+- Object Lock live fixtures use only governance-mode retention with short
+  retain-until windows, never compliance mode, so cleanup can clear retention
+  with the required `bypassGovernance` capability;
+- best-effort test `afterAll` cleanup plus strict workflow cleanup through
+  `scripts/live-b2-janitor.mjs`; leaked buckets or cleanup errors fail the run
+  that caused them;
 - best-effort log hygiene redacting B2 credentials, account IDs, presigned URLs,
   live run prefixes, and smoke bucket names. This is not a containment boundary;
   live secrets must never share a job with unreviewed pull-request code.
 
 The live path runs through `.github/workflows/contract.yml` and
 `.github/workflows/smoke.yml`. Both run on manual dispatch from `main` and
-trusted scheduled paths; contract also runs on pushes to `main`, while smoke
-runs on successful deployment status events using the deployed SHA after
-checking that the deployment environment is approved and the SHA is reachable
-from protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
+trusted scheduled paths; smoke also runs on successful deployment status events
+using the deployed SHA after checking that the deployment environment is approved
+from a repository or organization variable and the SHA is reachable from
+protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
 because live credentials must not be exposed to PR-head code. Trusted runs set
 `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the smoke equivalent and fail loudly
 when credentials or required variables are absent; a skipped-only trusted run is
-not accepted as release evidence. The contract janitor also requires
-`B2_LIVE_TEST_ACCOUNT_ID` and refuses deletion when the authorized account ID
-does not match that dedicated test-account allowlist. The protected live matrix
-is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26. Contract runs and
-the scheduled abandoned-resource janitor also share a live-resource concurrency
-lock, so a global `mcp-contract-*` sweep cannot delete fixtures from an active
-release gate.
+not accepted as release evidence. The contract validation step and janitor both
+require `B2_LIVE_TEST_ACCOUNT_ID` and refuse to proceed when the authorized
+account ID does not match that dedicated test-account allowlist. The protected
+live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26.
 
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract
-workflow through `workflow_call` before npm publish. `release.published` is not
-a pre-release gate and is not used for live contract evidence.
+workflow through `workflow_call` before npm publish. The caller passes only the
+reviewed checkout SHA. The called workflow's jobs bind `live-b2-contract` and
+resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and `B2_LIVE_TEST_ACCOUNT_ID` there;
+those values must not be duplicated or forwarded from repository or
+`npm-publish` secrets. `release.published` is not a pre-release gate and is not
+used for live contract evidence.

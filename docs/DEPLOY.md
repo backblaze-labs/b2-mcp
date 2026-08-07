@@ -551,17 +551,20 @@ deployments for unmerged PR code are ignored before secrets are exposed. It
 does not run on `pull_request`, because live smoke credentials must not share a
 job with unreviewed PR-head code.
 
-It depends on these protected `live-b2-smoke` environment secrets and variable:
+It depends on these protected `live-b2-smoke` environment secrets and variables:
 
 - `vars.MCP_URL` — full `/mcp` endpoint (e.g. `https://mcp.example.com/mcp`)
 - `vars.B2_SMOKE_BUCKET` — dedicated test-owned bucket for the `s3_head_bucket`
   probe
 - `vars.B2_MCP_EXPECTED_TOOL_PROFILE` — expected frozen profile for the live
   credential set (`phase1-default`, `read-only`, or `full`)
-- `vars.B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT` — approved deployment environment
-  for deployment-triggered smoke, defaulting to `production`
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
+
+The deployment-status guard also reads repository or organization variable
+`B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT` before binding the `live-b2-smoke`
+environment, defaulting to `production`. Do not configure this one only as an
+environment variable.
 
 The workflow is gated to the canonical repo, fails loudly when dispatched from a
 non-main ref, and runs only reviewed `main` code with live secrets. It is
@@ -570,27 +573,34 @@ environment with branch restrictions before storing live B2 secrets there. Add
 required reviewers when the repository plan supports environment reviewers.
 
 The protected live contract workflow runs through
-`.github/workflows/contract.yml` on manual dispatch from `main`, pushes to
-`main`, a daily schedule, and `workflow_call` from the publish workflow. The
+`.github/workflows/contract.yml` on manual dispatch from `main`, a daily
+schedule, and `workflow_call` from the publish workflow. The
 reusable release path validates that the checkout SHA is reachable from the
 protected `ci-green` ref before exposing live credentials. It uses the
 `live-b2-contract` environment with `LIVE_B2_KEY_ID` / `LIVE_B2_KEY` and
 `vars.B2_LIVE_TEST_ACCOUNT_ID`, sets
 `B2_INTEGRATION_REQUIRE_CREDENTIALS=1`, and fails a trusted run when credentials
-are missing instead of accepting skipped live tests. It does not run on
-`pull_request`, because redaction and `add-mask` are only best-effort log
-hygiene and cannot contain secrets from code running in the same job. Each
-matrix entry uses a unique `B2_MCP_LIVE_RUN_PREFIX` rooted at `mcp-contract-`,
-creates only test-owned
+are missing instead of accepting skipped live tests. The validation step also
+authorizes the key before package tests run, fails if the authorized account
+does not match `B2_LIVE_TEST_ACCOUNT_ID`, and requires the `bypassGovernance`,
+`deleteKeys`, `listKeys`, and `writeKeys` capabilities needed to clean up every
+live fixture it creates. Live Object Lock cases use only governance-mode
+retention with short retain-until windows, not compliance mode. It does not run
+on `pull_request` or every push to `main`, because redaction and `add-mask` are
+only best-effort log hygiene and cannot contain secrets from code running in the
+same job. Each matrix entry uses a unique `B2_MCP_LIVE_RUN_PREFIX` rooted at
+`mcp-contract-`, creates only test-owned
 buckets, objects, multipart uploads, keys, and notification rules, runs
 serially on Node.js 22.23.1, 24, and 26, and invokes
 `scripts/live-b2-janitor.mjs` after the run. The janitor verifies the authorized
-account matches `B2_LIVE_TEST_ACCOUNT_ID` before any delete; the per-run cleanup
-logs best-effort failures without flipping an otherwise-passing test job, while
-the scheduled abandoned-resource sweep still exits non-zero on residual errors.
-The daily schedule also sweeps abandoned `mcp-contract-*` resources, with the
-sweep sharing the live-resource concurrency lock used by contract runs so it
-cannot overlap an active release gate.
+account matches `B2_LIVE_TEST_ACCOUNT_ID` before any delete; per-run cleanup
+failures or leaked buckets fail the workflow run that caused them.
+
+Configure the live contract credentials only on the `live-b2-contract`
+environment. GitHub does not let a reusable-workflow caller bind an environment,
+so `publish.yml` passes only `checkout-sha`; the jobs inside `contract.yml` bind
+the environment and resolve its secrets and variables for every trigger. Do not
+duplicate these B2 credentials as repository-level or `npm-publish` secrets.
 
 Set `vars.B2_LIVE_TEST_ACCOUNT_ID` to the dedicated test account ID in the
 `live-b2-contract` environment. The janitor compares it with the account ID
