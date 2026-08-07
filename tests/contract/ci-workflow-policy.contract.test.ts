@@ -194,7 +194,7 @@ describe("CI workflow policy", () => {
     expect(budgetJob).toContain("reports/package-budget/");
     expect(slowJob).toContain("timeout-minutes: 20");
     expect(slowJob).toContain("VITEST_MAX_WORKERS: 1");
-    expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1 --minWorkers=1");
+    expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1");
     expect(crossPlatformAggregateJob).toContain("name: cross-platform minimum");
     expect(crossPlatformMatrixJob).toContain("name: cross-platform minimum / ${{ matrix.os }}");
     expect(crossPlatformAggregateJob).toContain("needs: cross-platform-minimum-matrix");
@@ -265,6 +265,7 @@ describe("CI workflow policy", () => {
     const workflowSecurity = workflowJob("codeql-workflow-security");
 
     expect(workflowSecurity).toContain("name: CodeQL/workflow security");
+    expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
       "github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3",

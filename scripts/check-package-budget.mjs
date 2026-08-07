@@ -31,7 +31,7 @@ const budget = readJson("package-budget.json");
 const packageJson = readJson("package.json");
 const packageLock = readPackageManagerLock(root);
 const errors = [];
-const { commandLine, runNpmCommandWithRetries } = retryUtils;
+const { commandInvocation, commandLine, runNpmCommandWithRetries } = retryUtils;
 const { sanitizedEnv: baseSanitizedEnv } = envUtils;
 const productionDependencySections = ["dependencies", "optionalDependencies"];
 
@@ -640,6 +640,7 @@ function assertRuntimeImportPolicy(imports) {
 }
 
 function run(command, args, options = {}) {
+  const invocation = commandInvocation(command, args);
   const result =
     command === "npm" && (options.retries ?? 0) > 0
       ? runNpmCommandWithRetries(args, {
@@ -650,7 +651,7 @@ function run(command, args, options = {}) {
             `package-budget: retrying ${label} after transient registry failure (${attempt}/${attempts})`,
           spawnOptions: options.spawnOptions,
         })
-      : spawnSync(command, args, options.spawnOptions ?? {});
+      : spawnSync(invocation.command, invocation.args, options.spawnOptions ?? {});
   if (result.error) {
     throw new Error(`${commandLine(command, args)} failed: ${result.error.message}`);
   }

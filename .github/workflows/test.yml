@@ -427,6 +427,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
       security-events: write
     steps:
@@ -489,7 +490,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: pnpm run test:slow -- --maxWorkers=1 --minWorkers=1
+      - run: pnpm run test:slow -- --maxWorkers=1
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload slow lifecycle reports
         if: always()
