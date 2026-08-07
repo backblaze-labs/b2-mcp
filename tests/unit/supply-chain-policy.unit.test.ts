@@ -511,6 +511,8 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("Create GitHub release from verified artifact");
     expect(publishWorkflow).toContain("gh release upload");
     expect(publishWorkflow).toContain("gh release create");
+    expect(publishWorkflow).toContain("release_flags+=(--prerelease)");
+    expect(publishWorkflow).toContain("create_flags+=(--prerelease --latest=false)");
     expect(publishWorkflow).toContain("contents: write");
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");

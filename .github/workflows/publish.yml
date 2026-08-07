@@ -363,17 +363,25 @@ jobs:
           PUBLISH_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          release_flags=(
+            --repo "${GITHUB_REPOSITORY}"
+            --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}"
+            --verify-tag
+          )
+          create_flags=(
+            --repo "${GITHUB_REPOSITORY}"
+            --title "${PUBLISH_TAG}"
+            --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}"
+            --verify-tag
+          )
+          if [[ "${PUBLISH_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            release_flags+=(--prerelease)
+            create_flags+=(--prerelease --latest=false)
+          fi
           if gh release view "${PUBLISH_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release edit "${PUBLISH_TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}" \
-              --verify-tag
+            gh release edit "${PUBLISH_TAG}" "${release_flags[@]}"
           else
-            gh release create "${PUBLISH_TAG}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --title "${PUBLISH_TAG}" \
-              --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}" \
-              --verify-tag
+            gh release create "${PUBLISH_TAG}" "${create_flags[@]}"
           fi
           gh release upload "${PUBLISH_TAG}" \
             "publish-package/${EXPECTED_TARBALL_NAME}" \

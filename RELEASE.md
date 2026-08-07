@@ -75,12 +75,28 @@ Before publishing `v0.1.0`:
 npm trusted publishing cannot be configured until `@backblaze-labs/b2-mcp`
 exists. For the first public package only:
 
-1. Have the npm organization owner create the package under Backblaze ownership
-   with public access and no automation token.
-2. Configure trusted publishing for
+1. Have an npm organization owner do a one-time manual bootstrap publish from a
+   temporary clean checkout. Set `package.json` to a reserved non-release
+   version such as `0.0.0-bootstrap.0`, build, pack, inspect the tarball, and
+   publish it with short-lived or interactive npm credentials:
+
+   ```bash
+   pnpm install --frozen-lockfile
+   pnpm run build
+   npm pack --json --ignore-scripts --pack-destination /tmp/b2-mcp-bootstrap
+   npm publish /tmp/b2-mcp-bootstrap/backblaze-labs-b2-mcp-0.0.0-bootstrap.0.tgz \
+     --access public \
+     --ignore-scripts \
+     --tag bootstrap
+   ```
+
+2. Revoke any bootstrap credential or end the interactive npm session, then
+   configure trusted publishing for
    `backblaze-labs/b2-mcp/.github/workflows/publish.yml` and the
    `npm-publish` GitHub environment.
-3. Run the publish workflow against the signed `v0.1.0` tag. The workflow must
+3. Deprecate the bootstrap version with a note that it is a reserved package
+   bootstrap and is not supported for installation.
+4. Run the publish workflow against the signed `v0.1.0` tag. The workflow must
    publish the verified tarball with OIDC provenance; do not publish a different
    local tarball to bootstrap the package.
 
