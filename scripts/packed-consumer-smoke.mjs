@@ -2,7 +2,8 @@
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import net from "node:net";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import retryUtils from "./lib/retry-utils.cjs";
 import envUtils from "./lib/sanitized-env.cjs";
@@ -22,6 +23,28 @@ const sanitizerBlockedEnv = {
   GITHUB_TOKEN: "sentinel-github-token",
   NPM_TOKEN: "sentinel-npm-token",
 };
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+const LEGACY_PROTOCOL_VERSION = "2025-06-18";
+const MODERN_META = {
+  "io.modelcontextprotocol/protocolVersion": MODERN_PROTOCOL_VERSION,
+  "io.modelcontextprotocol/clientCapabilities": {},
+  "io.modelcontextprotocol/clientInfo": {
+    name: "b2-mcp-packed-consumer",
+    version: "1.0.0",
+  },
+};
+const JSON_HEADERS = {
+  "content-type": "application/json",
+  accept: "application/json, text/event-stream",
+};
+const fakeCredentialEnvNames = [
+  "B2_APPLICATION_KEY_ID",
+  "B2_APPLICATION_KEY",
+  "B2_REGISTER_ALL_TOOLS",
+  "B2_HTTP_CREDENTIAL_MODE",
+  "B2_ALLOWED_HOSTS",
+  "LOG_LEVEL",
+];
 
 function sanitizedEnv(extra = {}, options = {}) {
   const env = baseSanitizedEnv(extra, { nonSecretEnvNames: options.nonSecretEnvNames });
@@ -89,6 +112,291 @@ function parseArgs(argv) {
   return { tarball };
 }
 
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function installedBin(name) {
+  return path.join(
+    workspace,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? `${name}.cmd` : name,
+  );
+}
+
+function packageRuntimeEnv(extra = {}) {
+  return sanitizedEnv(
+    {
+      ...sanitizerBlockedEnv,
+      B2_APPLICATION_KEY_ID: "packed-consumer-key-id",
+      B2_APPLICATION_KEY: "packed-consumer-key-secret",
+      B2_REGISTER_ALL_TOOLS: "true",
+      LOG_LEVEL: "silent",
+      ...extra,
+    },
+    { nonSecretEnvNames: fakeCredentialEnvNames },
+  );
+}
+
+function runPath(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd ?? workspace,
+    env: options.env ?? packageRuntimeEnv(),
+    encoding: "utf8",
+    timeout: options.timeout ?? 30_000,
+    stdio: options.stdio ?? "pipe",
+  });
+  const failed = result.error || (options.allowFailure !== true && result.status !== 0);
+  if (!failed) return result;
+  if (result.error) throw new Error(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  throw new Error(
+    `${command} ${args.join(" ")} failed with ${result.status}\n${result.stdout}\n${result.stderr}`,
+  );
+}
+
+function modernBody(method, params = {}, id = 1) {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method,
+    params: { ...params, _meta: MODERN_META },
+  });
+}
+
+function modernHeaders(method, name) {
+  return {
+    ...JSON_HEADERS,
+    "mcp-protocol-version": MODERN_PROTOCOL_VERSION,
+    "mcp-method": method,
+    ...(name ? { "mcp-name": name } : {}),
+  };
+}
+
+function legacyInitializeBody() {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: LEGACY_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: { name: "b2-mcp-packed-consumer", version: "1.0.0" },
+    },
+  });
+}
+
+function legacyBody(method, params = {}, id = 1) {
+  return JSON.stringify({ jsonrpc: "2.0", id, method, params });
+}
+
+function legacyCallBody(name, args = {}, id = 1) {
+  return legacyBody("tools/call", { name, arguments: args }, id);
+}
+
+function parseMcpBody(body) {
+  if (body.trimStart().startsWith("{")) return JSON.parse(body);
+  const data = body
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice("data:".length).trim())
+    .join("\n");
+  return JSON.parse(data);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+async function httpJson(port, method, pathname, { headers = {}, body = undefined } = {}) {
+  const response = await fetch(`http://127.0.0.1:${port}${pathname}`, {
+    method,
+    headers,
+    body,
+  });
+  const text = await response.text();
+  return { status: response.status, headers: response.headers, body: text };
+}
+
+async function waitForHealth(port, expectedVersion) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      const response = await httpJson(port, "GET", "/health");
+      if (response.status === 200) {
+        const health = JSON.parse(response.body);
+        assert(health.version === expectedVersion, "HTTP health version mismatch");
+        assert(health.server === "backblaze-b2-mcp", "HTTP health server identity mismatch");
+        return health;
+      }
+      lastError = new Error(`health status ${response.status}: ${response.body}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await wait(100);
+  }
+  throw lastError ?? new Error("HTTP health did not become ready");
+}
+
+async function httpRpc(port, body, headers) {
+  const response = await httpJson(port, "POST", "/mcp", { headers, body });
+  assert(response.status === 200, `MCP HTTP status ${response.status}: ${response.body}`);
+  const message = parseMcpBody(response.body);
+  assert(!message.error, `MCP HTTP error: ${JSON.stringify(message.error)}`);
+  return message.result;
+}
+
+function waitForStdioFrame(child, request, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error(`stdio request timed out\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+    }, timeoutMs);
+    timeout.unref();
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+      for (;;) {
+        const newline = stdout.indexOf("\n");
+        if (newline === -1) return;
+        const line = stdout.slice(0, newline).trim();
+        stdout = stdout.slice(newline + 1);
+        if (!line) continue;
+        const frame = JSON.parse(line);
+        if (frame.id === request.id) {
+          clearTimeout(timeout);
+          resolve(frame);
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timeout);
+      reject(new Error(`stdio process exited before response with ${code}\nstderr:\n${stderr}`));
+    });
+    child.stdin.write(`${JSON.stringify(request)}\n`);
+  });
+}
+
+async function smokeStdio(binPath, expectedVersion) {
+  const child = spawn(binPath, ["--transport", "stdio"], {
+    cwd: workspace,
+    env: packageRuntimeEnv(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  try {
+    const request = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "server/discover",
+      params: { _meta: MODERN_META },
+    };
+    const frame = await waitForStdioFrame(child, request);
+    assert(!frame.error, `stdio discover failed: ${JSON.stringify(frame.error)}`);
+    assert(
+      frame.result?.supportedVersions?.includes(MODERN_PROTOCOL_VERSION),
+      "stdio discover missing modern protocol",
+    );
+    assert(
+      frame.result?._meta?.["io.modelcontextprotocol/serverInfo"]?.version === expectedVersion,
+      "stdio discover version mismatch",
+    );
+  } finally {
+    child.stdin.end();
+    child.kill("SIGTERM");
+  }
+}
+
+async function smokeHttp(binPath, port, expectedVersion) {
+  const child = spawn(binPath, ["--transport", "http", "--port", String(port)], {
+    cwd: workspace,
+    env: packageRuntimeEnv({
+      B2_HTTP_CREDENTIAL_MODE: "headers",
+      B2_ALLOWED_HOSTS: "127.0.0.1,localhost",
+    }),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  try {
+    await waitForHealth(port, expectedVersion);
+    const credentialHeaders = {
+      "x-b2-mcp-key-id": "packed-consumer-key-id",
+      "x-b2-mcp-key": "packed-consumer-key-secret",
+    };
+
+    const discover = await httpRpc(port, modernBody("server/discover"), {
+      ...credentialHeaders,
+      ...modernHeaders("server/discover"),
+    });
+    assert(
+      discover.supportedVersions?.includes(MODERN_PROTOCOL_VERSION),
+      "missing modern discover",
+    );
+    assert(
+      discover._meta?.["io.modelcontextprotocol/serverInfo"]?.version === expectedVersion,
+      "modern discover version mismatch",
+    );
+
+    const modernList = await httpRpc(port, modernBody("tools/list"), {
+      ...credentialHeaders,
+      ...modernHeaders("tools/list"),
+    });
+    assert(
+      modernList.tools?.some((tool) => tool.name === "b2_list_buckets"),
+      "modern tools/list missing b2_list_buckets",
+    );
+    const modernCall = await httpRpc(
+      port,
+      modernBody("tools/call", { name: "b2_create_key", arguments: {} }, 3),
+      { ...credentialHeaders, ...modernHeaders("tools/call", "b2_create_key") },
+    );
+    assert(JSON.stringify(modernCall).includes("tool_unavailable"), "modern tool call mismatch");
+
+    const legacyInit = await httpRpc(port, legacyInitializeBody(), {
+      ...credentialHeaders,
+      ...JSON_HEADERS,
+    });
+    assert(
+      legacyInit.serverInfo?.version === expectedVersion,
+      "legacy initialize version mismatch",
+    );
+    const legacyList = await httpRpc(port, legacyBody("tools/list", {}, 2), {
+      ...credentialHeaders,
+      ...JSON_HEADERS,
+    });
+    assert(
+      legacyList.tools?.some((tool) => tool.name === "b2_list_buckets"),
+      "legacy tools/list missing b2_list_buckets",
+    );
+    const legacyCall = await httpRpc(port, legacyCallBody("b2_create_key", {}, 3), {
+      ...credentialHeaders,
+      ...JSON_HEADERS,
+    });
+    assert(JSON.stringify(legacyCall).includes("tool_unavailable"), "legacy tool call mismatch");
+  } finally {
+    child.kill("SIGTERM");
+  }
+}
+
 try {
   const args = parseArgs(process.argv.slice(2));
 
@@ -146,7 +454,7 @@ try {
     retryLabel: "npm install",
     timeout: 180_000,
   });
-  run(
+  const metadataProbe = run(
     "node",
     [
       "-e",
@@ -159,72 +467,55 @@ try {
         'const pkg = require("@backblaze-labs/b2-mcp");',
         'const meta = require("@backblaze-labs/b2-mcp/package.json");',
         'const packageRoot = path.dirname(require.resolve("@backblaze-labs/b2-mcp/package.json"));',
-        'const httpEntrypoint = path.join(packageRoot, "dist", "http-server.js");',
         'if (typeof pkg.startStdio !== "function") throw new Error("missing startStdio export");',
-        'if (typeof require(httpEntrypoint).buildHttpServer !== "function") throw new Error("missing HTTP entry point");',
         'for (const legacyPackage of ["@modelcontextprotocol/node", "@hono/node-server", "axios"]) {',
         "  try { require.resolve(legacyPackage, { paths: [packageRoot] }); throw new Error(`${legacyPackage} should not be installed`); }",
         '  catch (err) { if (err.code !== "MODULE_NOT_FOUND") throw err; }',
         "}",
         `if (meta.engines.node !== ${JSON.stringify(runtimePolicy.engineFloor)}) throw new Error("wrong package engine");`,
         'if (meta.bin["b2-mcp"] !== "dist/index.js") throw new Error("wrong b2-mcp bin");',
+        'if (meta.bin["b2-mcp-server"] !== "dist/index.js") throw new Error("wrong b2-mcp-server bin");',
+        'for (const requiredDoc of ["docs/CLIENTS.md", "docs/DEPLOY.md"]) {',
+        "  if (!fs.existsSync(path.join(packageRoot, requiredDoc))) throw new Error(`${requiredDoc} should be published`);",
+        "}",
         'for (const repoOnlyFile of ["runtime-policy.json", "audit-policy.json", "package-budget.json"]) {',
         "  if (fs.existsSync(path.join(packageRoot, repoOnlyFile))) throw new Error(`${repoOnlyFile} should not be published`);",
         "}",
-        "(async () => {",
-        '  const { createServer, getRegisteredTools } = require(path.join(packageRoot, "dist", "server.js"));',
-        "  const runtimeConfig = {",
-        '    applicationKeyId: "key-id",',
-        '    applicationKey: "key-secret",',
-        '    appKeyId: "key-id",',
-        '    appKey: "key-secret",',
-        '    masterKeyId: "key-id",',
-        '    masterKey: "key-secret",',
-        '    region: "us-west-004",',
-        "    allowLocalFiles: false,",
-        "    fileRoot: null,",
-        "  };",
-        "  const server = createServer(runtimeConfig);",
-        "  const tools = getRegisteredTools(server) || {};",
-        "  const toolNames = Object.keys(tools);",
-        "  if (toolNames.length !== 40) throw new Error(`expected 40 registered tools, got ${toolNames.length}`);",
-        '  if (!tools.s3_get_object.inputSchema.safeParse({ bucket: "bucket", key: "object" }).success) throw new Error("s3_get_object schema rejected required bucket/key");',
-        '  const readOnlyServer = createServer(runtimeConfig, ["listBuckets", "listFiles", "readFiles", "listKeys"]);',
-        "  const readOnlyTools = getRegisteredTools(readOnlyServer) || {};",
-        '  if (readOnlyTools.s3_delete_object) throw new Error("read-only capability filter exposed delete object");',
-        '  if (!readOnlyTools.s3_get_object) throw new Error("read-only capability filter hid get object");',
-        "  const stubResult = await tools.b2_create_key.execute({}, {});",
-        '  const stubText = stubResult?.content?.[0]?.text ?? "";',
-        '  if (!stubText.includes("tool_unavailable")) throw new Error("durable secret stub did not return unavailable response");',
-        "  await Promise.all([server.close(), readOnlyServer.close()]);",
-        "})().catch((err) => { console.error(err); process.exit(1); });",
+        "process.stdout.write(JSON.stringify({ version: meta.version }));",
       ].join("\n"),
     ],
     { env: sanitizerBlockedEnv },
   );
+  const packageVersion = JSON.parse(metadataProbe.stdout).version;
+  const b2McpBin = installedBin("b2-mcp");
+  const serverAliasBin = installedBin("b2-mcp-server");
 
-  const entrypoint = path.join(
-    workspace,
-    "node_modules",
-    "@backblaze-labs",
-    "b2-mcp",
-    "dist",
-    "index.js",
-  );
-  const withoutCreds = run("node", [entrypoint], {
+  for (const bin of [b2McpBin, serverAliasBin]) {
+    const help = runPath(bin, ["--help"]);
+    assert(help.stdout.includes("--transport <stdio|http>"), `${bin} --help missing transport`);
+    const version = runPath(bin, ["--version"]);
+    assert(version.stdout.trim() === packageVersion, `${bin} --version mismatch`);
+  }
+
+  await smokeStdio(serverAliasBin, packageVersion);
+  await smokeHttp(b2McpBin, await freePort(), packageVersion);
+
+  const withoutCreds = runPath(b2McpBin, [], {
     allowFailure: true,
     env: {
-      ...sanitizerBlockedEnv,
-      B2_APPLICATION_KEY_ID: "",
-      B2_APPLICATION_KEY: "",
-      B2_REGISTER_ALL_TOOLS: "true",
+      ...sanitizedEnv(sanitizerBlockedEnv),
+      HOME: home,
+      USERPROFILE: home,
     },
-    nonSecretEnvNames: ["B2_REGISTER_ALL_TOOLS"],
     timeout: 10_000,
   });
   if (withoutCreds.status !== 1) {
     throw new Error(`expected missing-credential startup to exit 1, got ${withoutCreds.status}`);
   }
+  assert(
+    withoutCreds.stderr.includes("B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"),
+    "missing credential error did not name required stdio variables",
+  );
 
   console.log(
     `packed-consumer-smoke: installed and exercised runtime compatibility for ${filename}`,

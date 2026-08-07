@@ -24,8 +24,13 @@ jobs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
       tarball-name: ${{ steps.pack.outputs.tarball_name }}
       tarball-sha256: ${{ steps.pack.outputs.tarball_sha256 }}
+      tarball-integrity: ${{ steps.pack.outputs.tarball_integrity }}
       sbom-name: ${{ steps.sbom.outputs.sbom_name }}
       sbom-sha256: ${{ steps.sbom.outputs.sbom_sha256 }}
+      checksums-name: ${{ steps.checksums.outputs.checksums_name }}
+      checksums-sha256: ${{ steps.checksums.outputs.checksums_sha256 }}
+      release-notes-name: ${{ steps.notes.outputs.release_notes_name }}
+      release-notes-sha256: ${{ steps.notes.outputs.release_notes_sha256 }}
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -56,6 +61,10 @@ jobs:
           ref: ${{ steps.ref.outputs.checkout_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify release version and changelog
+        env:
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
         run: |
           set -euo pipefail
@@ -70,6 +79,7 @@ jobs:
             sleep "$attempt"
           done
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run verify
       - run: pnpm run typecheck
       - run: pnpm run build
       - run: pnpm run check:package-budget
@@ -86,12 +96,27 @@ jobs:
           sbom_sha256="$(sha256sum "${GITHUB_WORKSPACE}/publish-package/b2-mcp-production.cdx.json" | awk '{print $1}')"
           echo "sbom_name=b2-mcp-production.cdx.json" >> "$GITHUB_OUTPUT"
           echo "sbom_sha256=${sbom_sha256}" >> "$GITHUB_OUTPUT"
+      - name: Extract release notes
+        id: notes
+        env:
+          PUBLISH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p publish-package
+          version="${PUBLISH_TAG#v}"
+          node scripts/extract-release-notes.mjs \
+            --version "${version}" \
+            --output publish-package/release-notes.md
+          notes_sha256="$(sha256sum publish-package/release-notes.md | awk '{print $1}')"
+          echo "release_notes_name=release-notes.md" >> "$GITHUB_OUTPUT"
+          echo "release_notes_sha256=${notes_sha256}" >> "$GITHUB_OUTPUT"
       - name: Build and scan publish tarball
         id: pack
         run: |
           set -euo pipefail
           mkdir -p publish-package
-          npm pack --ignore-scripts --pack-destination publish-package
+          pack_json="$(npm pack --json --ignore-scripts --pack-destination publish-package)"
+          printf '%s\n' "$pack_json" > publish-package/npm-pack.json
           tarball="$(find publish-package -maxdepth 1 -type f -name '*.tgz' | sort | head -n 1)"
           if [[ -z "$tarball" ]]; then
             echo "::error::npm pack did not produce a tarball"
@@ -103,6 +128,20 @@ jobs:
             --tarball "$tarball"
           echo "tarball_name=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
           echo "tarball_sha256=$(sha256sum "$tarball" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+          echo "tarball_integrity=$(node -e 'const fs = require("fs"); const [pack] = JSON.parse(fs.readFileSync("publish-package/npm-pack.json", "utf8")); process.stdout.write(pack.integrity || "");')" >> "$GITHUB_OUTPUT"
+      - name: Dry-run npm publish from verified tarball
+        env:
+          EXPECTED_TARBALL_NAME: ${{ steps.pack.outputs.tarball_name }}
+        run: npm publish "publish-package/${EXPECTED_TARBALL_NAME}" --dry-run --access public --ignore-scripts
+      - name: Write artifact checksums
+        id: checksums
+        run: |
+          set -euo pipefail
+          cd publish-package
+          sha256sum *.tgz *.cdx.json release-notes.md npm-pack.json > SHA256SUMS
+          checksums_sha256="$(sha256sum SHA256SUMS | awk '{print $1}')"
+          echo "checksums_name=SHA256SUMS" >> "$GITHUB_OUTPUT"
+          echo "checksums_sha256=${checksums_sha256}" >> "$GITHUB_OUTPUT"
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
@@ -110,6 +149,9 @@ jobs:
           path: |
             publish-package/*.tgz
             publish-package/*.cdx.json
+            publish-package/SHA256SUMS
+            publish-package/release-notes.md
+            publish-package/npm-pack.json
           if-no-files-found: error
           retention-days: 7
 
@@ -140,10 +182,6 @@ jobs:
         with:
           name: npm-package
           path: publish-package
-      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
-      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
-        with:
-          run_install: false
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -168,6 +206,7 @@ jobs:
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
           EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
+          EXPECTED_TARBALL_INTEGRITY: ${{ needs.prepare.outputs.tarball-integrity }}
         run: |
           set -euo pipefail
           tarball="publish-package/${EXPECTED_TARBALL_NAME}"
@@ -182,12 +221,50 @@ jobs:
             echo "actual=${actual_sha}"
             exit 1
           fi
+          local_integrity="$(node -e '
+            const fs = require("fs");
+            const crypto = require("crypto");
+            const file = process.argv[1];
+            const digest = crypto.createHash("sha512").update(fs.readFileSync(file)).digest("base64");
+            process.stdout.write(`sha512-${digest}`);
+          ' "$tarball")"
+          if [[ "$local_integrity" != "$EXPECTED_TARBALL_INTEGRITY" ]]; then
+            echo "::error::Publish tarball npm integrity mismatch"
+            echo "expected=${EXPECTED_TARBALL_INTEGRITY}"
+            echo "actual=${local_integrity}"
+            exit 1
+          fi
       - name: Publish prebuilt tarball with trusted provenance
         env:
           EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
-        run: npm publish "publish-package/${EXPECTED_TARBALL_NAME}" --provenance --access public --ignore-scripts
+          EXPECTED_TARBALL_INTEGRITY: ${{ needs.prepare.outputs.tarball-integrity }}
+        run: |
+          set -euo pipefail
+          tarball="publish-package/${EXPECTED_TARBALL_NAME}"
+          package_spec="$(node -e '
+            const fs = require("fs");
+            const cp = require("child_process");
+            const pkg = JSON.parse(cp.execFileSync("tar", ["-xOf", process.argv[1], "package/package.json"], { encoding: "utf8" }));
+            process.stdout.write(`${pkg.name}@${pkg.version}`);
+          ' "$tarball")"
+          if registry_integrity="$(npm view "${package_spec}" dist.integrity --json 2>/tmp/npm-view-error)"; then
+            registry_integrity="$(node -e 'const value = JSON.parse(process.argv[1] || "null"); process.stdout.write(value || "");' "$registry_integrity")"
+            if [[ "$registry_integrity" == "$EXPECTED_TARBALL_INTEGRITY" ]]; then
+              echo "::notice::${package_spec} already exists on npm with matching integrity; treating as idempotent success"
+              exit 0
+            fi
+            echo "::error::${package_spec} already exists on npm with different integrity"
+            echo "expected=${EXPECTED_TARBALL_INTEGRITY}"
+            echo "registry=${registry_integrity}"
+            exit 1
+          fi
+          if ! grep -Eq '(E404|404|not found)' /tmp/npm-view-error; then
+            cat /tmp/npm-view-error
+            exit 1
+          fi
+          npm publish "$tarball" --provenance --access public --ignore-scripts
 
-  attach-sbom:
+  github-release:
     needs: [prepare, publish]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
@@ -205,11 +282,37 @@ jobs:
         env:
           EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
           EXPECTED_SBOM_SHA256: ${{ needs.prepare.outputs.sbom-sha256 }}
+          EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
+          EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
+          EXPECTED_CHECKSUMS_NAME: ${{ needs.prepare.outputs.checksums-name }}
+          EXPECTED_CHECKSUMS_SHA256: ${{ needs.prepare.outputs.checksums-sha256 }}
+          EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
+          EXPECTED_RELEASE_NOTES_SHA256: ${{ needs.prepare.outputs.release-notes-sha256 }}
         run: |
           set -euo pipefail
+          tarball="publish-package/${EXPECTED_TARBALL_NAME}"
           sbom="publish-package/${EXPECTED_SBOM_NAME}"
+          checksums="publish-package/${EXPECTED_CHECKSUMS_NAME}"
+          notes="publish-package/${EXPECTED_RELEASE_NOTES_NAME}"
+          if [[ ! -f "$tarball" ]]; then
+            echo "::error::Expected release tarball ${tarball} is missing"
+            exit 1
+          fi
           if [[ ! -f "$sbom" ]]; then
             echo "::error::Expected release SBOM ${sbom} is missing"
+            exit 1
+          fi
+          if [[ ! -f "$checksums" ]]; then
+            echo "::error::Expected release checksums ${checksums} are missing"
+            exit 1
+          fi
+          if [[ ! -f "$notes" ]]; then
+            echo "::error::Expected release notes ${notes} are missing"
+            exit 1
+          fi
+          actual_tarball_sha="$(sha256sum "$tarball" | awk '{print $1}')"
+          if [[ "$actual_tarball_sha" != "$EXPECTED_TARBALL_SHA256" ]]; then
+            echo "::error::Release tarball SHA-256 mismatch"
             exit 1
           fi
           actual_sbom_sha="$(sha256sum "$sbom" | awk '{print $1}')"
@@ -219,9 +322,42 @@ jobs:
             echo "actual=${actual_sbom_sha}"
             exit 1
           fi
-      - name: Attach SBOM to GitHub release after npm publish
+          actual_checksums_sha="$(sha256sum "$checksums" | awk '{print $1}')"
+          if [[ "$actual_checksums_sha" != "$EXPECTED_CHECKSUMS_SHA256" ]]; then
+            echo "::error::Release checksums SHA-256 mismatch"
+            exit 1
+          fi
+          actual_notes_sha="$(sha256sum "$notes" | awk '{print $1}')"
+          if [[ "$actual_notes_sha" != "$EXPECTED_RELEASE_NOTES_SHA256" ]]; then
+            echo "::error::Release notes SHA-256 mismatch"
+            exit 1
+          fi
+          (cd publish-package && sha256sum --check "${EXPECTED_CHECKSUMS_NAME}")
+      - name: Create GitHub release from verified artifact
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
           EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
+          EXPECTED_CHECKSUMS_NAME: ${{ needs.prepare.outputs.checksums-name }}
+          EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
           PUBLISH_TAG: ${{ inputs.tag }}
-        run: gh release upload "${PUBLISH_TAG}" "publish-package/${EXPECTED_SBOM_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
+        run: |
+          set -euo pipefail
+          if gh release view "${PUBLISH_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release edit "${PUBLISH_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}" \
+              --verify-tag
+          else
+            gh release create "${PUBLISH_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${PUBLISH_TAG}" \
+              --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}" \
+              --verify-tag
+          fi
+          gh release upload "${PUBLISH_TAG}" \
+            "publish-package/${EXPECTED_TARBALL_NAME}" \
+            "publish-package/${EXPECTED_SBOM_NAME}" \
+            "publish-package/${EXPECTED_CHECKSUMS_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber

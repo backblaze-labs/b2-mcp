@@ -188,20 +188,26 @@ The only repository workflow allowed to publish npm packages is
 - pins every marketplace action to a reviewed commit SHA;
 - accepts only a `vMAJOR.MINOR.PATCH[-prerelease]` tag and checks it out only
   after proving it is reachable from the current `ci-green` history;
-- runs `pnpm install --frozen-lockfile` with lifecycle scripts still disabled;
+- verifies tag/package/changelog consistency, then runs
+  `pnpm install --frozen-lockfile` with lifecycle scripts still disabled and
+  `pnpm run verify`;
 - builds explicitly, enforces the reviewed runtime package budget, requires
   `dist/index.js` in the packlist, runs the npm production audit and CycloneDX
   SBOM flow through `pnpm run release:sbom`, creates an npm tarball with
   lifecycle scripts disabled, scans that exact tarball through the safe denylist
-  extractor, and uploads the tarball plus SBOM as seven-day artifacts for
-  protected environment approval;
+  extractor, runs an npm dry-run publish against that tarball, writes SHA-256
+  checksums and versioned release notes, and uploads the tarball, SBOM,
+  checksums, pack manifest, and notes as seven-day artifacts for protected
+  environment approval;
 - runs the protected live B2 contract suite once on the exact publish ref before
   the npm publish job can start;
 - requires a protected `npm-publish` environment only for the final publish job;
-- verifies the tarball SHA-256 before publishing;
-- verifies the SBOM SHA-256 and attaches the SBOM to the pre-created GitHub
-  Release only after the npm publish job succeeds, from a separate job that does
-  not hold npm OIDC permission;
+- verifies the tarball SHA-256 and npm `dist.integrity` before publishing;
+- compares an already-published registry version's integrity to the verified
+  local tarball before treating the run as an idempotent success;
+- verifies checksums and creates or updates the GitHub Release only after the
+  npm publish job succeeds, from a separate job that does not hold npm OIDC
+  permission;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
 - publishes the prebuilt tarball with lifecycle scripts disabled:
   `npm publish <tarball> --provenance --access public --ignore-scripts`.

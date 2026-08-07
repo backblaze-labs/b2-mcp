@@ -143,12 +143,17 @@ export function deriveRateKey(cacheKey: string): string {
   return crypto.createHash("sha256").update(cacheKey).digest("hex").slice(0, 16);
 }
 
-export function getPort(): number {
-  const idx = process.argv.indexOf("--port");
+export function getPort(
+  argv = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const idx = argv.indexOf("--port");
   const raw =
-    idx !== -1 && process.argv[idx + 1]
-      ? process.argv[idx + 1]
-      : (process.env.PORT ?? String(DEFAULT_PORT));
+    idx !== -1 && argv[idx + 1]
+      ? argv[idx + 1]
+      : (argv.find((arg) => arg.startsWith("--port="))?.slice("--port=".length) ??
+        env.PORT ??
+        String(DEFAULT_PORT));
   const port = parseInt(raw, 10);
   if (!Number.isFinite(port) || port <= 0 || port > 65535) {
     throw new Error(`Invalid port: ${raw}`);
@@ -832,8 +837,12 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   return { server: httpServer, sessions, drain };
 }
 
-async function main(): Promise<void> {
-  const port = getPort();
+export interface HttpListenOptions {
+  port?: number;
+}
+
+export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
+  const port = options.port ?? getPort();
   const { server: httpServer, sessions, drain } = buildHttpServer();
 
   httpServer.listen(port, () => {
@@ -864,7 +873,7 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
-  main().catch((err) => {
+  startHttp().catch((err) => {
     logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
     process.exit(1);
   });

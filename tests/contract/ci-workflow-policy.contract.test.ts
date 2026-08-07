@@ -297,12 +297,12 @@ describe("CI workflow policy", () => {
 
   it("blocks publishing until the live contract suite passes for the publish ref", () => {
     const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
-    const attachSbomJob = workflowJobBlock(publish, "attach-sbom") ?? "";
+    const githubReleaseJob = workflowJobBlock(publish, "github-release") ?? "";
     const publishJob = workflowJobBlock(publish, "publish") ?? "";
 
     expect(publishJob).toContain("needs: [prepare, live-contract]");
-    expect(attachSbomJob).toContain("needs: [prepare, publish]");
-    expect(attachSbomJob).toContain("Attach SBOM to GitHub release after npm publish");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
+    expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");
     expect(liveContract).toContain("checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}");
@@ -310,6 +310,6 @@ describe("CI workflow policy", () => {
     expect(liveContract).toContain("LIVE_B2_KEY: ${{ secrets.LIVE_B2_KEY }}");
     expect(liveContract).not.toContain("for attempt in 1 2 3");
     expect(liveContract).not.toContain("retrying");
-    expect(publish).toContain("attach-sbom:");
+    expect(publish).toContain("github-release:");
   });
 });

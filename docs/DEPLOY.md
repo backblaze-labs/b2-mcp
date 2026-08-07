@@ -161,7 +161,7 @@ After=network.target
 Type=simple
 User=ec2-user
 WorkingDirectory=/home/ec2-user/b2-mcp
-ExecStart=/usr/bin/node dist/http-server.js --port 3000
+ExecStart=/home/ec2-user/.local/bin/b2-mcp --transport http --port 3000
 Environment=B2_HTTP_CREDENTIAL_MODE=server
 Environment=B2_ALLOWED_HOSTS=mcp.your-domain.example
 Environment=B2_APPLICATION_KEY_ID=your-application-key-id

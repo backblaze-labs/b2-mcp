@@ -467,7 +467,7 @@ describe("supply-chain audit policy", () => {
   });
 
   it("disables normal lifecycle scripts and isolates npm publishing", () => {
-    const attachSbomJob = publishJobBlock("attach-sbom");
+    const githubReleaseJob = publishJobBlock("github-release");
     const publishJob = publishJobBlock("publish");
 
     expect(npmrc).toMatch(/^ignore-scripts=true$/m);
@@ -490,28 +490,38 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
     expect(publishWorkflow).toContain("ci-green");
+    expect(publishWorkflow).toContain("node scripts/verify-release-input.mjs --tag");
     expect(publishWorkflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
     expect(publishWorkflow).toContain("pnpm run release:sbom");
+    expect(publishWorkflow).toContain("node scripts/extract-release-notes.mjs");
+    expect(publishWorkflow).toContain("Dry-run npm publish from verified tarball");
+    expect(publishWorkflow).toContain("--dry-run --access public --ignore-scripts");
     expect(publishWorkflow).not.toContain("prepare-production-npm-audit.mjs");
     expect(publishWorkflow).not.toContain("npm sbom");
     expect(publishWorkflow).toContain("publish-package/*.cdx.json");
+    expect(publishWorkflow).toContain("publish-package/SHA256SUMS");
+    expect(publishWorkflow).toContain("release-notes.md");
     expect(publishWorkflow).toContain("sbom-sha256");
     expect(publishWorkflow).toContain("EXPECTED_SBOM_SHA256");
-    expect(publishWorkflow).toContain("Attach SBOM to GitHub release");
+    expect(publishWorkflow).toContain("Create GitHub release from verified artifact");
     expect(publishWorkflow).toContain("gh release upload");
+    expect(publishWorkflow).toContain("gh release create");
     expect(publishWorkflow).toContain("contents: write");
-    expect(attachSbomJob).toContain("actions: read");
-    expect(attachSbomJob).toContain("contents: write");
-    expect(attachSbomJob).not.toContain("id-token: write");
-    expect(attachSbomJob).toContain("needs: [prepare, publish]");
-    expect(attachSbomJob).toContain("Attach SBOM to GitHub release after npm publish");
-    expect(attachSbomJob).toContain('sha256sum "$sbom"');
+    expect(githubReleaseJob).toContain("actions: read");
+    expect(githubReleaseJob).toContain("contents: write");
+    expect(githubReleaseJob).not.toContain("id-token: write");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
+    expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
+    expect(githubReleaseJob).toContain('sha256sum "$sbom"');
+    expect(githubReleaseJob).toContain("sha256sum --check");
     expect(publishJob).toContain("needs: [prepare, live-contract]");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).not.toContain("contents: write");
+    expect(publishJob).toContain("npm view");
+    expect(publishJob).toContain("already exists on npm with matching integrity");
     expect(publishWorkflow).toContain('--tarball "$tarball"');
     expect(publishWorkflow).toContain('sha256sum "$tarball"');
     expect(publishWorkflow).toContain("retention-days: 7");
@@ -595,20 +605,23 @@ describe("supply-chain audit policy", () => {
 
   it("keeps npm trusted-publishing OIDC away from repo and dependency code", () => {
     const prepareJob = publishJobBlock("prepare");
-    const attachSbomJob = publishJobBlock("attach-sbom");
+    const githubReleaseJob = publishJobBlock("github-release");
     const publishJob = publishJobBlock("publish");
 
     expect(prepareJob).not.toContain("id-token: write");
+    expect(prepareJob).toContain("pnpm run verify");
     expect(prepareJob).toContain("pnpm run typecheck");
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
-    expect(attachSbomJob).toContain("actions: read");
-    expect(attachSbomJob).toContain("contents: write");
-    expect(attachSbomJob).not.toContain("id-token: write");
+    expect(githubReleaseJob).toContain("actions: read");
+    expect(githubReleaseJob).toContain("contents: write");
+    expect(githubReleaseJob).not.toContain("id-token: write");
     expect(publishJob).toContain("id-token: write");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).not.toContain("contents: write");
+    expect(publishJob).not.toContain("actions/checkout");
+    expect(publishJob).not.toContain("pnpm install");
     expect(publishJob).not.toContain("pnpm run typecheck");
     expect(publishJob).not.toContain("pnpm run build");
     expect(publishJob).not.toContain("--ignore-scripts=false");
