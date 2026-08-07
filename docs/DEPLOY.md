@@ -542,9 +542,9 @@ pass, 1 = at least one check failed.
 ### CI smoke runs
 
 The same script also runs automatically via `.github/workflows/smoke.yml` on
-manual dispatch from `main`, pushes to `main`, trusted same-repository pull
-requests, and a weekly schedule. Fork pull requests are skipped before protected
-environment secrets are requested.
+manual dispatch from `main`, pushes to `main`, and a weekly schedule. It does
+not run on `pull_request`, because live smoke credentials must not share a job
+with unreviewed PR-head code.
 
 It depends on these protected `live-b2-smoke` environment secrets and variable:
 
@@ -557,23 +557,26 @@ It depends on these protected `live-b2-smoke` environment secrets and variable:
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
 
 The workflow is gated to the canonical repo, fails loudly when dispatched from a
-non-main ref, and runs only trusted same-repository code with live secrets. It is
+non-main ref, and runs only reviewed `main` code with live secrets. It is
 then further gated by the `live-b2-smoke` GitHub environment. Configure that
 environment with branch restrictions before storing live B2 secrets there. Add
 required reviewers when the repository plan supports environment reviewers.
 
 The protected live contract workflow runs through
 `.github/workflows/contract.yml` on manual dispatch from `main`, pushes to
-`main`, trusted same-repository pull requests, a weekly schedule, and
-`workflow_call` from the publish workflow. It uses the `live-b2-contract`
-environment with `LIVE_B2_KEY_ID` / `LIVE_B2_KEY`, sets
+`main`, a daily schedule, and `workflow_call` from the publish workflow. The
+reusable release path validates that the checkout SHA is reachable from the
+protected `ci-green` ref before exposing live credentials. It uses the
+`live-b2-contract` environment with `LIVE_B2_KEY_ID` / `LIVE_B2_KEY`, sets
 `B2_INTEGRATION_REQUIRE_CREDENTIALS=1`, and fails a trusted run when credentials
-are missing instead of accepting skipped live tests. Fork pull requests are
-skipped before protected secrets are requested. Each matrix entry uses a unique
-`B2_MCP_LIVE_RUN_PREFIX` rooted at `mcp-contract-`, creates only test-owned
+are missing instead of accepting skipped live tests. It does not run on
+`pull_request`, because redaction and `add-mask` are only best-effort log
+hygiene and cannot contain secrets from code running in the same job. Each
+matrix entry uses a unique `B2_MCP_LIVE_RUN_PREFIX` rooted at `mcp-contract-`,
+creates only test-owned
 buckets, objects, multipart uploads, keys, and notification rules, runs
-serially on Node.js 22.3.0, 24, and 26, and invokes
-`scripts/live-b2-janitor.mjs` after the run. The weekly schedule also sweeps
+serially on Node.js 22.23.1, 24, and 26, and invokes
+`scripts/live-b2-janitor.mjs` after the run. The daily schedule also sweeps
 abandoned `mcp-contract-*` resources.
 
 For credential-free supplemental evidence before touching a live deployment, run

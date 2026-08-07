@@ -23,10 +23,9 @@ import { loadConfig, createServer } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult } from "../support/deterministic-fakes";
 import {
-  cleanupContractBucket,
-  cleanupTrackedContractBuckets,
   contractRuleName,
-  createContractBucket,
+  createContractBucketTracker,
+  type ContractBucketTracker,
   liveErrorText,
   redactedLiveResourceDetail,
   type ContractBucketRef,
@@ -38,6 +37,7 @@ const liveIt = HAS_CREDS ? test : test.skip;
 const isError = (r: any): boolean => r?.isError === true;
 
 let server: McpServer;
+let bucketTracker: ContractBucketTracker;
 
 function failContractPrerequisite(message: string, detail?: unknown): never {
   const suffix = detail ? `: ${redactedLiveResourceDetail(detail)}` : "";
@@ -49,11 +49,12 @@ beforeAll(async () => {
   // Integration tests create AND clean up real resources, so disable the
   // destructive-op gate here (it is unit-tested separately).
   server = createServer({ ...loadConfig(), destructivePolicy: "allow" });
+  bucketTracker = createContractBucketTracker(server);
 });
 
 afterAll(async () => {
   if (!HAS_CREDS) return;
-  await cleanupTrackedContractBuckets(server);
+  await bucketTracker.cleanupAll();
 });
 
 // ── Notification rule write-shape contract ────────────────────────────────────
@@ -63,7 +64,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
     async () => {
       const cleanupBucket: ContractBucketRef = { bucketId: "" };
       try {
-        const bucket = await createContractBucket(server, "notify");
+        const bucket = await bucketTracker.createBucket("notify");
         cleanupBucket.bucketId = bucket.bucketId;
         cleanupBucket.bucketName = bucket.bucketName;
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
@@ -90,7 +91,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
         }
         expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
       } finally {
-        await cleanupContractBucket(server, cleanupBucket);
+        await bucketTracker.cleanupBucket(cleanupBucket);
       }
     },
     30_000,
@@ -104,7 +105,7 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
     async () => {
       const cleanupBucket: ContractBucketRef = { bucketId: "" };
       try {
-        const created = await createContractBucket(server, "retrofit");
+        const created = await bucketTracker.createBucket("retrofit");
         cleanupBucket.bucketId = created.bucketId;
         cleanupBucket.bucketName = created.bucketName;
         expect(created.fileLockConfiguration?.value?.isFileLockEnabled).toBe(false);
@@ -136,7 +137,7 @@ describe("Contract: b2_update_bucket Object Lock retrofit", () => {
         expect(back?.mode).toBe("governance");
         expect(back?.period).toEqual({ duration: 7, unit: "days" });
       } finally {
-        await cleanupContractBucket(server, cleanupBucket);
+        await bucketTracker.cleanupBucket(cleanupBucket);
       }
     },
     90_000,
@@ -152,7 +153,7 @@ describe("Contract: v4 tool-surface alignment", () => {
       try {
         // (e) SSE-B2 with no algorithm — server must inject algorithm:"AES256"
         //     (regresses to HTTP 400 "Invalid default server-side encryption algorithm" if dropped).
-        const created = await createContractBucket(server, "pathb", {
+        const created = await bucketTracker.createBucket("pathb", {
           defaultServerSideEncryption: { mode: "SSE-B2" },
         });
         cleanupBucket.bucketId = created.bucketId;
@@ -167,7 +168,7 @@ describe("Contract: v4 tool-surface alignment", () => {
         });
         expect(isError(life)).toBe(false);
       } finally {
-        await cleanupContractBucket(server, cleanupBucket);
+        await bucketTracker.cleanupBucket(cleanupBucket);
       }
     },
     90_000,

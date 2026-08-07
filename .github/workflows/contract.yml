@@ -7,22 +7,25 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
-    - cron: "17 9 * * 1"
+    - cron: "17 9 * * *"
   workflow_call:
     inputs:
       checkout-sha:
         description: Exact release candidate commit SHA resolved by the caller.
         required: true
         type: string
+      concurrency-scope:
+        description: Stable queue name for release-gate calls.
+        required: false
+        type: string
+        default: release
 
 permissions:
   contents: read
 
 concurrency:
-  group: live-b2-contract-${{ github.repository }}
+  group: live-b2-contract-${{ github.repository }}-${{ inputs['concurrency-scope'] || github.ref_name || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -38,15 +41,17 @@ jobs:
         id: ref
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
           WORKFLOW_CALL_CHECKOUT_SHA: ${{ inputs['checkout-sha'] || '' }}
         run: |
           set -euo pipefail
           should_run=true
           checkout_sha="${GITHUB_SHA}"
+          event_kind="${EVENT_NAME}"
+          if [[ -n "${WORKFLOW_CALL_CHECKOUT_SHA}" ]]; then
+            event_kind="workflow_call"
+          fi
 
-          case "${EVENT_NAME}" in
+          case "${event_kind}" in
             workflow_dispatch)
               if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
                 echo "::error::workflow_dispatch must run from main; got ${GITHUB_REF}"
@@ -59,18 +64,21 @@ jobs:
                 exit 1
               fi
               ;;
-            pull_request)
-              if [[ "${PR_HEAD_REPO}" != "${GITHUB_REPOSITORY}" ]]; then
-                echo "::notice::Skipping fork pull request because protected B2 secrets are unavailable."
-                should_run=false
-                checkout_sha=""
-              else
-                checkout_sha="${PR_HEAD_SHA}"
-              fi
-              ;;
             workflow_call)
               if [[ ! "${WORKFLOW_CALL_CHECKOUT_SHA}" =~ ^[a-f0-9]{40}$ ]]; then
                 echo "::error::workflow_call requires a full checkout-sha commit."
+                exit 1
+              fi
+              git init --quiet /tmp/live-ref-check
+              cd /tmp/live-ref-check
+              git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+              git fetch --no-tags origin '+refs/heads/ci-green:refs/remotes/origin/ci-green'
+              if ! git cat-file -e "${WORKFLOW_CALL_CHECKOUT_SHA}^{commit}"; then
+                echo "::error::workflow_call checkout-sha is not reachable from ci-green."
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "${WORKFLOW_CALL_CHECKOUT_SHA}" refs/remotes/origin/ci-green; then
+                echo "::error::workflow_call checkout-sha must be reachable from refs/heads/ci-green before live credentials are exposed."
                 exit 1
               fi
               checkout_sha="${WORKFLOW_CALL_CHECKOUT_SHA}"
@@ -97,7 +105,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        node-version: [22.3.0, 24, 26]
+        node-version: [22.23.1, 24, 26]
     env:
       B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
       B2_MCP_LIVE_RUN_PREFIX: ${{ needs.guard.outputs.run-prefix }}-n${{ matrix.node-version }}
@@ -135,6 +143,7 @@ jobs:
           done
           exit "$missing"
       - name: Run live B2 contract and integration suites
+        timeout-minutes: 12
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
@@ -175,7 +184,7 @@ jobs:
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 22.3.0
+          node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build

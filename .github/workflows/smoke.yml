@@ -7,8 +7,6 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "47 9 * * 1"
 
@@ -16,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: live-b2-smoke-${{ github.repository }}
+  group: live-b2-smoke-${{ github.repository }}-${{ github.ref_name || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -31,8 +29,6 @@ jobs:
         id: ref
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
         run: |
           set -euo pipefail
           should_run=true
@@ -49,15 +45,6 @@ jobs:
               if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
                 echo "::error::${EVENT_NAME} live smoke runs must target main; got ${GITHUB_REF}"
                 exit 1
-              fi
-              ;;
-            pull_request)
-              if [[ "${PR_HEAD_REPO}" != "${GITHUB_REPOSITORY}" ]]; then
-                echo "::notice::Skipping fork pull request because protected B2 secrets are unavailable."
-                should_run=false
-                checkout_sha=""
-              else
-                checkout_sha="${PR_HEAD_SHA}"
               fi
               ;;
             *)
@@ -80,7 +67,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        node-version: [22.3.0, 24, 26]
+        node-version: [22.23.1, 24, 26]
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -122,6 +109,7 @@ jobs:
           done
           exit "$missing"
       - name: Run live B2 smoke
+        timeout-minutes: 4
         env:
           MCP_URL: ${{ vars.MCP_URL }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}

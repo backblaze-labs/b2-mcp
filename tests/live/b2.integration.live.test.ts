@@ -19,14 +19,13 @@ import { runWithMcpRequestSignal } from "../../src/request-context";
 import { parseErrorText } from "../../src/utils/errors";
 import { callTool, parseResult } from "../support/deterministic-fakes";
 import {
-  cleanupContractBucket,
-  cleanupTrackedContractBuckets,
   contractObjectKey,
-  createContractBucket,
+  createContractBucketTracker,
+  type ContractBucketTracker,
   liveErrorText,
   liveRunPrefix,
   redactedLiveResourceDetail,
-  type ContractBucketRef,
+  type CreatedContractBucket,
 } from "./support/contract-buckets";
 
 const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
@@ -47,7 +46,8 @@ function base64(value: string): string {
 }
 
 let server: McpServer;
-let primaryBucket: ContractBucketRef & { bucketName: string };
+let bucketTracker: ContractBucketTracker;
+let primaryBucket: CreatedContractBucket;
 
 function bucketName(): string {
   if (!primaryBucket?.bucketName) throw new Error("Live primary bucket was not created.");
@@ -58,19 +58,20 @@ beforeAll(async () => {
   if (!HAS_CREDS) return;
   const config = loadConfig();
   server = createServer({ ...config, destructivePolicy: "allow" });
-  primaryBucket = (await createContractBucket(server, "integration", {
+  bucketTracker = createContractBucketTracker(server);
+  primaryBucket = await bucketTracker.createBucket("integration", {
     lifecycleRules: [
       {
         fileNamePrefix: `${liveRunPrefix()}/`,
         daysFromStartingToCancelingUnfinishedLargeFiles: 1,
       },
     ],
-  })) as ContractBucketRef & { bucketName: string };
+  });
 });
 
 afterAll(async () => {
   if (!HAS_CREDS) return;
-  await cleanupTrackedContractBuckets(server);
+  await bucketTracker.cleanupAll();
 });
 
 describe("B2 Auth", () => {
@@ -268,9 +269,9 @@ describe("S3 presigned and multipart helpers", () => {
 
 describe("Object Lock live file contracts", () => {
   liveIt("sets and clears legal hold and governance retention on a run-owned object", async () => {
-    const lockBucket = (await createContractBucket(server, "object-lock", {
+    const lockBucket = await bucketTracker.createBucket("object-lock", {
       fileLockEnabled: true,
-    })) as ContractBucketRef & { bucketName: string };
+    });
     try {
       const key = contractObjectKey("object-lock", "locked.txt");
       expectLiveSuccess(
@@ -305,7 +306,7 @@ describe("Object Lock live file contracts", () => {
         "b2_update_file_legal_hold off",
       );
 
-      const retainUntilTimestamp = Date.now() + 24 * 60 * 60 * 1000;
+      const retainUntilTimestamp = Date.now() + 2 * 60 * 1000;
       expectLiveSuccess(
         await callTool(server, "b2_update_file_retention", {
           fileId: head.versionId,
@@ -325,7 +326,7 @@ describe("Object Lock live file contracts", () => {
         "b2_update_file_retention clear",
       );
     } finally {
-      await cleanupContractBucket(server, lockBucket);
+      await bucketTracker.cleanupBucket(lockBucket);
     }
   });
 });
@@ -382,8 +383,9 @@ describe("Insight scans, cancellation, and error mapping", () => {
   });
 
   liveIt("maps provider errors with status, code, and request id when B2 returns one", async () => {
-    const result = await callTool(server, "s3_head_bucket", {
-      bucket: "this-bucket-does-not-exist-xyz-mcp-test-99999",
+    const result = await callTool(server, "s3_head_object", {
+      bucket: bucketName(),
+      key: contractObjectKey("missing-error", "missing.txt"),
     });
     expect(isError(result)).toBe(true);
     const parsed = parseErrorText(liveErrorText(result));

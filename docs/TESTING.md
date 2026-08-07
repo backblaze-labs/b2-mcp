@@ -401,17 +401,19 @@ Required properties:
   only; live tests must never choose an arbitrary listed bucket as writable;
 - best-effort `afterAll` cleanup plus workflow janitor cleanup through
   `scripts/live-b2-janitor.mjs`;
-- logs redacting B2 credentials, account IDs, presigned URLs, live run prefixes,
-  and smoke bucket names.
+- best-effort log hygiene redacting B2 credentials, account IDs, presigned URLs,
+  live run prefixes, and smoke bucket names. This is not a containment boundary;
+  live secrets must never share a job with unreviewed pull-request code.
 
 The live path runs through `.github/workflows/contract.yml` and
-`.github/workflows/smoke.yml`. Both run on manual dispatch from `main`, pushes to
-`main`, trusted same-repository pull requests, and a weekly schedule. Fork pull
-requests are skipped before protected environments or secrets are used. Trusted
-runs set `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the smoke equivalent and fail
-loudly when credentials or required variables are absent; a skipped-only trusted
-run is not accepted as release evidence. The protected live matrix is serialized
-on Node.js 22.3.0, Node.js 24, and Node.js 26.
+`.github/workflows/smoke.yml`. Both run on manual dispatch from `main` and
+pushes to `main`; contract also runs daily and smoke runs weekly. Neither
+workflow runs on `pull_request`, because live credentials must not be exposed to
+PR-head code. Trusted runs set `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the
+smoke equivalent and fail loudly when credentials or required variables are
+absent; a skipped-only trusted run is not accepted as release evidence. The
+protected live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js
+26.
 
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract

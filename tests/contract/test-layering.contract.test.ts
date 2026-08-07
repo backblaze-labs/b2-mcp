@@ -3,7 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "os";
 import { basename, join } from "path";
 import { listFiles, readJson, root } from "./support";
-import { contractBucketName, isContractBucketName } from "../live/support/contract-buckets";
+import {
+  bucketMatchesPrefix,
+  CONTRACT_BUCKET_PREFIX,
+  contractBucketName,
+  isContractBucketName,
+  normalizeLivePrefix,
+} from "../live/support/contract-buckets";
 
 interface B2CredentialPolicy {
   exact: string[];
@@ -418,7 +424,9 @@ describe("test layer naming", () => {
     });
 
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("not a credential-free test layer");
+    expect(result.stderr).toContain(
+      "pnpm run test:integration:live is a deprecated live-test alias",
+    );
     expect(existsSync(liveSummaryPath)).toBe(false);
   });
 
@@ -448,5 +456,28 @@ describe("test layer naming", () => {
     expect(bucketName).toMatch(/^mcp-contract-[a-z0-9-]+-notify-[a-f0-9]{8}$/);
     expect(isContractBucketName(bucketName, "notify")).toBe(true);
     expect(isContractBucketName("user-production-bucket", "notify")).toBe(false);
+  });
+
+  it("keeps boundary live prefixes discoverable by the janitor", () => {
+    const prefix = normalizeLivePrefix(
+      `${CONTRACT_BUCKET_PREFIX}abcdefghijklmnopqrstuvwxyz1234567890`,
+    );
+    const bucketName = contractBucketName("notify", { prefix, randomHex: "abcdef12" });
+
+    expect(bucketName.startsWith(prefix)).toBe(true);
+    expect(bucketMatchesPrefix(bucketName, prefix)).toBe(true);
+    expect(bucketName.length).toBeLessThanOrEqual(50);
+  });
+
+  it("rejects hard-coded non-run bucket literals in live tests", () => {
+    const liveFiles = testFiles.filter((path) => path.startsWith("tests/live/"));
+    const literalBuckets = liveFiles.flatMap((path) => {
+      const text = readFileSync(join(root, path), "utf8");
+      return [...text.matchAll(/\bbucket:\s*["'`]([^"'`$]+)["'`]/g)].map(
+        (match) => `${path}: ${match[1]}`,
+      );
+    });
+
+    expect(literalBuckets).toEqual([]);
   });
 });

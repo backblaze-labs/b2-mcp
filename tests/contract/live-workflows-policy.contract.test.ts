@@ -19,14 +19,15 @@ const liveWorkflows = [
     path: ".github/workflows/contract.yml",
     job: "contract",
     environment: "live-b2-contract",
-    concurrency: "live-b2-contract-${{ github.repository }}",
+    concurrency:
+      "live-b2-contract-${{ github.repository }}-${{ inputs['concurrency-scope'] || github.ref_name || github.run_id }}",
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY"],
   },
   {
     path: ".github/workflows/smoke.yml",
     job: "smoke",
     environment: "live-b2-smoke",
-    concurrency: "live-b2-smoke-${{ github.repository }}",
+    concurrency: "live-b2-smoke-${{ github.repository }}-${{ github.ref_name || github.run_id }}",
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_APP_KEY_ID", "LIVE_B2_APP_KEY"],
   },
 ];
@@ -75,11 +76,12 @@ describe("live secret workflow policy", () => {
       expect(text).toMatch(/^\s{2}guard:\s*$/m);
       expect(text).toMatch(/if: github\.repository == 'backblaze-labs\/b2-mcp'/);
       expect(text).toMatch(/^\s{2}push:\s*$/m);
-      expect(text).toMatch(/^\s{2}pull_request:\s*$/m);
       expect(text).toMatch(/^\s{2}schedule:\s*$/m);
       expect(text).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
-      expect(text).toContain("Skipping fork pull request");
-      expect(text).toContain("github.event.pull_request.head.repo.full_name");
+      expect(text).not.toMatch(/^\s{2}pull_request:\s*$/m);
+      expect(text).not.toContain("PR_HEAD_SHA");
+      expect(text).not.toContain("github.event.pull_request.head.sha");
+      expect(text).not.toContain("Skipping fork pull request");
       expect(text).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
       expect(text).toContain('echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"');
       expect(text).toContain("node-version: ${{ matrix.node-version }}");
@@ -113,8 +115,13 @@ describe("live secret workflow policy", () => {
     const text = workflowText(".github/workflows/contract.yml");
     expect(text).toMatch(/^\s{2}workflow_call:\s*$/m);
     expect(text).toContain("checkout-sha:");
+    expect(text).toContain("concurrency-scope:");
     expect(text).toContain("WORKFLOW_CALL_CHECKOUT_SHA");
+    expect(text).toContain('event_kind="workflow_call"');
     expect(text).toContain("workflow_call requires a full checkout-sha commit");
+    expect(text).toContain("refs/heads/ci-green");
+    expect(text).toContain("git merge-base --is-ancestor");
+    expect(text).toContain("workflow_call checkout-sha must be reachable from refs/heads/ci-green");
   });
 
   it("adds a scheduled janitor for abandoned test-prefixed resources", () => {
@@ -124,6 +131,7 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
     expect(text).toContain("Clean current live B2 run resources");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
+    expect(text).toContain('cron: "17 9 * * *"');
   });
 
   it("keeps package-budget off the live contract dependency chain", () => {
@@ -145,6 +153,7 @@ describe("live secret workflow policy", () => {
     const contractJob = text.slice(text.indexOf("  contract:"));
 
     expect(contractJob).toContain("pnpm run test:live:b2");
+    expect(contractJob).toContain("timeout-minutes: 12");
     expect(contractJob).not.toContain("pnpm run test:contract\n");
     expect(contractJob).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");

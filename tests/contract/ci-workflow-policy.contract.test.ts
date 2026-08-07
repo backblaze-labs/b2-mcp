@@ -304,6 +304,7 @@ describe("CI workflow policy", () => {
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");
     expect(liveContract).toContain("checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}");
+    expect(liveContract).toContain("concurrency-scope: release");
     expect(liveContract).toContain("secrets: inherit");
     expect(liveContract).not.toContain("for attempt in 1 2 3");
     expect(liveContract).not.toContain("retrying");

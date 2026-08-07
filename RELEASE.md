@@ -30,7 +30,7 @@ Before publishing `v0.1.0`:
 2. Confirm operators use a patched Node 22 LTS release (`.nvmrc`) or Node.js 24
    or 26. Keep CI production-dependency and deterministic workflow evidence on
    Node.js 22.23.1, 24, and 26; live B2 workflow evidence runs on Node.js
-   22.3.0, 24, and 26. Build release artifacts on the patched Node 22 LTS pin,
+   22.23.1, 24, and 26. Build release artifacts on the patched Node 22 LTS pin,
    then run the deterministic local gate:
    `pnpm install --frozen-lockfile`, `pnpm run build`, `pnpm run typecheck`,
    `pnpm run lint`, `pnpm run format:check`, `pnpm test`,
@@ -55,7 +55,7 @@ Before publishing `v0.1.0`:
    `LIVE_B2_KEY`, the smoke-suite `LIVE_B2_*` secrets, `MCP_URL`, and
    `B2_SMOKE_BUCKET` populated from the dedicated test account, then manually
    dispatch smoke and contract from `main`. Security owns rotation for the live
-   B2 credentials. The live jobs run serially on Node.js 22.3.0, Node.js 24, and
+   B2 credentials. The live jobs run serially on Node.js 22.23.1, Node.js 24, and
    Node.js 26.
 9. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.

@@ -120,6 +120,7 @@ jobs:
     uses: ./.github/workflows/contract.yml
     with:
       checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}
+      concurrency-scope: release
     secrets: inherit
 
   publish:
