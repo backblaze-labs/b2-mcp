@@ -4,10 +4,10 @@ set -eu
 load_secret_file() {
   var_name="$1"
   file_var="${var_name}_FILE"
-  eval "file_path=\${$file_var:-}"
+  file_path="$(printenv "$file_var" || true)"
   [ -z "$file_path" ] && return 0
 
-  eval "current_value=\${$var_name:-}"
+  current_value="$(printenv "$var_name" || true)"
   if [ -n "$current_value" ]; then
     echo "Refusing to use both $var_name and $file_var" >&2
     exit 64

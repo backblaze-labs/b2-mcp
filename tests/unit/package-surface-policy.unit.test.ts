@@ -1,4 +1,12 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
@@ -117,6 +125,43 @@ describe("package surface policy", () => {
     expect(readFileSync(join(root, "deploy/customer-hosted/pnpm-workspace.yaml"), "utf8")).toBe(
       readFileSync(join(root, "pnpm-workspace.yaml"), "utf8"),
     );
+  });
+
+  it("treats deployment secret-file env values as literal paths", () => {
+    const entrypointPath = join(root, "deploy/customer-hosted/container-entrypoint.sh");
+    const entrypoint = readFileSync(entrypointPath, "utf8");
+    const tempRoot = mkdtempSync(join(tmpdir(), "b2-mcp-entrypoint-"));
+    const binDir = join(tempRoot, "bin");
+    const fakeServer = join(binDir, "b2-mcp-server");
+    const secretPath = join(tempRoot, "secret-$(touch exploited)");
+    const exploitedPath = join(tempRoot, "exploited");
+
+    try {
+      expect(entrypoint).not.toMatch(/\beval\b/);
+      expect(entrypoint).toContain('printenv "$file_var"');
+      expect(entrypoint).toContain('printenv "$var_name"');
+
+      mkdirSync(binDir);
+      writeFileSync(secretPath, "literal-secret-value");
+      writeFileSync(fakeServer, "#!/bin/sh\nprintf '%s' \"$B2_APPLICATION_KEY\"\n");
+      chmodSync(fakeServer, 0o755);
+
+      const result = spawnSync("sh", [entrypointPath, "--probe"], {
+        cwd: tempRoot,
+        encoding: "utf8",
+        env: {
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+          B2_APPLICATION_KEY_FILE: secretPath,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("literal-secret-value");
+      expect(result.stderr).toBe("");
+      expect(existsSync(exploitedPath)).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("excludes local deployment secrets from npm pack and Docker build contexts", () => {
