@@ -577,7 +577,9 @@ creates only test-owned
 buckets, objects, multipart uploads, keys, and notification rules, runs
 serially on Node.js 22.23.1, 24, and 26, and invokes
 `scripts/live-b2-janitor.mjs` after the run. The daily schedule also sweeps
-abandoned `mcp-contract-*` resources.
+abandoned `mcp-contract-*` resources, with the sweep sharing the live-resource
+concurrency lock used by contract runs so it cannot overlap an active release
+gate.
 
 For credential-free supplemental evidence before touching a live deployment, run
 the advisory stdio client smoke from a non-serving checkout or copied release

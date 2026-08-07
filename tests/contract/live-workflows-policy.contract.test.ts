@@ -126,12 +126,16 @@ describe("live secret workflow policy", () => {
 
   it("adds a scheduled janitor for abandoned test-prefixed resources", () => {
     const text = workflowText(".github/workflows/contract.yml");
+    const contractJob = workflowJobBlock(text, "contract") ?? "";
+    const janitorJob = workflowJobBlock(text, "abandoned-resource-janitor") ?? "";
     expect(text).toContain("abandoned-resource-janitor:");
     expect(text).toContain("github.event_name == 'schedule'");
     expect(text).toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
     expect(text).toContain("Clean current live B2 run resources");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
     expect(text).toContain('cron: "17 9 * * *"');
+    expect(contractJob).toContain("group: live-b2-contract-${{ github.repository }}-resources");
+    expect(janitorJob).toContain("group: live-b2-contract-${{ github.repository }}-resources");
   });
 
   it("keeps package-budget off the live contract dependency chain", () => {

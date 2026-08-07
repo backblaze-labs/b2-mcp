@@ -413,7 +413,9 @@ PR-head code. Trusted runs set `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the
 smoke equivalent and fail loudly when credentials or required variables are
 absent; a skipped-only trusted run is not accepted as release evidence. The
 protected live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js
-26.
+26. Contract runs and the scheduled abandoned-resource janitor also share a
+live-resource concurrency lock, so a global `mcp-contract-*` sweep cannot delete
+fixtures from an active release gate.
 
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract

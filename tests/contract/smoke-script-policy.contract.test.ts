@@ -123,6 +123,8 @@ describe("smoke script release contract", () => {
     expect(smokeScript).toContain("B2_SMOKE_BUCKET");
     expect(smokeScript).toContain("B2_MCP_REQUIRE_SMOKE_BUCKET");
     expect(smokeScript).toContain("s3_head_bucket");
+    expect(smokeScript).toContain("assertToolSuccess");
+    expect(smokeScript).toContain("result?.isError");
     expect(smokeScript).toContain('check("s3_head_bucket confirms smoke bucket", false');
     expect(smokeScript).toContain("redactB2CredentialValues");
     expect(smokeScript).not.toContain("s3_list_buckets");

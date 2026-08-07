@@ -15,11 +15,14 @@
 
 import { loadConfig, createServer } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
+import { B2AuthManager } from "../../src/auth";
+import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import { parseErrorText } from "../../src/utils/errors";
 import { callTool, parseResult } from "../support/deterministic-fakes";
 import {
   contractObjectKey,
+  contractRuleName,
   createContractBucketTracker,
   type ContractBucketTracker,
   liveErrorText,
@@ -48,16 +51,51 @@ function base64(value: string): string {
 let server: McpServer;
 let bucketTracker: ContractBucketTracker;
 let primaryBucket: CreatedContractBucket;
+let liveB2Client: B2Client;
+
+interface LiveRestrictedKey {
+  applicationKeyId: string;
+  keyName: string;
+  capabilities: string[];
+  bucketId?: string;
+  namePrefix?: string;
+}
 
 function bucketName(): string {
   if (!primaryBucket?.bucketName) throw new Error("Live primary bucket was not created.");
   return primaryBucket.bucketName;
 }
 
+async function createRestrictedKeyFixture(label: string): Promise<LiveRestrictedKey> {
+  const authData = parseResult(await callTool(server, "b2_authorize_account", {}));
+  const created = await liveB2Client.call<Record<string, unknown>>("b2_create_key", {
+    accountId: authData.accountId,
+    keyName: contractRuleName(`restricted-${label}`),
+    capabilities: ["listFiles", "readFiles"],
+    bucketId: primaryBucket.bucketId,
+    namePrefix: `${liveRunPrefix()}/restricted-key/`,
+    validDurationInSeconds: 3600,
+  });
+  const { applicationKey: _applicationKey, ...safe } = created;
+  if (typeof safe.applicationKeyId !== "string" || typeof safe.keyName !== "string") {
+    throw new Error("Live restricted-key fixture did not return key metadata.");
+  }
+  return safe as unknown as LiveRestrictedKey;
+}
+
+async function deleteRestrictedKeyFixture(key: LiveRestrictedKey): Promise<void> {
+  const deleted = await callTool(server, "b2_delete_key", {
+    applicationKeyId: key.applicationKeyId,
+    confirm: true,
+  });
+  expectLiveSuccess(deleted, `b2_delete_key ${key.keyName}`);
+}
+
 beforeAll(async () => {
   if (!HAS_CREDS) return;
   const config = loadConfig();
   server = createServer({ ...config, destructivePolicy: "allow" });
+  liveB2Client = new B2Client(new B2AuthManager(config));
   bucketTracker = createContractBucketTracker(server);
   primaryBucket = await bucketTracker.createBucket("integration", {
     lifecycleRules: [
@@ -106,12 +144,49 @@ describe("B2 Bucket and key tools", () => {
     },
   );
 
-  liveIt("b2_list_keys paginates key metadata without exposing key secrets", async () => {
-    const result = parseResult(await callTool(server, "b2_list_keys", { maxKeyCount: 1 }));
-    expect(result).toHaveProperty("keys");
-    expect(Array.isArray(result.keys)).toBe(true);
-    for (const key of result.keys) {
-      expect(key).not.toHaveProperty("applicationKey");
+  liveIt("b2_list_keys paginates restricted key metadata without exposing secrets", async () => {
+    const createdKeys: LiveRestrictedKey[] = [];
+    try {
+      createdKeys.push(await createRestrictedKeyFixture("page-a"));
+      createdKeys.push(await createRestrictedKeyFixture("page-b"));
+      const expectedNames = new Set(createdKeys.map((key) => key.keyName));
+      const seenNames = new Set<string>();
+      const usedCursors: string[] = [];
+      let cursor: string | undefined;
+
+      for (let page = 0; page < 1000; page++) {
+        const result = parseResult(
+          await callTool(server, "b2_list_keys", {
+            maxKeyCount: 1,
+            ...(cursor ? { startApplicationKeyId: cursor } : {}),
+          }),
+        );
+        expect(result).toHaveProperty("keys");
+        expect(Array.isArray(result.keys)).toBe(true);
+        expect(JSON.stringify(result)).not.toContain("applicationKey");
+        for (const key of result.keys) {
+          if (expectedNames.has(key.keyName)) {
+            seenNames.add(key.keyName);
+            expect(key.capabilities).toEqual(expect.arrayContaining(["listFiles", "readFiles"]));
+            expect(key.bucketId).toBe(primaryBucket.bucketId);
+            expect(key.namePrefix).toBe(`${liveRunPrefix()}/restricted-key/`);
+          }
+        }
+        if (seenNames.size === expectedNames.size && usedCursors.length > 0) break;
+        const nextCursor =
+          typeof result.nextApplicationKeyId === "string" ? result.nextApplicationKeyId : undefined;
+        if (!nextCursor) break;
+        expect(nextCursor).not.toBe(cursor);
+        cursor = nextCursor;
+        usedCursors.push(nextCursor);
+      }
+
+      expect(usedCursors.length).toBeGreaterThan(0);
+      expect(seenNames).toEqual(expectedNames);
+    } finally {
+      for (const key of createdKeys.reverse()) {
+        await deleteRestrictedKeyFixture(key);
+      }
     }
   });
 });
@@ -391,6 +466,8 @@ describe("Insight scans, cancellation, and error mapping", () => {
     const parsed = parseErrorText(liveErrorText(result));
     expect(parsed?.status).toBeGreaterThanOrEqual(400);
     expect(parsed?.code).toBeTruthy();
+    expect(parsed?.requestId).toEqual(expect.any(String));
+    expect(parsed?.requestId?.length).toBeGreaterThan(0);
     expect(liveErrorText(result)).not.toContain("internal_error");
   });
 });

@@ -106,6 +106,12 @@ function parseToolJson(result) {
   }
 }
 
+function assertToolSuccess(result, label) {
+  if (result?.isError !== true) return result;
+  const detail = result.content?.[0]?.text || `${label} returned an MCP tool error`;
+  throw new Error(detail);
+}
+
 export function sortedToolNames(tools) {
   return [...tools].sort((a, b) => a.localeCompare(b));
 }
@@ -197,7 +203,10 @@ async function main() {
 
   // b2_authorize_account — exercises the primary key path
   try {
-    const r = await mcp("tools/call", { name: "b2_authorize_account", arguments: {} });
+    const r = assertToolSuccess(
+      await mcp("tools/call", { name: "b2_authorize_account", arguments: {} }),
+      "b2_authorize_account",
+    );
     const parsed = parseToolJson(r);
     check("b2_authorize_account returns accountId", !!parsed?.accountId);
   } catch (e) {
@@ -207,7 +216,10 @@ async function main() {
   // b2_list_buckets — exercises a B2 native read when this credential exposes it
   if (toolNames.has("b2_list_buckets")) {
     try {
-      const r = await mcp("tools/call", { name: "b2_list_buckets", arguments: {} });
+      const r = assertToolSuccess(
+        await mcp("tools/call", { name: "b2_list_buckets", arguments: {} }),
+        "b2_list_buckets",
+      );
       const parsed = parseToolJson(r);
       check("b2_list_buckets returns a buckets array", Array.isArray(parsed?.buckets));
     } catch (e) {
@@ -221,7 +233,13 @@ async function main() {
   const requireSmokeBucket = B2_MCP_REQUIRE_SMOKE_BUCKET === "1";
   if (B2_APP_KEY_ID && B2_APP_KEY && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
     try {
-      await mcp("tools/call", { name: "s3_head_bucket", arguments: { bucket: B2_SMOKE_BUCKET } });
+      assertToolSuccess(
+        await mcp("tools/call", {
+          name: "s3_head_bucket",
+          arguments: { bucket: B2_SMOKE_BUCKET },
+        }),
+        "s3_head_bucket",
+      );
       check("s3_head_bucket confirms smoke bucket", true);
     } catch (e) {
       check("s3_head_bucket confirms smoke bucket", false, e.message);
