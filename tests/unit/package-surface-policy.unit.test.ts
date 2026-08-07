@@ -26,10 +26,10 @@ function parseJsonArray(stdout: string) {
   }>;
 }
 
-function npmPackDryRunFiles(): string[] {
+function npmPackDryRunFiles(cwd = root): string[] {
   const npmPack = npmInvocation(["pack", "--json", "--ignore-scripts", "--dry-run"]);
   const packed = spawnSync(npmPack.command, npmPack.args, {
-    cwd: root,
+    cwd,
     encoding: "utf8",
     env: npmEnv(),
   });
@@ -106,7 +106,8 @@ describe("package surface policy", () => {
   });
 
   it("excludes local deployment secrets from npm pack and Docker build contexts", () => {
-    const deployRoot = join(root, "deploy/customer-hosted");
+    const tempRoot = mkdtempSync(join(tmpdir(), "b2-mcp-package-surface-"));
+    const deployRoot = join(tempRoot, "deploy/customer-hosted");
     const localSecretPaths = [
       "b2-mcp.env",
       ".env",
@@ -122,14 +123,33 @@ describe("package surface policy", () => {
     ];
 
     try {
+      mkdirSync(deployRoot, { recursive: true });
       mkdirSync(join(deployRoot, "secrets"), { recursive: true });
       mkdirSync(join(deployRoot, "certs"), { recursive: true });
       mkdirSync(join(deployRoot, "tls"), { recursive: true });
+      writeFileSync(
+        join(tempRoot, "package.json"),
+        readFileSync(join(root, "package.json"), "utf8"),
+      );
+      for (const fileName of [
+        ".dockerignore",
+        "Dockerfile",
+        "README.md",
+        "b2-mcp.env.example",
+        "container-entrypoint.sh",
+        "docker-compose.yml",
+        "nginx.conf",
+      ]) {
+        writeFileSync(
+          join(deployRoot, fileName),
+          readFileSync(join(root, "deploy/customer-hosted", fileName), "utf8"),
+        );
+      }
       for (const relativePath of localSecretPaths) {
         writeFileSync(join(deployRoot, relativePath), "local-secret-test-value");
       }
 
-      const files = npmPackDryRunFiles();
+      const files = npmPackDryRunFiles(tempRoot);
       for (const relativePath of localSecretPaths) {
         expect(files).not.toContain(`deploy/customer-hosted/${relativePath}`);
       }
@@ -145,12 +165,7 @@ describe("package surface policy", () => {
       expect(isDockerIgnored("Dockerfile")).toBe(false);
       expect(isDockerIgnored("nginx.conf")).toBe(false);
     } finally {
-      for (const relativePath of localSecretPaths) {
-        rmSync(join(deployRoot, relativePath), { force: true });
-      }
-      rmSync(join(deployRoot, "secrets"), { recursive: true, force: true });
-      rmSync(join(deployRoot, "certs"), { recursive: true, force: true });
-      rmSync(join(deployRoot, "tls"), { recursive: true, force: true });
+      rmSync(tempRoot, { recursive: true, force: true });
     }
   });
 
@@ -192,6 +207,7 @@ describe("package surface policy", () => {
     expect(compose).toContain('max-size: "10m"');
     expect(compose).toContain('max-file: "5"');
     expect(nginx).toContain('proxy_set_header Connection "";');
+    expect(nginx).toContain("proxy_set_header X-Forwarded-For $remote_addr;");
 
     expect(envExample).toContain("B2_ALLOWED_HOSTS=mcp.example.com");
     expect(envExample).toContain("B2_ALLOWED_ORIGINS=https://client.example.com");

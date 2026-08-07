@@ -133,7 +133,10 @@ tokens, wrong issuers, missing audience/resource
 trusted identity headers are stripped by rebuilding the upstream header set.
 Only `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, and explicitly permitted
 `Mcp-Param-*` hints are forwarded, and they remain metering/routing hints rather
-than authorization facts. The MCP SDK's header/body equality validation still
+than authorization facts. As the public edge, nginx overwrites
+`X-Forwarded-For` with the verified socket peer. If you place another trusted
+proxy in front, configure `real_ip` with explicit trusted CIDRs before relying
+on forwarded client IPs. The MCP SDK's header/body equality validation still
 runs behind nginx. Validator connect/send/read timeouts are intentionally short;
 timeout or validator error responses fail the MCP request with bounded 503
 behavior.

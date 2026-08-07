@@ -31,6 +31,9 @@ behind nginx, and keeps raw port 3000 private to the Docker network.
   routing and metering hints only. Authorization must come from OAuth, mTLS, or
   another trusted workload identity layer, and MCP body validation still runs
   behind the proxy.
+- As the public edge, nginx overwrites `X-Forwarded-For` with the verified
+  socket peer. If you place another trusted proxy in front, configure `real_ip`
+  with explicit trusted CIDRs before relying on forwarded client IPs.
 - nginx disables shared proxy caching; never translate MCP
   `cacheScope: "private"` into an intermediary cache.
 
