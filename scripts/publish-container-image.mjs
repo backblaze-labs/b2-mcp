@@ -318,8 +318,8 @@ function publish() {
   if (manifestDigest(publishedRelease) !== digest) {
     throw new Error(`${versionRef} and ${releaseRef} resolved to different digests`);
   }
-  verifyAnonymousManifestPull(versionRef);
   signDigest(registryImage, digest);
+  verifyAnonymousManifestPull(versionRef);
   writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
 }
 
