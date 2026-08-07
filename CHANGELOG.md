@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a digest-pinned production Docker image, container CI smoke coverage,
   signed multi-platform GHCR release publishing, and Docker run docs for HTTP
   and stdio transports.
+- Added the supported customer-hosted container reference deployment to the
+  published npm package with bounded logs, pinned runtime/proxy images, and
+  package/build-context secret exclusion policy.
+
+### Changed
+- Added `/ready` alongside `/health` for HTTP deployments and gated readiness
+  metadata behind the same Host/Origin checks used for MCP traffic.
 
 ### Changed
 - Replaced the `ts-node` dev runner with exact-pinned `tsx@4.23.11` and

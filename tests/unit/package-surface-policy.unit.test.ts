@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
@@ -26,6 +26,45 @@ function parseJsonArray(stdout: string) {
   }>;
 }
 
+function npmPackDryRunFiles(): string[] {
+  const npmPack = npmInvocation(["pack", "--json", "--ignore-scripts", "--dry-run"]);
+  const packed = spawnSync(npmPack.command, npmPack.args, {
+    cwd: root,
+    encoding: "utf8",
+    env: npmEnv(),
+  });
+  expect(packed.status).toBe(0);
+  return parseJsonArray(packed.stdout)[0].files.map((file) => file.path);
+}
+
+function dockerIgnoreMatcher(patternText: string): (relativePath: string) => boolean {
+  const patterns = patternText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+
+  function globToRegExp(pattern: string): RegExp {
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*\*/g, ".*")
+      .replace(/\*/g, "[^/]*");
+    return new RegExp(`^${escaped}$`);
+  }
+
+  return (relativePath: string): boolean => {
+    const path = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    return patterns.some((rawPattern) => {
+      const pattern = rawPattern.replace(/^\/+/, "");
+      if (pattern.endsWith("/")) {
+        const prefix = pattern;
+        return path === prefix.slice(0, -1) || path.startsWith(prefix);
+      }
+      if (pattern.includes("*")) return globToRegExp(pattern).test(path);
+      return path === pattern || path.endsWith(`/${pattern}`);
+    });
+  };
+}
+
 describe("package surface policy", () => {
   const pkg = readJson<{
     files: string[];
@@ -39,23 +78,21 @@ describe("package surface policy", () => {
   const readme = readFileSync(join(root, "README.md"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
-    const npmPack = npmInvocation(["pack", "--json", "--ignore-scripts", "--dry-run"]);
-    const packed = spawnSync(npmPack.command, npmPack.args, {
-      cwd: root,
-      encoding: "utf8",
-      env: npmEnv(),
-    });
-    expect(packed.status).toBe(0);
-    const files = parseJsonArray(packed.stdout)[0].files.map((file) => file.path);
+    const files = npmPackDryRunFiles();
 
     expect(pkg.files).not.toContain("runtime-policy.json");
     expect(pkg.files).not.toContain("audit-policy.json");
     expect(pkg.files).not.toContain("package-budget.json");
+    expect(pkg.files).not.toContain("deploy/customer-hosted/**/*");
     expect(files).not.toContain("runtime-policy.json");
     expect(files).not.toContain("audit-policy.json");
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
+    expect(files).toContain("deploy/customer-hosted/.dockerignore");
     expect(files).toContain("deploy/customer-hosted/Dockerfile");
+    expect(files).toContain("deploy/customer-hosted/README.md");
+    expect(files).toContain("deploy/customer-hosted/b2-mcp.env.example");
+    expect(files).toContain("deploy/customer-hosted/container-entrypoint.sh");
     expect(files).toContain("deploy/customer-hosted/docker-compose.yml");
     expect(files).toContain("deploy/customer-hosted/nginx.conf");
     expect(files).toContain("docs/CLIENTS.md");
@@ -66,6 +103,98 @@ describe("package surface policy", () => {
     )) {
       expect(files).toContain(fixturePath);
     }
+  });
+
+  it("excludes local deployment secrets from npm pack and Docker build contexts", () => {
+    const deployRoot = join(root, "deploy/customer-hosted");
+    const localSecretPaths = [
+      "b2-mcp.env",
+      ".env",
+      ".env.local",
+      ".env.production",
+      "secrets/b2_application_key_id",
+      "secrets/b2_application_key",
+      "fullchain.pem",
+      "certs/fullchain.pem",
+      "tls/client.key",
+      "tls/client.crt",
+      "tls/client.p12",
+    ];
+
+    try {
+      mkdirSync(join(deployRoot, "secrets"), { recursive: true });
+      mkdirSync(join(deployRoot, "certs"), { recursive: true });
+      mkdirSync(join(deployRoot, "tls"), { recursive: true });
+      for (const relativePath of localSecretPaths) {
+        writeFileSync(join(deployRoot, relativePath), "local-secret-test-value");
+      }
+
+      const files = npmPackDryRunFiles();
+      for (const relativePath of localSecretPaths) {
+        expect(files).not.toContain(`deploy/customer-hosted/${relativePath}`);
+      }
+      expect(files).toContain("deploy/customer-hosted/b2-mcp.env.example");
+
+      const isDockerIgnored = dockerIgnoreMatcher(
+        readFileSync(join(deployRoot, ".dockerignore"), "utf8"),
+      );
+      for (const relativePath of localSecretPaths) {
+        expect(isDockerIgnored(relativePath)).toBe(true);
+      }
+      expect(isDockerIgnored("b2-mcp.env.example")).toBe(false);
+      expect(isDockerIgnored("Dockerfile")).toBe(false);
+      expect(isDockerIgnored("nginx.conf")).toBe(false);
+    } finally {
+      for (const relativePath of localSecretPaths) {
+        rmSync(join(deployRoot, relativePath), { force: true });
+      }
+      rmSync(join(deployRoot, "secrets"), { recursive: true, force: true });
+      rmSync(join(deployRoot, "certs"), { recursive: true, force: true });
+      rmSync(join(deployRoot, "tls"), { recursive: true, force: true });
+    }
+  });
+
+  it("pins customer-hosted images and deployment policy knobs", () => {
+    const dockerfile = readFileSync(join(root, "deploy/customer-hosted/Dockerfile"), "utf8");
+    const compose = readFileSync(join(root, "deploy/customer-hosted/docker-compose.yml"), "utf8");
+    const nginx = readFileSync(join(root, "deploy/customer-hosted/nginx.conf"), "utf8");
+    const envExample = readFileSync(
+      join(root, "deploy/customer-hosted/b2-mcp.env.example"),
+      "utf8",
+    );
+    const deployReadme = readFileSync(join(root, "deploy/customer-hosted/README.md"), "utf8");
+    const deployDoc = readFileSync(join(root, "docs/DEPLOY.md"), "utf8");
+
+    expect(dockerfile).toMatch(/^FROM node:22\.23\.1-bookworm-slim@sha256:[a-f0-9]{64}$/m);
+    expect(compose).toMatch(/image: nginx:1\.29-alpine@sha256:[a-f0-9]{64}/);
+    expect(dockerfile).not.toMatch(/^ARG B2_MCP_VERSION=/m);
+    expect(dockerfile).toContain('test -n "$B2_MCP_VERSION"');
+    expect(compose).toContain("B2_MCP_VERSION: ${B2_MCP_VERSION:?");
+    expect(compose).not.toContain("B2_MCP_VERSION:-");
+    for (const text of [dockerfile, compose, deployReadme, deployDoc]) {
+      expect(text).not.toMatch(/B2_MCP_VERSION=0\.1\.0|b2-mcp@0\.1\.0/);
+    }
+
+    expect(nginx).toContain("resolver 127.0.0.11 ipv6=off valid=10s;");
+    expect(nginx).toContain("zone b2_mcp_backend 64k;");
+    expect(nginx).toMatch(/server b2-mcp-a:3000 resolve /);
+    expect(nginx).toMatch(/server b2-mcp-b:3000 resolve /);
+    expect(nginx).toContain("proxy_connect_timeout 2s;");
+    expect(nginx).toContain("proxy_send_timeout 2s;");
+    expect(nginx).toContain("proxy_read_timeout 3s;");
+    expect(nginx).toContain("error_page 500 502 503 504 = @oauth_unavailable;");
+
+    expect(compose).not.toContain("condition: service_healthy");
+    expect(compose).toContain('driver: "json-file"');
+    expect(compose).toContain('max-size: "10m"');
+    expect(compose).toContain('max-file: "5"');
+
+    expect(envExample).toContain("B2_ALLOWED_HOSTS=mcp.example.com");
+    expect(envExample).toContain("B2_ALLOWED_ORIGINS=https://client.example.com");
+    expect(nginx).toContain('"https://client.example.com" 1;');
+    expect(envExample).toContain("aggregate traffic per replica");
+    expect(deployReadme).toContain("aggregate per-replica caps");
+    expect(deployDoc).toContain("aggregate per-replica cap");
   });
 
   it("retries a transient lockfile-less packed-consumer install", () => {

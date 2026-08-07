@@ -1,9 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
-ARG NODE_VERSION=22.23.1
-FROM node:${NODE_VERSION}-bookworm-slim
+FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
 
-ARG B2_MCP_VERSION=0.1.0
+ARG B2_MCP_VERSION
 
 LABEL org.opencontainers.image.title="Backblaze B2 MCP Server"
 LABEL org.opencontainers.image.description="Customer-hosted Backblaze B2 MCP reference runtime"
@@ -12,7 +11,8 @@ LABEL org.opencontainers.image.source="https://github.com/backblaze-labs/b2-mcp"
 ENV NODE_ENV=production
 ENV PORT=3000
 
-RUN npm install -g --omit=dev --ignore-scripts "@backblaze-labs/b2-mcp@${B2_MCP_VERSION}" \
+RUN test -n "$B2_MCP_VERSION" \
+  && npm install -g --omit=dev --ignore-scripts "@backblaze-labs/b2-mcp@${B2_MCP_VERSION}" \
   && npm cache clean --force \
   && mkdir -p /sandbox /tmp/b2-mcp \
   && chown -R node:node /sandbox /tmp/b2-mcp

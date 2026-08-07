@@ -59,10 +59,20 @@ Fetch it from the package artifact instead of cloning the repository on the
 production host:
 
 ```bash
-npm pack @backblaze-labs/b2-mcp@0.1.0
+npm pack @backblaze-labs/b2-mcp@latest
 mkdir b2-mcp-release
-tar -xzf backblaze-labs-b2-mcp-0.1.0.tgz -C b2-mcp-release --strip-components=1
+tar -xzf backblaze-labs-b2-mcp-*.tgz -C b2-mcp-release --strip-components=1
 cd b2-mcp-release/deploy/customer-hosted
+```
+
+Build the image before creating local credential files. The image version is
+derived from the unpacked package's `package.json`, so release bumps do not
+require hand-editing the Dockerfile or compose file:
+
+```bash
+export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
+docker build --build-arg B2_MCP_VERSION="$B2_MCP_VERSION" \
+  -t "b2-mcp-reference:$B2_MCP_VERSION" .
 ```
 
 Then configure the deployment:
@@ -76,12 +86,14 @@ chmod 600 secrets/b2_application_key_id secrets/b2_application_key
 ```
 
 Before starting it, replace `mcp.example.com`, certificate paths, the OAuth
-validator upstream, and allowed origins in `nginx.conf`. The deployment is not
-safe until TLS and caller auth are active.
+validator upstream, and allowed origins in `nginx.conf`, then keep
+`B2_ALLOWED_HOSTS` and `B2_ALLOWED_ORIGINS` in `b2-mcp.env` in sync with those
+proxy settings. Keep `127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the
+container health check. The deployment is not safe until TLS and caller auth are
+active.
 
 ```bash
-docker compose build --build-arg B2_MCP_VERSION=0.1.0
-docker compose up -d
+docker compose up -d --no-build
 ```
 
 The compose file runs two B2 MCP replicas and one nginx reverse proxy. It never
@@ -90,7 +102,9 @@ Docker network. The application container runs as the non-root `node` user,
 uses a read-only root filesystem, drops Linux capabilities, and receives only a
 small `/tmp` tmpfs. Local file access remains disabled. If you enable
 `B2_ALLOW_LOCAL_FILES=true`, mount exactly one sandbox directory at `/sandbox`
-and set `B2_FILE_ROOT=/sandbox`.
+and set `B2_FILE_ROOT=/sandbox`. The checked-in `.dockerignore` excludes
+`b2-mcp.env`, `.env*`, `secrets/`, and local certificate material from Docker
+build contexts if you rebuild after configuration.
 
 `/health` and `/ready` are intentionally internal-only. They validate
 configuration, not B2 reachability, so routine probes do not call B2. Their JSON
@@ -117,7 +131,9 @@ trusted identity headers are stripped by rebuilding the upstream header set.
 Only `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`, and explicitly permitted
 `Mcp-Param-*` hints are forwarded, and they remain metering/routing hints rather
 than authorization facts. The MCP SDK's header/body equality validation still
-runs behind nginx.
+runs behind nginx. Validator connect/send/read timeouts are intentionally short;
+timeout or validator error responses fail the MCP request with bounded 503
+behavior.
 
 For mTLS/workload identity, enable `ssl_client_certificate` and
 `ssl_verify_client` in `nginx.conf`, enforce `$ssl_client_verify = SUCCESS`
@@ -134,6 +150,38 @@ TTL-bounded; after credential rotation, restart replicas or wait for
 a shared event bus and document subscription fan-out and invalidation limits
 before enabling it.
 
+Roll one backend at a time and wait for it to become healthy before replacing
+the next one:
+
+```bash
+export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
+docker compose up -d --no-deps --build b2-mcp-a
+docker compose ps b2-mcp-a
+docker compose up -d --no-deps --build b2-mcp-b
+docker compose ps b2-mcp-b
+```
+
+nginx uses Docker's embedded resolver for upstream replicas and starts after
+backend containers are started, not after both are healthy. A single
+misconfigured replica stays visible as `unhealthy` in `docker compose ps`
+without blocking nginx startup or the healthy survivor. If you change
+`nginx.conf` or the pinned nginx image, recreate nginx after at least one
+backend is healthy:
+
+```bash
+docker compose up -d --no-deps nginx
+```
+
+The Node base image and nginx proxy image are pinned as `tag@sha256:digest`.
+To update either image, inspect the replacement tag, review upstream release
+notes, replace the tag and digest together, and run the deployment policy tests:
+
+```bash
+docker buildx imagetools inspect node:<version>-bookworm-slim
+docker buildx imagetools inspect nginx:<version>-alpine
+pnpm exec vitest run tests/unit/package-surface-policy.unit.test.ts
+```
+
 ## Security baseline
 
 Before exposing the server, confirm each of these. Most are on by default; the
@@ -142,19 +190,19 @@ two **you must set for any internet-facing HTTP deployment** are marked ⚠️.
 | Control                 | How                                                                                                                                                                                                                                                          | Default           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
 | **TLS**                 | Terminate at nginx with Let's Encrypt (Step 5). Never expose `:3000` directly.                                                                                                                                                                               | —                 |
-| ⚠️ **DNS-rebinding**    | `B2_ALLOWED_HOSTS=your.domain` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname.                                          | localhost-only    |
+| ⚠️ **DNS-rebinding**    | `B2_ALLOWED_HOSTS=your.domain,127.0.0.1,localhost` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname.                     | localhost-only    |
 | ⚠️ **Caller auth**      | `server` mode is single-tenant. `principal` mode requires your TLS/OAuth resource-server layer to validate each request and pass verified MCP `authInfo` to the SDK handler before credential lookup.                                                        | none (your job)   |
 | **Least-privilege key** | Use a **non-master** application key scoped to the buckets/capabilities the workload needs.                                                                                                                                                                  | —                 |
 | **Destructive-op gate** | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted).                                                                                                                                                      | `confirm`         |
 | **Unavailable stubs**   | `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are non-secret compatibility stubs until a reviewed secret sink exists; Partner/Groups names are SDK-gap stubs until stable SDK support ships.                              | unavailable       |
 | **Tool-result text**    | `B2_MCP_OUTPUT_FORMAT=json\|toon` selects only the LLM-facing `TextContent.text` serialization for structured successes. `structuredContent` and MCP envelopes remain JSON. Keep `json` during rolling deploys unless every client explicitly supports TOON. | `json`            |
-| **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`.                                                                                                                                                              | on                |
+| **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`; in `server` mode the shared server-held key makes this an aggregate per-replica cap.                                                                          | on                |
 | **SDK retries**         | Native SDK calls use 3 retries with 1s exponential backoff capped at 4s and a 30s per-attempt timeout; expired auth tokens are refreshed by the SDK retry transport.                                                                                         | configured        |
-| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; the names are retained for deploy-manifest compatibility.                                                                              | 1000 / 20         |
+| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; in `server` mode the per-key cap applies to the shared key per replica.                                                                | 1000 / 200        |
 | **Local file access**   | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                                                          | off               |
 | **Capability cache**    | Capability discovery is cached by a secret-bound verifier or verified principal, with non-secret labels for logs. `B2_CAPABILITY_CACHE_TTL_MS` and `B2_CAPABILITY_CACHE_MAX_ENTRIES` bound staleness and size. Lookup failures fail closed.                  | 5 minutes / 10000 |
 | **Webhook targets**     | `b2_set_bucket_notification_rules` is gated by `B2_DESTRUCTIVE_POLICY`, enforces HTTPS, and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                    | enforced          |
-| **Audit log**           | Structured, values-redacted (key names only — never secrets/values). Ship stderr to journald/CloudWatch.                                                                                                                                                     | on                |
+| **Audit log**           | Structured, values-redacted (key names only — never secrets/values). Compose bounds local `json-file` logs; ship stderr to journald/CloudWatch or another rotated sink for VM deployments.                                                                  | on                |
 | **Secrets**             | Provide via the systemd unit's `Environment=` (or a secrets manager) — never commit. `.env*` is gitignored; see [`.env.example`](../.env.example).                                                                                                           | —                 |
 
 ## Credential modes

@@ -10,12 +10,15 @@ behind nginx, and keeps raw port 3000 private to the Docker network.
 - The container runs as the non-root `node` user.
 - Compose sets `read_only: true`, drops Linux capabilities, and provides only a
   small `/tmp` tmpfs.
+- Compose bounds the default `json-file` logs for every service.
 - Local file access stays off. If you enable `B2_ALLOW_LOCAL_FILES=true`, mount
   only one explicit sandbox at `/sandbox` and set `B2_FILE_ROOT=/sandbox`.
 - `/health` and `/ready` are internal-only. They include version, in-flight
   request count, and open subscription count for container/host checks, but
   nginx returns 404 for public requests.
 - Modern MCP HTTP is stateless. The two replicas need no sticky sessions.
+- nginx re-resolves replica DNS through Docker's embedded resolver so a
+  recreated backend is picked up without restarting the proxy.
 - The server does not advertise `subscriptions/listen`; no event bus is needed.
   If a future deployment advertises it, use a shared event bus and document
   subscription limits before enabling it.
@@ -29,19 +32,29 @@ behind nginx, and keeps raw port 3000 private to the Docker network.
 ## Build And Run
 
 ```bash
+export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
+docker build --build-arg B2_MCP_VERSION="$B2_MCP_VERSION" \
+  -t "b2-mcp-reference:$B2_MCP_VERSION" .
+
 cp b2-mcp.env.example b2-mcp.env
 mkdir -p secrets
 printf '%s' 'your-application-key-id' > secrets/b2_application_key_id
 printf '%s' 'your-application-key-secret' > secrets/b2_application_key
 chmod 600 secrets/b2_application_key_id secrets/b2_application_key
 
-docker compose build --build-arg B2_MCP_VERSION=0.1.0
-docker compose up -d
+docker compose up -d --no-build
 ```
 
+Build the image before creating local credential files. The checked-in
+`.dockerignore` also excludes `b2-mcp.env`, `.env*`, `secrets/`, and local
+certificate material from later `docker compose build` contexts.
+
 Replace `mcp.example.com`, certificate paths, OAuth validator upstream, and
-allowed origins in `nginx.conf` before exposing the host. The deployment is not
-safe until TLS and caller auth are active.
+allowed origins in `nginx.conf`, then keep `B2_ALLOWED_HOSTS` and
+`B2_ALLOWED_ORIGINS` in `b2-mcp.env` in sync with those proxy settings before
+exposing the host. Keep `127.0.0.1,localhost` in `B2_ALLOWED_HOSTS` for the
+container health check. The deployment is not safe until TLS and caller auth
+are active.
 
 Production secret managers should inject server-held credentials as environment
 variables or files mounted under `/run/secrets`. The entrypoint supports
@@ -61,11 +74,54 @@ Unauthenticated requests receive a `WWW-Authenticate: Bearer` challenge with a
 must be backed by your validator. That validator must reject expired tokens,
 tokens issued by the wrong issuer, tokens without audience/resource
 `https://mcp.example.com/mcp`, and tokens missing the required `b2:mcp` scope.
+Validator connect/send/read timeouts are intentionally short; timeout or
+validator error responses fail the MCP request with bounded 503 behavior.
 
 For mTLS or workload identity, enable `ssl_client_certificate` and
 `ssl_verify_client` in `nginx.conf`, enforce `$ssl_client_verify = SUCCESS`, and
 map the verified certificate identity to trusted headers only after validation.
 Strip inbound copies from the public request path.
+
+## Capacity And Rolling Deploys
+
+The default `server` credential mode uses one server-held B2 key. App-side
+`B2_MCP_RATE_LIMIT_*` and `B2_MAX_SESSIONS_PER_KEY` settings therefore behave
+as aggregate per-replica caps for that shared key, not as per-tenant limits.
+Use `principal` mode with a trusted identity layer when tenants need isolated
+credential, rate, or concurrency budgets.
+
+Roll one backend at a time and wait for it to become healthy before replacing
+the next one:
+
+```bash
+export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
+docker compose up -d --no-deps --build b2-mcp-a
+docker compose ps b2-mcp-a
+docker compose up -d --no-deps --build b2-mcp-b
+docker compose ps b2-mcp-b
+```
+
+nginx starts after the backend containers are started, not after both are
+healthy. A single misconfigured replica stays visible as `unhealthy` in
+`docker compose ps` without blocking nginx startup or the healthy survivor. If
+you change `nginx.conf` or the pinned nginx image, recreate nginx after at least
+one backend is healthy:
+
+```bash
+docker compose up -d --no-deps nginx
+```
+
+## Updating Pinned Images
+
+The Node base image and nginx proxy image are pinned as `tag@sha256:digest`.
+To update either image, inspect the replacement tag, review upstream release
+notes, replace the tag and digest together, and run the deployment policy tests:
+
+```bash
+docker buildx imagetools inspect node:<version>-bookworm-slim
+docker buildx imagetools inspect nginx:<version>-alpine
+pnpm exec vitest run tests/unit/package-surface-policy.unit.test.ts
+```
 
 ## Smoke Evidence
 

@@ -53,6 +53,7 @@ Gonza
 sophiecarreras
 
 # Cloud, network, storage, and security terms
+buildx
 creds
 EOPENBREAKER
 exfiltration

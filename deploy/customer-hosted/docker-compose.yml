@@ -1,12 +1,18 @@
 name: b2-mcp-reference
 
+x-bounded-logging: &bounded-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-b2-mcp-service: &b2-mcp-service
   build:
     context: .
     dockerfile: Dockerfile
     args:
-      B2_MCP_VERSION: ${B2_MCP_VERSION:-0.1.0}
-  image: b2-mcp-reference:${B2_MCP_VERSION:-0.1.0}
+      B2_MCP_VERSION: ${B2_MCP_VERSION:?Set B2_MCP_VERSION from ../../package.json before building}
+  image: b2-mcp-reference:${B2_MCP_VERSION:?Set B2_MCP_VERSION from ../../package.json before starting}
   env_file:
     - ./b2-mcp.env
   expose:
@@ -22,6 +28,7 @@ x-b2-mcp-service: &b2-mcp-service
   mem_limit: 1g
   stop_grace_period: 15s
   restart: unless-stopped
+  logging: *bounded-logging
   secrets:
     - b2_application_key_id
     - b2_application_key
@@ -36,12 +43,10 @@ services:
     <<: *b2-mcp-service
 
   nginx:
-    image: nginx:1.29-alpine
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
     depends_on:
-      b2-mcp-a:
-        condition: service_healthy
-      b2-mcp-b:
-        condition: service_healthy
+      - b2-mcp-a
+      - b2-mcp-b
     ports:
       - "80:80"
       - "443:443"
@@ -62,6 +67,7 @@ services:
     networks:
       - b2-mcp-private
     restart: unless-stopped
+    logging: *bounded-logging
 
 secrets:
   b2_application_key_id:

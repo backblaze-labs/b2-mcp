@@ -50,6 +50,8 @@ const DEFAULT_MAX_IN_FLIGHT = 1000;
 const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
 const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
+const STATELESS_ACTIVE_SESSIONS = 0;
+const STATELESS_OPEN_SUBSCRIPTIONS = 0;
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** Comma-separated allowlists for DNS-rebinding protection (empty = unset). */
@@ -584,9 +586,9 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       ...(error && { error }),
       server: "backblaze-b2-mcp",
       version: VERSION,
-      activeSessions: 0,
+      activeSessions: STATELESS_ACTIVE_SESSIONS,
       inFlightRequests: inFlight.active,
-      openSubscriptions: 0,
+      openSubscriptions: STATELESS_OPEN_SUBSCRIPTIONS,
     };
   }
 
@@ -683,23 +685,29 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       return;
     }
 
-    if (req.method === "GET" && (url.pathname === "/health" || url.pathname === "/ready")) {
-      const ready = readiness();
-      if (!ready.ok) {
-        writeJson(res, 503, healthBody("error", ready.error));
-        return;
-      }
-      writeJson(res, 200, healthBody("ok"));
-      return;
-    }
-
-    if (url.pathname !== "/mcp") {
+    const isHealthEndpoint =
+      req.method === "GET" && (url.pathname === "/health" || url.pathname === "/ready");
+    if (!isHealthEndpoint && url.pathname !== "/mcp") {
       writeJson(res, 404, { error: "Not found" });
       return;
     }
 
     if (!hostOriginAllowed(req)) {
       writeJson(res, 403, { error: "Host/Origin not allowed" });
+      return;
+    }
+
+    if (isHealthEndpoint) {
+      if (!allowRequest(deriveRateKey(requestLimitKey(req)))) {
+        writeJson(res, 429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+        return;
+      }
+      const ready = readiness();
+      if (!ready.ok) {
+        writeJson(res, 503, healthBody("error", ready.error));
+        return;
+      }
+      writeJson(res, 200, healthBody("ok"));
       return;
     }
 

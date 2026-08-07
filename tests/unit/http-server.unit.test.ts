@@ -196,6 +196,36 @@ describe("createInFlightLimiter", () => {
 });
 
 describe("health and readiness endpoints", () => {
+  it("rejects disallowed Host before returning readiness metadata", async () => {
+    const savedHosts = process.env.B2_ALLOWED_HOSTS;
+    process.env.B2_ALLOWED_HOSTS = "mcp.example.com";
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          throw new Error("readiness should not be evaluated");
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready", { headers: { host: "evil.example" } });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toContain("Host/Origin not allowed");
+      expect(res.body).not.toContain("version");
+      expect(res.body).not.toContain("inFlightRequests");
+    } finally {
+      if (savedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
+      else process.env.B2_ALLOWED_HOSTS = savedHosts;
+      await closeHttpServer(handle);
+    }
+  });
+
   it("exposes internal readiness metadata without resolving B2 credentials", async () => {
     let validated = 0;
     let resolved = 0;
