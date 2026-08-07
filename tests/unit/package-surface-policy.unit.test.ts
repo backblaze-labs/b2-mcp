@@ -55,6 +55,8 @@ describe("package surface policy", () => {
     expect(files).not.toContain("audit-policy.json");
     expect(files).not.toContain("package-budget.json");
     expect(files).toContain("package.json");
+    expect(files).toContain("docs/CLIENTS.md");
+    expect(files).toContain("docs/DEPLOY.md");
     expect(files).toContain("docs/tool-profile-contract.json");
     for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
       Object.values(profile.fixtures),
@@ -102,41 +104,27 @@ describe("package surface policy", () => {
         "  }",
         '  const packageRoot = path.join(process.cwd(), "node_modules", "@backblaze-labs", "b2-mcp");',
         '  fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });',
+        '  fs.mkdirSync(path.join(packageRoot, "docs"), { recursive: true });',
+        '  fs.mkdirSync(path.join(process.cwd(), "node_modules", ".bin"), { recursive: true });',
         "  fs.writeFileSync(",
         '    path.join(packageRoot, "package.json"),',
         "    JSON.stringify({",
         '      name: "@backblaze-labs/b2-mcp",',
+        '      version: "0.1.0",',
         '      main: "dist/index.js",',
-        '      bin: { "b2-mcp": "dist/index.js" },',
+        '      bin: { "b2-mcp": "dist/index.js", "b2-mcp-server": "dist/index.js" },',
         '      engines: { node: ">=22.3.0" }',
         "    }),",
         "  );",
-        "  fs.writeFileSync(",
-        '    path.join(packageRoot, "dist", "index.js"),',
-        '    "module.exports = { startStdio() {} };\\nif (require.main === module) {\\n  if (process.env.B2_REGISTER_ALL_TOOLS !== \\"true\\") throw new Error(\\"missing B2_REGISTER_ALL_TOOLS\\");\\n  if (process.env.B2_MASTER_KEY) throw new Error(\\"leaked B2 secret\\");\\n  process.exit(1);\\n}\\n",',
-        "  );",
-        "  fs.writeFileSync(",
-        '    path.join(packageRoot, "dist", "http-server.js"),',
-        '    "module.exports = { buildHttpServer() {} };\\n",',
-        "  );",
-        "  fs.writeFileSync(",
-        '    path.join(packageRoot, "dist", "server.js"),',
-        "    [",
-        '      "const allTools = {};\\n",',
-        '      "for (let i = 0; i < 37; i += 1) allTools[`b2_fixture_${i}`] = {};\\n",',
-        '      "allTools.b2_create_key = { execute: async () => ({ content: [{ text: \\"tool_unavailable\\" }] }) };\\n",',
-        '      "allTools.s3_get_object = { inputSchema: { safeParse: () => ({ success: true }) } };\\n",',
-        '      "allTools.s3_delete_object = {};\\n",',
-        '      "function createServer(_config, capabilities) { return { capabilities, close: async () => {} }; }\\n",',
-        '      "function getRegisteredTools(server) {\\n",',
-        '      "  if (Array.isArray(server.capabilities)) {\\n",',
-        '      "    return { b2_create_key: allTools.b2_create_key, s3_get_object: allTools.s3_get_object };\\n",',
-        '      "  }\\n",',
-        '      "  return allTools;\\n",',
-        '      "}\\n",',
-        '      "module.exports = { createServer, getRegisteredTools };\\n",',
-        '    ].join(""),',
-        "  );",
+        '  fs.writeFileSync(path.join(packageRoot, "docs", "CLIENTS.md"), "# Clients\\n");',
+        '  fs.writeFileSync(path.join(packageRoot, "docs", "DEPLOY.md"), "# Deploy\\n");',
+        '  fs.writeFileSync(path.join(packageRoot, "dist", "index.js"), "module.exports = { startStdio() {} };\\n");',
+        '  fs.chmodSync(path.join(packageRoot, "dist", "index.js"), 0o755);',
+        '  for (const name of ["b2-mcp", "b2-mcp-server"]) {',
+        '    const bin = path.join(process.cwd(), "node_modules", ".bin", name);',
+        '    fs.writeFileSync(bin, "#!/usr/bin/env node\\nrequire(\\"../@backblaze-labs/b2-mcp/dist/index.js\\").main();\\n");',
+        "    fs.chmodSync(bin, 0o755);",
+        "  }",
         "  process.exit(0);",
         "}",
         'console.error(`unexpected npm command: ${args.join(" ")}`);',
@@ -151,15 +139,15 @@ describe("package surface policy", () => {
         encoding: "utf8",
         env: {
           ...process.env,
+          NODE_ENV: "test",
+          B2_MCP_PACKED_CONSUMER_INSTALL_ONLY: "1",
           PATH: `${dir}${delimiter}${process.env.PATH ?? ""}`,
         },
       });
 
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("packed-consumer-smoke: retrying npm install");
-      expect(result.stdout).toContain(
-        "packed-consumer-smoke: installed and exercised runtime compatibility",
-      );
+      expect(result.stdout).toContain("packed-consumer-smoke: installed package metadata");
       expect(readFileSync(state, "utf8")).toBe("2");
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -24,6 +24,9 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createServer, fetchCapabilities, loadConfig } from "./server.js";
 import { CredentialResolutionError } from "./credentials.js";
 import { logger } from "./utils/logger.js";
+import { VERSION } from "./version.js";
+import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
+import { PortUsageError } from "./utils/config.js";
 
 export async function startStdio(): Promise<void> {
   const config = loadConfig();
@@ -53,10 +56,36 @@ export async function startStdio(): Promise<void> {
   logger.info({ transport: "stdio" }, "server.started");
 }
 
+async function runCli(argv = process.argv.slice(2)): Promise<void> {
+  const options = parseCliArgs(argv);
+  if (options.action === "help") {
+    process.stdout.write(`${helpText()}\n`);
+    return;
+  }
+  if (options.action === "version") {
+    process.stdout.write(`${VERSION}\n`);
+    return;
+  }
+
+  if (options.transport === "http") {
+    const { startHttp } = await import("./http-server.js");
+    await startHttp({ port: options.port });
+    return;
+  }
+
+  await startStdio();
+}
+
 // Only run when invoked directly (not when imported by tests).
 if (require.main === module) {
-  startStdio().catch((err) => {
-    logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
+  runCli().catch((err) => {
+    if (err instanceof CliUsageError || err instanceof PortUsageError) {
+      process.stderr.write(`b2-mcp: ${err.message}\n\n${helpText()}\n`);
+      process.exit(2);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`b2-mcp: ${message}\n`);
+    logger.fatal({ err: message }, "server.fatal");
     process.exit(1);
   });
 }

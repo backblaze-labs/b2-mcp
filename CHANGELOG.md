@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-07
+
 ### Added
+- Added issue #64 release verification for the unified CLI, published package
+  docs, changelog release-note extraction, checksums, idempotent trusted npm
+  publishing, and GitHub Release creation from the verified tarball.
 - Added deterministic test-layer scripts, JUnit/Vitest summaries, coverage
   summaries, packed-package install coverage, and the `pnpm run verify`
   no-credential quality gate.

@@ -71,9 +71,11 @@ export function loadConfig(): B2Config {
   } catch (err) {
     if (!(err instanceof CredentialResolutionError)) throw err;
     if (err.code === "missing_credentials") {
-      logger.fatal("config.missing: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required");
+      process.stderr.write(
+        "b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio\n",
+      );
     } else {
-      logger.fatal(`config.invalid: ${err.message}`);
+      process.stderr.write(`b2-mcp: ${err.message}\n`);
     }
     process.exit(1);
   }

@@ -178,7 +178,13 @@ describe("packed package", () => {
       const packedPaths = pack.files.map((file) => file.path).sort();
 
       expect(packedPaths).toEqual(
-        expect.arrayContaining(["dist/index.js", "dist/http-server.js", "README.md"]),
+        expect.arrayContaining([
+          "dist/index.js",
+          "dist/http-server.js",
+          "docs/CLIENTS.md",
+          "docs/DEPLOY.md",
+          "README.md",
+        ]),
       );
 
       const tarball = join(packDir, pack.filename);
@@ -236,7 +242,14 @@ describe("packed package", () => {
         ".bin",
         process.platform === "win32" ? "b2-mcp.cmd" : "b2-mcp",
       );
+      const aliasBinPath = join(
+        appDir,
+        "node_modules",
+        ".bin",
+        process.platform === "win32" ? "b2-mcp-server.cmd" : "b2-mcp-server",
+      );
       expect(statSync(binPath).isFile()).toBe(true);
+      expect(statSync(aliasBinPath).isFile()).toBe(true);
 
       const transport = new StdioClientTransport({
         command: binPath,

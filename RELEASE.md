@@ -77,3 +77,69 @@ Before publishing `v0.1.0`:
     gate, verify the tarball SHA-256, publish the already-scanned tarball with
     lifecycle scripts disabled, and attach the SBOM to the GitHub Release only
     after npm publish succeeds.
+
+## First Package Bootstrap
+
+npm trusted publishing cannot be configured until `@backblaze-labs/b2-mcp`
+exists. For the first public package only:
+
+1. Have an npm organization owner do a one-time manual bootstrap publish from a
+   temporary clean checkout. Set `package.json` to a reserved non-release
+   version such as `0.0.0-bootstrap.0`, build, pack, inspect the tarball, and
+   publish it with short-lived or interactive npm credentials:
+
+   ```bash
+   pnpm install --frozen-lockfile
+   pnpm run build
+   npm pack --json --ignore-scripts --pack-destination /tmp/b2-mcp-bootstrap
+   npm publish /tmp/b2-mcp-bootstrap/backblaze-labs-b2-mcp-0.0.0-bootstrap.0.tgz \
+     --access public \
+     --ignore-scripts \
+     --tag bootstrap
+   ```
+
+2. Revoke any bootstrap credential or end the interactive npm session, then
+   configure trusted publishing for
+   `backblaze-labs/b2-mcp/.github/workflows/publish.yml` and the
+   `npm-publish` GitHub environment.
+3. Deprecate the bootstrap version with a note that it is a reserved package
+   bootstrap and is not supported for installation.
+4. Run the publish workflow against the signed `v0.1.0` tag. The workflow must
+   publish the verified tarball with OIDC provenance; do not publish a different
+   local tarball to bootstrap the package.
+
+## Normal Release
+
+1. Keep `[Unreleased]` for future work and move the release contents into a
+   matching `## [x.y.z] - YYYY-MM-DD` changelog section.
+2. Commit the version and changelog update, wait for `ci-green`, then create the
+   signed `vX.Y.Z` tag at that commit.
+3. Dispatch `Publish Package` with the exact tag. The workflow verifies
+   tag/package/changelog consistency, runs `pnpm run verify`, requires live
+   contract success, builds one tarball, runs an npm dry-run publish, records
+   checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
+   and creates or updates the GitHub Release from the same artifact.
+
+## Prerelease
+
+Use npm semver prerelease tags such as `v0.2.0-rc.1`. Publish from the same
+workflow and tag shape. Validate install commands against the prerelease tag
+before advertising the release candidate outside the release issue.
+
+## Rollback
+
+npm package versions are immutable. If a published version is bad, deprecate it
+with a direct reason and publish a fixed higher patch or prerelease version from
+the protected workflow. If credentials, provenance, or package contents may be
+compromised, follow `docs/SUPPLY_CHAIN_SECURITY.md` before publishing again.
+
+## Deprecation
+
+Deprecate only after the replacement version is available and installable:
+
+```bash
+npm deprecate @backblaze-labs/b2-mcp@<version> "Use <fixed-version>: <reason>"
+```
+
+Record the command, reason, replacement, and affected GitHub Release in the
+release issue.

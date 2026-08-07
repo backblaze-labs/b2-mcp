@@ -5,11 +5,12 @@ This server speaks the Model Context Protocol over **two transports**:
 - **stdio** — the server runs as a local subprocess of the client. Used by desktop apps and IDE extensions (Claude Desktop, Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose…).
 - **HTTP** — the server runs as a hosted MCP 2026-07-28 endpoint behind a URL (single `/mcp` endpoint). Used by web clients (Claude.ai Custom Connectors) and any client pointed at a remote server. See [`DEPLOY.md`](DEPLOY.md) to stand one up.
 
-> **The one thing that matters:** every stdio client runs the _same_ command —
-> `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js` with two env vars. Only the
-> **config file location** and the **wrapper key name** differ per client. If a
-> client's config format has changed since this was written, its own MCP docs are
-> authoritative — the invocation below is what you're wiring up.
+> **The one thing that matters:** every stdio client runs the same command. For
+> a source checkout, use `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js`; for the
+> installed package, use `b2-mcp --transport stdio`. Only the **config file
+> location** and the **wrapper key name** differ per client. If a client's
+> config format has changed since this was written, its own MCP docs are
+> authoritative; the invocation below is what you're wiring up.
 
 ## Compatibility at a glance
 
@@ -32,14 +33,13 @@ This server speaks the Model Context Protocol over **two transports**:
 git clone https://github.com/backblaze-labs/b2-mcp.git b2-mcp
 cd b2-mcp
 pnpm install
-pnpm run build      # produces dist/ — required for the stdio command below
+pnpm run build      # produces dist/ -- required for the source stdio command below
 ```
 
 You also need a Backblaze B2 **Application Key** (key ID + secret). A single non-master application key works for both the B2 native and S3-compatible APIs. Master keys are only needed for Partner API and account-level key management in the Phase 1 tool surface.
 
-> The npm package name is planned for the Phase 1 release line but not yet
-> advertised as an install command. Use the local `node dist/index.js` path shown
-> below until the release gate verifies npm ownership and provenance.
+The canonical npm package binary is `b2-mcp`; `b2-mcp-server` remains a
+transition alias for existing stdio configurations.
 
 ---
 
@@ -50,6 +50,14 @@ The universal invocation, wrapped differently per client:
 ```
 command: node
 args:    /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js
+env:     B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
+```
+
+Installed package equivalent:
+
+```
+command: b2-mcp
+args:    --transport stdio
 env:     B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
 ```
 

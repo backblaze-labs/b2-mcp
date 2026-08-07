@@ -60,6 +60,8 @@
     "audit:supply-chain": "pnpm run audit:supply-chain:denylist --packlist && node scripts/audit-supply-chain.mjs",
     "audit:supply-chain:denylist": "node scripts/check-supply-chain-denylist.mjs",
     "audit:production": "node scripts/production-security-gate.mjs",
+    "release:verify": "node scripts/verify-release-input.mjs",
+    "release:notes": "node scripts/extract-release-notes.mjs",
     "release:sbom": "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",
     "lint": "node scripts/run-biome.mjs lint src tests scripts",
@@ -115,6 +117,8 @@
   },
   "files": [
     "dist/**/*",
+    "docs/CLIENTS.md",
+    "docs/DEPLOY.md",
     "docs/tool-profile-contract.json",
     "docs/TOOL_PROFILES.md",
     "tests/fixtures/tool-contract/*.json",

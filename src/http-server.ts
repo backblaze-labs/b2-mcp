@@ -10,7 +10,7 @@
 import * as http from "http";
 import * as crypto from "crypto";
 import { AsyncLocalStorage } from "async_hooks";
-import { parseIntEnv } from "./utils/config.js";
+import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
 import {
   classifyInboundRequest,
   createMcpHandler,
@@ -43,7 +43,6 @@ import {
   validateHttpCredentialConfiguration,
 } from "./credentials.js";
 
-const DEFAULT_PORT = 3000;
 const MAX_BODY_BYTES = 1 * 1024 * 1024; // 1 MB — MCP messages are JSON-RPC, never close to this
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000; // 1 minute
 const SHUTDOWN_DRAIN_MS = 10 * 1000; // 10 seconds to drain on SIGTERM
@@ -143,17 +142,11 @@ export function deriveRateKey(cacheKey: string): string {
   return crypto.createHash("sha256").update(cacheKey).digest("hex").slice(0, 16);
 }
 
-export function getPort(): number {
-  const idx = process.argv.indexOf("--port");
-  const raw =
-    idx !== -1 && process.argv[idx + 1]
-      ? process.argv[idx + 1]
-      : (process.env.PORT ?? String(DEFAULT_PORT));
-  const port = parseInt(raw, 10);
-  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-    throw new Error(`Invalid port: ${raw}`);
-  }
-  return port;
+export function getPort(
+  argv = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return resolveHttpPort(argv, env);
 }
 
 export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
@@ -832,8 +825,12 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   return { server: httpServer, sessions, drain };
 }
 
-async function main(): Promise<void> {
-  const port = getPort();
+export interface HttpListenOptions {
+  port?: number;
+}
+
+export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
+  const port = options.port ?? getPort();
   const { server: httpServer, sessions, drain } = buildHttpServer();
 
   httpServer.listen(port, () => {
@@ -864,7 +861,7 @@ async function main(): Promise<void> {
 }
 
 if (require.main === module) {
-  main().catch((err) => {
+  startHttp().catch((err) => {
     logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
     process.exit(1);
   });
