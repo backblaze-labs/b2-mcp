@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: release
+    secrets:
+      LIVE_B2_KEY_ID:
+        required: true
+      LIVE_B2_KEY:
+        required: true
 
 permissions:
   contents: read
