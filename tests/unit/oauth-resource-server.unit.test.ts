@@ -120,6 +120,7 @@ describe("OAuthIntrospectionVerifier", () => {
     ["wrong audience", { aud: "other" }, /audience/i],
     ["missing resource", { resource: undefined }, /resource/i],
     ["wrong resource", { resource: "other" }, /resource/i],
+    ["missing token type", { token_type: undefined }, /token type/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
     ["missing token algorithm", { alg: undefined }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],

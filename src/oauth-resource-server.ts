@@ -274,7 +274,10 @@ function assertTokenType(
   allowedTokenTypes: readonly string[],
 ): void {
   const tokenType = stringClaim(claims.token_type);
-  if (tokenType && !allowedTokenTypes.includes(tokenType.toLowerCase())) {
+  if (!tokenType) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token type is not verified");
+  }
+  if (!allowedTokenTypes.includes(tokenType.toLowerCase())) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Unsupported token type");
   }
 }

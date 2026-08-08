@@ -180,7 +180,7 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   b2_reserve_trial_create_account: "admin",
   b2_set_bucket_notification_rules: "admin",
   b2_unfinished_uploads: "read",
-  b2_update_bucket: "write",
+  b2_update_bucket: "admin",
   b2_update_file_legal_hold: "admin",
   b2_update_file_retention: "admin",
   b2_usage_growth: "read",
