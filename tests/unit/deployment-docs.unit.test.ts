@@ -245,6 +245,22 @@ describe("deployment documentation", () => {
     expect(worker).toContain("getContainer(env.MCP_CONTAINER");
     expect(worker).toContain("startAndWaitForPorts");
     expect(worker).toContain("STRIPPED_PUBLIC_HEADERS");
+    for (const header of [
+      "x-b2-key",
+      "x-b2-key-id",
+      "x-b2-app-key",
+      "x-b2-app-key-id",
+      "x-b2-master-key",
+      "x-b2-master-key-id",
+      "x-b2-mcp-key",
+      "x-b2-mcp-key-id",
+      "x-b2-mcp-app-key",
+      "x-b2-mcp-app-key-id",
+      "x-b2-mcp-master-key",
+      "x-b2-mcp-master-key-id",
+    ]) {
+      expect(worker).toContain(header);
+    }
   });
 
   it("keeps Cloud Run private to reviewed invokers", () => {
