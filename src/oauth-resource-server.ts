@@ -26,6 +26,7 @@ const DEFAULT_INTROSPECTION_RETRY_DELAY_MS = 50;
 const DEFAULT_INTROSPECTION_CIRCUIT_FAILURES = 5;
 const DEFAULT_INTROSPECTION_CIRCUIT_OPEN_MS = 30_000;
 const DEFAULT_INTROSPECTION_CACHE_MAX_ENTRIES = 1000;
+const DEFAULT_INTROSPECTION_CACHE_TTL_SECONDS = 300;
 const DEFAULT_INTROSPECTION_CACHE_SKEW_SECONDS = 30;
 
 type FetchLike = typeof fetch;
@@ -53,6 +54,7 @@ export interface OAuthResourceServerConfig {
   introspectionCircuitFailures: number;
   introspectionCircuitOpenMs: number;
   introspectionCacheMaxEntries: number;
+  introspectionCacheTtlSeconds: number;
   introspectionCacheSkewSeconds: number;
 }
 
@@ -185,6 +187,12 @@ export function loadOAuthResourceServerConfig(
       DEFAULT_INTROSPECTION_CACHE_MAX_ENTRIES,
       1,
     ),
+    introspectionCacheTtlSeconds: intEnv(
+      env,
+      "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS",
+      DEFAULT_INTROSPECTION_CACHE_TTL_SECONDS,
+      1,
+    ),
     introspectionCacheSkewSeconds: intEnv(
       env,
       "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS",
@@ -247,13 +255,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function requireMatch(actual: unknown, expected: string, claimName: string): void {
   if (!values(actual).includes(expected)) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, `Token ${claimName} is not accepted`);
-  }
-}
-
-function requireOptionalMatch(actual: unknown, expected: string, claimName: string): void {
-  const actualValues = values(actual);
-  if (actualValues.length > 0 && !actualValues.includes(expected)) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, `Token ${claimName} is not accepted`);
   }
 }
@@ -374,7 +375,9 @@ function rememberAuthInfo(
 ): void {
   if (config.introspectionCacheMaxEntries <= 0) return;
   if (typeof authInfo.expiresAt !== "number") return;
-  const expiresAtMs = authInfo.expiresAt * 1000 - config.introspectionCacheSkewSeconds * 1000;
+  const tokenExpiresAtMs = authInfo.expiresAt * 1000 - config.introspectionCacheSkewSeconds * 1000;
+  const ttlExpiresAtMs = nowMs + config.introspectionCacheTtlSeconds * 1000;
+  const expiresAtMs = Math.min(tokenExpiresAtMs, ttlExpiresAtMs);
   if (expiresAtMs <= nowMs) return;
   if (introspectionCache.size >= config.introspectionCacheMaxEntries) {
     const oldest = [...introspectionCache.entries()].sort(
@@ -422,7 +425,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
       if (issuer !== this.config.issuer) {
         throw new OAuthError(OAuthErrorCode.InvalidToken, "Token issuer is not trusted");
       }
-      requireOptionalMatch(claims.resource, this.config.resource, "resource");
+      requireMatch(claims.resource, this.config.resource, "resource");
       requireMatch(claims.aud, this.config.audience, "audience");
       const expiresAt = assertTimeWindow(claims, now);
       assertTokenType(claims, this.config.allowedTokenTypes);

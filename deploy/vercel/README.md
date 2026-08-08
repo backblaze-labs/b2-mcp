@@ -91,7 +91,7 @@ remain with the selected issuer. The adapter additionally checks:
 
 - active token response
 - exact `iss`
-- exact `resource`, when returned by introspection
+- exact `resource`
 - exact `aud`
 - `exp` and `nbf`
 - token type, when returned
@@ -103,8 +103,8 @@ remain with the selected issuer. The adapter additionally checks:
 Introspection calls are bounded by `B2_OAUTH_INTROSPECTION_TIMEOUT_MS`, retried
 within `B2_OAUTH_INTROSPECTION_RETRIES`, and fail closed through a small
 process-local circuit breaker. Successful active responses are cached by token
-hash until the token's `exp` minus
-`B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS`, with
+hash for at most `B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS`, never beyond the
+token's `exp` minus `B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS`, with
 `B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES` bounding memory. Introspection
 requires either `B2_OAUTH_INTROSPECTION_CLIENT_ID` plus
 `B2_OAUTH_INTROSPECTION_CLIENT_SECRET`, or

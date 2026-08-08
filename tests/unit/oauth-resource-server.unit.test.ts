@@ -29,6 +29,7 @@ const baseConfig = {
   introspectionCircuitFailures: 5,
   introspectionCircuitOpenMs: 30_000,
   introspectionCacheMaxEntries: 100,
+  introspectionCacheTtlSeconds: 300,
   introspectionCacheSkewSeconds: 0,
 };
 
@@ -117,6 +118,7 @@ describe("OAuthIntrospectionVerifier", () => {
     ["missing issuer", { iss: undefined }, /issuer/i],
     ["wrong issuer", { iss: "http://localhost:9001/" }, /issuer/i],
     ["wrong audience", { aud: "other" }, /audience/i],
+    ["missing resource", { resource: undefined }, /resource/i],
     ["wrong resource", { resource: "other" }, /resource/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
     ["missing token algorithm", { alg: undefined }, /algorithm/i],
@@ -126,15 +128,6 @@ describe("OAuthIntrospectionVerifier", () => {
     const { verifier } = verifierFor(claims(overrides));
 
     await expect(verifier.verifyAccessToken("access-token")).rejects.toThrow(message);
-  });
-
-  it("accepts tokens that omit resource when audience matches", async () => {
-    const { verifier } = verifierFor(claims({ resource: undefined }));
-
-    const authInfo = await verifier.verifyAccessToken("access-token");
-
-    expect(authInfo.resource?.href).toBe(baseConfig.resource);
-    expect(authInfo.extra?.resource).toEqual([]);
   });
 
   it("reports introspection 5xx as a retryable dependency failure", async () => {
@@ -269,11 +262,11 @@ describe("OAuthIntrospectionVerifier", () => {
     expect((response as Response).status).toBe(503);
   });
 
-  it("caches verified introspection results by token hash until token expiry", async () => {
+  it("caches verified introspection results by token hash until the short TTL", async () => {
     let now = 1000;
-    const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 10 })));
+    const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 100 })));
     const verifier = new OAuthIntrospectionVerifier({
-      config: { ...baseConfig, introspectionCacheSkewSeconds: 0 },
+      config: { ...baseConfig, introspectionCacheTtlSeconds: 5, introspectionCacheSkewSeconds: 0 },
       fetch: fetchMock as typeof fetch,
       nowSeconds: () => now,
     });
@@ -282,8 +275,30 @@ describe("OAuthIntrospectionVerifier", () => {
     await verifier.verifyAccessToken("short-cache-token");
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    now = 1011;
+    now = 1006;
     await verifier.verifyAccessToken("short-cache-token");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache past token expiry even when the cache TTL is longer", async () => {
+    let now = 1000;
+    const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 3 })));
+    const verifier = new OAuthIntrospectionVerifier({
+      config: {
+        ...baseConfig,
+        introspectionCacheTtlSeconds: 300,
+        introspectionCacheSkewSeconds: 0,
+      },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => now,
+    });
+
+    await verifier.verifyAccessToken("expiring-token");
+    await verifier.verifyAccessToken("expiring-token");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    now = 1004;
+    await verifier.verifyAccessToken("expiring-token");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -312,11 +327,13 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_REQUIRED_SCOPES: "b2:read,custom:report",
       B2_OAUTH_ALLOWED_ALGORITHMS: "RS256,ES256",
       B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "2500",
+      B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS: "120",
     });
 
     expect(config.requiredScopes).toEqual(["b2:read", "custom:report"]);
     expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
     expect(config.introspectionTimeoutMs).toBe(2500);
+    expect(config.introspectionCacheTtlSeconds).toBe(120);
     expect(protectedResourceMetadata(config)).toMatchObject({
       resource: baseConfig.resource,
       authorization_servers: [baseConfig.issuer],
