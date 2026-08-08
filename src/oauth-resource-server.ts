@@ -606,6 +606,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
         if (!(error instanceof OAuthDependencyError)) {
           throw new OAuthError(OAuthErrorCode.InvalidToken, "Token introspection failed");
         }
+        if (error.reason === "request_aborted") throw error;
         lastDependencyError = error;
         this.logDependencyFailure(error.reason, error.dependencyStatus, attempt);
         if (attempt >= maxAttempts || !this.isRetryable(error)) break;
@@ -655,6 +656,9 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
       return asRecord(await response.json());
     } catch (error) {
       if (error instanceof OAuthError || error instanceof OAuthDependencyError) throw error;
+      if (this.signal?.aborted) {
+        throw new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted");
+      }
       const reason =
         error instanceof Error && /abort|timeout/i.test(`${error.name} ${error.message}`)
           ? "timeout"

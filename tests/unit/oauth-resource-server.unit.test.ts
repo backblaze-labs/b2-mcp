@@ -295,6 +295,55 @@ describe("OAuthIntrospectionVerifier", () => {
     expect((response as Response).status).toBe(503);
   });
 
+  it("does not retry or open the circuit for caller-aborted introspection", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    const now = Math.floor(Date.now() / 1000);
+    const config = {
+      ...baseConfig,
+      introspectionMaxRetries: 1,
+      introspectionCircuitFailures: 1,
+    };
+    const abortingFetch = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        capturedSignal?.addEventListener("abort", () => reject(new Error("AbortError")), {
+          once: true,
+        });
+      });
+    });
+
+    const aborted = authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: "Bearer aborted-token" },
+        signal: controller.signal,
+      }),
+      config,
+      { fetch: abortingFetch as typeof fetch, nowSeconds: () => now },
+    );
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+    controller.abort();
+    await expect(aborted).resolves.toBeInstanceOf(Response);
+
+    const validFetch = vi.fn(async () => Response.json(claims({ exp: now + 600 })));
+    const accepted = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: "Bearer valid-token" },
+      }),
+      config,
+      { fetch: validFetch as typeof fetch, nowSeconds: () => now },
+    );
+
+    expect(abortingFetch).toHaveBeenCalledTimes(1);
+    expect(validFetch).toHaveBeenCalledTimes(1);
+    expect(accepted).not.toBeInstanceOf(Response);
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "request_aborted" }),
+      "oauth.introspection.dependency_failed",
+    );
+  });
+
   it("caches verified introspection results by token hash until the short TTL", async () => {
     let now = 1000;
     const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 100 })));
