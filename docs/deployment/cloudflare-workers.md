@@ -1,6 +1,6 @@
 # Native Cloudflare Workers
 
-Last verified: 2026-08-08. Repository baseline: `6819d74`. Package version:
+Last verified: 2026-08-08. Base/runtime baseline: `6819d74`. Package version:
 `0.1.0`. MCP revision: `2026-07-28`. Owner: Gonza (`@goanpeca`).
 Support level: experimental. The checked-in adapter compiles, but native Worker
 support is not claimed until a clean deployment and protected smoke pass.
@@ -49,7 +49,10 @@ Set non-secret vars in `wrangler.jsonc`:
   "B2_ALLOW_LOCAL_FILES": "false",
   "B2_DESTRUCTIVE_POLICY": "block",
   "B2_ALLOWED_HOSTS": "mcp.example.com",
-  "B2_ALLOWED_ORIGINS": "https://client.example.com"
+  "B2_ALLOWED_ORIGINS": "https://client.example.com",
+  "B2_MCP_TRUSTED_EDGE_AUTH": "cloudflare-access",
+  "B2_MCP_ACCESS_TEAM_DOMAIN": "https://example.cloudflareaccess.com",
+  "B2_MCP_ACCESS_AUDIENCE": "REPLACE_WITH_CLOUDFLARE_ACCESS_AUD"
 }
 ```
 
@@ -84,8 +87,11 @@ Two reviewed patterns are allowed:
   validates JWT issuer, audience/resource, expiry, not-before, allowed
   algorithm, signature, and scopes before passing `AuthInfo`.
 - Put Cloudflare Access in front and set `B2_MCP_TRUSTED_EDGE_AUTH=cloudflare-access`
-  for single-tenant `server` mode. Do not use this for `principal` mode unless
-  a verified Access JWT is converted into `AuthInfo`.
+  with `B2_MCP_ACCESS_TEAM_DOMAIN` and `B2_MCP_ACCESS_AUDIENCE`. The adapter
+  verifies the `Cf-Access-Jwt-Assertion` signature, issuer, audience, and
+  expiry before passing `AuthInfo`. Do not set
+  `B2_MCP_OAUTH_REQUIRED_SCOPES` in this mode unless the complete OAuth verifier
+  tuple is also configured.
 
 ## Health checks
 

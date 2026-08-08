@@ -8,12 +8,14 @@
 
 import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
-import { resolveHttpPort, parseIntEnv } from "./utils/config.js";
+import { positiveIntEnv, resolveHttpPort } from "./utils/config.js";
+import { jsonResponse } from "./utils/http-response.js";
 import { logger } from "./utils/logger.js";
 import { configFromHttpHeaders, type AuthenticatedIncomingMessage } from "./credentials.js";
 import { writeWebResponse } from "./node-http-adapter.js";
 import {
   createB2McpFetchHandler,
+  HTTP_SHUTDOWN_DRAIN_MS,
   isLoopbackHealthProbeFromParts,
   type B2McpFetchHandlerOptions,
 } from "./http-handler.js";
@@ -28,13 +30,8 @@ export {
 
 const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
-const SHUTDOWN_DRAIN_MS = 10 * 1000;
 
-function intEnv(name: string, fallback: number): number {
-  return Math.max(1, parseIntEnv(process.env[name], fallback));
-}
-
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+function firstNodeHeaderValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
@@ -54,8 +51,8 @@ function headersFromNode(headers: http.IncomingHttpHeaders): Headers {
 function nodeRequestToWebRequest(req: http.IncomingMessage, signal: AbortSignal): Request {
   const method = (req.method ?? "GET").toUpperCase();
   const host =
-    firstHeaderValue(req.headers.host) ??
-    firstHeaderValue(req.headers[":authority"]) ??
+    firstNodeHeaderValue(req.headers.host) ??
+    firstNodeHeaderValue(req.headers[":authority"]) ??
     "localhost";
   const init = {
     method,
@@ -67,13 +64,6 @@ function nodeRequestToWebRequest(req: http.IncomingMessage, signal: AbortSignal)
     init.duplex = "half";
   }
   return new Request(`http://${host}${req.url ?? "/"}`, init as RequestInit);
-}
-
-function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
 }
 
 export function getPort(
@@ -118,8 +108,8 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       const authedReq = req as AuthenticatedIncomingMessage;
       const authInfo = getAuthInfo?.(authedReq);
       if (authInfo) authedReq.auth = authInfo;
-      const host = firstHeaderValue(req.headers.host) ?? "";
-      const origin = firstHeaderValue(req.headers.origin) ?? "";
+      const host = firstNodeHeaderValue(req.headers.host) ?? "";
+      const origin = firstNodeHeaderValue(req.headers.origin) ?? "";
       response = await fetchHandler.fetch(nodeRequestToWebRequest(req, abortController.signal), {
         authInfo,
         clientAddress: req.socket.remoteAddress,
@@ -136,15 +126,24 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     if (response.headers.get("connection")?.toLowerCase() === "close") {
       res.shouldKeepAlive = false;
     }
+    const releaseUnreadBody = response.status === 413 && (req.method ?? "GET") !== "GET";
     await writeWebResponse(response, res, abortController.signal, {
       onerror: (error) => logger.warn({ err: error.message }, "mcp.http.failed"),
     });
     finished = true;
+    if (releaseUnreadBody && !req.complete && !req.destroyed) {
+      req.resume();
+      req.destroy();
+    }
   });
-  httpServer.requestTimeout = intEnv("B2_HTTP_REQUEST_TIMEOUT_MS", DEFAULT_HTTP_REQUEST_TIMEOUT_MS);
+  httpServer.requestTimeout = positiveIntEnv(
+    process.env,
+    "B2_HTTP_REQUEST_TIMEOUT_MS",
+    DEFAULT_HTTP_REQUEST_TIMEOUT_MS,
+  );
   httpServer.headersTimeout = Math.min(
     httpServer.requestTimeout,
-    intEnv("B2_HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HTTP_HEADERS_TIMEOUT_MS),
+    positiveIntEnv(process.env, "B2_HTTP_HEADERS_TIMEOUT_MS", DEFAULT_HTTP_HEADERS_TIMEOUT_MS),
   );
   httpServer.timeout = httpServer.requestTimeout;
 
@@ -172,7 +171,7 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info(
-      { signal, drainMs: SHUTDOWN_DRAIN_MS, activeSessions: sessions.size },
+      { signal, drainMs: HTTP_SHUTDOWN_DRAIN_MS, activeSessions: sessions.size },
       "server.shutdown",
     );
     drain();
@@ -183,7 +182,7 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
     setTimeout(() => {
       logger.error("server.drainTimeout");
       process.exit(1);
-    }, SHUTDOWN_DRAIN_MS).unref();
+    }, HTTP_SHUTDOWN_DRAIN_MS).unref();
   }
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));

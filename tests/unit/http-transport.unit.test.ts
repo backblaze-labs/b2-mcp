@@ -84,6 +84,47 @@ function postDeclaredLargeBody(port: number, pathname: string): Promise<Resp> {
   });
 }
 
+function postDeclaredLargeBodyWithoutEnding(
+  port: number,
+  pathname: string,
+): Promise<{ status: number; closed: boolean }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let status = 0;
+    let req: http.ClientRequest;
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (closed: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      req.destroy();
+      resolve({ status, closed });
+    };
+    req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: pathname,
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(4 * 1024 * 1024),
+        },
+      },
+      (res) => {
+        status = res.statusCode ?? 0;
+        res.resume();
+        res.on("close", () => finish(true));
+        res.on("end", () => finish(true));
+      },
+    );
+    req.on("error", () => finish(status === 413));
+    timer = setTimeout(() => finish(false), 1000);
+    timer.unref();
+    req.write("{");
+  });
+}
+
 function requestAndTrackEnd(
   port: number,
   method: string,
@@ -354,6 +395,12 @@ describe("HTTP transport handler", () => {
     const res = await postDeclaredLargeBody(port, "/mcp");
     expect(res.status).toBe(413);
     expect(res.headers.connection).toBe("close");
+  });
+
+  it("closes declared-oversized requests without waiting for the full body", async () => {
+    const res = await postDeclaredLargeBodyWithoutEnding(port, "/mcp");
+    expect(res.status).toBe(413);
+    expect(res.closed).toBe(true);
   });
 
   it("defaults unset B2_HTTP_CREDENTIAL_MODE to header compatibility", async () => {

@@ -4,6 +4,7 @@ import type { AuthInfo } from "@modelcontextprotocol/server";
 import { logger } from "./utils/logger.js";
 import { B2Config, DestructivePolicy } from "./utils/types.js";
 import { parseMcpOutputFormat, preflightMcpOutputFormat } from "./utils/result-serializer.js";
+import type { EnvSource } from "./utils/config.js";
 
 const DEFAULT_REGION = "us-west-004";
 
@@ -71,6 +72,7 @@ interface ConfigOptions {
   transport: "stdio" | "http";
   allowLocalFiles: boolean;
   fileRoot: string | null;
+  env: EnvSource;
   strictOptionalPairs?: boolean;
 }
 
@@ -116,8 +118,11 @@ function capabilityCacheKeyForConfig(prefix: string, config: B2Config): string {
   return `${prefix}:${verificationFingerprintConfig(config)}`;
 }
 
-function resolveDestructivePolicy(transport: "stdio" | "http"): DestructivePolicy {
-  const value = process.env.B2_DESTRUCTIVE_POLICY;
+function resolveDestructivePolicy(
+  transport: "stdio" | "http",
+  env: EnvSource = process.env,
+): DestructivePolicy {
+  const value = env.B2_DESTRUCTIVE_POLICY;
   if (transport === "http") {
     return value === "allow" || value === "block" || value === "confirm" ? value : "block";
   }
@@ -182,20 +187,20 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     appKey: app.key,
     masterKeyId: master.id,
     masterKey: master.key,
-    region: process.env.B2_REGION ?? DEFAULT_REGION,
+    region: options.env.B2_REGION ?? DEFAULT_REGION,
     allowLocalFiles: options.allowLocalFiles,
     fileRoot: options.fileRoot,
-    destructivePolicy: resolveDestructivePolicy(options.transport),
-    outputFormat: resolveOutputFormat(),
+    destructivePolicy: resolveDestructivePolicy(options.transport, options.env),
+    outputFormat: resolveOutputFormat(options.env),
     transport: options.transport,
   };
   config.credentialFingerprint = fingerprintConfig(config);
   return config;
 }
 
-function resolveOutputFormat() {
+function resolveOutputFormat(env: EnvSource = process.env) {
   try {
-    const outputFormat = parseMcpOutputFormat(process.env.B2_MCP_OUTPUT_FORMAT);
+    const outputFormat = parseMcpOutputFormat(env.B2_MCP_OUTPUT_FORMAT);
     preflightMcpOutputFormat(outputFormat);
     return outputFormat;
   } catch (err) {
@@ -207,14 +212,14 @@ function resolveOutputFormat() {
   }
 }
 
-function envMaterial(prefix = "B2"): CredentialMaterial {
+function envMaterial(prefix = "B2", env: EnvSource = process.env): CredentialMaterial {
   return {
-    applicationKeyId: process.env[`${prefix}_APPLICATION_KEY_ID`],
-    applicationKey: process.env[`${prefix}_APPLICATION_KEY`],
-    appKeyId: process.env[`${prefix}_APP_KEY_ID`],
-    appKey: process.env[`${prefix}_APP_KEY`],
-    masterKeyId: process.env[`${prefix}_MASTER_KEY_ID`],
-    masterKey: process.env[`${prefix}_MASTER_KEY`],
+    applicationKeyId: env[`${prefix}_APPLICATION_KEY_ID`],
+    applicationKey: env[`${prefix}_APPLICATION_KEY`],
+    appKeyId: env[`${prefix}_APP_KEY_ID`],
+    appKey: env[`${prefix}_APP_KEY`],
+    masterKeyId: env[`${prefix}_MASTER_KEY_ID`],
+    masterKey: env[`${prefix}_MASTER_KEY`],
   };
 }
 
@@ -252,11 +257,12 @@ export function hasCredentialHeaders(headers: http.IncomingHttpHeaders): boolean
   return Object.keys(headers).some((name) => ALL_CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()));
 }
 
-function httpConfigOptions(): ConfigOptions {
+function httpConfigOptions(env: EnvSource = process.env): ConfigOptions {
   return {
     transport: "http",
-    allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES === "true" && !!process.env.B2_FILE_ROOT,
-    fileRoot: process.env.B2_FILE_ROOT ?? null,
+    allowLocalFiles: env.B2_ALLOW_LOCAL_FILES === "true" && !!env.B2_FILE_ROOT,
+    fileRoot: env.B2_FILE_ROOT ?? null,
+    env,
     strictOptionalPairs: true,
   };
 }
@@ -264,16 +270,19 @@ function httpConfigOptions(): ConfigOptions {
 export class StdioEnvCredentialProvider implements CredentialProvider {
   readonly name = "stdio-env";
 
+  constructor(private readonly env: EnvSource = process.env) {}
+
   resolve(): CredentialResolution {
-    if (process.env.B2_APP_KEY_ID) {
+    if (this.env.B2_APP_KEY_ID) {
       logger.warn(
         "config.deprecated: B2_APP_KEY_ID/B2_APP_KEY is deprecated. Use B2_APPLICATION_KEY_ID/B2_APPLICATION_KEY with B2_MASTER_KEY_* only when a separate master credential is required.",
       );
     }
-    const config = configFromMaterial(envMaterial(), {
+    const config = configFromMaterial(envMaterial("B2", this.env), {
       transport: "stdio",
-      allowLocalFiles: process.env.B2_ALLOW_LOCAL_FILES !== "false",
-      fileRoot: process.env.B2_FILE_ROOT ?? null,
+      allowLocalFiles: this.env.B2_ALLOW_LOCAL_FILES !== "false",
+      fileRoot: this.env.B2_FILE_ROOT ?? null,
+      env: this.env,
       strictOptionalPairs: false,
     });
     return {
@@ -287,11 +296,16 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
 export class HttpHeaderCredentialProvider implements CredentialProvider {
   readonly name = "http-headers";
 
+  constructor(private readonly env: EnvSource = process.env) {}
+
   resolve(context?: CredentialProviderContext): CredentialResolution {
     if (!context?.req) {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
     }
-    const config = configFromMaterial(headerMaterial(context.req.headers), httpConfigOptions());
+    const config = configFromMaterial(
+      headerMaterial(context.req.headers),
+      httpConfigOptions(this.env),
+    );
     return {
       config,
       cacheKey: `credential:${config.credentialFingerprint}`,
@@ -303,6 +317,8 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
 export class HttpServerCredentialProvider implements CredentialProvider {
   readonly name = "http-server";
 
+  constructor(private readonly env: EnvSource = process.env) {}
+
   resolve(context?: CredentialProviderContext): CredentialResolution {
     if (context?.req && hasCredentialHeaders(context.req.headers)) {
       throw new CredentialResolutionError(
@@ -311,7 +327,7 @@ export class HttpServerCredentialProvider implements CredentialProvider {
         "credential_headers_rejected",
       );
     }
-    const config = configFromMaterial(envMaterial(), httpConfigOptions());
+    const config = configFromMaterial(envMaterial("B2", this.env), httpConfigOptions(this.env));
     return {
       config,
       cacheKey: `credential:${config.credentialFingerprint}`,
@@ -329,9 +345,11 @@ export interface SecretBroker {
 }
 
 export class EnvSecretBroker implements SecretBroker {
+  constructor(private readonly env: EnvSource = process.env) {}
+
   resolve(ref: string): CredentialMaterial | null {
     const prefix = credentialRefEnvPrefix(ref);
-    const material = envMaterial(prefix);
+    const material = envMaterial(prefix, this.env);
     return material.applicationKeyId && material.applicationKey ? material : null;
   }
 }
@@ -367,8 +385,8 @@ function principalFromAuthInfo(authInfo: AuthInfo): string | null {
 let cachedPrincipalMapRaw: string | undefined;
 let cachedPrincipalMap: Record<string, string> | undefined;
 
-function principalMap(): Record<string, string> {
-  const raw = process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
+function principalMap(env: EnvSource = process.env): Record<string, string> {
+  const raw = env.B2_PRINCIPAL_CREDENTIAL_MAP;
   if (!raw) return {};
   if (raw === cachedPrincipalMapRaw && cachedPrincipalMap) return cachedPrincipalMap;
   try {
@@ -403,7 +421,10 @@ function principalMap(): Record<string, string> {
 export class HttpPrincipalCredentialProvider implements CredentialProvider {
   readonly name = "http-principal";
 
-  constructor(private readonly broker: SecretBroker = new EnvSecretBroker()) {}
+  constructor(
+    private readonly broker: SecretBroker = new EnvSecretBroker(),
+    private readonly env: EnvSource = process.env,
+  ) {}
 
   resolve(context?: CredentialProviderContext): CredentialResolution {
     if (!context?.req) {
@@ -432,7 +453,7 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
         "missing_principal",
       );
     }
-    const map = principalMap();
+    const map = principalMap(this.env);
     if (!Object.prototype.hasOwnProperty.call(map, principal)) {
       throw new CredentialResolutionError(
         "No credential mapping for principal",
@@ -449,7 +470,7 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
         "credential_ref_not_found",
       );
     }
-    const config = configFromMaterial(material, httpConfigOptions());
+    const config = configFromMaterial(material, httpConfigOptions(this.env));
     return {
       config,
       cacheKey: `principal:${credentialFingerprint(principal)}`,
@@ -461,12 +482,12 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
   }
 
   validateConfiguration(): void {
-    principalMap();
+    principalMap(this.env);
   }
 }
 
-export function getHttpCredentialMode(): HttpCredentialMode {
-  const raw = (process.env.B2_HTTP_CREDENTIAL_MODE ?? "headers").trim().toLowerCase();
+export function getHttpCredentialMode(env: EnvSource = process.env): HttpCredentialMode {
+  const raw = (env.B2_HTTP_CREDENTIAL_MODE ?? "headers").trim().toLowerCase();
   if (raw === "server" || raw === "principal" || raw === "headers") return raw;
   throw new CredentialResolutionError(
     "Invalid B2_HTTP_CREDENTIAL_MODE",
@@ -475,21 +496,25 @@ export function getHttpCredentialMode(): HttpCredentialMode {
   );
 }
 
-export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProvider {
-  switch (getHttpCredentialMode()) {
+export function getHttpCredentialProvider(
+  broker?: SecretBroker,
+  env: EnvSource = process.env,
+): CredentialProvider {
+  switch (getHttpCredentialMode(env)) {
     case "headers":
-      return new HttpHeaderCredentialProvider();
+      return new HttpHeaderCredentialProvider(env);
     case "principal":
-      return new HttpPrincipalCredentialProvider(broker);
+      return new HttpPrincipalCredentialProvider(broker ?? new EnvSecretBroker(env), env);
     case "server":
-      return new HttpServerCredentialProvider();
+      return new HttpServerCredentialProvider(env);
   }
 }
 
 export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
+  env: EnvSource = process.env,
 ): void {
-  resolveOutputFormat();
+  resolveOutputFormat(env);
   provider.validateConfiguration?.();
 }
 

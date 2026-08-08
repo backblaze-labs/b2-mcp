@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added a deployment support matrix, shared hosted credential/security guide,
+  provider deployment guides, and an experimental native Cloudflare Worker
+  adapter that reuses the canonical MCP HTTP implementation.
 - Added a digest-pinned production Docker image, container CI smoke coverage,
   signed multi-platform GHCR release publishing, and Docker run docs for HTTP
   and stdio transports.
@@ -16,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package/build-context secret exclusion policy.
 
 ### Changed
+- Extracted the HTTP request policy into a shared fetch handler and added
+  Worker adapter compilation to the no-credential verification path.
 - Added `/ready` alongside `/health` for HTTP deployments and gated readiness
   metadata behind the same Host/Origin checks used for MCP traffic.
 

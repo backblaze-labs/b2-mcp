@@ -18,6 +18,7 @@
     "B2_ALLOWED_ORIGINS": "https://client.example.com",
     "B2_MCP_OUTPUT_FORMAT": "json",
     "B2_MCP_TRUSTED_EDGE_AUTH": "cloudflare-access",
-    "B2_MCP_OAUTH_REQUIRED_SCOPES": "b2:mcp"
+    "B2_MCP_ACCESS_TEAM_DOMAIN": "https://example.cloudflareaccess.com",
+    "B2_MCP_ACCESS_AUDIENCE": "REPLACE_WITH_CLOUDFLARE_ACCESS_AUD"
   }
 }

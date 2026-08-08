@@ -42,6 +42,14 @@ function read(relativePath: string): string {
   return readFileSync(join(root, relativePath), "utf8");
 }
 
+function sectionBetween(text: string, start: string, end: string): string {
+  const startIndex = text.indexOf(start);
+  const endIndex = text.indexOf(end, startIndex + start.length);
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  expect(endIndex).toBeGreaterThan(startIndex);
+  return text.slice(startIndex, endIndex);
+}
+
 function listFiles(dir: string): string[] {
   const absolute = join(root, dir);
   return readdirSync(absolute)
@@ -106,6 +114,7 @@ describe("deployment documentation", () => {
       "B2_APP_KEY",
       "B2_APP_KEY_ID",
       "B2_DESTRUCTIVE_POLICY",
+      "B2_FILE_ROOT",
       "B2_HTTP_CREDENTIAL_MODE",
       "B2_MASTER_KEY",
       "B2_MASTER_KEY_ID",
@@ -122,6 +131,7 @@ describe("deployment documentation", () => {
     }
     const allowedPatterns = [
       /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)(?:_ID)?$/,
+      /^B2_MCP_ACCESS_[A-Z0-9_]+$/,
       /^B2_MCP_OAUTH_[A-Z0-9_]+$/,
     ];
     const providerSpecific = new Set([
@@ -155,15 +165,48 @@ describe("deployment documentation", () => {
   it("keeps the native Worker adapter as a thin shared-handler boundary", () => {
     const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
     const worker = read("deploy/cloudflare-worker/src/index.ts");
+    const auth = read("deploy/cloudflare-worker/src/auth.ts");
     const wrangler = read("deploy/cloudflare-worker/wrangler.jsonc");
 
     expect(pkg.scripts["build:deploy:cloudflare-worker"]).toBe(
       "tsc -p deploy/cloudflare-worker/tsconfig.json",
     );
     expect(worker).toContain("../../../src/http-handler.js");
+    expect(worker).toContain("verifiedAuthInfoForRequest");
+    expect(worker).not.toContain("process.env");
+    expect(auth).toContain("cf-access-jwt-assertion");
     expect(worker).not.toContain("registerBucketTools");
     expect(worker).not.toContain("@modelcontextprotocol/sdk");
     expect(wrangler).toContain('"nodejs_compat"');
-    expect(wrangler).toContain('"compatibility_date": "2026-08-08"');
+    expect(wrangler).toMatch(/"compatibility_date": "\d{4}-\d{2}-\d{2}"/);
+    expect(wrangler).not.toContain("B2_MCP_OAUTH_REQUIRED_SCOPES");
+  });
+
+  it("keeps deployment guides covered by the public contract register", () => {
+    const contracts = read("docs/PUBLIC_CONTRACTS.md");
+
+    expect(contracts).toContain("deployment/*.md");
+    expect(contracts).toContain("Provider-specific deployment recipes");
+  });
+
+  it("keeps the AWS exact setup runnable enough to create ECS resources", () => {
+    const aws = read("docs/deployment/aws.md");
+    const exactSetup = sectionBetween(aws, "## Exact setup", "## Secrets");
+
+    expect(exactSetup).toContain("aws ecs create-cluster");
+    expect(exactSetup).toContain("aws ecs register-task-definition");
+    expect(exactSetup).toContain("aws ecs create-service");
+    expect(exactSetup).toContain("B2_MCP_IMAGE");
+    expect(exactSetup).toContain("B2_APPLICATION_KEY");
+  });
+
+  it("labels base commits as runtime baselines instead of verification commits", () => {
+    const docs = ["docs/DEPLOY.md", ...providerGuides.map((guide) => `docs/deployment/${guide}`)];
+
+    for (const doc of docs) {
+      const text = read(doc);
+      expect(text).not.toContain("Repository baseline: `6819d74`");
+      if (text.includes("6819d74")) expect(text).toContain("Base/runtime baseline");
+    }
   });
 });

@@ -1,6 +1,6 @@
 # Fly.io
 
-Last verified: 2026-08-08. Repository baseline: `6819d74`. Package version:
+Last verified: 2026-08-08. Base/runtime baseline: `6819d74`. Package version:
 `0.1.0`. MCP revision: `2026-07-28`. Owner: Gonza (`@goanpeca`).
 Support level: experimental until protected live smoke exists.
 

@@ -11,6 +11,12 @@ export function parseIntEnv(raw: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export type EnvSource = Record<string, string | undefined>;
+
+export function positiveIntEnv(env: EnvSource, name: string, fallback: number): number {
+  return Math.max(1, parseIntEnv(env[name], fallback));
+}
+
 export const DEFAULT_HTTP_PORT = 3000;
 
 export class PortUsageError extends Error {

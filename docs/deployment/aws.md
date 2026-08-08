@@ -1,6 +1,6 @@
 # AWS ECS Fargate
 
-Last verified: 2026-08-08. Repository baseline: `6819d74`. Package version:
+Last verified: 2026-08-08. Base/runtime baseline: `6819d74`. Package version:
 `0.1.0`. MCP revision: `2026-07-28`. Owner: Gonza (`@goanpeca`).
 Support level: OCI-compatible. No protected live smoke exists yet.
 
@@ -28,19 +28,126 @@ for some customers.
 
 ## Exact setup
 
-Create Secrets Manager entries:
+Set deployment variables. Use an immutable image digest; do not deploy a mutable
+tag to production.
 
 ```bash
-aws secretsmanager create-secret \
-  --name b2-mcp/application-key-id \
-  --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_ID'
-aws secretsmanager create-secret \
-  --name b2-mcp/application-key \
-  --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_SECRET'
+export AWS_REGION="us-east-1"
+export AWS_ACCOUNT_ID="REPLACE_WITH_ACCOUNT_ID"
+export B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_IMAGE_DIGEST"
+export AWS_ECS_SUBNETS="subnet-REPLACE_ONE,subnet-REPLACE_TWO"
+export AWS_ECS_SECURITY_GROUP="sg-REPLACE_WITH_ECS_TASK_SECURITY_GROUP"
+export AWS_ECS_TARGET_GROUP_ARN="arn:aws:elasticloadbalancing:REPLACE_WITH_TARGET_GROUP"
+export AWS_ECS_EXECUTION_ROLE_ARN="arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/ecsTaskExecutionRole"
 ```
 
-Define a Fargate task with container port `3000`, `B2_MCP_TRANSPORT=http`, and
-the non-secret env vars from [security and credentials](security-and-credentials.md).
+Create the cluster, log group, and Secrets Manager entries:
+
+```bash
+aws ecs create-cluster \
+  --cluster-name b2-mcp \
+  --region "$AWS_REGION"
+
+aws logs create-log-group \
+  --log-group-name /ecs/b2-mcp \
+  --region "$AWS_REGION"
+
+aws secretsmanager create-secret \
+  --name b2-mcp/application-key-id \
+  --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_ID' \
+  --region "$AWS_REGION"
+
+aws secretsmanager create-secret \
+  --name b2-mcp/application-key \
+  --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_SECRET' \
+  --region "$AWS_REGION"
+```
+
+Register a Fargate task definition. Replace the account id in the secret ARNs
+or use `aws secretsmanager describe-secret --query ARN --output text`.
+
+```bash
+cat > /tmp/b2-mcp-task-definition.json <<'JSON'
+{
+  "family": "b2-mcp",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "REPLACE_WITH_B2_MCP_EXECUTION_ROLE_ARN",
+  "containerDefinitions": [
+    {
+      "name": "b2-mcp",
+      "image": "REPLACE_WITH_B2_MCP_IMAGE",
+      "essential": true,
+      "portMappings": [{ "containerPort": 3000, "protocol": "tcp" }],
+      "environment": [
+        { "name": "PORT", "value": "3000" },
+        { "name": "B2_MCP_TRANSPORT", "value": "http" },
+        { "name": "B2_HTTP_CREDENTIAL_MODE", "value": "server" },
+        { "name": "B2_ALLOW_LOCAL_FILES", "value": "false" },
+        { "name": "B2_DESTRUCTIVE_POLICY", "value": "block" },
+        { "name": "B2_ALLOWED_HOSTS", "value": "mcp.example.com" },
+        { "name": "B2_ALLOWED_ORIGINS", "value": "https://client.example.com" }
+      ],
+      "secrets": [
+        {
+          "name": "B2_APPLICATION_KEY_ID",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_WITH_REGION:REPLACE_WITH_ACCOUNT_ID:secret:b2-mcp/application-key-id"
+        },
+        {
+          "name": "B2_APPLICATION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REPLACE_WITH_REGION:REPLACE_WITH_ACCOUNT_ID:secret:b2-mcp/application-key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/b2-mcp",
+          "awslogs-region": "REPLACE_WITH_REGION",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      }
+    }
+  ]
+}
+JSON
+
+sed -i.bak \
+  -e "s|REPLACE_WITH_B2_MCP_EXECUTION_ROLE_ARN|$AWS_ECS_EXECUTION_ROLE_ARN|g" \
+  -e "s|REPLACE_WITH_B2_MCP_IMAGE|$B2_MCP_IMAGE|g" \
+  -e "s|REPLACE_WITH_REGION|$AWS_REGION|g" \
+  -e "s|REPLACE_WITH_ACCOUNT_ID|$AWS_ACCOUNT_ID|g" \
+  /tmp/b2-mcp-task-definition.json
+
+aws ecs register-task-definition \
+  --cli-input-json file:///tmp/b2-mcp-task-definition.json \
+  --region "$AWS_REGION"
+```
+
+Create the service behind an existing HTTPS ALB target group. The target group
+must be IP target type, protocol HTTP, port `3000`, health path `/health`, and
+reachable only from the ALB security group.
+
+```bash
+aws ecs create-service \
+  --cluster b2-mcp \
+  --service-name b2-mcp \
+  --task-definition b2-mcp \
+  --desired-count 1 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[$AWS_ECS_SUBNETS],securityGroups=[$AWS_ECS_SECURITY_GROUP],assignPublicIp=DISABLED}" \
+  --load-balancers "targetGroupArn=$AWS_ECS_TARGET_GROUP_ARN,containerName=b2-mcp,containerPort=3000" \
+  --health-check-grace-period-seconds 60 \
+  --region "$AWS_REGION"
+```
 
 ## Secrets
 
@@ -52,10 +159,16 @@ definition. Do not put B2 keys in task-definition plaintext, user data, or logs.
 Create or update the ECS service behind an HTTPS ALB target group:
 
 ```bash
+aws ecs register-task-definition \
+  --cli-input-json file:///tmp/b2-mcp-task-definition.json \
+  --region "$AWS_REGION"
+
 aws ecs update-service \
   --cluster b2-mcp \
   --service b2-mcp \
-  --force-new-deployment
+  --task-definition b2-mcp \
+  --force-new-deployment \
+  --region "$AWS_REGION"
 ```
 
 Use no AWS S3 dependency. Backblaze B2 remains the data service.

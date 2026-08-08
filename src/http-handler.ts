@@ -17,7 +17,8 @@ import {
 } from "./server.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
-import { parseIntEnv } from "./utils/config.js";
+import { type EnvSource, positiveIntEnv } from "./utils/config.js";
+import { jsonResponse } from "./utils/http-response.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 import { runWithMcpRequestSignal } from "./request-context.js";
 import {
@@ -32,7 +33,7 @@ import {
 
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;
-const SHUTDOWN_DRAIN_MS = 10 * 1000;
+export const HTTP_SHUTDOWN_DRAIN_MS = 10 * 1000;
 const DEFAULT_MAX_IN_FLIGHT = 1000;
 const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
 const STATELESS_ACTIVE_SESSIONS = 0;
@@ -52,8 +53,8 @@ type StreamConstructor = new <T>(source: {
 const WebReadableStream = (globalThis as unknown as { ReadableStream: StreamConstructor })
   .ReadableStream;
 
-function csvEnv(name: string): string[] {
-  return (process.env[name] ?? "")
+function csvEnv(env: EnvSource, name: string): string[] {
+  return (env[name] ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -112,9 +113,9 @@ function originMatchesAllowedHost(origin: string, allowedHosts: string[]): boole
   );
 }
 
-function hostOriginAllowed(headers: Headers): boolean {
-  const allowedHosts = csvEnv("B2_ALLOWED_HOSTS");
-  const allowedOrigins = csvEnv("B2_ALLOWED_ORIGINS");
+function hostOriginAllowed(headers: Headers, env: EnvSource): boolean {
+  const allowedHosts = csvEnv(env, "B2_ALLOWED_HOSTS");
+  const allowedOrigins = csvEnv(env, "B2_ALLOWED_ORIGINS");
   const host = headers.get("host") ?? "";
   const origin = headers.get("origin") ?? "";
   const hostname = hostWithoutPort(host);
@@ -132,10 +133,6 @@ function hostOriginAllowed(headers: Headers): boolean {
   return true;
 }
 
-function intEnv(name: string, fallback: number): number {
-  return Math.max(1, parseIntEnv(process.env[name], fallback));
-}
-
 export function deriveRateKey(cacheKey: string): string {
   return crypto.createHash("sha256").update(cacheKey).digest("hex").slice(0, 16);
 }
@@ -151,8 +148,8 @@ export interface InFlightLimiter {
 }
 
 export function createInFlightLimiter(
-  maxTotal = intEnv("B2_MAX_SESSIONS", DEFAULT_MAX_IN_FLIGHT),
-  maxPerKey = intEnv("B2_MAX_SESSIONS_PER_KEY", DEFAULT_MAX_IN_FLIGHT_PER_KEY),
+  maxTotal = positiveIntEnv(process.env, "B2_MAX_SESSIONS", DEFAULT_MAX_IN_FLIGHT),
+  maxPerKey = positiveIntEnv(process.env, "B2_MAX_SESSIONS_PER_KEY", DEFAULT_MAX_IN_FLIGHT_PER_KEY),
 ): InFlightLimiter {
   let active = 0;
   const byKey = new Map<string, number>();
@@ -316,7 +313,10 @@ interface ProtocolPreflight {
   sdkHeaders?: Record<string, string>;
 }
 
-function firstHeaderValue(headers: Record<string, string>, name: string): string | undefined {
+function firstSanitizedHeaderValue(
+  headers: Record<string, string>,
+  name: string,
+): string | undefined {
   return headers[name.toLowerCase()];
 }
 
@@ -328,16 +328,16 @@ function classifyProtocolPreflight(
 ): ProtocolPreflight {
   if (httpMethod === "GET" || httpMethod === "DELETE") return { protocolOnly: true };
   if (httpMethod !== "POST") return { protocolOnly: false };
-  if (!isJsonContentType(firstHeaderValue(sanitizedHeaders, "content-type") ?? null)) {
+  if (!isJsonContentType(firstSanitizedHeaderValue(sanitizedHeaders, "content-type") ?? null)) {
     return { protocolOnly: true };
   }
 
   if (!parsed.ok) return { protocolOnly: false };
   const outcome = classifyInboundRequest({
     httpMethod,
-    protocolVersionHeader: firstHeaderValue(sanitizedHeaders, "mcp-protocol-version"),
-    mcpMethodHeader: firstHeaderValue(sanitizedHeaders, "mcp-method"),
-    mcpNameHeader: firstHeaderValue(sanitizedHeaders, "mcp-name"),
+    protocolVersionHeader: firstSanitizedHeaderValue(sanitizedHeaders, "mcp-protocol-version"),
+    mcpMethodHeader: firstSanitizedHeaderValue(sanitizedHeaders, "mcp-method"),
+    mcpNameHeader: firstSanitizedHeaderValue(sanitizedHeaders, "mcp-name"),
     body: parsed.body,
   });
 
@@ -352,7 +352,7 @@ function classifyProtocolPreflight(
     outcome.classification.revision,
     parsed.body,
   );
-  const headerName = firstHeaderValue(sanitizedHeaders, "mcp-name");
+  const headerName = firstSanitizedHeaderValue(sanitizedHeaders, "mcp-name");
   const bodyMethod = requestMethodFromParsedBody(parsed.body);
   if (bodyMethod !== "tools/call" || !headerName) return { protocolOnly: false, sdkHeaders };
 
@@ -434,17 +434,6 @@ function incomingHeadersFromRequest(headers: Headers): AuthenticatedIncomingMess
   return incoming;
 }
 
-function jsonResponse(
-  status: number,
-  body: unknown,
-  headers: Record<string, string> = {},
-): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...headers },
-  });
-}
-
 async function credentialErrorResponse(err: unknown): Promise<Response> {
   if (err instanceof CredentialResolutionError) {
     return jsonResponse(err.status, { error: err.message });
@@ -471,9 +460,14 @@ type CappedBodyResult =
   | { ok: true; body?: string }
   | { ok: false; response: Response; aborted?: boolean };
 
+async function cancelRequestBody(request: Request): Promise<void> {
+  await request.body?.cancel().catch(() => undefined);
+}
+
 async function readCappedBody(request: Request): Promise<CappedBodyResult> {
   if (request.method.toUpperCase() !== "POST") return { ok: true };
   if (contentLengthExceedsLimit(request.headers)) {
+    await cancelRequestBody(request);
     return {
       ok: false,
       response: jsonResponse(413, { error: "Request body too large" }, { Connection: "close" }),
@@ -532,9 +526,12 @@ function requestLimitKey(request: Request, clientAddress?: string): string {
   return `http:${clientAddress ?? forwarded ?? "unknown"}`;
 }
 
-function readiness(provider: CredentialProvider): { ok: true } | { ok: false; error: string } {
+function readiness(
+  provider: CredentialProvider,
+  env: EnvSource,
+): { ok: true } | { ok: false; error: string } {
   try {
-    validateHttpCredentialConfiguration(provider);
+    validateHttpCredentialConfiguration(provider, env);
     return { ok: true };
   } catch (err) {
     logger.warn(
@@ -618,6 +615,7 @@ function responseWithDeferredCleanup(response: Response, cleanup: () => Promise<
 }
 
 export interface B2McpFetchHandlerOptions {
+  env?: EnvSource;
   credentialProvider?: CredentialProvider;
   secretBroker?: SecretBroker;
   mcpHandler?: Pick<McpHttpHandler, "fetch" | "close">;
@@ -642,13 +640,17 @@ export interface B2McpFetchHandler {
 
 export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}): B2McpFetchHandler {
   const sessions = new Map<string, never>();
-  const inFlight = createInFlightLimiter();
+  const env = options.env ?? process.env;
+  const inFlight = createInFlightLimiter(
+    positiveIntEnv(env, "B2_MAX_SESSIONS", DEFAULT_MAX_IN_FLIGHT),
+    positiveIntEnv(env, "B2_MAX_SESSIONS_PER_KEY", DEFAULT_MAX_IN_FLIGHT_PER_KEY),
+  );
   let shuttingDown = false;
   let mcpHandlerClosed = false;
   let forcedCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
   const credentialProvider =
-    options.credentialProvider ?? getHttpCredentialProvider(options.secretBroker);
+    options.credentialProvider ?? getHttpCredentialProvider(options.secretBroker, env);
   const createServerForRequest = options.createServer ?? createMcpServerDefinition;
   const fetchCapabilitiesForRequest = options.fetchCapabilities ?? fetchCredentialCapabilities;
   const preparedRequestScope = new AsyncLocalStorage<PreparedMcpRequest>();
@@ -724,14 +726,14 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
     }
 
     if (
-      !hostOriginAllowed(request.headers) &&
+      !hostOriginAllowed(request.headers, env) &&
       !(isHealthEndpoint && requestOptions.loopbackHealthProbe === true)
     ) {
       return jsonResponse(403, { error: "Host/Origin not allowed" });
     }
 
     if (isHealthEndpoint) {
-      const ready = readiness(credentialProvider);
+      const ready = readiness(credentialProvider, env);
       if (!ready.ok) return jsonResponse(503, healthBody("error", inFlight.active, ready.error));
       return jsonResponse(200, healthBody("ok", inFlight.active));
     }
@@ -867,7 +869,7 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
     if (shuttingDown) return;
     shuttingDown = true;
     if (idleSweep) clearInterval(idleSweep);
-    forcedCloseTimer = setTimeout(closeMcpHandler, SHUTDOWN_DRAIN_MS);
+    forcedCloseTimer = setTimeout(closeMcpHandler, HTTP_SHUTDOWN_DRAIN_MS);
     (forcedCloseTimer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
     maybeCloseMcpHandlerAfterDrain();
   }
