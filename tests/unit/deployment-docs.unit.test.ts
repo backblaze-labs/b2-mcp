@@ -137,6 +137,7 @@ describe("deployment documentation", () => {
     ];
     const providerSpecific = new Set([
       "B2_MCP_IMAGE",
+      "B2_MCP_AUTH_FRONT_DOOR",
       "B2_MCP_KEY_ID_SECRET_ARN",
       "B2_MCP_KEY_SECRET_ARN",
       "B2_MCP_TRUSTED_EDGE_AUTH",
@@ -208,6 +209,8 @@ describe("deployment documentation", () => {
     const exactSetup = sectionBetween(aws, "## Exact setup", "## Secrets");
 
     expect(exactSetup).toContain("aws ecs create-cluster");
+    expect(exactSetup).toContain("NAT gateway");
+    expect(exactSetup).toContain("assignPublicIp=DISABLED");
     expect(exactSetup).toContain("aws ecs register-task-definition");
     expect(exactSetup).toContain("aws ecs create-service");
     expect(exactSetup).toContain("B2_MCP_IMAGE");
@@ -216,6 +219,31 @@ describe("deployment documentation", () => {
     expect(exactSetup).toContain("B2_MCP_KEY_SECRET_ARN");
     expect(exactSetup).not.toContain("secret:b2-mcp/application-key-id");
     expect(exactSetup).not.toContain('secret:b2-mcp/application-key"');
+  });
+
+  it("backs the Cloudflare Containers guide with a route-disabled template", () => {
+    const guide = read("docs/deployment/cloudflare-containers.md");
+    const exactSetup = sectionBetween(guide, "## Exact setup", "## Secrets");
+    const deployment = sectionBetween(guide, "## Deployment", "## Custom domains and TLS");
+    const wrangler = read("deploy/cloudflare-containers/wrangler.jsonc");
+    const worker = read("deploy/cloudflare-containers/src/index.js");
+
+    expect(exactSetup).toContain("deploy/cloudflare-containers/src/index.js");
+    expect(exactSetup).toContain("deploy/cloudflare-containers/wrangler.jsonc");
+    expect(exactSetup).toContain("wrangler containers push");
+    expect(exactSetup).toContain("B2_APPLICATION_KEY_ID");
+    expect(deployment).toContain("B2_MCP_AUTH_FRONT_DOOR=configured");
+    expect(deployment).toContain("returns");
+    expect(deployment).toContain("503");
+    expect(wrangler).toContain('"workers_dev": false');
+    expect(wrangler).toContain('"containers"');
+    expect(wrangler).toContain('"durable_objects"');
+    expect(wrangler).toContain('"migrations"');
+    expect(wrangler).toContain('"name": "MCP_CONTAINER"');
+    expect(worker).toContain("class B2McpContainer extends Container");
+    expect(worker).toContain("getContainer(env.MCP_CONTAINER");
+    expect(worker).toContain("startAndWaitForPorts");
+    expect(worker).toContain("STRIPPED_PUBLIC_HEADERS");
   });
 
   it("keeps hosted experimental recipes private until caller auth exists", () => {
@@ -241,6 +269,8 @@ describe("deployment documentation", () => {
     );
 
     expect(azureDeployment).toContain("--ingress internal");
+    expect(azureDeployment).toContain("--secrets b2-application-key-id");
+    expect(azureDeployment).toContain("secretref:b2-application-key-id");
     expect(azureDeployment).not.toContain("--ingress external");
     expect(renderExactSetup).toContain("Service type: Private Service");
     expect(renderExactSetup).toContain("Do not create or attach a public");

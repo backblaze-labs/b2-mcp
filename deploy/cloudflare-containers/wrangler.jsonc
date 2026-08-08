@@ -1,0 +1,33 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "b2-mcp-container-frontdoor",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-08",
+  "workers_dev": false,
+  "containers": [
+    {
+      "class_name": "B2McpContainer",
+      "image": "registry.cloudflare.com/REPLACE_WITH_ACCOUNT_ID/b2-mcp:REPLACE_WITH_RELEASE_TAG",
+      "max_instances": 3
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "B2McpContainer",
+        "name": "MCP_CONTAINER"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["B2McpContainer"]
+    }
+  ],
+  "vars": {
+    "B2_ALLOWED_HOSTS": "mcp.example.com",
+    "B2_ALLOWED_ORIGINS": "https://client.example.com",
+    "B2_MCP_AUTH_FRONT_DOOR": "unset"
+  }
+}

@@ -25,14 +25,49 @@ The container must be unreachable except through the trusted Worker route.
 
 ## Exact setup
 
-Use the release digest:
+This recipe is source-checkout-only because it uses the checked-in
+`deploy/cloudflare-containers/` Worker front door template. Start from the
+immutable release digest, push a tagged copy to Cloudflare's container registry,
+and deploy the Worker with `workers_dev=false` so no public route exists until
+the Access or OAuth front door is attached.
 
 ```bash
 export B2_MCP_IMAGE='ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_RELEASE_DIGEST'
+export CLOUDFLARE_ACCOUNT_ID='REPLACE_WITH_ACCOUNT_ID'
+export CF_CONTAINER_RELEASE_TAG='v0.1.0-REPLACE_WITH_SHORT_DIGEST'
+
+docker pull "$B2_MCP_IMAGE"
+docker tag "$B2_MCP_IMAGE" "b2-mcp:$CF_CONTAINER_RELEASE_TAG"
+pnpm exec wrangler containers push "b2-mcp:$CF_CONTAINER_RELEASE_TAG"
+
+cp deploy/cloudflare-containers/wrangler.jsonc /tmp/b2-mcp-containers.wrangler.jsonc
+sed -i.bak \
+  -e "s|REPLACE_WITH_ACCOUNT_ID|$CLOUDFLARE_ACCOUNT_ID|g" \
+  -e "s|REPLACE_WITH_RELEASE_TAG|$CF_CONTAINER_RELEASE_TAG|g" \
+  /tmp/b2-mcp-containers.wrangler.jsonc
 ```
 
-Configure a Container class that routes to the image, sets `defaultPort = 3000`,
-and sets `sleepAfter` and `max_instances` according to the expected workload.
+The template includes:
+
+- `deploy/cloudflare-containers/src/index.js`, exporting `B2McpContainer` with
+  `defaultPort = 3000`, `requiredPorts = [3000]`, `sleepAfter = "10m"`, and
+  routing that strips public credential and identity headers before forwarding.
+- `deploy/cloudflare-containers/wrangler.jsonc`, declaring the Container class,
+  Durable Object binding `MCP_CONTAINER`, migration tag `v1`, `workers_dev=false`,
+  and `max_instances = 3`.
+
+Configure the B2 secrets as Worker secrets. The Worker injects them only into
+the container start environment; the MCP client never sends B2 keys.
+
+```bash
+printf '%s' 'REPLACE_WITH_B2_APPLICATION_KEY_ID' \
+  | pnpm exec wrangler secret put B2_APPLICATION_KEY_ID \
+      --config /tmp/b2-mcp-containers.wrangler.jsonc
+
+printf '%s' 'REPLACE_WITH_B2_APPLICATION_KEY_SECRET' \
+  | pnpm exec wrangler secret put B2_APPLICATION_KEY \
+      --config /tmp/b2-mcp-containers.wrangler.jsonc
+```
 
 ## Secrets
 
@@ -41,8 +76,26 @@ secret broker. Do not forward B2 credentials from the client through the Worker.
 
 ## Deployment
 
-Deploy the Worker/container pair with immutable image digest promotion. Record
-the image digest, Worker version, Durable Object migration tag, and route.
+Deploy the Worker/container pair without a public route first:
+
+```bash
+pnpm exec wrangler deploy --config /tmp/b2-mcp-containers.wrangler.jsonc
+```
+
+Create the Cloudflare Access or OAuth front door, WAF rule, and route for
+`mcp.example.com/mcp` before setting `B2_MCP_AUTH_FRONT_DOOR=configured` in the
+Worker vars. Until that reviewed front door is configured, the template returns
+`503` for `/mcp` even if a route is accidentally attached.
+
+```bash
+sed -i.bak \
+  -e 's|"B2_MCP_AUTH_FRONT_DOOR": "unset"|"B2_MCP_AUTH_FRONT_DOOR": "configured"|g' \
+  /tmp/b2-mcp-containers.wrangler.jsonc
+pnpm exec wrangler deploy --config /tmp/b2-mcp-containers.wrangler.jsonc
+```
+
+Record the image digest, Cloudflare registry tag, Worker version, Durable Object
+migration tag, and route.
 
 ## Custom domains and TLS
 
@@ -113,3 +166,4 @@ route is reachable without the Worker boundary and must be disabled.
 
 - [Cloudflare Containers](https://developers.cloudflare.com/containers/)
 - [Cloudflare Containers getting started](https://developers.cloudflare.com/containers/get-started/)
+- [Cloudflare Containers image management](https://developers.cloudflare.com/containers/platform-details/image-management/)

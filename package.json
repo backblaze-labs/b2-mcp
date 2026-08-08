@@ -96,6 +96,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
+    "@cloudflare/containers": "0.3.7",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/inspector": "2.1.0",
     "@modelcontextprotocol/node": "2.0.0",

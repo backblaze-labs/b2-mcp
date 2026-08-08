@@ -41,6 +41,13 @@ export AWS_ECS_TARGET_GROUP_ARN="arn:aws:elasticloadbalancing:REPLACE_WITH_TARGE
 export AWS_ECS_EXECUTION_ROLE_ARN="arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/ecsTaskExecutionRole"
 ```
 
+Use private subnets only when they have an explicit outbound path. With
+`assignPublicIp=DISABLED`, the selected subnets need a NAT gateway, egress-only
+internet gateway, or equivalent controlled egress that lets Fargate pull the
+image, read Secrets Manager, write CloudWatch Logs, and reach Backblaze B2. If
+you mirror the release image to private ECR, keep VPC endpoints for ECR,
+Secrets Manager, and CloudWatch Logs, and still provide outbound HTTPS to B2.
+
 Create the cluster, log group, and Secrets Manager entries. Capture the full
 secret ARNs returned by AWS; do not construct ARNs from secret names because AWS
 adds a generated suffix to the physical secret ARN.

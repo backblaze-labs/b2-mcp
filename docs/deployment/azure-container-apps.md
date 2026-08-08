@@ -35,15 +35,10 @@ authentication for `/mcp`.
 
 ## Secrets
 
-```bash
-az containerapp secret set \
-  --name b2-mcp \
-  --resource-group b2-mcp-rg \
-  --secrets b2-application-key-id=REPLACE_WITH_B2_APPLICATION_KEY_ID \
-            b2-application-key=REPLACE_WITH_B2_APPLICATION_KEY_SECRET
-```
-
-Prefer Key Vault references for production rotation.
+The smallest-safe command supplies Container Apps secrets during `az
+containerapp create`, before the first revision starts. Prefer Key Vault
+references for production rotation and never deploy a public revision before
+the authenticated front door exists.
 
 ## Deployment
 
@@ -55,6 +50,7 @@ az containerapp create \
   --image 'ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_RELEASE_DIGEST' \
   --target-port 3000 \
   --ingress internal \
+  --secrets b2-application-key-id=REPLACE_WITH_B2_APPLICATION_KEY_ID b2-application-key=REPLACE_WITH_B2_APPLICATION_KEY_SECRET \
   --env-vars B2_HTTP_CREDENTIAL_MODE=server B2_ALLOW_LOCAL_FILES=false B2_DESTRUCTIVE_POLICY=block B2_ALLOWED_HOSTS=mcp.example.com B2_ALLOWED_ORIGINS=https://client.example.com B2_APPLICATION_KEY_ID=secretref:b2-application-key-id B2_APPLICATION_KEY=secretref:b2-application-key \
   --min-replicas 0 \
   --max-replicas 5
