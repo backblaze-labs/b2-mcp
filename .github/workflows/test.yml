@@ -599,6 +599,7 @@ jobs:
           | Runtime engine floor | Node.js 22.3.0 package install smoke |
           | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
           | Package budget metrics | Uploaded as package-budget artifact |
+          | Vercel adapter budget | Uploaded as vercel-bundle artifact path |
           | Container image | Docker build plus HTTP health/readiness smoke |
           | Required issue | backblaze-labs/b2-mcp#50 |
           SUMMARY
