@@ -21,7 +21,8 @@ const nodeRequire = createRequire(__filename);
 const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
 };
-const { readPackageManagerLock } = nodeRequire("../../scripts/lib/pnpm-lock.cjs") as {
+const { parseYaml, readPackageManagerLock } = nodeRequire("../../scripts/lib/pnpm-lock.cjs") as {
+  parseYaml: (text: string) => unknown;
   readPackageManagerLock: (root: string) => unknown;
 };
 const semver = nodeRequire("semver") as {
@@ -31,6 +32,26 @@ const semver = nodeRequire("semver") as {
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const rawPnpmLock = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8")) as {
+    importers?: Record<
+      string,
+      {
+        dependencies?: Record<string, { specifier?: string; version?: string }>;
+        devDependencies?: Record<string, { specifier?: string; version?: string }>;
+      }
+    >;
+    packages?: Record<string, { resolution?: { integrity?: string } }>;
+    snapshots?: Record<
+      string,
+      {
+        dependencies?: Record<string, string>;
+        optionalDependencies?: Record<string, string>;
+      }
+    >;
+  };
+  const pnpmWorkspace = parseYaml(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")) as {
+    allowBuilds?: Record<string, boolean>;
+  };
   const workflowDirectory = join(root, ".github/workflows");
   const allWorkflows = readdirSync(workflowDirectory)
     .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
@@ -54,21 +75,76 @@ describe("supply-chain audit policy", () => {
       expires: string;
     }>;
   };
-  const lock = readPackageManagerLock(root) as {
-    packages: Record<
-      string,
-      {
-        dependencies?: Record<string, string>;
-        optionalDependencies?: Record<string, string>;
-        engines?: { node?: string };
-        integrity?: string;
-        version?: string;
-      }
-    >;
+  type LockPackage = {
+    dependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+    engines?: { node?: string };
+    integrity?: string;
+    version?: string;
   };
-  const auditFixturePackage = lock.packages["node_modules/acorn"];
-  const auditFixtureVia = lock.packages["node_modules/acorn-walk"];
-  const zodPackage = lock.packages["node_modules/zod"];
+  type LockPackageWithMetadata = LockPackage & { integrity: string; version: string };
+  const lock = readPackageManagerLock(root) as { packages: Record<string, LockPackage> };
+
+  function requirePolicyFixturePackage(path: string, purpose: string): LockPackageWithMetadata {
+    const pkg = lock.packages[path];
+    if (!pkg) {
+      throw new Error(
+        `Missing supply-chain policy fixture package ${path} (${purpose}). Pick another present pnpm-lock.yaml package for this synthetic advisory fixture.`,
+      );
+    }
+    if (!pkg.version || !pkg.integrity) {
+      throw new Error(
+        `Supply-chain policy fixture package ${path} (${purpose}) must have version and integrity metadata in pnpm-lock.yaml.`,
+      );
+    }
+    return pkg as LockPackageWithMetadata;
+  }
+
+  function packageNameFromPath(path: string): string {
+    return path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+  }
+
+  function findPolicyFixtureVia(dependencyName: string): {
+    dependencyRange: string;
+    name: string;
+    path: string;
+    pkg: LockPackageWithMetadata;
+  } {
+    const candidates = Object.entries(lock.packages)
+      .filter(([path, pkg]) => {
+        if (path === `node_modules/${dependencyName}`) return false;
+        return !!(pkg.version && pkg.integrity && pkg.dependencies?.[dependencyName]);
+      })
+      .sort(([left], [right]) => left.localeCompare(right));
+    const [path, pkg] = candidates[0] ?? [];
+    if (!path || !pkg?.version || !pkg.integrity) {
+      throw new Error(
+        `Missing supply-chain policy fixture package with a real ${dependencyName} dependency edge in pnpm-lock.yaml.`,
+      );
+    }
+    const dependencyRange = pkg.dependencies?.[dependencyName];
+    if (!dependencyRange) {
+      throw new Error(
+        `Supply-chain policy fixture package ${path} must depend on ${dependencyName}; pick another present transitive fixture package.`,
+      );
+    }
+    return {
+      dependencyRange,
+      name: packageNameFromPath(path),
+      path,
+      pkg: pkg as LockPackageWithMetadata,
+    };
+  }
+
+  const auditFixturePackage = requirePolicyFixturePackage(
+    "node_modules/acorn",
+    "synthetic vulnerable package",
+  );
+  // This transitive package is an arbitrary stand-in used only to exercise
+  // advisory via/effects policy matching. Select it by required lockfile shape
+  // instead of package name so unrelated tooling swaps keep the test legible.
+  const policyFixtureVia = findPolicyFixtureVia("acorn");
+  const zodPackage = requirePolicyFixturePackage("node_modules/zod", "direct advisory fixture");
   const exceptionPolicy = {
     allowedAdvisories: [
       {
@@ -77,13 +153,13 @@ describe("supply-chain audit policy", () => {
         maxSeverity: "moderate",
         isDirect: false,
         nodes: ["node_modules/acorn"],
-        effects: ["acorn-walk"],
+        effects: [policyFixtureVia.name],
         package: { version: auditFixturePackage.version, integrity: auditFixturePackage.integrity },
         via: {
-          path: "node_modules/acorn-walk",
-          name: "acorn-walk",
-          version: auditFixtureVia.version,
-          dependencyRange: auditFixtureVia.dependencies?.acorn,
+          path: policyFixtureVia.path,
+          name: policyFixtureVia.name,
+          version: policyFixtureVia.pkg.version,
+          dependencyRange: policyFixtureVia.dependencyRange,
         },
         expires: "2026-10-01",
         reason: "Test-only exception fixture for policy behavior.",
@@ -138,20 +214,20 @@ describe("supply-chain audit policy", () => {
               range: "<8.16.1",
             },
           ],
-          effects: ["acorn-walk"],
+          effects: [policyFixtureVia.name],
           range: "<8.16.1",
           nodes: ["node_modules/acorn"],
           fixAvailable: false,
           ...overrides,
         },
-        "acorn-walk": {
-          name: "acorn-walk",
+        [policyFixtureVia.name]: {
+          name: policyFixtureVia.name,
           severity: "moderate",
           isDirect: false,
           via: ["acorn"],
           effects: [],
           range: "*",
-          nodes: ["node_modules/acorn-walk"],
+          nodes: [policyFixtureVia.path],
           fixAvailable: false,
         },
       },
@@ -548,6 +624,36 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain('--tag "$npm_tag"');
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
     expect(publishWorkflow).not.toContain("tar -xzf");
+  });
+
+  it("keeps tsx dev-only and denies esbuild install builds", () => {
+    const tsxPackage = rawPnpmLock.packages?.["tsx@4.23.11"];
+    const tsxSnapshot = rawPnpmLock.snapshots?.["tsx@4.23.11"];
+    const esbuildPackage = rawPnpmLock.packages?.["esbuild@0.28.1"];
+    const esbuildPlatformPackages = Object.entries(rawPnpmLock.packages ?? {}).filter(([key]) =>
+      key.startsWith("@esbuild/"),
+    );
+
+    expect(packageJson.dependencies).not.toHaveProperty("tsx");
+    expect(packageJson.dependencies).not.toHaveProperty("esbuild");
+    expect(packageJson.devDependencies.tsx).toBe("4.23.11");
+    expect(rawPnpmLock.importers?.["."]?.devDependencies?.tsx).toEqual({
+      specifier: "4.23.11",
+      version: "4.23.11",
+    });
+    expect(tsxPackage?.resolution?.integrity).toBe(
+      "sha512-Ry2oTEUnhBdeEdWIztY8kf3/nBGnPnjMLVGL0YfdRXMORuPER5NlKmayqxtxRxwB1xBN+RivRaJfe7PM1rtiyw==",
+    );
+    expect(tsxSnapshot?.dependencies).toEqual({ esbuild: "0.28.1" });
+    expect(tsxSnapshot?.optionalDependencies).toEqual({ fsevents: "2.3.3" });
+    expect(esbuildPackage?.resolution?.integrity).toMatch(/^sha512-/);
+    expect(esbuildPlatformPackages.length).toBeGreaterThan(0);
+    for (const [key, metadata] of esbuildPlatformPackages) {
+      expect(key).toMatch(/@0\.28\.1$/);
+      expect(metadata.resolution?.integrity).toMatch(/^sha512-/);
+    }
+    expect(npmrc).toMatch(/^ignore-scripts=true$/m);
+    expect(pnpmWorkspace.allowBuilds?.esbuild).toBe(false);
   });
 
   it("keeps release checksum entries aligned with uploaded GitHub assets", () => {
