@@ -85,7 +85,10 @@ Two reviewed patterns are allowed:
 - Configure `B2_MCP_OAUTH_ISSUER`, `B2_MCP_OAUTH_AUDIENCE`,
   `B2_MCP_OAUTH_JWKS_URL`, and `B2_MCP_OAUTH_REQUIRED_SCOPES`. The adapter
   validates JWT issuer, audience/resource, expiry, not-before, allowed
-  algorithm, signature, and scopes before passing `AuthInfo`.
+  algorithm, access-token type, signature, and scopes before passing
+  `AuthInfo`. The default token-type policy accepts `at+jwt` and
+  `application/at+jwt`; set `B2_MCP_OAUTH_ALLOWED_TOKEN_TYPES` only for a
+  reviewed issuer profile.
 - Put Cloudflare Access in front and set `B2_MCP_TRUSTED_EDGE_AUTH=cloudflare-access`
   with `B2_MCP_ACCESS_TEAM_DOMAIN` and `B2_MCP_ACCESS_AUDIENCE`. The adapter
   verifies the `Cf-Access-Jwt-Assertion` signature, issuer, audience, and

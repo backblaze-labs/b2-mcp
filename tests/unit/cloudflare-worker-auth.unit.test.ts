@@ -46,7 +46,9 @@ function signJwt(
   claims: Record<string, unknown>,
   header: Record<string, unknown> = {},
 ): string {
-  const encodedHeader = b64(JSON.stringify({ alg: "RS256", kid: key.kid, typ: "JWT", ...header }));
+  const encodedHeader = b64(
+    JSON.stringify({ alg: "RS256", kid: key.kid, typ: "at+jwt", ...header }),
+  );
   const encodedClaims = b64(JSON.stringify(claims));
   const signingInput = `${encodedHeader}.${encodedClaims}`;
   const signature = nodeCrypto.createSign("RSA-SHA256").update(signingInput).sign(key.privateKey);
@@ -140,6 +142,19 @@ describe("Cloudflare Worker OAuth verifier", () => {
     await expectAuthError(
       verifyJwtAccessToken(unsignedJwt(claims(), { alg: "none", kid: key.kid }), env()),
       "jwt_alg_disallowed",
+    );
+  });
+
+  it("rejects OAuth bearer tokens without the reviewed access-token type", async () => {
+    mockJwks([key.publicJwk]);
+
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(key, claims(), { typ: "JWT" }), env()),
+      "jwt_type_invalid",
+    );
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(key, claims(), { typ: undefined }), env()),
+      "jwt_type_invalid",
     );
   });
 
@@ -247,6 +262,7 @@ describe("Cloudflare Worker OAuth verifier", () => {
               email: "user@example.com",
               scope: undefined,
             }),
+            { typ: "JWT" },
           ),
         },
       }),

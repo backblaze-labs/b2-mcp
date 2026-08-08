@@ -7,6 +7,7 @@ export interface WorkerEnv {
   B2_MCP_ACCESS_AUDIENCE?: string;
   B2_MCP_ACCESS_TEAM_DOMAIN?: string;
   B2_MCP_OAUTH_ALLOWED_ALGORITHMS?: string;
+  B2_MCP_OAUTH_ALLOWED_TOKEN_TYPES?: string;
   B2_MCP_OAUTH_AUDIENCE?: string;
   B2_MCP_OAUTH_CLOCK_SKEW_SECONDS?: string;
   B2_MCP_OAUTH_ISSUER?: string;
@@ -18,6 +19,7 @@ export interface WorkerEnv {
 type JwtHeader = {
   alg?: string;
   kid?: string;
+  typ?: string;
 };
 
 type JwtClaims = {
@@ -47,6 +49,7 @@ type VerifyJwtOptions = {
   jwksUrl: string;
   requiredScopes?: string[];
   allowedAlgorithms?: string[];
+  allowedTokenTypes: string[];
   clockSkewSeconds?: number;
 };
 
@@ -69,6 +72,7 @@ const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
 const JWKS_STALE_GRACE_MS = 5 * 60 * 1000;
 const JWKS_FETCH_TIMEOUT_MS = 3000;
 const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256"];
+const DEFAULT_OAUTH_ACCESS_TOKEN_TYPES = ["at+jwt", "application/at+jwt"];
 const DEFAULT_CLOCK_SKEW_SECONDS = 60;
 
 let jwksCache: JwksCache | undefined;
@@ -247,6 +251,12 @@ function tokenScopes(claims: JwtClaims): string[] {
   ];
 }
 
+function tokenTypeAllowed(header: JwtHeader, allowedTokenTypes: string[]): boolean {
+  if (typeof header.typ !== "string") return false;
+  const normalized = header.typ.trim().toLowerCase();
+  return allowedTokenTypes.map((item) => item.trim().toLowerCase()).includes(normalized);
+}
+
 function authResource(audience: string): URL {
   try {
     return new URL(audience);
@@ -266,6 +276,9 @@ async function verifyJwt(token: string, options: VerifyJwtOptions): Promise<Auth
     : DEFAULT_ALLOWED_ALGORITHMS;
   if (!header.alg || !algorithms.includes(header.alg)) {
     throw authError(401, "jwt_alg_disallowed", "Bearer token algorithm is not allowed");
+  }
+  if (!tokenTypeAllowed(header, options.allowedTokenTypes)) {
+    throw authError(401, "jwt_type_invalid", "Bearer token type is not allowed");
   }
 
   let jwks = await getJwks(options.jwksUrl);
@@ -333,6 +346,7 @@ export async function verifyJwtAccessToken(token: string, env: WorkerEnv): Promi
   const issuer = env.B2_MCP_OAUTH_ISSUER;
   const audience = env.B2_MCP_OAUTH_AUDIENCE;
   const jwksUrl = env.B2_MCP_OAUTH_JWKS_URL;
+  const allowedTokenTypes = splitList(env.B2_MCP_OAUTH_ALLOWED_TOKEN_TYPES);
   if (!issuer || !audience || !jwksUrl) {
     throw authError(500, "oauth_config_incomplete", "OAuth verifier is not configured");
   }
@@ -342,6 +356,9 @@ export async function verifyJwtAccessToken(token: string, env: WorkerEnv): Promi
     jwksUrl,
     requiredScopes: splitList(env.B2_MCP_OAUTH_REQUIRED_SCOPES),
     allowedAlgorithms: splitList(env.B2_MCP_OAUTH_ALLOWED_ALGORITHMS),
+    allowedTokenTypes: allowedTokenTypes.length
+      ? allowedTokenTypes
+      : DEFAULT_OAUTH_ACCESS_TOKEN_TYPES,
     clockSkewSeconds: safeClockSkewSeconds(env.B2_MCP_OAUTH_CLOCK_SKEW_SECONDS),
   });
 }
@@ -367,6 +384,7 @@ export async function verifyAccessAssertion(token: string, env: WorkerEnv): Prom
     audience,
     jwksUrl: `${issuer}/cdn-cgi/access/certs`,
     allowedAlgorithms: splitList(env.B2_MCP_OAUTH_ALLOWED_ALGORITHMS),
+    allowedTokenTypes: ["JWT"],
     clockSkewSeconds: safeClockSkewSeconds(env.B2_MCP_OAUTH_CLOCK_SKEW_SECONDS),
   });
 }
