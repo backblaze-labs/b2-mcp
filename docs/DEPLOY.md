@@ -88,6 +88,28 @@ install and then copies the packaged `dist/` tree. If dependencies or image
 digests change, update them through the runbook and run the deployment policy
 tests before publishing.
 
+## Supported Vercel adapter
+
+The supported Vercel adapter is
+[`deploy/vercel/README.md`](../deploy/vercel/README.md). It is an additional
+runtime adapter, not a replacement for the container reference above. The
+adapter exposes `/mcp`, `/health`, and OAuth metadata only; it does not add a
+Next.js UI or a separate tool implementation.
+
+Use it when the operator wants Vercel to host the MCP resource server and keep
+B2 credentials in Vercel Production environment secrets. The adapter validates
+OAuth bearer tokens before credential resolution, uses the shared
+`src/http-fetch-handler.ts` pipeline, and keeps the MCP route stateless for MCP
+`2026-07-28`. Production must set `B2_HTTP_CREDENTIAL_MODE=server` and assign
+`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` to Production only. Preview
+deployments must be protected and must not receive production B2 credentials.
+
+Before deploying, review the current Vercel docs linked from the guide for
+function limits, Node.js versions, Fluid Compute, environments, and deployment
+protection. Do not infer B2 data residency from the selected Vercel region, and
+do not proxy large object bodies through Vercel Functions; use bounded inline
+payloads or short-lived B2 presigned URLs.
+
 ## Security baseline
 
 Before exposing the server, confirm each of these. Most are on by default; the
@@ -657,6 +679,8 @@ Server or principal mode, where the client sends no B2 key:
 
 ```bash
 MCP_URL=https://mcp.your-domain.example/mcp \
+B2_MCP_SMOKE_CREDENTIAL_MODE=server \
+MCP_AUTHORIZATION="Bearer <access-token>" \
 B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
 pnpm run smoke
 ```
@@ -701,8 +725,14 @@ It depends on these protected `live-b2-smoke` environment secrets and variables:
   probe
 - `vars.B2_MCP_EXPECTED_TOOL_PROFILE` — expected frozen profile for the live
   credential set (`phase1-default`, `read-only`, or `full`)
+- `vars.B2_MCP_SMOKE_CREDENTIAL_MODE` — `headers`, `server`, or `principal`;
+  manual dispatch can override it
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
+- `secrets.MCP_AUTHORIZATION` — required when the smoke mode is `server` or
+  `principal`
+- `secrets.VERCEL_PROTECTION_BYPASS` — optional automation value sent only as
+  `x-vercel-protection-bypass`
 
 The deployment-status guard also reads repository or organization variable
 `B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT` before binding the `live-b2-smoke`

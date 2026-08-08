@@ -236,6 +236,12 @@ describe("live secret workflow policy", () => {
     expect(smokeJob).toContain(
       "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
     );
+    expect(smokeJob).toContain(
+      "MCP_URL MCP_AUTHORIZATION B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
+    );
+    expect(smokeJob).toContain("B2_MCP_SMOKE_CREDENTIAL_MODE");
+    expect(smokeJob).toContain("VERCEL_PROTECTION_BYPASS");
+    expect(smokeJob).toContain("x-vercel-protection-bypass");
     expect(smokeJob).toContain("B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}");
     expect(smokeJob).toContain('B2_MCP_REQUIRE_SMOKE_BUCKET: "1"');
   });

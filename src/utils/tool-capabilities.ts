@@ -160,6 +160,45 @@ export const PARTNER_TOOLS = new Set<string>([
   "b2_list_group_members",
 ]);
 
+const ADMIN_TOOLS = new Set<string>([
+  "b2_create_group_member",
+  "b2_create_key",
+  "b2_delete_key",
+  "b2_eject_group_member",
+  "b2_get_bucket_notification_rules",
+  "b2_list_group_members",
+  "b2_list_groups",
+  "b2_list_keys",
+  "b2_reserve_trial_create_account",
+  "b2_set_bucket_notification_rules",
+  "b2_update_file_legal_hold",
+  "b2_update_file_retention",
+]);
+
+const REVIEWED_READ_ONLY_TOOLS = new Set<string>(["b2_authorize_account"]);
+
+const READ_CAPABILITY_PREFIXES = ["list", "read"] as const;
+const WRITE_CAPABILITY_PREFIXES = ["write", "delete", "share"] as const;
+
+function hasAnyScope(scopes: ReadonlySet<string>, candidates: readonly string[]): boolean {
+  return candidates.some((scope) => scopes.has(scope));
+}
+
+function hasWriteOrDeleteCapability(required: readonly string[]): boolean {
+  return required.some((capability) =>
+    WRITE_CAPABILITY_PREFIXES.some((prefix) => capability.startsWith(prefix)),
+  );
+}
+
+function hasOnlyReadCapability(required: readonly string[]): boolean {
+  return (
+    required.length > 0 &&
+    required.every((capability) =>
+      READ_CAPABILITY_PREFIXES.some((prefix) => capability.startsWith(prefix)),
+    )
+  );
+}
+
 /**
  * Whether a tool should be registered for a key with the given capabilities.
  * Durable-secret-producing handlers are always disabled until a reviewed secret
@@ -176,4 +215,42 @@ export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): b
   const required = TOOL_CAPABILITIES[name];
   if (!required || required.length === 0) return true;
   return required.some((c) => caps.has(c));
+}
+
+/**
+ * OAuth deployment scopes are an independent resource-server authorization
+ * layer. They only reduce the surface that the B2 capability filter would
+ * otherwise expose; they never grant a B2 operation by themselves.
+ *
+ * @returns True when OAuth scopes allow the tool to be registered.
+ */
+export function isToolAllowedByOAuthScopes(
+  name: string,
+  scopes: ReadonlySet<string> | null,
+): boolean {
+  if (scopes === null) return true;
+  if (hasAnyScope(scopes, ["b2:admin"])) return true;
+  if (
+    ADMIN_TOOLS.has(name) ||
+    PARTNER_TOOLS.has(name) ||
+    DURABLE_SECRET_PRODUCING_TOOLS.has(name)
+  ) {
+    return false;
+  }
+
+  if (REVIEWED_READ_ONLY_TOOLS.has(name)) {
+    return hasAnyScope(scopes, ["b2:read", "b2:write"]);
+  }
+
+  const required = TOOL_CAPABILITIES[name] ?? [];
+  if (hasWriteOrDeleteCapability(required)) {
+    return hasAnyScope(scopes, ["b2:write"]);
+  }
+
+  if (hasOnlyReadCapability(required)) {
+    return hasAnyScope(scopes, ["b2:read", "b2:write"]);
+  }
+
+  // Unmapped tools are treated as admin unless explicitly reviewed above.
+  return false;
 }

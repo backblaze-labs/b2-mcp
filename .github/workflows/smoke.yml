@@ -5,6 +5,11 @@ name: Live B2 Smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      credential-mode:
+        description: "Smoke credential mode: headers, server, or principal"
+        required: false
+        default: "headers"
   deployment_status:
   schedule:
     - cron: "47 9 * * 1"
@@ -122,20 +127,36 @@ jobs:
       - name: Validate live B2 smoke environment
         env:
           MCP_URL: ${{ vars.MCP_URL }}
+          B2_MCP_SMOKE_CREDENTIAL_MODE: ${{ inputs.credential-mode || vars.B2_MCP_SMOKE_CREDENTIAL_MODE || 'headers' }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
           B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+          MCP_AUTHORIZATION: ${{ secrets.MCP_AUTHORIZATION }}
+          # scripts/smoke-test.mjs sends this as x-vercel-protection-bypass.
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
           B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_REQUIRE_SMOKE_BUCKET: "1"
         run: |
           set -euo pipefail
-          for value in "${B2_SMOKE_BUCKET:-}"; do
+          for value in "${B2_SMOKE_BUCKET:-}" "${MCP_AUTHORIZATION:-}" "${VERCEL_PROTECTION_BYPASS:-}"; do
             if [[ -n "$value" ]]; then echo "::add-mask::$value"; fi
           done
           missing=0
-          for name in MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET; do
+          case "${B2_MCP_SMOKE_CREDENTIAL_MODE}" in
+            headers)
+              required_names="MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET"
+              ;;
+            server|principal)
+              required_names="MCP_URL MCP_AUTHORIZATION B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET"
+              ;;
+            *)
+              echo "::error::B2_MCP_SMOKE_CREDENTIAL_MODE must be headers, server, or principal"
+              exit 1
+              ;;
+          esac
+          for name in ${required_names}; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-smoke variable or secret for ${name}"
               missing=1
@@ -146,10 +167,14 @@ jobs:
         timeout-minutes: 4
         env:
           MCP_URL: ${{ vars.MCP_URL }}
+          B2_MCP_SMOKE_CREDENTIAL_MODE: ${{ inputs.credential-mode || vars.B2_MCP_SMOKE_CREDENTIAL_MODE || 'headers' }}
           B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_APP_KEY_ID: ${{ secrets.LIVE_B2_APP_KEY_ID }}
           B2_APP_KEY: ${{ secrets.LIVE_B2_APP_KEY }}
+          MCP_AUTHORIZATION: ${{ secrets.MCP_AUTHORIZATION }}
+          # scripts/smoke-test.mjs sends this as x-vercel-protection-bypass.
+          VERCEL_PROTECTION_BYPASS: ${{ secrets.VERCEL_PROTECTION_BYPASS }}
           B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_REQUIRE_SMOKE_BUCKET: "1"
