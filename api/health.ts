@@ -1,12 +1,9 @@
 import { createVercelNodeHandler } from "../deploy/vercel/node-function.js";
-import { HEALTH } from "../deploy/vercel/routes.js";
+import { methodNotAllowed } from "../deploy/vercel/method-guard.js";
+import { healthRoute } from "../deploy/vercel/routes.js";
 
 export default createVercelNodeHandler((request) => {
-  if (request.method.toUpperCase() !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", Allow: "GET" },
-    });
-  }
-  return HEALTH(request);
+  const rejected = methodNotAllowed(request, ["GET"]);
+  if (rejected) return rejected;
+  return healthRoute(request);
 });

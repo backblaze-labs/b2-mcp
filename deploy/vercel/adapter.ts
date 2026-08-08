@@ -1,24 +1,45 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
-import { createB2McpFetchHandler } from "../../src/http-fetch-handler.js";
+import {
+  createB2McpFetchHandler,
+  createInFlightLimiter,
+  deriveRateKey,
+  type InFlightLimiter,
+} from "../../src/http-fetch-handler.js";
 import {
   authenticateOAuthRequest,
   oauthMetadataOptions,
   protectedResourceMetadata,
+  resetOAuthVerifierCacheForTests,
   validateOAuthResourceServerConfiguration,
 } from "../../src/oauth-resource-server.js";
 import {
   getHttpCredentialMode,
   validateHttpCredentialConfiguration,
 } from "../../src/credentials.js";
+import { allowRequest } from "../../src/utils/rate-limiter.js";
+import { logger } from "../../src/utils/logger.js";
+import { sanitizeText } from "../../src/utils/secret-sanitizer.js";
 
 const ALLOW_HEADER_MODE_FLAG = "B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_PREVIEW_B2_CREDENTIALS_FLAG = "B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS";
+const MAX_BODY_BYTES = 1 * 1024 * 1024;
 
 let mcpHandler: ReturnType<typeof createB2McpFetchHandler> | null = null;
+let oauthAdmissionLimiter: InFlightLimiter | null = null;
+
+export interface VercelMcpFetchContext {
+  authInfo?: AuthInfo | null;
+  remoteAddress?: string;
+}
 
 function getMcpHandler(): ReturnType<typeof createB2McpFetchHandler> {
   mcpHandler ??= createB2McpFetchHandler();
   return mcpHandler;
+}
+
+function getOAuthAdmissionLimiter(): InFlightLimiter {
+  oauthAdmissionLimiter ??= createInFlightLimiter();
+  return oauthAdmissionLimiter;
 }
 
 function jsonResponse(
@@ -69,22 +90,88 @@ export function validateVercelStaticConfiguration(): void {
 }
 
 function configurationErrorResponse(error: unknown): Response {
+  logger.warn(
+    { err: sanitizeText(error instanceof Error ? error.message : String(error)) },
+    "vercel.config.invalid",
+  );
   return jsonResponse(503, {
     error: "Vercel MCP deployment is not configured",
-    code: error instanceof Error ? error.message : "configuration_error",
+    code: "configuration_error",
   });
 }
 
-export async function vercelMcpFetch(request: Request, authInfo?: AuthInfo): Promise<Response> {
+function normalizeContext(input?: AuthInfo | VercelMcpFetchContext): {
+  authInfo: AuthInfo | null;
+  remoteAddress?: string;
+} {
+  if (!input) return { authInfo: null };
+  if (isVercelMcpFetchContext(input)) {
+    return {
+      authInfo: input.authInfo ?? null,
+      remoteAddress: input.remoteAddress,
+    };
+  }
+  return { authInfo: input };
+}
+
+function isVercelMcpFetchContext(
+  input: AuthInfo | VercelMcpFetchContext,
+): input is VercelMcpFetchContext {
+  return "authInfo" in input || "remoteAddress" in input;
+}
+
+function oauthAdmissionKey(context: VercelMcpFetchContext): string {
+  const address = context.remoteAddress?.trim() || "unknown";
+  return `vercel-oauth:${address}`;
+}
+
+function contentLengthExceedsLimit(request: Request): boolean {
+  const raw = request.headers.get("content-length");
+  if (!raw) return false;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > MAX_BODY_BYTES;
+}
+
+async function authenticateWithAdmissionLimit(
+  request: Request,
+  context: VercelMcpFetchContext,
+): Promise<AuthInfo | Response> {
+  if (contentLengthExceedsLimit(request)) {
+    return jsonResponse(413, { error: "Request body too large" });
+  }
+  const limiter = getOAuthAdmissionLimiter();
+  const limitKey = oauthAdmissionKey(context);
+  const permit = limiter.acquire(limitKey);
+  if (!permit.ok) {
+    return jsonResponse(permit.status, { error: permit.error }, { "Retry-After": "1" });
+  }
+  try {
+    if (!allowRequest(deriveRateKey(limitKey))) {
+      return jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+    }
+    return await authenticateOAuthRequest(request);
+  } finally {
+    limiter.release(limitKey);
+  }
+}
+
+export async function vercelMcpFetch(
+  request: Request,
+  input?: AuthInfo | VercelMcpFetchContext,
+): Promise<Response> {
+  const context = normalizeContext(input);
   try {
     validateVercelStaticConfiguration();
   } catch (error) {
     return configurationErrorResponse(error);
   }
 
-  const auth = authInfo ?? (await authenticateOAuthRequest(request));
+  const auth = context.authInfo ?? (await authenticateWithAdmissionLimit(request, context));
   if (auth instanceof Response) return auth;
-  return getMcpHandler().fetch(rewritePath(request, "/mcp"), { authInfo: auth });
+  return getMcpHandler().fetch(rewritePath(request, "/mcp"), {
+    authInfo: auth,
+    remoteAddress: context.remoteAddress,
+  });
 }
 
 export async function vercelHealthFetch(request: Request): Promise<Response> {
@@ -121,5 +208,7 @@ export function vercelAuthorizationServerMetadataFetch(): Response {
 export function closeVercelMcpHandlerForTests(): Promise<void> {
   const handler = mcpHandler;
   mcpHandler = null;
+  oauthAdmissionLimiter = null;
+  resetOAuthVerifierCacheForTests();
   return handler?.close() ?? Promise.resolve();
 }

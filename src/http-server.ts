@@ -8,10 +8,14 @@
  */
 
 import * as http from "http";
-import { Readable } from "stream";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
+import {
+  nodeRequestToWeb,
+  resumeUnreadRequest,
+  writeWebResponse,
+} from "./utils/node-web-bridge.js";
 import { configFromHttpHeaders, type AuthenticatedIncomingMessage } from "./credentials.js";
 import {
   createB2McpFetchHandler,
@@ -67,101 +71,11 @@ function intEnv(name: string, fallback: number): number {
   return Math.max(1, parseIntEnv(process.env[name], fallback));
 }
 
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function headersFromNode(headers: http.IncomingHttpHeaders): Headers {
-  const result = new Headers();
-  for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined || name.startsWith(":")) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) result.append(name, item);
-    } else {
-      result.set(name, value);
-    }
-  }
-  return result;
-}
-
-function requestUrl(req: http.IncomingMessage): string {
-  const host =
-    firstHeaderValue(req.headers.host) ??
-    firstHeaderValue(req.headers[":authority"]) ??
-    "localhost";
-  return `http://${host}${req.url ?? "/"}`;
-}
-
-function nodeRequestToWeb(req: http.IncomingMessage, signal: AbortSignal): Request {
-  const method = (req.method ?? "GET").toUpperCase();
-  const init: RequestInit & { duplex?: "half" } = {
-    method,
-    headers: headersFromNode(req.headers),
-    signal,
-  };
-  if (method !== "GET" && method !== "HEAD") {
-    init.body = Readable.toWeb(req) as RequestInit["body"];
-    init.duplex = "half";
-  }
-  return new Request(requestUrl(req), init);
-}
-
-function headersFromWeb(headers: Headers): http.OutgoingHttpHeaders {
-  const nodeHeaders: http.OutgoingHttpHeaders = {};
-  for (const [name, value] of headers) {
-    const current = nodeHeaders[name];
-    if (current === undefined) {
-      nodeHeaders[name] = value;
-    } else if (Array.isArray(current)) {
-      current.push(value);
-    } else {
-      nodeHeaders[name] = [String(current), value];
-    }
-  }
-  const setCookies = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.();
-  if (setCookies && setCookies.length > 0) nodeHeaders["set-cookie"] = setCookies;
-  return nodeHeaders;
-}
-
-function waitForDrain(res: http.ServerResponse, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise((resolve) => {
-    const finish = () => {
-      res.off("drain", finish);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    res.once("drain", finish);
-    signal.addEventListener("abort", finish, { once: true });
-  });
-}
-
-async function writeWebResponse(
-  response: Response,
-  res: http.ServerResponse,
-  signal: AbortSignal,
-): Promise<void> {
-  res.writeHead(response.status, headersFromWeb(response.headers));
-
-  if (response.body !== null) {
-    for await (const chunk of response.body) {
-      if (signal.aborted) break;
-      if (!res.write(chunk)) await waitForDrain(res, signal);
-    }
-  }
-
-  if (!res.destroyed) res.end();
-}
-
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json" },
   });
-}
-
-function resumeUnreadRequest(req: http.IncomingMessage): void {
-  if (!req.readableEnded && !req.destroyed) req.resume();
 }
 
 function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOptions): http.Server {

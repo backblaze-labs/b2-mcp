@@ -1,12 +1,9 @@
 import { createVercelNodeHandler } from "../deploy/vercel/node-function.js";
-import { OAUTH_AUTHORIZATION_SERVER } from "../deploy/vercel/routes.js";
+import { methodNotAllowed } from "../deploy/vercel/method-guard.js";
+import { authorizationServerMetadataRoute } from "../deploy/vercel/routes.js";
 
 export default createVercelNodeHandler((request) => {
-  if (request.method.toUpperCase() !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json", Allow: "GET" },
-    });
-  }
-  return OAUTH_AUTHORIZATION_SERVER();
+  const rejected = methodNotAllowed(request, ["GET"]);
+  if (rejected) return rejected;
+  return authorizationServerMetadataRoute();
 });

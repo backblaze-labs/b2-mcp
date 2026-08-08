@@ -160,43 +160,63 @@ export const PARTNER_TOOLS = new Set<string>([
   "b2_list_group_members",
 ]);
 
-const ADMIN_TOOLS = new Set<string>([
-  "b2_create_group_member",
-  "b2_create_key",
-  "b2_delete_key",
-  "b2_eject_group_member",
-  "b2_get_bucket_notification_rules",
-  "b2_list_group_members",
-  "b2_list_groups",
-  "b2_list_keys",
-  "b2_reserve_trial_create_account",
-  "b2_set_bucket_notification_rules",
-  "b2_update_file_legal_hold",
-  "b2_update_file_retention",
-]);
+export type OAuthToolScopePolicy = "read" | "write" | "admin" | "read-write";
 
-const REVIEWED_READ_ONLY_TOOLS = new Set<string>(["b2_authorize_account"]);
-
-const READ_CAPABILITY_PREFIXES = ["list", "read"] as const;
-const WRITE_CAPABILITY_PREFIXES = ["write", "delete", "share"] as const;
+export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
+  b2_authorize_account: "read",
+  b2_create_bucket: "write",
+  b2_create_group_member: "admin",
+  b2_create_key: "admin",
+  b2_delete_bucket: "write",
+  b2_delete_key: "admin",
+  b2_eject_group_member: "admin",
+  b2_egress_leaders: "read",
+  b2_get_bucket_notification_rules: "admin",
+  b2_largest_files: "read",
+  b2_list_buckets: "read",
+  b2_list_group_members: "admin",
+  b2_list_groups: "admin",
+  b2_list_keys: "admin",
+  b2_reserve_trial_create_account: "admin",
+  b2_set_bucket_notification_rules: "admin",
+  b2_unfinished_uploads: "read",
+  b2_update_bucket: "write",
+  b2_update_file_legal_hold: "admin",
+  b2_update_file_retention: "admin",
+  b2_usage_growth: "read",
+  s3_abort_multipart_upload: "write",
+  s3_complete_multipart_upload: "write",
+  s3_copy_object: "write",
+  s3_create_multipart_upload: "write",
+  s3_delete_object: "write",
+  s3_delete_objects: "write",
+  s3_get_bucket_location: "read",
+  s3_get_object: "read",
+  s3_get_presigned_url: "read-write",
+  s3_head_bucket: "read",
+  s3_head_object: "read",
+  s3_list_multipart_uploads: "read",
+  s3_list_object_versions: "read",
+  s3_list_objects_v2: "read",
+  s3_list_parts: "read",
+  s3_presign_upload_part: "write",
+  s3_put_bucket_lifecycle: "write",
+  s3_put_object: "write",
+  s3_upload_part_copy: "write",
+};
 
 function hasAnyScope(scopes: ReadonlySet<string>, candidates: readonly string[]): boolean {
   return candidates.some((scope) => scopes.has(scope));
 }
 
-function hasWriteOrDeleteCapability(required: readonly string[]): boolean {
-  return required.some((capability) =>
-    WRITE_CAPABILITY_PREFIXES.some((prefix) => capability.startsWith(prefix)),
-  );
-}
-
-function hasOnlyReadCapability(required: readonly string[]): boolean {
-  return (
-    required.length > 0 &&
-    required.every((capability) =>
-      READ_CAPABILITY_PREFIXES.some((prefix) => capability.startsWith(prefix)),
-    )
-  );
+/**
+ * Return the reviewed OAuth deployment-scope policy for a tool.
+ *
+ * @returns The OAuth policy bucket used to reduce the B2 capability-filtered
+ * tool surface.
+ */
+export function oauthToolScopePolicy(name: string): OAuthToolScopePolicy | null {
+  return OAUTH_TOOL_SCOPE_POLICY[name] ?? null;
 }
 
 /**
@@ -230,27 +250,13 @@ export function isToolAllowedByOAuthScopes(
 ): boolean {
   if (scopes === null) return true;
   if (hasAnyScope(scopes, ["b2:admin"])) return true;
-  if (
-    ADMIN_TOOLS.has(name) ||
-    PARTNER_TOOLS.has(name) ||
-    DURABLE_SECRET_PRODUCING_TOOLS.has(name)
-  ) {
-    return false;
+  switch (oauthToolScopePolicy(name) ?? "admin") {
+    case "read":
+    case "read-write":
+      return hasAnyScope(scopes, ["b2:read", "b2:write"]);
+    case "write":
+      return hasAnyScope(scopes, ["b2:write"]);
+    case "admin":
+      return false;
   }
-
-  if (REVIEWED_READ_ONLY_TOOLS.has(name)) {
-    return hasAnyScope(scopes, ["b2:read", "b2:write"]);
-  }
-
-  const required = TOOL_CAPABILITIES[name] ?? [];
-  if (hasWriteOrDeleteCapability(required)) {
-    return hasAnyScope(scopes, ["b2:write"]);
-  }
-
-  if (hasOnlyReadCapability(required)) {
-    return hasAnyScope(scopes, ["b2:read", "b2:write"]);
-  }
-
-  // Unmapped tools are treated as admin unless explicitly reviewed above.
-  return false;
 }

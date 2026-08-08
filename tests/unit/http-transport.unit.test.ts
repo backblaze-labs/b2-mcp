@@ -981,7 +981,7 @@ describe("HTTP transport handler", () => {
     await replaceHandle(() => ({
       token: "verified-token",
       clientId: "client-a",
-      scopes: [],
+      scopes: ["b2:read"],
       extra: { sub: "alice" },
     }));
     await closeHttpServer(handle);
@@ -989,7 +989,7 @@ describe("HTTP transport handler", () => {
       getAuthInfo: () => ({
         token: "verified-token",
         clientId: "client-a",
-        scopes: [],
+        scopes: ["b2:read"],
         extra: { sub: "alice" },
       }),
       secretBroker: {

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added an OAuth-secured Vercel adapter for the shared HTTP MCP pipeline,
+  including protected-resource metadata, server-mode hosted deployment
+  configuration, and `headers` / `server` / `principal` smoke credential modes.
 - Added a digest-pinned production Docker image, container CI smoke coverage,
   signed multi-platform GHCR release publishing, and Docker run docs for HTTP
   and stdio transports.

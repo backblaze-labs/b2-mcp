@@ -202,6 +202,13 @@ export function createServer(
   // "unknown".
   const filterActive = Array.isArray(capabilities);
   const capsSet = filterActive ? new Set(capabilities) : null;
+  const oauthAllowsRead =
+    oauthScopes === null ||
+    oauthScopes.has("b2:read") ||
+    oauthScopes.has("b2:write") ||
+    oauthScopes.has("b2:admin");
+  const oauthAllowsWrite =
+    oauthScopes === null || oauthScopes.has("b2:write") || oauthScopes.has("b2:admin");
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) =>
       isToolEnabled(name, capsSet) && isToolAllowedByOAuthScopes(name, oauthScopes),
@@ -259,11 +266,17 @@ export function createServer(
     allowBypassGovernance,
   });
   registerS3MultipartTools(registrar, s3Client, config);
-  registerS3PresignedTools(registrar, s3Client, b2Client, config, {
-    allowGetObjectUrl: !filterActive || (capsSet?.has("readFiles") ?? false),
-    allowPutObjectUrl: !filterActive || (capsSet?.has("writeFiles") ?? false),
-    allowExplicitVersionInspection,
-  });
+  const allowGetObjectUrl =
+    (!filterActive || (capsSet?.has("readFiles") ?? false)) && oauthAllowsRead;
+  const allowPutObjectUrl =
+    (!filterActive || (capsSet?.has("writeFiles") ?? false)) && oauthAllowsWrite;
+  if (allowGetObjectUrl || allowPutObjectUrl) {
+    registerS3PresignedTools(registrar, s3Client, b2Client, config, {
+      allowGetObjectUrl,
+      allowPutObjectUrl,
+      allowExplicitVersionInspection,
+    });
+  }
   registerS3ExtraTools(registrar, s3Client);
 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────

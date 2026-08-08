@@ -1,22 +1,16 @@
-import { createVercelNodeHandler } from "../deploy/vercel/node-function.js";
-import { DELETE, GET, POST } from "../deploy/vercel/routes.js";
+import { createVercelNodeHandler, type FetchRouteContext } from "../deploy/vercel/node-function.js";
+import { methodNotAllowed } from "../deploy/vercel/method-guard.js";
+import { mcpDeleteRoute, mcpGetRoute, mcpPostRoute } from "../deploy/vercel/routes.js";
 
-const routeByMethod: Record<string, typeof GET> = {
-  DELETE,
-  GET,
-  POST,
+const routeByMethod: Record<string, typeof mcpGetRoute> = {
+  DELETE: mcpDeleteRoute,
+  GET: mcpGetRoute,
+  POST: mcpPostRoute,
 };
 
-export default createVercelNodeHandler((request) => {
+export default createVercelNodeHandler((request, context: FetchRouteContext) => {
+  const rejected = methodNotAllowed(request, ["GET", "POST", "DELETE"]);
+  if (rejected) return rejected;
   const route = routeByMethod[request.method.toUpperCase()];
-  if (!route) {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: {
-        "Content-Type": "application/json",
-        Allow: "GET, POST, DELETE",
-      },
-    });
-  }
-  return route(request);
+  return route(request, context);
 });

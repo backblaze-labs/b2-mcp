@@ -36,11 +36,14 @@ Backblaze B2 Native and S3-compatible APIs
 ```
 
 The MCP route is stateless. It does not use Redis, sticky routing, session
-storage, `initialize`, or `Mcp-Session-Id` for MCP `2026-07-28` requests. Warm
-Vercel instances keep process-local rate, concurrency, and capability caches;
-those are defense-in-depth only and are not deployment-wide abuse controls. Use
-Vercel Firewall, WAF, spend limits, and deployment protection for global
-controls.
+storage, `initialize`, or `Mcp-Session-Id` for MCP `2026-07-28` requests. Each
+warm Vercel instance keeps its own process-local rate, concurrency,
+introspection, and capability caches. `B2_MAX_SESSIONS`,
+`B2_MAX_SESSIONS_PER_KEY`, and `B2_MCP_RATE_LIMIT_*` are therefore per warm
+instance on Vercel, not deployment-wide ceilings and not deployment-wide abuse controls; effective capacity scales
+with the number of warm instances. Treat those values as defense-in-depth and
+size B2, the authorization server, and spend limits using Vercel Firewall, WAF,
+deployment protection, and provider-side quotas for global controls.
 
 ## Deploy
 
@@ -57,6 +60,7 @@ Set these in Vercel Project Settings, not in source:
 | Setting | Production requirement |
 | --- | --- |
 | `B2_HTTP_CREDENTIAL_MODE` | `server` |
+| `B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE` | Omit unless intentionally enabling legacy header mode |
 | `B2_APPLICATION_KEY_ID` | Production-only encrypted environment value |
 | `B2_APPLICATION_KEY` | Production-only encrypted environment value |
 | `B2_ALLOWED_HOSTS` | Exact Vercel/custom hostname without wildcards |
@@ -67,8 +71,8 @@ Set these in Vercel Project Settings, not in source:
 | `B2_MCP_OUTPUT_FORMAT` | `json` until every client validates `toon` |
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
-| OAuth introspection credentials | Encrypted environment values |
-| Rate/concurrency values | Explicit reviewed values |
+| OAuth introspection credentials | Encrypted environment values; required unless the dangerous unauthenticated override is set |
+| Rate/concurrency values | Explicit reviewed per-warm-instance values |
 
 Use `deploy/vercel/vercel.env.example` as a checklist. Do not set
 `B2_MASTER_KEY_*` unless you separately document and review a Partner API use
@@ -82,18 +86,29 @@ your authorization server to issue access tokens for exactly the MCP resource
 URL and audience in `B2_OAUTH_RESOURCE` / `B2_OAUTH_AUDIENCE`.
 
 Token validation uses the authorization server's RFC 7662 introspection
-endpoint, so signature verification, revocation, and local JWT algorithm policy
+endpoint, so signature verification, signing algorithm policy, and revocation
 remain with the selected issuer. The adapter additionally checks:
 
 - active token response
 - exact `iss`
-- exact `resource`
+- exact `resource`, when returned by introspection
 - exact `aud`
 - `exp` and `nbf`
 - token type, when returned
-- algorithm, when returned
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`
+
+Introspection calls are bounded by `B2_OAUTH_INTROSPECTION_TIMEOUT_MS`, retried
+within `B2_OAUTH_INTROSPECTION_RETRIES`, and fail closed through a small
+process-local circuit breaker. Successful active responses are cached by token
+hash until the token's `exp` minus
+`B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS`, with
+`B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES` bounding memory. Introspection
+requires either `B2_OAUTH_INTROSPECTION_CLIENT_ID` plus
+`B2_OAUTH_INTROSPECTION_CLIENT_SECRET`, or
+`B2_OAUTH_INTROSPECTION_BEARER_TOKEN`. Only set
+`B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION=true` for a reviewed
+local or lab authorization server.
 
 Scope behavior is cumulative with B2 capabilities. `b2:read` exposes reviewed
 read/list/inspect tools, `b2:write` also exposes object and bucket mutations
@@ -109,6 +124,11 @@ should use no B2 credentials, deterministic fakes, or a separate disposable
 read-only key. The adapter refuses Preview deployments that contain
 `B2_APPLICATION_KEY_ID` or `B2_APPLICATION_KEY` unless
 `B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS=true` is set.
+
+Legacy header credential mode is disabled on Vercel unless
+`B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE=true` is set. Server mode is the
+supported production mode because B2 credentials stay in Vercel Production
+environment secrets and are never supplied by the MCP client.
 
 Protect Preview deployments with Vercel Deployment Protection. If CI must reach
 a protected Preview, send `x-vercel-protection-bypass` from a protected GitHub
@@ -128,6 +148,11 @@ MCP_AUTHORIZATION="Bearer <access-token>" \
   B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
   pnpm run smoke
 ```
+
+`/health` validates the static Vercel credential and OAuth configuration
+without calling B2. It returns 503 until required OAuth and credential
+environment variables are complete; this is expected during incremental
+project setup and distinct from a crashed function.
 
 For protected Preview smoke, include the Vercel bypass header only through a
 protected CI secret. The smoke workflow supports `headers`, `server`, and

@@ -1,32 +1,40 @@
 import {
   vercelAuthorizationServerMetadataFetch,
   vercelHealthFetch,
+  type VercelMcpFetchContext,
   vercelMcpFetch,
   vercelProtectedResourceMetadataFetch,
 } from "./adapter.js";
 
-export const runtime = "nodejs";
-
-export async function GET(request: Request): Promise<Response> {
-  return vercelMcpFetch(request);
+export async function mcpGetRoute(
+  request: Request,
+  context?: VercelMcpFetchContext,
+): Promise<Response> {
+  return vercelMcpFetch(request, context);
 }
 
-export async function POST(request: Request): Promise<Response> {
-  return vercelMcpFetch(request);
+export async function mcpPostRoute(
+  request: Request,
+  context?: VercelMcpFetchContext,
+): Promise<Response> {
+  return vercelMcpFetch(request, context);
 }
 
-export async function DELETE(request: Request): Promise<Response> {
-  return vercelMcpFetch(request);
+export async function mcpDeleteRoute(
+  request: Request,
+  context?: VercelMcpFetchContext,
+): Promise<Response> {
+  return vercelMcpFetch(request, context);
 }
 
-export async function HEALTH(request: Request): Promise<Response> {
+export async function healthRoute(request: Request): Promise<Response> {
   return vercelHealthFetch(request);
 }
 
-export async function OAUTH_PROTECTED_RESOURCE(): Promise<Response> {
+export async function protectedResourceMetadataRoute(): Promise<Response> {
   return vercelProtectedResourceMetadataFetch();
 }
 
-export async function OAUTH_AUTHORIZATION_SERVER(): Promise<Response> {
+export async function authorizationServerMetadataRoute(): Promise<Response> {
   return vercelAuthorizationServerMetadataFetch();
 }

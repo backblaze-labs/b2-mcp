@@ -35,6 +35,7 @@ import {
   CredentialResolutionError,
   credentialFingerprint,
   getHttpCredentialProvider,
+  hasCredentialHeaders,
   type SecretBroker,
   validateHttpCredentialConfiguration,
 } from "./credentials.js";
@@ -160,7 +161,7 @@ export function createPreparedMcpServerFactory(
     }
     const b2OauthScopes = prepared.authInfo?.scopes?.filter((scope) => scope.startsWith("b2:"));
     const server = createServerForRequest(prepared.resolved.config, prepared.capabilities, {
-      ...(b2OauthScopes && b2OauthScopes.length > 0 && { oauthScopes: b2OauthScopes }),
+      ...(prepared.authInfo && { oauthScopes: b2OauthScopes ?? [] }),
     });
     prepared.servers.add(server);
     return server;
@@ -518,9 +519,13 @@ function logProtocolRejection(request: Request, rejection: ProtocolRejection): v
 }
 
 function requestLimitKey(request: Request, context: HttpFetchContext | undefined): string {
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const trustProxyHeaders = process.env.B2_TRUST_PROXY_HEADERS === "true";
+  const forwarded = trustProxyHeaders
+    ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+    : undefined;
+  const realIp = trustProxyHeaders ? request.headers.get("x-real-ip") : undefined;
   const address =
-    context?.remoteAddress ?? forwarded ?? request.headers.get("x-real-ip") ?? "unknown";
+    context?.remoteAddress?.trim() || forwarded?.trim() || realIp?.trim() || "unknown";
   return `http:${address}`;
 }
 
@@ -638,6 +643,26 @@ function makeCredentialRequest(
     headers: headersToIncoming(request.headers),
     ...(authInfo && { auth: authInfo }),
   } as AuthenticatedIncomingMessage;
+}
+
+function shouldRejectPublicCredentialHeaders(provider: CredentialProvider): boolean {
+  return provider.name === "http-server" || provider.name === "http-principal";
+}
+
+function publicCredentialHeaderRejection(
+  provider: CredentialProvider,
+  request: Request,
+  authInfo: AuthInfo | null | undefined,
+): Response | null {
+  if (!shouldRejectPublicCredentialHeaders(provider)) return null;
+  if (!hasCredentialHeaders(headersToIncoming(request.headers))) return null;
+  try {
+    provider.resolve({ req: makeCredentialRequest(request, authInfo) });
+    return null;
+  } catch (err) {
+    logCredentialResolutionFailure(provider, request, authInfo, err);
+    return credentialErrorResponse(err);
+  }
 }
 
 function responseWithCleanup(response: Response, cleanup: () => Promise<void>): Response {
@@ -822,6 +847,15 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
           jsonResponse(413, { error: "Request body too large" }, { Connection: "close" }),
           () => finalize(limitKey, prepared),
         );
+      }
+
+      const credentialHeaderRejection = publicCredentialHeaderRejection(
+        credentialProvider,
+        request,
+        authInfo,
+      );
+      if (credentialHeaderRejection) {
+        return responseWithCleanup(credentialHeaderRejection, () => finalize(limitKey, prepared));
       }
 
       const sanitizedHeaders = sanitizedHeadersFromRequest(request);
