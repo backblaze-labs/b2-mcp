@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHmac, createSecretKey, randomBytes } from "node:crypto";
 import {
   OAuthError,
   OAuthErrorCode,
@@ -13,7 +13,6 @@ import {
   type OAuthProtectedResourceMetadata,
   type OAuthTokenVerifier,
 } from "@modelcontextprotocol/server";
-import { credentialFingerprint } from "./credentials.js";
 import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
 
@@ -357,29 +356,28 @@ interface IntrospectionCircuitState {
 
 const introspectionCache = new Map<string, IntrospectionCacheEntry>();
 const introspectionCircuits = new Map<string, IntrospectionCircuitState>();
+const tokenLabelKey = createSecretKey(Uint8Array.from(randomBytes(32)));
 
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
+function tokenLabel(token: string): string {
+  return createHmac("sha256", tokenLabelKey).update(token).digest("hex").slice(0, 32);
 }
 
 function configCacheKey(config: OAuthResourceServerConfig): string {
-  return sha256Hex(
-    [
-      config.issuer,
-      config.resource,
-      config.audience,
-      config.introspectionEndpoint,
-      config.introspectionClientId ?? "",
-      config.introspectionBearerToken ? "bearer" : "",
-      config.allowedTokenTypes.join(","),
-      config.allowedAlgorithms.join(","),
-      config.allowedSubjects.join(","),
-    ].join("\0"),
-  );
+  return JSON.stringify({
+    issuer: config.issuer,
+    resource: config.resource,
+    audience: config.audience,
+    introspectionEndpoint: config.introspectionEndpoint,
+    introspectionClientId: config.introspectionClientId ?? "",
+    introspectionAuth: config.introspectionBearerToken ? "bearer" : "client",
+    allowedTokenTypes: config.allowedTokenTypes,
+    allowedAlgorithms: config.allowedAlgorithms,
+    allowedSubjects: config.allowedSubjects,
+  });
 }
 
 function cacheKey(config: OAuthResourceServerConfig, token: string): string {
-  return sha256Hex([configCacheKey(config), sha256Hex(token)].join("\0"));
+  return `${configCacheKey(config)}\0token:${tokenLabel(token)}`;
 }
 
 function cloneAuthInfo(authInfo: AuthInfo): AuthInfo {
@@ -476,7 +474,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
         "unknown-client";
       const subject = stringClaim(claims.sub);
       const authInfo: AuthInfo = {
-        token: `verified:${credentialFingerprint(token)}`,
+        token: `verified:${tokenLabel(token)}`,
         clientId,
         scopes,
         expiresAt,
@@ -487,7 +485,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
           ...(algorithm && { alg: algorithm }),
           aud: values(claims.aud),
           resource: values(claims.resource),
-          token_hash: credentialFingerprint(token),
+          token_hash: tokenLabel(token),
         },
       };
       rememberAuthInfo(key, authInfo, this.config, now * 1000);
