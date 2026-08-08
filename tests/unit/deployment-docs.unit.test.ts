@@ -191,6 +191,7 @@ describe("deployment documentation", () => {
       "`resource` claim does not substitute",
     );
     expect(wrangler).toContain('"nodejs_compat"');
+    expect(wrangler).toContain('"nodejs_compat_do_not_populate_process_env"');
     expect(wrangler).toMatch(/"compatibility_date": "\d{4}-\d{2}-\d{2}"/);
     expect(wrangler).not.toContain("B2_MCP_OAUTH_REQUIRED_SCOPES");
     expect(wrangler).not.toContain("B2_MCP_TRUSTED_EDGE_AUTH");

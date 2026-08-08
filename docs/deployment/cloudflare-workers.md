@@ -15,7 +15,9 @@ Read [security and credentials](security-and-credentials.md) before deploying.
   this guide for reference, but the native Worker adapter is source-checkout-only
   until it graduates from experimental support.
 - Wrangler configured for `deploy/cloudflare-worker/wrangler.jsonc`.
-- `nodejs_compat` compatibility flag and compatibility date `2026-08-08`.
+- `nodejs_compat` compatibility flag, compatibility date `2026-08-08`, and
+  `nodejs_compat_do_not_populate_process_env` so Worker secrets stay off global
+  `process.env`.
 - Worker encrypted secrets for B2 credentials.
 
 ## Architecture
@@ -122,7 +124,7 @@ route or a protected synthetic check.
 
 Run the shared smoke from [security and credentials](security-and-credentials.md).
 Record the Worker script version, compatibility date, route, `nodejs_compat`
-flag, and tool-contract hash.
+and `nodejs_compat_do_not_populate_process_env` flags, and tool-contract hash.
 
 ## Logs
 
