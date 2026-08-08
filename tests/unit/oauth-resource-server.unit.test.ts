@@ -281,6 +281,24 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keys cached introspection results by token type policy", async () => {
+    const fetchMock = vi.fn(async () => Response.json(claims({ token_type: "mac" })));
+    const permissive = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, allowedTokenTypes: ["bearer", "mac"] },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const strict = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, allowedTokenTypes: ["bearer"] },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await permissive.verifyAccessToken("same-token");
+    await expect(strict.verifyAccessToken("same-token")).rejects.toThrow(/token type/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not cache past token expiry even when the cache TTL is longer", async () => {
     let now = 1000;
     const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 3 })));

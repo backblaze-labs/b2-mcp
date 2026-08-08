@@ -341,6 +341,7 @@ function configCacheKey(config: OAuthResourceServerConfig): string {
       config.introspectionEndpoint,
       config.introspectionClientId ?? "",
       config.introspectionBearerToken ? "bearer" : "",
+      config.allowedTokenTypes.join(","),
       config.allowedAlgorithms.join(","),
     ].join("\0"),
   );
