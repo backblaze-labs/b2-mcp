@@ -1,0 +1,84 @@
+name: b2-mcp-reference
+
+x-bounded-logging: &bounded-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-b2-mcp-service: &b2-mcp-service
+  build:
+    context: ../..
+    dockerfile: deploy/customer-hosted/Dockerfile
+    args:
+      B2_MCP_VERSION: ${B2_MCP_VERSION:?Set B2_MCP_VERSION from ../../package.json before building}
+  image: b2-mcp-reference:${B2_MCP_VERSION:?Set B2_MCP_VERSION from ../../package.json before starting}
+  env_file:
+    - ./b2-mcp.env
+  expose:
+    - "3000"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 256
+  mem_limit: 1g
+  stop_grace_period: 15s
+  restart: unless-stopped
+  logging: *bounded-logging
+  secrets:
+    - b2_application_key_id
+    - b2_application_key
+  networks:
+    - b2-mcp-private
+
+services:
+  b2-mcp-a:
+    <<: *b2-mcp-service
+
+  b2-mcp-b:
+    <<: *b2-mcp-service
+
+  nginx:
+    image: nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    depends_on:
+      - b2-mcp-a
+      - b2-mcp-b
+    ports:
+      - "80:80"
+      - "443:443"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:rw,noexec,nosuid,nodev,size=64m
+      - /var/run:rw,noexec,nosuid,nodev,size=16m
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt/live/mcp.example.com:/etc/letsencrypt/live/mcp.example.com:ro
+      - /etc/letsencrypt/archive/mcp.example.com:/etc/letsencrypt/archive/mcp.example.com:ro
+      - /var/www/letsencrypt:/var/www/letsencrypt:ro
+    networks:
+      - b2-mcp-private
+    restart: unless-stopped
+    logging: *bounded-logging
+
+secrets:
+  b2_application_key_id:
+    file: ./secrets/b2_application_key_id
+  b2_application_key:
+    file: ./secrets/b2_application_key
+
+networks:
+  b2-mcp-private:
+    driver: bridge

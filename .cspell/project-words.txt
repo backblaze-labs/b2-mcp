@@ -38,6 +38,7 @@ spdxjson
 slsaprovenance
 SUIDSGID
 thiennq
+tmpfs
 toon
 tvzf
 ustar
@@ -52,6 +53,7 @@ Gonza
 sophiecarreras
 
 # Cloud, network, storage, and security terms
+buildx
 creds
 EOPENBREAKER
 exfiltration

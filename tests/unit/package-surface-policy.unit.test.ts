@@ -1,4 +1,12 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "fs";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { delimiter, join } from "path";
@@ -26,6 +34,55 @@ function parseJsonArray(stdout: string) {
   }>;
 }
 
+function npmPackDryRunFiles(cwd = root): string[] {
+  const npmPack = npmInvocation(["pack", "--json", "--ignore-scripts", "--dry-run"]);
+  const packed = spawnSync(npmPack.command, npmPack.args, {
+    cwd,
+    encoding: "utf8",
+    env: npmEnv(),
+  });
+  expect(packed.status).toBe(0);
+  return parseJsonArray(packed.stdout)[0].files.map((file) => file.path);
+}
+
+function dockerIgnoreMatcher(patternText: string): (relativePath: string) => boolean {
+  // Best-effort local invariant for the simple checked-in patterns below. It is
+  // not a complete Docker .dockerignore parser.
+  const patterns = patternText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+
+  function globToRegExp(pattern: string): RegExp {
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*\*/g, ".*")
+      .replace(/\*/g, "[^/]*");
+    return new RegExp(`^${escaped}$`);
+  }
+
+  return (relativePath: string): boolean => {
+    const path = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+    return patterns.some((rawPattern) => {
+      const pattern = rawPattern.replace(/^\/+/, "");
+      if (pattern.endsWith("/")) {
+        const prefix = pattern;
+        return path === prefix.slice(0, -1) || path.startsWith(prefix);
+      }
+      if (pattern.includes("*")) return globToRegExp(pattern).test(path);
+      // A bare directory/file pattern (e.g. `dist`) matches the entry itself
+      // and every descendant, at the root or nested, mirroring how Docker
+      // excludes a directory's whole subtree.
+      return (
+        path === pattern ||
+        path.startsWith(`${pattern}/`) ||
+        path.endsWith(`/${pattern}`) ||
+        path.includes(`/${pattern}/`)
+      );
+    });
+  };
+}
+
 describe("package surface policy", () => {
   const pkg = readJson<{
     files: string[];
@@ -39,22 +96,26 @@ describe("package surface policy", () => {
   const readme = readFileSync(join(root, "README.md"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
-    const npmPack = npmInvocation(["pack", "--json", "--ignore-scripts", "--dry-run"]);
-    const packed = spawnSync(npmPack.command, npmPack.args, {
-      cwd: root,
-      encoding: "utf8",
-      env: npmEnv(),
-    });
-    expect(packed.status).toBe(0);
-    const files = parseJsonArray(packed.stdout)[0].files.map((file) => file.path);
+    const files = npmPackDryRunFiles();
 
     expect(pkg.files).not.toContain("runtime-policy.json");
     expect(pkg.files).not.toContain("audit-policy.json");
     expect(pkg.files).not.toContain("package-budget.json");
+    expect(pkg.files).not.toContain("deploy/customer-hosted/**/*");
     expect(files).not.toContain("runtime-policy.json");
     expect(files).not.toContain("audit-policy.json");
     expect(files).not.toContain("package-budget.json");
+    expect(files).toContain(".dockerignore");
     expect(files).toContain("package.json");
+    expect(files).toContain("deploy/customer-hosted/.dockerignore");
+    expect(files).toContain("deploy/customer-hosted/Dockerfile");
+    expect(files).toContain("deploy/customer-hosted/README.md");
+    expect(files).toContain("deploy/customer-hosted/b2-mcp.env.example");
+    expect(files).toContain("deploy/customer-hosted/container-entrypoint.sh");
+    expect(files).toContain("deploy/customer-hosted/docker-compose.yml");
+    expect(files).toContain("deploy/customer-hosted/nginx.conf");
+    expect(files).toContain("deploy/customer-hosted/pnpm-lock.yaml");
+    expect(files).toContain("deploy/customer-hosted/pnpm-workspace.yaml");
     expect(files).toContain("docs/CLIENTS.md");
     expect(files).toContain("docs/DEPLOY.md");
     expect(files).toContain("docs/tool-profile-contract.json");
@@ -63,6 +124,230 @@ describe("package surface policy", () => {
     )) {
       expect(files).toContain(fixturePath);
     }
+  });
+
+  it("keeps packaged deployment lockfiles mirrored from the reviewed lockfiles", () => {
+    expect(readFileSync(join(root, "deploy/customer-hosted/pnpm-lock.yaml"), "utf8")).toBe(
+      readFileSync(join(root, "pnpm-lock.yaml"), "utf8"),
+    );
+    expect(readFileSync(join(root, "deploy/customer-hosted/pnpm-workspace.yaml"), "utf8")).toBe(
+      readFileSync(join(root, "pnpm-workspace.yaml"), "utf8"),
+    );
+  });
+
+  it("treats deployment secret-file env values as literal paths", () => {
+    const entrypointPath = join(root, "deploy/customer-hosted/container-entrypoint.sh");
+    const entrypoint = readFileSync(entrypointPath, "utf8");
+    const tempRoot = mkdtempSync(join(tmpdir(), "b2-mcp-entrypoint-"));
+    const binDir = join(tempRoot, "bin");
+    const fakeServer = join(binDir, "b2-mcp-server");
+    const secretPath = join(tempRoot, "secret-$(touch exploited)");
+    const exploitedPath = join(tempRoot, "exploited");
+
+    try {
+      expect(entrypoint).not.toMatch(/\beval\b/);
+      expect(entrypoint).toContain('printenv "$file_var"');
+      expect(entrypoint).toContain('printenv "$var_name"');
+
+      mkdirSync(binDir);
+      writeFileSync(secretPath, "literal-secret-value");
+      writeFileSync(fakeServer, "#!/bin/sh\nprintf '%s' \"$B2_APPLICATION_KEY\"\n");
+      chmodSync(fakeServer, 0o755);
+
+      const result = spawnSync("sh", [entrypointPath, "--probe"], {
+        cwd: tempRoot,
+        encoding: "utf8",
+        env: {
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+          B2_APPLICATION_KEY_FILE: secretPath,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("literal-secret-value");
+      expect(result.stderr).toBe("");
+      expect(existsSync(exploitedPath)).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes local deployment secrets from npm pack and Docker build contexts", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "b2-mcp-package-surface-"));
+    const deployRoot = join(tempRoot, "deploy/customer-hosted");
+    const localSecretPaths = [
+      "b2-mcp.env",
+      ".env",
+      ".env.local",
+      ".env.production",
+      "secrets/b2_application_key_id",
+      "secrets/b2_application_key",
+      "fullchain.pem",
+      "certs/fullchain.pem",
+      "tls/client.key",
+      "tls/client.crt",
+      "tls/client.p12",
+    ];
+    const rootSecretPaths = [
+      ".env.production",
+      "secrets/b2_application_key",
+      "certs/fullchain.pem",
+      "tls/client.p12",
+      "private.key",
+    ];
+
+    try {
+      mkdirSync(deployRoot, { recursive: true });
+      mkdirSync(join(tempRoot, "secrets"), { recursive: true });
+      mkdirSync(join(tempRoot, "certs"), { recursive: true });
+      mkdirSync(join(tempRoot, "tls"), { recursive: true });
+      mkdirSync(join(deployRoot, "secrets"), { recursive: true });
+      mkdirSync(join(deployRoot, "certs"), { recursive: true });
+      mkdirSync(join(deployRoot, "tls"), { recursive: true });
+      writeFileSync(
+        join(tempRoot, "package.json"),
+        readFileSync(join(root, "package.json"), "utf8"),
+      );
+      writeFileSync(
+        join(tempRoot, ".dockerignore"),
+        readFileSync(join(root, ".dockerignore"), "utf8"),
+      );
+      for (const fileName of [
+        ".dockerignore",
+        "Dockerfile",
+        "README.md",
+        "b2-mcp.env.example",
+        "container-entrypoint.sh",
+        "docker-compose.yml",
+        "nginx.conf",
+      ]) {
+        writeFileSync(
+          join(deployRoot, fileName),
+          readFileSync(join(root, "deploy/customer-hosted", fileName), "utf8"),
+        );
+      }
+      for (const relativePath of localSecretPaths) {
+        writeFileSync(join(deployRoot, relativePath), "local-secret-test-value");
+      }
+      for (const relativePath of rootSecretPaths) {
+        writeFileSync(join(tempRoot, relativePath), "root-secret-test-value");
+      }
+
+      const files = npmPackDryRunFiles(tempRoot);
+      for (const relativePath of localSecretPaths) {
+        expect(files).not.toContain(`deploy/customer-hosted/${relativePath}`);
+      }
+      for (const relativePath of rootSecretPaths) {
+        expect(files).not.toContain(relativePath);
+      }
+      expect(files).toContain("deploy/customer-hosted/b2-mcp.env.example");
+
+      const isDockerIgnored = dockerIgnoreMatcher(
+        readFileSync(join(deployRoot, ".dockerignore"), "utf8"),
+      );
+      const isRootDockerIgnored = dockerIgnoreMatcher(
+        readFileSync(join(tempRoot, ".dockerignore"), "utf8"),
+      );
+      for (const relativePath of localSecretPaths) {
+        expect(isDockerIgnored(relativePath)).toBe(true);
+        expect(isRootDockerIgnored(`deploy/customer-hosted/${relativePath}`)).toBe(true);
+      }
+      for (const relativePath of rootSecretPaths) {
+        expect(isRootDockerIgnored(relativePath)).toBe(true);
+      }
+      expect(isDockerIgnored("b2-mcp.env.example")).toBe(false);
+      expect(isDockerIgnored("Dockerfile")).toBe(false);
+      expect(isDockerIgnored("nginx.conf")).toBe(false);
+      expect(isRootDockerIgnored("package.json")).toBe(false);
+      expect(isRootDockerIgnored("dist/index.js")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/pnpm-lock.yaml")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/b2-mcp.env.example")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/Dockerfile")).toBe(false);
+      expect(isRootDockerIgnored("deploy/customer-hosted/nginx.conf")).toBe(false);
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("pins customer-hosted images and deployment policy knobs", () => {
+    const dockerfile = readFileSync(join(root, "deploy/customer-hosted/Dockerfile"), "utf8");
+    const compose = readFileSync(join(root, "deploy/customer-hosted/docker-compose.yml"), "utf8");
+    const nginx = readFileSync(join(root, "deploy/customer-hosted/nginx.conf"), "utf8");
+    const envExample = readFileSync(
+      join(root, "deploy/customer-hosted/b2-mcp.env.example"),
+      "utf8",
+    );
+    const deployReadme = readFileSync(join(root, "deploy/customer-hosted/README.md"), "utf8");
+    const deployDoc = readFileSync(join(root, "docs/DEPLOY.md"), "utf8");
+
+    expect(
+      dockerfile.match(/^FROM node:22\.23\.1-bookworm-slim@sha256:[a-f0-9]{64}.*$/gm),
+    ).toHaveLength(2);
+    expect(compose).toMatch(/image: nginx:1\.29-alpine@sha256:[a-f0-9]{64}/);
+    expect(dockerfile).not.toMatch(/^ARG B2_MCP_VERSION=/m);
+    expect(dockerfile).toContain('test -n "$B2_MCP_VERSION"');
+    expect(dockerfile).toContain(
+      "COPY package.json deploy/customer-hosted/pnpm-lock.yaml deploy/customer-hosted/pnpm-workspace.yaml ./",
+    );
+    expect(dockerfile).toContain("pnpm install --prod --frozen-lockfile --ignore-scripts");
+    expect(dockerfile).toContain("chmod 0555 /usr/local/lib/b2-mcp/dist/index.js");
+    expect(dockerfile).not.toContain("npm install -g");
+    expect(dockerfile).not.toContain("@backblaze-labs/b2-mcp@${B2_MCP_VERSION}");
+    expect(compose).toContain("context: ../..");
+    expect(compose).toContain("dockerfile: deploy/customer-hosted/Dockerfile");
+    expect(compose).toContain("B2_MCP_VERSION: ${B2_MCP_VERSION:?");
+    expect(compose).not.toContain("B2_MCP_VERSION:-");
+    for (const text of [dockerfile, compose, deployReadme, deployDoc]) {
+      expect(text).not.toMatch(/B2_MCP_VERSION=0\.1\.0|b2-mcp@0\.1\.0/);
+    }
+
+    expect(nginx).toContain("resolver 127.0.0.11 ipv6=off valid=10s;");
+    expect(nginx).toContain("zone b2_mcp_backend 64k;");
+    expect(nginx).toMatch(/server b2-mcp-a:3000 resolve /);
+    expect(nginx).toMatch(/server b2-mcp-b:3000 resolve /);
+    expect(nginx).toMatch(
+      /location\s+=\s+\/_oauth2\/validate\s+\{[\s\S]*proxy_connect_timeout\s+\d+s;/,
+    );
+    expect(nginx).toMatch(
+      /location\s+=\s+\/_oauth2\/validate\s+\{[\s\S]*proxy_send_timeout\s+\d+s;/,
+    );
+    expect(nginx).toMatch(
+      /location\s+=\s+\/_oauth2\/validate\s+\{[\s\S]*proxy_read_timeout\s+\d+s;/,
+    );
+    expect(nginx).toContain("error_page 500 502 503 504 = @oauth_unavailable;");
+
+    expect(compose).not.toContain("condition: service_healthy");
+    for (const capability of ["CHOWN", "NET_BIND_SERVICE", "SETGID", "SETUID"]) {
+      expect(compose).toContain(`- ${capability}`);
+    }
+    expect(compose).toContain('driver: "json-file"');
+    expect(compose).toContain("logging: *bounded-logging");
+    expect(compose).not.toContain("/etc/letsencrypt:/etc/letsencrypt:ro");
+    expect(compose).toContain(
+      "/etc/letsencrypt/live/mcp.example.com:/etc/letsencrypt/live/mcp.example.com:ro",
+    );
+    expect(compose).toContain(
+      "/etc/letsencrypt/archive/mcp.example.com:/etc/letsencrypt/archive/mcp.example.com:ro",
+    );
+    expect(nginx).toContain('proxy_set_header Connection "";');
+    expect(nginx).toContain("proxy_set_header X-Forwarded-For $remote_addr;");
+    expect(nginx).toContain("proxy_set_header Content-Type $http_content_type;");
+    expect(nginx).not.toContain("proxy_set_header Content-Type $content_type;");
+
+    expect(envExample).toContain("B2_ALLOWED_HOSTS=mcp.example.com");
+    expect(envExample).toContain("B2_ALLOWED_ORIGINS=https://client.example.com");
+    expect(nginx).toContain('"https://client.example.com" 1;');
+    expect(envExample).toContain("aggregate traffic per replica");
+    expect(deployReadme).toContain("aggregate per-replica caps");
+    expect(deployReadme).toContain("chmod 700 secrets");
+    expect(deployReadme).toContain(
+      "chmod 0444 secrets/b2_application_key_id secrets/b2_application_key",
+    );
+    expect(deployReadme).not.toContain(
+      "chmod 600 secrets/b2_application_key_id secrets/b2_application_key",
+    );
+    expect(deployDoc).toContain("canonical source for build/run steps");
+    expect(deployDoc).toContain("deploy/customer-hosted/README.md");
   });
 
   it("retries a transient lockfile-less packed-consumer install", () => {

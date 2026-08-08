@@ -1,8 +1,11 @@
 # Self-hosting the B2 MCP server
 
-This guide walks through deploying the MCP 2026-07-28 HTTP transport behind
-nginx with Let's Encrypt TLS on AWS EC2. The same recipe works on any Linux VM
-— only the AWS-specific steps differ.
+This guide covers the supported customer-hosted deployment for the MCP
+2026-07-28 HTTP transport. The recommended path is the checked-in container
+reference under `deploy/customer-hosted`, which is included in the npm release
+package so production hosts do not need to clone or build the repository. The
+systemd runbook later in this document remains a VM-oriented fallback for
+operators who intentionally manage the Node.js runtime themselves.
 
 If you only need local stdio use (Claude Desktop on your laptop), follow the
 README's Quick Start instead — none of this is required.
@@ -40,6 +43,51 @@ server does not depend on `initialize` or `Mcp-Session-Id` in production.
 - Node.js 22.23.1 or a later patched 22 LTS release, Node.js 24, or Node.js 26.
   The package engine floor remains `>=22.3.0` only to match the official B2 SDK.
 
+For the container path, the production host needs Docker Engine plus the Compose
+plugin. Node.js is installed inside the image.
+
+## Supported container reference
+
+The supported container operator runbook is
+[`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md). Treat
+that README as the canonical source for build/run steps, secret injection,
+nginx OAuth and mTLS policy, rolling deploys, pinned image updates, bounded
+logging, and capacity guidance. This section only shows how to fetch the
+published reference files.
+
+The release package includes:
+
+- `deploy/customer-hosted/Dockerfile`
+- `deploy/customer-hosted/docker-compose.yml`
+- `deploy/customer-hosted/nginx.conf`
+- `deploy/customer-hosted/b2-mcp.env.example`
+- `deploy/customer-hosted/pnpm-lock.yaml`
+- `deploy/customer-hosted/pnpm-workspace.yaml`
+- `.dockerignore`
+
+Fetch it from the package artifact instead of cloning the repository on the
+production host:
+
+```bash
+npm pack @backblaze-labs/b2-mcp@latest
+mkdir b2-mcp-release
+tar -xzf backblaze-labs-b2-mcp-*.tgz -C b2-mcp-release --strip-components=1
+cd b2-mcp-release/deploy/customer-hosted
+```
+
+Then follow the canonical runbook in
+[`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md). In
+brief, export `B2_MCP_VERSION` from the unpacked package's `package.json`, run
+`docker compose build` before creating local credential files, update
+`nginx.conf` plus `b2-mcp.env` together, create secrets outside the published
+examples, and start with `docker compose up -d --no-build`.
+
+The image installs production dependencies from the packaged
+`deploy/customer-hosted/pnpm-lock.yaml` with a frozen, script-disabled pnpm
+install and then copies the packaged `dist/` tree. If dependencies or image
+digests change, update them through the runbook and run the deployment policy
+tests before publishing.
+
 ## Security baseline
 
 Before exposing the server, confirm each of these. Most are on by default; the
@@ -48,19 +96,19 @@ two **you must set for any internet-facing HTTP deployment** are marked ⚠️.
 | Control                 | How                                                                                                                                                                                                                                                          | Default           |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
 | **TLS**                 | Terminate at nginx with Let's Encrypt (Step 5). Never expose `:3000` directly.                                                                                                                                                                               | —                 |
-| ⚠️ **DNS-rebinding**    | `B2_ALLOWED_HOSTS=your.domain` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname.                                          | localhost-only    |
+| ⚠️ **DNS-rebinding**    | `B2_ALLOWED_HOSTS=your.domain,127.0.0.1,localhost` (+ `B2_ALLOWED_ORIGINS` if browser clients). With neither set the server accepts **only localhost** — so an internet-facing deploy must set this or it will refuse its own hostname.                     | localhost-only    |
 | ⚠️ **Caller auth**      | `server` mode is single-tenant. `principal` mode requires your TLS/OAuth resource-server layer to validate each request and pass verified MCP `authInfo` to the SDK handler before credential lookup.                                                        | none (your job)   |
 | **Least-privilege key** | Use a **non-master** application key scoped to the buckets/capabilities the workload needs.                                                                                                                                                                  | —                 |
 | **Destructive-op gate** | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted).                                                                                                                                                      | `confirm`         |
 | **Unavailable stubs**   | `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are non-secret compatibility stubs until a reviewed secret sink exists; Partner/Groups names are SDK-gap stubs until stable SDK support ships.                              | unavailable       |
 | **Tool-result text**    | `B2_MCP_OUTPUT_FORMAT=json\|toon` selects only the LLM-facing `TextContent.text` serialization for structured successes. `structuredContent` and MCP envelopes remain JSON. Keep `json` during rolling deploys unless every client explicitly supports TOON. | `json`            |
-| **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`.                                                                                                                                                              | on                |
+| **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`; in `server` mode the shared server-held key makes this an aggregate per-replica cap.                                                                          | on                |
 | **SDK retries**         | Native SDK calls use 3 retries with 1s exponential backoff capped at 4s and a 30s per-attempt timeout; expired auth tokens are refreshed by the SDK retry transport.                                                                                         | configured        |
-| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; the names are retained for deploy-manifest compatibility.                                                                              | 1000 / 20         |
+| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; in `server` mode the per-key cap applies to the shared key per replica. The container reference raises the per-key cap to 200.        | 1000 / 20         |
 | **Local file access**   | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                                                          | off               |
 | **Capability cache**    | Capability discovery is cached by a secret-bound verifier or verified principal, with non-secret labels for logs. `B2_CAPABILITY_CACHE_TTL_MS` and `B2_CAPABILITY_CACHE_MAX_ENTRIES` bound staleness and size. Lookup failures fail closed.                  | 5 minutes / 10000 |
 | **Webhook targets**     | `b2_set_bucket_notification_rules` is gated by `B2_DESTRUCTIVE_POLICY`, enforces HTTPS, and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                    | enforced          |
-| **Audit log**           | Structured, values-redacted (key names only — never secrets/values). Ship stderr to journald/CloudWatch.                                                                                                                                                     | on                |
+| **Audit log**           | Structured, values-redacted (key names only — never secrets/values). Compose bounds local `json-file` logs; ship stderr to journald/CloudWatch or another rotated sink for VM deployments.                                                                  | on                |
 | **Secrets**             | Provide via the systemd unit's `Environment=` (or a secrets manager) — never commit. `.env*` is gitignored; see [`.env.example`](../.env.example).                                                                                                           | —                 |
 
 ## Credential modes
@@ -429,8 +477,11 @@ server {
     }
 
     location = /health {
-        proxy_pass http://127.0.0.1:3000;
-        access_log off;
+        return 404;
+    }
+
+    location = /ready {
+        return 404;
     }
 
     location / { return 404; }

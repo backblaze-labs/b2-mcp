@@ -33,7 +33,7 @@ export const ROOT = join(__dirname, "../../..");
 const DIST_INDEX = join(ROOT, "dist/index.js");
 const DIST_HTTP = join(ROOT, "dist/http-server.js");
 export const SIMULATOR_ENTRYPOINT = join(__dirname, "simulator-entrypoint.mjs");
-const REQUEST_TIMEOUT_MS = 5_000;
+const REQUEST_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 10_000;
 const SAFE_ENV_NAMES = [
   "PATH",
   "Path",

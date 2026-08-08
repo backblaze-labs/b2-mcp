@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import os from "node:os";
 import path from "node:path";
 import net from "node:net";
+import http from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assert } from "./lib/release-utils.mjs";
@@ -122,6 +123,63 @@ function installedBin(name) {
   );
 }
 
+function installedPackageFile(relativePath) {
+  return path.join(workspace, "node_modules", "@backblaze-labs", "b2-mcp", relativePath);
+}
+
+function nginxBlockBody(config, directivePattern, label) {
+  const directive = directivePattern.exec(config);
+  assert(directive, `${label} missing`);
+  const openBrace = config.indexOf("{", directive.index);
+  assert(openBrace >= 0, `${label} missing opening brace`);
+
+  let depth = 0;
+  for (let index = openBrace; index < config.length; index += 1) {
+    const char = config[index];
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return config.slice(openBrace + 1, index);
+    }
+  }
+
+  throw new Error(`${label} missing closing brace`);
+}
+
+function referenceNginxProxyHeaders(nginxConfig) {
+  const mcpLocation = nginxBlockBody(
+    nginxConfig,
+    /location\s+=\s+\/mcp\s*\{/,
+    "reference nginx /mcp location",
+  );
+  return new Map(
+    Array.from(mcpLocation.matchAll(/proxy_set_header\s+([^\s]+)\s+([^;]+);/g)).map((match) => [
+      match[1],
+      match[2],
+    ]),
+  );
+}
+
+function smokeReferenceNginxConfig() {
+  const nginxConfig = readFileSync(
+    installedPackageFile("deploy/customer-hosted/nginx.conf"),
+    "utf8",
+  );
+  const headers = referenceNginxProxyHeaders(nginxConfig);
+  assert(
+    nginxConfig.includes("proxy_pass_request_headers off;"),
+    "reference nginx should rebuild upstream request headers",
+  );
+  assert(
+    headers.get("Content-Type") === "$http_content_type",
+    "reference nginx should forward the incoming request Content-Type",
+  );
+  assert(
+    !nginxConfig.includes("proxy_set_header Content-Type $content_type;"),
+    "reference nginx should not forward nginx response Content-Type",
+  );
+}
+
 function packageRuntimeEnv(extra = {}) {
   return sanitizedEnv(
     {
@@ -227,6 +285,14 @@ async function httpJson(port, method, pathname, { headers = {}, body = undefined
   return { status: response.status, headers: response.headers, body: text };
 }
 
+async function httpRpcWithResponse(port, body, headers) {
+  const response = await httpJson(port, "POST", "/mcp", { headers, body });
+  assert(response.status === 200, `MCP HTTP status ${response.status}: ${response.body}`);
+  const message = parseMcpBody(response.body);
+  assert(!message.error, `MCP HTTP error: ${JSON.stringify(message.error)}`);
+  return { response, message };
+}
+
 async function waitForHealth(port, expectedVersion) {
   let lastError = null;
   for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -248,11 +314,7 @@ async function waitForHealth(port, expectedVersion) {
 }
 
 async function httpRpc(port, body, headers) {
-  const response = await httpJson(port, "POST", "/mcp", { headers, body });
-  assert(response.status === 200, `MCP HTTP status ${response.status}: ${response.body}`);
-  const message = parseMcpBody(response.body);
-  assert(!message.error, `MCP HTTP error: ${JSON.stringify(message.error)}`);
-  return message.result;
+  return (await httpRpcWithResponse(port, body, headers)).message.result;
 }
 
 function waitForStdioFrame(child, request, timeoutMs = 10_000) {
@@ -394,6 +456,192 @@ async function smokeHttp(binPath, port, expectedVersion) {
   }
 }
 
+async function stopProcess(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 5_000);
+    timer.unref();
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+async function startPackagedReplica(binPath, name, expectedVersion) {
+  const port = await freePort();
+  const child = spawn(binPath, ["--transport", "http", "--port", String(port)], {
+    cwd: workspace,
+    env: packageRuntimeEnv({
+      B2_HTTP_CREDENTIAL_MODE: "headers",
+      B2_ALLOWED_HOSTS: "127.0.0.1,localhost",
+    }),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+  try {
+    await waitForHealth(port, expectedVersion);
+  } catch (err) {
+    await stopProcess(child);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`replica ${name} failed health: ${message}\n${stderr}`);
+  }
+  return { name, port, child };
+}
+
+async function readNodeBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+async function startRoundRobinProxy(initialTargets) {
+  let targets = [...initialTargets];
+  let next = 0;
+  const seen = [];
+  const server = http.createServer(async (clientReq, clientRes) => {
+    if (targets.length === 0) {
+      clientRes.writeHead(503);
+      clientRes.end();
+      return;
+    }
+    const target = targets[next % targets.length];
+    next += 1;
+    seen.push(target.name);
+    const body = await readNodeBody(clientReq);
+    const upstream = http.request(
+      {
+        host: "127.0.0.1",
+        port: target.port,
+        method: clientReq.method,
+        path: clientReq.url,
+        headers: { ...clientReq.headers, host: `127.0.0.1:${target.port}` },
+      },
+      (upstreamRes) => {
+        clientRes.writeHead(upstreamRes.statusCode ?? 502, {
+          ...upstreamRes.headers,
+          "x-b2-mcp-replica": target.name,
+        });
+        upstreamRes.pipe(clientRes);
+      },
+    );
+    upstream.on("error", () => {
+      clientRes.writeHead(502, { "x-b2-mcp-replica": target.name });
+      clientRes.end();
+    });
+    upstream.end(body);
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  return {
+    port: typeof address === "object" && address ? address.port : 0,
+    seen,
+    server,
+    setTargets(nextTargets) {
+      targets = [...nextTargets];
+      next = 0;
+    },
+  };
+}
+
+async function closeProxy(proxy) {
+  await new Promise((resolve) => proxy.server.close(() => resolve()));
+}
+
+async function smokeRoundRobinHttp(binPath, expectedVersion) {
+  const replicas = [];
+  let proxy = null;
+  try {
+    replicas.push(await startPackagedReplica(binPath, "replica-a", expectedVersion));
+    replicas.push(await startPackagedReplica(binPath, "replica-b", expectedVersion));
+    proxy = await startRoundRobinProxy(replicas);
+    const credentialHeaders = {
+      "x-b2-mcp-key-id": "packed-consumer-key-id",
+      "x-b2-mcp-key": "packed-consumer-key-secret",
+    };
+
+    const discover = await httpRpcWithResponse(proxy.port, modernBody("server/discover"), {
+      ...credentialHeaders,
+      ...modernHeaders("server/discover"),
+    });
+    const modernList = await httpRpcWithResponse(proxy.port, modernBody("tools/list", {}, 2), {
+      ...credentialHeaders,
+      ...modernHeaders("tools/list"),
+    });
+    const modernCall = await httpRpcWithResponse(
+      proxy.port,
+      modernBody("tools/call", { name: "b2_create_key", arguments: {} }, 3),
+      { ...credentialHeaders, ...modernHeaders("tools/call", "b2_create_key") },
+    );
+    const legacyInit = await httpRpcWithResponse(proxy.port, legacyInitializeBody(), {
+      ...credentialHeaders,
+      ...JSON_HEADERS,
+    });
+    const legacyList = await httpRpcWithResponse(proxy.port, legacyBody("tools/list", {}, 5), {
+      ...credentialHeaders,
+      ...JSON_HEADERS,
+    });
+
+    assert(
+      JSON.stringify(proxy.seen.slice(0, 5)) ===
+        JSON.stringify(["replica-a", "replica-b", "replica-a", "replica-b", "replica-a"]),
+      `round-robin order mismatch: ${proxy.seen.join(",")}`,
+    );
+    for (const { response } of [discover, modernList, modernCall]) {
+      assert(
+        response.headers.get("mcp-session-id") === null,
+        "modern HTTP unexpectedly returned Mcp-Session-Id",
+      );
+    }
+    assert(
+      discover.message.result?._meta?.["io.modelcontextprotocol/serverInfo"]?.version ===
+        expectedVersion,
+      "round-robin modern discover version mismatch",
+    );
+    assert(
+      modernList.message.result?.tools?.some((tool) => tool.name === "b2_list_buckets"),
+      "round-robin modern tools/list missing b2_list_buckets",
+    );
+    assert(
+      JSON.stringify(modernCall.message.result).includes("tool_unavailable"),
+      "round-robin modern tools/call mismatch",
+    );
+    assert(
+      legacyInit.message.result?.serverInfo?.version === expectedVersion,
+      "round-robin legacy initialize version mismatch",
+    );
+    assert(
+      legacyList.message.result?.tools?.some((tool) => tool.name === "b2_list_buckets"),
+      "round-robin legacy tools/list missing b2_list_buckets",
+    );
+
+    await stopProcess(replicas[0].child);
+    proxy.setTargets([replicas[1]]);
+    const survivor = await httpRpcWithResponse(proxy.port, modernBody("tools/list", {}, 6), {
+      ...credentialHeaders,
+      ...modernHeaders("tools/list"),
+    });
+    assert(
+      survivor.response.headers.get("x-b2-mcp-replica") === "replica-b",
+      "survivor request did not route to replica-b",
+    );
+    assert(
+      survivor.message.result?.tools?.some((tool) => tool.name === "b2_list_buckets"),
+      "survivor tools/list missing b2_list_buckets",
+    );
+  } finally {
+    if (proxy) await closeProxy(proxy);
+    await Promise.all(replicas.map((replica) => stopProcess(replica.child)));
+  }
+}
+
 try {
   const args = parseArgs(process.argv.slice(2));
 
@@ -493,6 +741,8 @@ try {
     const b2McpBin = installedBin("b2-mcp");
     const serverAliasBin = installedBin("b2-mcp-server");
 
+    smokeReferenceNginxConfig();
+
     for (const bin of [b2McpBin, serverAliasBin]) {
       const help = runPath(bin, ["--help"]);
       assert(help.stdout.includes("--transport <stdio|http>"), `${bin} --help missing transport`);
@@ -502,6 +752,7 @@ try {
 
     await smokeStdio(serverAliasBin, packageVersion);
     await smokeHttp(b2McpBin, await freePort(), packageVersion);
+    await smokeRoundRobinHttp(b2McpBin, packageVersion);
 
     const withoutCreds = runPath(b2McpBin, [], {
       allowFailure: true,

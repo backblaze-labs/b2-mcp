@@ -50,6 +50,8 @@ const DEFAULT_MAX_IN_FLIGHT = 1000;
 const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
 const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
+const STATELESS_ACTIVE_SESSIONS = 0;
+const STATELESS_OPEN_SUBSCRIPTIONS = 0;
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 /** Comma-separated allowlists for DNS-rebinding protection (empty = unset). */
@@ -230,6 +232,24 @@ function intEnv(name: string, fallback: number): number {
 
 function requestLimitKey(req: http.IncomingMessage): string {
   return `http:${req.socket.remoteAddress ?? "unknown"}`;
+}
+
+function isLoopbackRemoteAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  if (address === "::1" || address === "0:0:0:0:0:0:0:1") return true;
+  return /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(address);
+}
+
+function isLoopbackHostName(hostname: string): boolean {
+  return LOCALHOST_NAMES.has(hostname) || /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(hostname);
+}
+
+function isLoopbackHealthProbe(req: http.IncomingMessage): boolean {
+  if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) return false;
+  const host = Array.isArray(req.headers.host) ? "" : (req.headers.host ?? "");
+  if (!isLoopbackHostName(hostWithoutPort(host))) return false;
+  const origin = Array.isArray(req.headers.origin) ? "" : (req.headers.origin ?? "");
+  return !origin || isLoopbackHostName(originHostname(origin));
 }
 
 function contentLengthExceedsLimit(headers: http.IncomingHttpHeaders): boolean {
@@ -578,6 +598,18 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
     }
   }
 
+  function healthBody(status: "ok" | "error", error?: string): Record<string, unknown> {
+    return {
+      status,
+      ...(error && { error }),
+      server: "backblaze-b2-mcp",
+      version: VERSION,
+      activeSessions: STATELESS_ACTIVE_SESSIONS,
+      inFlightRequests: inFlight.active,
+      openSubscriptions: STATELESS_OPEN_SUBSCRIPTIONS,
+    };
+  }
+
   const idleSweep = setInterval(() => {
     const now = Date.now();
     sweepIdleBuckets(now);
@@ -671,34 +703,26 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       return;
     }
 
-    if (req.method === "GET" && url.pathname === "/health") {
-      const ready = readiness();
-      if (!ready.ok) {
-        writeJson(res, 503, {
-          status: "error",
-          error: ready.error,
-          server: "backblaze-b2-mcp",
-          version: VERSION,
-          activeSessions: 0,
-        });
-        return;
-      }
-      writeJson(res, 200, {
-        status: "ok",
-        server: "backblaze-b2-mcp",
-        version: VERSION,
-        activeSessions: 0,
-      });
-      return;
-    }
-
-    if (url.pathname !== "/mcp") {
+    const isHealthEndpoint =
+      req.method === "GET" && (url.pathname === "/health" || url.pathname === "/ready");
+    if (!isHealthEndpoint && url.pathname !== "/mcp") {
       writeJson(res, 404, { error: "Not found" });
       return;
     }
 
-    if (!hostOriginAllowed(req)) {
+    if (!hostOriginAllowed(req) && !(isHealthEndpoint && isLoopbackHealthProbe(req))) {
       writeJson(res, 403, { error: "Host/Origin not allowed" });
+      return;
+    }
+
+    if (isHealthEndpoint) {
+      // Health/readiness are control-plane probes and must not share data-plane rate buckets.
+      const ready = readiness();
+      if (!ready.ok) {
+        writeJson(res, 503, healthBody("error", ready.error));
+        return;
+      }
+      writeJson(res, 200, healthBody("ok"));
       return;
     }
 

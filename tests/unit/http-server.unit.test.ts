@@ -4,12 +4,15 @@
  */
 
 import {
+  buildHttpServer,
   configFromHeaders,
   createInFlightLimiter,
   deriveRateKey,
   getPort,
 } from "../../src/http-server";
+import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
 
 describe("configFromHeaders", () => {
   const baseEnv = { ...process.env };
@@ -190,6 +193,175 @@ describe("createInFlightLimiter", () => {
     expect(limiter.acquire("credential:c")).toMatchObject({ ok: false, status: 503 });
     limiter.release("credential:a");
     expect(limiter.acquire("credential:c")).toEqual({ ok: true });
+  });
+});
+
+describe("health and readiness endpoints", () => {
+  beforeEach(() => {
+    _resetRateLimiter();
+  });
+
+  afterEach(() => {
+    _resetRateLimiter();
+  });
+
+  it("rejects disallowed Host before returning readiness metadata", async () => {
+    const savedHosts = process.env.B2_ALLOWED_HOSTS;
+    process.env.B2_ALLOWED_HOSTS = "mcp.example.com";
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          throw new Error("readiness should not be evaluated");
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready", { headers: { host: "evil.example" } });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toContain("Host/Origin not allowed");
+      expect(res.body).not.toContain("version");
+      expect(res.body).not.toContain("inFlightRequests");
+    } finally {
+      if (savedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
+      else process.env.B2_ALLOWED_HOSTS = savedHosts;
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("allows loopback health probes when localhost is not in the host allowlist", async () => {
+    const savedHosts = process.env.B2_ALLOWED_HOSTS;
+    process.env.B2_ALLOWED_HOSTS = "mcp.example.com";
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          return undefined;
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+
+      for (const path of ["/health", "/ready"]) {
+        const res = await request(port, "GET", path, {
+          headers: { host: `localhost:${port}` },
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.body).not.toContain("Host/Origin not allowed");
+      }
+    } finally {
+      if (savedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
+      else process.env.B2_ALLOWED_HOSTS = savedHosts;
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("does not rate-limit health probes with the data-plane MCP bucket", async () => {
+    const sourceRateKey = deriveRateKey("http:127.0.0.1");
+    for (let index = 0; index < rateLimiterConfig.burst; index += 1) {
+      expect(allowRequest(sourceRateKey)).toBe(true);
+    }
+    expect(allowRequest(sourceRateKey)).toBe(false);
+
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          return undefined;
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready");
+
+      expect(res.status).toBe(200);
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("exposes internal readiness metadata without resolving B2 credentials", async () => {
+    let validated = 0;
+    let resolved = 0;
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          validated++;
+        },
+        resolve() {
+          resolved++;
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready");
+      const body = JSON.parse(res.body);
+
+      expect(res.status).toBe(200);
+      expect(body).toMatchObject({
+        status: "ok",
+        server: "backblaze-b2-mcp",
+        activeSessions: 0,
+        inFlightRequests: 0,
+        openSubscriptions: 0,
+      });
+      expect(typeof body.version).toBe("string");
+      expect(validated).toBe(1);
+      expect(resolved).toBe(0);
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("reports not-ready when configuration validation fails", async () => {
+    const handle = buildHttpServer({
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          throw new Error("invalid test config");
+        },
+        resolve() {
+          throw new Error("resolve should not be called by readiness");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/ready");
+      const body = JSON.parse(res.body);
+
+      expect(res.status).toBe(503);
+      expect(body).toMatchObject({
+        status: "error",
+        error: "Credential configuration invalid",
+        inFlightRequests: 0,
+        openSubscriptions: 0,
+      });
+    } finally {
+      await closeHttpServer(handle);
+    }
   });
 });
 

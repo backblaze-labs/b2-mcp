@@ -73,13 +73,17 @@ describe("container image policy", () => {
       "*.pem",
       "*.key",
       "node_modules",
-      "dist",
       "coverage",
       "reports",
       "docs/internal",
     ]) {
       expect(dockerignore).toContain(pattern);
     }
+    // `dist` is intentionally NOT ignored at the root: the customer-hosted
+    // deploy build (deploy/customer-hosted/Dockerfile, root build context)
+    // COPYs the prebuilt dist. The root image builds dist from src and never
+    // COPYs host dist, so leaving it in-context is harmless for that image.
+    expect(dockerignore).not.toContain("\ndist\n");
     expect(isIgnored(".env.production")).toBe(true);
     expect(isIgnored(".env.prod")).toBe(true);
     expect(isIgnored(".env.staging")).toBe(true);
