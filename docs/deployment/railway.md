@@ -11,18 +11,21 @@ Read [security and credentials](security-and-credentials.md) and
 
 - Railway project and service.
 - Immutable image digest or Dockerfile-based service.
-- External OAuth/reverse proxy plan for caller authentication.
+- Authenticated gateway service or external reverse proxy for caller
+  authentication before any public Railway domain reaches `/mcp`.
 
 ## Architecture
 
 ```text
-MCP client -> Railway HTTPS/custom domain -> b2-mcp service -> Backblaze B2
+MCP client -> authenticated HTTPS gateway -> private b2-mcp service -> Backblaze B2
 ```
 
 ## Exact setup
 
-Use a Docker image service or Dockerfile-based build. The service must expose
-port `3000` and run the image default command.
+Use a Docker image service or Dockerfile-based build on Railway private
+networking. The service must expose port `3000` and run the image default
+command. Do not generate a public Railway domain for this service while it holds
+B2 credentials.
 
 ```text
 Image: ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_RELEASE_DIGEST
@@ -47,18 +50,19 @@ Keep production variables out of untrusted preview environments.
 
 ## Deployment
 
-Deploy from a protected branch or pinned image. Confirm the deployment becomes
-Active only after `/health` succeeds.
+Deploy from a protected branch or pinned image. Confirm the private deployment
+becomes Active only after `/health` succeeds.
 
 ## Custom domains and TLS
 
-Use Railway custom domains and managed TLS. Match `B2_ALLOWED_HOSTS` to the
-public hostname.
+Use Railway custom domains and managed TLS only on the authenticated gateway,
+not on the private credential-bearing service. Match `B2_ALLOWED_HOSTS` to the
+gateway hostname forwarded after caller authentication.
 
 ## Authentication
 
 Railway HTTPS is not caller authorization by itself. Put OAuth, mTLS, or a
-trusted reverse proxy in front of `/mcp`.
+trusted reverse proxy in front of `/mcp` before exposing any public domain.
 
 ## Health checks
 
@@ -67,8 +71,8 @@ succeeds when one is configured.
 
 ## Smoke testing
 
-Run the shared smoke through the public hostname. Record service id, deployment
-id, image digest, region, and tool-contract hash.
+Run the shared smoke through the authenticated gateway hostname. Record service
+id, deployment id, image digest, region, and tool-contract hash.
 
 ## Logs
 

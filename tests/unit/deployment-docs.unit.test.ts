@@ -137,6 +137,8 @@ describe("deployment documentation", () => {
     ];
     const providerSpecific = new Set([
       "B2_MCP_IMAGE",
+      "B2_MCP_KEY_ID_SECRET_ARN",
+      "B2_MCP_KEY_SECRET_ARN",
       "B2_MCP_TRUSTED_EDGE_AUTH",
       "B2_MCP_VERSION",
     ]);
@@ -205,6 +207,42 @@ describe("deployment documentation", () => {
     expect(exactSetup).toContain("aws ecs create-service");
     expect(exactSetup).toContain("B2_MCP_IMAGE");
     expect(exactSetup).toContain("B2_APPLICATION_KEY");
+    expect(exactSetup).toContain("B2_MCP_KEY_ID_SECRET_ARN");
+    expect(exactSetup).toContain("B2_MCP_KEY_SECRET_ARN");
+    expect(exactSetup).not.toContain("secret:b2-mcp/application-key-id");
+    expect(exactSetup).not.toContain('secret:b2-mcp/application-key"');
+  });
+
+  it("keeps hosted experimental recipes private until caller auth exists", () => {
+    const azureDeployment = sectionBetween(
+      read("docs/deployment/azure-container-apps.md"),
+      "## Deployment",
+      "## Custom domains and TLS",
+    );
+    const renderExactSetup = sectionBetween(
+      read("docs/deployment/render.md"),
+      "## Exact setup",
+      "## Secrets",
+    );
+    const railwayExactSetup = sectionBetween(
+      read("docs/deployment/railway.md"),
+      "## Exact setup",
+      "## Secrets",
+    );
+    const flyExactSetup = sectionBetween(
+      read("docs/deployment/fly-io.md"),
+      "## Exact setup",
+      "## Secrets",
+    );
+
+    expect(azureDeployment).toContain("--ingress internal");
+    expect(azureDeployment).not.toContain("--ingress external");
+    expect(renderExactSetup).toContain("Service type: Private Service");
+    expect(renderExactSetup).toContain("Do not create or attach a public");
+    expect(railwayExactSetup).toContain("Do not generate a public Railway domain");
+    expect(flyExactSetup).toContain("without public");
+    expect(flyExactSetup).not.toContain("[[services]]");
+    expect(flyExactSetup).not.toContain("[http_service]");
   });
 
   it("labels base commits as runtime baselines instead of verification commits", () => {

@@ -11,17 +11,20 @@ Read [security and credentials](security-and-credentials.md) and
 
 - Fly.io organization, app, and `flyctl`.
 - Immutable GHCR image digest.
-- External OAuth/reverse proxy plan for caller authentication.
+- Authenticated Fly app, edge proxy, or external gateway for caller
+  authentication before any public route reaches `/mcp`.
 
 ## Architecture
 
 ```text
-MCP client -> Fly Proxy TLS/custom domain -> b2-mcp Machine -> Backblaze B2
+MCP client -> authenticated gateway -> private b2-mcp Machine -> Backblaze B2
 ```
 
 ## Exact setup
 
-Create `fly.toml` with an HTTP service on internal port `3000`:
+Create `fly.toml` without public service routing blocks. This keeps the
+credential-bearing Machine private on Fly networking until an authenticated
+gateway is in place.
 
 ```toml
 app = "b2-mcp"
@@ -33,14 +36,6 @@ primary_region = "iad"
   B2_DESTRUCTIVE_POLICY = "block"
   B2_ALLOWED_HOSTS = "mcp.example.com"
   B2_ALLOWED_ORIGINS = "https://client.example.com"
-
-[[services]]
-  internal_port = 3000
-  protocol = "tcp"
-
-  [[services.http_checks]]
-    method = "GET"
-    path = "/health"
 ```
 
 ## Secrets
@@ -59,22 +54,25 @@ fly deploy --image 'ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_RELEASE_DI
 
 ## Custom domains and TLS
 
-Use Fly certificates for the custom domain. Set `B2_ALLOWED_HOSTS` to the final
-hostname.
+Use Fly certificates for the authenticated gateway custom domain. Set
+`B2_ALLOWED_HOSTS` to the final gateway hostname forwarded after caller
+authentication.
 
 ## Authentication
 
 Fly TLS is not caller authorization by itself. Put OAuth, mTLS, or a trusted
-reverse proxy in front of `/mcp`.
+reverse proxy in front of `/mcp` before exposing any public route.
 
 ## Health checks
 
-Use `http_checks` on `/health` so the Fly Proxy routes only to healthy Machines.
+Use the authenticated gateway or private-network synthetic checks to call
+`/health`. Do not add public Fly Proxy routing to the `b2-mcp` app until the
+gateway is enforcing caller authentication.
 
 ## Smoke testing
 
-Run the shared smoke through the public hostname. Record app, Machine image
-digest, region, VM size, and tool-contract hash.
+Run the shared smoke through the authenticated gateway hostname. Record app,
+Machine image digest, region, VM size, and tool-contract hash.
 
 ## Logs
 

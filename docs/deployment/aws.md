@@ -41,7 +41,9 @@ export AWS_ECS_TARGET_GROUP_ARN="arn:aws:elasticloadbalancing:REPLACE_WITH_TARGE
 export AWS_ECS_EXECUTION_ROLE_ARN="arn:aws:iam::REPLACE_WITH_ACCOUNT_ID:role/ecsTaskExecutionRole"
 ```
 
-Create the cluster, log group, and Secrets Manager entries:
+Create the cluster, log group, and Secrets Manager entries. Capture the full
+secret ARNs returned by AWS; do not construct ARNs from secret names because AWS
+adds a generated suffix to the physical secret ARN.
 
 ```bash
 aws ecs create-cluster \
@@ -52,19 +54,38 @@ aws logs create-log-group \
   --log-group-name /ecs/b2-mcp \
   --region "$AWS_REGION"
 
-aws secretsmanager create-secret \
-  --name b2-mcp/application-key-id \
-  --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_ID' \
-  --region "$AWS_REGION"
+export B2_MCP_KEY_ID_SECRET_ARN="$(
+  aws secretsmanager create-secret \
+    --name b2-mcp/application-key-id \
+    --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_ID' \
+    --query ARN \
+    --output text \
+    --region "$AWS_REGION" \
+    2>/dev/null \
+  || aws secretsmanager describe-secret \
+    --secret-id b2-mcp/application-key-id \
+    --query ARN \
+    --output text \
+    --region "$AWS_REGION"
+)"
 
-aws secretsmanager create-secret \
-  --name b2-mcp/application-key \
-  --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_SECRET' \
-  --region "$AWS_REGION"
+export B2_MCP_KEY_SECRET_ARN="$(
+  aws secretsmanager create-secret \
+    --name b2-mcp/application-key \
+    --secret-string 'REPLACE_WITH_B2_APPLICATION_KEY_SECRET' \
+    --query ARN \
+    --output text \
+    --region "$AWS_REGION" \
+    2>/dev/null \
+  || aws secretsmanager describe-secret \
+    --secret-id b2-mcp/application-key \
+    --query ARN \
+    --output text \
+    --region "$AWS_REGION"
+)"
 ```
 
-Register a Fargate task definition. Replace the account id in the secret ARNs
-or use `aws secretsmanager describe-secret --query ARN --output text`.
+Register a Fargate task definition with those exact secret ARNs.
 
 ```bash
 cat > /tmp/b2-mcp-task-definition.json <<'JSON'
@@ -94,11 +115,11 @@ cat > /tmp/b2-mcp-task-definition.json <<'JSON'
       "secrets": [
         {
           "name": "B2_APPLICATION_KEY_ID",
-          "valueFrom": "arn:aws:secretsmanager:REPLACE_WITH_REGION:REPLACE_WITH_ACCOUNT_ID:secret:b2-mcp/application-key-id"
+          "valueFrom": "REPLACE_WITH_B2_MCP_KEY_ID_SECRET_ARN"
         },
         {
           "name": "B2_APPLICATION_KEY",
-          "valueFrom": "arn:aws:secretsmanager:REPLACE_WITH_REGION:REPLACE_WITH_ACCOUNT_ID:secret:b2-mcp/application-key"
+          "valueFrom": "REPLACE_WITH_B2_MCP_KEY_SECRET_ARN"
         }
       ],
       "logConfiguration": {
@@ -124,6 +145,8 @@ JSON
 sed -i.bak \
   -e "s|REPLACE_WITH_B2_MCP_EXECUTION_ROLE_ARN|$AWS_ECS_EXECUTION_ROLE_ARN|g" \
   -e "s|REPLACE_WITH_B2_MCP_IMAGE|$B2_MCP_IMAGE|g" \
+  -e "s|REPLACE_WITH_B2_MCP_KEY_ID_SECRET_ARN|$B2_MCP_KEY_ID_SECRET_ARN|g" \
+  -e "s|REPLACE_WITH_B2_MCP_KEY_SECRET_ARN|$B2_MCP_KEY_SECRET_ARN|g" \
   -e "s|REPLACE_WITH_REGION|$AWS_REGION|g" \
   -e "s|REPLACE_WITH_ACCOUNT_ID|$AWS_ACCOUNT_ID|g" \
   /tmp/b2-mcp-task-definition.json

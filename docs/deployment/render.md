@@ -9,21 +9,25 @@ Read [security and credentials](security-and-credentials.md) and
 
 ## Prerequisites
 
-- Render Web Service using Docker or a prebuilt image.
+- Render Private Service using Docker or a prebuilt image.
 - Immutable GHCR image digest.
-- External OAuth/reverse proxy plan if Render is not terminating caller auth.
+- Authenticated Render Web Service, edge proxy, or external gateway for caller
+  authentication before any public route reaches `/mcp`.
 
 ## Architecture
 
 ```text
-MCP client -> Render HTTPS/custom domain -> b2-mcp web service -> Backblaze B2
+MCP client -> authenticated HTTPS edge -> Render Private Service -> Backblaze B2
 ```
 
 ## Exact setup
 
-Create a Render Web Service from the image:
+Create a Render Private Service from the image. Do not create or attach a public
+Render Web Service directly to this container while it carries server-held B2
+credentials.
 
 ```text
+Service type: Private Service
 Image: ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_RELEASE_DIGEST
 Port: 3000
 Health check path: /health
@@ -38,17 +42,19 @@ Set Render environment secrets for `B2_APPLICATION_KEY_ID` and
 
 ## Deployment
 
-Deploy manually from the pinned digest. Disable automatic branch deploys for
-production unless the branch is protected and smoke-gated.
+Deploy manually from the pinned digest to the private service. Disable automatic
+branch deploys for production unless the branch is protected and smoke-gated.
 
 ## Custom domains and TLS
 
-Use Render managed TLS for a custom domain and keep `B2_ALLOWED_HOSTS` exact.
+Use Render managed TLS on the authenticated public edge only. Keep the
+credential-bearing `b2-mcp` service private and set `B2_ALLOWED_HOSTS` to the
+edge hostname that is forwarded after caller authentication.
 
 ## Authentication
 
 Render HTTPS is not caller authorization by itself. Put OAuth, mTLS, or a
-trusted reverse proxy in front of `/mcp`.
+trusted reverse proxy in front of `/mcp` before exposing any public domain.
 
 ## Health checks
 
@@ -57,8 +63,8 @@ traffic.
 
 ## Smoke testing
 
-Run the shared smoke through the public hostname. Record service id, region,
-plan, image digest, and tool-contract hash.
+Run the shared smoke through the authenticated public edge. Record service id,
+region, plan, image digest, and tool-contract hash.
 
 ## Logs
 
