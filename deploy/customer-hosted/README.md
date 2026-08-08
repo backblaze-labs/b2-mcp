@@ -47,9 +47,11 @@ Docker network.
 
 ```bash
 export B2_MCP_VERSION="$(node -p "require('../../package.json').version")"
+# b2-mcp.env is a required env_file, so Compose reads it even during `build`.
+# Create it from the non-secret example before building.
+cp b2-mcp.env.example b2-mcp.env
 docker compose build
 
-cp b2-mcp.env.example b2-mcp.env
 mkdir -p secrets
 printf '%s' 'your-application-key-id' > secrets/b2_application_key_id
 printf '%s' 'your-application-key-secret' > secrets/b2_application_key
