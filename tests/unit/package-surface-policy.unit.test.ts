@@ -70,7 +70,15 @@ function dockerIgnoreMatcher(patternText: string): (relativePath: string) => boo
         return path === prefix.slice(0, -1) || path.startsWith(prefix);
       }
       if (pattern.includes("*")) return globToRegExp(pattern).test(path);
-      return path === pattern || path.endsWith(`/${pattern}`);
+      // A bare directory/file pattern (e.g. `dist`) matches the entry itself
+      // and every descendant, at the root or nested, mirroring how Docker
+      // excludes a directory's whole subtree.
+      return (
+        path === pattern ||
+        path.startsWith(`${pattern}/`) ||
+        path.endsWith(`/${pattern}`) ||
+        path.includes(`/${pattern}/`)
+      );
     });
   };
 }

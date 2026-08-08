@@ -6,7 +6,6 @@
 .vscode
 node_modules
 coverage
-dist
 probe-output
 reports
 .npmrc
