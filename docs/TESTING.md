@@ -110,6 +110,8 @@ Node.js 22.23.1.
 TypeScript is intentionally constrained to the `6.0.x` line while
 the toolchain validates support on Node.js 22, 24, and 26. Widen the
 TypeScript range only with a matching typecheck and lint toolchain upgrade.
+The TypeScript 7 native compiler decision and trigger are recorded in
+[`TYPESCRIPT_7_MIGRATION.md`](TYPESCRIPT_7_MIGRATION.md).
 
 Biome is also the only formatter. `pnpm run format` and `pnpm run format:check`
 cover Biome-supported file types; Markdown and YAML files are not part of the
