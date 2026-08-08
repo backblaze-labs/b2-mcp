@@ -194,6 +194,16 @@ describe("Cloudflare Worker OAuth verifier", () => {
     );
   });
 
+  it("rejects clock skew configuration above the reviewed maximum", async () => {
+    await expectAuthError(
+      verifyJwtAccessToken(
+        signJwt(key, claims()),
+        env({ B2_MCP_OAUTH_CLOCK_SKEW_SECONDS: "315360000" }),
+      ),
+      "oauth_clock_skew_invalid",
+    );
+  });
+
   it("rejects not-yet-valid tokens", async () => {
     mockJwks([key.publicJwk]);
 

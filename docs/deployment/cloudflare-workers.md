@@ -88,8 +88,10 @@ Two reviewed patterns are allowed:
   allowed algorithm, access-token type, signature, and scopes before passing
   `AuthInfo`. The default token-type policy accepts `at+jwt` and
   `application/at+jwt`; set `B2_MCP_OAUTH_ALLOWED_TOKEN_TYPES` only for a
-  reviewed issuer profile. The Worker serves OAuth protected-resource metadata
-  at `/.well-known/oauth-protected-resource` and includes that URL in bearer
+  reviewed issuer profile. Leave `B2_MCP_OAUTH_CLOCK_SKEW_SECONDS` unset unless
+  the issuer needs a smaller bounded skew; values above 300 seconds fail closed.
+  The Worker serves OAuth protected-resource metadata at
+  `/.well-known/oauth-protected-resource` and includes that URL in bearer
   challenges.
 - Put Cloudflare Access in front and set `B2_MCP_TRUSTED_EDGE_AUTH=cloudflare-access`
   with `B2_MCP_ACCESS_TEAM_DOMAIN` and `B2_MCP_ACCESS_AUDIENCE`. The adapter

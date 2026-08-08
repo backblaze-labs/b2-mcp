@@ -81,6 +81,7 @@ const JWKS_FETCH_TIMEOUT_MS = 3000;
 const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256"];
 const DEFAULT_OAUTH_ACCESS_TOKEN_TYPES = ["at+jwt", "application/at+jwt"];
 const DEFAULT_CLOCK_SKEW_SECONDS = 60;
+const MAX_CLOCK_SKEW_SECONDS = 300;
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 let jwksCache: JwksCache | undefined;
@@ -107,7 +108,11 @@ function requiredOAuthScopes(env: WorkerEnv): string[] {
 
 function safeClockSkewSeconds(value: string | undefined): number {
   const parsed = Number(value ?? String(DEFAULT_CLOCK_SKEW_SECONDS));
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CLOCK_SKEW_SECONDS;
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CLOCK_SKEW_SECONDS;
+  if (parsed > MAX_CLOCK_SKEW_SECONDS) {
+    throw authError(500, "oauth_clock_skew_invalid", "OAuth clock skew is too large");
+  }
+  return parsed;
 }
 
 function assertHttpsUrl(value: string, code: string, message: string): void {
