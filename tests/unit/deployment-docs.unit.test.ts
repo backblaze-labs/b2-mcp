@@ -115,6 +115,7 @@ describe("deployment documentation", () => {
       "B2_APP_KEY_ID",
       "B2_DESTRUCTIVE_POLICY",
       "B2_FILE_ROOT",
+      "B2_HEALTHCHECK_ALLOW_PRIVATE",
       "B2_HTTP_CREDENTIAL_MODE",
       "B2_MASTER_KEY",
       "B2_MASTER_KEY_ID",

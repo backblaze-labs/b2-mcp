@@ -903,6 +903,26 @@ export function isLoopbackRemoteAddress(address: string | undefined): boolean {
   return /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(address);
 }
 
+function normalizedIpv4Octets(address: string | undefined): number[] | null {
+  const value = address?.startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
+  const match = value?.match(/^(\d{1,3})(?:\.(\d{1,3})){3}$/);
+  if (!match || !value) return null;
+  const octets = value.split(".").map((part) => Number(part));
+  return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+    ? octets
+    : null;
+}
+
+export function isPrivateRemoteAddress(address: string | undefined): boolean {
+  const octets = normalizedIpv4Octets(address);
+  if (octets) {
+    const [a, b] = octets;
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  const lower = address?.toLowerCase() ?? "";
+  return lower.startsWith("fc") || lower.startsWith("fd");
+}
+
 export function isLoopbackHostName(hostname: string): boolean {
   return LOCALHOST_NAMES.has(hostname) || /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(hostname);
 }
@@ -915,4 +935,14 @@ export function isLoopbackHealthProbeFromParts(
   if (!isLoopbackRemoteAddress(remoteAddress)) return false;
   if (!isLoopbackHostName(hostWithoutPort(host))) return false;
   return !origin || isLoopbackHostName(originHostname(origin));
+}
+
+export function isPrivateHealthProbeFromParts(
+  remoteAddress: string | undefined,
+  origin: string,
+  env: EnvSource = process.env,
+): boolean {
+  return (
+    env.B2_HEALTHCHECK_ALLOW_PRIVATE === "true" && isPrivateRemoteAddress(remoteAddress) && !origin
+  );
 }

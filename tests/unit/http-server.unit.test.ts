@@ -13,6 +13,7 @@ import {
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
+import { isPrivateHealthProbeFromParts, isPrivateRemoteAddress } from "../../src/http-handler";
 
 describe("configFromHeaders", () => {
   const baseEnv = { ...process.env };
@@ -362,6 +363,29 @@ describe("health and readiness endpoints", () => {
     } finally {
       await closeHttpServer(handle);
     }
+  });
+});
+
+describe("private health probe helpers", () => {
+  it("recognizes private load-balancer source addresses", () => {
+    expect(isPrivateRemoteAddress("10.0.1.5")).toBe(true);
+    expect(isPrivateRemoteAddress("::ffff:172.20.0.10")).toBe(true);
+    expect(isPrivateRemoteAddress("192.168.1.10")).toBe(true);
+    expect(isPrivateRemoteAddress("8.8.8.8")).toBe(false);
+  });
+
+  it("requires explicit opt-in and no Origin header for private health bypass", () => {
+    expect(
+      isPrivateHealthProbeFromParts("10.0.1.5", "", {
+        B2_HEALTHCHECK_ALLOW_PRIVATE: "true",
+      }),
+    ).toBe(true);
+    expect(isPrivateHealthProbeFromParts("10.0.1.5", "", {})).toBe(false);
+    expect(
+      isPrivateHealthProbeFromParts("10.0.1.5", "https://client.example.com", {
+        B2_HEALTHCHECK_ALLOW_PRIVATE: "true",
+      }),
+    ).toBe(false);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   createB2McpFetchHandler,
   HTTP_SHUTDOWN_DRAIN_MS,
   isLoopbackHealthProbeFromParts,
+  isPrivateHealthProbeFromParts,
   type B2McpFetchHandlerOptions,
 } from "./http-handler.js";
 
@@ -113,7 +114,9 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
       response = await fetchHandler.fetch(nodeRequestToWebRequest(req, abortController.signal), {
         authInfo,
         clientAddress: req.socket.remoteAddress,
-        loopbackHealthProbe: isLoopbackHealthProbeFromParts(req.socket.remoteAddress, host, origin),
+        loopbackHealthProbe:
+          isLoopbackHealthProbeFromParts(req.socket.remoteAddress, host, origin) ||
+          isPrivateHealthProbeFromParts(req.socket.remoteAddress, origin),
       });
     } catch (error) {
       logger.warn(

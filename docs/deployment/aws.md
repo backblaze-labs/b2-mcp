@@ -88,7 +88,8 @@ cat > /tmp/b2-mcp-task-definition.json <<'JSON'
         { "name": "B2_ALLOW_LOCAL_FILES", "value": "false" },
         { "name": "B2_DESTRUCTIVE_POLICY", "value": "block" },
         { "name": "B2_ALLOWED_HOSTS", "value": "mcp.example.com" },
-        { "name": "B2_ALLOWED_ORIGINS", "value": "https://client.example.com" }
+        { "name": "B2_ALLOWED_ORIGINS", "value": "https://client.example.com" },
+        { "name": "B2_HEALTHCHECK_ALLOW_PRIVATE", "value": "true" }
       ],
       "secrets": [
         {
@@ -134,7 +135,9 @@ aws ecs register-task-definition \
 
 Create the service behind an existing HTTPS ALB target group. The target group
 must be IP target type, protocol HTTP, port `3000`, health path `/health`, and
-reachable only from the ALB security group.
+reachable only from the ALB security group. `B2_HEALTHCHECK_ALLOW_PRIVATE=true`
+allows `/health` only for no-Origin probes from private load-balancer source
+addresses; `/mcp` still requires the exact `B2_ALLOWED_HOSTS` policy.
 
 ```bash
 aws ecs create-service \
@@ -187,7 +190,9 @@ Place OAuth/OIDC at ALB, API Gateway, or a trusted sidecar/reverse proxy before
 ## Health checks
 
 Configure ALB health checks on `/health`, port `3000`, and HTTP success `200`.
-Keep the app health endpoint private to the load balancer.
+Keep the target security group restricted to the ALB security group. The app's
+Host policy still protects `/mcp`; the private health bypass is limited to
+no-Origin health probes from private source addresses.
 
 ## Smoke testing
 
@@ -232,9 +237,10 @@ CloudWatch retention, and B2 lifecycle cleanup for smoke objects.
 
 ## Troubleshooting
 
-Unhealthy targets usually mean wrong port, missing secrets, or `B2_ALLOWED_HOSTS`
-mismatch. Auth loops usually mean ALB/OIDC callback and resource audience do not
-match the MCP URL.
+Unhealthy targets usually mean wrong port, missing secrets, a target security
+group that is not restricted to the ALB, or missing
+`B2_HEALTHCHECK_ALLOW_PRIVATE=true`. Auth loops usually mean ALB/OIDC callback
+and resource audience do not match the MCP URL.
 
 ## References
 
