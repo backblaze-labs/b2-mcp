@@ -40,6 +40,7 @@ SUIDSGID
 thiennq
 tmpfs
 toon
+tsx
 tvzf
 ustar
 xvda

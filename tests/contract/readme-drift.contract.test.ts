@@ -71,6 +71,8 @@ describe("README project badges", () => {
 
     expect(packageMetadata.name).toBe("@backblaze-labs/b2-mcp");
     expect(packageMetadata.engines.node).toBe(">=22.3.0");
+    // Intentional overlap with typescript-7-migration: this guard owns README
+    // badge sync, while the migration test owns the 6.0-line deferral record.
     expect(packageMetadata.devDependencies.typescript).toMatch(/^~6\./);
     expect(readme).toContain("actions/workflows/test.yml/badge.svg");
     expect(readme).toContain("CodeQL-enabled-brightgreen");
