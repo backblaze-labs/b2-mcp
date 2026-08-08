@@ -27,9 +27,9 @@ type JwtClaims = {
   azp?: string;
   client_id?: string;
   email?: string;
-  exp?: number;
+  exp?: unknown;
   iss?: string;
-  nbf?: number;
+  nbf?: unknown;
   resource?: string | string[];
   scope?: string;
   scp?: string[];
@@ -77,6 +77,8 @@ export class WorkerAuthError extends Error {
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
 const JWKS_FETCH_TIMEOUT_MS = 3000;
 const JWKS_FORCED_REFRESH_MIN_INTERVAL_MS = 10 * 1000;
+const JWKS_MAX_BODY_BYTES = 128 * 1024;
+const JWKS_MAX_KEYS = 32;
 const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256"];
 const DEFAULT_OAUTH_ACCESS_TOKEN_TYPES = ["at+jwt", "application/at+jwt"];
 const DEFAULT_CLOCK_SKEW_SECONDS = 60;
@@ -186,6 +188,66 @@ function authResponse(
   return new Response(JSON.stringify({ error }), { status, headers });
 }
 
+async function readCappedResponseText(response: Response): Promise<string> {
+  const contentLength = response.headers.get("content-length");
+  const parsedContentLength = contentLength === null ? NaN : Number(contentLength);
+  if (Number.isFinite(parsedContentLength) && parsedContentLength > JWKS_MAX_BODY_BYTES) {
+    throw authError(503, "jwks_response_too_large", "OAuth JWKS response is too large");
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > JWKS_MAX_BODY_BYTES) {
+      throw authError(503, "jwks_response_too_large", "OAuth JWKS response is too large");
+    }
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > JWKS_MAX_BODY_BYTES) {
+        await reader.cancel();
+        throw authError(503, "jwks_response_too_large", "OAuth JWKS response is too large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+async function parseJwksBody(response: Response): Promise<JsonWebKey[]> {
+  let body: { keys?: JsonWebKey[] };
+  try {
+    body = JSON.parse(await readCappedResponseText(response)) as { keys?: JsonWebKey[] };
+  } catch (err) {
+    if (err instanceof WorkerAuthError) throw err;
+    throw authError(503, "jwks_invalid_response", "OAuth JWKS response was not valid JSON");
+  }
+  if (!Array.isArray(body.keys)) {
+    throw authError(503, "jwks_invalid_response", "OAuth JWKS response did not contain keys");
+  }
+  if (body.keys.length > JWKS_MAX_KEYS) {
+    throw authError(503, "jwks_too_many_keys", "OAuth JWKS response contained too many keys");
+  }
+  return body.keys;
+}
+
 async function fetchJwks(url: string): Promise<JsonWebKey[]> {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const timeout = AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS);
@@ -197,11 +259,7 @@ async function fetchJwks(url: string): Promise<JsonWebKey[]> {
       if (!response.ok) {
         throw authError(503, "jwks_fetch_failed", "OAuth JWKS fetch failed");
       }
-      const body = (await response.json()) as { keys?: JsonWebKey[] };
-      if (!Array.isArray(body.keys)) {
-        throw authError(503, "jwks_invalid_response", "OAuth JWKS response did not contain keys");
-      }
-      return body.keys;
+      return await parseJwksBody(response);
     } catch (err) {
       if (attempt === 2) {
         if (err instanceof WorkerAuthError) throw err;
@@ -325,6 +383,15 @@ function authResource(audience: string): URL {
   }
 }
 
+function jwtNumericDate(claims: JwtClaims, name: "exp" | "nbf"): number | undefined {
+  const value = claims[name];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw authError(401, "jwt_numeric_date_invalid", "Bearer token NumericDate is invalid");
+  }
+  return value;
+}
+
 async function verifyJwt(token: string, options: VerifyJwtOptions): Promise<AuthInfo> {
   const parts = token.split(".");
   if (parts.length !== 3) throw authError(401, "jwt_malformed", "Malformed bearer token");
@@ -372,10 +439,12 @@ async function verifyJwt(token: string, options: VerifyJwtOptions): Promise<Auth
   if (!audienceMatches(claims.aud, options.audience)) {
     throw authError(401, "jwt_audience_invalid", "Bearer token audience is invalid");
   }
-  if (typeof claims.exp !== "number" || claims.exp <= nowSeconds - skew) {
+  const exp = jwtNumericDate(claims, "exp");
+  const nbf = jwtNumericDate(claims, "nbf");
+  if (exp === undefined || exp <= nowSeconds - skew) {
     throw authError(401, "jwt_expired", "Bearer token is expired");
   }
-  if (typeof claims.nbf === "number" && claims.nbf > nowSeconds + skew) {
+  if (nbf !== undefined && nbf > nowSeconds + skew) {
     throw authError(401, "jwt_not_yet_valid", "Bearer token is not yet valid");
   }
 
@@ -389,7 +458,7 @@ async function verifyJwt(token: string, options: VerifyJwtOptions): Promise<Auth
     token,
     clientId: claims.client_id ?? claims.azp ?? claims.email ?? claims.sub ?? "unknown",
     scopes,
-    expiresAt: claims.exp,
+    expiresAt: exp,
     resource: authResource(options.audience),
     extra: {
       iss: claims.iss,

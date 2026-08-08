@@ -247,6 +247,21 @@ describe("deployment documentation", () => {
     expect(worker).toContain("STRIPPED_PUBLIC_HEADERS");
   });
 
+  it("keeps Cloud Run private to reviewed invokers", () => {
+    const deployment = sectionBetween(
+      read("docs/deployment/google-cloud-run.md"),
+      "## Deployment",
+      "## Custom domains and TLS",
+    );
+
+    expect(deployment).toContain("--no-allow-unauthenticated");
+    expect(deployment).toContain("remove-iam-policy-binding");
+    expect(deployment).toContain("--member allUsers");
+    expect(deployment).toContain("add-iam-policy-binding");
+    expect(deployment).toContain("serviceAccount:REPLACE_WITH_FRONT_DOOR_SERVICE_ACCOUNT");
+    expect(deployment).toContain("roles/run.invoker");
+  });
+
   it("keeps hosted experimental recipes private until caller auth exists", () => {
     const azureDeployment = sectionBetween(
       read("docs/deployment/azure-container-apps.md"),

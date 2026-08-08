@@ -55,6 +55,19 @@ function signJwt(
   return `${signingInput}.${signature.toString("base64url")}`;
 }
 
+function signJwtRawClaims(
+  key: KeyMaterial,
+  rawClaims: string,
+  header: Record<string, unknown> = {},
+): string {
+  const encodedHeader = b64(
+    JSON.stringify({ alg: "RS256", kid: key.kid, typ: "at+jwt", ...header }),
+  );
+  const signingInput = `${encodedHeader}.${b64(rawClaims)}`;
+  const signature = nodeCrypto.createSign("RSA-SHA256").update(signingInput).sign(key.privateKey);
+  return `${signingInput}.${signature.toString("base64url")}`;
+}
+
 function unsignedJwt(claims: Record<string, unknown>, header: Record<string, unknown>): string {
   return `${b64(JSON.stringify(header))}.${b64(JSON.stringify(claims))}.`;
 }
@@ -213,6 +226,25 @@ describe("Cloudflare Worker OAuth verifier", () => {
     );
   });
 
+  it("rejects malformed or non-finite JWT NumericDate claims", async () => {
+    mockJwks([key.publicJwk]);
+
+    await expectAuthError(
+      verifyJwtAccessToken(
+        signJwtRawClaims(
+          key,
+          `{"iss":"${issuer}","aud":"${audience}","sub":"user-123","client_id":"client-abc","scope":"b2:mcp","exp":1e400}`,
+        ),
+        env(),
+      ),
+      "jwt_numeric_date_invalid",
+    );
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(key, claims({ nbf: "not-a-date" })), env()),
+      "jwt_numeric_date_invalid",
+    );
+  });
+
   it("rejects issuer and audience mismatches", async () => {
     mockJwks([key.publicJwk]);
 
@@ -341,6 +373,40 @@ describe("Cloudflare Worker OAuth verifier", () => {
     await Promise.all([first, second]);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects JWKS responses that exceed the capped body size", async () => {
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ keys: [key.publicJwk], padding: "x".repeat(140000) }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(key, claims()), env()),
+      "jwks_response_too_large",
+    );
+  });
+
+  it("rejects JWKS responses with too many keys", async () => {
+    const keys = Array.from({ length: 33 }, (_, index) => ({
+      ...key.publicJwk,
+      kid: `kid-${index}`,
+    }));
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ keys }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(key, claims()), env()),
+      "jwks_too_many_keys",
+    );
   });
 
   it("rejects Cloudflare Access mode without a verified assertion", async () => {

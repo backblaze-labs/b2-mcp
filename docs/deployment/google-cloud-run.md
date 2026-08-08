@@ -51,7 +51,28 @@ gcloud run deploy b2-mcp \
   --min-instances 0 \
   --max-instances 5 \
   --concurrency 20 \
+  --no-allow-unauthenticated \
   --timeout 300
+```
+
+`--no-allow-unauthenticated` is required on first deploy and redeploy. It does
+not remove a previously granted `allUsers` invoker binding, so remove any public
+binding before smoke testing:
+
+```bash
+gcloud run services remove-iam-policy-binding b2-mcp \
+  --region us-central1 \
+  --member allUsers \
+  --role roles/run.invoker
+```
+
+Grant invocation only to the reviewed OAuth front door or service-auth caller:
+
+```bash
+gcloud run services add-iam-policy-binding b2-mcp \
+  --region us-central1 \
+  --member 'serviceAccount:REPLACE_WITH_FRONT_DOOR_SERVICE_ACCOUNT' \
+  --role roles/run.invoker
 ```
 
 Use separate staging and production services with separate B2 keys.
