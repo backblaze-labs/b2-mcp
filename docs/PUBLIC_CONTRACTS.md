@@ -13,6 +13,7 @@ current with code, CI, and GitHub release metadata.
 | [`DEPLOY.md`](DEPLOY.md)                               | Gonza              | Customer-hosted deployment and hardening runbook                        | #65, #66, #106               |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md)                   | Gonza              | Runtime architecture and integration-boundary decisions                 | #71                          |
 | [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) | Gonza              | Official B2 SDK adoption and tool parity matrix                         | #71                          |
+| [`TYPESCRIPT_7_MIGRATION.md`](TYPESCRIPT_7_MIGRATION.md) | Gonza              | TypeScript 7 native compiler migration decision and trigger              | #114                         |
 | [`V1_SCOPE.md`](V1_SCOPE.md)                           | Gonza              | Phase 1 product, runtime, release, SDK, and protocol decision record    | #55, #71, #106               |
 | [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)                 | Gonza              | Tool-profile contract policy and fixture requirements                   | #49, #59                     |
 | [`TOOL_PROFILES.md`](TOOL_PROFILES.md)                 | Gonza              | Generated Phase 1 tool-profile reference                                | #49                          |
