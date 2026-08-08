@@ -20,7 +20,7 @@ import { logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { B2ReportClient } from "./b2/report-client.js";
-import { createS3Client } from "./s3/client.js";
+import { createPrimaryS3Client, createS3Client } from "./s3/client.js";
 import { DURABLE_SECRET_PRODUCING_TOOLS, isToolEnabled } from "./utils/tool-capabilities.js";
 import {
   sanitizeError,
@@ -198,6 +198,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   const b2Client = new B2Client(auth);
   const reportClient = new B2ReportClient(auth);
   const s3Client = createS3Client(config);
+  const objectS3Client = createPrimaryS3Client(config, "s3-object-tools");
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
   const masterConfig = {
@@ -229,9 +230,9 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
   registerS3BucketTools(registrar, s3Client, config);
-  registerS3ObjectTools(registrar, s3Client, config);
+  registerS3ObjectTools(registrar, objectS3Client, b2Client, config);
   registerS3MultipartTools(registrar, s3Client, config);
-  registerS3PresignedTools(registrar, s3Client, config, {
+  registerS3PresignedTools(registrar, objectS3Client, b2Client, config, {
     allowGetObjectUrl: !filterActive || (capsSet?.has("readFiles") ?? false),
     allowPutObjectUrl: !filterActive || (capsSet?.has("writeFiles") ?? false),
   });
@@ -260,6 +261,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
       if (!cleanedUp) {
         cleanedUp = true;
         s3Client.destroy();
+        objectS3Client.destroy();
         reportClient.destroy();
       }
     }

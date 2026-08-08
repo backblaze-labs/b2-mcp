@@ -7,9 +7,12 @@ Target MCP revision: `2026-07-28`
 
 This record supersedes the implementation allowance in
 [#55](https://github.com/backblaze-labs/b2-mcp/issues/55) that treated direct B2
-HTTP calls and direct AWS SDK S3 calls as acceptable Phase 1 architecture. The
-official Backblaze TypeScript SDK is the required B2 integration boundary for
-Phase 1 migration and for the public MCP tool contract freeze.
+HTTP calls as acceptable Phase 1 architecture. The official Backblaze TypeScript
+SDK is the required native B2 integration boundary for Phase 1 migration and
+for the public MCP tool contract freeze. Issue
+[#126](https://github.com/backblaze-labs/b2-mcp/issues/126) makes the AWS SDK
+the permanent S3-compatible data-plane boundary for `s3_*` tools, configured
+through the SDK `/s3` helper.
 
 ## Binding Decision
 
@@ -22,12 +25,12 @@ Phase 1 migration and for the public MCP tool contract freeze.
   `@backblaze-labs/b2-sdk`, then documented `@backblaze-labs/b2-sdk/raw`, then
   documented `@backblaze-labs/b2-sdk/s3`, then composition of public SDK
   operations.
-- Direct B2 HTTP transports are not allowed in runtime code. Any retained direct
-  AWS peer usage must be justified by S3-material semantics and anchored through
+- Direct B2 HTTP transports are not allowed in runtime code. AWS SDK S3 usage is
+  allowed only through `src/s3/aws-sdk-adapter.ts` and must be anchored through
   the SDK's documented `/s3` helper path.
-- Missing SDK capabilities must be tracked upstream and must land in a stable
-  SDK release before the MCP release can claim that capability as an SDK-backed
-  contract.
+- Missing native B2 SDK capabilities must be tracked upstream and must land in a
+  stable SDK release before the MCP release can claim that capability as an
+  SDK-backed native contract.
 - The MCP protocol baseline remains `2026-07-28`. The modern MCP runtime uses
   the stable v2 server entry points through `createMcpHandler` and `serveStdio`.
   A repository-owned Node HTTP bridge adapts the web-standard handler without
@@ -78,7 +81,9 @@ contract. The contract freeze must apply this rule:
 - Partner/Groups typed operations:
   [backblaze-labs/b2-sdk-typescript#153](https://github.com/backblaze-labs/b2-sdk-typescript/issues/153).
 - S3-only helper coverage:
-  [backblaze-labs/b2-sdk-typescript#154](https://github.com/backblaze-labs/b2-sdk-typescript/issues/154).
+  [backblaze-labs/b2-sdk-typescript#154](https://github.com/backblaze-labs/b2-sdk-typescript/issues/154)
+  remains historical context; `s3_*` data-plane tools use the AWS SDK directly
+  through the repository-owned adapter.
 
 ## Runtime Import Inventory
 
@@ -87,8 +92,8 @@ official SDK, or explicitly justified as S3-material compatibility paths.
 
 | Source                      | Runtime import                  | Current purpose                                                                                                                              | Contract disposition                                                                                                                                                        |
 | --------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/s3/aws-sdk-adapter.ts` | `@aws-sdk/client-s3`            | Central S3 data-plane adapter for retained `s3_*` tools and usage-report object reads through SDK `/s3` configuration                         | Covered by S3-only helper issue #154; all runtime AWS client usage must enter through this adapter and stay anchored by `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`. |
-| `src/s3/aws-sdk-adapter.ts` | `@aws-sdk/s3-request-presigner` | Adapter-owned S3 object and multipart presigning for `s3_get_presigned_url` and `s3_presign_upload_part`                                      | Covered by SDK helper issue #154; retain only until a stable SDK release exposes first-party S3 presign helpers.                                                            |
+| `src/s3/aws-sdk-adapter.ts` | `@aws-sdk/client-s3`            | Central S3 data-plane adapter for retained `s3_*` tools and usage-report object reads through SDK `/s3` configuration                         | Permanent S3-compatible data-plane dependency; all runtime AWS client usage must enter through this adapter and stay anchored by `@backblaze-labs/b2-sdk/s3` `createS3ClientConfig`. |
+| `src/s3/aws-sdk-adapter.ts` | `@aws-sdk/s3-request-presigner` | Adapter-owned S3 object and multipart presigning for `s3_get_presigned_url` and `s3_presign_upload_part`                                      | Permanent S3-compatible presigning dependency; all runtime presigning must enter through this adapter.                                                                         |
 
 Package note: `@aws-sdk/s3-presigned-post` is intentionally absent because there
 is no runtime source import or approved MCP tool row for S3 POST Object form

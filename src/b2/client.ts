@@ -24,6 +24,7 @@ import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { B2AuthResponse } from "../utils/types.js";
 import { buildUserAgent } from "../utils/user-agent.js";
+import type { B2S3FileVersionBinding } from "../s3/aws-sdk-adapter.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
 export type BucketTypeFilter = BucketType | "all";
@@ -449,6 +450,23 @@ function toFileVersionResult(value: FileVersion): FileVersionResult {
   };
 }
 
+function toS3FileVersionBinding(value: FileVersion): B2S3FileVersionBinding {
+  return {
+    fileName: value.fileName,
+    fileId: String(value.fileId),
+    bucketId: String(value.bucketId),
+    contentLength: value.contentLength,
+    contentType: value.contentType,
+    uploadTimestamp: value.uploadTimestamp,
+    fileInfo: cloneJsonField(value.fileInfo),
+    action: value.action,
+    serverSideEncryption:
+      value.serverSideEncryption?.mode === "SSE-B2"
+        ? value.serverSideEncryption.algorithm
+        : undefined,
+  };
+}
+
 function toUnfinishedLargeFileResult(value: UnfinishedLargeFile): UnfinishedLargeFileResult {
   return {
     fileId: String(value.fileId),
@@ -697,6 +715,10 @@ function isUnauthorized(err: unknown): boolean {
   return e.status === 401 || e.response?.status === 401;
 }
 
+function b2NotFound(message: string): Error {
+  return Object.assign(new Error(message), { status: 404, code: "not_found" });
+}
+
 export interface NativeCallOptions {
   method?: "GET" | "POST";
   useDownloadUrl?: boolean;
@@ -862,6 +884,41 @@ export class B2Client {
       nextApplicationKeyId:
         result.nextApplicationKeyId == null ? null : String(result.nextApplicationKeyId),
     };
+  }
+
+  async resolveS3FileVersion(options: {
+    bucket: string;
+    key: string;
+    versionId: string;
+  }): Promise<B2S3FileVersionBinding> {
+    return this.withNativeCircuit(async (client, auth) => {
+      const bucket = await client.getBucket(options.bucket);
+      if (!bucket) throw b2NotFound(`Bucket '${options.bucket}' not found.`);
+      const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
+        fileId: fileId(options.versionId),
+      });
+      if (version.fileName !== options.key || String(version.bucketId) !== String(bucket.id)) {
+        throw b2NotFound(`Object '${options.key}' not found in bucket '${options.bucket}'.`);
+      }
+      return toS3FileVersionBinding(version);
+    });
+  }
+
+  async getCurrentS3FileVersion(options: {
+    bucket: string;
+    key: string;
+  }): Promise<B2S3FileVersionBinding | null> {
+    return this.withNativeCircuit(async (client, auth) => {
+      const bucket = await client.getBucket(options.bucket);
+      if (!bucket) throw b2NotFound(`Bucket '${options.bucket}' not found.`);
+      const result = await client.raw.listFileVersions(auth.apiUrl, auth.authorizationToken, {
+        bucketId: bucket.id,
+        prefix: options.key,
+        maxFileCount: 1,
+      });
+      const version = result.files.find((file) => file.fileName === options.key) ?? null;
+      return version ? toS3FileVersionBinding(version) : null;
+    });
   }
 
   async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKeyResult> {

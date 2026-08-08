@@ -498,6 +498,25 @@ describe("package budget policy gate", () => {
     );
   });
 
+  it("keeps AWS S3 dependencies as permanent data-plane dependencies", () => {
+    const budget = JSON.parse(readFileSync(join(root, "package-budget.json"), "utf8")) as {
+      directProductionDependencies: Record<string, Record<string, unknown>>;
+      temporaryAdapters?: unknown[];
+    };
+    const awsEntries = [
+      budget.directProductionDependencies["@aws-sdk/client-s3"],
+      budget.directProductionDependencies["@aws-sdk/s3-request-presigner"],
+    ];
+
+    for (const entry of awsEntries) {
+      expect(String(entry.purpose)).toMatch(/Permanent primary/i);
+      expect(JSON.stringify(entry)).not.toMatch(/temporary|must be removed|upstreamIssue/i);
+    }
+    expect(JSON.stringify(budget.temporaryAdapters ?? [])).not.toMatch(
+      /aws|s3|removalCondition|upstreamIssue/i,
+    );
+  });
+
   it("runs the package budget before npm publish", () => {
     const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
       scripts: Record<string, string>;

@@ -258,11 +258,20 @@ function assertBudgetMetadata() {
     }
   }
 
+  const allowedAwsImportEntries = budget.runtimeImportPolicy?.allowedAwsRuntimeImports ?? [];
   const allowedAwsImports = new Set(
-    (budget.runtimeImportPolicy?.allowedAwsRuntimeImports ?? []).map(
-      (entry) => `${entry.source}|${entry.specifier}`,
-    ),
+    allowedAwsImportEntries.map((entry) => `${entry.source}|${entry.specifier}`),
   );
+  for (const entry of allowedAwsImportEntries) {
+    requireNonEmptyString(entry?.source, "allowedAwsRuntimeImports source");
+    requireNonEmptyString(entry?.specifier, "allowedAwsRuntimeImports specifier");
+    if (entry?.source && !existsSync(path.join(root, entry.source))) {
+      fail(`allowedAwsRuntimeImports source is missing: ${entry.source}`);
+    }
+    if (entry?.specifier && !directDependencies[entry.specifier]) {
+      fail(`allowedAwsRuntimeImports specifier is not a direct dependency: ${entry.specifier}`);
+    }
+  }
   const adapterImports = new Set();
   for (const adapter of budget.temporaryAdapters ?? []) {
     requireNonEmptyString(adapter?.name, "temporary adapter name");
@@ -321,11 +330,6 @@ function assertBudgetMetadata() {
   for (const key of adapterImports) {
     if (!allowedAwsImports.has(key)) {
       fail(`temporary adapter import is not listed in allowedAwsRuntimeImports: ${key}`);
-    }
-  }
-  for (const key of allowedAwsImports) {
-    if (!adapterImports.has(key)) {
-      fail(`allowedAwsRuntimeImports entry is not backed by a temporary adapter: ${key}`);
     }
   }
 

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import type { B2Config } from "../utils/types.js";
-import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
+import type { B2S3PeerClient, B2S3VersionGuard } from "./aws-sdk-adapter.js";
 
 /**
  * Presigned URL tools for the B2 S3-compatible API.
@@ -48,6 +48,7 @@ function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean)
 export function registerS3PresignedTools(
   server: ToolRegistrar,
   s3: B2S3PresignedClient,
+  versions: B2S3VersionGuard,
   config: B2Config,
   options: S3PresignedToolOptions = {},
 ): void {
@@ -108,6 +109,13 @@ export function registerS3PresignedTools(
         }
         const gate = checkDestructive("s3_get_presigned_url", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        if (args.operation === "GetObject" && args.versionId) {
+          await versions.resolveS3FileVersion({
+            bucket: args.bucket,
+            key: args.key,
+            versionId: args.versionId,
+          });
+        }
         return toolJson(
           await s3.presignObjectUrl({
             bucket: args.bucket,

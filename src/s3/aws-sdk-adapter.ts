@@ -1,12 +1,11 @@
-// Temporary S3-material AWS peer boundary. package-budget.json records the
-// upstream SDK gap, ownership, tests, and removal condition for this adapter.
+// AWS S3 SDK boundary for B2's S3-compatible data plane. The adapter keeps
+// tool handlers behind a repository-owned contract while using B2 S3 semantics.
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
   CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
-  DeleteObjectsCommand,
   GetBucketLocationCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -26,8 +25,14 @@ import {
   type ServiceOutputTypes,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { Command, HttpHandlerOptions, StreamingBlobPayloadInputTypes } from "@smithy/types";
+import type {
+  Command,
+  HttpHandlerOptions,
+  StreamingBlobPayloadInputTypes,
+  StreamingBlobPayloadOutputTypes,
+} from "@smithy/types";
 import { currentMcpRequestSignal } from "../request-context.js";
+import { withCircuit } from "../utils/circuit-breaker.js";
 
 type S3SendCommand<
   InputType extends ServiceInputTypes,
@@ -80,6 +85,37 @@ export interface B2S3PutObjectOptions {
   serverSideEncryption?: "AES256";
 }
 
+export interface B2S3FileVersionBinding {
+  fileName: string;
+  fileId: string;
+  bucketId: string;
+  contentLength: number;
+  contentType: string;
+  uploadTimestamp: number;
+  fileInfo: Record<string, string>;
+  action: string;
+  serverSideEncryption?: string;
+}
+
+export interface B2S3VersionGuard {
+  resolveS3FileVersion(input: {
+    bucket: string;
+    key: string;
+    versionId: string;
+  }): Promise<B2S3FileVersionBinding>;
+  getCurrentS3FileVersion(input: {
+    bucket: string;
+    key: string;
+  }): Promise<B2S3FileVersionBinding | null>;
+}
+
+export interface B2S3GetObjectOptions {
+  bucket: string;
+  key: string;
+  range?: string;
+  versionId?: string;
+}
+
 export interface B2S3DownloadedObject {
   key: string;
   contentType?: string;
@@ -88,13 +124,33 @@ export interface B2S3DownloadedObject {
   etag?: string;
   versionId?: string;
   metadata: Record<string, string>;
-  body: unknown;
+  body?: StreamingBlobPayloadOutputTypes;
+}
+
+export interface B2S3HeadObjectOptions {
+  bucket: string;
+  key: string;
+  versionId?: string;
 }
 
 export type B2S3HeadObjectResult = Omit<B2S3DownloadedObject, "body"> & {
   serverSideEncryption?: string;
   deleteMarker?: boolean;
 };
+
+export interface B2S3DeleteObjectOptions {
+  bucket: string;
+  key: string;
+  versionId?: string;
+  bypassGovernance?: boolean;
+}
+
+export interface B2S3DeleteObjectsOptions {
+  bucket: string;
+  objects: Array<{ key: string; versionId?: string }>;
+  quiet?: boolean;
+  bypassGovernance?: boolean;
+}
 
 export interface B2S3DeleteObjectsResult {
   deleted: Array<{
@@ -103,12 +159,21 @@ export interface B2S3DeleteObjectsResult {
     DeleteMarker?: boolean;
     DeleteMarkerVersionId?: string;
   }>;
-  errors: Array<{ Key?: string; VersionId?: string; Code?: string; Message?: string }>;
+  errors: Array<{
+    Key?: string;
+    VersionId?: string;
+    Code?: string;
+    Message?: string;
+    RequestId?: string;
+  }>;
   attempted: number;
   aborted: boolean;
   maxConcurrency: number;
 }
 
+// Collection item and DeleteObjects shapes intentionally retain the AWS S3
+// PascalCase field names. They are pass-through wire DTOs from B2's S3 API,
+// while single-object envelopes above use repository-owned camelCase fields.
 export interface B2S3ObjectSummary {
   Key?: string;
   LastModified?: Date;
@@ -150,6 +215,44 @@ export interface B2S3ListObjectVersionsResult {
   nextVersionIdMarker?: string;
 }
 
+export interface B2S3CopyObjectOptions {
+  sourceBucket: string;
+  sourceKey: string;
+  sourceVersionId?: string;
+  destinationBucket: string;
+  destinationKey: string;
+  metadataDirective?: "COPY" | "REPLACE";
+  contentType?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface B2S3ListObjectsV2Options {
+  bucket: string;
+  prefix?: string;
+  delimiter?: string;
+  maxKeys: number;
+  continuationToken?: string;
+  startAfter?: string;
+}
+
+export interface B2S3ListObjectVersionsOptions {
+  bucket: string;
+  prefix?: string;
+  delimiter?: string;
+  maxKeys: number;
+  keyMarker?: string;
+  versionIdMarker?: string;
+}
+
+export interface B2S3PresignObjectUrlOptions {
+  bucket: string;
+  key: string;
+  operation: "GetObject" | "PutObject";
+  expiresIn: number;
+  versionId?: string;
+  contentType?: string;
+}
+
 export interface B2S3PresignObjectUrlResult {
   url: string;
   operation: "GetObject" | "PutObject";
@@ -175,6 +278,37 @@ function copySource(input: {
   return input.sourceVersionId === undefined
     ? base
     : `${base}?versionId=${encodeURIComponent(input.sourceVersionId)}`;
+}
+
+const DELETE_OBJECTS_MAX_CONCURRENCY = 8;
+
+function providerRequestId(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const e = err as {
+    requestId?: unknown;
+    $metadata?: { requestId?: unknown; extendedRequestId?: unknown };
+  };
+  if (typeof e.requestId === "string") return e.requestId;
+  if (typeof e.$metadata?.requestId === "string") return e.$metadata.requestId;
+  if (typeof e.$metadata?.extendedRequestId === "string") return e.$metadata.extendedRequestId;
+  return undefined;
+}
+
+function providerErrorCode(err: unknown): string {
+  if (typeof err !== "object" || err === null) return "unknown_error";
+  const e = err as { code?: unknown; name?: unknown };
+  if (typeof e.code === "string" && e.code) return e.code;
+  if (typeof e.name === "string" && e.name) return e.name;
+  return "unknown_error";
+}
+
+function providerErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object" && err !== null) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return String(err);
 }
 
 export class B2S3PeerClient extends S3Client {
@@ -213,12 +347,22 @@ export class B2S3PeerClient extends S3Client {
     return super.send(command, options);
   }
 
+  private async sendWithCircuit<
+    InputType extends ServiceInputTypes,
+    OutputType extends ServiceOutputTypes,
+  >(
+    command: S3SendCommand<InputType, OutputType>,
+    options?: HttpHandlerOptions,
+  ): Promise<OutputType> {
+    return withCircuit(() => this.send(command, options));
+  }
+
   async headBucket(bucket: string): Promise<void> {
-    await this.send(new HeadBucketCommand({ Bucket: bucket }));
+    await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
   }
 
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {
-    await this.send(
+    await this.sendWithCircuit(
       new PutBucketLifecycleConfigurationCommand({
         Bucket: input.bucket,
         LifecycleConfiguration: {
@@ -249,12 +393,12 @@ export class B2S3PeerClient extends S3Client {
   }
 
   async getBucketLocation(bucket: string): Promise<{ locationConstraint?: string }> {
-    const result = await this.send(new GetBucketLocationCommand({ Bucket: bucket }));
+    const result = await this.sendWithCircuit(new GetBucketLocationCommand({ Bucket: bucket }));
     return { locationConstraint: result.LocationConstraint };
   }
 
   async putObject(input: B2S3PutObjectOptions): Promise<void> {
-    await this.send(
+    await this.sendWithCircuit(
       new PutObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -267,13 +411,8 @@ export class B2S3PeerClient extends S3Client {
     );
   }
 
-  async getObject(input: {
-    bucket: string;
-    key: string;
-    range?: string;
-    versionId?: string;
-  }): Promise<B2S3DownloadedObject> {
-    const result = await this.send(
+  async getObject(input: B2S3GetObjectOptions): Promise<B2S3DownloadedObject> {
+    const result = await this.sendWithCircuit(
       new GetObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -293,12 +432,8 @@ export class B2S3PeerClient extends S3Client {
     };
   }
 
-  async headObject(input: {
-    bucket: string;
-    key: string;
-    versionId?: string;
-  }): Promise<B2S3HeadObjectResult> {
-    const result = await this.send(
+  async headObject(input: B2S3HeadObjectOptions): Promise<B2S3HeadObjectResult> {
+    const result = await this.sendWithCircuit(
       new HeadObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -318,55 +453,70 @@ export class B2S3PeerClient extends S3Client {
     };
   }
 
-  async deleteObject(input: { bucket: string; key: string; versionId?: string }): Promise<void> {
-    await this.send(
+  async deleteObject(input: B2S3DeleteObjectOptions): Promise<void> {
+    await this.sendWithCircuit(
       new DeleteObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
         VersionId: input.versionId,
-      }),
-    );
-  }
-
-  async deleteObjects(input: {
-    bucket: string;
-    objects: Array<{ key: string; versionId?: string }>;
-    quiet?: boolean;
-    bypassGovernance?: boolean;
-  }): Promise<B2S3DeleteObjectsResult> {
-    const result = await this.send(
-      new DeleteObjectsCommand({
-        Bucket: input.bucket,
-        Delete: {
-          Objects: input.objects.map((object) => ({
-            Key: object.key,
-            VersionId: object.versionId,
-          })),
-          Quiet: input.quiet,
-        },
         BypassGovernanceRetention: input.bypassGovernance,
       }),
     );
+  }
+
+  async deleteObjects(input: B2S3DeleteObjectsOptions): Promise<B2S3DeleteObjectsResult> {
+    if (input.objects.length === 0) {
+      return { deleted: [], errors: [], attempted: 0, aborted: false, maxConcurrency: 0 };
+    }
+
+    const signal = currentMcpRequestSignal();
+    const maxConcurrency = Math.min(DELETE_OBJECTS_MAX_CONCURRENCY, input.objects.length);
+    const deleted: B2S3DeleteObjectsResult["deleted"] = [];
+    const errors: B2S3DeleteObjectsResult["errors"] = [];
+    let attempted = 0;
+    let nextIndex = 0;
+
+    const worker = async () => {
+      for (;;) {
+        if (signal?.aborted === true) return;
+        const index = nextIndex++;
+        const object = input.objects[index];
+        if (!object) return;
+        attempted++;
+        try {
+          await this.deleteObject({
+            bucket: input.bucket,
+            key: object.key,
+            versionId: object.versionId,
+            bypassGovernance: input.bypassGovernance,
+          });
+          if (input.quiet !== true) {
+            deleted.push({ Key: object.key, VersionId: object.versionId });
+          }
+        } catch (err) {
+          errors.push({
+            Key: object.key,
+            VersionId: object.versionId,
+            Code: providerErrorCode(err),
+            Message: providerErrorMessage(err),
+            RequestId: providerRequestId(err),
+          });
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
     return {
-      deleted: result.Deleted ?? [],
-      errors: result.Errors ?? [],
-      attempted: input.objects.length,
-      aborted: currentMcpRequestSignal()?.aborted === true,
-      maxConcurrency: 1,
+      deleted,
+      errors,
+      attempted,
+      aborted: signal?.aborted === true,
+      maxConcurrency,
     };
   }
 
-  async copyObject(input: {
-    sourceBucket: string;
-    sourceKey: string;
-    sourceVersionId?: string;
-    destinationBucket: string;
-    destinationKey: string;
-    metadataDirective?: "COPY" | "REPLACE";
-    contentType?: string;
-    metadata?: Record<string, string>;
-  }): Promise<void> {
-    await this.send(
+  async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
+    await this.sendWithCircuit(
       new CopyObjectCommand({
         Bucket: input.destinationBucket,
         Key: input.destinationKey,
@@ -378,15 +528,8 @@ export class B2S3PeerClient extends S3Client {
     );
   }
 
-  async listObjectsV2(input: {
-    bucket: string;
-    prefix?: string;
-    delimiter?: string;
-    maxKeys: number;
-    continuationToken?: string;
-    startAfter?: string;
-  }): Promise<B2S3ListObjectsV2Result> {
-    const result = await this.send(
+  async listObjectsV2(input: B2S3ListObjectsV2Options): Promise<B2S3ListObjectsV2Result> {
+    const result = await this.sendWithCircuit(
       new ListObjectsV2Command({
         Bucket: input.bucket,
         Prefix: input.prefix,
@@ -406,15 +549,10 @@ export class B2S3PeerClient extends S3Client {
     };
   }
 
-  async listObjectVersions(input: {
-    bucket: string;
-    prefix?: string;
-    delimiter?: string;
-    maxKeys: number;
-    keyMarker?: string;
-    versionIdMarker?: string;
-  }): Promise<B2S3ListObjectVersionsResult> {
-    const result = await this.send(
+  async listObjectVersions(
+    input: B2S3ListObjectVersionsOptions,
+  ): Promise<B2S3ListObjectVersionsResult> {
+    const result = await this.sendWithCircuit(
       new ListObjectVersionsCommand({
         Bucket: input.bucket,
         Prefix: input.prefix,
@@ -434,14 +572,7 @@ export class B2S3PeerClient extends S3Client {
     };
   }
 
-  async presignObjectUrl(input: {
-    bucket: string;
-    key: string;
-    operation: "GetObject" | "PutObject";
-    expiresIn: number;
-    versionId?: string;
-    contentType?: string;
-  }): Promise<B2S3PresignObjectUrlResult> {
+  async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
       throw new Error("versionId is only valid for GetObject presigned URLs.");
     }
@@ -458,7 +589,7 @@ export class B2S3PeerClient extends S3Client {
             ContentType: input.contentType,
           });
     return {
-      url: await getSignedUrl(this, command, { expiresIn: input.expiresIn }),
+      url: await withCircuit(() => getSignedUrl(this, command, { expiresIn: input.expiresIn })),
       operation: input.operation,
       expiresIn: input.expiresIn,
       expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),

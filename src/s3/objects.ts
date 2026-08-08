@@ -9,7 +9,12 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
+import { withCircuit } from "../utils/circuit-breaker.js";
+import type {
+  B2S3FileVersionBinding,
+  B2S3PeerClient,
+  B2S3VersionGuard,
+} from "./aws-sdk-adapter.js";
 
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
@@ -31,7 +36,11 @@ type B2S3ObjectClient = Pick<
   | "listObjectVersions"
 >;
 
-function isWebReadableStream(value: unknown): value is WebReadableStream<Uint8Array> {
+type B2S3ObjectBody = Awaited<ReturnType<B2S3ObjectClient["getObject"]>>["body"];
+
+function isWebReadableStream(
+  value: B2S3ObjectBody | unknown,
+): value is WebReadableStream<Uint8Array> {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -40,11 +49,11 @@ function isWebReadableStream(value: unknown): value is WebReadableStream<Uint8Ar
   );
 }
 
-function isNodeReadable(value: unknown): value is Readable {
+function isNodeReadable(value: B2S3ObjectBody | unknown): value is Readable {
   return value instanceof Readable;
 }
 
-function transformToWebStream(value: unknown): WebReadableStream<Uint8Array> | null {
+function transformToWebStream(value: B2S3ObjectBody): WebReadableStream<Uint8Array> | null {
   if (
     typeof value === "object" &&
     value !== null &&
@@ -52,13 +61,14 @@ function transformToWebStream(value: unknown): WebReadableStream<Uint8Array> | n
     typeof (value as { transformToWebStream?: unknown }).transformToWebStream === "function"
   ) {
     return (
-      value as { transformToWebStream: () => WebReadableStream<Uint8Array> }
+      value as unknown as { transformToWebStream: () => WebReadableStream<Uint8Array> }
     ).transformToWebStream();
   }
   return null;
 }
 
-async function cancelBody(body: unknown, reason?: unknown): Promise<void> {
+async function cancelBody(body: B2S3ObjectBody, reason?: unknown): Promise<void> {
+  if (!body) return;
   if (isWebReadableStream(body)) {
     await body.cancel(reason).catch(() => undefined);
     return;
@@ -139,22 +149,49 @@ async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<B
   return Buffer.concat(chunks, total);
 }
 
-function nodeReadableFromBody(body: unknown): Readable {
+function nodeReadableFromBody(body: B2S3ObjectBody): Readable {
+  if (!body) throw new Error("Object response did not include a readable body.");
   if (isNodeReadable(body)) return body;
   if (isWebReadableStream(body)) {
     return Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0]);
   }
   const web = transformToWebStream(body);
   if (web) return Readable.fromWeb(web as Parameters<typeof Readable.fromWeb>[0]);
-  if (body instanceof Uint8Array || typeof body === "string") return Readable.from([body]);
   throw new Error("Object response did not include a readable body.");
 }
 
-async function bodyToBuffer(body: unknown, maxBytes: number): Promise<Buffer> {
+async function bodyToBuffer(body: B2S3ObjectBody, maxBytes: number): Promise<Buffer> {
+  if (!body) throw new Error("Object response did not include a readable body.");
   if (isWebReadableStream(body)) return webStreamToBuffer(body, maxBytes);
   const web = transformToWebStream(body);
   if (web) return webStreamToBuffer(web, maxBytes);
   return nodeStreamToBuffer(nodeReadableFromBody(body), maxBytes);
+}
+
+async function verifyVersionBinding(
+  versions: B2S3VersionGuard,
+  input: { bucket: string; key: string; versionId?: string },
+): Promise<B2S3FileVersionBinding | null> {
+  if (!input.versionId) return null;
+  return versions.resolveS3FileVersion({
+    bucket: input.bucket,
+    key: input.key,
+    versionId: input.versionId,
+  });
+}
+
+function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
+  return {
+    key: version.fileName,
+    contentType: version.contentType,
+    contentLength: version.contentLength,
+    lastModified: new Date(version.uploadTimestamp),
+    etag: undefined,
+    versionId: version.fileId,
+    metadata: version.fileInfo,
+    serverSideEncryption: version.serverSideEncryption,
+    deleteMarker: true,
+  };
 }
 
 // Inline object content moves bytes *through* the server — and, for base64,
@@ -169,6 +206,7 @@ const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 export function registerS3ObjectTools(
   server: ToolRegistrar,
   s3: B2S3ObjectClient,
+  versions: B2S3VersionGuard,
   config: B2Config,
 ): void {
   server.registerTool(
@@ -210,12 +248,21 @@ export function registerS3ObjectTools(
           ? resolveLocalPath(config, args.filePath, "read")
           : undefined;
 
-        // Enforce the inline cap before moving any bytes. Bulk uploads must use a
-        // presigned PutObject URL (s3_get_presigned_url) or the multipart flow so
-        // object data never streams through the server / model context.
-        const size = safePath
-          ? fs.statSync(safePath).size
-          : Buffer.byteLength(args.content!, "base64");
+        // Enforce the inline cap before sending any bytes. Bulk uploads must use
+        // a presigned PutObject URL (s3_get_presigned_url) or the multipart flow
+        // so object data never streams through the server / model context.
+        const statSize = safePath ? fs.statSync(safePath).size : undefined;
+        if (statSize !== undefined && statSize > MAX_INLINE_OBJECT_BYTES) {
+          return toolError(
+            new Error(
+              `Payload is ${statSize} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline limit for s3_put_object. ` +
+                `Generate a PutObject URL with s3_get_presigned_url and upload directly to B2, or use the ` +
+                `multipart tools (s3_create_multipart_upload → s3_presign_upload_part → s3_complete_multipart_upload) for large objects.`,
+            ),
+          );
+        }
+        const body = safePath ? fs.readFileSync(safePath) : Buffer.from(args.content!, "base64");
+        const size = body.byteLength;
         if (size > MAX_INLINE_OBJECT_BYTES) {
           return toolError(
             new Error(
@@ -229,7 +276,7 @@ export function registerS3ObjectTools(
         await s3.putObject({
           bucket: args.bucket,
           key: args.key,
-          body: safePath ? fs.createReadStream(safePath) : Buffer.from(args.content!, "base64"),
+          body,
           contentLength: size,
           contentType: args.contentType,
           metadata: args.metadata,
@@ -261,6 +308,11 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
+        await verifyVersionBinding(versions, {
+          bucket: args.bucket,
+          key: args.key,
+          versionId: args.versionId,
+        });
         const result = await s3.getObject({
           bucket: args.bucket,
           key: args.key,
@@ -274,7 +326,7 @@ export function registerS3ObjectTools(
           fs.mkdirSync(path.dirname(safePath), { recursive: true });
           const writeStream = fs.createWriteStream(safePath);
           try {
-            await pipeline(nodeReadableFromBody(result.body), writeStream);
+            await withCircuit(() => pipeline(nodeReadableFromBody(result.body), writeStream));
           } catch (e) {
             await fs.promises.unlink(safePath).catch(() => undefined);
             throw e;
@@ -307,7 +359,7 @@ export function registerS3ObjectTools(
             ),
           );
         }
-        const buffer = await bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES);
+        const buffer = await withCircuit(() => bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES));
 
         return toolJson({
           key: args.key,
@@ -342,6 +394,11 @@ export function registerS3ObjectTools(
       try {
         const gate = checkDestructive("s3_delete_object", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        await verifyVersionBinding(versions, {
+          bucket: args.bucket,
+          key: args.key,
+          versionId: args.versionId,
+        });
         await s3.deleteObject({
           bucket: args.bucket,
           key: args.key,
@@ -358,7 +415,7 @@ export function registerS3ObjectTools(
     "s3_delete_objects",
     {
       description:
-        "Delete multiple objects from a B2 bucket through S3 DeleteObjects (up to 1000 objects).",
+        "Delete multiple objects from a B2 bucket through bounded per-key S3 DeleteObject calls (up to 1000 objects).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         objects: z
@@ -388,6 +445,13 @@ export function registerS3ObjectTools(
       try {
         const gate = checkDestructive("s3_delete_objects", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        for (const object of args.objects as DeleteObjectEntry[]) {
+          await verifyVersionBinding(versions, {
+            bucket: args.bucket,
+            key: object.key,
+            versionId: object.versionId,
+          });
+        }
         return toolJson({
           ...(await s3.deleteObjects({
             bucket: args.bucket,
@@ -415,6 +479,17 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
+        const version = args.versionId
+          ? await versions.resolveS3FileVersion({
+              bucket: args.bucket,
+              key: args.key,
+              versionId: args.versionId,
+            })
+          : await versions.getCurrentS3FileVersion({
+              bucket: args.bucket,
+              key: args.key,
+            });
+        if (version?.action === "hide") return toolJson(headResultFromDeleteMarker(version));
         const result = await s3.headObject({
           bucket: args.bucket,
           key: args.key,
@@ -471,6 +546,11 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
+        await verifyVersionBinding(versions, {
+          bucket: args.sourceBucket,
+          key: args.sourceKey,
+          versionId: args.sourceVersionId,
+        });
         await s3.copyObject({
           sourceBucket: args.sourceBucket,
           sourceKey: args.sourceKey,

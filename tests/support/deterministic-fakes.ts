@@ -8,15 +8,23 @@ import { getRegisteredTools } from "../../src/server";
 import type { McpServer, ToolCallback, ToolRegistrar } from "../../src/mcp";
 import type {
   B2S3CompletedMultipartPart,
+  B2S3CopyObjectOptions,
+  B2S3DeleteObjectOptions,
   B2S3DeleteObjectsResult,
+  B2S3DeleteObjectsOptions,
   B2S3DownloadedObject,
+  B2S3GetObjectOptions,
   B2S3HeadObjectResult,
+  B2S3HeadObjectOptions,
   B2S3LifecycleRule,
+  B2S3ListObjectsV2Options,
   B2S3ListObjectsV2Result,
+  B2S3ListObjectVersionsOptions,
   B2S3ListObjectVersionsResult,
   B2S3MultipartUploadSummary,
   B2S3PartSummary,
   B2S3PeerClient,
+  B2S3PresignObjectUrlOptions,
   B2S3PresignObjectUrlResult,
   B2S3PutObjectOptions,
 } from "../../src/s3/aws-sdk-adapter";
@@ -268,12 +276,7 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     await this.next("putObject", input, undefined);
   }
 
-  async getObject(input: {
-    bucket: string;
-    key: string;
-    range?: string;
-    versionId?: string;
-  }): Promise<B2S3DownloadedObject> {
+  async getObject(input: B2S3GetObjectOptions): Promise<B2S3DownloadedObject> {
     return this.next("getObject", input, {
       key: input.key,
       contentType: "text/plain",
@@ -286,34 +289,25 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
         start(controller) {
           controller.close();
         },
-      }),
+      }) as unknown as B2S3DownloadedObject["body"],
     });
   }
 
-  async deleteObject(input: { bucket: string; key: string; versionId?: string }): Promise<void> {
+  async deleteObject(input: B2S3DeleteObjectOptions): Promise<void> {
     await this.next("deleteObject", input, undefined);
   }
 
-  async deleteObjects(input: {
-    bucket: string;
-    objects: Array<{ key: string; versionId?: string }>;
-    quiet?: boolean;
-    bypassGovernance?: boolean;
-  }): Promise<B2S3DeleteObjectsResult> {
+  async deleteObjects(input: B2S3DeleteObjectsOptions): Promise<B2S3DeleteObjectsResult> {
     return this.next("deleteObjects", input, {
       deleted: input.quiet === true ? [] : input.objects.map((object) => ({ Key: object.key })),
       errors: [],
       attempted: input.objects.length,
       aborted: false,
-      maxConcurrency: 1,
+      maxConcurrency: Math.min(8, input.objects.length),
     });
   }
 
-  async headObject(input: {
-    bucket: string;
-    key: string;
-    versionId?: string;
-  }): Promise<B2S3HeadObjectResult> {
+  async headObject(input: B2S3HeadObjectOptions): Promise<B2S3HeadObjectResult> {
     return this.next("headObject", input, {
       key: input.key,
       contentType: "text/plain",
@@ -325,27 +319,11 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     });
   }
 
-  async copyObject(input: {
-    sourceBucket: string;
-    sourceKey: string;
-    sourceVersionId?: string;
-    destinationBucket: string;
-    destinationKey: string;
-    metadataDirective?: "COPY" | "REPLACE";
-    contentType?: string;
-    metadata?: Record<string, string>;
-  }): Promise<void> {
+  async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
     await this.next("copyObject", input, undefined);
   }
 
-  async listObjectsV2(input: {
-    bucket: string;
-    prefix?: string;
-    delimiter?: string;
-    maxKeys: number;
-    continuationToken?: string;
-    startAfter?: string;
-  }): Promise<B2S3ListObjectsV2Result> {
+  async listObjectsV2(input: B2S3ListObjectsV2Options): Promise<B2S3ListObjectsV2Result> {
     return this.next("listObjectsV2", input, {
       objects: [],
       commonPrefixes: [],
@@ -354,14 +332,9 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     });
   }
 
-  async listObjectVersions(input: {
-    bucket: string;
-    prefix?: string;
-    delimiter?: string;
-    maxKeys: number;
-    keyMarker?: string;
-    versionIdMarker?: string;
-  }): Promise<B2S3ListObjectVersionsResult> {
+  async listObjectVersions(
+    input: B2S3ListObjectVersionsOptions,
+  ): Promise<B2S3ListObjectVersionsResult> {
     return this.next("listObjectVersions", input, {
       versions: [],
       deleteMarkers: [],
@@ -370,14 +343,7 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     });
   }
 
-  async presignObjectUrl(input: {
-    bucket: string;
-    key: string;
-    operation: "GetObject" | "PutObject";
-    expiresIn: number;
-    versionId?: string;
-    contentType?: string;
-  }): Promise<B2S3PresignObjectUrlResult> {
+  async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
     return this.next("presignObjectUrl", input, {
       url: `https://s3.example.invalid/${encodeURIComponent(input.bucket)}/${encodeURIComponent(
         input.key,

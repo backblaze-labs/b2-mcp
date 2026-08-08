@@ -1193,7 +1193,7 @@
     },
     {
       "name": "s3_delete_objects",
-      "descriptionSha256": "5bbd1770a1135ce92c41158914221a3b8f5cfd2247ae2b56f69e76f8ec530f6a",
+      "descriptionSha256": "9a99378813ec9a9bfd523d24eaef92b49e062441dce9f0d4567595d51fffe420",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1747,5 +1747,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "28c09992037450e49b6bfea4dd67af2981924e976f645fced975fab8d8092a6b"
+  "hash": "d7865b231c728b851ff8a725ac95ced0f96861711f08c04c426f01f1227df62d"
 }

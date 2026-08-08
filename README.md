@@ -15,7 +15,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 **40 tools, split by what they do:**
 
 - **Control plane (11 active, native B2 API)** — buckets, key listing/deletion, Object Lock, event notifications. _(The S3 API has no equivalent for these.)_
-- **Data plane (19, compatibility `s3_*` names)** — object upload/download/copy/list/delete through the official B2 SDK, plus S3-material multipart, bucket reachability, lifecycle, and presigned URL paths.
+- **Data plane (19, compatibility `s3_*` names)** — object upload/download/copy/list/delete, multipart, bucket reachability, lifecycle, and presigned URL paths through the AWS S3 SDK configured for B2's S3-compatible endpoint.
 - **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
 - **Unavailable compatibility stubs (6, native B2 API in the full surface)** — three durable-secret-producing tool names and three Partner/Groups SDK-gap tool names return a non-secret unavailable error until their reviewed dependencies exist.
 

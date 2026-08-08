@@ -1,5 +1,6 @@
 import {
   buildB2S3ClientConfig,
+  createPrimaryS3Client,
   createReportS3Client,
   expectedB2S3Endpoint,
   validateB2S3ApiUrl,
@@ -30,6 +31,32 @@ describe("B2 S3 client configuration", () => {
       accessKeyId: "legacy-s3-key-id",
       secretAccessKey: "legacy-s3-secret",
     });
+    expect(s3.maxAttempts).toBe(1);
+  });
+
+  it("can build primary object-tool config with caller credentials", () => {
+    const s3 = buildB2S3ClientConfig(config, {
+      applicationKeyId: config.applicationKeyId,
+      applicationKey: config.applicationKey,
+      surface: "s3-object-tools",
+    });
+
+    expect(s3.credentials).toEqual({
+      accessKeyId: "principal-key-id",
+      secretAccessKey: "principal-secret",
+    });
+    expect(JSON.stringify(s3.customUserAgent)).toContain("s3-object-tools");
+  });
+
+  it("creates object clients with the credential used for capability registration", async () => {
+    const s3 = createPrimaryS3Client(config, "s3-object-tools");
+
+    await expect(s3.config.credentials()).resolves.toMatchObject({
+      accessKeyId: "principal-key-id",
+      secretAccessKey: "principal-secret",
+    });
+    await expect(s3.config.maxAttempts()).resolves.toBe(1);
+    s3.destroy();
   });
 
   it("can build report client config with explicit caller credentials", () => {

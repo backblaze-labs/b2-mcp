@@ -1,6 +1,8 @@
 import { ReadableStream } from "node:stream/web";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { B2Client } from "../../src/b2/client";
+import type { B2S3FileVersionBinding } from "../../src/s3/aws-sdk-adapter";
 import type { McpServer } from "../../src/mcp";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
@@ -8,6 +10,20 @@ import type { MockInstance } from "vitest";
 
 let server: McpServer;
 let sendSpy: MockInstance;
+
+function matchingVersion(overrides: Partial<B2S3FileVersionBinding> = {}) {
+  return {
+    fileName: "k",
+    fileId: "v1",
+    bucketId: "bucket-id",
+    contentLength: 5,
+    contentType: "text/plain",
+    uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+    fileInfo: {},
+    action: "upload",
+    ...overrides,
+  } satisfies B2S3FileVersionBinding;
+}
 
 function bodyFromText(value: string): ReadableStream<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -21,6 +37,10 @@ function bodyFromText(value: string): ReadableStream<Uint8Array> {
 beforeEach(() => {
   invalidateAuthManagerCache();
   sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
+  vi.spyOn(B2Client.prototype, "resolveS3FileVersion").mockImplementation(
+    async ({ key, versionId }) => matchingVersion({ fileName: key, fileId: versionId }),
+  );
+  vi.spyOn(B2Client.prototype, "getCurrentS3FileVersion").mockResolvedValue(null);
   server = createServer(testConfig);
 });
 
@@ -328,12 +348,7 @@ describe("s3_delete_object and s3_delete_objects", () => {
     expect(command.input).toMatchObject({ Bucket: "b", Key: "k", VersionId: "v1" });
   });
 
-  it("sends DeleteObjectsCommand and returns AWS delete accounting", async () => {
-    sendSpy.mockResolvedValueOnce({
-      Deleted: [{ Key: "a.txt" }, { Key: "b.txt", VersionId: "v2" }],
-      Errors: [],
-    });
-
+  it("deletes objects with bounded per-key accounting", async () => {
     const result = parseResult(
       await callTool(server, "s3_delete_objects", {
         bucket: "b",
@@ -349,16 +364,22 @@ describe("s3_delete_object and s3_delete_objects", () => {
       errors: [],
       attempted: 2,
       aborted: false,
-      maxConcurrency: 1,
+      maxConcurrency: 2,
     });
-    const command = sendSpy.mock.calls[0][0];
-    expect(command.constructor.name).toBe("DeleteObjectsCommand");
-    expect(command.input).toMatchObject({
+    expect(sendSpy).toHaveBeenCalledTimes(2);
+    expect(sendSpy.mock.calls.map((call) => call[0].constructor.name)).toEqual([
+      "DeleteObjectCommand",
+      "DeleteObjectCommand",
+    ]);
+    expect(sendSpy.mock.calls[0][0].input).toMatchObject({
       Bucket: "b",
-      Delete: {
-        Objects: [{ Key: "a.txt" }, { Key: "b.txt", VersionId: "v2" }],
-        Quiet: false,
-      },
+      Key: "a.txt",
+      BypassGovernanceRetention: true,
+    });
+    expect(sendSpy.mock.calls[1][0].input).toMatchObject({
+      Bucket: "b",
+      Key: "b.txt",
+      VersionId: "v2",
       BypassGovernanceRetention: true,
     });
   });
@@ -485,6 +506,27 @@ describe("s3_get_presigned_url", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
+  it("refuses mismatched GetObject version IDs before presigning", async () => {
+    vi.mocked(B2Client.prototype.resolveS3FileVersion).mockRejectedValueOnce(
+      Object.assign(new Error("Object 'public/allowed.txt' not found in bucket 'my-bucket'."), {
+        status: 404,
+        code: "not_found",
+      }),
+    );
+
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "public/allowed.txt",
+      operation: "GetObject",
+      versionId: "secret-version",
+      expiresIn: 3600,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
   it("requires operation in the registered input schema", () => {
     const tool = getRegisteredTools(server)?.["s3_get_presigned_url"];
     const result = tool?.inputSchema?.safeParse({ bucket: "my-bucket", key: "photo.jpg" });
@@ -528,20 +570,19 @@ describe("s3_get_presigned_url", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("generates URLs while the native circuit breaker is open", async () => {
+  it("fails fast while the shared circuit breaker is open", async () => {
     circuitBreaker.open();
 
-    const result = parseResult(
-      await callTool(server, "s3_get_presigned_url", {
-        bucket: "my-bucket",
-        key: "photo.jpg",
-        operation: "PutObject",
-        expiresIn: 3600,
-        confirm: true,
-      }),
-    );
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "photo.jpg",
+      operation: "PutObject",
+      expiresIn: 3600,
+      confirm: true,
+    });
 
-    expect(result.url).toMatch(/^https?:\/\//);
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/breaker|open/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 });
