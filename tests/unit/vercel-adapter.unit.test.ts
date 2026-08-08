@@ -442,6 +442,31 @@ describe("Vercel adapter", () => {
     expect(body.error).toMatch(/not configured/i);
   });
 
+  it("requires an allowed OAuth subject even when shared server credentials are enabled", async () => {
+    delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
+    process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+    const body = (await response.json()) as { code: string; error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("configuration_error");
+    expect(body.error).toMatch(/not configured/i);
+  });
+
+  it("allows multiple OAuth subjects only with the shared server credential override", async () => {
+    process.env.B2_OAUTH_ALLOWED_SUBJECTS = "subject,other-subject";
+    process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
   it.each([
     "B2_APPLICATION_KEY",
     "B2_APPLICATION_KEY_ID",

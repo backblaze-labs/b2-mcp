@@ -93,14 +93,18 @@ export function validateVercelStaticConfiguration(): void {
   validateVercelCredentialMode();
   validatePreviewCredentialCustody();
   const oauthConfig = loadOAuthResourceServerConfig();
-  if (
-    getHttpCredentialMode() === "server" &&
-    oauthConfig.allowedSubjects.length !== 1 &&
-    process.env[ALLOW_SHARED_SERVER_CREDENTIAL_FLAG] !== "true"
-  ) {
-    throw new Error(
-      `Vercel server mode requires exactly one B2_OAUTH_ALLOWED_SUBJECTS value unless ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true is set`,
-    );
+  if (getHttpCredentialMode() === "server") {
+    if (oauthConfig.allowedSubjects.length === 0) {
+      throw new Error("Vercel server mode requires at least one B2_OAUTH_ALLOWED_SUBJECTS value");
+    }
+    if (
+      oauthConfig.allowedSubjects.length !== 1 &&
+      process.env[ALLOW_SHARED_SERVER_CREDENTIAL_FLAG] !== "true"
+    ) {
+      throw new Error(
+        `Vercel server mode requires exactly one B2_OAUTH_ALLOWED_SUBJECTS value unless ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true is set`,
+      );
+    }
   }
   protectedResourceMetadata(oauthConfig);
   validateHttpCredentialConfiguration();
