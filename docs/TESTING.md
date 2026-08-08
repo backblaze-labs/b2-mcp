@@ -16,11 +16,16 @@ pnpm install --frozen-lockfile
 pnpm run verify
 ```
 
-`pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, local
-Markdown link validation, the Biome-supported format check, spelling,
-and listener diagnostics across the fast non-live layers. Coverage, slow
-lifecycle, and packed-package installation evidence stay in distinct scripts and
-CI jobs so their failures do not mask each other.
+`pnpm run verify` runs typecheck, build, the Cloudflare Worker dry-run bundle,
+Biome lint, doc-comment lint, local Markdown link validation, the
+Biome-supported format check, spelling, and listener diagnostics across the fast
+non-live layers. The Worker bundle check intentionally uses Wrangler in this
+default no-credential gate because the experimental adapter imports the shared
+fetch handler and must not drift from the same MCP contract. This adds a heavier
+Cloudflare CLI dependency to local verification; run
+`pnpm run build:deploy:cloudflare-worker` directly when iterating only on that
+adapter. Coverage, slow lifecycle, and packed-package installation evidence stay
+in distinct scripts and CI jobs so their failures do not mask each other.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |

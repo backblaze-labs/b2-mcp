@@ -224,6 +224,13 @@ describe("Cloudflare Worker OAuth verifier", () => {
       verifyJwtAccessToken(signJwt(key, claims({ aud: "https://other.example.com" })), env()),
       "jwt_audience_invalid",
     );
+    await expectAuthError(
+      verifyJwtAccessToken(
+        signJwt(key, claims({ aud: "https://other.example.com", resource: audience })),
+        env(),
+      ),
+      "jwt_audience_invalid",
+    );
   });
 
   it("rejects missing required scopes when OAuth is configured", async () => {
@@ -243,6 +250,72 @@ describe("Cloudflare Worker OAuth verifier", () => {
     const authInfo = await verifyJwtAccessToken(signJwt(rotated, claims()), env());
 
     expect(authInfo.extra?.sub).toBe("user-123");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns a retryable JWKS failure for a rotated kid when refetch is unavailable", async () => {
+    const rotated = keyPair("kid-b");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ keys: [key.publicJwk] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockRejectedValueOnce(new Error("issuer unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await verifyJwtAccessToken(signJwt(key, claims()), env());
+
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(rotated, claims()), env()),
+      "jwks_fetch_failed",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not accept a cached key after JWKS expiry when the issuer is unreachable", async () => {
+    const baseNow = Date.parse("2026-08-08T00:00:00Z");
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(baseNow);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ keys: [key.publicJwk] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockRejectedValueOnce(new Error("issuer unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const token = signJwt(key, claims({ exp: Math.floor(baseNow / 1000) + 3600 }));
+      await verifyJwtAccessToken(token, env());
+      nowSpy.mockReturnValue(baseNow + 6 * 60 * 1000);
+
+      await expectAuthError(verifyJwtAccessToken(token, env()), "jwks_fetch_failed");
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("rate-limits repeated forced JWKS refreshes for unknown kids", async () => {
+    const firstUnknown = keyPair("kid-unknown-a");
+    const secondUnknown = keyPair("kid-unknown-b");
+    const fetchMock = mockJwks([key.publicJwk], [key.publicJwk], [key.publicJwk]);
+
+    await verifyJwtAccessToken(signJwt(key, claims()), env());
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(firstUnknown, claims()), env()),
+      "jwt_signature_invalid",
+    );
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(secondUnknown, claims()), env()),
+      "jwks_forced_refresh_deferred",
+    );
+
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 

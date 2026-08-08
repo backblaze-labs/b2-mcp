@@ -184,6 +184,11 @@ describe("deployment documentation", () => {
     expect(auth).toContain("cf-access-jwt-assertion");
     expect(worker).not.toContain("registerBucketTools");
     expect(worker).not.toContain("@modelcontextprotocol/sdk");
+    expect(read("docs/deployment/cloudflare-workers.md")).toContain("source-checkout-only");
+    expect(read("docs/deployment/cloudflare-workers.md")).toContain("B2_MAX_SESSIONS");
+    expect(read("docs/deployment/cloudflare-workers.md")).toContain(
+      "`resource` claim does not substitute",
+    );
     expect(wrangler).toContain('"nodejs_compat"');
     expect(wrangler).toMatch(/"compatibility_date": "\d{4}-\d{2}-\d{2}"/);
     expect(wrangler).not.toContain("B2_MCP_OAUTH_REQUIRED_SCOPES");

@@ -263,6 +263,15 @@ function modernHeaders(method: string, name?: string): Record<string, string> {
   };
 }
 
+function authInfoForSubject(subject: string): AuthInfo {
+  return {
+    token: `verified-${subject}`,
+    clientId: subject,
+    scopes: ["b2:mcp"],
+    extra: { iss: "https://issuer.example.com", sub: subject },
+  };
+}
+
 const LIST_TOOLS = modernBody("tools/list");
 function jsonRpcResponse(result: unknown = {}): Response {
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }), {
@@ -395,6 +404,29 @@ describe("HTTP transport handler", () => {
     const res = await postDeclaredLargeBody(port, "/mcp");
     expect(res.status).toBe(413);
     expect(res.headers.connection).toBe("close");
+  });
+
+  it("returns declared-oversized 413 before in-flight limiter gates", async () => {
+    process.env.B2_MAX_SESSIONS = "1";
+    await replaceHandle();
+
+    const slow = http.request({
+      host: "127.0.0.1",
+      port,
+      method: "POST",
+      path: "/mcp",
+      headers: modernHeaders("tools/list"),
+    });
+    slow.on("error", () => undefined);
+    slow.write("{");
+    await sleep(50);
+
+    try {
+      const res = await postDeclaredLargeBody(port, "/mcp");
+      expect(res.status).toBe(413);
+    } finally {
+      slow.destroy();
+    }
   });
 
   it("closes declared-oversized requests without waiting for the full body", async () => {
@@ -574,6 +606,59 @@ describe("HTTP transport handler", () => {
     const completed = await first;
 
     expect(limited.status).toBe(429);
+    expect(completed.status).toBe(200);
+  });
+
+  it("keys server-mode per-caller limits on verified principals", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key-id";
+    process.env.B2_APPLICATION_KEY = "server-key";
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    let streamReady!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      streamReady = resolve;
+    });
+    await replaceHandle((req) => authInfoForSubject(String(req.headers["x-test-sub"] ?? "anon")), {
+      fetchCapabilities: vi.fn(async () => null),
+      mcpHandler: {
+        fetch: vi.fn(async (_req, options) => {
+          if (options?.authInfo?.clientId !== "tenant-a") return jsonRpcResponse({ ok: true });
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+              controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+              streamReady();
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          });
+        }),
+        close: vi.fn(),
+      },
+    });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: { "x-test-sub": "tenant-a", ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    await ready;
+
+    const otherPrincipal = await request(port, "POST", "/mcp", {
+      headers: { "x-test-sub": "tenant-b", ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    const samePrincipal = await request(port, "POST", "/mcp", {
+      headers: { "x-test-sub": "tenant-a", ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    streamController.close();
+    const completed = await first;
+
+    expect(otherPrincipal.status).toBe(200);
+    expect(samePrincipal.status).toBe(429);
     expect(completed.status).toBe(200);
   });
 

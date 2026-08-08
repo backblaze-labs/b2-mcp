@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Extracted the HTTP request policy into a shared fetch handler and added
   Worker adapter compilation to the no-credential verification path.
+- Hardened the experimental Cloudflare Worker caller-auth verifier with
+  HTTPS-only issuer/JWKS configuration, required OAuth scopes, bounded JWKS
+  refresh, fail-closed key rotation behavior, and `aud`-only audience checks.
+- Scoped server-mode HTTP in-flight and rate-limit buckets to verified callers
+  where available, so one authenticated caller cannot consume another caller's
+  per-key budget while sharing the same server-held B2 credential.
 - Added `/ready` alongside `/health` for HTTP deployments and gated readiness
   metadata behind the same Host/Origin checks used for MCP traffic.
 

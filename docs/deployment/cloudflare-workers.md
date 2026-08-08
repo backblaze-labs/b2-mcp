@@ -11,6 +11,9 @@ Read [security and credentials](security-and-credentials.md) before deploying.
 
 - Cloudflare Workers account with a plan and CPU/subrequest limits appropriate
   for B2 authorization plus representative tool calls.
+- A full source checkout of this repository. The published npm package ships
+  this guide for reference, but the native Worker adapter is source-checkout-only
+  until it graduates from experimental support.
 - Wrangler configured for `deploy/cloudflare-worker/wrangler.jsonc`.
 - `nodejs_compat` compatibility flag and compatibility date `2026-08-08`.
 - Worker encrypted secrets for B2 credentials.
@@ -27,6 +30,9 @@ credential resolution, capability filtering, audit wrapping, redaction,
 serialization, or B2 SDK calls.
 
 ## Exact setup
+
+Run these commands from a full repository checkout, not from an installed npm
+package:
 
 ```bash
 cd deploy/cloudflare-worker
@@ -84,9 +90,10 @@ Two reviewed patterns are allowed:
 
 - Configure HTTPS `B2_MCP_OAUTH_ISSUER`, `B2_MCP_OAUTH_AUDIENCE`, HTTPS
   `B2_MCP_OAUTH_JWKS_URL`, and non-empty `B2_MCP_OAUTH_REQUIRED_SCOPES`.
-  The adapter validates JWT issuer, audience/resource, expiry, not-before,
-  allowed algorithm, access-token type, signature, and scopes before passing
-  `AuthInfo`. The default token-type policy accepts `at+jwt` and
+  The adapter validates JWT issuer, `aud`, expiry, not-before, allowed
+  algorithm, access-token type, signature, and scopes before passing `AuthInfo`.
+  A `resource` claim does not substitute for a mismatched audience. The default
+  token-type policy accepts `at+jwt` and
   `application/at+jwt`; set `B2_MCP_OAUTH_ALLOWED_TOKEN_TYPES` only for a
   reviewed issuer profile. Leave `B2_MCP_OAUTH_CLOCK_SKEW_SECONDS` unset unless
   the issuer needs a smaller bounded skew; values above 300 seconds fail closed.
@@ -125,8 +132,11 @@ authorization responses, and presigned URLs are redacted or absent.
 ## Scaling and sessions
 
 Worker isolates are stateless from the MCP perspective. Isolate-local caches,
-rate counters, and concurrency counters are not global. Use Cloudflare rate
-limiting or a Durable Object when a global guarantee is required.
+rate counters, and concurrency counters are not global. `B2_MAX_SESSIONS`,
+`B2_MAX_SESSIONS_PER_KEY`, and `B2_MCP_RATE_LIMIT_*` are per-isolate
+best-effort limits on Workers, not deployment-wide B2 backpressure. Use
+Cloudflare rate limiting, B2-side limits, or a Durable Object when a global
+guarantee is required.
 
 ## Rollback
 

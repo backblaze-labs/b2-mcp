@@ -39,7 +39,6 @@ type JwtClaims = {
 type JwksCache = {
   url: string;
   expiresAt: number;
-  staleUntil: number;
   keys: JsonWebKey[];
 };
 
@@ -76,8 +75,8 @@ export class WorkerAuthError extends Error {
 }
 
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
-const JWKS_STALE_GRACE_MS = 5 * 60 * 1000;
 const JWKS_FETCH_TIMEOUT_MS = 3000;
+const JWKS_FORCED_REFRESH_MIN_INTERVAL_MS = 10 * 1000;
 const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256"];
 const DEFAULT_OAUTH_ACCESS_TOKEN_TYPES = ["at+jwt", "application/at+jwt"];
 const DEFAULT_CLOCK_SKEW_SECONDS = 60;
@@ -86,6 +85,7 @@ const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource"
 
 let jwksCache: JwksCache | undefined;
 const inFlightJwksFetches = new Map<string, Promise<JsonWebKey[]>>();
+const forcedRefreshBlockedUntilByUrl = new Map<string, number>();
 
 function authError(
   status: WorkerAuthError["status"],
@@ -225,6 +225,17 @@ async function getJwks(url: string, options: JwksOptions = {}): Promise<JsonWebK
   const cacheKey = `${url}:${options.force === true ? "force" : "normal"}`;
   const existing = inFlightJwksFetches.get(cacheKey);
   if (existing) return existing;
+  if (options.force) {
+    const blockedUntil = forcedRefreshBlockedUntilByUrl.get(url) ?? 0;
+    if (blockedUntil > now) {
+      logger.warn(
+        { code: "jwks_forced_refresh_deferred", status: 503 },
+        "worker.auth.jwks_forced_refresh_deferred",
+      );
+      throw authError(503, "jwks_forced_refresh_deferred", "OAuth JWKS refresh is rate limited");
+    }
+    forcedRefreshBlockedUntilByUrl.set(url, now + JWKS_FORCED_REFRESH_MIN_INTERVAL_MS);
+  }
 
   const pending = fetchJwks(url)
     .then((keys) => {
@@ -233,18 +244,10 @@ async function getJwks(url: string, options: JwksOptions = {}): Promise<JsonWebK
         url,
         keys,
         expiresAt: fetchedAt + JWKS_CACHE_TTL_MS,
-        staleUntil: fetchedAt + JWKS_CACHE_TTL_MS + JWKS_STALE_GRACE_MS,
       };
       return keys;
     })
     .catch((err) => {
-      if (jwksCache?.url === url && jwksCache.staleUntil > Date.now()) {
-        logger.warn(
-          { code: "jwks_stale_fallback", status: 503 },
-          "worker.auth.jwks_stale_fallback",
-        );
-        return jwksCache.keys;
-      }
       if (err instanceof WorkerAuthError) {
         logger.warn({ code: err.code, status: err.status }, "worker.auth.jwks_failed");
         throw err;
@@ -366,10 +369,7 @@ async function verifyJwt(token: string, options: VerifyJwtOptions): Promise<Auth
   if (claims.iss !== options.issuer) {
     throw authError(401, "jwt_issuer_invalid", "Bearer token issuer is invalid");
   }
-  if (
-    !audienceMatches(claims.aud, options.audience) &&
-    !audienceMatches(claims.resource, options.audience)
-  ) {
+  if (!audienceMatches(claims.aud, options.audience)) {
     throw authError(401, "jwt_audience_invalid", "Bearer token audience is invalid");
   }
   if (typeof claims.exp !== "number" || claims.exp <= nowSeconds - skew) {
@@ -571,4 +571,5 @@ export async function verifiedAuthInfoForRequest(
 export function resetWorkerAuthCachesForTests(): void {
   jwksCache = undefined;
   inFlightJwksFetches.clear();
+  forcedRefreshBlockedUntilByUrl.clear();
 }

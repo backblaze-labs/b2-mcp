@@ -121,6 +121,11 @@ describe("package surface policy", () => {
     expect(files).toContain("docs/deployment/security-and-credentials.md");
     expect(files).toContain("docs/deployment/vercel.md");
     expect(files).toContain("docs/deployment/cloudflare-workers.md");
+    expect(readFileSync(join(root, "docs/deployment/cloudflare-workers.md"), "utf8")).toContain(
+      "source-checkout-only",
+    );
+    expect(files).not.toContain("deploy/cloudflare-worker/src/index.ts");
+    expect(files).not.toContain("deploy/cloudflare-worker/src/auth.ts");
     expect(files).toContain("docs/deployment/cloudflare-containers.md");
     expect(files).toContain("docs/deployment/docker.md");
     expect(files).toContain("docs/deployment/google-cloud-run.md");

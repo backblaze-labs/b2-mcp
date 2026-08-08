@@ -12,6 +12,7 @@ import { positiveIntEnv, resolveHttpPort } from "./utils/config.js";
 import { jsonResponse } from "./utils/http-response.js";
 import { logger } from "./utils/logger.js";
 import { configFromHttpHeaders, type AuthenticatedIncomingMessage } from "./credentials.js";
+import type { B2Config } from "./utils/types.js";
 import { writeWebResponse } from "./node-http-adapter.js";
 import {
   createB2McpFetchHandler,
@@ -74,7 +75,7 @@ export function getPort(
   return resolveHttpPort(argv, env);
 }
 
-export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }) {
+export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
   return configFromHttpHeaders(req);
 }
 

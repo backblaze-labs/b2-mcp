@@ -26,6 +26,7 @@ import {
   type CredentialProvider,
   type CredentialResolution,
   CredentialResolutionError,
+  credentialFingerprint,
   getHttpCredentialProvider,
   type SecretBroker,
   validateHttpCredentialConfiguration,
@@ -208,7 +209,17 @@ function authPrincipalLabel(authInfo: AuthInfo | null | undefined): string | und
         ? extra.issuer
         : undefined;
   const label = issuer?.trim() ? `${issuer.trim()}#${subject.trim()}` : subject.trim();
-  return crypto.createHash("sha256").update(label).digest("hex").slice(0, 16);
+  return credentialFingerprint(label);
+}
+
+function serverModeLimitKey(
+  provider: CredentialProvider,
+  authInfo: AuthInfo | null | undefined,
+  fallback: string,
+): string | null {
+  if (provider.name !== "http-server") return null;
+  const principal = authPrincipalLabel(authInfo);
+  return principal ? `principal:${principal}` : fallback;
 }
 
 function logCredentialResolutionFailure(
@@ -622,6 +633,7 @@ export interface B2McpFetchHandlerOptions {
   createServer?: typeof createMcpServerDefinition;
   fetchCapabilities?: typeof fetchCredentialCapabilities;
   idleSweepIntervalMs?: number | false;
+  sweepRuntimeCaches?: () => void;
 }
 
 export interface B2McpFetchRequestOptions {
@@ -654,6 +666,7 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
     options.credentialProvider ?? getHttpCredentialProvider(options.secretBroker, env);
   const createServerForRequest = options.createServer ?? createMcpServerDefinition;
   const fetchCapabilitiesForRequest = options.fetchCapabilities ?? fetchCredentialCapabilities;
+  const sweepRuntimeCachesForHandler = options.sweepRuntimeCaches ?? sweepRuntimeCaches;
   const preparedRequestScope = new AsyncLocalStorage<PreparedMcpRequest>();
   const defaultMcpHandler = createMcpHandler(
     createPreparedMcpServerFactory(preparedRequestScope, createServerForRequest),
@@ -667,7 +680,10 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
   const idleSweep =
     options.idleSweepIntervalMs === false
       ? null
-      : setInterval(sweepRuntimeCaches, options.idleSweepIntervalMs ?? IDLE_SWEEP_INTERVAL_MS);
+      : setInterval(
+          sweepRuntimeCachesForHandler,
+          options.idleSweepIntervalMs ?? IDLE_SWEEP_INTERVAL_MS,
+        );
   if (idleSweep) {
     (idleSweep as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.();
   }
@@ -715,7 +731,7 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
       const now = Date.now();
       if (now - lastInlineSweepAt >= IDLE_SWEEP_INTERVAL_MS) {
         lastInlineSweepAt = now;
-        sweepRuntimeCaches();
+        sweepRuntimeCachesForHandler();
       }
     }
     const authInfo = requestOptions.authInfo;
@@ -747,6 +763,11 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
 
     if (method !== "POST" && method !== "GET" && method !== "DELETE") {
       return jsonResponse(405, { error: "Method not allowed" });
+    }
+
+    if (method === "POST" && contentLengthExceedsLimit(request.headers)) {
+      await cancelRequestBody(request);
+      return jsonResponse(413, { error: "Request body too large" }, { Connection: "close" });
     }
 
     const initialLimitKey = requestLimitKey(request, requestOptions.clientAddress);
@@ -825,7 +846,9 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
         return finish(await credentialErrorResponse(err));
       }
 
-      const credentialPermit = inFlight.rekey(limitKey, resolved.cacheKey);
+      const credentialLimitKey =
+        serverModeLimitKey(credentialProvider, authInfo, initialLimitKey) ?? resolved.cacheKey;
+      const credentialPermit = inFlight.rekey(limitKey, credentialLimitKey);
       if (!credentialPermit.ok) {
         return finish(
           jsonResponse(
@@ -835,9 +858,9 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
           ),
         );
       }
-      limitKey = resolved.cacheKey;
+      limitKey = credentialLimitKey;
 
-      const credentialRateKey = deriveRateKey(resolved.cacheKey);
+      const credentialRateKey = deriveRateKey(credentialLimitKey);
       if (!allowRequest(credentialRateKey)) {
         return finish(jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" }));
       }

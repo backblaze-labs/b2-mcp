@@ -298,6 +298,38 @@ describe("health and readiness endpoints", () => {
     }
   });
 
+  it("bounds timerless runtime cache sweeps to the idle sweep cadence", async () => {
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(60_000);
+    const sweepRuntimeCaches = vi.fn();
+    const handle = buildHttpServer({
+      idleSweepIntervalMs: false,
+      sweepRuntimeCaches,
+      credentialProvider: {
+        name: "test-provider",
+        validateConfiguration() {
+          return undefined;
+        },
+        resolve() {
+          throw new Error("resolve should not be called by this test");
+        },
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      await request(port, "GET", "/missing");
+      nowSpy.mockReturnValue(60_001);
+      await request(port, "GET", "/missing");
+      nowSpy.mockReturnValue(120_000);
+      await request(port, "GET", "/missing");
+
+      expect(sweepRuntimeCaches).toHaveBeenCalledTimes(2);
+    } finally {
+      nowSpy.mockRestore();
+      await closeHttpServer(handle);
+    }
+  });
+
   it("exposes internal readiness metadata without resolving B2 credentials", async () => {
     let validated = 0;
     let resolved = 0;
