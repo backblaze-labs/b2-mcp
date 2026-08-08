@@ -95,6 +95,8 @@ remain with the selected issuer. The adapter additionally checks:
 - exact `aud`
 - `exp` and `nbf`
 - token type, when returned
+- token signing algorithm from `alg`, `jwt_alg`, or `token_alg`, matched
+  against `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`
 
@@ -158,6 +160,11 @@ For protected Preview smoke, include the Vercel bypass header only through a
 protected CI secret. The smoke workflow supports `headers`, `server`, and
 `principal` credential modes; `server` mode sends no B2 key headers and uses
 `MCP_AUTHORIZATION`.
+
+CI also runs Vercel adapter protocol parity through the modern `2026-07-28`
+suite and the separately named 2025-era fallback suite. The package-budget job
+writes a Vercel bundle estimate to `reports/vercel-bundle/` without requiring
+Production B2 secrets.
 
 ## Runtime limits
 

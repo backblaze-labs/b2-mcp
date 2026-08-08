@@ -378,13 +378,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run check:package-budget
+      - run: pnpm run check:vercel-bundle
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload package budget reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: package-budget
-          path: reports/package-budget/
+          path: |
+            reports/package-budget/
+            reports/vercel-bundle/
           if-no-files-found: error
           retention-days: 7
 

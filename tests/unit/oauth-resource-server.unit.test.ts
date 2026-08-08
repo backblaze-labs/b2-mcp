@@ -20,6 +20,7 @@ const baseConfig = {
   introspectionClientSecret: "secret",
   requiredScopes: [],
   allowedTokenTypes: ["bearer"],
+  allowedAlgorithms: ["RS256"],
   dangerouslyAllowInsecureIssuerUrl: true,
   dangerouslyAllowUnauthenticatedIntrospection: false,
   introspectionTimeoutMs: 50,
@@ -40,6 +41,7 @@ function claims(overrides: Record<string, unknown> = {}) {
     exp: 2000,
     nbf: 900,
     token_type: "Bearer",
+    alg: "RS256",
     scope: "b2:read",
     client_id: "mcp-client",
     sub: "user-123",
@@ -98,6 +100,7 @@ describe("OAuthIntrospectionVerifier", () => {
       extra: {
         iss: baseConfig.issuer,
         sub: "user-123",
+        alg: "RS256",
         aud: [baseConfig.audience],
         resource: [baseConfig.resource],
       },
@@ -116,6 +119,8 @@ describe("OAuthIntrospectionVerifier", () => {
     ["wrong audience", { aud: "other" }, /audience/i],
     ["wrong resource", { resource: "other" }, /resource/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
+    ["missing token algorithm", { alg: undefined }, /algorithm/i],
+    ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
     ["missing deployment scope", { scope: "profile" }, /deployment scope/i],
   ])("rejects %s tokens", async (_name, overrides, message) => {
     const { verifier } = verifierFor(claims(overrides));
@@ -233,6 +238,37 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(aborted).toBe(true);
   });
 
+  it("propagates caller abort into the introspection request", async () => {
+    const controller = new AbortController();
+    let capturedSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        if (capturedSignal?.aborted) reject(new Error("AbortError"));
+        capturedSignal?.addEventListener("abort", () => reject(new Error("AbortError")), {
+          once: true,
+        });
+      });
+    });
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    const responsePromise = authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: "Bearer access-token" },
+        signal: controller.signal,
+      }),
+      { ...baseConfig, introspectionMaxRetries: 0 },
+      { fetch: fetchMock as typeof fetch, nowSeconds: () => 1000 },
+    );
+    await vi.waitFor(() => expect(capturedSignal).toBeDefined());
+    controller.abort();
+    const response = await responsePromise;
+
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(503);
+  });
+
   it("caches verified introspection results by token hash until token expiry", async () => {
     let now = 1000;
     const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 10 })));
@@ -273,17 +309,31 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
       B2_OAUTH_RESOURCE: baseConfig.resource,
       B2_OAUTH_AUDIENCE: baseConfig.audience,
-      B2_OAUTH_REQUIRED_SCOPES: "b2:read",
+      B2_OAUTH_REQUIRED_SCOPES: "b2:read,custom:report",
+      B2_OAUTH_ALLOWED_ALGORITHMS: "RS256,ES256",
       B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "2500",
     });
 
-    expect(config.requiredScopes).toEqual(["b2:read"]);
+    expect(config.requiredScopes).toEqual(["b2:read", "custom:report"]);
+    expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
     expect(config.introspectionTimeoutMs).toBe(2500);
     expect(protectedResourceMetadata(config)).toMatchObject({
-      resource: baseConfig.publicUrl,
+      resource: baseConfig.resource,
       authorization_servers: [baseConfig.issuer],
-      scopes_supported: ["b2:read", "b2:write", "b2:admin"],
+      scopes_supported: ["b2:read", "b2:write", "b2:admin", "custom:report"],
     });
+  });
+
+  it("advertises the verified OAuth resource when it differs from the metadata URL", () => {
+    const metadata = protectedResourceMetadata({
+      ...baseConfig,
+      resource: "http://localhost:3000/resources/b2-mcp",
+      publicUrl: "http://localhost:3000/mcp",
+      requiredScopes: ["custom:tenant"],
+    });
+
+    expect(metadata.resource).toBe("http://localhost:3000/resources/b2-mcp");
+    expect(metadata.scopes_supported).toEqual(["b2:read", "b2:write", "b2:admin", "custom:tenant"]);
   });
 
   it("fails closed without authenticated introspection credentials by default", () => {

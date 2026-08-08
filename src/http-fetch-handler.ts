@@ -60,6 +60,7 @@ const SDK_HEADER_ALLOWLIST = new Set([
   "tracestate",
   "baggage",
 ]);
+const RATE_KEY_HMAC_KEY = crypto.randomBytes(32).toString("hex");
 
 export interface InFlightLimiter {
   readonly active: number;
@@ -100,7 +101,7 @@ export interface B2McpFetchHandler {
 }
 
 export function deriveRateKey(cacheKey: string): string {
-  return crypto.createHash("sha256").update(cacheKey).digest("hex").slice(0, 16);
+  return crypto.createHmac("sha256", RATE_KEY_HMAC_KEY).update(cacheKey).digest("hex").slice(0, 16);
 }
 
 function intEnv(name: string, fallback: number): number {

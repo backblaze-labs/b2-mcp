@@ -1,6 +1,44 @@
-import { readFileSync } from "fs";
-import { join } from "path";
+import { existsSync, readFileSync, statSync } from "fs";
+import { dirname, extname, join, resolve } from "path";
 import { readJson, root } from "./support";
+
+const VERCEL_FUNCTION_ENTRYPOINTS = [
+  "api/mcp.ts",
+  "api/health.ts",
+  "api/oauth-protected-resource.ts",
+  "api/oauth-authorization-server.ts",
+];
+const VERCEL_FUNCTION_SOURCE_BYTES_BUDGET = 450_000;
+const VERCEL_FUNCTION_SOURCE_FILES_BUDGET = 55;
+
+function resolveLocalImport(from: string, specifier: string): string | null {
+  if (!specifier.startsWith(".")) return null;
+  const base = resolve(dirname(from), specifier);
+  const candidates = extname(base)
+    ? [base.replace(/\.js$/, ".ts"), base]
+    : [".ts", ".js", ".json"].map((extension) => `${base}${extension}`);
+  return (
+    candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile()) ?? null
+  );
+}
+
+function collectLocalImportGraph(entrypoints: readonly string[]): Set<string> {
+  const seen = new Set<string>();
+  const importPattern =
+    /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?["']([^"']+)["']|import\(["']([^"']+)["']\)/g;
+  function visit(relativePath: string): void {
+    const absolutePath = resolve(root, relativePath);
+    if (seen.has(absolutePath)) return;
+    seen.add(absolutePath);
+    const source = readFileSync(absolutePath, "utf8");
+    for (const match of source.matchAll(importPattern)) {
+      const resolved = resolveLocalImport(absolutePath, match[1] ?? match[2]);
+      if (resolved) visit(resolved.slice(root.length + 1));
+    }
+  }
+  for (const entrypoint of entrypoints) visit(entrypoint);
+  return seen;
+}
 
 describe("Vercel adapter policy", () => {
   it("does not add a second MCP transport dependency", () => {
@@ -60,5 +98,39 @@ describe("Vercel adapter policy", () => {
 
     expect(tsconfig).toContain('"api/**/*"');
     expect(tsconfig).toContain('"deploy/vercel/**/*"');
+  });
+
+  it("keeps the Vercel function source graph within the reviewed budget", () => {
+    const files = collectLocalImportGraph(VERCEL_FUNCTION_ENTRYPOINTS);
+    const bytes = [...files].reduce((sum, file) => sum + statSync(file).size, 0);
+
+    expect(files.size).toBeLessThanOrEqual(VERCEL_FUNCTION_SOURCE_FILES_BUDGET);
+    expect(bytes).toBeLessThanOrEqual(VERCEL_FUNCTION_SOURCE_BYTES_BUDGET);
+  });
+
+  it("runs Vercel adapter parity and bundle-budget gates", () => {
+    const pkg = readJson<{ scripts?: Record<string, string> }>("package.json");
+    const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+    const modernParity = readFileSync(
+      join(root, "tests/protocol/vercel.modern-protocol.test.ts"),
+      "utf8",
+    );
+    const legacyParity = readFileSync(
+      join(root, "tests/protocol/vercel.legacy-protocol.test.ts"),
+      "utf8",
+    );
+    const bundleCheck = readFileSync(join(root, "scripts/check-vercel-bundle.mjs"), "utf8");
+
+    expect(modernParity).toContain('connectVercelClient("modern")');
+    expect(modernParity).toContain("server/discover");
+    expect(legacyParity).toContain('connectVercelClient("legacy")');
+    expect(legacyParity).toContain("stateless adapter");
+    expect(pkg.scripts?.["test:protocol"]).toContain("test:protocol:modern");
+    expect(pkg.scripts?.["test:protocol"]).toContain("test:protocol:legacy");
+    expect(pkg.scripts?.["check:vercel-bundle"]).toBe("node scripts/check-vercel-bundle.mjs");
+    expect(workflow).toContain("pnpm run check:vercel-bundle");
+    expect(workflow).toContain("reports/vercel-bundle/");
+    expect(bundleCheck).toContain("VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES");
+    expect(bundleCheck).toContain("reports/package-budget/metrics.json");
   });
 });

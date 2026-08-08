@@ -58,6 +58,50 @@ function modernBody(method: string, params: Record<string, unknown> = {}, id = 1
   });
 }
 
+function jsonHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/event-stream",
+    host: "mcp.example.com",
+    ...extra,
+  };
+}
+
+function modernHeaders(method: string, name?: string): Record<string, string> {
+  return jsonHeaders({
+    "Mcp-Protocol-Version": "2026-07-28",
+    "Mcp-Method": method,
+    ...(name && { "Mcp-Name": name }),
+  });
+}
+
+function legacyInitializeBody(protocolVersion = "2025-06-18"): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion,
+      capabilities: {},
+      clientInfo: { name: "b2-mcp-vercel-test", version: "1.0.0" },
+    },
+  });
+}
+
+function legacyBody(method: string, params: Record<string, unknown> = {}, id = 2): string {
+  return JSON.stringify({ jsonrpc: "2.0", id, method, params });
+}
+
+async function rpcJson(response: Response): Promise<Record<string, any>> {
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  const dataLine = text
+    .split("\n")
+    .find((line) => line.startsWith("data: "))
+    ?.slice("data: ".length);
+  return JSON.parse(dataLine ?? text) as Record<string, any>;
+}
+
 describe("Vercel adapter", () => {
   beforeEach(async () => {
     await closeVercelMcpHandlerForTests();
@@ -115,6 +159,66 @@ describe("Vercel adapter", () => {
     );
   });
 
+  it("serves modern discovery and tools/list through the Vercel adapter", async () => {
+    const discover = await rpcJson(
+      await vercelMcpFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: modernHeaders("server/discover"),
+          body: modernBody("server/discover"),
+        }),
+        validAuthInfo,
+      ),
+    );
+    const listed = await rpcJson(
+      await vercelMcpFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: modernHeaders("tools/list"),
+          body: modernBody("tools/list", {}, 2),
+        }),
+        validAuthInfo,
+      ),
+    );
+    const toolNames = new Set(
+      ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
+    );
+
+    expect(discover.result?.supportedVersions).toContain("2026-07-28");
+    expect(discover.result?.capabilities?.tools).toBeDefined();
+    expect(toolNames.has("b2_list_buckets")).toBe(true);
+    expect(toolNames.has("b2_create_bucket")).toBe(false);
+  });
+
+  it("serves the named 2025 stateless fallback through the Vercel adapter", async () => {
+    const initialized = await rpcJson(
+      await vercelMcpFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: legacyInitializeBody(),
+        }),
+        validAuthInfo,
+      ),
+    );
+    const listed = await rpcJson(
+      await vercelMcpFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: jsonHeaders(),
+          body: legacyBody("tools/list"),
+        }),
+        validAuthInfo,
+      ),
+    );
+    const toolNames = new Set(
+      ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
+    );
+
+    expect(initialized.result?.protocolVersion).toBe("2025-06-18");
+    expect(toolNames.has("b2_list_buckets")).toBe(true);
+  });
+
   it("rejects declared oversized bodies before OAuth introspection", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -123,8 +227,7 @@ describe("Vercel adapter", () => {
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: {
-          Authorization: "Bearer access-token",
-          "Content-Type": "application/json",
+          ...jsonHeaders({ Authorization: "Bearer access-token" }),
           "Content-Length": String(1024 * 1024 + 1),
         },
         body: "{}",
@@ -150,8 +253,7 @@ describe("Vercel adapter", () => {
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: {
-          Authorization: "Bearer first",
-          "Content-Type": "application/json",
+          ...jsonHeaders({ Authorization: "Bearer first" }),
           "x-forwarded-for": "203.0.113.10",
         },
         body: "{}",
@@ -164,8 +266,7 @@ describe("Vercel adapter", () => {
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: {
-          Authorization: "Bearer second",
-          "Content-Type": "application/json",
+          ...jsonHeaders({ Authorization: "Bearer second" }),
           "x-forwarded-for": "203.0.113.99",
           "x-real-ip": "203.0.113.100",
         },
@@ -184,10 +285,7 @@ describe("Vercel adapter", () => {
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          host: "mcp.example.com",
-          "Mcp-Protocol-Version": "2026-07-28",
-          "Mcp-Method": "tools/list",
+          ...modernHeaders("tools/list"),
           "X-B2-Key-Id": "public-id",
           "X-B2-Key": "public-secret",
         },

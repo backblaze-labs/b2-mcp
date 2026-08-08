@@ -3,8 +3,8 @@
  *
  * Nginx already rate-limits by IP. This is the second tier: a misbehaving
  * key (runaway client loop) gets throttled even when its IP is fine. The
- * rate key is a SHA-256 hash of the provider's non-secret credential/principal
- * cache key (see deriveRateKey in http-server.ts), so raw credentials and key
+ * rate key is an HMAC of the provider's non-secret credential/principal cache
+ * key (see deriveRateKey in http-fetch-handler.ts), so raw credentials and key
  * IDs never become metrics/log labels. The HTTP entry derives it after
  * per-request credential resolution.
  *

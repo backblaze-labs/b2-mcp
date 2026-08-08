@@ -19,6 +19,7 @@ import { logger } from "./utils/logger.js";
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
 
 const DEFAULT_TOKEN_TYPES = ["bearer"];
+const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256", "EdDSA"];
 const DEFAULT_INTROSPECTION_TIMEOUT_MS = 3000;
 const DEFAULT_INTROSPECTION_RETRIES = 1;
 const DEFAULT_INTROSPECTION_RETRY_DELAY_MS = 50;
@@ -43,6 +44,7 @@ export interface OAuthResourceServerConfig {
   serviceDocumentationUrl?: string;
   requiredScopes: string[];
   allowedTokenTypes: string[];
+  allowedAlgorithms: string[];
   dangerouslyAllowInsecureIssuerUrl: boolean;
   dangerouslyAllowUnauthenticatedIntrospection: boolean;
   introspectionTimeoutMs: number;
@@ -144,6 +146,7 @@ export function loadOAuthResourceServerConfig(
     allowedTokenTypes: csv(env.B2_OAUTH_ALLOWED_TOKEN_TYPES, DEFAULT_TOKEN_TYPES).map((value) =>
       value.toLowerCase(),
     ),
+    allowedAlgorithms: csv(env.B2_OAUTH_ALLOWED_ALGORITHMS, DEFAULT_ALLOWED_ALGORITHMS),
     dangerouslyAllowInsecureIssuerUrl,
     dangerouslyAllowUnauthenticatedIntrospection,
     introspectionTimeoutMs: intEnv(
@@ -275,6 +278,21 @@ function assertTokenType(
   }
 }
 
+function assertTokenAlgorithm(
+  claims: Record<string, unknown>,
+  allowedAlgorithms: readonly string[],
+): string | undefined {
+  if (allowedAlgorithms.length === 0) return undefined;
+  const algorithm = stringClaim(claims.alg ?? claims.jwt_alg ?? claims.token_alg);
+  if (!algorithm) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not verified");
+  }
+  if (!allowedAlgorithms.includes(algorithm)) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
+  }
+  return algorithm;
+}
+
 function assertDeploymentScope(scopes: readonly string[]): void {
   if (!B2_OAUTH_SCOPES.some((scope) => scopes.includes(scope))) {
     throw new OAuthError(OAuthErrorCode.InsufficientScope, "Missing B2 deployment scope");
@@ -319,6 +337,7 @@ function configCacheKey(config: OAuthResourceServerConfig): string {
       config.introspectionEndpoint,
       config.introspectionClientId ?? "",
       config.introspectionBearerToken ? "bearer" : "",
+      config.allowedAlgorithms.join(","),
     ].join("\0"),
   );
 }
@@ -407,6 +426,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
       requireMatch(claims.aud, this.config.audience, "audience");
       const expiresAt = assertTimeWindow(claims, now);
       assertTokenType(claims, this.config.allowedTokenTypes);
+      const algorithm = assertTokenAlgorithm(claims, this.config.allowedAlgorithms);
       const scopes = scopesFromClaim(claims.scope ?? claims.scp);
       assertDeploymentScope(scopes);
       const clientId =
@@ -424,6 +444,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
         extra: {
           iss: issuer,
           ...(subject && { sub: subject }),
+          ...(algorithm && { alg: algorithm }),
           aud: values(claims.aud),
           resource: values(claims.resource),
           token_hash: credentialFingerprint(token),
@@ -617,6 +638,7 @@ function serviceUnavailableOAuthResponse(error: OAuthDependencyError): Response 
 export function oauthMetadataOptions(
   config = loadOAuthResourceServerConfig(),
 ): AuthMetadataOptions {
+  const scopesSupported = [...new Set([...B2_OAUTH_SCOPES, ...config.requiredScopes])];
   const oauthMetadata: OAuthMetadata = {
     issuer: config.issuer,
     authorization_endpoint: config.authorizationEndpoint,
@@ -625,12 +647,12 @@ export function oauthMetadataOptions(
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "private_key_jwt", "none"],
-    scopes_supported: [...B2_OAUTH_SCOPES],
+    scopes_supported: scopesSupported,
   };
   return {
     oauthMetadata,
-    resourceServerUrl: new URL(config.publicUrl),
-    scopesSupported: [...B2_OAUTH_SCOPES],
+    resourceServerUrl: new URL(config.resource),
+    scopesSupported,
     resourceName: "Backblaze B2 MCP",
     ...(config.serviceDocumentationUrl && {
       serviceDocumentationUrl: new URL(config.serviceDocumentationUrl),
