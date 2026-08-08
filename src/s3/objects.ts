@@ -11,12 +11,9 @@ import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
-import type {
-  B2S3DeleteObjectsResult,
-  B2S3FileVersionBinding,
-  B2S3PeerClient,
-  B2S3VersionGuard,
-} from "./aws-sdk-adapter.js";
+import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../b2/s3-version-guard.js";
+import type { B2S3DeleteObjectsResult, B2S3ObjectBody, B2S3PeerClient } from "./aws-sdk-adapter.js";
+import { b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
 
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
@@ -37,8 +34,6 @@ type B2S3ObjectClient = Pick<
   | "listObjectsV2"
   | "listObjectVersions"
 >;
-
-type B2S3ObjectBody = Awaited<ReturnType<B2S3ObjectClient["getObject"]>>["body"];
 
 function isWebReadableStream(
   value: B2S3ObjectBody | unknown,
@@ -227,19 +222,6 @@ function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
     metadata: version.fileInfo,
     serverSideEncryption: version.serverSideEncryption,
     deleteMarker: true,
-  };
-}
-
-function deleteValidationError(
-  object: DeleteObjectEntry,
-  err: unknown,
-): B2S3DeleteObjectsResult["errors"][number] {
-  const details = typeof err === "object" && err !== null ? (err as { code?: unknown }) : {};
-  return {
-    Key: object.key,
-    VersionId: object.versionId,
-    Code: typeof details.code === "string" && details.code ? details.code : "version_not_found",
-    Message: err instanceof Error ? err.message : String(err),
   };
 }
 
@@ -512,7 +494,7 @@ export function registerS3ObjectTools(
             });
             validObjects.push(object);
           } catch (err) {
-            validationErrors.push(deleteValidationError(object, err));
+            validationErrors.push(b2S3DeleteErrorEntry(object, err));
           }
         }
         const deleteResult =
@@ -534,7 +516,6 @@ export function registerS3ObjectTools(
           ...deleteResult,
           errors: [...validationErrors, ...deleteResult.errors],
           attempted: validationErrors.length + deleteResult.attempted,
-          maxConcurrency: deleteResult.maxConcurrency,
         });
       } catch (err) {
         return toolError(err);

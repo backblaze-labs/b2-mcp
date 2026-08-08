@@ -24,7 +24,7 @@ import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { B2AuthResponse } from "../utils/types.js";
 import { buildUserAgent } from "../utils/user-agent.js";
-import type { B2S3FileVersionBinding } from "../s3/aws-sdk-adapter.js";
+import type { B2S3FileVersionBinding } from "./s3-version-guard.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
 export type BucketTypeFilter = BucketType | "all";

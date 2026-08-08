@@ -1,7 +1,8 @@
 import { Readable } from "node:stream";
 import { ReadableStream } from "node:stream/web";
 import { registerS3ObjectTools } from "../../src/s3/objects";
-import type { B2S3DownloadedObject, B2S3FileVersionBinding } from "../../src/s3/aws-sdk-adapter";
+import type { B2S3FileVersionBinding } from "../../src/b2/s3-version-guard";
+import type { B2S3DownloadedObject } from "../../src/s3/aws-sdk-adapter";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
@@ -179,8 +180,8 @@ describe("S3 object tools with deterministic handler fake", () => {
       await tools.call("s3_get_object", { bucket: "b", key: "hello.txt", range: "bytes=0-4" }),
     );
     nextListObjects = {
-      objects: [{ Key: "a.txt", Size: 1, LastModified: new Date(), StorageClass: "STANDARD" }],
-      commonPrefixes: [{ Prefix: "folder/" }],
+      objects: [{ key: "a.txt", size: 1, lastModified: new Date(), storageClass: "STANDARD" }],
+      commonPrefixes: [{ prefix: "folder/" }],
       isTruncated: true,
       nextContinuationToken: "next",
       keyCount: 1,

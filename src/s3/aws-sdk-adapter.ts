@@ -85,36 +85,14 @@ export interface B2S3PutObjectOptions {
   serverSideEncryption?: "AES256";
 }
 
-export interface B2S3FileVersionBinding {
-  fileName: string;
-  fileId: string;
-  bucketId: string;
-  contentLength: number;
-  contentType: string;
-  uploadTimestamp: number;
-  fileInfo: Record<string, string>;
-  action: string;
-  serverSideEncryption?: string;
-}
-
-export interface B2S3VersionGuard {
-  resolveS3FileVersion(input: {
-    bucket: string;
-    key: string;
-    versionId: string;
-  }): Promise<B2S3FileVersionBinding>;
-  getCurrentS3FileVersion(input: {
-    bucket: string;
-    key: string;
-  }): Promise<B2S3FileVersionBinding | null>;
-}
-
 export interface B2S3GetObjectOptions {
   bucket: string;
   key: string;
   range?: string;
   versionId?: string;
 }
+
+export type B2S3ObjectBody = StreamingBlobPayloadOutputTypes | undefined;
 
 export interface B2S3DownloadedObject {
   key: string;
@@ -124,7 +102,7 @@ export interface B2S3DownloadedObject {
   etag?: string;
   versionId?: string;
   metadata: Record<string, string>;
-  body?: StreamingBlobPayloadOutputTypes;
+  body?: B2S3ObjectBody;
 }
 
 export interface B2S3HeadObjectOptions {
@@ -171,19 +149,16 @@ export interface B2S3DeleteObjectsResult {
   maxConcurrency: number;
 }
 
-// Collection item and DeleteObjects shapes intentionally retain the AWS S3
-// PascalCase field names. They are pass-through wire DTOs from B2's S3 API,
-// while single-object envelopes above use repository-owned camelCase fields.
 export interface B2S3ObjectSummary {
-  Key?: string;
-  LastModified?: Date;
-  ETag?: string;
-  Size?: number;
-  StorageClass?: string;
+  key: string;
+  lastModified?: Date;
+  etag?: string;
+  size?: number;
+  storageClass?: string;
 }
 
 export interface B2S3CommonPrefix {
-  Prefix?: string;
+  prefix: string;
 }
 
 export interface B2S3ListObjectsV2Result {
@@ -195,15 +170,15 @@ export interface B2S3ListObjectsV2Result {
 }
 
 export interface B2S3ObjectVersionSummary extends B2S3ObjectSummary {
-  VersionId?: string;
-  IsLatest?: boolean;
+  versionId: string;
+  isLatest?: boolean;
 }
 
 export interface B2S3DeleteMarkerSummary {
-  Key?: string;
-  VersionId?: string;
-  IsLatest?: boolean;
-  LastModified?: Date;
+  key: string;
+  versionId: string;
+  isLatest?: boolean;
+  lastModified?: Date;
 }
 
 export interface B2S3ListObjectVersionsResult {
@@ -309,6 +284,87 @@ function providerErrorMessage(err: unknown): string {
     if (typeof message === "string" && message) return message;
   }
   return String(err);
+}
+
+export function b2S3DeleteErrorEntry(
+  object: { key: string; versionId?: string },
+  err: unknown,
+): B2S3DeleteObjectsResult["errors"][number] {
+  return {
+    Key: object.key,
+    VersionId: object.versionId,
+    Code: providerErrorCode(err),
+    Message: providerErrorMessage(err),
+    RequestId: providerRequestId(err),
+  };
+}
+
+function compactMap<Input, Output>(
+  items: Input[] | undefined,
+  mapper: (item: Input) => Output | null,
+): Output[] {
+  return (items ?? []).flatMap((item) => {
+    const mapped = mapper(item);
+    return mapped === null ? [] : [mapped];
+  });
+}
+
+function mapObjectSummary(input: {
+  Key?: string;
+  LastModified?: Date;
+  ETag?: string;
+  Size?: number;
+  StorageClass?: string;
+}): B2S3ObjectSummary | null {
+  if (typeof input.Key !== "string") return null;
+  return {
+    key: input.Key,
+    lastModified: input.LastModified,
+    etag: input.ETag,
+    size: input.Size,
+    storageClass: input.StorageClass,
+  };
+}
+
+function mapCommonPrefix(input: { Prefix?: string }): B2S3CommonPrefix | null {
+  if (typeof input.Prefix !== "string") return null;
+  return { prefix: input.Prefix };
+}
+
+function mapObjectVersion(input: {
+  Key?: string;
+  VersionId?: string;
+  IsLatest?: boolean;
+  LastModified?: Date;
+  ETag?: string;
+  Size?: number;
+  StorageClass?: string;
+}): B2S3ObjectVersionSummary | null {
+  if (typeof input.Key !== "string" || typeof input.VersionId !== "string") return null;
+  return {
+    key: input.Key,
+    versionId: input.VersionId,
+    isLatest: input.IsLatest,
+    lastModified: input.LastModified,
+    etag: input.ETag,
+    size: input.Size,
+    storageClass: input.StorageClass,
+  };
+}
+
+function mapDeleteMarker(input: {
+  Key?: string;
+  VersionId?: string;
+  IsLatest?: boolean;
+  LastModified?: Date;
+}): B2S3DeleteMarkerSummary | null {
+  if (typeof input.Key !== "string" || typeof input.VersionId !== "string") return null;
+  return {
+    key: input.Key,
+    versionId: input.VersionId,
+    isLatest: input.IsLatest,
+    lastModified: input.LastModified,
+  };
 }
 
 export class B2S3PeerClient extends S3Client {
@@ -494,13 +550,7 @@ export class B2S3PeerClient extends S3Client {
             deleted.push({ Key: object.key, VersionId: object.versionId });
           }
         } catch (err) {
-          errors.push({
-            Key: object.key,
-            VersionId: object.versionId,
-            Code: providerErrorCode(err),
-            Message: providerErrorMessage(err),
-            RequestId: providerRequestId(err),
-          });
+          errors.push(b2S3DeleteErrorEntry(object, err));
         }
       }
     };
@@ -539,13 +589,13 @@ export class B2S3PeerClient extends S3Client {
         StartAfter: input.startAfter,
       }),
     );
-    const objects = result.Contents ?? [];
+    const objects = compactMap(result.Contents, mapObjectSummary);
     return {
       objects,
-      commonPrefixes: result.CommonPrefixes ?? [],
+      commonPrefixes: compactMap(result.CommonPrefixes, mapCommonPrefix),
       isTruncated: result.IsTruncated === true,
       nextContinuationToken: result.NextContinuationToken,
-      keyCount: objects.length,
+      keyCount: result.KeyCount ?? objects.length,
     };
   }
 
@@ -563,9 +613,9 @@ export class B2S3PeerClient extends S3Client {
       }),
     );
     return {
-      versions: result.Versions ?? [],
-      deleteMarkers: result.DeleteMarkers ?? [],
-      commonPrefixes: result.CommonPrefixes ?? [],
+      versions: compactMap(result.Versions, mapObjectVersion),
+      deleteMarkers: compactMap(result.DeleteMarkers, mapDeleteMarker),
+      commonPrefixes: compactMap(result.CommonPrefixes, mapCommonPrefix),
       isTruncated: result.IsTruncated === true,
       nextKeyMarker: result.NextKeyMarker,
       nextVersionIdMarker: result.NextVersionIdMarker,

@@ -154,6 +154,8 @@ export function buildB2S3ClientConfig(
   return {
     ...sdkS3Config,
     forcePathStyle: true,
+    // Repository-owned circuit/deadline handling owns retry semantics, so the
+    // AWS SDK must not replay side-effecting S3 object commands underneath it.
     maxAttempts: 1,
     customUserAgent: customUserAgent(config, options.surface),
   };

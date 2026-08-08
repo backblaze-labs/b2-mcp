@@ -259,9 +259,6 @@ function assertBudgetMetadata() {
   }
 
   const allowedAwsImportEntries = budget.runtimeImportPolicy?.allowedAwsRuntimeImports ?? [];
-  const allowedAwsImports = new Set(
-    allowedAwsImportEntries.map((entry) => `${entry.source}|${entry.specifier}`),
-  );
   for (const entry of allowedAwsImportEntries) {
     requireNonEmptyString(entry?.source, "allowedAwsRuntimeImports source");
     requireNonEmptyString(entry?.specifier, "allowedAwsRuntimeImports specifier");
@@ -272,67 +269,6 @@ function assertBudgetMetadata() {
       fail(`allowedAwsRuntimeImports specifier is not a direct dependency: ${entry.specifier}`);
     }
   }
-  const adapterImports = new Set();
-  for (const adapter of budget.temporaryAdapters ?? []) {
-    requireNonEmptyString(adapter?.name, "temporary adapter name");
-    requireNonEmptyString(
-      adapter?.owner,
-      `temporary adapter ${adapter?.name ?? "<unknown>"} owner`,
-    );
-    requireNonEmptyString(
-      adapter?.upstreamIssue,
-      `temporary adapter ${adapter?.name ?? "<unknown>"} upstreamIssue`,
-    );
-    requireNonEmptyString(
-      adapter?.removalCondition,
-      `temporary adapter ${adapter?.name ?? "<unknown>"} removalCondition`,
-    );
-    requireNonEmptyString(
-      adapter?.source,
-      `temporary adapter ${adapter?.name ?? "<unknown>"} source`,
-    );
-    if (adapter?.source && !existsSync(path.join(root, adapter.source))) {
-      fail(`temporary adapter ${adapter.name} source is missing: ${adapter.source}`);
-    }
-    if (!String(adapter?.upstreamIssue ?? "").startsWith("https://")) {
-      fail(`temporary adapter ${adapter?.name ?? "<unknown>"} upstreamIssue must be an https URL`);
-    }
-
-    if (!Array.isArray(adapter?.dependencies) || adapter.dependencies.length === 0) {
-      fail(`temporary adapter ${adapter?.name ?? "<unknown>"} dependencies are required`);
-    } else {
-      for (const dependency of adapter.dependencies) {
-        if (!directDependencies[dependency]) {
-          fail(
-            `temporary adapter ${adapter.name} dependency ${dependency} is not a direct dependency`,
-          );
-        }
-        // Only the AWS SDK peer packages are runtime-imported by the temporary
-        // S3 adapter. Type-only peers such as @smithy/types are tracked as
-        // direct adapter dependencies but do not need an allowed runtime import.
-        if (dependency.startsWith("@aws-sdk/")) {
-          adapterImports.add(`${adapter.source}|${dependency}`);
-        }
-      }
-    }
-
-    if (!Array.isArray(adapter?.tests) || adapter.tests.length === 0) {
-      fail(`temporary adapter ${adapter?.name ?? "<unknown>"} tests are required`);
-    } else {
-      for (const testPath of adapter.tests) {
-        if (!existsSync(path.join(root, testPath))) {
-          fail(`temporary adapter ${adapter.name} test path is missing: ${testPath}`);
-        }
-      }
-    }
-  }
-
-  for (const key of adapterImports) {
-    if (!allowedAwsImports.has(key)) {
-      fail(`temporary adapter import is not listed in allowedAwsRuntimeImports: ${key}`);
-    }
-  }
-
   const nonRegistryAllowlist =
     budget.lockfileProvenancePolicy?.allowedNonRegistryProductionPackages ?? [];
   if (!Array.isArray(nonRegistryAllowlist)) {
@@ -930,7 +866,6 @@ function writePolicyReports(productionInventory, runtimeImports, status) {
         issue: budget.issue,
         status,
         directProductionDependencies: budget.directProductionDependencies,
-        temporaryAdapters: budget.temporaryAdapters,
         errors,
       },
       null,
@@ -972,7 +907,6 @@ function writeReports(metrics, productionInventory, runtimeImports) {
         },
         limits: budget.limits,
         directProductionDependencies: budget.directProductionDependencies,
-        temporaryAdapters: budget.temporaryAdapters,
       },
       null,
       2,

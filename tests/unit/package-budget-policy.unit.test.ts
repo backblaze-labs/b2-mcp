@@ -133,7 +133,6 @@ function writeFixture(
         },
         reviewedTransitiveProductionDependencies:
           options.reviewedTransitiveProductionDependencies ?? {},
-        temporaryAdapters: [],
         approvedDuplicatePackageVersions: {},
       },
       null,
@@ -501,7 +500,6 @@ describe("package budget policy gate", () => {
   it("keeps AWS S3 dependencies as permanent data-plane dependencies", () => {
     const budget = JSON.parse(readFileSync(join(root, "package-budget.json"), "utf8")) as {
       directProductionDependencies: Record<string, Record<string, unknown>>;
-      temporaryAdapters?: unknown[];
     };
     const awsEntries = [
       budget.directProductionDependencies["@aws-sdk/client-s3"],
@@ -512,9 +510,7 @@ describe("package budget policy gate", () => {
       expect(String(entry.purpose)).toMatch(/Permanent primary/i);
       expect(JSON.stringify(entry)).not.toMatch(/temporary|must be removed|upstreamIssue/i);
     }
-    expect(JSON.stringify(budget.temporaryAdapters ?? [])).not.toMatch(
-      /aws|s3|removalCondition|upstreamIssue/i,
-    );
+    expect(budget).not.toHaveProperty("temporaryAdapters");
   });
 
   it("runs the package budget before npm publish", () => {

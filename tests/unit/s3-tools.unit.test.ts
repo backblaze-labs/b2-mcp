@@ -2,7 +2,7 @@ import { ReadableStream } from "node:stream/web";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { B2Client } from "../../src/b2/client";
-import type { B2S3FileVersionBinding } from "../../src/s3/aws-sdk-adapter";
+import type { B2S3FileVersionBinding } from "../../src/b2/s3-version-guard";
 import type { McpServer } from "../../src/mcp";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
@@ -76,6 +76,7 @@ describe("s3_list_objects_v2", () => {
       CommonPrefixes: [{ Prefix: "folder/" }],
       IsTruncated: true,
       NextContinuationToken: "next-token",
+      KeyCount: 2,
     });
 
     const result = parseResult(
@@ -91,12 +92,12 @@ describe("s3_list_objects_v2", () => {
 
     expect(result).toMatchObject({
       objects: [
-        { Key: "a.txt", Size: 1, LastModified: lastModified.toISOString(), ETag: '"etag"' },
+        { key: "a.txt", size: 1, lastModified: lastModified.toISOString(), etag: '"etag"' },
       ],
-      commonPrefixes: [{ Prefix: "folder/" }],
+      commonPrefixes: [{ prefix: "folder/" }],
       isTruncated: true,
       nextContinuationToken: "next-token",
-      keyCount: 1,
+      keyCount: 2,
     });
     const command = sendSpy.mock.calls[0][0];
     expect(command.constructor.name).toBe("ListObjectsV2Command");
@@ -148,7 +149,22 @@ describe("s3_list_object_versions", () => {
 
     expect(result.versions).toHaveLength(1);
     expect(result.deleteMarkers).toHaveLength(1);
-    expect(result.commonPrefixes).toEqual([{ Prefix: "folder/" }]);
+    expect(result.versions[0]).toMatchObject({
+      key: "k",
+      versionId: "v1",
+      isLatest: true,
+      lastModified: lastModified.toISOString(),
+      etag: '"etag"',
+      size: 5,
+      storageClass: "STANDARD",
+    });
+    expect(result.deleteMarkers[0]).toMatchObject({
+      key: "hidden",
+      versionId: "v2",
+      isLatest: true,
+      lastModified: lastModified.toISOString(),
+    });
+    expect(result.commonPrefixes).toEqual([{ prefix: "folder/" }]);
     expect(result.isTruncated).toBe(true);
     expect(result.nextKeyMarker).toBe("next-key");
     expect(result.nextVersionIdMarker).toBe("next-version");
