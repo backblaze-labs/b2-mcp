@@ -23,6 +23,8 @@ import { sanitizeText } from "../../src/utils/secret-sanitizer.js";
 const ALLOW_HEADER_MODE_FLAG = "B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_PREVIEW_B2_CREDENTIALS_FLAG = "B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS";
 const MAX_BODY_BYTES = 1 * 1024 * 1024;
+const PREVIEW_B2_CREDENTIAL_ENV_PATTERN =
+  /^B2_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$|^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$/;
 
 let mcpHandler: ReturnType<typeof createB2McpFetchHandler> | null = null;
 let oauthAdmissionLimiter: InFlightLimiter | null = null;
@@ -75,7 +77,10 @@ function validateVercelCredentialMode(): void {
 function validatePreviewCredentialCustody(): void {
   if (process.env.VERCEL_ENV !== "preview") return;
   if (process.env[ALLOW_PREVIEW_B2_CREDENTIALS_FLAG] === "true") return;
-  if (process.env.B2_APPLICATION_KEY_ID || process.env.B2_APPLICATION_KEY) {
+  const credentialEnvPresent = Object.entries(process.env).some(
+    ([name, value]) => !!value && PREVIEW_B2_CREDENTIAL_ENV_PATTERN.test(name),
+  );
+  if (credentialEnvPresent) {
     throw new Error(
       `Preview B2 credentials require ${ALLOW_PREVIEW_B2_CREDENTIALS_FLAG}=true and a disposable read-only key`,
     );

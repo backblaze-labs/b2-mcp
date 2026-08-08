@@ -6,6 +6,7 @@ import {
   vercelMcpFetch,
   vercelProtectedResourceMetadataFetch,
 } from "../../deploy/vercel/adapter";
+import { logger } from "../../src/utils/logger";
 
 const savedEnv = { ...process.env };
 
@@ -331,5 +332,40 @@ describe("Vercel adapter", () => {
     expect(response.status).toBe(503);
     expect(body.code).toBe("configuration_error");
     expect(body.error).toMatch(/not configured/i);
+  });
+
+  it.each([
+    "B2_APPLICATION_KEY",
+    "B2_APPLICATION_KEY_ID",
+    "B2_APP_KEY",
+    "B2_APP_KEY_ID",
+    "B2_MASTER_KEY",
+    "B2_MASTER_KEY_ID",
+    "B2_CREDENTIAL_TENANT_A_APPLICATION_KEY",
+    "B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID",
+    "B2_CREDENTIAL_TENANT_A_APP_KEY",
+    "B2_CREDENTIAL_TENANT_A_APP_KEY_ID",
+    "B2_CREDENTIAL_TENANT_A_MASTER_KEY",
+    "B2_CREDENTIAL_TENANT_A_MASTER_KEY_ID",
+  ])("rejects preview credential env material %s without the explicit override", async (name) => {
+    delete process.env.B2_APPLICATION_KEY_ID;
+    delete process.env.B2_APPLICATION_KEY;
+    process.env.VERCEL_ENV = "preview";
+    process.env[name] = "credential-material";
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+    const body = (await response.json()) as { code: string; error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("configuration_error");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: expect.stringContaining("Preview B2 credentials require"),
+      }),
+      "vercel.config.invalid",
+    );
   });
 });
