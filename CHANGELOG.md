@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package/build-context secret exclusion policy.
 
 ### Changed
+- Moved all `s3_*` data-plane object, presigned URL, multipart, bucket, and
+  lifecycle paths onto the AWS S3 SDK configured for B2's S3-compatible
+  endpoint, while native `b2_*` control-plane tools remain on the B2 SDK.
 - Added `/ready` alongside `/health` for HTTP deployments and gated readiness
   metadata behind the same Host/Origin checks used for MCP traffic.
 

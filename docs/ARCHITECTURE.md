@@ -129,11 +129,8 @@ streaming, local-file, base64, or presigned-URL paths instead.
 
 ## S3-Compatible Surface
 
-Backblaze B2 through MCP is the product contract. S3-compatible behavior is
-retained only where S3 semantics are material, such as endpoint reachability,
-S3 region checks, presigned URLs, S3 multipart flows, upload-part-copy, and
-`AbortIncompleteMultipartUpload` lifecycle rules.
-
-Any `s3_*` compatibility name that can be implemented faithfully through native
-SDK operations must either become a compatibility alias over public SDK calls or
-be renamed/removed before the public tool contract freezes.
+Backblaze B2 through MCP is the product contract. The compatibility `s3_*`
+data plane is implemented by the permanent AWS S3 SDK adapter configured
+against B2's S3-compatible endpoint through the official SDK `/s3` helper.
+That adapter owns object, presigned URL, multipart, endpoint reachability,
+location, lifecycle, upload-part-copy, and usage-report object-read paths.

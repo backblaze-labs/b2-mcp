@@ -415,7 +415,7 @@ export function registerS3ObjectTools(
     "s3_delete_objects",
     {
       description:
-        "Delete multiple objects from a B2 bucket through bounded per-key S3 DeleteObject calls (up to 1000 objects).",
+        "Delete multiple objects from a B2 bucket through S3 DeleteObjects (up to 1000 objects).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         objects: z
