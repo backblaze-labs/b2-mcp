@@ -5,7 +5,6 @@
  * security-sensitive transport behavior does not drift across runtimes.
  */
 
-import * as crypto from "crypto";
 import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
@@ -60,8 +59,6 @@ const SDK_HEADER_ALLOWLIST = new Set([
   "tracestate",
   "baggage",
 ]);
-const RATE_KEY_HMAC_KEY = crypto.randomBytes(32).toString("hex");
-
 export interface InFlightLimiter {
   readonly active: number;
   acquire(cacheKey: string): { ok: true } | { ok: false; status: number; error: string };
@@ -101,7 +98,7 @@ export interface B2McpFetchHandler {
 }
 
 export function deriveRateKey(cacheKey: string): string {
-  return crypto.createHmac("sha256", RATE_KEY_HMAC_KEY).update(cacheKey).digest("hex").slice(0, 16);
+  return `rate:${cacheKey}`;
 }
 
 function intEnv(name: string, fallback: number): number {

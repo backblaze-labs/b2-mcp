@@ -177,10 +177,10 @@ describe("configFromHeaders — credential model", () => {
 });
 
 describe("deriveRateKey", () => {
-  it("is deterministic and distinct per key id", () => {
+  it("is deterministic and distinct per non-secret cache key", () => {
     expect(deriveRateKey("abc")).toBe(deriveRateKey("abc"));
     expect(deriveRateKey("abc")).not.toBe(deriveRateKey("abd"));
-    expect(deriveRateKey("abcdefgh")).not.toContain("abcdefgh");
+    expect(deriveRateKey("abc")).toBe("rate:abc");
   });
 });
 
