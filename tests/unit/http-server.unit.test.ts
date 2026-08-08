@@ -10,6 +10,7 @@ import {
   deriveRateKey,
   getPort,
 } from "../../src/http-server";
+import { createB2McpFetchHandler } from "../../src/http-fetch-handler";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
@@ -265,6 +266,22 @@ describe("health and readiness endpoints", () => {
       if (savedHosts === undefined) delete process.env.B2_ALLOWED_HOSTS;
       else process.env.B2_ALLOWED_HOSTS = savedHosts;
       await closeHttpServer(handle);
+    }
+  });
+
+  it("rejects missing Host headers outside the loopback health exception", async () => {
+    const pipeline = createB2McpFetchHandler();
+
+    try {
+      const res = await pipeline.fetch(new Request("http://localhost/mcp"), {
+        remoteAddress: "203.0.113.10",
+      });
+      const body = await res.text();
+
+      expect(res.status).toBe(403);
+      expect(body).toContain("Host/Origin not allowed");
+    } finally {
+      await pipeline.close();
     }
   });
 

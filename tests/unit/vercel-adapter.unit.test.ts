@@ -1,4 +1,5 @@
 // cspell:ignore unstub
+import { ReadableStream } from "node:stream/web";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   closeVercelMcpHandlerForTests,
@@ -233,6 +234,30 @@ describe("Vercel adapter", () => {
         },
         body: "{}",
       }),
+    );
+
+    expect(response.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects chunked oversized bodies before OAuth introspection", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(1024 * 1024));
+        controller.enqueue(new Uint8Array(1));
+        controller.close();
+      },
+    });
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Bearer access-token" }),
+        body,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" }),
     );
 
     expect(response.status).toBe(413);

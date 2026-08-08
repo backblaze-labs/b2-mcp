@@ -247,7 +247,8 @@ function isLoopbackHealthProbe(request: Request, remoteAddress: string | undefin
 function hostOriginAllowed(request: Request): boolean {
   const allowedHosts = csvEnv("B2_ALLOWED_HOSTS");
   const allowedOrigins = csvEnv("B2_ALLOWED_ORIGINS");
-  const host = request.headers.get("host") ?? new URL(request.url).host;
+  const host = request.headers.get("host");
+  if (!host) return false;
   const origin = request.headers.get("origin") ?? "";
   const hostname = hostWithoutPort(host);
 

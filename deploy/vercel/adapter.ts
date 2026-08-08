@@ -137,13 +137,53 @@ function contentLengthExceedsLimit(request: Request): boolean {
   return Number.isFinite(parsed) && parsed > MAX_BODY_BYTES;
 }
 
+function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+async function requestWithCappedBody(request: Request): Promise<Request | Response> {
+  if (request.method.toUpperCase() !== "POST") return request;
+  if (contentLengthExceedsLimit(request)) {
+    return jsonResponse(413, { error: "Request body too large" });
+  }
+  if (!request.body) return request;
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return jsonResponse(413, { error: "Request body too large" }, { Connection: "close" });
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: concatChunks(chunks, bytes),
+    signal: request.signal,
+  });
+}
+
 async function authenticateWithAdmissionLimit(
   request: Request,
   context: VercelMcpFetchContext,
 ): Promise<AuthInfo | Response> {
-  if (contentLengthExceedsLimit(request)) {
-    return jsonResponse(413, { error: "Request body too large" });
-  }
   const limiter = getOAuthAdmissionLimiter();
   const limitKey = oauthAdmissionKey(context);
   const permit = limiter.acquire(limitKey);
@@ -171,9 +211,12 @@ export async function vercelMcpFetch(
     return configurationErrorResponse(error);
   }
 
-  const auth = context.authInfo ?? (await authenticateWithAdmissionLimit(request, context));
+  const boundedRequest = await requestWithCappedBody(request);
+  if (boundedRequest instanceof Response) return boundedRequest;
+
+  const auth = context.authInfo ?? (await authenticateWithAdmissionLimit(boundedRequest, context));
   if (auth instanceof Response) return auth;
-  return getMcpHandler().fetch(rewritePath(request, "/mcp"), {
+  return getMcpHandler().fetch(rewritePath(boundedRequest, "/mcp"), {
     authInfo: auth,
     remoteAddress: context.remoteAddress,
   });
