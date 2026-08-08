@@ -54,21 +54,64 @@ describe("supply-chain audit policy", () => {
       expires: string;
     }>;
   };
-  const lock = readPackageManagerLock(root) as {
-    packages: Record<
-      string,
-      {
-        dependencies?: Record<string, string>;
-        optionalDependencies?: Record<string, string>;
-        engines?: { node?: string };
-        integrity?: string;
-        version?: string;
-      }
-    >;
+  type LockPackage = {
+    dependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+    engines?: { node?: string };
+    integrity?: string;
+    version?: string;
   };
-  const auditFixturePackage = lock.packages["node_modules/acorn"];
-  const auditFixtureVia = lock.packages["node_modules/acorn-jsx"];
-  const zodPackage = lock.packages["node_modules/zod"];
+  type LockPackageWithMetadata = LockPackage & { integrity: string; version: string };
+  const lock = readPackageManagerLock(root) as { packages: Record<string, LockPackage> };
+
+  function requirePolicyFixturePackage(path: string, purpose: string): LockPackageWithMetadata {
+    const pkg = lock.packages[path];
+    if (!pkg) {
+      throw new Error(
+        `Missing supply-chain policy fixture package ${path} (${purpose}). Pick another present pnpm-lock.yaml package for this synthetic advisory fixture.`,
+      );
+    }
+    if (!pkg.version || !pkg.integrity) {
+      throw new Error(
+        `Supply-chain policy fixture package ${path} (${purpose}) must have version and integrity metadata in pnpm-lock.yaml.`,
+      );
+    }
+    return pkg as LockPackageWithMetadata;
+  }
+
+  function requireFixtureDependency(
+    pkg: LockPackage,
+    path: string,
+    dependencyName: string,
+  ): string {
+    const dependencyRange = pkg.dependencies?.[dependencyName];
+    if (!dependencyRange) {
+      throw new Error(
+        `Supply-chain policy fixture package ${path} must depend on ${dependencyName}; pick another present transitive fixture package.`,
+      );
+    }
+    return dependencyRange;
+  }
+
+  const auditFixturePackage = requirePolicyFixturePackage(
+    "node_modules/acorn",
+    "synthetic vulnerable package",
+  );
+  const policyFixtureTransitiveName = "acorn-jsx";
+  const policyFixtureTransitivePath = `node_modules/${policyFixtureTransitiveName}`;
+  // This transitive package is an arbitrary stand-in used only to exercise
+  // advisory via/effects policy matching. If the dependency graph stops
+  // including it, pick another present package with an acorn dependency.
+  const policyFixtureTransitive = requirePolicyFixturePackage(
+    policyFixtureTransitivePath,
+    "synthetic transitive via/effects package",
+  );
+  const policyFixtureDependencyRange = requireFixtureDependency(
+    policyFixtureTransitive,
+    policyFixtureTransitivePath,
+    "acorn",
+  );
+  const zodPackage = requirePolicyFixturePackage("node_modules/zod", "direct advisory fixture");
   const exceptionPolicy = {
     allowedAdvisories: [
       {
@@ -77,13 +120,13 @@ describe("supply-chain audit policy", () => {
         maxSeverity: "moderate",
         isDirect: false,
         nodes: ["node_modules/acorn"],
-        effects: ["acorn-jsx"],
+        effects: [policyFixtureTransitiveName],
         package: { version: auditFixturePackage.version, integrity: auditFixturePackage.integrity },
         via: {
-          path: "node_modules/acorn-jsx",
-          name: "acorn-jsx",
-          version: auditFixtureVia.version,
-          dependencyRange: auditFixtureVia.dependencies?.acorn,
+          path: policyFixtureTransitivePath,
+          name: policyFixtureTransitiveName,
+          version: policyFixtureTransitive.version,
+          dependencyRange: policyFixtureDependencyRange,
         },
         expires: "2026-10-01",
         reason: "Test-only exception fixture for policy behavior.",
@@ -138,20 +181,20 @@ describe("supply-chain audit policy", () => {
               range: "<8.16.1",
             },
           ],
-          effects: ["acorn-jsx"],
+          effects: [policyFixtureTransitiveName],
           range: "<8.16.1",
           nodes: ["node_modules/acorn"],
           fixAvailable: false,
           ...overrides,
         },
-        "acorn-jsx": {
-          name: "acorn-jsx",
+        [policyFixtureTransitiveName]: {
+          name: policyFixtureTransitiveName,
           severity: "moderate",
           isDirect: false,
           via: ["acorn"],
           effects: [],
           range: "*",
-          nodes: ["node_modules/acorn-jsx"],
+          nodes: [policyFixtureTransitivePath],
           fixAvailable: false,
         },
       },

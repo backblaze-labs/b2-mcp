@@ -1,5 +1,7 @@
 allowBuilds:
   '@modelcontextprotocol/inspector': false
+  # tsx depends on esbuild, whose platform packages ship native binaries.
+  # Keep install scripts disabled; esbuild only runs when dev tooling invokes it.
   esbuild: false
 overrides:
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
