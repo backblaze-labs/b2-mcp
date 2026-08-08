@@ -7,6 +7,7 @@ import * as http from "http";
 import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
+import { S3Client } from "@aws-sdk/client-s3";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import type { MockInstance } from "vitest";
 import {
@@ -859,7 +860,7 @@ describe("HTTP transport handler", () => {
     expect(capturedSignal?.aborted).toBe(true);
   });
 
-  it("aborts an in-flight SDK list call when the HTTP client disconnects", async () => {
+  it("aborts an in-flight S3 SDK list call when the HTTP client disconnects", async () => {
     let markSdkStarted!: () => void;
     const sdkStarted = new Promise<void>((resolve) => {
       markSdkStarted = resolve;
@@ -869,46 +870,21 @@ describe("HTTP transport handler", () => {
       markSdkAborted = resolve;
     });
     let capturedSignal: AbortSignal | undefined;
-    installSdkTransport(
-      new RecordingTransport((request) => {
-        const endpoint = b2EndpointName(request);
-        if (endpoint === "b2_authorize_account") {
-          return new StaticHttpResponse(200, authorizeResponse(["listBuckets", "listFiles"]));
+    vi.spyOn(S3Client.prototype as any, "send").mockImplementation((_command, options) => {
+      capturedSignal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+      markSdkStarted();
+      return new Promise((resolve) => {
+        const onAbort = () => {
+          markSdkAborted();
+          resolve({ Contents: [], IsTruncated: false });
+        };
+        if (capturedSignal?.aborted) {
+          onAbort();
+        } else {
+          capturedSignal?.addEventListener("abort", onAbort, { once: true });
         }
-        if (endpoint === "b2_list_buckets") {
-          return new StaticHttpResponse(200, {
-            buckets: [
-              {
-                accountId: "test-account-123",
-                bucketId: "bucket-1",
-                bucketName: "bucket-a",
-                bucketType: "allPrivate",
-                bucketInfo: {},
-                corsRules: [],
-                lifecycleRules: [],
-                revision: 1,
-                options: [],
-              },
-            ],
-          });
-        }
-        if (endpoint === "b2_list_file_names") {
-          capturedSignal = request.signal;
-          markSdkStarted();
-          return new Promise<StaticHttpResponse>((resolve) => {
-            request.signal?.addEventListener(
-              "abort",
-              () => {
-                markSdkAborted();
-                resolve(new StaticHttpResponse(200, { files: [], nextFileName: null }));
-              },
-              { once: true },
-            );
-          });
-        }
-        return new StaticHttpResponse(200, {});
-      }),
-    );
+      });
+    });
     await replaceHandle(undefined, {
       credentialProvider: credentialProviderFromHeaders(),
       fetchCapabilities: vi.fn(async () => null),

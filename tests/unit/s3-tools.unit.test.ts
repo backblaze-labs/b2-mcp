@@ -1,62 +1,25 @@
-/**
- * Unit tests for the retained S3-compatible tool handlers.
- * The object/presign compatibility aliases run against the official B2 SDK
- * simulator; only S3-material bucket/multipart operations mock S3Client.send.
- */
-
-import {
-  B2Client as SdkB2Client,
-  Bucket,
-  BucketType,
-  BufferSource,
-  FileAction,
-  SSE_B2,
-} from "@backblaze-labs/b2-sdk";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import { ReadableStream } from "node:stream/web";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
-import { B2Client } from "../../src/b2/client";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
-import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
-import { installSdkTransport } from "../support/sdk-test-helpers";
 import type { MockInstance } from "vitest";
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
-
 let server: McpServer;
-let sim: B2Simulator;
-let seed: SdkB2Client;
-// Use a loose type to avoid TypeScript overload resolution issues with S3Client.send
 let sendSpy: MockInstance;
 
-async function seedClient(): Promise<SdkB2Client> {
-  const client = new SdkB2Client({
-    applicationKeyId: testConfig.applicationKeyId,
-    applicationKey: testConfig.applicationKey,
-    transport: sim.transport(),
-    retry: {
-      maxRetries: 0,
-      initialRetryDelayMs: 1,
-      maxRetryDelayMs: 1,
-      requestTimeoutMs: 30_000,
+function bodyFromText(value: string): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(value));
+      controller.close();
     },
   });
-  await client.authorize();
-  return client;
 }
 
-async function createBucket(name = "b") {
-  return seed.createBucket({ bucketName: name, bucketType: BucketType.AllPrivate });
-}
-
-beforeEach(async () => {
+beforeEach(() => {
   invalidateAuthManagerCache();
-  sim = new B2Simulator({ minimumPartSize: 1000, recommendedPartSize: 5 * 1024 * 1024 });
-  installSdkTransport(sim.transport());
-  seed = await seedClient();
-  // S3Client.prototype.send is a generic overloaded method; cast to bypass TS strictness
   sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   server = createServer(testConfig);
 });
@@ -64,11 +27,8 @@ beforeEach(async () => {
 afterEach(() => {
   vi.restoreAllMocks();
   circuitBreaker.close();
-  setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
 });
-
-// ── s3_head_bucket ────────────────────────────────────────────────────────────
 
 describe("s3_head_bucket", () => {
   it("returns success for an existing bucket", async () => {
@@ -89,361 +49,390 @@ describe("s3_head_bucket", () => {
 });
 
 describe("s3_list_objects_v2", () => {
-  it("preserves nextContinuationToken for truncated responses", async () => {
-    const bucket = await createBucket("list-bucket");
-    await bucket.upload({
-      fileName: "a.txt",
-      source: new BufferSource(new TextEncoder().encode("a")),
-    });
-    await bucket.upload({
-      fileName: "b.txt",
-      source: new BufferSource(new TextEncoder().encode("b")),
-    });
-
-    const result = parseResult(
-      await callTool(server, "s3_list_objects_v2", { bucket: "list-bucket", maxKeys: 1 }),
-    );
-
-    expect(result.isTruncated).toBe(true);
-    expect(result.nextContinuationToken).toBeTruthy();
-    expect(result.objects).toHaveLength(1);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("preserves S3 StartAfter exclusion while using B2 SDK pagination", async () => {
-    const bucket = await createBucket("list-bucket");
-    for (const fileName of ["a.txt", "b.txt", "c.txt"]) {
-      await bucket.upload({
-        fileName,
-        source: new BufferSource(new TextEncoder().encode(fileName)),
-      });
-    }
-
-    const result = parseResult(
-      await callTool(server, "s3_list_objects_v2", {
-        bucket: "list-bucket",
-        startAfter: "a.txt",
-        maxKeys: 2,
-      }),
-    );
-
-    expect(result.objects.map((object: { Key: string }) => object.Key)).toEqual(["b.txt", "c.txt"]);
-    expect(result.isTruncated).toBe(false);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("excludes common prefixes from keyCount when using a delimiter", async () => {
-    const bucket = await createBucket("list-bucket");
-    const root = await bucket.upload({
-      fileName: "root.txt",
-      source: new BufferSource(new TextEncoder().encode("root")),
-    });
-    vi.spyOn(Bucket.prototype, "listFileNames").mockResolvedValue({
-      files: [{ ...root, action: FileAction.Folder, fileName: "folder/" }, root],
-      nextFileName: null,
+  it("sends ListObjectsV2 through the AWS SDK and maps the response", async () => {
+    const lastModified = new Date("2026-01-01T00:00:00.000Z");
+    sendSpy.mockResolvedValueOnce({
+      Contents: [{ Key: "a.txt", Size: 1, LastModified: lastModified, ETag: '"etag"' }],
+      CommonPrefixes: [{ Prefix: "folder/" }],
+      IsTruncated: true,
+      NextContinuationToken: "next-token",
     });
 
     const result = parseResult(
       await callTool(server, "s3_list_objects_v2", {
         bucket: "list-bucket",
+        prefix: "a",
         delimiter: "/",
+        maxKeys: 1,
+        continuationToken: "token",
+        startAfter: "ignored-when-token-present",
       }),
     );
 
-    expect(result.objects.map((object: { Key: string }) => object.Key)).toEqual(["root.txt"]);
-    expect(result.commonPrefixes).toEqual([{ Prefix: "folder/" }]);
-    expect(result.keyCount).toBe(1);
-    expect(result.keyCount).toBe(result.objects.length);
-    expect(sendSpy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      objects: [
+        { Key: "a.txt", Size: 1, LastModified: lastModified.toISOString(), ETag: '"etag"' },
+      ],
+      commonPrefixes: [{ Prefix: "folder/" }],
+      isTruncated: true,
+      nextContinuationToken: "next-token",
+      keyCount: 1,
+    });
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("ListObjectsV2Command");
+    expect(command.input).toMatchObject({
+      Bucket: "list-bucket",
+      Prefix: "a",
+      Delimiter: "/",
+      MaxKeys: 1,
+      ContinuationToken: "token",
+      StartAfter: "ignored-when-token-present",
+    });
   });
 });
 
 describe("s3_list_object_versions", () => {
-  it("marks a hide marker as latest when it shadows an older version", async () => {
-    const bucket = await createBucket("versions-bucket");
-    await bucket.upload({
-      fileName: "k",
-      source: new BufferSource(new TextEncoder().encode("visible")),
-    });
-    await callTool(server, "s3_delete_object", {
-      bucket: "versions-bucket",
-      key: "k",
-      confirm: true,
+  it("sends ListObjectVersions through the AWS SDK and maps versions", async () => {
+    const lastModified = new Date("2026-01-01T00:00:00.000Z");
+    sendSpy.mockResolvedValueOnce({
+      Versions: [
+        {
+          Key: "k",
+          VersionId: "v1",
+          IsLatest: true,
+          LastModified: lastModified,
+          ETag: '"etag"',
+          Size: 5,
+          StorageClass: "STANDARD",
+        },
+      ],
+      DeleteMarkers: [
+        { Key: "hidden", VersionId: "v2", IsLatest: true, LastModified: lastModified },
+      ],
+      CommonPrefixes: [{ Prefix: "folder/" }],
+      IsTruncated: true,
+      NextKeyMarker: "next-key",
+      NextVersionIdMarker: "next-version",
     });
 
     const result = parseResult(
-      await callTool(server, "s3_list_object_versions", { bucket: "versions-bucket" }),
+      await callTool(server, "s3_list_object_versions", {
+        bucket: "versions-bucket",
+        prefix: "k",
+        delimiter: "/",
+        maxKeys: 2,
+        keyMarker: "marker",
+        versionIdMarker: "version-marker",
+      }),
     );
 
-    expect(result.deleteMarkers).toHaveLength(1);
-    expect(result.deleteMarkers[0].IsLatest).toBe(true);
     expect(result.versions).toHaveLength(1);
-    expect(result.versions[0].IsLatest).toBe(false);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("keeps IsLatest false for older versions continued onto another page", async () => {
-    const bucket = await createBucket("versions-bucket");
-    await bucket.upload({
-      fileName: "k",
-      source: new BufferSource(new TextEncoder().encode("old")),
+    expect(result.deleteMarkers).toHaveLength(1);
+    expect(result.commonPrefixes).toEqual([{ Prefix: "folder/" }]);
+    expect(result.isTruncated).toBe(true);
+    expect(result.nextKeyMarker).toBe("next-key");
+    expect(result.nextVersionIdMarker).toBe("next-version");
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("ListObjectVersionsCommand");
+    expect(command.input).toMatchObject({
+      Bucket: "versions-bucket",
+      Prefix: "k",
+      Delimiter: "/",
+      MaxKeys: 2,
+      KeyMarker: "marker",
+      VersionIdMarker: "version-marker",
     });
-    await bucket.upload({
-      fileName: "k",
-      source: new BufferSource(new TextEncoder().encode("new")),
-    });
-
-    const first = parseResult(
-      await callTool(server, "s3_list_object_versions", {
-        bucket: "versions-bucket",
-        maxKeys: 1,
-      }),
-    );
-    const second = parseResult(
-      await callTool(server, "s3_list_object_versions", {
-        bucket: "versions-bucket",
-        maxKeys: 1,
-        keyMarker: first.nextKeyMarker,
-        versionIdMarker: first.nextVersionIdMarker,
-      }),
-    );
-
-    expect(first.versions[0].IsLatest).toBe(true);
-    expect(second.versions[0].IsLatest).toBe(false);
-    expect(sendSpy).not.toHaveBeenCalled();
   });
 });
 
-describe("versionId ownership validation", () => {
-  async function seedVersionMismatch() {
-    const requestedBucket = await createBucket("requested-bucket");
-    const otherBucket = await createBucket("other-bucket");
-    await requestedBucket.upload({
-      fileName: "expected.txt",
-      source: new BufferSource(new TextEncoder().encode("expected")),
-    });
-    const other = await otherBucket.upload({
-      fileName: "secret.txt",
-      source: new BufferSource(new TextEncoder().encode("secret")),
-    });
-    return { requestedBucket, otherBucket, otherVersionId: String(other.fileId) };
-  }
-
-  it("refuses s3_get_object when versionId belongs to a different bucket/key", async () => {
-    const { otherVersionId } = await seedVersionMismatch();
-
-    const result = await callTool(server, "s3_get_object", {
-      bucket: "requested-bucket",
-      key: "expected.txt",
-      versionId: otherVersionId,
-    });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/not found/i);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("refuses s3_head_object when versionId belongs to a different bucket/key", async () => {
-    const { otherVersionId } = await seedVersionMismatch();
-
-    const result = await callTool(server, "s3_head_object", {
-      bucket: "requested-bucket",
-      key: "expected.txt",
-      versionId: otherVersionId,
-    });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/not found/i);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("refuses s3_delete_object when versionId belongs to a different bucket/key", async () => {
-    const { otherBucket, otherVersionId } = await seedVersionMismatch();
-
-    const result = await callTool(server, "s3_delete_object", {
-      bucket: "requested-bucket",
-      key: "expected.txt",
-      versionId: otherVersionId,
-      confirm: true,
-    });
-
-    expect(result.isError).toBe(true);
-    expect(await otherBucket.getFileInfoByName("secret.txt")).toBeTruthy();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("refuses presigned GET when versionId belongs to a different bucket/key", async () => {
-    const { otherVersionId } = await seedVersionMismatch();
-
-    const result = await callTool(server, "s3_get_presigned_url", {
-      bucket: "requested-bucket",
-      key: "expected.txt",
-      operation: "GetObject",
-      versionId: otherVersionId,
-    });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/not found/i);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe("s3_copy_object", () => {
-  it("copies into the requested destination bucket on cross-bucket copy", async () => {
-    const sourceBucket = await createBucket("copy-source");
-    const destinationBucket = await createBucket("copy-destination");
-    await sourceBucket.upload({
-      fileName: "source.txt",
-      source: new BufferSource(new TextEncoder().encode("source")),
-    });
-
-    const result = await callTool(server, "s3_copy_object", {
-      sourceBucket: "copy-source",
-      sourceKey: "source.txt",
-      destinationBucket: "copy-destination",
-      destinationKey: "copied.txt",
-    });
-
-    expect(result.isError).toBeFalsy();
-    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeTruthy();
-    expect(await sourceBucket.getFileInfoByName("copied.txt")).toBeNull();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("returns not found when the current source resolves to a hide marker", async () => {
-    const sourceBucket = await createBucket("copy-source");
-    const destinationBucket = await createBucket("copy-destination");
-    await sourceBucket.upload({
-      fileName: "source.txt",
-      source: new BufferSource(new TextEncoder().encode("source")),
-    });
-    const marker = await sourceBucket.hideFile("source.txt");
-    vi.spyOn(Bucket.prototype, "getFileInfoByName").mockResolvedValueOnce(marker);
-
-    const result = await callTool(server, "s3_copy_object", {
-      sourceBucket: "copy-source",
-      sourceKey: "source.txt",
-      destinationBucket: "copy-destination",
-      destinationKey: "copied.txt",
-    });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/not found/i);
-    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeNull();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("returns not found when sourceVersionId identifies a hide marker", async () => {
-    const sourceBucket = await createBucket("copy-source");
-    const destinationBucket = await createBucket("copy-destination");
-    await sourceBucket.upload({
-      fileName: "source.txt",
-      source: new BufferSource(new TextEncoder().encode("source")),
-    });
-    const marker = await sourceBucket.hideFile("source.txt");
-
-    const result = await callTool(server, "s3_copy_object", {
-      sourceBucket: "copy-source",
-      sourceKey: "source.txt",
-      sourceVersionId: String(marker.fileId),
-      destinationBucket: "copy-destination",
-      destinationKey: "copied.txt",
-    });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/not found/i);
-    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeNull();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("copies an explicit upload version hidden by a newer marker", async () => {
-    const sourceBucket = await createBucket("copy-source");
-    const destinationBucket = await createBucket("copy-destination");
-    const upload = await sourceBucket.upload({
-      fileName: "source.txt",
-      source: new BufferSource(new TextEncoder().encode("source")),
-    });
-    await sourceBucket.hideFile("source.txt");
-
-    const result = await callTool(server, "s3_copy_object", {
-      sourceBucket: "copy-source",
-      sourceKey: "source.txt",
-      sourceVersionId: String(upload.fileId),
-      destinationBucket: "copy-destination",
-      destinationKey: "copied.txt",
-    });
-
-    expect(result.isError).toBeFalsy();
-    expect(await destinationBucket.getFileInfoByName("copied.txt")).toBeTruthy();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe("SDK-backed delete destructive gate", () => {
-  it("blocks s3_delete_object before the SDK hide path without confirm", async () => {
-    const bucket = await createBucket("delete-gate-bucket");
-    await bucket.upload({
-      fileName: "k",
-      source: new BufferSource(new TextEncoder().encode("data")),
-    });
-
-    const result = await callTool(server, "s3_delete_object", {
-      bucket: "delete-gate-bucket",
+describe("s3_put_object and s3_get_object", () => {
+  it("uploads small inline payloads with PutObjectCommand", async () => {
+    const content = Buffer.from("hello").toString("base64");
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "bucket-b",
       key: "k",
+      content,
+      contentType: "text/plain",
+      metadata: { owner: "fixture" },
+      acl: "public-read",
+      storageClass: "STANDARD",
     });
 
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("PutObjectCommand");
+    expect(command.input).toMatchObject({
+      Bucket: "bucket-b",
+      Key: "k",
+      ContentType: "text/plain",
+      Metadata: { owner: "fixture" },
+    });
+    expect(Buffer.from(command.input.Body).toString()).toBe("hello");
+    expect(command.input.ACL).toBeUndefined();
+    expect(command.input.StorageClass).toBeUndefined();
+  });
+
+  it("returns small inline objects as base64", async () => {
+    const lastModified = new Date("2026-01-01T00:00:00.000Z");
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "text/plain",
+      ContentLength: 5,
+      LastModified: lastModified,
+      ETag: '"etag"',
+      VersionId: "v1",
+      Metadata: { owner: "fixture" },
+      Body: bodyFromText("hello"),
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_get_object", {
+        bucket: "bucket-b",
+        key: "hello.txt",
+        range: "bytes=0-4",
+        versionId: "v1",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      key: "hello.txt",
+      contentType: "text/plain",
+      contentLength: 5,
+      lastModified: lastModified.toISOString(),
+      etag: '"etag"',
+      versionId: "v1",
+      metadata: { owner: "fixture" },
+      content: Buffer.from("hello").toString("base64"),
+      encoding: "base64",
+    });
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("GetObjectCommand");
+    expect(command.input).toMatchObject({
+      Bucket: "bucket-b",
+      Key: "hello.txt",
+      Range: "bytes=0-4",
+      VersionId: "v1",
+    });
+  });
+
+  it("rejects base64 content over the inline cap without calling S3", async () => {
+    const tooBig = Buffer.alloc(2 * 1024 * 1024).toString("base64");
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "b",
+      key: "k",
+      content: tooBig,
+    });
     expect(result.isError).toBe(true);
-    expect(await bucket.getFileInfoByName("k")).toBeTruthy();
+    expect(parseResult(result)).toMatch(/inline limit|s3_get_presigned_url/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("blocks s3_delete_objects before the SDK hide path without confirm", async () => {
-    const bucket = await createBucket("delete-gate-bucket");
-    await bucket.upload({
-      fileName: "k",
-      source: new BufferSource(new TextEncoder().encode("data")),
+  it("refuses an inline read over the cap and cancels the body", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "application/octet-stream",
+      ContentLength: 1024 * 1024 + 1,
+      Body: { cancel },
     });
 
-    const result = await callTool(server, "s3_delete_objects", {
-      bucket: "delete-gate-bucket",
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/inline read limit|s3_get_presigned_url|saveToPath/i);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("rejects invalid reported contentLength and cancels the body", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "application/octet-stream",
+      ContentLength: Number.NaN,
+      Body: { cancel },
+    });
+
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/invalid content length/i);
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("enforces the inline cap while streaming a lying body", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(1024 * 1024 + 1) })
+        .mockResolvedValueOnce({ done: true, value: undefined }),
+      cancel,
+      releaseLock: vi.fn(),
+    };
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "application/octet-stream",
+      ContentLength: 1,
+      Body: { getReader: () => reader },
+    });
+
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/inline read limit|exceeded/i);
+    expect(cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
+  });
+
+  it("cancels the stream when inline reading fails mid-stream", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: vi.fn().mockRejectedValue(new Error("network interrupted")),
+      cancel,
+      releaseLock: vi.fn(),
+    };
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "application/octet-stream",
+      ContentLength: 10,
+      Body: { getReader: () => reader },
+    });
+
+    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
+
+    expect(result.isError).toBe(true);
+    expect(cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
+  });
+});
+
+describe("s3_delete_object and s3_delete_objects", () => {
+  it("blocks destructive deletes before calling S3", async () => {
+    const one = await callTool(server, "s3_delete_object", { bucket: "b", key: "k" });
+    const many = await callTool(server, "s3_delete_objects", {
+      bucket: "b",
       objects: [{ key: "k" }],
     });
 
-    expect(result.isError).toBe(true);
-    expect(await bucket.getFileInfoByName("k")).toBeTruthy();
+    expect(one.isError).toBe(true);
+    expect(many.isError).toBe(true);
     expect(sendSpy).not.toHaveBeenCalled();
   });
-});
 
-describe("s3_delete_objects", () => {
-  it("returns bounded-concurrency bulk delete accounting", async () => {
-    const bucket = await createBucket("bulk-delete-bucket");
-    for (let index = 0; index < 12; index++) {
-      await bucket.upload({
-        fileName: `k-${index}`,
-        source: new BufferSource(new TextEncoder().encode(`data-${index}`)),
-      });
-    }
+  it("sends DeleteObjectCommand after confirmation", async () => {
+    const result = await callTool(server, "s3_delete_object", {
+      bucket: "b",
+      key: "k",
+      versionId: "v1",
+      confirm: true,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("DeleteObjectCommand");
+    expect(command.input).toMatchObject({ Bucket: "b", Key: "k", VersionId: "v1" });
+  });
+
+  it("sends DeleteObjectsCommand and returns AWS delete accounting", async () => {
+    sendSpy.mockResolvedValueOnce({
+      Deleted: [{ Key: "a.txt" }, { Key: "b.txt", VersionId: "v2" }],
+      Errors: [],
+    });
 
     const result = parseResult(
       await callTool(server, "s3_delete_objects", {
-        bucket: "bulk-delete-bucket",
-        objects: Array.from({ length: 12 }, (_, index) => ({ key: `k-${index}` })),
+        bucket: "b",
+        objects: [{ key: "a.txt" }, { key: "b.txt", versionId: "v2" }],
         quiet: false,
+        bypassGovernance: true,
         confirm: true,
       }),
     );
 
-    expect(result.errors).toEqual([]);
-    expect(result.deleted).toHaveLength(12);
-    expect(result.attempted).toBe(12);
-    expect(result.aborted).toBe(false);
-    expect(result.maxConcurrency).toBe(8);
-    expect(sendSpy).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      deleted: [{ Key: "a.txt" }, { Key: "b.txt", VersionId: "v2" }],
+      errors: [],
+      attempted: 2,
+      aborted: false,
+      maxConcurrency: 1,
+    });
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("DeleteObjectsCommand");
+    expect(command.input).toMatchObject({
+      Bucket: "b",
+      Delete: {
+        Objects: [{ Key: "a.txt" }, { Key: "b.txt", VersionId: "v2" }],
+        Quiet: false,
+      },
+      BypassGovernanceRetention: true,
+    });
   });
 });
 
-// ── s3_put_bucket_lifecycle ───────────────────────────────────────────────────
+describe("s3_head_object and s3_copy_object", () => {
+  it("reports S3 head object metadata", async () => {
+    const lastModified = new Date("2026-01-01T00:00:00.000Z");
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "text/plain",
+      ContentLength: 5,
+      LastModified: lastModified,
+      ETag: '"etag"',
+      VersionId: "v1",
+      Metadata: { owner: "fixture" },
+      ServerSideEncryption: "AES256",
+      DeleteMarker: true,
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "hidden.txt",
+        versionId: "v1",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      key: "hidden.txt",
+      contentType: "text/plain",
+      contentLength: 5,
+      lastModified: lastModified.toISOString(),
+      etag: '"etag"',
+      versionId: "v1",
+      metadata: { owner: "fixture" },
+      serverSideEncryption: "AES256",
+      deleteMarker: true,
+    });
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("HeadObjectCommand");
+    expect(command.input).toMatchObject({
+      Bucket: "head-bucket",
+      Key: "hidden.txt",
+      VersionId: "v1",
+    });
+  });
+
+  it("sends CopyObjectCommand through the AWS SDK", async () => {
+    const result = await callTool(server, "s3_copy_object", {
+      sourceBucket: "copy-source",
+      sourceKey: "folder/source file.txt",
+      sourceVersionId: "version/1",
+      destinationBucket: "copy-destination",
+      destinationKey: "copied.txt",
+      metadataDirective: "REPLACE",
+      contentType: "text/plain",
+      metadata: { owner: "fixture" },
+      acl: "public-read",
+    });
+
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("CopyObjectCommand");
+    expect(command.input).toMatchObject({
+      Bucket: "copy-destination",
+      Key: "copied.txt",
+      CopySource: "copy-source/folder/source%20file.txt?versionId=version%2F1",
+      MetadataDirective: "REPLACE",
+      ContentType: "text/plain",
+      Metadata: { owner: "fixture" },
+    });
+    expect(command.input.ACL).toBeUndefined();
+  });
+});
 
 describe("s3_put_bucket_lifecycle", () => {
   it("sends lifecycle rules and returns success", async () => {
@@ -458,93 +447,28 @@ describe("s3_put_bucket_lifecycle", () => {
     const result = await callTool(server, "s3_put_bucket_lifecycle", {
       bucket: "my-bucket",
       rules,
-      confirm: true, // expiration rule schedules deletion → gated
-    });
-    expect(result.isError).toBeFalsy();
-    const cmd = sendSpy.mock.calls[0][0];
-    expect(cmd.input.LifecycleConfiguration.Rules[0].ID).toBe("expire-after-90-days");
-    expect(cmd.input.LifecycleConfiguration.Rules[0].Status).toBe("Enabled");
-    expect(cmd.input.LifecycleConfiguration.Rules[0].Expiration.Days).toBe(90);
-  });
-
-  it("maps filter prefix correctly", async () => {
-    const rules = [
-      { id: "rule1", status: "Enabled", filter: { prefix: "archive/" }, expiration: { days: 365 } },
-    ];
-    await callTool(server, "s3_put_bucket_lifecycle", {
-      bucket: "my-bucket",
-      rules,
       confirm: true,
     });
-    const cmd = sendSpy.mock.calls[0][0];
-    expect(cmd.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("archive/");
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("PutBucketLifecycleConfigurationCommand");
+    expect(command.input.LifecycleConfiguration.Rules[0].ID).toBe("expire-after-90-days");
+    expect(command.input.LifecycleConfiguration.Rules[0].Status).toBe("Enabled");
+    expect(command.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("logs/");
+    expect(command.input.LifecycleConfiguration.Rules[0].Expiration.Days).toBe(90);
   });
 });
 
-// ── s3_get_bucket_location ────────────────────────────────────────────────────
-
 describe("s3_get_bucket_location", () => {
-  beforeEach(() => {
-    sendSpy.mockResolvedValue({ LocationConstraint: "us-west-004" });
-  });
-
   it("returns the bucket location constraint", async () => {
+    sendSpy.mockResolvedValueOnce({ LocationConstraint: "us-west-004" });
     const result = parseResult(
       await callTool(server, "s3_get_bucket_location", { bucket: "my-bucket" }),
     );
     expect(result.locationConstraint).toBe("us-west-004");
+    expect(sendSpy.mock.calls[0][0].constructor.name).toBe("GetBucketLocationCommand");
   });
 });
-
-describe("s3_head_object", () => {
-  it("reports SSE-B2 encryption metadata for encrypted objects", async () => {
-    const bucket = await createBucket("head-bucket");
-    await bucket.upload({
-      fileName: "encrypted.txt",
-      source: new BufferSource(new TextEncoder().encode("encrypted")),
-      serverSideEncryption: SSE_B2,
-    });
-
-    const result = parseResult(
-      await callTool(server, "s3_head_object", {
-        bucket: "head-bucket",
-        key: "encrypted.txt",
-      }),
-    );
-
-    expect(result.serverSideEncryption).toBe("AES256");
-    expect(result.deleteMarker).toBeUndefined();
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("reports deleteMarker for an explicit hide-marker version", async () => {
-    const bucket = await createBucket("head-bucket");
-    await bucket.upload({
-      fileName: "hidden.txt",
-      source: new BufferSource(new TextEncoder().encode("hidden")),
-    });
-    await callTool(server, "s3_delete_object", {
-      bucket: "head-bucket",
-      key: "hidden.txt",
-      confirm: true,
-    });
-    const page = await bucket.listFileVersions({ prefix: "hidden.txt" });
-    const marker = page.files.find((file) => file.action === "hide");
-
-    const result = parseResult(
-      await callTool(server, "s3_head_object", {
-        bucket: "head-bucket",
-        key: "hidden.txt",
-        versionId: String(marker?.fileId),
-      }),
-    );
-
-    expect(result.deleteMarker).toBe(true);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-});
-
-// ── s3_get_presigned_url ──────────────────────────────────────────────────────
 
 describe("s3_get_presigned_url", () => {
   it("returns a presigned URL string for GET", async () => {
@@ -556,9 +480,8 @@ describe("s3_get_presigned_url", () => {
         expiresIn: 3600,
       }),
     );
-    // Result is either a URL string or an object with a url field
-    const hasUrl = typeof result === "string" || typeof result?.url === "string";
-    expect(hasUrl).toBe(true);
+    expect(typeof result?.url).toBe("string");
+    expect(result.operation).toBe("GetObject");
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
@@ -622,129 +545,6 @@ describe("s3_get_presigned_url", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 });
-
-// ── Inline-payload cap: bulk bytes must use a presigned URL, not flow through ──
-// the server. s3_put_object / s3_get_object are capped to small (≤1 MiB)
-// control-plane payloads; anything larger is refused with a pointer to
-// s3_get_presigned_url. This is what keeps the data plane off the server.
-
-describe("inline object cap (control-plane-first data path)", () => {
-  it("s3_put_object rejects base64 content over the inline cap without calling S3", async () => {
-    const tooBig = Buffer.alloc(2 * 1024 * 1024).toString("base64"); // 2 MiB decoded
-    const result = await callTool(server, "s3_put_object", {
-      bucket: "b",
-      key: "k",
-      content: tooBig,
-    });
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline limit|s3_get_presigned_url/i);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("s3_put_object allows a small inline payload", async () => {
-    await createBucket("bucket-b");
-    const small = Buffer.from("hello").toString("base64");
-    const result = await callTool(server, "s3_put_object", {
-      bucket: "bucket-b",
-      key: "k",
-      content: small,
-      acl: "public-read",
-      storageClass: "STANDARD",
-    });
-    expect(result.isError).toBeFalsy();
-    expect(sendSpy).not.toHaveBeenCalled();
-    const bucket = await seed.getBucket("bucket-b");
-    const uploaded = await bucket?.getFileInfoByName("k");
-    expect(uploaded?.contentLength).toBe(5);
-  });
-
-  it("s3_get_object refuses an inline read over the cap and points to a presigned URL", async () => {
-    const bucket = await createBucket("bucket-b");
-    await bucket.upload({
-      fileName: "k",
-      source: new BufferSource(new Uint8Array(2 * 1024 * 1024)),
-    });
-    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline read limit|s3_get_presigned_url|saveToPath/i);
-    expect(sendSpy).not.toHaveBeenCalled();
-  });
-
-  it("s3_get_object rejects invalid reported contentLength and cancels the body", async () => {
-    const cancel = vi.fn().mockResolvedValue(undefined);
-    vi.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
-      key: "k",
-      contentType: "application/octet-stream",
-      contentLength: Number.NaN,
-      lastModified: new Date(),
-      versionId: "v",
-      metadata: {},
-      body: { cancel } as any,
-    });
-
-    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/invalid content length/i);
-    expect(cancel).toHaveBeenCalled();
-  });
-
-  it("s3_get_object enforces the inline cap while streaming a lying body", async () => {
-    const cancel = vi.fn().mockResolvedValue(undefined);
-    const reader = {
-      read: vi
-        .fn()
-        .mockResolvedValueOnce({ done: false, value: new Uint8Array(1024 * 1024 + 1) })
-        .mockResolvedValueOnce({ done: true, value: undefined }),
-      cancel,
-      releaseLock: vi.fn(),
-    };
-    vi.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
-      key: "k",
-      contentType: "application/octet-stream",
-      contentLength: 1,
-      lastModified: new Date(),
-      versionId: "v",
-      metadata: {},
-      body: { getReader: () => reader } as any,
-    });
-
-    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
-
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline read limit|exceeded/i);
-    expect(cancel).toHaveBeenCalled();
-    expect(reader.releaseLock).toHaveBeenCalled();
-  });
-
-  it("s3_get_object cancels the stream when inline reading fails mid-stream", async () => {
-    const cancel = vi.fn().mockResolvedValue(undefined);
-    const reader = {
-      read: vi.fn().mockRejectedValue(new Error("network interrupted")),
-      cancel,
-      releaseLock: vi.fn(),
-    };
-    vi.spyOn(B2Client.prototype, "s3GetObject").mockResolvedValue({
-      key: "k",
-      contentType: "application/octet-stream",
-      contentLength: 10,
-      lastModified: new Date(),
-      versionId: "v",
-      metadata: {},
-      body: { getReader: () => reader } as any,
-    });
-
-    const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
-
-    expect(result.isError).toBe(true);
-    expect(cancel).toHaveBeenCalled();
-    expect(reader.releaseLock).toHaveBeenCalled();
-  });
-});
-
-// ── s3_presign_upload_part: multipart parts are presigned, never streamed ─────
-// through the server. The handler signs locally (no SDK.send), returning one
-// PUT URL per part for the client to upload directly to B2.
 
 describe("s3_presign_upload_part", () => {
   it("returns a presigned PUT URL per requested part without calling S3", async () => {

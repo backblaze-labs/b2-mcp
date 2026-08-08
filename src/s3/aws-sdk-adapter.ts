@@ -3,13 +3,19 @@
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
+  CopyObjectCommand,
   CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetBucketLocationCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   ListMultipartUploadsCommand,
+  ListObjectVersionsCommand,
   ListObjectsV2Command,
   ListPartsCommand,
+  PutObjectCommand,
   PutBucketLifecycleConfigurationCommand,
   S3Client,
   UploadPartCommand,
@@ -20,7 +26,7 @@ import {
   type ServiceOutputTypes,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { Command, HttpHandlerOptions } from "@smithy/types";
+import type { Command, HttpHandlerOptions, StreamingBlobPayloadInputTypes } from "@smithy/types";
 import { currentMcpRequestSignal } from "../request-context.js";
 
 type S3SendCommand<
@@ -62,6 +68,113 @@ export interface B2S3PartSummary {
   LastModified?: Date;
   ETag?: string;
   Size?: number;
+}
+
+export interface B2S3PutObjectOptions {
+  bucket: string;
+  key: string;
+  body: StreamingBlobPayloadInputTypes;
+  contentLength?: number;
+  contentType?: string;
+  metadata?: Record<string, string>;
+  serverSideEncryption?: "AES256";
+}
+
+export interface B2S3DownloadedObject {
+  key: string;
+  contentType?: string;
+  contentLength?: number;
+  lastModified?: Date;
+  etag?: string;
+  versionId?: string;
+  metadata: Record<string, string>;
+  body: unknown;
+}
+
+export type B2S3HeadObjectResult = Omit<B2S3DownloadedObject, "body"> & {
+  serverSideEncryption?: string;
+  deleteMarker?: boolean;
+};
+
+export interface B2S3DeleteObjectsResult {
+  deleted: Array<{
+    Key?: string;
+    VersionId?: string;
+    DeleteMarker?: boolean;
+    DeleteMarkerVersionId?: string;
+  }>;
+  errors: Array<{ Key?: string; VersionId?: string; Code?: string; Message?: string }>;
+  attempted: number;
+  aborted: boolean;
+  maxConcurrency: number;
+}
+
+export interface B2S3ObjectSummary {
+  Key?: string;
+  LastModified?: Date;
+  ETag?: string;
+  Size?: number;
+  StorageClass?: string;
+}
+
+export interface B2S3CommonPrefix {
+  Prefix?: string;
+}
+
+export interface B2S3ListObjectsV2Result {
+  objects: B2S3ObjectSummary[];
+  commonPrefixes: B2S3CommonPrefix[];
+  isTruncated: boolean;
+  nextContinuationToken?: string;
+  keyCount: number;
+}
+
+export interface B2S3ObjectVersionSummary extends B2S3ObjectSummary {
+  VersionId?: string;
+  IsLatest?: boolean;
+}
+
+export interface B2S3DeleteMarkerSummary {
+  Key?: string;
+  VersionId?: string;
+  IsLatest?: boolean;
+  LastModified?: Date;
+}
+
+export interface B2S3ListObjectVersionsResult {
+  versions: B2S3ObjectVersionSummary[];
+  deleteMarkers: B2S3DeleteMarkerSummary[];
+  commonPrefixes: B2S3CommonPrefix[];
+  isTruncated: boolean;
+  nextKeyMarker?: string;
+  nextVersionIdMarker?: string;
+}
+
+export interface B2S3PresignObjectUrlResult {
+  url: string;
+  operation: "GetObject" | "PutObject";
+  expiresIn: number;
+  expiresAt: string;
+}
+
+function encodeCopySourceSegment(value: string): string {
+  return value
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function copySource(input: {
+  sourceBucket: string;
+  sourceKey: string;
+  sourceVersionId?: string;
+}): string {
+  const base = `${encodeURIComponent(input.sourceBucket)}/${encodeCopySourceSegment(
+    input.sourceKey,
+  )}`;
+  return input.sourceVersionId === undefined
+    ? base
+    : `${base}?versionId=${encodeURIComponent(input.sourceVersionId)}`;
 }
 
 export class B2S3PeerClient extends S3Client {
@@ -138,6 +251,218 @@ export class B2S3PeerClient extends S3Client {
   async getBucketLocation(bucket: string): Promise<{ locationConstraint?: string }> {
     const result = await this.send(new GetBucketLocationCommand({ Bucket: bucket }));
     return { locationConstraint: result.LocationConstraint };
+  }
+
+  async putObject(input: B2S3PutObjectOptions): Promise<void> {
+    await this.send(
+      new PutObjectCommand({
+        Bucket: input.bucket,
+        Key: input.key,
+        Body: input.body,
+        ContentLength: input.contentLength,
+        ContentType: input.contentType,
+        Metadata: input.metadata,
+        ServerSideEncryption: input.serverSideEncryption,
+      }),
+    );
+  }
+
+  async getObject(input: {
+    bucket: string;
+    key: string;
+    range?: string;
+    versionId?: string;
+  }): Promise<B2S3DownloadedObject> {
+    const result = await this.send(
+      new GetObjectCommand({
+        Bucket: input.bucket,
+        Key: input.key,
+        Range: input.range,
+        VersionId: input.versionId,
+      }),
+    );
+    return {
+      key: input.key,
+      contentType: result.ContentType,
+      contentLength: result.ContentLength,
+      lastModified: result.LastModified,
+      etag: result.ETag,
+      versionId: result.VersionId,
+      metadata: result.Metadata ?? {},
+      body: result.Body,
+    };
+  }
+
+  async headObject(input: {
+    bucket: string;
+    key: string;
+    versionId?: string;
+  }): Promise<B2S3HeadObjectResult> {
+    const result = await this.send(
+      new HeadObjectCommand({
+        Bucket: input.bucket,
+        Key: input.key,
+        VersionId: input.versionId,
+      }),
+    );
+    return {
+      key: input.key,
+      contentType: result.ContentType,
+      contentLength: result.ContentLength,
+      lastModified: result.LastModified,
+      etag: result.ETag,
+      versionId: result.VersionId,
+      metadata: result.Metadata ?? {},
+      serverSideEncryption: result.ServerSideEncryption,
+      deleteMarker: result.DeleteMarker,
+    };
+  }
+
+  async deleteObject(input: { bucket: string; key: string; versionId?: string }): Promise<void> {
+    await this.send(
+      new DeleteObjectCommand({
+        Bucket: input.bucket,
+        Key: input.key,
+        VersionId: input.versionId,
+      }),
+    );
+  }
+
+  async deleteObjects(input: {
+    bucket: string;
+    objects: Array<{ key: string; versionId?: string }>;
+    quiet?: boolean;
+    bypassGovernance?: boolean;
+  }): Promise<B2S3DeleteObjectsResult> {
+    const result = await this.send(
+      new DeleteObjectsCommand({
+        Bucket: input.bucket,
+        Delete: {
+          Objects: input.objects.map((object) => ({
+            Key: object.key,
+            VersionId: object.versionId,
+          })),
+          Quiet: input.quiet,
+        },
+        BypassGovernanceRetention: input.bypassGovernance,
+      }),
+    );
+    return {
+      deleted: result.Deleted ?? [],
+      errors: result.Errors ?? [],
+      attempted: input.objects.length,
+      aborted: currentMcpRequestSignal()?.aborted === true,
+      maxConcurrency: 1,
+    };
+  }
+
+  async copyObject(input: {
+    sourceBucket: string;
+    sourceKey: string;
+    sourceVersionId?: string;
+    destinationBucket: string;
+    destinationKey: string;
+    metadataDirective?: "COPY" | "REPLACE";
+    contentType?: string;
+    metadata?: Record<string, string>;
+  }): Promise<void> {
+    await this.send(
+      new CopyObjectCommand({
+        Bucket: input.destinationBucket,
+        Key: input.destinationKey,
+        CopySource: copySource(input),
+        MetadataDirective: input.metadataDirective,
+        ContentType: input.metadataDirective === "REPLACE" ? input.contentType : undefined,
+        Metadata: input.metadataDirective === "REPLACE" ? input.metadata : undefined,
+      }),
+    );
+  }
+
+  async listObjectsV2(input: {
+    bucket: string;
+    prefix?: string;
+    delimiter?: string;
+    maxKeys: number;
+    continuationToken?: string;
+    startAfter?: string;
+  }): Promise<B2S3ListObjectsV2Result> {
+    const result = await this.send(
+      new ListObjectsV2Command({
+        Bucket: input.bucket,
+        Prefix: input.prefix,
+        Delimiter: input.delimiter,
+        MaxKeys: input.maxKeys,
+        ContinuationToken: input.continuationToken,
+        StartAfter: input.startAfter,
+      }),
+    );
+    const objects = result.Contents ?? [];
+    return {
+      objects,
+      commonPrefixes: result.CommonPrefixes ?? [],
+      isTruncated: result.IsTruncated === true,
+      nextContinuationToken: result.NextContinuationToken,
+      keyCount: objects.length,
+    };
+  }
+
+  async listObjectVersions(input: {
+    bucket: string;
+    prefix?: string;
+    delimiter?: string;
+    maxKeys: number;
+    keyMarker?: string;
+    versionIdMarker?: string;
+  }): Promise<B2S3ListObjectVersionsResult> {
+    const result = await this.send(
+      new ListObjectVersionsCommand({
+        Bucket: input.bucket,
+        Prefix: input.prefix,
+        Delimiter: input.delimiter,
+        MaxKeys: input.maxKeys,
+        KeyMarker: input.keyMarker,
+        VersionIdMarker: input.versionIdMarker,
+      }),
+    );
+    return {
+      versions: result.Versions ?? [],
+      deleteMarkers: result.DeleteMarkers ?? [],
+      commonPrefixes: result.CommonPrefixes ?? [],
+      isTruncated: result.IsTruncated === true,
+      nextKeyMarker: result.NextKeyMarker,
+      nextVersionIdMarker: result.NextVersionIdMarker,
+    };
+  }
+
+  async presignObjectUrl(input: {
+    bucket: string;
+    key: string;
+    operation: "GetObject" | "PutObject";
+    expiresIn: number;
+    versionId?: string;
+    contentType?: string;
+  }): Promise<B2S3PresignObjectUrlResult> {
+    if (input.operation === "PutObject" && input.versionId !== undefined) {
+      throw new Error("versionId is only valid for GetObject presigned URLs.");
+    }
+    const command =
+      input.operation === "GetObject"
+        ? new GetObjectCommand({
+            Bucket: input.bucket,
+            Key: input.key,
+            VersionId: input.versionId,
+          })
+        : new PutObjectCommand({
+            Bucket: input.bucket,
+            Key: input.key,
+            ContentType: input.contentType,
+          });
+    return {
+      url: await getSignedUrl(this, command, { expiresIn: input.expiresIn }),
+      operation: input.operation,
+      expiresIn: input.expiresIn,
+      expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
+    };
   }
 
   async createMultipartUpload(input: {

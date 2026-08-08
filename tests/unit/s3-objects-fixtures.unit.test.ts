@@ -1,6 +1,6 @@
 import { ReadableStream } from "node:stream/web";
 import { registerS3ObjectTools } from "../../src/s3/objects";
-import type { B2Client, S3DownloadedObject } from "../../src/b2/client";
+import type { B2S3DownloadedObject } from "../../src/s3/aws-sdk-adapter";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
@@ -16,7 +16,7 @@ function streamFrom(chunks: Uint8Array[], onCancel: () => void = () => undefined
   });
 }
 
-function downloadedObject(overrides: Partial<S3DownloadedObject> = {}): S3DownloadedObject {
+function downloadedObject(overrides: Partial<B2S3DownloadedObject> = {}): B2S3DownloadedObject {
   const body = streamFrom([new TextEncoder().encode("hello")]);
   return {
     key: "hello.txt",
@@ -34,7 +34,7 @@ function downloadedObject(overrides: Partial<S3DownloadedObject> = {}): S3Downlo
 describe("S3 object tools with deterministic handler fake", () => {
   let tools: ToolHarness;
   let calls: Array<{ operation: string; input: any }> = [];
-  let nextDownload: S3DownloadedObject = downloadedObject();
+  let nextDownload: B2S3DownloadedObject = downloadedObject();
   let nextListObjects = {
     objects: [],
     commonPrefixes: [],
@@ -51,20 +51,19 @@ describe("S3 object tools with deterministic handler fake", () => {
       isTruncated: false,
       keyCount: 0,
     };
-    const b2 = {
-      async s3PutObject(input: any) {
-        calls.push({ operation: "s3PutObject", input });
-        return { fileName: input.key, fileId: "version-put", contentLength: 5 };
+    const s3 = {
+      async putObject(input: any) {
+        calls.push({ operation: "putObject", input });
       },
-      async s3GetObject(input: any) {
-        calls.push({ operation: "s3GetObject", input });
+      async getObject(input: any) {
+        calls.push({ operation: "getObject", input });
         return nextDownload;
       },
-      async s3DeleteObject(input: any) {
-        calls.push({ operation: "s3DeleteObject", input });
+      async deleteObject(input: any) {
+        calls.push({ operation: "deleteObject", input });
       },
-      async s3DeleteObjects(input: any) {
-        calls.push({ operation: "s3DeleteObjects", input });
+      async deleteObjects(input: any) {
+        calls.push({ operation: "deleteObjects", input });
         return {
           deleted: input.quiet ? [] : input.objects.map((object: any) => ({ Key: object.key })),
           errors: [],
@@ -73,24 +72,23 @@ describe("S3 object tools with deterministic handler fake", () => {
           maxConcurrency: 1,
         };
       },
-      async s3HeadObject(input: any) {
-        calls.push({ operation: "s3HeadObject", input });
+      async headObject(input: any) {
+        calls.push({ operation: "headObject", input });
         return {
           ...downloadedObject(),
           serverSideEncryption: "AES256",
           deleteMarker: false,
         };
       },
-      async s3CopyObject(input: any) {
-        calls.push({ operation: "s3CopyObject", input });
-        return { fileName: input.destinationKey, fileId: "version-copy", contentLength: 5 };
+      async copyObject(input: any) {
+        calls.push({ operation: "copyObject", input });
       },
-      async s3ListObjectsV2(input: any) {
-        calls.push({ operation: "s3ListObjectsV2", input });
+      async listObjectsV2(input: any) {
+        calls.push({ operation: "listObjectsV2", input });
         return nextListObjects;
       },
-      async s3ListObjectVersions(input: any) {
-        calls.push({ operation: "s3ListObjectVersions", input });
+      async listObjectVersions(input: any) {
+        calls.push({ operation: "listObjectVersions", input });
         return {
           versions: [],
           deleteMarkers: [],
@@ -100,7 +98,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       },
     };
     tools = new ToolHarness();
-    registerS3ObjectTools(tools, b2 as unknown as B2Client, testConfig);
+    registerS3ObjectTools(tools, s3 as any, testConfig);
   });
 
   afterEach(() => {
@@ -119,7 +117,7 @@ describe("S3 object tools with deterministic handler fake", () => {
 
     expect(result.isError).toBeFalsy();
     expect(calls[0]).toMatchObject({
-      operation: "s3PutObject",
+      operation: "putObject",
       input: {
         bucket: "b",
         key: "hello.txt",
@@ -128,7 +126,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         serverSideEncryption: "AES256",
       },
     });
-    expect(Buffer.from(calls[0].input.source.buffer).toString()).toBe("hello");
+    expect(Buffer.from(calls[0].input.body).toString()).toBe("hello");
   });
 
   it("returns small inline objects and forwards list pagination arguments", async () => {
@@ -158,7 +156,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       nextContinuationToken: "next",
       keyCount: 1,
     });
-    expect(calls.find((call) => call.operation === "s3ListObjectsV2")?.input).toMatchObject({
+    expect(calls.find((call) => call.operation === "listObjectsV2")?.input).toMatchObject({
       bucket: "b",
       prefix: "a",
       delimiter: "/",
@@ -193,7 +191,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       objects: [{ key: "a.txt" }],
     });
     expect(blocked.isError).toBe(true);
-    expect(calls.some((call) => call.operation === "s3DeleteObjects")).toBe(false);
+    expect(calls.some((call) => call.operation === "deleteObjects")).toBe(false);
 
     const blockedBypass = parseResult(
       await tools.call("s3_delete_objects", {
@@ -203,7 +201,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       }),
     );
     expect(blockedBypass).toContain("bypass governance-mode Object Lock retention");
-    expect(calls.some((call) => call.operation === "s3DeleteObjects")).toBe(false);
+    expect(calls.some((call) => call.operation === "deleteObjects")).toBe(false);
 
     const allowed = parseResult(
       await tools.call("s3_delete_objects", {
@@ -214,7 +212,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       }),
     );
     expect(allowed).toMatchObject({ attempted: 1, aborted: false, maxConcurrency: 1 });
-    expect(calls.find((call) => call.operation === "s3DeleteObjects")?.input).toMatchObject({
+    expect(calls.find((call) => call.operation === "deleteObjects")?.input).toMatchObject({
       quiet: false,
     });
   });

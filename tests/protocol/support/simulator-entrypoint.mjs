@@ -5,6 +5,7 @@ import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 const { B2Client: SdkB2Client } = require("@backblaze-labs/b2-sdk");
 const { B2Simulator } = require("@backblaze-labs/b2-sdk/simulator");
+const { S3Client } = require("@aws-sdk/client-s3");
 const { createMcpHttpTransport, setB2SdkClientFactoryForTests } = require("../../../dist/auth.js");
 
 const API_TIMEOUT_MS = 30_000;
@@ -55,6 +56,30 @@ function credentialScopedTransport(inner) {
 }
 
 const simulators = new Map();
+
+S3Client.prototype.send = async (command, options = {}) => {
+  if (options.abortSignal?.aborted) throw options.abortSignal.reason ?? new Error("aborted");
+  switch (command?.constructor?.name) {
+    case "ListObjectsV2Command":
+      return {
+        Contents: [],
+        CommonPrefixes: [],
+        IsTruncated: false,
+        KeyCount: 0,
+      };
+    case "ListObjectVersionsCommand":
+      return {
+        Versions: [],
+        DeleteMarkers: [],
+        CommonPrefixes: [],
+        IsTruncated: false,
+      };
+    case "GetBucketLocationCommand":
+      return { LocationConstraint: "us-west-004" };
+    default:
+      return {};
+  }
+};
 
 setB2SdkClientFactoryForTests((config) => {
   const cacheKey = `${config.applicationKeyId}\0${config.applicationKey}`;

@@ -25,12 +25,40 @@ describe("S3 tool error paths (catch blocks)", () => {
   const args = {
     bucket: "b",
     key: "k",
+    sourceBucket: "source-b",
+    sourceKey: "source-k",
+    destinationBucket: "dest-b",
+    destinationKey: "dest-k",
+    content: Buffer.from("hello").toString("base64"),
+    objects: [{ key: "k" }],
+    uploadId: "upload-1",
+    parts: [{ partNumber: 1, etag: '"etag"' }],
+    partNumber: 1,
+    copySource: "source-b/source-k",
     rules: [{ id: "r", status: "Enabled" }],
+    confirm: true,
   };
 
-  // The retained S3 tools that call the SDK (presigned URL generator excluded —
-  // it does not call SDK.send).
-  const tools = ["s3_head_bucket", "s3_put_bucket_lifecycle", "s3_get_bucket_location"];
+  // The retained S3 tools that call SDK.send. Presigning-only tools are excluded.
+  const tools = [
+    "s3_head_bucket",
+    "s3_put_bucket_lifecycle",
+    "s3_get_bucket_location",
+    "s3_put_object",
+    "s3_get_object",
+    "s3_delete_object",
+    "s3_delete_objects",
+    "s3_head_object",
+    "s3_copy_object",
+    "s3_list_objects_v2",
+    "s3_list_object_versions",
+    "s3_create_multipart_upload",
+    "s3_complete_multipart_upload",
+    "s3_abort_multipart_upload",
+    "s3_list_multipart_uploads",
+    "s3_list_parts",
+    "s3_upload_part_copy",
+  ];
 
   it.each(tools)("%s returns a structured error when the SDK rejects", async (tool) => {
     sendSpy.mockRejectedValue({

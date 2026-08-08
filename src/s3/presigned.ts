@@ -1,9 +1,9 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
-import { B2Client } from "../b2/client.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import type { B2Config } from "../utils/types.js";
+import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 
 /**
  * Presigned URL tools for the B2 S3-compatible API.
@@ -17,6 +17,8 @@ interface S3PresignedToolOptions {
   allowGetObjectUrl?: boolean;
   allowPutObjectUrl?: boolean;
 }
+
+type B2S3PresignedClient = Pick<B2S3PeerClient, "presignObjectUrl">;
 
 const PUT_OBJECT_CONFIRM_DESC =
   "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
@@ -45,7 +47,7 @@ function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean)
 
 export function registerS3PresignedTools(
   server: ToolRegistrar,
-  b2: B2Client,
+  s3: B2S3PresignedClient,
   config: B2Config,
   options: S3PresignedToolOptions = {},
 ): void {
@@ -107,7 +109,7 @@ export function registerS3PresignedTools(
         const gate = checkDestructive("s3_get_presigned_url", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
         return toolJson(
-          await b2.s3PresignObjectUrl({
+          await s3.presignObjectUrl({
             bucket: args.bucket,
             key: args.key,
             operation: args.operation,

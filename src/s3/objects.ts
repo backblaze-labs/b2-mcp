@@ -7,9 +7,9 @@ import { pipeline } from "stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
-import { B2Config } from "../utils/types.js";
+import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-import { B2Client } from "../b2/client.js";
+import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
@@ -17,6 +17,69 @@ const CONFIRM_DESC =
 interface DeleteObjectEntry {
   key: string;
   versionId?: string;
+}
+
+type B2S3ObjectClient = Pick<
+  B2S3PeerClient,
+  | "putObject"
+  | "getObject"
+  | "deleteObject"
+  | "deleteObjects"
+  | "headObject"
+  | "copyObject"
+  | "listObjectsV2"
+  | "listObjectVersions"
+>;
+
+function isWebReadableStream(value: unknown): value is WebReadableStream<Uint8Array> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "getReader" in value &&
+    typeof (value as { getReader?: unknown }).getReader === "function"
+  );
+}
+
+function isNodeReadable(value: unknown): value is Readable {
+  return value instanceof Readable;
+}
+
+function transformToWebStream(value: unknown): WebReadableStream<Uint8Array> | null {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "transformToWebStream" in value &&
+    typeof (value as { transformToWebStream?: unknown }).transformToWebStream === "function"
+  ) {
+    return (
+      value as { transformToWebStream: () => WebReadableStream<Uint8Array> }
+    ).transformToWebStream();
+  }
+  return null;
+}
+
+async function cancelBody(body: unknown, reason?: unknown): Promise<void> {
+  if (isWebReadableStream(body)) {
+    await body.cancel(reason).catch(() => undefined);
+    return;
+  }
+  if (isNodeReadable(body)) {
+    body.destroy(reason instanceof Error ? reason : undefined);
+    return;
+  }
+  if (
+    typeof body === "object" &&
+    body !== null &&
+    "cancel" in body &&
+    typeof (body as { cancel?: unknown }).cancel === "function"
+  ) {
+    await Promise.resolve(
+      (body as { cancel: (reason?: unknown) => Promise<void> | void }).cancel(reason),
+    ).catch(() => undefined);
+    return;
+  }
+  const web = transformToWebStream(body);
+  if (web) await web.cancel(reason).catch(() => undefined);
 }
 
 async function webStreamToBuffer(
@@ -48,8 +111,50 @@ async function webStreamToBuffer(
   return Buffer.concat(chunks, total);
 }
 
-function nodeReadableFromWeb(stream: WebReadableStream<Uint8Array>): Readable {
-  return Readable.fromWeb(stream as Parameters<typeof Readable.fromWeb>[0]);
+async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of stream) {
+      const buffer = Uint8Array.from(
+        chunk instanceof Uint8Array
+          ? chunk
+          : typeof chunk === "string"
+            ? Buffer.from(chunk)
+            : Buffer.from(chunk),
+      );
+      chunks.push(buffer);
+      total += buffer.byteLength;
+      if (total > maxBytes) {
+        stream.destroy(new Error(`Inline object body exceeded ${maxBytes} bytes.`));
+        throw new Error(
+          `Object body exceeded the ${maxBytes}-byte inline read limit for s3_get_object while streaming.`,
+        );
+      }
+    }
+  } catch (err) {
+    stream.destroy(err instanceof Error ? err : undefined);
+    throw err;
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function nodeReadableFromBody(body: unknown): Readable {
+  if (isNodeReadable(body)) return body;
+  if (isWebReadableStream(body)) {
+    return Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0]);
+  }
+  const web = transformToWebStream(body);
+  if (web) return Readable.fromWeb(web as Parameters<typeof Readable.fromWeb>[0]);
+  if (body instanceof Uint8Array || typeof body === "string") return Readable.from([body]);
+  throw new Error("Object response did not include a readable body.");
+}
+
+async function bodyToBuffer(body: unknown, maxBytes: number): Promise<Buffer> {
+  if (isWebReadableStream(body)) return webStreamToBuffer(body, maxBytes);
+  const web = transformToWebStream(body);
+  if (web) return webStreamToBuffer(web, maxBytes);
+  return nodeStreamToBuffer(nodeReadableFromBody(body), maxBytes);
 }
 
 // Inline object content moves bytes *through* the server — and, for base64,
@@ -61,7 +166,11 @@ function nodeReadableFromWeb(stream: WebReadableStream<Uint8Array>): Readable {
 // cap is what keeps the data plane off the server: anything larger must presign.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
-export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, config: B2Config): void {
+export function registerS3ObjectTools(
+  server: ToolRegistrar,
+  s3: B2S3ObjectClient,
+  config: B2Config,
+): void {
   server.registerTool(
     "s3_put_object",
     {
@@ -117,12 +226,11 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
           );
         }
 
-        await b2.s3PutObject({
+        await s3.putObject({
           bucket: args.bucket,
           key: args.key,
-          source: safePath
-            ? { kind: "file", path: safePath }
-            : { kind: "buffer", buffer: new Uint8Array(Buffer.from(args.content!, "base64")) },
+          body: safePath ? fs.createReadStream(safePath) : Buffer.from(args.content!, "base64"),
+          contentLength: size,
           contentType: args.contentType,
           metadata: args.metadata,
           serverSideEncryption: args.serverSideEncryption,
@@ -153,7 +261,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     },
     async (args) => {
       try {
-        const result = await b2.s3GetObject({
+        const result = await s3.getObject({
           bucket: args.bucket,
           key: args.key,
           range: args.range,
@@ -166,25 +274,31 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
           fs.mkdirSync(path.dirname(safePath), { recursive: true });
           const writeStream = fs.createWriteStream(safePath);
           try {
-            await pipeline(nodeReadableFromWeb(result.body), writeStream);
+            await pipeline(nodeReadableFromBody(result.body), writeStream);
           } catch (e) {
             await fs.promises.unlink(safePath).catch(() => undefined);
             throw e;
           }
-          return toolSuccess(`Object saved to ${safePath} (${result.contentLength} bytes)`);
+          return toolSuccess(
+            `Object saved to ${safePath} (${result.contentLength ?? "unknown"} bytes)`,
+          );
         }
 
         // Bound the inline path: without saveToPath the whole object is buffered
         // and base64-copied into the response (and the model context), so this is
         // a control-plane convenience for small payloads only. Reject before
         // buffering and steer bulk reads to a presigned URL or saveToPath.
-        if (!Number.isFinite(result.contentLength) || result.contentLength < 0) {
-          await result.body.cancel().catch(() => undefined);
+        if (
+          typeof result.contentLength !== "number" ||
+          !Number.isFinite(result.contentLength) ||
+          result.contentLength < 0
+        ) {
+          await cancelBody(result.body);
           return toolError(new Error("Object response reported an invalid content length."));
         }
 
         if (result.contentLength > MAX_INLINE_OBJECT_BYTES) {
-          await result.body.cancel().catch(() => undefined);
+          await cancelBody(result.body);
           return toolError(
             new Error(
               `Object is ${result.contentLength} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline read limit for s3_get_object. ` +
@@ -193,7 +307,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
             ),
           );
         }
-        const buffer = await webStreamToBuffer(result.body, MAX_INLINE_OBJECT_BYTES);
+        const buffer = await bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES);
 
         return toolJson({
           key: args.key,
@@ -228,7 +342,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
       try {
         const gate = checkDestructive("s3_delete_object", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        await b2.s3DeleteObject({
+        await s3.deleteObject({
           bucket: args.bucket,
           key: args.key,
           versionId: args.versionId,
@@ -244,7 +358,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     "s3_delete_objects",
     {
       description:
-        "Delete multiple objects from a B2 bucket with bounded SDK concurrency (up to 1000 objects).",
+        "Delete multiple objects from a B2 bucket through S3 DeleteObjects (up to 1000 objects).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         objects: z
@@ -275,7 +389,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
         const gate = checkDestructive("s3_delete_objects", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
         return toolJson({
-          ...(await b2.s3DeleteObjects({
+          ...(await s3.deleteObjects({
             bucket: args.bucket,
             objects: args.objects as DeleteObjectEntry[],
             quiet: args.quiet ?? true,
@@ -301,7 +415,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     },
     async (args) => {
       try {
-        const result = await b2.s3HeadObject({
+        const result = await s3.headObject({
           bucket: args.bucket,
           key: args.key,
           versionId: args.versionId,
@@ -327,7 +441,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     "s3_copy_object",
     {
       description:
-        "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+        "Copy an object within B2 or between B2 buckets through the S3-compatible CopyObject API. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
       inputSchema: {
         sourceBucket: z.string().describe("The source bucket name."),
         sourceKey: z.string().describe("The source object key."),
@@ -357,7 +471,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     },
     async (args) => {
       try {
-        await b2.s3CopyObject({
+        await s3.copyObject({
           sourceBucket: args.sourceBucket,
           sourceKey: args.sourceKey,
           sourceVersionId: args.sourceVersionId,
@@ -402,7 +516,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     async (args) => {
       try {
         return toolJson({
-          ...(await b2.s3ListObjectsV2({
+          ...(await s3.listObjectsV2({
             bucket: args.bucket,
             prefix: args.prefix,
             delimiter: args.delimiter,
@@ -440,7 +554,7 @@ export function registerS3ObjectTools(server: ToolRegistrar, b2: B2Client, confi
     async (args) => {
       try {
         return toolJson({
-          ...(await b2.s3ListObjectVersions({
+          ...(await s3.listObjectVersions({
             bucket: args.bucket,
             prefix: args.prefix,
             delimiter: args.delimiter,

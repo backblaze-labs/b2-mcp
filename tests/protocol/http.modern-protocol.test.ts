@@ -11,6 +11,7 @@ import {
 } from "../../src/http-server";
 import { invalidateAuthManagerCache } from "../../src/server";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import { S3Client } from "@aws-sdk/client-s3";
 import {
   JSON_HEADERS,
   closeHttpServer,
@@ -47,6 +48,12 @@ afterAll(() => {
 beforeEach(async () => {
   const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
   installSdkTransport(simulator.transport());
+  vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({
+    Contents: [],
+    CommonPrefixes: [],
+    IsTruncated: false,
+    KeyCount: 0,
+  });
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;
@@ -55,6 +62,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
   await closeHttpServer(handle);
