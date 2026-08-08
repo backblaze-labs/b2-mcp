@@ -39,7 +39,7 @@ on the TypeScript compiler API for this repository's current gates.
 | Consumer | Status | Migration note |
 | --- | --- | --- |
 | `build` | Feasible later | Native compiler output must be compared against TypeScript 6 output for CJS, `.d.ts`, `.d.ts.map`, and package exports. |
-| `typecheck` | Feasible later | Run on the Node.js 22.3.0, 22.23.1, 24, and 26 evidence paths and review any diagnostic drift. |
+| `typecheck` | Feasible later | Run on the Node.js 22.23.1, 24, and 26 deterministic toolchain matrix and review any diagnostic drift; the separate package smoke covers the Node.js 22.3.0 engine floor. |
 | `lint:docs` | Blocked now | It needs the TypeScript programmatic API through `typescript-eslint`, whose current support excludes TypeScript 7. |
 | `dev` | Already unblocked | The script uses `tsx`, avoiding `ts-node` and its compiler-API dependency. |
 
@@ -57,10 +57,7 @@ on the TypeScript compiler API for this repository's current gates.
 ## Required Evidence For The Future Migration
 
 - `pnpm install --frozen-lockfile`
-- `pnpm run typecheck`
-- `pnpm run build`
-- `pnpm run lint`
-- `pnpm run lint:docs`
+- `pnpm run verify`
 - `pnpm run test:contract`
 - `pnpm run test:protocol`
 - `pnpm run test:package`
