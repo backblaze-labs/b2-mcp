@@ -79,7 +79,6 @@ async function cancelBody(body: B2S3ObjectBody, reason?: unknown): Promise<void>
   }
   if (
     typeof body === "object" &&
-    body !== null &&
     "cancel" in body &&
     typeof (body as { cancel?: unknown }).cancel === "function"
   ) {
