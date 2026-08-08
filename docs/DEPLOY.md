@@ -148,6 +148,98 @@ pnpm install --frozen-lockfile
 pnpm run build
 ```
 
+### Container image option
+
+Release images are published to GHCR as
+`ghcr.io/backblaze-labs/b2-mcp:<package-version>`. The image uses the same
+Node.js 22.23.1 runtime pin as `.nvmrc`, defaults to HTTP through
+`B2_MCP_TRANSPORT=http`, and contains only the built server plus production
+dependencies. Releases publish immutable version tags only:
+`:<package-version>` and the matching signed tag such as `:v0.2.0`. There is no
+public `:latest` tag.
+
+Before running a release image, verify its keyless signature against this
+repository's release workflow identity and confirm the signed image index
+contains BuildKit attestation manifests for the platform images:
+
+```bash
+B2_MCP_IMAGE=ghcr.io/backblaze-labs/b2-mcp@sha256:DIGEST_FROM_RELEASE
+cosign verify "$B2_MCP_IMAGE" \
+  --certificate-identity-regexp '^https://github.com/backblaze-labs/b2-mcp/.github/workflows/publish.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker buildx imagetools inspect "$B2_MCP_IMAGE" --format '{{json .}}' \
+  | jq -e '
+      .manifest.manifests as $manifests
+      | [$manifests[]
+          | select(.platform.os != "unknown")
+          | .digest] as $images
+      | [$manifests[]
+          | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")
+          | .annotations["vnd.docker.reference.digest"]] as $attested
+      | all($images[]; . as $digest | $attested | index($digest))
+    '
+```
+
+Single-tenant HTTP behind a reverse proxy:
+
+```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
+docker run --rm --name b2-mcp \
+  --stop-timeout 20 \
+  -p 127.0.0.1:3000:3000 \
+  -e B2_HTTP_CREDENTIAL_MODE=server \
+  -e B2_APPLICATION_KEY_ID=your-application-key-id \
+  -e B2_APPLICATION_KEY=your-application-key-secret \
+  -e B2_ALLOWED_HOSTS=mcp.your-domain.example \
+  -e B2_ALLOWED_ORIGINS=https://mcp.your-domain.example \
+  -e B2_MCP_RATE_LIMIT_RPS=60 \
+  -e B2_MCP_RATE_LIMIT_BURST=120 \
+  -e B2_MAX_SESSIONS=1000 \
+  -e B2_MAX_SESSIONS_PER_KEY=20 \
+  "$B2_MCP_IMAGE"
+```
+
+Header-credential compatibility mode keeps B2 credentials out of the container
+environment and requires each MCP request to include the reviewed
+`X-B2-MCP-Key-Id` / `X-B2-MCP-Key` headers:
+
+```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
+docker run --rm --name b2-mcp \
+  --stop-timeout 20 \
+  -p 127.0.0.1:3000:3000 \
+  -e B2_HTTP_CREDENTIAL_MODE=headers \
+  -e B2_ALLOWED_HOSTS=mcp.your-domain.example \
+  "$B2_MCP_IMAGE"
+```
+
+Stdio clients can use the same image by overriding the transport argument:
+
+```bash
+B2_MCP_VERSION=VERSION # replace with the release version you want
+B2_MCP_IMAGE="ghcr.io/backblaze-labs/b2-mcp:${B2_MCP_VERSION}"
+docker run --rm -i \
+  --no-healthcheck \
+  -e B2_APPLICATION_KEY_ID=your-application-key-id \
+  -e B2_APPLICATION_KEY=your-application-key-secret \
+  "$B2_MCP_IMAGE" stdio
+```
+
+For a local image from source, run `docker build -t b2-mcp:local .` and replace
+the GHCR image reference above with `b2-mcp:local`.
+
+HTTP container examples intentionally bind the host side to `127.0.0.1` and set
+`B2_ALLOWED_HOSTS`. If you publish the port through a reverse proxy or external
+load balancer, set `B2_ALLOWED_HOSTS` to the public host names before accepting
+traffic. The image healthcheck applies to HTTP mode; stdio containers should
+pass `--no-healthcheck`. If changing the HTTP listen port in a container, set
+`PORT`, not only `--port`, so the healthcheck probes the same port the server
+binds. The application drains in-flight requests for up to 10 seconds on
+SIGTERM, so set the platform stop grace period above that window; with Docker,
+use `--stop-timeout 20`.
+
 ## Step 4 — Hardened systemd unit
 
 `/etc/systemd/system/b2-mcp.service`:

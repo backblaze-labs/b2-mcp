@@ -3,7 +3,7 @@ import { PortUsageError } from "../../src/utils/config";
 
 describe("CLI argument parsing", () => {
   it("defaults to stdio transport", () => {
-    expect(parseCliArgs([])).toEqual({ action: "run", transport: "stdio" });
+    expect(parseCliArgs([], {})).toEqual({ action: "run", transport: "stdio" });
   });
 
   it("accepts HTTP transport and port flags", () => {
@@ -19,17 +19,29 @@ describe("CLI argument parsing", () => {
     });
   });
 
+  it("uses B2_MCP_TRANSPORT when no transport argument is passed", () => {
+    expect(parseCliArgs([], { B2_MCP_TRANSPORT: "http" })).toEqual({
+      action: "run",
+      transport: "http",
+    });
+    expect(parseCliArgs(["stdio"], { B2_MCP_TRANSPORT: "http" })).toEqual({
+      action: "run",
+      transport: "stdio",
+    });
+  });
+
   it("supports help and version without requiring transport configuration", () => {
-    expect(parseCliArgs(["--help"]).action).toBe("help");
-    expect(parseCliArgs(["--version"]).action).toBe("version");
+    expect(parseCliArgs(["--help"], { B2_MCP_TRANSPORT: "sse" }).action).toBe("help");
+    expect(parseCliArgs(["--version"], { B2_MCP_TRANSPORT: "sse" }).action).toBe("version");
     expect(helpText()).toContain("--transport <stdio|http>");
   });
 
   it("rejects invalid transport, port, and unknown arguments", () => {
     expect(() => parseCliArgs(["--transport", "sse"])).toThrow(CliUsageError);
+    expect(() => parseCliArgs([], { B2_MCP_TRANSPORT: "sse" })).toThrow(CliUsageError);
     expect(() => parseCliArgs(["http", "--port", "0"])).toThrow(PortUsageError);
     expect(() => parseCliArgs(["http", "--port", "3000abc"])).toThrow("Invalid port: 3000abc");
-    expect(() => parseCliArgs(["--port", "3000"])).toThrow(CliUsageError);
+    expect(() => parseCliArgs(["--port", "3000"], {})).toThrow(CliUsageError);
     expect(() => parseCliArgs(["--session"])).toThrow(CliUsageError);
   });
 });

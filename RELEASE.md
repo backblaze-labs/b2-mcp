@@ -51,7 +51,14 @@ Before publishing `v0.1.0`:
    issue or PR and approved by the release owner and security owner.
 7. Confirm `@backblaze-labs/b2-mcp` is owned by Backblaze on npm and package
    provenance is enabled before publishing or advertising npm install commands.
-8. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
+8. Confirm the GHCR package `ghcr.io/backblaze-labs/b2-mcp` is public before
+   advertising Docker run commands. On the first container release, if the
+   initial push creates a private package, set the package visibility to Public
+   in GitHub Packages and rerun the same publish tag. The workflow fails until
+   an anonymous manifest inspection succeeds.
+9. Confirm the `ghcr-publish` GitHub environment exists, requires trusted
+   release approval, and restricts deployments to protected release refs.
+10. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
    `LIVE_B2_KEY` plus environment variable `B2_LIVE_TEST_ACCOUNT_ID`. Confirm
    `live-b2-smoke` has its four `LIVE_B2_*` environment secrets plus
    environment variables `MCP_URL`, `B2_SMOKE_BUCKET`, and
@@ -65,9 +72,9 @@ Before publishing `v0.1.0`:
    them from `live-b2-contract`. Manually dispatch smoke and contract from
    `main`. Security owns credential rotation. The live jobs run serially on
    Node.js 22.23.1, Node.js 24, and Node.js 26.
-9. Confirm any claimed MCP SDK package split is either implemented or tracked as
+11. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.
-10. Create the GitHub Release for the publish tag, then publish only from the
+12. Create the GitHub Release for the publish tag, then publish only from the
     canonical repository through the protected
     `.github/workflows/publish.yml` workflow. Do not publish from a developer
     workstation. The publish workflow must prove the `v*` tag is reachable from
@@ -118,7 +125,26 @@ exists. For the first public package only:
    tag/package/changelog consistency, runs `pnpm run verify`, requires live
    contract success, builds one tarball, runs an npm dry-run publish, records
    checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
-   and creates or updates the GitHub Release from the same artifact.
+   publishes and anonymously verifies the idempotent GHCR container image from
+   the same verified ref, and then creates or updates the GitHub Release. A
+   Docker/GHCR failure can be retried against the same tag; it must not sign an
+   existing digest unless that digest already has this workflow's trusted
+   signature plus provenance and SBOM attestations, and it must not overwrite an
+   existing versioned image whose recorded revision differs from the verified
+   checkout SHA.
+4. If GHCR has the version/release tags but the retry fails because the digest is
+   unsigned or missing trusted attestations, delete that specific GHCR package
+   version and rerun the same tag:
+
+   ```bash
+   VERSION=0.1.0
+   version_id="$(
+     gh api orgs/backblaze-labs/packages/container/b2-mcp/versions \
+       --jq ".[] | select(.metadata.container.tags[]? == \"${VERSION}\") | .id" \
+       | head -n 1
+   )"
+   gh api --method DELETE "orgs/backblaze-labs/packages/container/b2-mcp/versions/${version_id}"
+   ```
 
 ## Prerelease
 

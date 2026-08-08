@@ -282,8 +282,43 @@ jobs:
             --ignore-scripts \
             --tag "$npm_tag"
 
-  github-release:
+  container-image:
     needs: [prepare, publish]
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    environment: ghcr-publish
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.prepare.outputs.checkout-sha }}
+          persist-credentials: false
+      # docker/setup-qemu-action v3.6.0, reviewed 2026-08-07.
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
+      # docker/setup-buildx-action v3.11.1, reviewed 2026-08-07.
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      # sigstore/cosign-installer v3.9.2, reviewed 2026-08-07.
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159
+      - name: Smoke local Docker image
+        env:
+          CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
+        run: node scripts/smoke-container-image.mjs --build --image "b2-mcp-release-smoke:${CHECKOUT_SHA}"
+      - name: Publish signed multi-platform GHCR image
+        id: image
+        env:
+          CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
+          GHCR_TOKEN: ${{ github.token }}
+          PUBLISH_TAG: ${{ inputs.tag }}
+          REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
+        run: node scripts/publish-container-image.mjs
+
+  github-release:
+    needs: [prepare, publish, container-image]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 5

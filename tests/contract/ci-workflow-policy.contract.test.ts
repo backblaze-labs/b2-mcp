@@ -46,6 +46,7 @@ const requiredJobNames = [
   "runtime engine floor",
   "production dependency audit",
   "package budget",
+  "container image",
   "supply-chain audit",
   "CodeQL/workflow security",
   "slow/lifecycle",
@@ -104,6 +105,7 @@ describe("CI workflow policy", () => {
       "runtime-engine-floor",
       "production-dependency-audit",
       "package-budget",
+      "container-image",
       "supply-chain-audit",
       "codeql-workflow-security",
       "slow-lifecycle",
@@ -153,6 +155,7 @@ describe("CI workflow policy", () => {
     const auditJob = workflowJob("production-dependency-audit-matrix");
     const auditAggregateJob = workflowJob("production-dependency-audit");
     const budgetJob = workflowJob("package-budget");
+    const containerJob = workflowJob("container-image");
     const slowJob = workflowJob("slow-lifecycle");
     const crossPlatformMatrixJob = workflowJob("cross-platform-minimum-matrix");
     const crossPlatformAggregateJob = workflowJob("cross-platform-minimum");
@@ -192,6 +195,10 @@ describe("CI workflow policy", () => {
     expect(auditAggregateJob).toContain("needs: production-dependency-audit-matrix");
     expect(budgetJob).toContain("pnpm run check:package-budget");
     expect(budgetJob).toContain("reports/package-budget/");
+    expect(containerJob).toContain("name: container image");
+    expect(containerJob).toContain(
+      'node scripts/smoke-container-image.mjs --build --image "b2-mcp:${GITHUB_SHA}"',
+    );
     expect(slowJob).toContain("timeout-minutes: 20");
     expect(slowJob).toContain("VITEST_MAX_WORKERS: 1");
     expect(slowJob).toContain("pnpm run test:slow -- --maxWorkers=1");
@@ -209,6 +216,7 @@ describe("CI workflow policy", () => {
     expect(summaryJob).toContain("Linux deterministic Node matrix | 22.23.1, 24, 26");
     expect(summaryJob).toContain("Runtime engine floor | Node.js 22.3.0 package install smoke");
     expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
+    expect(summaryJob).toContain("Container image | Docker build plus HTTP health/readiness smoke");
   });
 
   it("does not persist checkout credentials in pull-request jobs that run repo code", () => {
@@ -298,10 +306,21 @@ describe("CI workflow policy", () => {
   it("blocks publishing until the live contract suite passes for the publish ref", () => {
     const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
     const githubReleaseJob = workflowJobBlock(publish, "github-release") ?? "";
+    const containerImageJob = workflowJobBlock(publish, "container-image") ?? "";
     const publishJob = workflowJobBlock(publish, "publish") ?? "";
 
     expect(publishJob).toContain("needs: [prepare, live-contract]");
-    expect(githubReleaseJob).toContain("needs: [prepare, publish]");
+    expect(containerImageJob).toContain("needs: [prepare, publish]");
+    expect(containerImageJob).toContain("environment: ghcr-publish");
+    expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
+    expect(containerImageJob).toContain("packages: write");
+    expect(containerImageJob).toContain("id-token: write");
+    expect(containerImageJob).toContain("docker/setup-qemu-action");
+    expect(containerImageJob).toContain("docker/setup-buildx-action");
+    expect(containerImageJob).toContain("sigstore/cosign-installer");
+    expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
+    expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
+    expect(githubReleaseJob).toContain("needs: [prepare, publish, container-image]");
     expect(githubReleaseJob).toContain("Create GitHub release from verified artifact");
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");

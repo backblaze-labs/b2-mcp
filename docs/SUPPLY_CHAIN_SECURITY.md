@@ -205,12 +205,54 @@ The only repository workflow allowed to publish npm packages is
 - verifies the tarball SHA-256 and npm `dist.integrity` before publishing;
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
-- verifies checksums and creates or updates the GitHub Release only after the
-  npm publish job succeeds, from a separate job that does not hold npm OIDC
-  permission;
+- verifies checksums and creates or updates the GitHub Release after npm publish
+  and the public GHCR manifest check succeed, from a separate job that does not
+  hold npm OIDC permission; the GHCR job is idempotent, so a Docker/GHCR retry
+  does not require re-cutting the npm version;
+- builds, smokes, and publishes the GHCR image from the same verified checkout
+  SHA after npm publish succeeds, using `packages: write` and OIDC only for
+  keyless signing, behind the protected `ghcr-publish` environment;
+- publishes a multi-platform GHCR manifest for `linux/amd64` and `linux/arm64`,
+  attaches BuildKit provenance and SBOM attestation manifests, signs the image
+  index digest that contains those manifests with cosign keyless signing, records
+  the image digest and pinned Node base digest in release metadata, and refuses
+  to overwrite an existing version tag whose manifest revision differs from the
+  verified checkout SHA;
+- treats an already-published version tag as idempotent only after verifying the
+  existing digest's prior cosign signature from this release workflow and
+  checking the signed index contains BuildKit provenance and SBOM attestation
+  manifests for each required platform, so the workflow does not sign a digest
+  based only on caller-controlled OCI annotations; if a first publish dies after
+  pushing tags but before signing, delete the unsigned GHCR package version
+  documented in `RELEASE.md` and rerun the same tag;
+- verifies the pushed version tag through an anonymous manifest inspection before
+  the GitHub Release job can run, so a private first-publish GHCR package fails
+  the workflow until an owner sets the package visibility to Public and reruns
+  the same tag;
+- publishes only immutable container tags: the package version without a leading
+  `v` and the matching signed release tag; no mutable `latest` tag is produced;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
 - publishes the prebuilt tarball with lifecycle scripts disabled:
   `npm publish <tarball> --provenance --access public --ignore-scripts`.
 
 Do not publish from a developer workstation or from a workflow that has not
 first proved the release tag is reachable from `ci-green`.
+
+## Container Base Image Pinning
+
+`Dockerfile` pins the Node.js base image by immutable digest, with the readable
+`node:<version>-bookworm-slim` tag retained only as a comment. Treat that digest
+as the container equivalent of a lockfile entry.
+
+To update it:
+
+1. Confirm `.nvmrc`, `runtime-policy.json`, and package `engines.node` still
+   agree on the supported Node.js line.
+2. Resolve the new multi-platform Node image digest:
+   `docker buildx imagetools inspect node:<version>-bookworm-slim`.
+3. Update every `FROM node:<version>-bookworm-slim@sha256:...` line in
+   `Dockerfile` with the same reviewed index digest and update the review date
+   comment.
+4. Run `pnpm run test:unit`, `pnpm run test:contract`, and the container CI
+   smoke path before release. The `container image` tests fail if a future
+   `FROM` line uses a floating tag.

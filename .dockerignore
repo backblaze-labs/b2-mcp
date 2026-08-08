@@ -1,0 +1,27 @@
+.git
+.audit
+.claude
+.env*
+!.env.example
+.envrc
+.idea
+.vscode
+coverage
+dist
+node_modules
+probe-output
+reports
+.npmrc
+*.cert
+*.crt
+*.key
+*.log
+*.p12
+*.pem
+*.pfx
+*.tsbuildinfo
+.DS_Store
+
+# Internal-only docs are never sent to the Docker build context.
+docs/STRATEGY-*.md
+docs/internal

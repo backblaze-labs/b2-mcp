@@ -15,10 +15,16 @@ mgmt
 # Tooling, libraries, runtimes
 biome
 biomejs
+buildx
+BuildKit
+cgroup
 cobertura
 corepack
+cosign
 cspell
 CycloneDX
+envrc
+GHCR
 iocs
 junit
 MCP
@@ -26,6 +32,10 @@ NOFILE
 opossum
 pino
 presigner
+QEMU
+SLSA
+spdxjson
+slsaprovenance
 SUIDSGID
 thiennq
 toon
