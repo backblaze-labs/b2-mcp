@@ -31,7 +31,6 @@ serialization, or B2 SDK calls.
 ```bash
 cd deploy/cloudflare-worker
 pnpm --dir ../.. run build:deploy:cloudflare-worker
-wrangler deploy --dry-run --outdir dist-dry-run
 ```
 
 Set secrets:
@@ -50,11 +49,12 @@ Set non-secret vars in `wrangler.jsonc`:
   "B2_DESTRUCTIVE_POLICY": "block",
   "B2_ALLOWED_HOSTS": "mcp.example.com",
   "B2_ALLOWED_ORIGINS": "https://client.example.com",
-  "B2_MCP_TRUSTED_EDGE_AUTH": "cloudflare-access",
-  "B2_MCP_ACCESS_TEAM_DOMAIN": "https://example.cloudflareaccess.com",
-  "B2_MCP_ACCESS_AUDIENCE": "REPLACE_WITH_CLOUDFLARE_ACCESS_AUD"
+  "B2_MCP_OUTPUT_FORMAT": "json"
 }
 ```
+
+Leave OAuth and Access variables unset until the selected authentication path is
+fully configured. With neither path configured, `/mcp` fails closed.
 
 ## Secrets
 

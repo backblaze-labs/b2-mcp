@@ -3,6 +3,7 @@ allowBuilds:
   # tsx depends on esbuild, whose platform packages ship native binaries.
   # Keep install scripts disabled; esbuild only runs when dev tooling invokes it.
   esbuild: false
+  workerd: false
 overrides:
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1

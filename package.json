@@ -28,7 +28,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "pnpm run clean && tsc",
-    "build:deploy:cloudflare-worker": "tsc -p deploy/cloudflare-worker/tsconfig.json",
+    "build:deploy:cloudflare-worker": "tsc -p deploy/cloudflare-worker/tsconfig.json && mkdir -p deploy/cloudflare-worker/dist && wrangler deploy --config deploy/cloudflare-worker/wrangler.jsonc --dry-run --outfile=deploy/cloudflare-worker/dist/worker.js --metafile=deploy/cloudflare-worker/dist/bundle-meta.json && node scripts/check-worker-bundle-budget.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "start": "node dist/index.js",
     "start:http": "node dist/http-server.js",
@@ -111,7 +111,8 @@
     "tsx": "4.23.11",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "4.120.0"
   },
   "engines": {
     "node": ">=22.3.0"

@@ -648,6 +648,7 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
   let shuttingDown = false;
   let mcpHandlerClosed = false;
   let forcedCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastInlineSweepAt = 0;
 
   const credentialProvider =
     options.credentialProvider ?? getHttpCredentialProvider(options.secretBroker, env);
@@ -710,7 +711,13 @@ export function createB2McpFetchHandler(options: B2McpFetchHandlerOptions = {}):
     request: Request,
     requestOptions: B2McpFetchRequestOptions = {},
   ): Promise<Response> {
-    if (idleSweep === null) sweepRuntimeCaches();
+    if (idleSweep === null) {
+      const now = Date.now();
+      if (now - lastInlineSweepAt >= IDLE_SWEEP_INTERVAL_MS) {
+        lastInlineSweepAt = now;
+        sweepRuntimeCaches();
+      }
+    }
     const authInfo = requestOptions.authInfo;
     const url = new URL(request.url);
     const method = request.method.toUpperCase();

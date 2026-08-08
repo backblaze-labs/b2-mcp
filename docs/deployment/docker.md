@@ -90,6 +90,8 @@ docker run --rm --name b2-mcp \
   --env B2_ALLOWED_HOSTS=mcp.example.com \
   --env B2_ALLOWED_ORIGINS=https://client.example.com \
   --env-file ./b2-mcp.env \
+  --mount type=bind,src="$PWD/secrets/b2_application_key_id",dst=/run/secrets/b2_application_key_id,readonly \
+  --mount type=bind,src="$PWD/secrets/b2_application_key",dst=/run/secrets/b2_application_key,readonly \
   --publish 127.0.0.1:3000:3000 \
   "$B2_MCP_IMAGE"
 ```
@@ -148,9 +150,12 @@ process-local per replica.
 Promote images by digest. Keep the previous digest available:
 
 ```bash
-export B2_MCP_IMAGE='ghcr.io/backblaze-labs/b2-mcp@sha256:REPLACE_WITH_PREVIOUS_DIGEST'
+export B2_MCP_VERSION='REPLACE_WITH_PREVIOUS_LOCAL_VERSION'
 docker compose up -d --no-build
 ```
+
+For a direct `docker run` deployment, restart with the previous immutable
+`B2_MCP_IMAGE` digest instead.
 
 ## Secret rotation
 

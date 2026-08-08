@@ -153,7 +153,7 @@ Principal mode uses verified `AuthInfo` plus a customer-operated secret broker:
 
 ```bash
 B2_HTTP_CREDENTIAL_MODE=principal
-B2_PRINCIPAL_CREDENTIAL_MAP={"https://issuer.example.com#subject-123":"TENANT_A"}
+B2_PRINCIPAL_CREDENTIAL_MAP='{"https://issuer.example.com#subject-123":"TENANT_A"}'
 B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID=REPLACE_WITH_TENANT_A_B2_KEY_ID
 B2_CREDENTIAL_TENANT_A_APPLICATION_KEY=REPLACE_WITH_TENANT_A_B2_KEY_SECRET
 ```

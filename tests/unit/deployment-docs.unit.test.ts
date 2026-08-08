@@ -168,8 +168,12 @@ describe("deployment documentation", () => {
     const auth = read("deploy/cloudflare-worker/src/auth.ts");
     const wrangler = read("deploy/cloudflare-worker/wrangler.jsonc");
 
-    expect(pkg.scripts["build:deploy:cloudflare-worker"]).toBe(
+    expect(pkg.scripts["build:deploy:cloudflare-worker"]).toContain(
       "tsc -p deploy/cloudflare-worker/tsconfig.json",
+    );
+    expect(pkg.scripts["build:deploy:cloudflare-worker"]).toContain("wrangler deploy");
+    expect(pkg.scripts["build:deploy:cloudflare-worker"]).toContain(
+      "scripts/check-worker-bundle-budget.mjs",
     );
     expect(worker).toContain("../../../src/http-handler.js");
     expect(worker).toContain("verifiedAuthInfoForRequest");
@@ -180,6 +184,8 @@ describe("deployment documentation", () => {
     expect(wrangler).toContain('"nodejs_compat"');
     expect(wrangler).toMatch(/"compatibility_date": "\d{4}-\d{2}-\d{2}"/);
     expect(wrangler).not.toContain("B2_MCP_OAUTH_REQUIRED_SCOPES");
+    expect(wrangler).not.toContain("B2_MCP_TRUSTED_EDGE_AUTH");
+    expect(wrangler).not.toContain("B2_MCP_ACCESS_AUDIENCE");
   });
 
   it("keeps deployment guides covered by the public contract register", () => {

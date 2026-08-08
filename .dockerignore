@@ -58,6 +58,8 @@ deploy/customer-hosted/**/*.pem
 deploy/customer-hosted/**/*.pfx
 deploy/cloudflare-worker/.dev.vars*
 deploy/cloudflare-worker/.wrangler/
+deploy/cloudflare-worker/dist/
+deploy/cloudflare-worker/dist-dry-run/
 
 # Internal-only docs are never sent to the Docker build context.
 docs/STRATEGY-*.md
