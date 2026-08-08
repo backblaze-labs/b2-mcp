@@ -63,7 +63,10 @@ export async function connectVercelClient(era: "modern" | "legacy"): Promise<{
   const requests: RecordedVercelRequest[] = [];
   const transport = new StreamableHTTPClientTransport(new URL(VERCEL_MCP_URL), {
     fetch: async (input, init) => {
-      const request = new Request(input, init);
+      const sdkRequest = new Request(input, init);
+      const headers = new Headers(sdkRequest.headers);
+      headers.set("host", new URL(sdkRequest.url).host);
+      const request = new Request(sdkRequest, { headers });
       requests.push({
         method: request.method,
         url: request.url,
