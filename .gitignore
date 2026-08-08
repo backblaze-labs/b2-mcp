@@ -25,6 +25,8 @@ deploy/customer-hosted/**/*.key
 deploy/customer-hosted/**/*.p12
 deploy/customer-hosted/**/*.pfx
 deploy/customer-hosted/**/*.pem
+deploy/cloudflare-worker/.dev.vars*
+deploy/cloudflare-worker/.wrangler/
 .idea/
 .vscode/
 .claude/settings.local.json

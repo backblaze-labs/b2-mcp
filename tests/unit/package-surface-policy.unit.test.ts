@@ -118,6 +118,17 @@ describe("package surface policy", () => {
     expect(files).toContain("deploy/customer-hosted/pnpm-workspace.yaml");
     expect(files).toContain("docs/CLIENTS.md");
     expect(files).toContain("docs/DEPLOY.md");
+    expect(files).toContain("docs/deployment/security-and-credentials.md");
+    expect(files).toContain("docs/deployment/vercel.md");
+    expect(files).toContain("docs/deployment/cloudflare-workers.md");
+    expect(files).toContain("docs/deployment/cloudflare-containers.md");
+    expect(files).toContain("docs/deployment/docker.md");
+    expect(files).toContain("docs/deployment/google-cloud-run.md");
+    expect(files).toContain("docs/deployment/aws.md");
+    expect(files).toContain("docs/deployment/azure-container-apps.md");
+    expect(files).toContain("docs/deployment/render.md");
+    expect(files).toContain("docs/deployment/railway.md");
+    expect(files).toContain("docs/deployment/fly-io.md");
     expect(files).toContain("docs/tool-profile-contract.json");
     for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
       Object.values(profile.fixtures),

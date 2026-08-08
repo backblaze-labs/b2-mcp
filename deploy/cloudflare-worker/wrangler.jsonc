@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "b2-mcp-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 30000
+  },
+  "vars": {
+    "B2_HTTP_CREDENTIAL_MODE": "server",
+    "B2_ALLOW_LOCAL_FILES": "false",
+    "B2_DESTRUCTIVE_POLICY": "block",
+    "B2_ALLOWED_HOSTS": "mcp.example.com",
+    "B2_ALLOWED_ORIGINS": "https://client.example.com",
+    "B2_MCP_OUTPUT_FORMAT": "json",
+    "B2_MCP_TRUSTED_EDGE_AUTH": "cloudflare-access",
+    "B2_MCP_OAUTH_REQUIRED_SCOPES": "b2:mcp"
+  }
+}

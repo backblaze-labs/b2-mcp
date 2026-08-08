@@ -134,7 +134,7 @@ function headersFromWeb(headers: Headers): OutgoingHttpHeaders {
   return nodeHeaders;
 }
 
-async function writeWebResponse(
+export async function writeWebResponse(
   response: Response,
   res: ServerResponse,
   signal: AbortSignal,

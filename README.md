@@ -98,9 +98,10 @@ docker run --rm -i \
   "$B2_MCP_IMAGE" stdio
 ```
 
-See [`docs/DEPLOY.md`](docs/DEPLOY.md) for hardened HTTP examples with
-signature verification, `B2_ALLOWED_ORIGINS`, rate limits, and in-flight
-request caps.
+See the [`docs/DEPLOY.md`](docs/DEPLOY.md) deployment matrix and
+[`docs/deployment/docker.md`](docs/deployment/docker.md) for hardened HTTP
+examples with signature verification, `B2_ALLOWED_ORIGINS`, rate limits, and
+in-flight request caps.
 
 The image healthcheck applies to HTTP mode. For stdio containers, pass
 `--no-healthcheck`. For HTTP containers, set the listen port through `PORT` so
@@ -267,7 +268,15 @@ Running it safely:
 - **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; opt-in TOON output uses a reviewed repo-owned encoder for spec `4.1`, with `@toon-format/toon@4.1.0` retained only as a dev/test decoder oracle.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
 
-Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).
+Deployment documentation:
+
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — support matrix and provider index
+- [`docs/deployment/security-and-credentials.md`](docs/deployment/security-and-credentials.md) — shared hosted security contract
+- [`docs/deployment/docker.md`](docs/deployment/docker.md) — supported Docker/OCI reference
+- [`docs/deployment/vercel.md`](docs/deployment/vercel.md) — Vercel Node.js Functions recipe
+- [`docs/deployment/cloudflare-workers.md`](docs/deployment/cloudflare-workers.md) — native Cloudflare Worker adapter
+- [`docs/deployment/cloudflare-containers.md`](docs/deployment/cloudflare-containers.md) — Cloudflare Worker plus Container recipe
+- [`docs/deployment/google-cloud-run.md`](docs/deployment/google-cloud-run.md), [`docs/deployment/aws.md`](docs/deployment/aws.md), [`docs/deployment/azure-container-apps.md`](docs/deployment/azure-container-apps.md), [`docs/deployment/render.md`](docs/deployment/render.md), [`docs/deployment/railway.md`](docs/deployment/railway.md), and [`docs/deployment/fly-io.md`](docs/deployment/fly-io.md) — OCI-based provider recipes
 
 ---
 
@@ -303,7 +312,7 @@ committed lockfile and a sanitized temporary environment.
 ## Documentation
 
 - [`docs/CLIENTS.md`](docs/CLIENTS.md) — per-client setup + compatibility matrix
-- [`docs/DEPLOY.md`](docs/DEPLOY.md) — hosted deployment + security baseline
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — deployment support matrix and provider index
 - [`docs/PUBLIC_CONTRACTS.md`](docs/PUBLIC_CONTRACTS.md) — public document ownership and contract status
 - [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — Phase 1 tool-contract policy
 - [`docs/TOOL_PROFILES.md`](docs/TOOL_PROFILES.md) — generated tool-profile reference

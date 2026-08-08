@@ -10,7 +10,8 @@ current with code, CI, and GitHub release metadata.
 | ------------------------------------------------------ | ------------------ | ----------------------------------------------------------------------- | ---------------------------- |
 | [`../README.md`](../README.md)                         | Gonza              | Product overview, quick start, tool catalog, local development commands | Ongoing                      |
 | [`CLIENTS.md`](CLIENTS.md)                             | Gonza              | MCP client configuration contract for stdio and Streamable HTTP         | #66                          |
-| [`DEPLOY.md`](DEPLOY.md)                               | Gonza              | Customer-hosted deployment and hardening runbook                        | #65, #66, #106               |
+| [`DEPLOY.md`](DEPLOY.md)                               | Gonza              | Deployment support matrix and provider index                            | #65, #66, #106, #121         |
+| [`deployment/security-and-credentials.md`](deployment/security-and-credentials.md) | Gonza | Shared hosted security, credential, smoke, rotation, and teardown contract | #121                         |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md)                   | Gonza              | Runtime architecture and integration-boundary decisions                 | #71                          |
 | [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) | Gonza              | Official B2 SDK adoption and tool parity matrix                         | #71                          |
 | [`V1_SCOPE.md`](V1_SCOPE.md)                           | Gonza              | Phase 1 product, runtime, release, SDK, and protocol decision record    | #55, #71, #106               |

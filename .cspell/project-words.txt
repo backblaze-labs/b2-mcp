@@ -24,11 +24,13 @@ cosign
 cspell
 CycloneDX
 envrc
+flyctl
 GHCR
 iocs
 junit
 MCP
 NOFILE
+nosuid
 opossum
 pino
 presigner
@@ -55,6 +57,7 @@ sophiecarreras
 # Cloud, network, storage, and security terms
 buildx
 creds
+eastus
 EOPENBREAKER
 exfiltration
 noout
