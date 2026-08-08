@@ -11,7 +11,7 @@ import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
-import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../b2/client.js";
+import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
 import type { B2S3DeleteObjectsResult, B2S3ObjectBody, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import { b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
 

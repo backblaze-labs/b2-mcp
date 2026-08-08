@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import { ReadableStream } from "node:stream/web";
 import { registerS3ObjectTools } from "../../src/s3/objects";
-import type { B2S3FileVersionBinding } from "../../src/b2/client";
+import type { B2S3FileVersionBinding } from "../../src/utils/types";
 import type { B2S3DownloadedObject } from "../../src/s3/aws-sdk-adapter";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
