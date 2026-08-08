@@ -29,7 +29,7 @@ Until that trigger is met, do not merge a blanket `typescript@7` upgrade.
 - `typecheck` uses `tsc --noEmit -p tsconfig.typecheck.json`.
 - `lint:docs` uses ESLint, `typescript-eslint`, and type-aware parser services
   for TSDoc and JSDoc validation.
-- `dev` uses `tsx src/index.ts` and no longer depends on `ts-node`.
+- `dev` uses `tsx` and no longer depends on `ts-node`.
 
 Vitest and Biome are not blockers for TypeScript 7 because they do not depend
 on the TypeScript compiler API for this repository's current gates.
