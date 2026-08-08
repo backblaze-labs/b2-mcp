@@ -1,5 +1,9 @@
 import { createB2McpFetchHandler, type B2McpFetchHandler } from "../../../src/http-handler.js";
-import { type WorkerEnv, verifiedAuthInfoForRequest } from "./auth.js";
+import {
+  oauthProtectedResourceMetadataForRequest,
+  type WorkerEnv,
+  verifiedAuthInfoForRequest,
+} from "./auth.js";
 
 interface Env extends WorkerEnv {
   B2_ALLOW_LOCAL_FILES?: string;
@@ -36,6 +40,8 @@ function getHandler(env: Env): B2McpFetchHandler {
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+    const metadata = oauthProtectedResourceMetadataForRequest(request, env);
+    if (metadata) return metadata;
     const authInfo = await verifiedAuthInfoForRequest(request, env);
     if (authInfo instanceof Response) return authInfo;
     return getHandler(env).fetch(request, { authInfo });

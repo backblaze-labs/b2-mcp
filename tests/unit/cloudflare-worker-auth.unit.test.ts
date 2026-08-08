@@ -158,6 +158,30 @@ describe("Cloudflare Worker OAuth verifier", () => {
     );
   });
 
+  it("requires non-empty OAuth scopes in verifier configuration", async () => {
+    await expectAuthError(
+      verifyJwtAccessToken(signJwt(key, claims()), env({ B2_MCP_OAUTH_REQUIRED_SCOPES: "" })),
+      "oauth_config_incomplete",
+    );
+  });
+
+  it("requires HTTPS OAuth issuer and JWKS endpoints", async () => {
+    await expectAuthError(
+      verifyJwtAccessToken(
+        signJwt(key, claims({ iss: "http://issuer.example.com" })),
+        env({ B2_MCP_OAUTH_ISSUER: "http://issuer.example.com" }),
+      ),
+      "oauth_issuer_invalid",
+    );
+    await expectAuthError(
+      verifyJwtAccessToken(
+        signJwt(key, claims()),
+        env({ B2_MCP_OAUTH_JWKS_URL: "http://issuer.example.com/.well-known/jwks.json" }),
+      ),
+      "oauth_jwks_url_invalid",
+    );
+  });
+
   it("keeps expiry checks enforced when clock skew config is invalid", async () => {
     mockJwks([key.publicJwk]);
 
@@ -360,5 +384,53 @@ describe("Cloudflare Worker adapter secret boundary", () => {
 
     expect(authInfo).toBeInstanceOf(Response);
     expect((authInfo as Response).status).toBe(500);
+  });
+
+  it("returns a server-side auth error when OAuth verifier vars omit required scopes", async () => {
+    const authInfo = await verifiedAuthInfoForRequest(new Request("https://mcp.example.com/mcp"), {
+      B2_MCP_OAUTH_ISSUER: issuer,
+      B2_MCP_OAUTH_AUDIENCE: audience,
+      B2_MCP_OAUTH_JWKS_URL: jwksUrl,
+    });
+
+    expect(authInfo).toBeInstanceOf(Response);
+    expect((authInfo as Response).status).toBe(500);
+  });
+
+  it("returns a server-side auth error for plaintext OAuth endpoints before token parsing", async () => {
+    const authInfo = await verifiedAuthInfoForRequest(new Request("https://mcp.example.com/mcp"), {
+      B2_MCP_OAUTH_ISSUER: "http://issuer.example.com",
+      B2_MCP_OAUTH_AUDIENCE: audience,
+      B2_MCP_OAUTH_JWKS_URL: jwksUrl,
+      B2_MCP_OAUTH_REQUIRED_SCOPES: "b2:mcp",
+    });
+
+    expect(authInfo).toBeInstanceOf(Response);
+    expect((authInfo as Response).status).toBe(500);
+  });
+
+  it("serves OAuth protected-resource metadata", async () => {
+    const response = await worker.fetch(
+      new Request("https://mcp.example.com/.well-known/oauth-protected-resource"),
+      env(),
+      ctx,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      resource: audience,
+      authorization_servers: [issuer],
+      scopes_supported: ["b2:mcp"],
+      bearer_methods_supported: ["header"],
+    });
+  });
+
+  it("references OAuth protected-resource metadata from challenges", async () => {
+    const response = await worker.fetch(new Request("https://mcp.example.com/mcp"), env(), ctx);
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain(
+      'resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"',
+    );
   });
 });

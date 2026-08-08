@@ -57,6 +57,13 @@ type JwksOptions = {
   force?: boolean;
 };
 
+type OAuthVerifierConfig = {
+  issuer: string;
+  audience: string;
+  jwksUrl: string;
+  requiredScopes: string[];
+};
+
 export class WorkerAuthError extends Error {
   constructor(
     readonly status: 401 | 403 | 500 | 503,
@@ -74,6 +81,7 @@ const JWKS_FETCH_TIMEOUT_MS = 3000;
 const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256"];
 const DEFAULT_OAUTH_ACCESS_TOKEN_TYPES = ["at+jwt", "application/at+jwt"];
 const DEFAULT_CLOCK_SKEW_SECONDS = 60;
+const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 let jwksCache: JwksCache | undefined;
 const inFlightJwksFetches = new Map<string, Promise<JsonWebKey[]>>();
@@ -93,9 +101,35 @@ function splitList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function requiredOAuthScopes(env: WorkerEnv): string[] {
+  return splitList(env.B2_MCP_OAUTH_REQUIRED_SCOPES);
+}
+
 function safeClockSkewSeconds(value: string | undefined): number {
   const parsed = Number(value ?? String(DEFAULT_CLOCK_SKEW_SECONDS));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_CLOCK_SKEW_SECONDS;
+}
+
+function assertHttpsUrl(value: string, code: string, message: string): void {
+  try {
+    if (new URL(value).protocol === "https:") return;
+  } catch {
+    // Report malformed and plaintext endpoints through the same fail-closed path.
+  }
+  throw authError(500, code, message);
+}
+
+function oauthVerifierConfig(env: WorkerEnv): OAuthVerifierConfig {
+  const issuer = env.B2_MCP_OAUTH_ISSUER;
+  const audience = env.B2_MCP_OAUTH_AUDIENCE;
+  const jwksUrl = env.B2_MCP_OAUTH_JWKS_URL;
+  const requiredScopes = requiredOAuthScopes(env);
+  if (!issuer || !audience || !jwksUrl || requiredScopes.length === 0) {
+    throw authError(500, "oauth_config_incomplete", "OAuth verifier is not configured");
+  }
+  assertHttpsUrl(issuer, "oauth_issuer_invalid", "OAuth issuer must use HTTPS");
+  assertHttpsUrl(jwksUrl, "oauth_jwks_url_invalid", "OAuth JWKS URL must use HTTPS");
+  return { issuer, audience, jwksUrl, requiredScopes };
 }
 
 function base64UrlDecode(input: string): Uint8Array {
@@ -123,9 +157,27 @@ function extractBearerToken(request: Request): string | null {
   return match?.[1]?.trim() || null;
 }
 
-function authResponse(status: 401 | 403 | 500 | 503, error: string): Response {
+function authParam(name: string, value: string): string {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return `${name}="${escaped}"`;
+}
+
+function authResponse(
+  status: 401 | 403 | 500 | 503,
+  error: string,
+  challenge?: { resourceMetadataUrl?: string; scopes?: string[] },
+): Response {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (status === 401 || status === 403) headers["WWW-Authenticate"] = `Bearer error="${error}"`;
+  if (status === 401 || status === 403) {
+    const params = [authParam("error", error)];
+    if (challenge?.resourceMetadataUrl) {
+      params.push(authParam("resource_metadata", challenge.resourceMetadataUrl));
+    }
+    if (error === "insufficient_scope" && challenge?.scopes?.length) {
+      params.push(authParam("scope", challenge.scopes.join(" ")));
+    }
+    headers["WWW-Authenticate"] = `Bearer ${params.join(", ")}`;
+  }
   return new Response(JSON.stringify({ error }), { status, headers });
 }
 
@@ -343,18 +395,13 @@ async function verifyJwt(token: string, options: VerifyJwtOptions): Promise<Auth
 }
 
 export async function verifyJwtAccessToken(token: string, env: WorkerEnv): Promise<AuthInfo> {
-  const issuer = env.B2_MCP_OAUTH_ISSUER;
-  const audience = env.B2_MCP_OAUTH_AUDIENCE;
-  const jwksUrl = env.B2_MCP_OAUTH_JWKS_URL;
+  const { issuer, audience, jwksUrl, requiredScopes } = oauthVerifierConfig(env);
   const allowedTokenTypes = splitList(env.B2_MCP_OAUTH_ALLOWED_TOKEN_TYPES);
-  if (!issuer || !audience || !jwksUrl) {
-    throw authError(500, "oauth_config_incomplete", "OAuth verifier is not configured");
-  }
   return verifyJwt(token, {
     issuer,
     audience,
     jwksUrl,
-    requiredScopes: splitList(env.B2_MCP_OAUTH_REQUIRED_SCOPES),
+    requiredScopes,
     allowedAlgorithms: splitList(env.B2_MCP_OAUTH_ALLOWED_ALGORITHMS),
     allowedTokenTypes: allowedTokenTypes.length
       ? allowedTokenTypes
@@ -365,6 +412,13 @@ export async function verifyJwtAccessToken(token: string, env: WorkerEnv): Promi
 
 function accessIssuer(teamDomain: string): string {
   const trimmed = teamDomain.trim().replace(/\/+$/, "");
+  if (/^http:\/\//i.test(trimmed)) {
+    throw authError(
+      500,
+      "access_team_domain_invalid",
+      "Cloudflare Access team domain must use HTTPS",
+    );
+  }
   return trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`;
 }
 
@@ -379,14 +433,26 @@ export async function verifyAccessAssertion(token: string, env: WorkerEnv): Prom
     );
   }
   const issuer = accessIssuer(teamDomain);
+  const jwksUrl = `${issuer}/cdn-cgi/access/certs`;
+  assertHttpsUrl(issuer, "access_issuer_invalid", "Cloudflare Access issuer must use HTTPS");
+  assertHttpsUrl(jwksUrl, "access_jwks_url_invalid", "Cloudflare Access JWKS URL must use HTTPS");
   return verifyJwt(token, {
     issuer,
     audience,
-    jwksUrl: `${issuer}/cdn-cgi/access/certs`,
+    jwksUrl,
     allowedAlgorithms: splitList(env.B2_MCP_OAUTH_ALLOWED_ALGORITHMS),
     allowedTokenTypes: ["JWT"],
     clockSkewSeconds: safeClockSkewSeconds(env.B2_MCP_OAUTH_CLOCK_SKEW_SECONDS),
   });
+}
+
+function oauthVerifierConfigured(env: WorkerEnv): boolean {
+  return Boolean(
+    env.B2_MCP_OAUTH_ISSUER &&
+      env.B2_MCP_OAUTH_AUDIENCE &&
+      env.B2_MCP_OAUTH_JWKS_URL &&
+      requiredOAuthScopes(env).length > 0,
+  );
 }
 
 function oauthConfigIsPartiallySet(env: WorkerEnv): boolean {
@@ -398,6 +464,56 @@ function oauthConfigIsPartiallySet(env: WorkerEnv): boolean {
   ].some(Boolean);
 }
 
+function oauthMetadataUrl(request: Request, env: WorkerEnv): string {
+  const audience = env.B2_MCP_OAUTH_AUDIENCE;
+  if (audience) {
+    try {
+      const resource = new URL(audience);
+      if (resource.protocol === "https:")
+        return `${resource.origin}${PROTECTED_RESOURCE_METADATA_PATH}`;
+    } catch {
+      // Fall through to the request origin for non-URL resource identifiers.
+    }
+  }
+  return `${new URL(request.url).origin}${PROTECTED_RESOURCE_METADATA_PATH}`;
+}
+
+export function oauthProtectedResourceMetadataForRequest(
+  request: Request,
+  env: WorkerEnv,
+): Response | undefined {
+  const url = new URL(request.url);
+  if (
+    url.pathname !== PROTECTED_RESOURCE_METADATA_PATH &&
+    url.pathname !== `${PROTECTED_RESOURCE_METADATA_PATH}/mcp`
+  ) {
+    return undefined;
+  }
+
+  try {
+    const { issuer, audience, requiredScopes } = oauthVerifierConfig(env);
+    return new Response(
+      JSON.stringify({
+        resource: audience,
+        authorization_servers: [issuer],
+        scopes_supported: requiredScopes,
+        bearer_methods_supported: ["header"],
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  } catch (err) {
+    const authErr =
+      err instanceof WorkerAuthError
+        ? err
+        : authError(500, "auth_config_invalid", "OAuth metadata configuration is invalid");
+    logger.warn({ code: authErr.code, status: authErr.status }, "worker.auth.metadata_failed");
+    return authResponse(500, "auth_config_invalid");
+  }
+}
+
 export async function verifiedAuthInfoForRequest(
   request: Request,
   env: WorkerEnv,
@@ -406,7 +522,8 @@ export async function verifiedAuthInfoForRequest(
   if (url.pathname !== "/mcp") return undefined;
 
   try {
-    if (env.B2_MCP_OAUTH_ISSUER && env.B2_MCP_OAUTH_AUDIENCE && env.B2_MCP_OAUTH_JWKS_URL) {
+    if (oauthVerifierConfigured(env)) {
+      oauthVerifierConfig(env);
       const token = extractBearerToken(request);
       if (!token) throw authError(401, "invalid_token", "Bearer token is required");
       return await verifyJwtAccessToken(token, env);
@@ -432,9 +549,16 @@ export async function verifiedAuthInfoForRequest(
     logger.warn({ code: authErr.code, status: authErr.status }, "worker.auth.failed");
     if (authErr.status === 503) return authResponse(503, "jwks_unavailable");
     if (authErr.status === 500) return authResponse(500, "auth_config_invalid");
+    const resourceMetadataUrl = oauthVerifierConfigured(env)
+      ? oauthMetadataUrl(request, env)
+      : undefined;
     return authResponse(
       authErr.status,
       authErr.code === "jwt_scope_missing" ? "insufficient_scope" : "invalid_token",
+      {
+        resourceMetadataUrl,
+        scopes: requiredOAuthScopes(env),
+      },
     );
   }
 }
