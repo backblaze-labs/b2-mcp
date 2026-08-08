@@ -10,7 +10,9 @@ import { resolveLocalPath } from "../utils/fs-guard.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
+import { currentMcpRequestSignal } from "../request-context.js";
 import type {
+  B2S3DeleteObjectsResult,
   B2S3FileVersionBinding,
   B2S3PeerClient,
   B2S3VersionGuard,
@@ -91,11 +93,36 @@ async function cancelBody(body: B2S3ObjectBody, reason?: unknown): Promise<void>
   if (web) await web.cancel(reason).catch(() => undefined);
 }
 
+function bodyAbortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new Error("Object body read aborted.");
+}
+
+async function withBodyReadAbort<T>(body: B2S3ObjectBody, fn: () => Promise<T>): Promise<T> {
+  const signal = currentMcpRequestSignal();
+  if (!signal) return fn();
+  const abort = () => {
+    void cancelBody(body, bodyAbortReason(signal));
+  };
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  try {
+    return await fn();
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 async function webStreamToBuffer(
   stream: WebReadableStream<Uint8Array>,
   maxBytes: number,
 ): Promise<Buffer> {
   const reader = stream.getReader();
+  const signal = currentMcpRequestSignal();
+  const abort = () => {
+    void reader.cancel(bodyAbortReason(signal as AbortSignal)).catch(() => undefined);
+  };
+  if (signal?.aborted === true) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -115,12 +142,20 @@ async function webStreamToBuffer(
     await reader.cancel(err).catch(() => undefined);
     throw err;
   } finally {
+    signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
   return Buffer.concat(chunks, total);
 }
 
 async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<Buffer> {
+  const signal = currentMcpRequestSignal();
+  const abort = () => {
+    const reason = bodyAbortReason(signal as AbortSignal);
+    stream.destroy(reason instanceof Error ? reason : undefined);
+  };
+  if (signal?.aborted === true) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
   const chunks: Uint8Array[] = [];
   let total = 0;
   try {
@@ -144,6 +179,8 @@ async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<B
   } catch (err) {
     stream.destroy(err instanceof Error ? err : undefined);
     throw err;
+  } finally {
+    signal?.removeEventListener("abort", abort);
   }
   return Buffer.concat(chunks, total);
 }
@@ -190,6 +227,19 @@ function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
     metadata: version.fileInfo,
     serverSideEncryption: version.serverSideEncryption,
     deleteMarker: true,
+  };
+}
+
+function deleteValidationError(
+  object: DeleteObjectEntry,
+  err: unknown,
+): B2S3DeleteObjectsResult["errors"][number] {
+  const details = typeof err === "object" && err !== null ? (err as { code?: unknown }) : {};
+  return {
+    Key: object.key,
+    VersionId: object.versionId,
+    Code: typeof details.code === "string" && details.code ? details.code : "version_not_found",
+    Message: err instanceof Error ? err.message : String(err),
   };
 }
 
@@ -325,7 +375,11 @@ export function registerS3ObjectTools(
           fs.mkdirSync(path.dirname(safePath), { recursive: true });
           const writeStream = fs.createWriteStream(safePath);
           try {
-            await withCircuit(() => pipeline(nodeReadableFromBody(result.body), writeStream));
+            await withCircuit(() =>
+              withBodyReadAbort(result.body, () =>
+                pipeline(nodeReadableFromBody(result.body), writeStream),
+              ),
+            );
           } catch (e) {
             await fs.promises.unlink(safePath).catch(() => undefined);
             throw e;
@@ -358,7 +412,9 @@ export function registerS3ObjectTools(
             ),
           );
         }
-        const buffer = await withCircuit(() => bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES));
+        const buffer = await withCircuit(() =>
+          withBodyReadAbort(result.body, () => bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES)),
+        );
 
         return toolJson({
           key: args.key,
@@ -444,20 +500,41 @@ export function registerS3ObjectTools(
       try {
         const gate = checkDestructive("s3_delete_objects", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        for (const object of args.objects as DeleteObjectEntry[]) {
-          await verifyVersionBinding(versions, {
-            bucket: args.bucket,
-            key: object.key,
-            versionId: object.versionId,
-          });
+        const objects = args.objects as DeleteObjectEntry[];
+        const validationErrors: B2S3DeleteObjectsResult["errors"] = [];
+        const validObjects: DeleteObjectEntry[] = [];
+        for (const object of objects) {
+          try {
+            await verifyVersionBinding(versions, {
+              bucket: args.bucket,
+              key: object.key,
+              versionId: object.versionId,
+            });
+            validObjects.push(object);
+          } catch (err) {
+            validationErrors.push(deleteValidationError(object, err));
+          }
         }
+        const deleteResult =
+          validObjects.length > 0
+            ? await s3.deleteObjects({
+                bucket: args.bucket,
+                objects: validObjects,
+                quiet: args.quiet ?? true,
+                bypassGovernance: args.bypassGovernance,
+              })
+            : {
+                deleted: [],
+                errors: [],
+                attempted: 0,
+                aborted: currentMcpRequestSignal()?.aborted === true,
+                maxConcurrency: 0,
+              };
         return toolJson({
-          ...(await s3.deleteObjects({
-            bucket: args.bucket,
-            objects: args.objects as DeleteObjectEntry[],
-            quiet: args.quiet ?? true,
-            bypassGovernance: args.bypassGovernance,
-          })),
+          ...deleteResult,
+          errors: [...validationErrors, ...deleteResult.errors],
+          attempted: validationErrors.length + deleteResult.attempted,
+          maxConcurrency: deleteResult.maxConcurrency,
         });
       } catch (err) {
         return toolError(err);

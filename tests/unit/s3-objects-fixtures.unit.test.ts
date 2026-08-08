@@ -1,6 +1,8 @@
+import { Readable } from "node:stream";
 import { ReadableStream } from "node:stream/web";
 import { registerS3ObjectTools } from "../../src/s3/objects";
 import type { B2S3DownloadedObject, B2S3FileVersionBinding } from "../../src/s3/aws-sdk-adapter";
+import { runWithMcpRequestSignal } from "../../src/request-context";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
@@ -228,6 +230,34 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(largeCanceled).toBe(1);
   });
 
+  it("destroys the body when inline reading aborts after headers", async () => {
+    let markReadStarted: () => void = () => undefined;
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    const body = new Readable({
+      read() {
+        markReadStarted();
+      },
+    });
+    const destroySpy = vi.spyOn(body, "destroy");
+    nextDownload = downloadedObject({
+      contentLength: 1,
+      body: body as B2S3DownloadedObject["body"],
+    });
+    const controller = new AbortController();
+
+    const pending = runWithMcpRequestSignal(controller.signal, () =>
+      tools.call("s3_get_object", { bucket: "b", key: "hello.txt" }),
+    );
+    await readStarted;
+    controller.abort(new Error("client disconnected"));
+    const result = await pending;
+
+    expect(result.isError).toBe(true);
+    expect(destroySpy).toHaveBeenCalled();
+  });
+
   it("enforces destructive confirmation on object delete calls", async () => {
     const blocked = await tools.call("s3_delete_objects", {
       bucket: "b",
@@ -279,11 +309,13 @@ describe("S3 object tools with deterministic handler fake", () => {
       versionId: "secret-version",
       confirm: true,
     });
-    const manyDelete = await tools.call("s3_delete_objects", {
-      bucket: "b",
-      objects: [{ key: "public/allowed.txt", versionId: "secret-version" }],
-      confirm: true,
-    });
+    const manyDelete = parseResult(
+      await tools.call("s3_delete_objects", {
+        bucket: "b",
+        objects: [{ key: "public/allowed.txt", versionId: "secret-version" }],
+        confirm: true,
+      }),
+    );
     const copy = await tools.call("s3_copy_object", {
       sourceBucket: "b",
       sourceKey: "public/allowed.txt",
@@ -295,13 +327,60 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(get.isError).toBe(true);
     expect(head.isError).toBe(true);
     expect(oneDelete.isError).toBe(true);
-    expect(manyDelete.isError).toBe(true);
+    expect(manyDelete).toMatchObject({
+      deleted: [],
+      attempted: 1,
+      errors: [
+        {
+          Key: "public/allowed.txt",
+          VersionId: "secret-version",
+          Code: "not_found",
+        },
+      ],
+    });
     expect(copy.isError).toBe(true);
     expect(calls.some((call) => call.operation === "getObject")).toBe(false);
     expect(calls.some((call) => call.operation === "headObject")).toBe(false);
     expect(calls.some((call) => call.operation === "deleteObject")).toBe(false);
     expect(calls.some((call) => call.operation === "deleteObjects")).toBe(false);
     expect(calls.some((call) => call.operation === "copyObject")).toBe(false);
+  });
+
+  it("keeps bulk delete partial results when one version binding is invalid", async () => {
+    versions.set(
+      "allowed-version",
+      fileVersion({ fileName: "public/allowed.txt", fileId: "allowed-version" }),
+    );
+    versions.set("secret-version", fileVersion({ fileName: "secret/private.txt" }));
+
+    const result = parseResult(
+      await tools.call("s3_delete_objects", {
+        bucket: "b",
+        objects: [
+          { key: "public/allowed.txt", versionId: "allowed-version" },
+          { key: "public/blocked.txt", versionId: "secret-version" },
+          { key: "public/latest.txt" },
+        ],
+        quiet: false,
+        confirm: true,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      deleted: [{ Key: "public/allowed.txt" }, { Key: "public/latest.txt" }],
+      attempted: 3,
+      errors: [
+        {
+          Key: "public/blocked.txt",
+          VersionId: "secret-version",
+          Code: "not_found",
+        },
+      ],
+    });
+    expect(calls.find((call) => call.operation === "deleteObjects")?.input.objects).toEqual([
+      { key: "public/allowed.txt", versionId: "allowed-version" },
+      { key: "public/latest.txt" },
+    ]);
   });
 
   it("reports deleteMarker for current and explicit hide-marker versions", async () => {
