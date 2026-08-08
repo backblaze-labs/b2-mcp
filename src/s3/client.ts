@@ -163,12 +163,8 @@ export function createS3Client(config: B2Config, options: B2S3ClientOptions = {}
   return createB2S3PeerClient(buildB2S3ClientConfig(config, options));
 }
 
-export function createPrimaryS3Client(config: B2Config, surface: string): B2S3PeerClient {
-  return createS3Client(config, {
-    applicationKeyId: config.applicationKeyId,
-    applicationKey: config.applicationKey,
-    surface,
-  });
+export function createS3ObjectClient(config: B2Config, surface: string): B2S3PeerClient {
+  return createS3Client(config, { surface });
 }
 
 export function createReportS3Client(config: B2Config, auth: B2AuthResponse): B2S3PeerClient {

@@ -1,7 +1,7 @@
 import {
   buildB2S3ClientConfig,
-  createPrimaryS3Client,
   createReportS3Client,
+  createS3ObjectClient,
   expectedB2S3Endpoint,
   validateB2S3ApiUrl,
 } from "../../src/s3/client";
@@ -48,12 +48,12 @@ describe("B2 S3 client configuration", () => {
     expect(JSON.stringify(s3.customUserAgent)).toContain("s3-object-tools");
   });
 
-  it("creates object clients with the credential used for capability registration", async () => {
-    const s3 = createPrimaryS3Client(config, "s3-object-tools");
+  it("creates object clients with the configured S3 credential override", async () => {
+    const s3 = createS3ObjectClient(config, "s3-object-tools");
 
     await expect(s3.config.credentials()).resolves.toMatchObject({
-      accessKeyId: "principal-key-id",
-      secretAccessKey: "principal-secret",
+      accessKeyId: "legacy-s3-key-id",
+      secretAccessKey: "legacy-s3-secret",
     });
     await expect(s3.config.maxAttempts()).resolves.toBe(1);
     s3.destroy();
