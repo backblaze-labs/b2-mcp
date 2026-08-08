@@ -24,7 +24,6 @@ import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { B2AuthResponse } from "../utils/types.js";
 import { buildUserAgent } from "../utils/user-agent.js";
-import type { B2S3FileVersionBinding } from "./s3-version-guard.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
 export type BucketTypeFilter = BucketType | "all";
@@ -43,6 +42,30 @@ export interface LifecycleRuleInput {
   daysFromHidingToDeleting?: number | null;
   daysFromUploadingToHiding?: number | null;
   daysFromStartingToCancelingUnfinishedLargeFiles?: number | null;
+}
+
+export interface B2S3FileVersionBinding {
+  fileName: string;
+  fileId: string;
+  bucketId: string;
+  contentLength: number;
+  contentType: string;
+  uploadTimestamp: number;
+  fileInfo: Record<string, string>;
+  action: string;
+  serverSideEncryption?: string;
+}
+
+export interface B2S3VersionGuard {
+  resolveS3FileVersion(input: {
+    bucket: string;
+    key: string;
+    versionId: string;
+  }): Promise<B2S3FileVersionBinding>;
+  getCurrentS3FileVersion(input: {
+    bucket: string;
+    key: string;
+  }): Promise<B2S3FileVersionBinding | null>;
 }
 
 export interface ServerSideEncryptionInput {

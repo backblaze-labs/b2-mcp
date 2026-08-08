@@ -2,7 +2,7 @@ import { ReadableStream } from "node:stream/web";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { B2Client } from "../../src/b2/client";
-import type { B2S3FileVersionBinding } from "../../src/b2/s3-version-guard";
+import type { B2S3FileVersionBinding } from "../../src/b2/client";
 import type { McpServer } from "../../src/mcp";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";

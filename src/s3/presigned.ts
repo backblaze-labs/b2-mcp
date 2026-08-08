@@ -3,7 +3,7 @@ import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import type { B2Config } from "../utils/types.js";
-import type { B2S3VersionGuard } from "../b2/s3-version-guard.js";
+import type { B2S3VersionGuard } from "../b2/client.js";
 import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 
 /**
