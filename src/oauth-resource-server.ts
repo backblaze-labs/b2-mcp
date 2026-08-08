@@ -295,7 +295,9 @@ function assertTokenAlgorithm(
 ): string | undefined {
   if (allowedAlgorithms.length === 0) return undefined;
   const algorithm = stringClaim(claims.alg ?? claims.jwt_alg ?? claims.token_alg);
-  if (!algorithm) return undefined;
+  if (!algorithm) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
+  }
   if (!allowedAlgorithms.includes(algorithm)) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
   }

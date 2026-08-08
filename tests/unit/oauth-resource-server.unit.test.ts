@@ -112,13 +112,13 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(authInfo.resource?.href).toBe(baseConfig.resource);
   });
 
-  it("accepts RFC 7662 introspection without optional token type or algorithm", async () => {
-    const { verifier } = verifierFor(claims({ token_type: undefined, alg: undefined }));
+  it("accepts RFC 7662 introspection without optional token type", async () => {
+    const { verifier } = verifierFor(claims({ token_type: undefined }));
 
     const authInfo = await verifier.verifyAccessToken("access-token");
 
     expect(authInfo.clientId).toBe("mcp-client");
-    expect(authInfo.extra?.alg).toBeUndefined();
+    expect(authInfo.extra?.alg).toBe("RS256");
   });
 
   it.each([
@@ -130,6 +130,7 @@ describe("OAuthIntrospectionVerifier", () => {
     ["wrong audience", { aud: "other" }, /audience/i],
     ["wrong resource", { resource: "other" }, /resource/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
+    ["missing token algorithm", { alg: undefined }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
     ["missing deployment scope", { scope: "profile" }, /deployment scope/i],
   ])("rejects %s tokens", async (_name, overrides, message) => {

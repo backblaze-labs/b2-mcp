@@ -189,10 +189,10 @@ function admissionRejectedResponse(
   return jsonResponse(status, body, { "Retry-After": "1" });
 }
 
-async function authenticateWithAdmissionLimit(
-  request: Request,
+async function runWithAdmissionLimit<T>(
   context: VercelMcpFetchContext,
-): Promise<AuthInfo | Response> {
+  run: () => Promise<T | Response>,
+): Promise<T | Response> {
   const limiter = getOAuthAdmissionLimiter();
   const limitKey = oauthAdmissionKey(context);
   const permit = limiter.acquire(limitKey);
@@ -213,7 +213,7 @@ async function authenticateWithAdmissionLimit(
         "rate_limit",
       );
     }
-    return await authenticateOAuthRequest(request);
+    return await run();
   } finally {
     limiter.release(limitKey);
   }
@@ -233,13 +233,26 @@ export async function vercelMcpFetch(
   const preflightRejection = vercelMcpPreflight(request);
   if (preflightRejection) return preflightRejection;
 
-  const boundedRequest = await requestWithCappedBody(request);
-  if (boundedRequest instanceof Response) return boundedRequest;
+  if (context.authInfo) {
+    const boundedRequest = await requestWithCappedBody(request);
+    if (boundedRequest instanceof Response) return boundedRequest;
+    return getMcpHandler().fetch(rewritePath(boundedRequest, "/mcp"), {
+      authInfo: context.authInfo,
+      remoteAddress: context.remoteAddress,
+    });
+  }
 
-  const auth = context.authInfo ?? (await authenticateWithAdmissionLimit(boundedRequest, context));
-  if (auth instanceof Response) return auth;
-  return getMcpHandler().fetch(rewritePath(boundedRequest, "/mcp"), {
-    authInfo: auth,
+  const prepared = await runWithAdmissionLimit(context, async () => {
+    const boundedRequest = await requestWithCappedBody(request);
+    if (boundedRequest instanceof Response) return boundedRequest;
+    const auth = await authenticateOAuthRequest(boundedRequest);
+    if (auth instanceof Response) return auth;
+    return { auth, boundedRequest };
+  });
+  if (prepared instanceof Response) return prepared;
+
+  return getMcpHandler().fetch(rewritePath(prepared.boundedRequest, "/mcp"), {
+    authInfo: prepared.auth,
     remoteAddress: context.remoteAddress,
   });
 }

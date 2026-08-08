@@ -292,6 +292,51 @@ describe("Vercel adapter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("counts slow pre-auth bodies before buffering completes", async () => {
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    await closeVercelMcpHandlerForTests();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ active: false }), {
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    let slowController: { enqueue(chunk: Uint8Array): void; close(): void } | undefined;
+    const slowBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        slowController = controller;
+      },
+    });
+
+    const first = vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Bearer slow" }),
+        body: slowBody,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" }),
+      { remoteAddress: "203.0.113.10" },
+    );
+
+    const second = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Bearer second" }),
+        body: "{}",
+      }),
+      { remoteAddress: "203.0.113.10" },
+    );
+
+    expect(second.status).toBe(429);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    slowController?.enqueue(new TextEncoder().encode("{}"));
+    slowController?.close();
+    await expect(first).resolves.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("throttles concurrent invalid-token requests before unbounded introspection", async () => {
     process.env.B2_MAX_SESSIONS_PER_KEY = "1";
     await closeVercelMcpHandlerForTests();
