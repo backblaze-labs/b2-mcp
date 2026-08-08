@@ -106,7 +106,7 @@ remain with the selected issuer. The adapter additionally checks:
 
 - active token response
 - exact `iss`
-- exact `resource`, when the introspection response includes a resource claim
+- exact `resource`
 - exact `aud`
 - `exp` and `nbf`
 - token type, when returned

@@ -261,13 +261,6 @@ function requireMatch(actual: unknown, expected: string, claimName: string): voi
   }
 }
 
-function requireMatchWhenPresent(actual: unknown, expected: string, claimName: string): void {
-  const actualValues = values(actual);
-  if (actualValues.length > 0 && !actualValues.includes(expected)) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, `Token ${claimName} is not accepted`);
-  }
-}
-
 function assertTimeWindow(claims: Record<string, unknown>, now: number): number {
   const exp = numberClaim(claims.exp);
   const nbf = numberClaim(claims.nbf);
@@ -461,7 +454,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
       if (issuer !== this.config.issuer) {
         throw new OAuthError(OAuthErrorCode.InvalidToken, "Token issuer is not trusted");
       }
-      requireMatchWhenPresent(claims.resource, this.config.resource, "resource");
+      requireMatch(claims.resource, this.config.resource, "resource");
       requireMatch(claims.aud, this.config.audience, "audience");
       const expiresAt = assertTimeWindow(claims, now);
       assertTokenType(claims, this.config.allowedTokenTypes);

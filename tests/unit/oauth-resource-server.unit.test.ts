@@ -128,6 +128,7 @@ describe("OAuthIntrospectionVerifier", () => {
     ["missing issuer", { iss: undefined }, /issuer/i],
     ["wrong issuer", { iss: "http://localhost:9001/" }, /issuer/i],
     ["wrong audience", { aud: "other" }, /audience/i],
+    ["missing resource", { resource: undefined }, /resource/i],
     ["wrong resource", { resource: "other" }, /resource/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
     ["missing token algorithm", { alg: undefined }, /algorithm/i],
@@ -137,15 +138,6 @@ describe("OAuthIntrospectionVerifier", () => {
     const { verifier } = verifierFor(claims(overrides));
 
     await expect(verifier.verifyAccessToken("access-token")).rejects.toThrow(message);
-  });
-
-  it("accepts a valid audience-bound token when introspection omits resource", async () => {
-    const { verifier } = verifierFor(claims({ resource: undefined }));
-
-    await expect(verifier.verifyAccessToken("access-token")).resolves.toMatchObject({
-      clientId: "mcp-client",
-      scopes: ["b2:read"],
-    });
   });
 
   it("enforces configured allowed subjects when present", async () => {
