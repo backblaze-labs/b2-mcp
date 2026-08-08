@@ -22,6 +22,24 @@ export type FetchRoute = (
   context: FetchRouteContext,
 ) => Promise<Response> | Response;
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export function vercelClientAddress(headers: http.IncomingHttpHeaders): string | undefined {
+  const canTrustForwardedHeaders =
+    process.env.VERCEL === "1" ||
+    !!process.env.VERCEL_ENV ||
+    process.env.B2_TRUST_PROXY_HEADERS === "true";
+  if (!canTrustForwardedHeaders) return undefined;
+  for (const name of ["x-vercel-forwarded-for", "x-forwarded-for", "x-real-ip"]) {
+    const raw = firstHeaderValue(headers[name]);
+    const address = raw?.split(",")[0]?.trim();
+    if (address) return address;
+  }
+  return undefined;
+}
+
 function logVercelHandlerFailure(
   req: http.IncomingMessage,
   res: http.ServerResponse,
@@ -53,7 +71,7 @@ export function createVercelNodeHandler(route: FetchRoute): VercelNodeHandler {
       const response = await route(
         nodeRequestToWeb(req, abortController.signal, { scheme: "https" }),
         {
-          remoteAddress: req.socket.remoteAddress,
+          remoteAddress: vercelClientAddress(req.headers) ?? req.socket.remoteAddress,
         },
       );
       resumeUnreadRequest(req);

@@ -42,6 +42,7 @@ export function setVercelProtocolEnv(savedEnv: NodeJS.ProcessEnv): void {
     B2_OAUTH_INTROSPECTION_CLIENT_SECRET: "secret",
     B2_OAUTH_RESOURCE: VERCEL_MCP_URL,
     B2_OAUTH_AUDIENCE: VERCEL_MCP_URL,
+    B2_OAUTH_ALLOWED_SUBJECTS: "vercel-protocol-client",
     B2_MCP_PUBLIC_URL: VERCEL_MCP_URL,
   };
 }

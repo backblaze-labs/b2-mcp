@@ -111,6 +111,7 @@ describe("OAuth scope-aware tool registration", () => {
     expect(tools.has("b2_create_bucket")).toBe(true);
     expect(tools.has("b2_delete_bucket")).toBe(true);
     expect(tools.has("b2_update_bucket")).toBe(false);
+    expect(tools.has("s3_put_bucket_lifecycle")).toBe(false);
     expect(tools.has("b2_list_keys")).toBe(false);
     expect(tools.has("b2_update_file_retention")).toBe(false);
   });
@@ -121,6 +122,7 @@ describe("OAuth scope-aware tool registration", () => {
     expect(tools.has("b2_list_keys")).toBe(true);
     expect(tools.has("b2_delete_key")).toBe(true);
     expect(tools.has("b2_update_bucket")).toBe(true);
+    expect(tools.has("s3_put_bucket_lifecycle")).toBe(true);
     expect(tools.has("b2_set_bucket_notification_rules")).toBe(true);
     expect(tools.has("b2_update_file_legal_hold")).toBe(true);
   });

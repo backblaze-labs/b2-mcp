@@ -3,14 +3,15 @@ import {
   createB2McpFetchHandler,
   createInFlightLimiter,
   deriveRateKey,
+  hostOriginAllowed,
   type InFlightLimiter,
 } from "../../src/http-fetch-handler.js";
 import {
   authenticateOAuthRequest,
+  loadOAuthResourceServerConfig,
   oauthMetadataOptions,
   protectedResourceMetadata,
   resetOAuthVerifierCacheForTests,
-  validateOAuthResourceServerConfiguration,
 } from "../../src/oauth-resource-server.js";
 import {
   getHttpCredentialMode,
@@ -19,10 +20,11 @@ import {
 import { allowRequest } from "../../src/utils/rate-limiter.js";
 import { logger } from "../../src/utils/logger.js";
 import { sanitizeText } from "../../src/utils/secret-sanitizer.js";
+import { readCappedBodyBytes } from "../../src/utils/http-body-limit.js";
 
 const ALLOW_HEADER_MODE_FLAG = "B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_PREVIEW_B2_CREDENTIALS_FLAG = "B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS";
-const MAX_BODY_BYTES = 1 * 1024 * 1024;
+const ALLOW_SHARED_SERVER_CREDENTIAL_FLAG = "B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL";
 const PREVIEW_B2_CREDENTIAL_ENV_PATTERN =
   /^B2_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$|^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$/;
 
@@ -90,7 +92,17 @@ function validatePreviewCredentialCustody(): void {
 export function validateVercelStaticConfiguration(): void {
   validateVercelCredentialMode();
   validatePreviewCredentialCustody();
-  validateOAuthResourceServerConfiguration();
+  const oauthConfig = loadOAuthResourceServerConfig();
+  if (
+    getHttpCredentialMode() === "server" &&
+    oauthConfig.allowedSubjects.length !== 1 &&
+    process.env[ALLOW_SHARED_SERVER_CREDENTIAL_FLAG] !== "true"
+  ) {
+    throw new Error(
+      `Vercel server mode requires exactly one B2_OAUTH_ALLOWED_SUBJECTS value unless ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true is set`,
+    );
+  }
+  protectedResourceMetadata(oauthConfig);
   validateHttpCredentialConfiguration();
 }
 
@@ -130,54 +142,47 @@ function oauthAdmissionKey(context: VercelMcpFetchContext): string {
   return `vercel-oauth:${address}`;
 }
 
-function contentLengthExceedsLimit(request: Request): boolean {
-  const raw = request.headers.get("content-length");
-  if (!raw) return false;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > MAX_BODY_BYTES;
-}
-
-function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
-  const body = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
+function vercelMcpPreflight(request: Request): Response | null {
+  const url = new URL(request.url);
+  if (url.pathname !== "/mcp" && url.pathname !== "/api/mcp") {
+    return jsonResponse(404, { error: "Not found" });
   }
-  return body;
+  if (request.method !== "POST" && request.method !== "GET" && request.method !== "DELETE") {
+    return jsonResponse(405, { error: "Method not allowed" }, { Allow: "GET, POST, DELETE" });
+  }
+  if (!hostOriginAllowed(request)) {
+    return jsonResponse(403, { error: "Host/Origin not allowed" });
+  }
+  return null;
 }
 
 async function requestWithCappedBody(request: Request): Promise<Request | Response> {
   if (request.method.toUpperCase() !== "POST") return request;
-  if (contentLengthExceedsLimit(request)) {
-    return jsonResponse(413, { error: "Request body too large" });
-  }
-  if (!request.body) return request;
 
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        return jsonResponse(413, { error: "Request body too large" }, { Connection: "close" });
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
+  const body = await readCappedBodyBytes(request);
+  if (body === null) {
+    return jsonResponse(413, { error: "Request body too large" }, { Connection: "close" });
   }
 
   return new Request(request.url, {
     method: request.method,
     headers: request.headers,
-    body: concatChunks(chunks, bytes),
+    body,
     signal: request.signal,
   });
+}
+
+function admissionRejectedResponse(
+  status: number,
+  body: unknown,
+  limitKey: string,
+  reason: string,
+): Response {
+  logger.warn(
+    { reason, status, rateKey: deriveRateKey(limitKey) },
+    "vercel.oauth.admission_rejected",
+  );
+  return jsonResponse(status, body, { "Retry-After": "1" });
 }
 
 async function authenticateWithAdmissionLimit(
@@ -188,11 +193,21 @@ async function authenticateWithAdmissionLimit(
   const limitKey = oauthAdmissionKey(context);
   const permit = limiter.acquire(limitKey);
   if (!permit.ok) {
-    return jsonResponse(permit.status, { error: permit.error }, { "Retry-After": "1" });
+    return admissionRejectedResponse(
+      permit.status,
+      { error: permit.error },
+      limitKey,
+      "in_flight_limit",
+    );
   }
   try {
     if (!allowRequest(deriveRateKey(limitKey))) {
-      return jsonResponse(429, { error: "Rate limit exceeded" }, { "Retry-After": "1" });
+      return admissionRejectedResponse(
+        429,
+        { error: "Rate limit exceeded" },
+        limitKey,
+        "rate_limit",
+      );
     }
     return await authenticateOAuthRequest(request);
   } finally {
@@ -210,6 +225,9 @@ export async function vercelMcpFetch(
   } catch (error) {
     return configurationErrorResponse(error);
   }
+
+  const preflightRejection = vercelMcpPreflight(request);
+  if (preflightRejection) return preflightRejection;
 
   const boundedRequest = await requestWithCappedBody(request);
   if (boundedRequest instanceof Response) return boundedRequest;

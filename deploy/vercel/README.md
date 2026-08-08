@@ -38,12 +38,15 @@ Backblaze B2 Native and S3-compatible APIs
 The MCP route is stateless. It does not use Redis, sticky routing, session
 storage, `initialize`, or `Mcp-Session-Id` for MCP `2026-07-28` requests. Each
 warm Vercel instance keeps its own process-local rate, concurrency,
-introspection, and capability caches. `B2_MAX_SESSIONS`,
+introspection, circuit-breaker, and capability caches. `B2_MAX_SESSIONS`,
 `B2_MAX_SESSIONS_PER_KEY`, and `B2_MCP_RATE_LIMIT_*` are therefore per warm
-instance on Vercel, not deployment-wide ceilings and not deployment-wide abuse controls; effective capacity scales
-with the number of warm instances. Treat those values as defense-in-depth and
-size B2, the authorization server, and spend limits using Vercel Firewall, WAF,
-deployment protection, and provider-side quotas for global controls.
+instance on Vercel, not deployment-wide ceilings and not deployment-wide abuse
+controls; effective capacity scales with the number of warm instances. The
+OAuth introspection cache and circuit breaker are also per instance and cold on
+cold start, so an authorization-server outage can still receive probes from
+each warm instance. Treat those values as defense-in-depth and size B2, the
+authorization server, and spend limits using Vercel Firewall, WAF, deployment
+protection, and provider-side quotas for global controls.
 
 ## Deploy
 
@@ -53,7 +56,7 @@ runtime, enables Fluid Compute, sets a bounded function duration, selects
 reviewing latency to your B2 account region; Vercel function region selection
 does not change B2 data residency.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
 
 Set these in Vercel Project Settings, not in source:
 
@@ -61,6 +64,7 @@ Set these in Vercel Project Settings, not in source:
 | --- | --- |
 | `B2_HTTP_CREDENTIAL_MODE` | `server` |
 | `B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE` | Omit unless intentionally enabling legacy header mode |
+| `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | Omit unless a reviewed deployment accepts sharing one B2 key across multiple subjects |
 | `B2_APPLICATION_KEY_ID` | Production-only encrypted environment value |
 | `B2_APPLICATION_KEY` | Production-only encrypted environment value |
 | `B2_ALLOWED_HOSTS` | Exact Vercel/custom hostname without wildcards |
@@ -71,6 +75,7 @@ Set these in Vercel Project Settings, not in source:
 | `B2_MCP_OUTPUT_FORMAT` | `json` until every client validates `toon` |
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
+| `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for the supported single-tenant `server` mode |
 | OAuth introspection credentials | Encrypted environment values; required unless the dangerous unauthenticated override is set |
 | Rate/concurrency values | Explicit reviewed per-warm-instance values |
 
@@ -85,19 +90,30 @@ This adapter is an OAuth resource server, not an authorization server. Configure
 your authorization server to issue access tokens for exactly the MCP resource
 URL and audience in `B2_OAUTH_RESOURCE` / `B2_OAUTH_AUDIENCE`.
 
+The supported `server` credential mode is single-tenant: one verified OAuth
+subject uses one server-held B2 application key. Configure exactly one
+`B2_OAUTH_ALLOWED_SUBJECTS` value matching the token `sub`, or
+`issuer#sub`, for that tenant. This prevents multiple unrelated principals
+from sharing one broad B2 credential without bucket or prefix authorization.
+Use `principal` mode when different verified principals need distinct B2
+credentials. `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` exists only for a
+separately reviewed deployment where the operator accepts that every allowed
+principal can access everything the shared B2 key can access.
+
 Token validation uses the authorization server's RFC 7662 introspection
 endpoint, so signature verification, signing algorithm policy, and revocation
 remain with the selected issuer. The adapter additionally checks:
 
 - active token response
 - exact `iss`
-- exact `resource`
+- exact `resource`, when the introspection response includes a resource claim
 - exact `aud`
 - `exp` and `nbf`
 - token type, when returned
 - token signing algorithm from `alg`, `jwt_alg`, or `token_alg`, matched
   against `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
+- a subject listed in `B2_OAUTH_ALLOWED_SUBJECTS`, when configured
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`
 
 Introspection calls are bounded by `B2_OAUTH_INTROSPECTION_TIMEOUT_MS`, retried

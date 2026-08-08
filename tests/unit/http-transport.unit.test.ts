@@ -997,6 +997,59 @@ describe("HTTP transport handler", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("server mode applies in-flight caps per verified principal", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    await replaceHandle(
+      (req) => {
+        const principal = String(req.headers["x-test-principal"] ?? "unknown");
+        return {
+          token: "verified-token",
+          clientId: `client-${principal}`,
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: principal },
+        };
+      },
+      {
+        fetchCapabilities: vi.fn(async () => ["listBuckets"]),
+        mcpHandler: {
+          fetch: vi.fn(async () => {
+            const stream = new ReadableStream<Uint8Array>({
+              start(controller) {
+                controllers.push(controller);
+                controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+              },
+            });
+            return new Response(stream, {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            });
+          }),
+          close: vi.fn(),
+        },
+      },
+    );
+
+    const first = request(port, "POST", "/mcp", {
+      headers: { ...modernHeaders("tools/list"), "x-test-principal": "alice" },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(1));
+
+    const second = request(port, "POST", "/mcp", {
+      headers: { ...modernHeaders("tools/list"), "x-test-principal": "bob" },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(2));
+
+    for (const controller of controllers) controller.close();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+    await expect(second).resolves.toMatchObject({ status: 200 });
+  });
+
   it("principal mode supports broker injection and rejects B2 header spoofing", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
     process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });

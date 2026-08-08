@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   OAuthError,
   OAuthErrorCode,
@@ -44,6 +45,7 @@ export interface OAuthResourceServerConfig {
   introspectionBearerToken?: string;
   serviceDocumentationUrl?: string;
   requiredScopes: string[];
+  allowedSubjects: string[];
   allowedTokenTypes: string[];
   allowedAlgorithms: string[];
   dangerouslyAllowInsecureIssuerUrl: boolean;
@@ -145,6 +147,7 @@ export function loadOAuthResourceServerConfig(
     introspectionBearerToken,
     serviceDocumentationUrl: optionalEnv(env, "B2_MCP_SERVICE_DOCUMENTATION_URL"),
     requiredScopes: csv(env.B2_OAUTH_REQUIRED_SCOPES),
+    allowedSubjects: csv(env.B2_OAUTH_ALLOWED_SUBJECTS),
     allowedTokenTypes: csv(env.B2_OAUTH_ALLOWED_TOKEN_TYPES, DEFAULT_TOKEN_TYPES).map((value) =>
       value.toLowerCase(),
     ),
@@ -259,6 +262,13 @@ function requireMatch(actual: unknown, expected: string, claimName: string): voi
   }
 }
 
+function requireMatchWhenPresent(actual: unknown, expected: string, claimName: string): void {
+  const actualValues = values(actual);
+  if (actualValues.length > 0 && !actualValues.includes(expected)) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, `Token ${claimName} is not accepted`);
+  }
+}
+
 function assertTimeWindow(claims: Record<string, unknown>, now: number): number {
   const exp = numberClaim(claims.exp);
   const nbf = numberClaim(claims.nbf);
@@ -274,9 +284,7 @@ function assertTokenType(
   allowedTokenTypes: readonly string[],
 ): void {
   const tokenType = stringClaim(claims.token_type);
-  if (!tokenType) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token type is not verified");
-  }
+  if (!tokenType) return;
   if (!allowedTokenTypes.includes(tokenType.toLowerCase())) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Unsupported token type");
   }
@@ -288,9 +296,7 @@ function assertTokenAlgorithm(
 ): string | undefined {
   if (allowedAlgorithms.length === 0) return undefined;
   const algorithm = stringClaim(claims.alg ?? claims.jwt_alg ?? claims.token_alg);
-  if (!algorithm) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not verified");
-  }
+  if (!algorithm) return undefined;
   if (!allowedAlgorithms.includes(algorithm)) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
   }
@@ -300,6 +306,26 @@ function assertTokenAlgorithm(
 function assertDeploymentScope(scopes: readonly string[]): void {
   if (!B2_OAUTH_SCOPES.some((scope) => scopes.includes(scope))) {
     throw new OAuthError(OAuthErrorCode.InsufficientScope, "Missing B2 deployment scope");
+  }
+}
+
+function subjectClaim(claims: Record<string, unknown>): string | undefined {
+  return stringClaim(claims.sub) ?? stringClaim(claims.subject) ?? stringClaim(claims.principal);
+}
+
+function assertAllowedSubject(
+  claims: Record<string, unknown>,
+  issuer: string,
+  allowedSubjects: readonly string[],
+): void {
+  if (allowedSubjects.length === 0) return;
+  const subject = subjectClaim(claims);
+  if (!subject) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token subject is not accepted");
+  }
+  const candidates = new Set([subject, `${issuer}#${subject}`]);
+  if (!allowedSubjects.some((allowed) => candidates.has(allowed))) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token subject is not accepted");
   }
 }
 
@@ -332,8 +358,12 @@ interface IntrospectionCircuitState {
 const introspectionCache = new Map<string, IntrospectionCacheEntry>();
 const introspectionCircuits = new Map<string, IntrospectionCircuitState>();
 
+function sha256Hex(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
 function configCacheKey(config: OAuthResourceServerConfig): string {
-  return credentialFingerprint(
+  return sha256Hex(
     [
       config.issuer,
       config.resource,
@@ -343,12 +373,13 @@ function configCacheKey(config: OAuthResourceServerConfig): string {
       config.introspectionBearerToken ? "bearer" : "",
       config.allowedTokenTypes.join(","),
       config.allowedAlgorithms.join(","),
+      config.allowedSubjects.join(","),
     ].join("\0"),
   );
 }
 
 function cacheKey(config: OAuthResourceServerConfig, token: string): string {
-  return credentialFingerprint([configCacheKey(config), credentialFingerprint(token)].join("\0"));
+  return sha256Hex([configCacheKey(config), sha256Hex(token)].join("\0"));
 }
 
 function cloneAuthInfo(authInfo: AuthInfo): AuthInfo {
@@ -368,6 +399,8 @@ function cachedAuthInfo(key: string, nowMs: number): AuthInfo | null {
     return null;
   }
   entry.lastAccessMs = nowMs;
+  introspectionCache.delete(key);
+  introspectionCache.set(key, entry);
   return cloneAuthInfo(entry.authInfo);
 }
 
@@ -383,10 +416,9 @@ function rememberAuthInfo(
   const ttlExpiresAtMs = nowMs + config.introspectionCacheTtlSeconds * 1000;
   const expiresAtMs = Math.min(tokenExpiresAtMs, ttlExpiresAtMs);
   if (expiresAtMs <= nowMs) return;
+  introspectionCache.delete(key);
   if (introspectionCache.size >= config.introspectionCacheMaxEntries) {
-    const oldest = [...introspectionCache.entries()].sort(
-      ([, left], [, right]) => left.lastAccessMs - right.lastAccessMs,
-    )[0]?.[0];
+    const oldest = introspectionCache.keys().next().value;
     if (oldest) introspectionCache.delete(oldest);
   }
   introspectionCache.set(key, {
@@ -429,13 +461,14 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
       if (issuer !== this.config.issuer) {
         throw new OAuthError(OAuthErrorCode.InvalidToken, "Token issuer is not trusted");
       }
-      requireMatch(claims.resource, this.config.resource, "resource");
+      requireMatchWhenPresent(claims.resource, this.config.resource, "resource");
       requireMatch(claims.aud, this.config.audience, "audience");
       const expiresAt = assertTimeWindow(claims, now);
       assertTokenType(claims, this.config.allowedTokenTypes);
       const algorithm = assertTokenAlgorithm(claims, this.config.allowedAlgorithms);
       const scopes = scopesFromClaim(claims.scope ?? claims.scp);
       assertDeploymentScope(scopes);
+      assertAllowedSubject(claims, issuer, this.config.allowedSubjects);
       const clientId =
         stringClaim(claims.client_id) ??
         stringClaim(claims.azp) ??
@@ -595,7 +628,9 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
     });
     if (this.config.introspectionClientId && this.config.introspectionClientSecret) {
       const basic = Buffer.from(
-        `${this.config.introspectionClientId}:${this.config.introspectionClientSecret}`,
+        `${oauthBasicComponent(this.config.introspectionClientId)}:${oauthBasicComponent(
+          this.config.introspectionClientSecret,
+        )}`,
       ).toString("base64");
       headers.set("Authorization", `Basic ${basic}`);
     } else if (this.config.introspectionBearerToken) {
@@ -629,6 +664,11 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
       throw new OAuthDependencyError("OAuth authorization server unavailable", reason);
     }
   }
+}
+
+function oauthBasicComponent(value: string): string {
+  const params = new URLSearchParams({ value });
+  return params.toString().slice("value=".length);
 }
 
 function serviceUnavailableOAuthResponse(error: OAuthDependencyError): Response {

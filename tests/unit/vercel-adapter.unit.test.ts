@@ -40,6 +40,7 @@ function setVercelEnv() {
     B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "25",
     B2_OAUTH_RESOURCE: "https://mcp.example.com/mcp",
     B2_OAUTH_AUDIENCE: "https://mcp.example.com/mcp",
+    B2_OAUTH_ALLOWED_SUBJECTS: "subject",
     B2_MCP_PUBLIC_URL: "https://mcp.example.com/mcp",
     B2_REGISTER_ALL_TOOLS: "true",
   };
@@ -152,13 +153,40 @@ describe("Vercel adapter", () => {
   });
 
   it("returns a bearer challenge before credential resolution when auth is missing", async () => {
-    const response = await vercelMcpFetch(new Request("https://mcp.example.com/mcp"));
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", { headers: { host: "mcp.example.com" } }),
+    );
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
     expect(response.headers.get("www-authenticate")).toContain(
       ".well-known/oauth-protected-resource/mcp",
     );
+  });
+
+  it.each([
+    ["wrong path", "https://mcp.example.com/not-mcp", "POST", jsonHeaders()],
+    ["wrong method", "https://mcp.example.com/mcp", "PUT", jsonHeaders()],
+    [
+      "wrong origin",
+      "https://mcp.example.com/mcp",
+      "POST",
+      jsonHeaders({ Origin: "https://evil.example.com" }),
+    ],
+  ])("rejects %s before OAuth introspection", async (_name, url, method, headers) => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await vercelMcpFetch(
+      new Request(url, {
+        method,
+        headers: { ...headers, Authorization: "Bearer access-token" },
+        body: method === "POST" || method === "PUT" ? "{}" : undefined,
+      }),
+    );
+
+    expect([403, 404, 405]).toContain(response.status);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("serves modern discovery and tools/list through the Vercel adapter", async () => {
@@ -267,6 +295,7 @@ describe("Vercel adapter", () => {
   it("throttles concurrent invalid-token requests before unbounded introspection", async () => {
     process.env.B2_MAX_SESSIONS_PER_KEY = "1";
     await closeVercelMcpHandlerForTests();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
       const signal = init?.signal as AbortSignal | undefined;
       return new Promise<Response>((_resolve, reject) => {
@@ -303,7 +332,48 @@ describe("Vercel adapter", () => {
 
     expect(second.status).toBe(429);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "in_flight_limit", status: 429 }),
+      "vercel.oauth.admission_rejected",
+    );
     await expect(first).resolves.toMatchObject({ status: 503 });
+  });
+
+  it("keeps OAuth admission buckets independent for distinct clients", async () => {
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    await closeVercelMcpHandlerForTests();
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("Timed out")), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Bearer first" }),
+        body: "{}",
+      }),
+      { remoteAddress: "203.0.113.10" },
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const second = vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Bearer second" }),
+        body: "{}",
+      }),
+      { remoteAddress: "203.0.113.11" },
+    );
+    await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+    await expect(first).resolves.toMatchObject({ status: 503 });
+    await expect(second).resolves.toMatchObject({ status: 503 });
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("rejects public B2 credential headers in server mode", async () => {
@@ -348,6 +418,19 @@ describe("Vercel adapter", () => {
 
   it("fails closed when Vercel header credential mode is not explicitly enabled", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+    const body = (await response.json()) as { code: string; error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("configuration_error");
+    expect(body.error).toMatch(/not configured/i);
+  });
+
+  it("requires a single allowed OAuth subject in server credential mode", async () => {
+    delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
 
     const response = await vercelHealthFetch(
       new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),

@@ -160,7 +160,8 @@ export const PARTNER_TOOLS = new Set<string>([
   "b2_list_group_members",
 ]);
 
-export type OAuthToolScopePolicy = "read" | "write" | "admin" | "read-write";
+export type OAuthToolScopePolicy = "read" | "write" | "admin";
+export type OAuthOperationScope = "read" | "write" | "admin";
 
 export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   b2_authorize_account: "read",
@@ -192,7 +193,7 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   s3_delete_objects: "write",
   s3_get_bucket_location: "read",
   s3_get_object: "read",
-  s3_get_presigned_url: "read-write",
+  s3_get_presigned_url: "read",
   s3_head_bucket: "read",
   s3_head_object: "read",
   s3_list_multipart_uploads: "read",
@@ -200,13 +201,27 @@ export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   s3_list_objects_v2: "read",
   s3_list_parts: "read",
   s3_presign_upload_part: "write",
-  s3_put_bucket_lifecycle: "write",
+  s3_put_bucket_lifecycle: "admin",
   s3_put_object: "write",
   s3_upload_part_copy: "write",
 };
 
 function hasAnyScope(scopes: ReadonlySet<string>, candidates: readonly string[]): boolean {
   return candidates.some((scope) => scopes.has(scope));
+}
+
+const OAUTH_OPERATION_SCOPES: Record<OAuthOperationScope, readonly string[]> = {
+  read: ["b2:read", "b2:write", "b2:admin"],
+  write: ["b2:write", "b2:admin"],
+  admin: ["b2:admin"],
+};
+
+export function oauthScopesAllowOperation(
+  scopes: ReadonlySet<string> | null,
+  operation: OAuthOperationScope,
+): boolean {
+  if (scopes === null) return true;
+  return hasAnyScope(scopes, OAUTH_OPERATION_SCOPES[operation]);
 }
 
 /**
@@ -249,13 +264,12 @@ export function isToolAllowedByOAuthScopes(
   scopes: ReadonlySet<string> | null,
 ): boolean {
   if (scopes === null) return true;
-  if (hasAnyScope(scopes, ["b2:admin"])) return true;
+  if (oauthScopesAllowOperation(scopes, "admin")) return true;
   switch (oauthToolScopePolicy(name) ?? "admin") {
     case "read":
-    case "read-write":
-      return hasAnyScope(scopes, ["b2:read", "b2:write"]);
+      return oauthScopesAllowOperation(scopes, "read");
     case "write":
-      return hasAnyScope(scopes, ["b2:write"]);
+      return oauthScopesAllowOperation(scopes, "write");
     case "admin":
       return false;
   }

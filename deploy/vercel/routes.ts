@@ -6,21 +6,7 @@ import {
   vercelProtectedResourceMetadataFetch,
 } from "./adapter.js";
 
-export async function mcpGetRoute(
-  request: Request,
-  context?: VercelMcpFetchContext,
-): Promise<Response> {
-  return vercelMcpFetch(request, context);
-}
-
-export async function mcpPostRoute(
-  request: Request,
-  context?: VercelMcpFetchContext,
-): Promise<Response> {
-  return vercelMcpFetch(request, context);
-}
-
-export async function mcpDeleteRoute(
+export async function mcpRoute(
   request: Request,
   context?: VercelMcpFetchContext,
 ): Promise<Response> {

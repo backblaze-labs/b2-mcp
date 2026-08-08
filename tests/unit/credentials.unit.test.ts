@@ -174,6 +174,41 @@ describe("credential providers", () => {
     ).toThrow(/not accepted/i);
   });
 
+  it("server provider rate keys use verified principal when present", () => {
+    process.env.B2_APPLICATION_KEY_ID = "server-id";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+    const provider = new HttpServerCredentialProvider();
+    const alice = provider.resolve({
+      req: {
+        headers: {},
+        auth: {
+          token: "verified",
+          clientId: "client-a",
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: "alice" },
+        },
+      } as any,
+    });
+    const bob = provider.resolve({
+      req: {
+        headers: {},
+        auth: {
+          token: "verified",
+          clientId: "client-b",
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: "bob" },
+        },
+      } as any,
+    });
+
+    expect(alice.cacheKey).toMatch(/^server-principal:[a-f0-9]{16}$/);
+    expect(bob.cacheKey).toMatch(/^server-principal:[a-f0-9]{16}$/);
+    expect(alice.cacheKey).not.toBe(bob.cacheKey);
+    expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
+    expect(alice.cacheKey).not.toContain("alice");
+    expect(alice.cacheKey).not.toContain("server-secret");
+  });
+
   it("principal provider maps verified authInfo to an env-backed credential reference", () => {
     process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
     process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-id";

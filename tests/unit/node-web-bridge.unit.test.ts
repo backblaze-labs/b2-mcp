@@ -2,9 +2,11 @@ import { EventEmitter } from "events";
 import { PassThrough } from "stream";
 import { ReadableStream } from "node:stream/web";
 import type * as http from "http";
-import { createVercelNodeHandler } from "../../deploy/vercel/node-function";
+import { createVercelNodeHandler, vercelClientAddress } from "../../deploy/vercel/node-function";
 import { logger } from "../../src/utils/logger";
 import { writeWebResponse } from "../../src/utils/node-web-bridge";
+
+const savedEnv = { ...process.env };
 
 class FakeServerResponse extends EventEmitter {
   destroyed = false;
@@ -58,6 +60,7 @@ function fakeRequest(): http.IncomingMessage {
 describe("Node Web bridge", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    process.env = { ...savedEnv };
   });
 
   it("waits for drain when ServerResponse applies backpressure", async () => {
@@ -129,5 +132,35 @@ describe("Node Web bridge", () => {
       "vercel.http.failed",
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain("secret-token-value");
+  });
+
+  it("passes the trusted Vercel forwarded client address to the route", async () => {
+    process.env = { ...savedEnv, VERCEL: "1" };
+    const req = fakeRequest();
+    req.headers = {
+      host: "mcp.example.com",
+      "x-forwarded-for": "203.0.113.77, 198.51.100.1",
+    };
+    const res = new FakeServerResponse();
+    const route = vi.fn(() => new Response("ok"));
+    const handler = createVercelNodeHandler(route);
+
+    await handler(req, res as unknown as http.ServerResponse);
+
+    expect(route).toHaveBeenCalledWith(
+      expect.any(Request),
+      expect.objectContaining({ remoteAddress: "203.0.113.77" }),
+    );
+  });
+
+  it("prefers x-vercel-forwarded-for over generic forwarded headers", () => {
+    process.env = { ...savedEnv, VERCEL: "1" };
+    expect(
+      vercelClientAddress({
+        "x-vercel-forwarded-for": "2001:db8::1",
+        "x-forwarded-for": "203.0.113.77, 198.51.100.1",
+        "x-real-ip": "198.51.100.2",
+      }),
+    ).toBe("2001:db8::1");
   });
 });

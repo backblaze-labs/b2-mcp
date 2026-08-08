@@ -18,7 +18,8 @@ const baseConfig = {
   introspectionEndpoint: "http://localhost:9000/oauth2/introspect",
   introspectionClientId: "client",
   introspectionClientSecret: "secret",
-  requiredScopes: [],
+  requiredScopes: [] as string[],
+  allowedSubjects: [] as string[],
   allowedTokenTypes: ["bearer"],
   allowedAlgorithms: ["RS256"],
   dangerouslyAllowInsecureIssuerUrl: true,
@@ -111,6 +112,15 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(authInfo.resource?.href).toBe(baseConfig.resource);
   });
 
+  it("accepts RFC 7662 introspection without optional token type or algorithm", async () => {
+    const { verifier } = verifierFor(claims({ token_type: undefined, alg: undefined }));
+
+    const authInfo = await verifier.verifyAccessToken("access-token");
+
+    expect(authInfo.clientId).toBe("mcp-client");
+    expect(authInfo.extra?.alg).toBeUndefined();
+  });
+
   it.each([
     ["inactive", { active: false }, /inactive/i],
     ["expired", { exp: 999 }, /expired/i],
@@ -118,17 +128,39 @@ describe("OAuthIntrospectionVerifier", () => {
     ["missing issuer", { iss: undefined }, /issuer/i],
     ["wrong issuer", { iss: "http://localhost:9001/" }, /issuer/i],
     ["wrong audience", { aud: "other" }, /audience/i],
-    ["missing resource", { resource: undefined }, /resource/i],
     ["wrong resource", { resource: "other" }, /resource/i],
-    ["missing token type", { token_type: undefined }, /token type/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
-    ["missing token algorithm", { alg: undefined }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
     ["missing deployment scope", { scope: "profile" }, /deployment scope/i],
   ])("rejects %s tokens", async (_name, overrides, message) => {
     const { verifier } = verifierFor(claims(overrides));
 
     await expect(verifier.verifyAccessToken("access-token")).rejects.toThrow(message);
+  });
+
+  it("accepts a valid audience-bound token when introspection omits resource", async () => {
+    const { verifier } = verifierFor(claims({ resource: undefined }));
+
+    await expect(verifier.verifyAccessToken("access-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+      scopes: ["b2:read"],
+    });
+  });
+
+  it("enforces configured allowed subjects when present", async () => {
+    const accepted = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ sub: "tenant-a" }))),
+      { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
+    );
+    const rejected = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ sub: "tenant-b" }))),
+      { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
+    );
+
+    await expect(accepted.verifyAccessToken("access-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+    await expect(rejected.verifyAccessToken("other-token")).rejects.toThrow(/subject/i);
   });
 
   it("reports introspection 5xx as a retryable dependency failure", async () => {
@@ -299,6 +331,23 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("form-encodes client credentials before Basic introspection auth", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = init?.headers as Headers;
+      const encoded = headers.get("authorization")?.replace(/^Basic /, "") ?? "";
+      expect(Buffer.from(encoded, "base64").toString("utf8")).toBe("client%3Aid:secret+with+%25");
+      return Response.json(claims());
+    });
+    const verifier = verifierWithFetch(fetchMock, {
+      introspectionClientId: "client:id",
+      introspectionClientSecret: "secret with %",
+    });
+
+    await verifier.verifyAccessToken("access-token");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not cache past token expiry even when the cache TTL is longer", async () => {
     let now = 1000;
     const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 3 })));
@@ -343,6 +392,7 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
       B2_OAUTH_RESOURCE: baseConfig.resource,
       B2_OAUTH_AUDIENCE: baseConfig.audience,
+      B2_OAUTH_ALLOWED_SUBJECTS: "user-123,https://issuer.example/#user-456",
       B2_OAUTH_REQUIRED_SCOPES: "b2:read,custom:report",
       B2_OAUTH_ALLOWED_ALGORITHMS: "RS256,ES256",
       B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "2500",
@@ -350,6 +400,7 @@ describe("OAuth resource metadata", () => {
     });
 
     expect(config.requiredScopes).toEqual(["b2:read", "custom:report"]);
+    expect(config.allowedSubjects).toEqual(["user-123", "https://issuer.example/#user-456"]);
     expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
     expect(config.introspectionTimeoutMs).toBe(2500);
     expect(config.introspectionCacheTtlSeconds).toBe(120);

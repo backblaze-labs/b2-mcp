@@ -86,11 +86,23 @@ describe("Vercel adapter policy", () => {
     const guide = readFileSync(join(root, "deploy/vercel/README.md"), "utf8");
 
     expect(guide).toContain("not a Next.js app");
-    expect(guide).toContain("not deployment-wide abuse controls");
+    expect(guide).toContain("not deployment-wide ceilings");
+    expect(guide).toContain("not deployment-wide abuse");
+    expect(guide).toContain("single-tenant");
+    expect(guide).toContain("B2_OAUTH_ALLOWED_SUBJECTS");
     expect(guide).toContain("Production environment secrets");
     expect(guide).toContain("x-vercel-protection-bypass");
     expect(guide).toContain("https://vercel.com/docs/functions/limitations");
     expect(guide).toContain("https://vercel.com/docs/fluid-compute");
+  });
+
+  it("prompts Vercel server-mode deployments for an OAuth subject allowlist", () => {
+    const guide = readFileSync(join(root, "deploy/vercel/README.md"), "utf8");
+    const envExample = readFileSync(join(root, "deploy/vercel/vercel.env.example"), "utf8");
+
+    expect(guide).toContain("B2_OAUTH_ALLOWED_SUBJECTS");
+    expect(guide).toContain("B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL");
+    expect(envExample).toContain("B2_OAUTH_ALLOWED_SUBJECTS=");
   });
 
   it("keeps Vercel TypeScript files in the typecheck-only project", () => {

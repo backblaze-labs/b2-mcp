@@ -27,6 +27,7 @@ import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 import { parseIntEnv } from "./utils/config.js";
+import { readCappedBodyBytes } from "./utils/http-body-limit.js";
 import {
   type AuthenticatedIncomingMessage,
   type CredentialProvider,
@@ -39,7 +40,6 @@ import {
   validateHttpCredentialConfiguration,
 } from "./credentials.js";
 
-const MAX_BODY_BYTES = 1 * 1024 * 1024;
 const IDLE_SWEEP_INTERVAL_MS = 60 * 1000;
 const SHUTDOWN_DRAIN_MS = 10 * 1000;
 const DEFAULT_MAX_IN_FLIGHT = 1000;
@@ -244,7 +244,7 @@ function isLoopbackHealthProbe(request: Request, remoteAddress: string | undefin
   return !origin || isLoopbackHostName(originHostname(origin));
 }
 
-function hostOriginAllowed(request: Request): boolean {
+export function hostOriginAllowed(request: Request): boolean {
   const allowedHosts = csvEnv("B2_ALLOWED_HOSTS");
   const allowedOrigins = csvEnv("B2_ALLOWED_ORIGINS");
   const host = request.headers.get("host");
@@ -295,13 +295,6 @@ function headerValue(
   name: string,
 ): string | undefined {
   return firstHeaderValue(headers[name.toLowerCase()] ?? headers[name]);
-}
-
-function contentLengthExceedsLimit(headers: Headers): boolean {
-  const raw = headers.get("content-length");
-  if (!raw) return false;
-  const contentLength = Number(raw);
-  return Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES;
 }
 
 function jsonResponse(
@@ -524,34 +517,13 @@ function requestLimitKey(request: Request, context: HttpFetchContext | undefined
     : undefined;
   const realIp = trustProxyHeaders ? request.headers.get("x-real-ip") : undefined;
   const address =
-    context?.remoteAddress?.trim() || forwarded?.trim() || realIp?.trim() || "unknown";
+    forwarded?.trim() || realIp?.trim() || context?.remoteAddress?.trim() || "unknown";
   return `http:${address}`;
 }
 
 async function readCappedBody(request: Request): Promise<string | null> {
-  if (contentLengthExceedsLimit(request.headers)) return null;
-  if (!request.body) return "";
-
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder();
-  let body = "";
-  let bytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      bytes += value.byteLength;
-      if (bytes > MAX_BODY_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        return null;
-      }
-      body += decoder.decode(value, { stream: true });
-    }
-    body += decoder.decode();
-    return body;
-  } finally {
-    reader.releaseLock();
-  }
+  const body = await readCappedBodyBytes(request);
+  return body === null ? null : new TextDecoder().decode(body);
 }
 
 function headersFromRecord(headers: Record<string, string | string[] | undefined>): Headers {

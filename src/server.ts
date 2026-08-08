@@ -25,6 +25,7 @@ import {
   DURABLE_SECRET_PRODUCING_TOOLS,
   isToolAllowedByOAuthScopes,
   isToolEnabled,
+  oauthScopesAllowOperation,
 } from "./utils/tool-capabilities.js";
 import {
   sanitizeError,
@@ -202,13 +203,8 @@ export function createServer(
   // "unknown".
   const filterActive = Array.isArray(capabilities);
   const capsSet = filterActive ? new Set(capabilities) : null;
-  const oauthAllowsRead =
-    oauthScopes === null ||
-    oauthScopes.has("b2:read") ||
-    oauthScopes.has("b2:write") ||
-    oauthScopes.has("b2:admin");
-  const oauthAllowsWrite =
-    oauthScopes === null || oauthScopes.has("b2:write") || oauthScopes.has("b2:admin");
+  const oauthAllowsRead = oauthScopesAllowOperation(oauthScopes, "read");
+  const oauthAllowsWrite = oauthScopesAllowOperation(oauthScopes, "write");
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) =>
       isToolEnabled(name, capsSet) && isToolAllowedByOAuthScopes(name, oauthScopes),
