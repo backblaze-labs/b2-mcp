@@ -67,7 +67,7 @@ describe("supply-chain audit policy", () => {
     >;
   };
   const auditFixturePackage = lock.packages["node_modules/acorn"];
-  const auditFixtureVia = lock.packages["node_modules/acorn-walk"];
+  const auditFixtureVia = lock.packages["node_modules/acorn-jsx"];
   const zodPackage = lock.packages["node_modules/zod"];
   const exceptionPolicy = {
     allowedAdvisories: [
@@ -77,11 +77,11 @@ describe("supply-chain audit policy", () => {
         maxSeverity: "moderate",
         isDirect: false,
         nodes: ["node_modules/acorn"],
-        effects: ["acorn-walk"],
+        effects: ["acorn-jsx"],
         package: { version: auditFixturePackage.version, integrity: auditFixturePackage.integrity },
         via: {
-          path: "node_modules/acorn-walk",
-          name: "acorn-walk",
+          path: "node_modules/acorn-jsx",
+          name: "acorn-jsx",
           version: auditFixtureVia.version,
           dependencyRange: auditFixtureVia.dependencies?.acorn,
         },
@@ -138,20 +138,20 @@ describe("supply-chain audit policy", () => {
               range: "<8.16.1",
             },
           ],
-          effects: ["acorn-walk"],
+          effects: ["acorn-jsx"],
           range: "<8.16.1",
           nodes: ["node_modules/acorn"],
           fixAvailable: false,
           ...overrides,
         },
-        "acorn-walk": {
-          name: "acorn-walk",
+        "acorn-jsx": {
+          name: "acorn-jsx",
           severity: "moderate",
           isDirect: false,
           via: ["acorn"],
           effects: [],
           range: "*",
-          nodes: ["node_modules/acorn-walk"],
+          nodes: ["node_modules/acorn-jsx"],
           fixAvailable: false,
         },
       },
