@@ -179,6 +179,53 @@ describe("B2Client S3 version guard", () => {
     ).toHaveLength(0);
   });
 
+  it("does not trust unnamed authorize bucket scope for version binding", async () => {
+    invalidateAuthManagerCache();
+    const auth = authorizeResponse(["readFiles"]) as any;
+    auth.apiInfo.storageApi.allowed.buckets = [{ id: "bucket-1", name: null }];
+    auth.apiInfo.storageApi.allowed.bucketId = "bucket-1";
+    auth.apiInfo.storageApi.allowed.bucketName = null;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(403, {
+          status: 403,
+          code: "unauthorized",
+          message: "listBuckets denied",
+        });
+      }
+      if (endpoint === "b2_get_file_info") {
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          bucketId: "bucket-1",
+          fileId: "version-a",
+          fileName: "a.txt",
+          action: "upload",
+          contentLength: 1,
+          contentSha1: "none",
+          contentType: "text/plain",
+          fileInfo: {},
+          uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    await expect(
+      client.resolveS3FileVersion({
+        bucket: "claimed-bucket",
+        key: "a.txt",
+        versionId: "version-a",
+      }),
+    ).rejects.toThrow(/listBuckets denied/i);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_get_file_info"),
+    ).toHaveLength(0);
+  });
+
   it("fails bulk version binding closed when bucket ownership is unknown", async () => {
     invalidateAuthManagerCache();
     const transport = new RecordingTransport((request) => {

@@ -511,7 +511,7 @@ function bucketIdFromAuthorizedScope(auth: B2AuthResponse, bucketName: string): 
   if (!buckets || buckets.length === 0) return null;
   const namedBucket = buckets.find((bucket) => bucket.name === bucketName);
   if (namedBucket) return namedBucket.id;
-  return buckets.length === 1 && buckets[0]?.name === null ? buckets[0].id : null;
+  return null;
 }
 
 async function resolveTrustedBucketId(
