@@ -1068,7 +1068,7 @@
     },
     {
       "name": "s3_copy_object",
-      "descriptionSha256": "e2bb90a2ee5d8a2da5f0322e562271cfe2a2ca1f5c979c6ed8ba1e9e6b357c35",
+      "descriptionSha256": "363910cd742071f6ac91e61d3bb13d577141dab1766f35bca382abd3212e4985",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1747,5 +1747,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "e22fbb551d597707fa8c570fd4b17fcd158d5a896e5fd14ea7a7ec19b028ac6d"
+  "hash": "41832d9a61e75c761c3fe73f79a9713e854aa31e34efec923e751a9cbeb933b9"
 }

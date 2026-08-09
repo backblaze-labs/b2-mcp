@@ -310,12 +310,12 @@ describe("S3-compatible bucket and object tools", () => {
       ...(firstVersionPage.deleteMarkers ?? []),
       ...(secondVersionPage.deleteMarkers ?? []),
     ];
-    expect(versionRows.some((version: any) => version.key === versionedKey)).toBe(true);
-    expect(deleteMarkerRows.some((marker: any) => marker.key === versionedKey)).toBe(true);
+    expect(versionRows.some((version: any) => version.Key === versionedKey)).toBe(true);
+    expect(deleteMarkerRows.some((marker: any) => marker.Key === versionedKey)).toBe(true);
 
     const versionDeleteTargets = [...versionRows, ...deleteMarkerRows]
-      .filter((entry: any) => entry.key === versionedKey && typeof entry.versionId === "string")
-      .map((entry: any) => ({ key: entry.key, versionId: entry.versionId }));
+      .filter((entry: any) => entry.Key === versionedKey && typeof entry.VersionId === "string")
+      .map((entry: any) => ({ key: entry.Key, versionId: entry.VersionId }));
     expect(versionDeleteTargets.length).toBeGreaterThanOrEqual(2);
     const versionCleanup = parseResult(
       await callTool(server, "s3_delete_objects", {

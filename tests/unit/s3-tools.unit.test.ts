@@ -649,6 +649,31 @@ describe("s3_head_object and s3_copy_object", () => {
     });
   });
 
+  it("does not mask non-404 HeadObject failures with native delete markers", async () => {
+    vi.mocked(B2Client.prototype.getCurrentS3FileVersion).mockResolvedValueOnce(
+      matchingVersion({
+        fileName: "hidden.txt",
+        fileId: "hide-current",
+        action: "hide",
+      }),
+    );
+    sendSpy.mockRejectedValueOnce(
+      Object.assign(new Error("access denied"), {
+        name: "AccessDenied",
+        $metadata: { httpStatusCode: 403 },
+      }),
+    );
+
+    const result = await callTool(server, "s3_head_object", {
+      bucket: "head-bucket",
+      key: "hidden.txt",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/access denied/i);
+    expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
+  });
+
   it("sends CopyObjectCommand through the AWS SDK", async () => {
     const result = await callTool(server, "s3_copy_object", {
       sourceBucket: "copy-source",

@@ -323,6 +323,10 @@ function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
   };
 }
 
+function is404(e: any) {
+  return e?.status === 404 || e?.$metadata?.httpStatusCode === 404;
+}
+
 async function validateDeleteObjectVersions(
   versions: B2S3VersionGuard,
   input: {
@@ -731,7 +735,7 @@ export function registerS3ObjectTools(
             versionId: args.versionId,
           });
         } catch (headErr) {
-          if (!args.versionId && allowCurrentVersionInspection) {
+          if (!args.versionId && allowCurrentVersionInspection && is404(headErr)) {
             try {
               const currentVersion = await versions.getCurrentS3FileVersion({
                 bucket: args.bucket,
@@ -768,7 +772,7 @@ export function registerS3ObjectTools(
     "s3_copy_object",
     {
       description:
-        "Copy an object within B2 or between B2 buckets through the B2 S3-compatible endpoint. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+        "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
       inputSchema: {
         sourceBucket: z.string().describe("The source bucket name."),
         sourceKey: z.string().describe("The source object key."),
