@@ -487,7 +487,7 @@ export class B2S3PeerClient {
   }
 
   async putObject(input: B2S3PutObjectOptions): Promise<void> {
-    await this.sendWithCircuit(
+    await this.sendUnsafeMutationWithCircuit(
       new PutObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -543,7 +543,7 @@ export class B2S3PeerClient {
   }
 
   async deleteObject(input: B2S3DeleteObjectOptions): Promise<B2S3DeleteObjectResult> {
-    const result = await this.sendWithCircuit(
+    const result = await this.sendUnsafeMutationWithCircuit(
       new DeleteObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -603,7 +603,7 @@ export class B2S3PeerClient {
   }
 
   async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
-    await this.sendWithCircuit(
+    await this.sendUnsafeMutationWithCircuit(
       new CopyObjectCommand({
         Bucket: input.destinationBucket,
         Key: input.destinationKey,
