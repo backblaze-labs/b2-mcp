@@ -123,6 +123,11 @@ export interface B2S3DeleteObjectOptions {
   bypassGovernance?: boolean;
 }
 
+export interface B2S3DeleteObjectResult {
+  versionId?: string;
+  deleteMarker?: boolean;
+}
+
 export interface B2S3DeleteObjectsOptions {
   bucket: string;
   objects: Array<{ key: string; versionId?: string }>;
@@ -368,6 +373,18 @@ function mapDeleteMarker(input: {
 }
 
 export class B2S3PeerClient extends S3Client {
+  private readonly unsafeMutationClient: S3Client;
+
+  constructor(config: B2S3PeerClientConfig) {
+    super(config);
+    this.unsafeMutationClient = new S3Client({ ...config, maxAttempts: 1 });
+  }
+
+  override destroy(): void {
+    this.unsafeMutationClient.destroy();
+    super.destroy();
+  }
+
   private optionsWithRequestSignal(options?: HttpHandlerOptions): HttpHandlerOptions | undefined {
     const signal = currentMcpRequestSignal();
     if (!signal) return options;
@@ -413,12 +430,24 @@ export class B2S3PeerClient extends S3Client {
     return withCircuit(() => this.send(command, options));
   }
 
+  private async sendUnsafeMutationWithCircuit<
+    InputType extends ServiceInputTypes,
+    OutputType extends ServiceOutputTypes,
+  >(
+    command: S3SendCommand<InputType, OutputType>,
+    options?: HttpHandlerOptions,
+  ): Promise<OutputType> {
+    return withCircuit(() =>
+      this.unsafeMutationClient.send(command, this.optionsWithRequestSignal(options)),
+    );
+  }
+
   async headBucket(bucket: string): Promise<void> {
     await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
   }
 
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {
-    await this.sendWithCircuit(
+    await this.sendUnsafeMutationWithCircuit(
       new PutBucketLifecycleConfigurationCommand({
         Bucket: input.bucket,
         LifecycleConfiguration: {
@@ -454,7 +483,7 @@ export class B2S3PeerClient extends S3Client {
   }
 
   async putObject(input: B2S3PutObjectOptions): Promise<void> {
-    await this.sendWithCircuit(
+    await this.sendUnsafeMutationWithCircuit(
       new PutObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -509,8 +538,8 @@ export class B2S3PeerClient extends S3Client {
     };
   }
 
-  async deleteObject(input: B2S3DeleteObjectOptions): Promise<void> {
-    await this.sendWithCircuit(
+  async deleteObject(input: B2S3DeleteObjectOptions): Promise<B2S3DeleteObjectResult> {
+    const result = await this.sendUnsafeMutationWithCircuit(
       new DeleteObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -518,6 +547,10 @@ export class B2S3PeerClient extends S3Client {
         BypassGovernanceRetention: input.bypassGovernance,
       }),
     );
+    return {
+      versionId: result.VersionId,
+      deleteMarker: result.DeleteMarker,
+    };
   }
 
   async deleteObjects(input: B2S3DeleteObjectsOptions): Promise<B2S3DeleteObjectsResult> {
@@ -540,14 +573,20 @@ export class B2S3PeerClient extends S3Client {
         if (!object) return;
         attempted++;
         try {
-          await this.deleteObject({
+          const result = await this.deleteObject({
             bucket: input.bucket,
             key: object.key,
             versionId: object.versionId,
             bypassGovernance: input.bypassGovernance,
           });
           if (input.quiet !== true) {
-            deleted.push({ Key: object.key, VersionId: object.versionId });
+            const versionId = result.versionId ?? object.versionId;
+            deleted.push({
+              Key: object.key,
+              VersionId: versionId,
+              DeleteMarker: result.deleteMarker,
+              DeleteMarkerVersionId: result.deleteMarker === true ? versionId : undefined,
+            });
           }
         } catch (err) {
           errors.push(b2S3DeleteErrorEntry(object, err));
@@ -566,7 +605,7 @@ export class B2S3PeerClient extends S3Client {
   }
 
   async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
-    await this.sendWithCircuit(
+    await this.sendUnsafeMutationWithCircuit(
       new CopyObjectCommand({
         Bucket: input.destinationBucket,
         Key: input.destinationKey,
@@ -586,7 +625,7 @@ export class B2S3PeerClient extends S3Client {
         Delimiter: input.delimiter,
         MaxKeys: input.maxKeys,
         ContinuationToken: input.continuationToken,
-        StartAfter: input.startAfter,
+        StartAfter: input.continuationToken === undefined ? input.startAfter : undefined,
       }),
     );
     const objects = compactMap(result.Contents, mapObjectSummary);
@@ -595,7 +634,7 @@ export class B2S3PeerClient extends S3Client {
       commonPrefixes: compactMap(result.CommonPrefixes, mapCommonPrefix),
       isTruncated: result.IsTruncated === true,
       nextContinuationToken: result.NextContinuationToken,
-      keyCount: result.KeyCount ?? objects.length,
+      keyCount: objects.length,
     };
   }
 
@@ -654,7 +693,7 @@ export class B2S3PeerClient extends S3Client {
     acl?: "private" | "public-read";
     serverSideEncryption?: "AES256";
   }): Promise<{ uploadId?: string; bucket?: string; key?: string }> {
-    const result = await this.send(
+    const result = await this.sendUnsafeMutationWithCircuit(
       new CreateMultipartUploadCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -693,7 +732,7 @@ export class B2S3PeerClient extends S3Client {
     uploadId: string;
     parts: B2S3CompletedMultipartPart[];
   }): Promise<{ location?: string; bucket?: string; key?: string; etag?: string }> {
-    const result = await this.send(
+    const result = await this.sendUnsafeMutationWithCircuit(
       new CompleteMultipartUploadCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -719,7 +758,7 @@ export class B2S3PeerClient extends S3Client {
     key: string;
     uploadId: string;
   }): Promise<void> {
-    await this.send(
+    await this.sendUnsafeMutationWithCircuit(
       new AbortMultipartUploadCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -795,7 +834,7 @@ export class B2S3PeerClient extends S3Client {
     copySource: string;
     copySourceRange?: string;
   }): Promise<{ etag?: string; lastModified?: Date }> {
-    const result = await this.send(
+    const result = await this.sendUnsafeMutationWithCircuit(
       new UploadPartCopyCommand({
         Bucket: input.bucket,
         Key: input.key,

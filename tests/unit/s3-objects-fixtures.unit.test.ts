@@ -198,6 +198,8 @@ describe("S3 object tools with deterministic handler fake", () => {
 
     expect(getResult.content).toBe(Buffer.from("hello").toString("base64"));
     expect(listResult).toMatchObject({
+      objects: [{ Key: "a.txt", Size: 1, StorageClass: "STANDARD" }],
+      commonPrefixes: [{ Prefix: "folder/" }],
       isTruncated: true,
       nextContinuationToken: "next",
       keyCount: 1,
@@ -257,6 +259,38 @@ describe("S3 object tools with deterministic handler fake", () => {
 
     expect(result.isError).toBe(true);
     expect(destroySpy).toHaveBeenCalled();
+  });
+
+  it("does not return partial inline content when web-stream cancellation resolves done", async () => {
+    let resolveRead: (value: { done: boolean; value?: Uint8Array }) => void = () => undefined;
+    const reader = {
+      read: vi.fn(
+        () =>
+          new Promise<{ done: boolean; value?: Uint8Array }>((resolve) => {
+            resolveRead = resolve;
+          }),
+      ),
+      cancel: vi.fn().mockResolvedValue(undefined),
+      releaseLock: vi.fn(),
+    };
+    nextDownload = downloadedObject({
+      contentLength: 5,
+      body: { getReader: () => reader } as unknown as B2S3DownloadedObject["body"],
+    });
+    const controller = new AbortController();
+
+    const pending = runWithMcpRequestSignal(controller.signal, () =>
+      tools.call("s3_get_object", { bucket: "b", key: "hello.txt" }),
+    );
+    await vi.waitFor(() => expect(reader.read).toHaveBeenCalled());
+    controller.abort(new Error("client disconnected"));
+    resolveRead({ done: true });
+    const result = await pending;
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/client disconnected|aborted/i);
+    expect(reader.cancel).toHaveBeenCalled();
+    expect(reader.releaseLock).toHaveBeenCalled();
   });
 
   it("enforces destructive confirmation on object delete calls", async () => {

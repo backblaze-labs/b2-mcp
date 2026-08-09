@@ -107,17 +107,19 @@ and duplicate runtime package versions. CI and `prepublishOnly` reject an
 unapproved direct dependency, Axios runtime import, SDK private/unpublished
 import, Git/path SDK dependency, unpinned or provenance-mismatched direct
 dependency, production lockfile entry without npm registry provenance and
-integrity, or AWS import outside the temporary `src/s3/aws-sdk-adapter.ts`
-boundary. The clean consumer install is measured from the committed production
-lock graph, not from lockfile-less semver resolution.
+integrity, or AWS import outside the repository-owned
+`src/s3/aws-sdk-adapter.ts` boundary. The clean consumer install is measured
+from the committed production lock graph, not from lockfile-less semver
+resolution.
 
 To intentionally raise the budget, update `package-budget.json` in the same PR,
 include the reason, policy, reviewed version, resolved URL, integrity, and owner
-for any new direct dependency, link an upstream SDK gap for temporary adapters,
-run the package-budget check, and call out the metric delta in the PR. Do not
-add compatibility packages for Node.js 18/20, browsers, Bun, Deno, HTTP, stream,
-abort, retry, or schema wrapping when Node 22+ built-ins, the MCP server
-package, or public B2 SDK exports cover the need.
+for any new direct dependency, link the upstream SDK gap or architecture
+decision for adapter-scoped dependencies, run the package-budget check, and call
+out the metric delta in the PR. Do not add compatibility packages for Node.js
+18/20, browsers, Bun, Deno, HTTP, stream, abort, retry, or schema wrapping when
+Node 22+ built-ins, the MCP server package, or public B2 SDK exports cover the
+need.
 
 `@backblaze-labs/b2-sdk` bumps require the complete SDK/MCP no-credential
 contract before review: `pnpm run test:contract`, `pnpm run test:protocol`,

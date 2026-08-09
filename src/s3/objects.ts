@@ -9,7 +9,7 @@ import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-import { withCircuit } from "../utils/circuit-breaker.js";
+import { withCircuit, withLongCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
 import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
 import type { B2S3DeleteObjectsResult, B2S3ObjectBody, B2S3PeerClient } from "./aws-sdk-adapter.js";
@@ -22,6 +22,8 @@ interface DeleteObjectEntry {
   key: string;
   versionId?: string;
 }
+
+const DELETE_OBJECT_VERSION_VALIDATION_MAX_CONCURRENCY = 8;
 
 type B2S3ObjectClient = Pick<
   B2S3PeerClient,
@@ -67,7 +69,17 @@ function transformToWebStream(value: B2S3ObjectBody): WebReadableStream<Uint8Arr
 async function cancelBody(body: B2S3ObjectBody, reason?: unknown): Promise<void> {
   if (!body) return;
   if (isWebReadableStream(body)) {
-    await body.cancel(reason).catch(() => undefined);
+    if (typeof (body as { cancel?: unknown }).cancel === "function") {
+      await body.cancel(reason).catch(() => undefined);
+    } else {
+      try {
+        const reader = body.getReader();
+        await reader.cancel(reason).catch(() => undefined);
+        reader.releaseLock();
+      } catch {
+        // Best-effort cancellation for nonstandard stream fakes.
+      }
+    }
     return;
   }
   if (isNodeReadable(body)) {
@@ -90,6 +102,14 @@ async function cancelBody(body: B2S3ObjectBody, reason?: unknown): Promise<void>
 
 function bodyAbortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new Error("Object body read aborted.");
+}
+
+function throwIfBodyReadAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw bodyAbortReason(signal);
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 async function withBodyReadAbort<T>(body: B2S3ObjectBody, fn: () => Promise<T>): Promise<T> {
@@ -123,6 +143,7 @@ async function webStreamToBuffer(
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      throwIfBodyReadAborted(signal);
       if (done) break;
       chunks.push(value);
       total += value.byteLength;
@@ -155,6 +176,7 @@ async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<B
   let total = 0;
   try {
     for await (const chunk of stream) {
+      throwIfBodyReadAborted(signal);
       const buffer = Uint8Array.from(
         chunk instanceof Uint8Array
           ? chunk
@@ -171,6 +193,7 @@ async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<B
         );
       }
     }
+    throwIfBodyReadAborted(signal);
   } catch (err) {
     stream.destroy(err instanceof Error ? err : undefined);
     throw err;
@@ -222,6 +245,114 @@ function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
     metadata: version.fileInfo,
     serverSideEncryption: version.serverSideEncryption,
     deleteMarker: true,
+  };
+}
+
+function publicObjectSummary(object: {
+  key: string;
+  lastModified?: Date;
+  etag?: string;
+  size?: number;
+  storageClass?: string;
+}) {
+  return {
+    Key: object.key,
+    LastModified: object.lastModified,
+    ETag: object.etag,
+    Size: object.size,
+    StorageClass: object.storageClass,
+  };
+}
+
+function publicCommonPrefix(prefix: { prefix: string }) {
+  return { Prefix: prefix.prefix };
+}
+
+function publicObjectVersion(version: {
+  key: string;
+  versionId: string;
+  isLatest?: boolean;
+  lastModified?: Date;
+  etag?: string;
+  size?: number;
+  storageClass?: string;
+}) {
+  return {
+    ...publicObjectSummary(version),
+    VersionId: version.versionId,
+    IsLatest: version.isLatest,
+  };
+}
+
+function publicDeleteMarker(marker: {
+  key: string;
+  versionId: string;
+  isLatest?: boolean;
+  lastModified?: Date;
+}) {
+  return {
+    Key: marker.key,
+    VersionId: marker.versionId,
+    IsLatest: marker.isLatest,
+    LastModified: marker.lastModified,
+  };
+}
+
+async function validateDeleteObjectVersions(
+  versions: B2S3VersionGuard,
+  input: { bucket: string; objects: DeleteObjectEntry[] },
+): Promise<{
+  validObjects: DeleteObjectEntry[];
+  errors: B2S3DeleteObjectsResult["errors"];
+  aborted: boolean;
+}> {
+  if (input.objects.length === 0) return { validObjects: [], errors: [], aborted: false };
+
+  const signal = currentMcpRequestSignal();
+  const maxConcurrency = Math.min(
+    DELETE_OBJECT_VERSION_VALIDATION_MAX_CONCURRENCY,
+    input.objects.length,
+  );
+  const validObjectsByIndex: Array<DeleteObjectEntry | undefined> = [];
+  const errors: B2S3DeleteObjectsResult["errors"] = [];
+  let nextIndex = 0;
+  let aborted = isSignalAborted(signal);
+
+  const worker = async () => {
+    for (;;) {
+      if (isSignalAborted(signal)) {
+        aborted = true;
+        return;
+      }
+      const index = nextIndex++;
+      const object = input.objects[index];
+      if (!object) return;
+      try {
+        await verifyVersionBinding(versions, {
+          bucket: input.bucket,
+          key: object.key,
+          versionId: object.versionId,
+        });
+        if (isSignalAborted(signal)) {
+          aborted = true;
+          return;
+        }
+        validObjectsByIndex[index] = object;
+      } catch (err) {
+        if (isSignalAborted(signal)) {
+          aborted = true;
+          return;
+        }
+        errors.push(b2S3DeleteErrorEntry(object, err));
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
+  return {
+    validObjects: validObjectsByIndex.flatMap((object) => (object ? [object] : [])),
+    errors,
+    aborted: aborted || isSignalAborted(signal),
   };
 }
 
@@ -357,7 +488,7 @@ export function registerS3ObjectTools(
           fs.mkdirSync(path.dirname(safePath), { recursive: true });
           const writeStream = fs.createWriteStream(safePath);
           try {
-            await withCircuit(() =>
+            await withLongCircuit(() =>
               withBodyReadAbort(result.body, () =>
                 pipeline(nodeReadableFromBody(result.body), writeStream),
               ),
@@ -452,7 +583,7 @@ export function registerS3ObjectTools(
     "s3_delete_objects",
     {
       description:
-        "Delete multiple objects from a B2 bucket through S3 DeleteObjects (up to 1000 objects).",
+        "Delete multiple objects from a B2 bucket with bounded SDK concurrency (up to 1000 objects).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         objects: z
@@ -483,25 +614,15 @@ export function registerS3ObjectTools(
         const gate = checkDestructive("s3_delete_objects", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
         const objects = args.objects as DeleteObjectEntry[];
-        const validationErrors: B2S3DeleteObjectsResult["errors"] = [];
-        const validObjects: DeleteObjectEntry[] = [];
-        for (const object of objects) {
-          try {
-            await verifyVersionBinding(versions, {
-              bucket: args.bucket,
-              key: object.key,
-              versionId: object.versionId,
-            });
-            validObjects.push(object);
-          } catch (err) {
-            validationErrors.push(b2S3DeleteErrorEntry(object, err));
-          }
-        }
+        const validation = await validateDeleteObjectVersions(versions, {
+          bucket: args.bucket,
+          objects,
+        });
         const deleteResult =
-          validObjects.length > 0
+          !validation.aborted && validation.validObjects.length > 0
             ? await s3.deleteObjects({
                 bucket: args.bucket,
-                objects: validObjects,
+                objects: validation.validObjects,
                 quiet: args.quiet ?? true,
                 bypassGovernance: args.bypassGovernance,
               })
@@ -509,13 +630,14 @@ export function registerS3ObjectTools(
                 deleted: [],
                 errors: [],
                 attempted: 0,
-                aborted: currentMcpRequestSignal()?.aborted === true,
+                aborted: validation.aborted || currentMcpRequestSignal()?.aborted === true,
                 maxConcurrency: 0,
               };
         return toolJson({
           ...deleteResult,
-          errors: [...validationErrors, ...deleteResult.errors],
-          attempted: validationErrors.length + deleteResult.attempted,
+          errors: [...validation.errors, ...deleteResult.errors],
+          attempted: validation.errors.length + deleteResult.attempted,
+          aborted: validation.aborted || deleteResult.aborted,
         });
       } catch (err) {
         return toolError(err);
@@ -573,7 +695,7 @@ export function registerS3ObjectTools(
     "s3_copy_object",
     {
       description:
-        "Copy an object within B2 or between B2 buckets through the S3-compatible CopyObject API. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+        "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
       inputSchema: {
         sourceBucket: z.string().describe("The source bucket name."),
         sourceKey: z.string().describe("The source object key."),
@@ -652,15 +774,20 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
+        const result = await s3.listObjectsV2({
+          bucket: args.bucket,
+          prefix: args.prefix,
+          delimiter: args.delimiter,
+          maxKeys: args.maxKeys ?? 1000,
+          continuationToken: args.continuationToken,
+          startAfter: args.startAfter,
+        });
         return toolJson({
-          ...(await s3.listObjectsV2({
-            bucket: args.bucket,
-            prefix: args.prefix,
-            delimiter: args.delimiter,
-            maxKeys: args.maxKeys ?? 1000,
-            continuationToken: args.continuationToken,
-            startAfter: args.startAfter,
-          })),
+          objects: result.objects.map(publicObjectSummary),
+          commonPrefixes: result.commonPrefixes.map(publicCommonPrefix),
+          isTruncated: result.isTruncated,
+          nextContinuationToken: result.nextContinuationToken,
+          keyCount: result.keyCount,
         });
       } catch (err) {
         return toolError(err);
@@ -690,15 +817,21 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
+        const result = await s3.listObjectVersions({
+          bucket: args.bucket,
+          prefix: args.prefix,
+          delimiter: args.delimiter,
+          maxKeys: args.maxKeys ?? 1000,
+          keyMarker: args.keyMarker,
+          versionIdMarker: args.versionIdMarker,
+        });
         return toolJson({
-          ...(await s3.listObjectVersions({
-            bucket: args.bucket,
-            prefix: args.prefix,
-            delimiter: args.delimiter,
-            maxKeys: args.maxKeys ?? 1000,
-            keyMarker: args.keyMarker,
-            versionIdMarker: args.versionIdMarker,
-          })),
+          versions: result.versions.map(publicObjectVersion),
+          deleteMarkers: result.deleteMarkers.map(publicDeleteMarker),
+          commonPrefixes: result.commonPrefixes.map(publicCommonPrefix),
+          isTruncated: result.isTruncated,
+          nextKeyMarker: result.nextKeyMarker,
+          nextVersionIdMarker: result.nextVersionIdMarker,
         });
       } catch (err) {
         return toolError(err);

@@ -10,6 +10,7 @@ import type {
   B2S3CompletedMultipartPart,
   B2S3CopyObjectOptions,
   B2S3DeleteObjectOptions,
+  B2S3DeleteObjectResult,
   B2S3DeleteObjectsResult,
   B2S3DeleteObjectsOptions,
   B2S3DownloadedObject,
@@ -293,8 +294,8 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     });
   }
 
-  async deleteObject(input: B2S3DeleteObjectOptions): Promise<void> {
-    await this.next("deleteObject", input, undefined);
+  async deleteObject(input: B2S3DeleteObjectOptions): Promise<B2S3DeleteObjectResult> {
+    return this.next("deleteObject", input, {});
   }
 
   async deleteObjects(input: B2S3DeleteObjectsOptions): Promise<B2S3DeleteObjectsResult> {

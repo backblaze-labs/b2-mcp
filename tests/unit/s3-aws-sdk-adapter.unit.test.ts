@@ -8,7 +8,6 @@ function clientWithHandler(handle: ReturnType<typeof vi.fn>) {
     endpoint: "https://s3.us-west-004.backblazeb2.com",
     credentials: { accessKeyId: "key-id", secretAccessKey: "key-secret" },
     forcePathStyle: true,
-    maxAttempts: 1,
     requestHandler: {
       handle,
       updateHttpClientConfig() {
@@ -82,7 +81,7 @@ describe("B2S3PeerClient object data-plane behavior", () => {
           $metadata: { requestId: "request-1" },
         }),
       )
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({});
 
     const result = await s3.deleteObjects({
       bucket: "b",
@@ -107,10 +106,34 @@ describe("B2S3PeerClient object data-plane behavior", () => {
     s3.destroy();
   });
 
-  it("normalizes listObjectsV2 results and preserves provider KeyCount", async () => {
+  it("preserves delete marker metadata in the bulk delete ledger", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    vi.spyOn(s3, "deleteObject").mockResolvedValueOnce({
+      versionId: "delete-marker-version",
+      deleteMarker: true,
+    });
+
+    const result = await s3.deleteObjects({
+      bucket: "b",
+      objects: [{ key: "a.txt" }],
+      quiet: false,
+    });
+
+    expect(result.deleted).toEqual([
+      {
+        Key: "a.txt",
+        VersionId: "delete-marker-version",
+        DeleteMarker: true,
+        DeleteMarkerVersionId: "delete-marker-version",
+      },
+    ]);
+    s3.destroy();
+  });
+
+  it("normalizes listObjectsV2 results and preserves existing keyCount semantics", async () => {
     const lastModified = new Date("2026-01-01T00:00:00.000Z");
     const s3 = clientWithHandler(vi.fn());
-    vi.spyOn(s3 as any, "send").mockResolvedValueOnce({
+    const send = vi.spyOn(s3 as any, "send").mockResolvedValueOnce({
       Contents: [
         {
           Key: "a.txt",
@@ -141,9 +164,29 @@ describe("B2S3PeerClient object data-plane behavior", () => {
         commonPrefixes: [{ prefix: "folder/" }],
         isTruncated: true,
         nextContinuationToken: "next",
-        keyCount: 2,
+        keyCount: 1,
       },
     );
+    const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(command.input.ContinuationToken).toBeUndefined();
+    expect(command.input.StartAfter).toBeUndefined();
+    s3.destroy();
+  });
+
+  it("omits StartAfter from continuation pages", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    const send = vi.spyOn(s3 as any, "send").mockResolvedValueOnce({});
+
+    await s3.listObjectsV2({
+      bucket: "b",
+      maxKeys: 1000,
+      continuationToken: "token",
+      startAfter: "first-page-only",
+    });
+
+    const command = send.mock.calls[0][0] as { input: Record<string, unknown> };
+    expect(command.input.ContinuationToken).toBe("token");
+    expect(command.input.StartAfter).toBeUndefined();
     s3.destroy();
   });
 

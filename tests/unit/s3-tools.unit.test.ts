@@ -92,12 +92,12 @@ describe("s3_list_objects_v2", () => {
 
     expect(result).toMatchObject({
       objects: [
-        { key: "a.txt", size: 1, lastModified: lastModified.toISOString(), etag: '"etag"' },
+        { Key: "a.txt", Size: 1, LastModified: lastModified.toISOString(), ETag: '"etag"' },
       ],
-      commonPrefixes: [{ prefix: "folder/" }],
+      commonPrefixes: [{ Prefix: "folder/" }],
       isTruncated: true,
       nextContinuationToken: "next-token",
-      keyCount: 2,
+      keyCount: 1,
     });
     const command = sendSpy.mock.calls[0][0];
     expect(command.constructor.name).toBe("ListObjectsV2Command");
@@ -107,8 +107,8 @@ describe("s3_list_objects_v2", () => {
       Delimiter: "/",
       MaxKeys: 1,
       ContinuationToken: "token",
-      StartAfter: "ignored-when-token-present",
     });
+    expect(command.input.StartAfter).toBeUndefined();
   });
 });
 
@@ -150,21 +150,21 @@ describe("s3_list_object_versions", () => {
     expect(result.versions).toHaveLength(1);
     expect(result.deleteMarkers).toHaveLength(1);
     expect(result.versions[0]).toMatchObject({
-      key: "k",
-      versionId: "v1",
-      isLatest: true,
-      lastModified: lastModified.toISOString(),
-      etag: '"etag"',
-      size: 5,
-      storageClass: "STANDARD",
+      Key: "k",
+      VersionId: "v1",
+      IsLatest: true,
+      LastModified: lastModified.toISOString(),
+      ETag: '"etag"',
+      Size: 5,
+      StorageClass: "STANDARD",
     });
     expect(result.deleteMarkers[0]).toMatchObject({
-      key: "hidden",
-      versionId: "v2",
-      isLatest: true,
-      lastModified: lastModified.toISOString(),
+      Key: "hidden",
+      VersionId: "v2",
+      IsLatest: true,
+      LastModified: lastModified.toISOString(),
     });
-    expect(result.commonPrefixes).toEqual([{ prefix: "folder/" }]);
+    expect(result.commonPrefixes).toEqual([{ Prefix: "folder/" }]);
     expect(result.isTruncated).toBe(true);
     expect(result.nextKeyMarker).toBe("next-key");
     expect(result.nextVersionIdMarker).toBe("next-version");

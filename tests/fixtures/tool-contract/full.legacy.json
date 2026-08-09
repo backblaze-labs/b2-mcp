@@ -1068,7 +1068,7 @@
     },
     {
       "name": "s3_copy_object",
-      "descriptionSha256": "8b627ca5661925fcd7dcef67105c3609c9c6594e7c888df53211cc870678a76b",
+      "descriptionSha256": "363910cd742071f6ac91e61d3bb13d577141dab1766f35bca382abd3212e4985",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1193,7 +1193,7 @@
     },
     {
       "name": "s3_delete_objects",
-      "descriptionSha256": "5bbd1770a1135ce92c41158914221a3b8f5cfd2247ae2b56f69e76f8ec530f6a",
+      "descriptionSha256": "8ca46ff9710400d96a951ba3a3de99d718501b16450bdfe9f5e9b3fd8562f1a9",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1734,5 +1734,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "28c09992037450e49b6bfea4dd67af2981924e976f645fced975fab8d8092a6b"
+  "hash": "41832d9a61e75c761c3fe73f79a9713e854aa31e34efec923e751a9cbeb933b9"
 }

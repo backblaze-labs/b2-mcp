@@ -31,7 +31,7 @@ describe("B2 S3 client configuration", () => {
       accessKeyId: "legacy-s3-key-id",
       secretAccessKey: "legacy-s3-secret",
     });
-    expect(s3.maxAttempts).toBe(1);
+    expect(s3.maxAttempts).toBeUndefined();
   });
 
   it("can build primary object-tool config with caller credentials", () => {
@@ -55,7 +55,7 @@ describe("B2 S3 client configuration", () => {
       accessKeyId: "legacy-s3-key-id",
       secretAccessKey: "legacy-s3-secret",
     });
-    await expect(s3.config.maxAttempts()).resolves.toBe(1);
+    await expect(s3.config.maxAttempts()).resolves.toBe(3);
     s3.destroy();
   });
 
