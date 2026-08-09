@@ -1,6 +1,6 @@
 import { Readable } from "stream";
 import { B2S3PeerClient } from "../../src/s3/aws-sdk-adapter";
-import { circuitBreaker } from "../../src/utils/circuit-breaker";
+import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 
 function clientWithHandler(handle: ReturnType<typeof vi.fn>) {
   return new B2S3PeerClient({
@@ -23,6 +23,18 @@ function clientWithHandler(handle: ReturnType<typeof vi.fn>) {
 describe("B2S3PeerClient object data-plane behavior", () => {
   afterEach(() => {
     circuitBreaker.close();
+    s3CircuitBreaker.close();
+  });
+
+  it("does not gate S3 data-plane calls on the native circuit breaker", async () => {
+    const s3 = clientWithHandler(vi.fn());
+    const send = vi.spyOn(s3 as any, "sendCommand").mockResolvedValueOnce({});
+    circuitBreaker.open();
+
+    await expect(s3.headBucket("b")).resolves.toBeUndefined();
+
+    expect(send).toHaveBeenCalled();
+    s3.destroy();
   });
 
   it.each([
@@ -133,7 +145,7 @@ describe("B2S3PeerClient object data-plane behavior", () => {
   it("normalizes listObjectsV2 results and preserves existing keyCount semantics", async () => {
     const lastModified = new Date("2026-01-01T00:00:00.000Z");
     const s3 = clientWithHandler(vi.fn());
-    const send = vi.spyOn(s3 as any, "send").mockResolvedValueOnce({
+    const send = vi.spyOn(s3 as any, "sendCommand").mockResolvedValueOnce({
       Contents: [
         {
           Key: "a.txt",
@@ -154,14 +166,14 @@ describe("B2S3PeerClient object data-plane behavior", () => {
       {
         objects: [
           {
-            key: "a.txt",
-            lastModified,
-            etag: '"etag"',
-            size: 1,
-            storageClass: "STANDARD",
+            Key: "a.txt",
+            LastModified: lastModified,
+            ETag: '"etag"',
+            Size: 1,
+            StorageClass: "STANDARD",
           },
         ],
-        commonPrefixes: [{ prefix: "folder/" }],
+        commonPrefixes: [{ Prefix: "folder/" }],
         isTruncated: true,
         nextContinuationToken: "next",
         keyCount: 1,
@@ -175,7 +187,7 @@ describe("B2S3PeerClient object data-plane behavior", () => {
 
   it("omits StartAfter from continuation pages", async () => {
     const s3 = clientWithHandler(vi.fn());
-    const send = vi.spyOn(s3 as any, "send").mockResolvedValueOnce({});
+    const send = vi.spyOn(s3 as any, "sendCommand").mockResolvedValueOnce({});
 
     await s3.listObjectsV2({
       bucket: "b",
@@ -193,7 +205,7 @@ describe("B2S3PeerClient object data-plane behavior", () => {
   it("normalizes listObjectVersions results", async () => {
     const lastModified = new Date("2026-01-01T00:00:00.000Z");
     const s3 = clientWithHandler(vi.fn());
-    vi.spyOn(s3 as any, "send").mockResolvedValueOnce({
+    vi.spyOn(s3 as any, "sendCommand").mockResolvedValueOnce({
       Versions: [
         {
           Key: "a.txt",
@@ -224,24 +236,24 @@ describe("B2S3PeerClient object data-plane behavior", () => {
     await expect(s3.listObjectVersions({ bucket: "b", maxKeys: 1000 })).resolves.toEqual({
       versions: [
         {
-          key: "a.txt",
-          versionId: "version-1",
-          isLatest: true,
-          lastModified,
-          etag: '"etag"',
-          size: 1,
-          storageClass: "STANDARD",
+          Key: "a.txt",
+          VersionId: "version-1",
+          IsLatest: true,
+          LastModified: lastModified,
+          ETag: '"etag"',
+          Size: 1,
+          StorageClass: "STANDARD",
         },
       ],
       deleteMarkers: [
         {
-          key: "deleted.txt",
-          versionId: "marker-1",
-          isLatest: false,
-          lastModified,
+          Key: "deleted.txt",
+          VersionId: "marker-1",
+          IsLatest: false,
+          LastModified: lastModified,
         },
       ],
-      commonPrefixes: [{ prefix: "folder/" }],
+      commonPrefixes: [{ Prefix: "folder/" }],
       isTruncated: true,
       nextKeyMarker: "next-key",
       nextVersionIdMarker: "next-version",

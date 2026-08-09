@@ -27,6 +27,24 @@ beforeEach(() => {
       action: "upload",
     }),
   );
+  vi.spyOn(B2Client.prototype, "resolveS3FileVersions").mockImplementation(async ({ objects }) =>
+    objects.map((object) => ({
+      object,
+      version:
+        object.versionId === undefined
+          ? null
+          : {
+              fileName: object.key,
+              fileId: object.versionId,
+              bucketId: "bucket-id",
+              contentLength: 0,
+              contentType: "application/octet-stream",
+              uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+              fileInfo: {},
+              action: "upload",
+            },
+    })),
+  );
   vi.spyOn(B2Client.prototype, "getCurrentS3FileVersion").mockResolvedValue(null);
   server = createServer(testConfig);
 });

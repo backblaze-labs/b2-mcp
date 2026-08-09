@@ -22,7 +22,13 @@ import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@bac
 import { B2AuthManager } from "../auth.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
-import type { B2AuthResponse, B2S3FileVersionBinding } from "../utils/types.js";
+import type {
+  B2AuthResponse,
+  B2S3FileVersionBinding,
+  B2S3FileVersionResolution,
+  B2S3VersionTarget,
+} from "../utils/types.js";
+import { forEachBounded } from "../utils/concurrency.js";
 import { buildUserAgent } from "../utils/user-agent.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
@@ -900,6 +906,55 @@ export class B2Client {
         throw b2NotFound(`Object '${options.key}' not found in bucket '${options.bucket}'.`);
       }
       return toS3FileVersionBinding(version);
+    });
+  }
+
+  async resolveS3FileVersions(options: {
+    bucket: string;
+    objects: B2S3VersionTarget[];
+    maxConcurrency?: number;
+  }): Promise<B2S3FileVersionResolution[]> {
+    if (options.objects.length === 0) return [];
+    if (options.objects.every((object) => object.versionId === undefined)) {
+      return options.objects.map((object) => ({ object, version: null }));
+    }
+
+    return this.withNativeCircuit(async (client, auth) => {
+      const bucket = await client.getBucket(options.bucket);
+      if (!bucket) {
+        const err = b2NotFound(`Bucket '${options.bucket}' not found.`);
+        return options.objects.map((object) =>
+          object.versionId === undefined
+            ? { object, version: null }
+            : { object, version: null, error: err },
+        );
+      }
+
+      const signal = currentMcpRequestSignal();
+      const results: Array<B2S3FileVersionResolution | undefined> = [];
+      await forEachBounded(
+        options.objects,
+        { maxConcurrency: options.maxConcurrency, signal },
+        async (object, index) => {
+          if (object.versionId === undefined) {
+            results[index] = { object, version: null };
+            return;
+          }
+          try {
+            const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
+              fileId: fileId(object.versionId),
+            });
+            if (version.fileName !== object.key || String(version.bucketId) !== String(bucket.id)) {
+              throw b2NotFound(`Object '${object.key}' not found in bucket '${options.bucket}'.`);
+            }
+            results[index] = { object, version: toS3FileVersionBinding(version) };
+          } catch (error) {
+            results[index] = { object, version: null, error };
+          }
+        },
+      );
+
+      return results.flatMap((result) => (result ? [result] : []));
     });
   }
 

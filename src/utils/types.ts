@@ -76,6 +76,8 @@ export interface B2AuthResponse {
   capabilities: string[];
 }
 
+export type B2FileAction = "upload" | "hide" | "start" | "folder" | "copy";
+
 export interface B2S3FileVersionBinding {
   fileName: string;
   fileId: string;
@@ -84,8 +86,19 @@ export interface B2S3FileVersionBinding {
   contentType: string;
   uploadTimestamp: number;
   fileInfo: Record<string, string>;
-  action: string;
+  action: B2FileAction;
   serverSideEncryption?: string;
+}
+
+export interface B2S3VersionTarget {
+  key: string;
+  versionId?: string;
+}
+
+export interface B2S3FileVersionResolution {
+  object: B2S3VersionTarget;
+  version: B2S3FileVersionBinding | null;
+  error?: unknown;
 }
 
 export interface B2S3VersionGuard {
@@ -94,6 +107,11 @@ export interface B2S3VersionGuard {
     key: string;
     versionId: string;
   }): Promise<B2S3FileVersionBinding>;
+  resolveS3FileVersions(input: {
+    bucket: string;
+    objects: B2S3VersionTarget[];
+    maxConcurrency?: number;
+  }): Promise<B2S3FileVersionResolution[]>;
   getCurrentS3FileVersion(input: {
     bucket: string;
     key: string;
@@ -137,7 +155,7 @@ export interface B2FileInfo {
   contentMd5?: string;
   contentType: string;
   fileInfo: Record<string, string>;
-  action: "upload" | "hide" | "start" | "folder";
+  action: B2FileAction;
   uploadTimestamp: number;
   serverSideEncryption?: B2Encryption;
 }

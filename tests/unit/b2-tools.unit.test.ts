@@ -8,6 +8,8 @@ import {
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
+import { B2AuthManager } from "../../src/auth";
+import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
@@ -16,6 +18,7 @@ import {
   b2EndpointName,
   installSdkTransport,
   RecordingTransport,
+  requestJson,
   StaticHttpResponse,
 } from "../support/sdk-test-helpers";
 
@@ -60,6 +63,74 @@ afterEach(() => {
   setWebhookDnsLookupForTests(null);
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
+});
+
+describe("B2Client S3 version guard", () => {
+  it("resolves bulk version checks with one bucket lookup per request", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets", "listFiles"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, {
+          buckets: [
+            {
+              accountId: "test-account-123",
+              bucketId: "bucket-1",
+              bucketName: "bulk-bucket",
+              bucketType: "allPrivate",
+              bucketInfo: {},
+              corsRules: [],
+              lifecycleRules: [],
+              revision: 1,
+              options: [],
+            },
+          ],
+        });
+      }
+      if (endpoint === "b2_get_file_info") {
+        const body = requestJson(request);
+        const id = String(body.fileId);
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          bucketId: "bucket-1",
+          fileId: id,
+          fileName: id === "version-a" ? "a.txt" : "b.txt",
+          action: "upload",
+          contentLength: 1,
+          contentSha1: "none",
+          contentType: "text/plain",
+          fileInfo: {},
+          uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    const result = await client.resolveS3FileVersions({
+      bucket: "bulk-bucket",
+      objects: [
+        { key: "a.txt", versionId: "version-a" },
+        { key: "b.txt", versionId: "version-b" },
+        { key: "latest.txt" },
+      ],
+    });
+
+    expect(result).toHaveLength(3);
+    expect(result[0].version?.fileId).toBe("version-a");
+    expect(result[1].version?.fileId).toBe("version-b");
+    expect(result[2].version).toBeNull();
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(1);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_get_file_info"),
+    ).toHaveLength(2);
+  });
 });
 
 describe("b2_authorize_account", () => {

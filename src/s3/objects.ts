@@ -2,18 +2,24 @@ import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
 import * as path from "path";
-import { Readable } from "stream";
+import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-import { withCircuit, withLongCircuit } from "../utils/circuit-breaker.js";
+import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
 import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
-import type { B2S3DeleteObjectsResult, B2S3ObjectBody, B2S3PeerClient } from "./aws-sdk-adapter.js";
+import type {
+  B2S3DeleteObjectsResult,
+  B2S3HeadObjectResult,
+  B2S3ObjectBody,
+  B2S3PeerClient,
+} from "./aws-sdk-adapter.js";
 import { b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
+import { timeoutError } from "../utils/named-error.js";
 
 const CONFIRM_DESC =
   "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
@@ -22,8 +28,6 @@ interface DeleteObjectEntry {
   key: string;
   versionId?: string;
 }
-
-const DELETE_OBJECT_VERSION_VALIDATION_MAX_CONCURRENCY = 8;
 
 type B2S3ObjectClient = Pick<
   B2S3PeerClient,
@@ -37,9 +41,7 @@ type B2S3ObjectClient = Pick<
   | "listObjectVersions"
 >;
 
-function isWebReadableStream(
-  value: B2S3ObjectBody | unknown,
-): value is WebReadableStream<Uint8Array> {
+function isWebReadableStream(value: unknown): value is WebReadableStream<Uint8Array> {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -48,7 +50,7 @@ function isWebReadableStream(
   );
 }
 
-function isNodeReadable(value: B2S3ObjectBody | unknown): value is Readable {
+function isNodeReadable(value: unknown): value is Readable {
   return value instanceof Readable;
 }
 
@@ -124,6 +126,67 @@ async function withBodyReadAbort<T>(body: B2S3ObjectBody, fn: () => Promise<T>):
     return await fn();
   } finally {
     signal.removeEventListener("abort", abort);
+  }
+}
+
+const DEFAULT_SAVE_TO_PATH_IDLE_TIMEOUT_MS = 60_000;
+
+function saveToPathIdleTimeoutMs(): number {
+  const raw = process.env.B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS;
+  if (!raw) return DEFAULT_SAVE_TO_PATH_IDLE_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SAVE_TO_PATH_IDLE_TIMEOUT_MS;
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: unknown }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+async function pipelineBodyToFileWithIdleTimeout(
+  body: B2S3ObjectBody,
+  writeStream: fs.WriteStream,
+): Promise<void> {
+  const source = nodeReadableFromBody(body);
+  const timeoutMs = saveToPathIdleTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timeoutFailure: Error | null = null;
+  const progress = new Transform({
+    transform(chunk, _encoding, callback) {
+      armIdleTimer();
+      callback(null, chunk);
+    },
+  });
+
+  const clearIdleTimer = () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+  };
+  const armIdleTimer = () => {
+    clearIdleTimer();
+    timer = setTimeout(() => {
+      timeoutFailure = timeoutError(
+        `No object body progress for ${timeoutMs} ms while streaming s3_get_object saveToPath.`,
+      );
+      source.destroy(timeoutFailure);
+      progress.destroy(timeoutFailure);
+      writeStream.destroy(timeoutFailure);
+      void cancelBody(body, timeoutFailure);
+    }, timeoutMs);
+    unrefTimer(timer);
+  };
+
+  armIdleTimer();
+  try {
+    await pipeline(source, progress, writeStream);
+  } catch (err) {
+    if (timeoutFailure) {
+      await cancelBody(body, timeoutFailure);
+      throw timeoutFailure;
+    }
+    throw err;
+  } finally {
+    clearIdleTimer();
   }
 }
 
@@ -225,13 +288,24 @@ async function bodyToBuffer(body: B2S3ObjectBody, maxBytes: number): Promise<Buf
 async function verifyVersionBinding(
   versions: B2S3VersionGuard,
   input: { bucket: string; key: string; versionId?: string },
+  options: { allowNativeVersionInspection: boolean },
 ): Promise<B2S3FileVersionBinding | null> {
   if (!input.versionId) return null;
+  if (!options.allowNativeVersionInspection) throw missingVersionInspectionCapabilityError();
   return versions.resolveS3FileVersion({
     bucket: input.bucket,
     key: input.key,
     versionId: input.versionId,
   });
+}
+
+function missingVersionInspectionCapabilityError(): Error {
+  return Object.assign(
+    new Error(
+      "Version-targeted S3 operations require the listFiles capability for native version binding.",
+    ),
+    { status: 403, code: "missing_capability" },
+  );
 }
 
 function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
@@ -248,59 +322,13 @@ function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
   };
 }
 
-function publicObjectSummary(object: {
-  key: string;
-  lastModified?: Date;
-  etag?: string;
-  size?: number;
-  storageClass?: string;
-}) {
-  return {
-    Key: object.key,
-    LastModified: object.lastModified,
-    ETag: object.etag,
-    Size: object.size,
-    StorageClass: object.storageClass,
-  };
-}
-
-function publicCommonPrefix(prefix: { prefix: string }) {
-  return { Prefix: prefix.prefix };
-}
-
-function publicObjectVersion(version: {
-  key: string;
-  versionId: string;
-  isLatest?: boolean;
-  lastModified?: Date;
-  etag?: string;
-  size?: number;
-  storageClass?: string;
-}) {
-  return {
-    ...publicObjectSummary(version),
-    VersionId: version.versionId,
-    IsLatest: version.isLatest,
-  };
-}
-
-function publicDeleteMarker(marker: {
-  key: string;
-  versionId: string;
-  isLatest?: boolean;
-  lastModified?: Date;
-}) {
-  return {
-    Key: marker.key,
-    VersionId: marker.versionId,
-    IsLatest: marker.isLatest,
-    LastModified: marker.lastModified,
-  };
-}
-
 async function validateDeleteObjectVersions(
   versions: B2S3VersionGuard,
-  input: { bucket: string; objects: DeleteObjectEntry[] },
+  input: {
+    bucket: string;
+    objects: DeleteObjectEntry[];
+    allowNativeVersionInspection: boolean;
+  },
 ): Promise<{
   validObjects: DeleteObjectEntry[];
   errors: B2S3DeleteObjectsResult["errors"];
@@ -309,50 +337,47 @@ async function validateDeleteObjectVersions(
   if (input.objects.length === 0) return { validObjects: [], errors: [], aborted: false };
 
   const signal = currentMcpRequestSignal();
-  const maxConcurrency = Math.min(
-    DELETE_OBJECT_VERSION_VALIDATION_MAX_CONCURRENCY,
-    input.objects.length,
-  );
   const validObjectsByIndex: Array<DeleteObjectEntry | undefined> = [];
   const errors: B2S3DeleteObjectsResult["errors"] = [];
-  let nextIndex = 0;
-  let aborted = isSignalAborted(signal);
-
-  const worker = async () => {
-    for (;;) {
-      if (isSignalAborted(signal)) {
-        aborted = true;
-        return;
-      }
-      const index = nextIndex++;
-      const object = input.objects[index];
-      if (!object) return;
-      try {
-        await verifyVersionBinding(versions, {
-          bucket: input.bucket,
-          key: object.key,
-          versionId: object.versionId,
-        });
-        if (isSignalAborted(signal)) {
-          aborted = true;
-          return;
-        }
+  if (!input.allowNativeVersionInspection) {
+    for (const [index, object] of input.objects.entries()) {
+      if (object.versionId === undefined) {
         validObjectsByIndex[index] = object;
-      } catch (err) {
-        if (isSignalAborted(signal)) {
-          aborted = true;
-          return;
-        }
-        errors.push(b2S3DeleteErrorEntry(object, err));
+      } else {
+        errors.push(b2S3DeleteErrorEntry(object, missingVersionInspectionCapabilityError()));
       }
     }
-  };
+    return {
+      validObjects: validObjectsByIndex.flatMap((object) => (object ? [object] : [])),
+      errors,
+      aborted: isSignalAborted(signal),
+    };
+  }
 
-  await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
+  try {
+    const resolutions = await versions.resolveS3FileVersions({
+      bucket: input.bucket,
+      objects: input.objects,
+    });
+    for (const [index, object] of input.objects.entries()) {
+      if (isSignalAborted(signal)) break;
+      const resolution = resolutions[index];
+      if (!resolution) continue;
+      if (resolution.error !== undefined)
+        errors.push(b2S3DeleteErrorEntry(object, resolution.error));
+      else validObjectsByIndex[index] = object;
+    }
+  } catch (err) {
+    for (const [index, object] of input.objects.entries()) {
+      if (object.versionId === undefined) validObjectsByIndex[index] = object;
+      else errors.push(b2S3DeleteErrorEntry(object, err));
+    }
+  }
+
   return {
     validObjects: validObjectsByIndex.flatMap((object) => (object ? [object] : [])),
     errors,
-    aborted: aborted || isSignalAborted(signal),
+    aborted: isSignalAborted(signal),
   };
 }
 
@@ -365,12 +390,40 @@ async function validateDeleteObjectVersions(
 // cap is what keeps the data plane off the server: anything larger must presign.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
+interface S3ObjectToolOptions {
+  allowNativeVersionInspection?: boolean;
+}
+
 export function registerS3ObjectTools(
   server: ToolRegistrar,
   s3: B2S3ObjectClient,
   versions: B2S3VersionGuard,
   config: B2Config,
+  options: S3ObjectToolOptions = {},
 ): void {
+  const allowNativeVersionInspection = options.allowNativeVersionInspection ?? true;
+  const getObjectVersionIdInput: z.ZodRawShape = allowNativeVersionInspection
+    ? {
+        versionId: z.string().optional().describe("Specific version of the object to retrieve."),
+      }
+    : {};
+  const deleteVersionIdInput: z.ZodRawShape = allowNativeVersionInspection
+    ? {
+        versionId: z.string().optional().describe("Version ID of the specific version to delete."),
+      }
+    : {};
+  const headVersionIdInput: z.ZodRawShape = allowNativeVersionInspection
+    ? {
+        versionId: z.string().optional().describe("Specific version of the object."),
+      }
+    : {};
+  const deleteObjectEntrySchema = z.object({
+    key: z.string().describe("The object key."),
+    ...(allowNativeVersionInspection
+      ? { versionId: z.string().optional().describe("Specific version to delete.") }
+      : {}),
+  });
+
   server.registerTool(
     "s3_put_object",
     {
@@ -461,7 +514,7 @@ export function registerS3ObjectTools(
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
         range: z.string().optional().describe("Byte range, e.g. 'bytes=0-1048575'."),
-        versionId: z.string().optional().describe("Specific version of the object to retrieve."),
+        ...getObjectVersionIdInput,
         saveToPath: z
           .string()
           .optional()
@@ -470,11 +523,15 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
-        await verifyVersionBinding(versions, {
-          bucket: args.bucket,
-          key: args.key,
-          versionId: args.versionId,
-        });
+        await verifyVersionBinding(
+          versions,
+          {
+            bucket: args.bucket,
+            key: args.key,
+            versionId: args.versionId,
+          },
+          { allowNativeVersionInspection },
+        );
         const result = await s3.getObject({
           bucket: args.bucket,
           key: args.key,
@@ -488,9 +545,9 @@ export function registerS3ObjectTools(
           fs.mkdirSync(path.dirname(safePath), { recursive: true });
           const writeStream = fs.createWriteStream(safePath);
           try {
-            await withLongCircuit(() =>
+            await withS3LongCircuit(() =>
               withBodyReadAbort(result.body, () =>
-                pipeline(nodeReadableFromBody(result.body), writeStream),
+                pipelineBodyToFileWithIdleTimeout(result.body, writeStream),
               ),
             );
           } catch (e) {
@@ -525,7 +582,7 @@ export function registerS3ObjectTools(
             ),
           );
         }
-        const buffer = await withCircuit(() =>
+        const buffer = await withS3Circuit(() =>
           withBodyReadAbort(result.body, () => bodyToBuffer(result.body, MAX_INLINE_OBJECT_BYTES)),
         );
 
@@ -554,7 +611,7 @@ export function registerS3ObjectTools(
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key to delete."),
-        versionId: z.string().optional().describe("Version ID of the specific version to delete."),
+        ...deleteVersionIdInput,
         confirm: z.boolean().optional().describe(CONFIRM_DESC),
       },
     },
@@ -562,11 +619,15 @@ export function registerS3ObjectTools(
       try {
         const gate = checkDestructive("s3_delete_object", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        await verifyVersionBinding(versions, {
-          bucket: args.bucket,
-          key: args.key,
-          versionId: args.versionId,
-        });
+        await verifyVersionBinding(
+          versions,
+          {
+            bucket: args.bucket,
+            key: args.key,
+            versionId: args.versionId,
+          },
+          { allowNativeVersionInspection },
+        );
         await s3.deleteObject({
           bucket: args.bucket,
           key: args.key,
@@ -586,15 +647,7 @@ export function registerS3ObjectTools(
         "Delete multiple objects from a B2 bucket with bounded SDK concurrency (up to 1000 objects).",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
-        objects: z
-          .array(
-            z.object({
-              key: z.string().describe("The object key."),
-              versionId: z.string().optional().describe("Specific version to delete."),
-            }),
-          )
-          .max(1000)
-          .describe("Array of objects to delete."),
+        objects: z.array(deleteObjectEntrySchema).max(1000).describe("Array of objects to delete."),
         quiet: z
           .boolean()
           .optional()
@@ -617,6 +670,7 @@ export function registerS3ObjectTools(
         const validation = await validateDeleteObjectVersions(versions, {
           bucket: args.bucket,
           objects,
+          allowNativeVersionInspection,
         });
         const deleteResult =
           !validation.aborted && validation.validObjects.length > 0
@@ -633,10 +687,11 @@ export function registerS3ObjectTools(
                 aborted: validation.aborted || currentMcpRequestSignal()?.aborted === true,
                 maxConcurrency: 0,
               };
+        const attemptedInputObjects = validation.errors.length + deleteResult.attempted;
         return toolJson({
           ...deleteResult,
           errors: [...validation.errors, ...deleteResult.errors],
-          attempted: validation.errors.length + deleteResult.attempted,
+          attempted: attemptedInputObjects,
           aborted: validation.aborted || deleteResult.aborted,
         });
       } catch (err) {
@@ -653,27 +708,48 @@ export function registerS3ObjectTools(
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
-        versionId: z.string().optional().describe("Specific version of the object."),
+        ...headVersionIdInput,
       },
     },
     async (args) => {
       try {
-        const version = args.versionId
-          ? await versions.resolveS3FileVersion({
+        if (args.versionId) {
+          const version = await verifyVersionBinding(
+            versions,
+            {
               bucket: args.bucket,
               key: args.key,
               versionId: args.versionId,
-            })
-          : await versions.getCurrentS3FileVersion({
-              bucket: args.bucket,
-              key: args.key,
-            });
-        if (version?.action === "hide") return toolJson(headResultFromDeleteMarker(version));
-        const result = await s3.headObject({
-          bucket: args.bucket,
-          key: args.key,
-          versionId: args.versionId,
-        });
+            },
+            { allowNativeVersionInspection },
+          );
+          if (version?.action === "hide") return toolJson(headResultFromDeleteMarker(version));
+        }
+
+        let result: B2S3HeadObjectResult;
+        try {
+          result = await s3.headObject({
+            bucket: args.bucket,
+            key: args.key,
+            versionId: args.versionId,
+          });
+        } catch (headErr) {
+          if (!args.versionId && allowNativeVersionInspection) {
+            try {
+              const currentVersion = await versions.getCurrentS3FileVersion({
+                bucket: args.bucket,
+                key: args.key,
+              });
+              if (currentVersion?.action === "hide") {
+                return toolJson(headResultFromDeleteMarker(currentVersion));
+              }
+            } catch {
+              // Preserve the S3 HeadObject failure; native inspection is only a
+              // best-effort fallback for synthesizing current delete markers.
+            }
+          }
+          throw headErr;
+        }
         return toolJson({
           key: args.key,
           contentType: result.contentType,
@@ -701,10 +777,14 @@ export function registerS3ObjectTools(
         sourceKey: z.string().describe("The source object key."),
         destinationBucket: z.string().describe("The destination bucket name."),
         destinationKey: z.string().describe("The destination object key."),
-        sourceVersionId: z
-          .string()
-          .optional()
-          .describe("Copy a specific version of the source object."),
+        ...(allowNativeVersionInspection
+          ? {
+              sourceVersionId: z
+                .string()
+                .optional()
+                .describe("Copy a specific version of the source object."),
+            }
+          : {}),
         metadataDirective: z
           .enum(["COPY", "REPLACE"])
           .optional()
@@ -725,11 +805,15 @@ export function registerS3ObjectTools(
     },
     async (args) => {
       try {
-        await verifyVersionBinding(versions, {
-          bucket: args.sourceBucket,
-          key: args.sourceKey,
-          versionId: args.sourceVersionId,
-        });
+        await verifyVersionBinding(
+          versions,
+          {
+            bucket: args.sourceBucket,
+            key: args.sourceKey,
+            versionId: args.sourceVersionId,
+          },
+          { allowNativeVersionInspection },
+        );
         await s3.copyObject({
           sourceBucket: args.sourceBucket,
           sourceKey: args.sourceKey,
@@ -783,8 +867,8 @@ export function registerS3ObjectTools(
           startAfter: args.startAfter,
         });
         return toolJson({
-          objects: result.objects.map(publicObjectSummary),
-          commonPrefixes: result.commonPrefixes.map(publicCommonPrefix),
+          objects: result.objects,
+          commonPrefixes: result.commonPrefixes,
           isTruncated: result.isTruncated,
           nextContinuationToken: result.nextContinuationToken,
           keyCount: result.keyCount,
@@ -826,9 +910,9 @@ export function registerS3ObjectTools(
           versionIdMarker: args.versionIdMarker,
         });
         return toolJson({
-          versions: result.versions.map(publicObjectVersion),
-          deleteMarkers: result.deleteMarkers.map(publicDeleteMarker),
-          commonPrefixes: result.commonPrefixes.map(publicCommonPrefix),
+          versions: result.versions,
+          deleteMarkers: result.deleteMarkers,
+          commonPrefixes: result.commonPrefixes,
           isTruncated: result.isTruncated,
           nextKeyMarker: result.nextKeyMarker,
           nextVersionIdMarker: result.nextVersionIdMarker,

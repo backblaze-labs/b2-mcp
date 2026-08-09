@@ -32,17 +32,13 @@ import type {
   StreamingBlobPayloadOutputTypes,
 } from "@smithy/types";
 import { currentMcpRequestSignal } from "../request-context.js";
-import { withCircuit } from "../utils/circuit-breaker.js";
+import { withS3Circuit } from "../utils/circuit-breaker.js";
+import { forEachBounded } from "../utils/concurrency.js";
 
 type S3SendCommand<
   InputType extends ServiceInputTypes,
   OutputType extends ServiceOutputTypes,
 > = Command<ServiceInputTypes, InputType, ServiceOutputTypes, OutputType, S3ClientResolvedConfig>;
-
-type S3SendCallback<OutputType extends ServiceOutputTypes> = (
-  err: unknown,
-  data?: OutputType,
-) => void;
 
 export type B2S3PeerClientConfig = AwsS3ClientConfig;
 
@@ -155,15 +151,15 @@ export interface B2S3DeleteObjectsResult {
 }
 
 export interface B2S3ObjectSummary {
-  key: string;
-  lastModified?: Date;
-  etag?: string;
-  size?: number;
-  storageClass?: string;
+  Key?: string;
+  LastModified?: Date;
+  ETag?: string;
+  Size?: number;
+  StorageClass?: string;
 }
 
 export interface B2S3CommonPrefix {
-  prefix: string;
+  Prefix?: string;
 }
 
 export interface B2S3ListObjectsV2Result {
@@ -175,15 +171,15 @@ export interface B2S3ListObjectsV2Result {
 }
 
 export interface B2S3ObjectVersionSummary extends B2S3ObjectSummary {
-  versionId: string;
-  isLatest?: boolean;
+  VersionId?: string;
+  IsLatest?: boolean;
 }
 
 export interface B2S3DeleteMarkerSummary {
-  key: string;
-  versionId: string;
-  isLatest?: boolean;
-  lastModified?: Date;
+  Key?: string;
+  VersionId?: string;
+  IsLatest?: boolean;
+  LastModified?: Date;
 }
 
 export interface B2S3ListObjectVersionsResult {
@@ -260,8 +256,6 @@ function copySource(input: {
     : `${base}?versionId=${encodeURIComponent(input.sourceVersionId)}`;
 }
 
-const DELETE_OBJECTS_MAX_CONCURRENCY = 8;
-
 function providerRequestId(err: unknown): string | undefined {
   if (typeof err !== "object" || err === null) return undefined;
   const e = err as {
@@ -323,17 +317,17 @@ function mapObjectSummary(input: {
 }): B2S3ObjectSummary | null {
   if (typeof input.Key !== "string") return null;
   return {
-    key: input.Key,
-    lastModified: input.LastModified,
-    etag: input.ETag,
-    size: input.Size,
-    storageClass: input.StorageClass,
+    Key: input.Key,
+    LastModified: input.LastModified,
+    ETag: input.ETag,
+    Size: input.Size,
+    StorageClass: input.StorageClass,
   };
 }
 
 function mapCommonPrefix(input: { Prefix?: string }): B2S3CommonPrefix | null {
   if (typeof input.Prefix !== "string") return null;
-  return { prefix: input.Prefix };
+  return { Prefix: input.Prefix };
 }
 
 function mapObjectVersion(input: {
@@ -347,13 +341,13 @@ function mapObjectVersion(input: {
 }): B2S3ObjectVersionSummary | null {
   if (typeof input.Key !== "string" || typeof input.VersionId !== "string") return null;
   return {
-    key: input.Key,
-    versionId: input.VersionId,
-    isLatest: input.IsLatest,
-    lastModified: input.LastModified,
-    etag: input.ETag,
-    size: input.Size,
-    storageClass: input.StorageClass,
+    Key: input.Key,
+    VersionId: input.VersionId,
+    IsLatest: input.IsLatest,
+    LastModified: input.LastModified,
+    ETag: input.ETag,
+    Size: input.Size,
+    StorageClass: input.StorageClass,
   };
 }
 
@@ -365,24 +359,54 @@ function mapDeleteMarker(input: {
 }): B2S3DeleteMarkerSummary | null {
   if (typeof input.Key !== "string" || typeof input.VersionId !== "string") return null;
   return {
-    key: input.Key,
-    versionId: input.VersionId,
-    isLatest: input.IsLatest,
-    lastModified: input.LastModified,
+    Key: input.Key,
+    VersionId: input.VersionId,
+    IsLatest: input.IsLatest,
+    LastModified: input.LastModified,
   };
 }
 
-export class B2S3PeerClient extends S3Client {
-  private readonly unsafeMutationClient: S3Client;
+const BLOCKED_PRESIGNED_PUT_CONTENT_TYPES = new Set([
+  "application/ecmascript",
+  "application/javascript",
+  "application/xml",
+  "image/svg+xml",
+  "text/ecmascript",
+  "text/html",
+  "text/javascript",
+  "text/xml",
+]);
+
+function normalizedMediaType(contentType: string | undefined): string | null {
+  if (contentType === undefined) return null;
+  const mediaType = contentType.split(";")[0]?.trim().toLowerCase();
+  return mediaType ? mediaType : null;
+}
+
+function assertPresignedPutContentTypeAllowed(contentType: string | undefined): void {
+  const mediaType = normalizedMediaType(contentType);
+  if (!mediaType) return;
+  if (BLOCKED_PRESIGNED_PUT_CONTENT_TYPES.has(mediaType) || mediaType.endsWith("+xml")) {
+    throw new Error(
+      `Presigned PutObject URLs do not allow browser-executable content type '${contentType}'.`,
+    );
+  }
+}
+
+export class B2S3PeerClient {
+  private readonly readClient: S3Client;
+  private unsafeMutationClient: S3Client | null = null;
+  private readonly peerConfig: B2S3PeerClientConfig;
 
   constructor(config: B2S3PeerClientConfig) {
-    super(config);
-    this.unsafeMutationClient = new S3Client({ ...config, maxAttempts: 1 });
+    this.peerConfig = config;
+    this.readClient = new S3Client(config);
   }
 
-  override destroy(): void {
-    this.unsafeMutationClient.destroy();
-    super.destroy();
+  destroy(): void {
+    this.unsafeMutationClient?.destroy();
+    this.unsafeMutationClient = null;
+    this.readClient.destroy();
   }
 
   private optionsWithRequestSignal(options?: HttpHandlerOptions): HttpHandlerOptions | undefined {
@@ -392,32 +416,18 @@ export class B2S3PeerClient extends S3Client {
     return { ...(options ?? {}), abortSignal: signal };
   }
 
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
+  private sendCommand<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
     command: S3SendCommand<InputType, OutputType>,
     options?: HttpHandlerOptions,
-  ): Promise<OutputType>;
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    cb: S3SendCallback<OutputType>,
-  ): void;
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    options: HttpHandlerOptions,
-    cb: S3SendCallback<OutputType>,
-  ): void;
-  override send<InputType extends ServiceInputTypes, OutputType extends ServiceOutputTypes>(
-    command: S3SendCommand<InputType, OutputType>,
-    optionsOrCb?: HttpHandlerOptions | S3SendCallback<OutputType>,
-    cb?: S3SendCallback<OutputType>,
-  ): Promise<OutputType> | void {
-    if (typeof optionsOrCb === "function") {
-      const options = this.optionsWithRequestSignal();
-      if (options) return super.send(command, options, optionsOrCb);
-      return super.send(command, optionsOrCb);
+  ): Promise<OutputType> {
+    return this.readClient.send(command, this.optionsWithRequestSignal(options));
+  }
+
+  private mutationClient(): S3Client {
+    if (!this.unsafeMutationClient) {
+      this.unsafeMutationClient = new S3Client({ ...this.peerConfig, maxAttempts: 1 });
     }
-    const options = this.optionsWithRequestSignal(optionsOrCb);
-    if (cb) return super.send(command, options ?? {}, cb);
-    return super.send(command, options);
+    return this.unsafeMutationClient;
   }
 
   private async sendWithCircuit<
@@ -427,7 +437,7 @@ export class B2S3PeerClient extends S3Client {
     command: S3SendCommand<InputType, OutputType>,
     options?: HttpHandlerOptions,
   ): Promise<OutputType> {
-    return withCircuit(() => this.send(command, options));
+    return withS3Circuit(() => this.sendCommand(command, options));
   }
 
   private async sendUnsafeMutationWithCircuit<
@@ -437,8 +447,8 @@ export class B2S3PeerClient extends S3Client {
     command: S3SendCommand<InputType, OutputType>,
     options?: HttpHandlerOptions,
   ): Promise<OutputType> {
-    return withCircuit(() =>
-      this.unsafeMutationClient.send(command, this.optionsWithRequestSignal(options)),
+    return withS3Circuit(() =>
+      this.mutationClient().send(command, this.optionsWithRequestSignal(options)),
     );
   }
 
@@ -559,18 +569,14 @@ export class B2S3PeerClient extends S3Client {
     }
 
     const signal = currentMcpRequestSignal();
-    const maxConcurrency = Math.min(DELETE_OBJECTS_MAX_CONCURRENCY, input.objects.length);
     const deleted: B2S3DeleteObjectsResult["deleted"] = [];
     const errors: B2S3DeleteObjectsResult["errors"] = [];
     let attempted = 0;
-    let nextIndex = 0;
 
-    const worker = async () => {
-      for (;;) {
-        if (signal?.aborted === true) return;
-        const index = nextIndex++;
-        const object = input.objects[index];
-        if (!object) return;
+    const { maxConcurrency, aborted } = await forEachBounded(
+      input.objects,
+      { signal },
+      async (object) => {
         attempted++;
         try {
           const result = await this.deleteObject({
@@ -591,15 +597,13 @@ export class B2S3PeerClient extends S3Client {
         } catch (err) {
           errors.push(b2S3DeleteErrorEntry(object, err));
         }
-      }
-    };
-
-    await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
+      },
+    );
     return {
       deleted,
       errors,
       attempted,
-      aborted: signal?.aborted === true,
+      aborted,
       maxConcurrency,
     };
   }
@@ -665,6 +669,7 @@ export class B2S3PeerClient extends S3Client {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
       throw new Error("versionId is only valid for GetObject presigned URLs.");
     }
+    if (input.operation === "PutObject") assertPresignedPutContentTypeAllowed(input.contentType);
     const command =
       input.operation === "GetObject"
         ? new GetObjectCommand({
@@ -678,7 +683,7 @@ export class B2S3PeerClient extends S3Client {
             ContentType: input.contentType,
           });
     return {
-      url: await withCircuit(() => getSignedUrl(this, command, { expiresIn: input.expiresIn })),
+      url: await getSignedUrl(this.readClient, command, { expiresIn: input.expiresIn }),
       operation: input.operation,
       expiresIn: input.expiresIn,
       expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
@@ -714,7 +719,7 @@ export class B2S3PeerClient extends S3Client {
     expiresIn: number;
   }): Promise<{ partNumber: number; url: string }> {
     const url = await getSignedUrl(
-      this,
+      this.readClient,
       new UploadPartCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -780,7 +785,7 @@ export class B2S3PeerClient extends S3Client {
     nextKeyMarker?: string;
     nextUploadIdMarker?: string;
   }> {
-    const result = await this.send(
+    const result = await this.sendWithCircuit(
       new ListMultipartUploadsCommand({
         Bucket: input.bucket,
         Prefix: input.prefix,
@@ -809,7 +814,7 @@ export class B2S3PeerClient extends S3Client {
     isTruncated?: boolean;
     nextPartNumberMarker?: string;
   }> {
-    const result = await this.send(
+    const result = await this.sendWithCircuit(
       new ListPartsCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -857,7 +862,7 @@ export class B2S3PeerClient extends S3Client {
     continuationToken?: string;
     maxKeys?: number;
   }): Promise<{ keys: string[]; isTruncated: boolean; nextContinuationToken?: string }> {
-    const page = await this.send(
+    const page = await this.sendCommand(
       new ListObjectsV2Command({
         Bucket: input.bucketName,
         Prefix: input.prefix,
@@ -879,7 +884,7 @@ export class B2S3PeerClient extends S3Client {
     bucketName: string;
     key: string;
   }): Promise<{ body: unknown }> {
-    const object = await this.send(
+    const object = await this.sendCommand(
       new GetObjectCommand({ Bucket: input.bucketName, Key: input.key }),
     );
     return { body: object.Body };

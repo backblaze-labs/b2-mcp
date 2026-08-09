@@ -1,10 +1,17 @@
 import { Readable } from "node:stream";
 import { ReadableStream } from "node:stream/web";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { registerS3ObjectTools } from "../../src/s3/objects";
 import type { B2S3FileVersionBinding } from "../../src/utils/types";
 import type { B2S3DownloadedObject } from "../../src/s3/aws-sdk-adapter";
 import { runWithMcpRequestSignal } from "../../src/request-context";
-import { circuitBreaker } from "../../src/utils/circuit-breaker";
+import {
+  circuitBreaker,
+  s3CircuitBreaker,
+  s3TransferCircuitBreaker,
+} from "../../src/utils/circuit-breaker";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
 
 function streamFrom(
@@ -61,8 +68,13 @@ describe("S3 object tools with deterministic handler fake", () => {
   let calls: Array<{ operation: string; input: any }> = [];
   let nextDownload: B2S3DownloadedObject = downloadedObject();
   let currentVersion: B2S3FileVersionBinding | null = null;
+  let nextHeadObjectError: unknown = null;
   const versions = new Map<string, B2S3FileVersionBinding>();
   const bucketIds = new Map([["b", "bucket-id"]]);
+  let bulkVersionLookups: Array<{
+    bucket: string;
+    objects: Array<{ key: string; versionId?: string }>;
+  }> = [];
   let nextListObjects = {
     objects: [],
     commonPrefixes: [],
@@ -74,7 +86,9 @@ describe("S3 object tools with deterministic handler fake", () => {
     calls = [];
     nextDownload = downloadedObject();
     currentVersion = null;
+    nextHeadObjectError = null;
     versions.clear();
+    bulkVersionLookups = [];
     nextListObjects = {
       objects: [],
       commonPrefixes: [],
@@ -104,6 +118,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       },
       async headObject(input: any) {
         calls.push({ operation: "headObject", input });
+        if (nextHeadObjectError) throw nextHeadObjectError;
         return {
           ...downloadedObject(),
           serverSideEncryption: "AES256",
@@ -139,6 +154,28 @@ describe("S3 object tools with deterministic handler fake", () => {
         }
         return version;
       },
+      async resolveS3FileVersions(input: {
+        bucket: string;
+        objects: Array<{ key: string; versionId?: string }>;
+      }) {
+        bulkVersionLookups.push(input);
+        return input.objects.map((object) => {
+          if (object.versionId === undefined) return { object, version: null };
+          const version = versions.get(object.versionId);
+          if (
+            !version ||
+            version.fileName !== object.key ||
+            version.bucketId !== (bucketIds.get(input.bucket) ?? input.bucket)
+          ) {
+            return {
+              object,
+              version: null,
+              error: notFound(`Object '${object.key}' not found in bucket '${input.bucket}'.`),
+            };
+          }
+          return { object, version };
+        });
+      },
       async getCurrentS3FileVersion() {
         return currentVersion;
       },
@@ -149,6 +186,8 @@ describe("S3 object tools with deterministic handler fake", () => {
 
   afterEach(() => {
     circuitBreaker.close();
+    s3CircuitBreaker.close();
+    s3TransferCircuitBreaker.close();
   });
 
   it("uploads base64 content without touching the filesystem", async () => {
@@ -180,8 +219,8 @@ describe("S3 object tools with deterministic handler fake", () => {
       await tools.call("s3_get_object", { bucket: "b", key: "hello.txt", range: "bytes=0-4" }),
     );
     nextListObjects = {
-      objects: [{ key: "a.txt", size: 1, lastModified: new Date(), storageClass: "STANDARD" }],
-      commonPrefixes: [{ prefix: "folder/" }],
+      objects: [{ Key: "a.txt", Size: 1, LastModified: new Date(), StorageClass: "STANDARD" }],
+      commonPrefixes: [{ Prefix: "folder/" }],
       isTruncated: true,
       nextContinuationToken: "next",
       keyCount: 1,
@@ -259,6 +298,43 @@ describe("S3 object tools with deterministic handler fake", () => {
 
     expect(result.isError).toBe(true);
     expect(destroySpy).toHaveBeenCalled();
+  });
+
+  it("times out stalled saveToPath downloads and removes the partial file", async () => {
+    const previousTimeout = process.env.B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS;
+    process.env.B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS = "20";
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-stall-"));
+    const target = path.join(dir, "out.txt");
+    let pushed = false;
+    const body = new Readable({
+      read() {
+        if (pushed) return;
+        pushed = true;
+        this.push(Buffer.from("partial"));
+      },
+    });
+    const destroySpy = vi.spyOn(body, "destroy");
+    nextDownload = downloadedObject({
+      contentLength: 100,
+      body: body as B2S3DownloadedObject["body"],
+    });
+
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "hello.txt",
+        saveToPath: target,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(parseResult(result)).toMatch(/No object body progress/i);
+      expect(destroySpy).toHaveBeenCalled();
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      if (previousTimeout === undefined) delete process.env.B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS;
+      else process.env.B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS = previousTimeout;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("does not return partial inline content when web-stream cancellation resolves done", async () => {
@@ -412,6 +488,16 @@ describe("S3 object tools with deterministic handler fake", () => {
         },
       ],
     });
+    expect(bulkVersionLookups).toEqual([
+      {
+        bucket: "b",
+        objects: [
+          { key: "public/allowed.txt", versionId: "allowed-version" },
+          { key: "public/blocked.txt", versionId: "secret-version" },
+          { key: "public/latest.txt" },
+        ],
+      },
+    ]);
     expect(calls.find((call) => call.operation === "deleteObjects")?.input.objects).toEqual([
       { key: "public/allowed.txt", versionId: "allowed-version" },
       { key: "public/latest.txt" },
@@ -420,11 +506,16 @@ describe("S3 object tools with deterministic handler fake", () => {
 
   it("reports deleteMarker for current and explicit hide-marker versions", async () => {
     currentVersion = fileVersion({ action: "hide", fileId: "hide-current" });
+    nextHeadObjectError = Object.assign(new Error("not found"), {
+      name: "NotFound",
+      $metadata: { httpStatusCode: 404 },
+    });
     const current = parseResult(
       await tools.call("s3_head_object", { bucket: "b", key: "hello.txt" }),
     );
 
     versions.set("hide-explicit", fileVersion({ action: "hide", fileId: "hide-explicit" }));
+    nextHeadObjectError = null;
     const explicit = parseResult(
       await tools.call("s3_head_object", {
         bucket: "b",
@@ -443,6 +534,6 @@ describe("S3 object tools with deterministic handler fake", () => {
       versionId: "hide-explicit",
       deleteMarker: true,
     });
-    expect(calls.some((call) => call.operation === "headObject")).toBe(false);
+    expect(calls.filter((call) => call.operation === "headObject")).toHaveLength(1);
   });
 });

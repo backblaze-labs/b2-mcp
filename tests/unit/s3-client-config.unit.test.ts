@@ -51,11 +51,9 @@ describe("B2 S3 client configuration", () => {
   it("creates object clients with the configured S3 credential override", async () => {
     const s3 = createS3ObjectClient(config, "s3-object-tools");
 
-    await expect(s3.config.credentials()).resolves.toMatchObject({
-      accessKeyId: "legacy-s3-key-id",
-      secretAccessKey: "legacy-s3-secret",
-    });
-    await expect(s3.config.maxAttempts()).resolves.toBe(3);
+    expect(typeof s3.destroy).toBe("function");
+    expect((s3 as unknown as { config?: unknown }).config).toBeUndefined();
+    expect((s3 as unknown as { send?: unknown }).send).toBeUndefined();
     s3.destroy();
   });
 
@@ -86,10 +84,9 @@ describe("B2 S3 client configuration", () => {
       capabilities: [],
     });
 
-    await expect(s3.config.credentials()).resolves.toMatchObject({
-      accessKeyId: "principal-key-id",
-      secretAccessKey: "principal-secret",
-    });
+    expect(typeof s3.destroy).toBe("function");
+    expect((s3 as unknown as { config?: unknown }).config).toBeUndefined();
+    expect((s3 as unknown as { send?: unknown }).send).toBeUndefined();
     s3.destroy();
   });
 

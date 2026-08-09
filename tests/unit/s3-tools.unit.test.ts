@@ -4,7 +4,7 @@ import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "..
 import { B2Client } from "../../src/b2/client";
 import type { B2S3FileVersionBinding } from "../../src/utils/types";
 import type { McpServer } from "../../src/mcp";
-import { circuitBreaker } from "../../src/utils/circuit-breaker";
+import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import type { MockInstance } from "vitest";
 
@@ -40,6 +40,15 @@ beforeEach(() => {
   vi.spyOn(B2Client.prototype, "resolveS3FileVersion").mockImplementation(
     async ({ key, versionId }) => matchingVersion({ fileName: key, fileId: versionId }),
   );
+  vi.spyOn(B2Client.prototype, "resolveS3FileVersions").mockImplementation(async ({ objects }) =>
+    objects.map((object) => ({
+      object,
+      version:
+        object.versionId === undefined
+          ? null
+          : matchingVersion({ fileName: object.key, fileId: object.versionId }),
+    })),
+  );
   vi.spyOn(B2Client.prototype, "getCurrentS3FileVersion").mockResolvedValue(null);
   server = createServer(testConfig);
 });
@@ -47,6 +56,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   circuitBreaker.close();
+  s3CircuitBreaker.close();
   invalidateAuthManagerCache();
 });
 
@@ -399,6 +409,42 @@ describe("s3_delete_object and s3_delete_objects", () => {
       BypassGovernanceRetention: true,
     });
   });
+
+  it("rejects version-targeted deletes for deleteFiles-only credentials", async () => {
+    const cleanupServer = createServer(testConfig, ["deleteFiles"]);
+
+    const one = await callTool(cleanupServer, "s3_delete_object", {
+      bucket: "b",
+      key: "old.txt",
+      versionId: "v1",
+      confirm: true,
+    });
+    expect(one.isError).toBe(true);
+    expect(parseResult(one)).toMatch(/listFiles capability/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+
+    const many = parseResult(
+      await callTool(cleanupServer, "s3_delete_objects", {
+        bucket: "b",
+        objects: [{ key: "old.txt", versionId: "v1" }, { key: "latest.txt" }],
+        quiet: false,
+        confirm: true,
+      }),
+    );
+
+    expect(many).toMatchObject({
+      deleted: [{ Key: "latest.txt" }],
+      attempted: 2,
+      errors: [{ Key: "old.txt", VersionId: "v1", Code: "missing_capability" }],
+    });
+    expect(B2Client.prototype.resolveS3FileVersion).not.toHaveBeenCalledWith({
+      bucket: "b",
+      key: "old.txt",
+      versionId: "v1",
+    });
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy.mock.calls[0][0].input).toMatchObject({ Bucket: "b", Key: "latest.txt" });
+  });
 });
 
 describe("s3_head_object and s3_copy_object", () => {
@@ -440,6 +486,91 @@ describe("s3_head_object and s3_copy_object", () => {
       Bucket: "head-bucket",
       Key: "hidden.txt",
       VersionId: "v1",
+    });
+  });
+
+  it("uses S3 HeadObject first for current-version metadata", async () => {
+    const lastModified = new Date("2026-01-01T00:00:00.000Z");
+    vi.mocked(B2Client.prototype.getCurrentS3FileVersion).mockRejectedValueOnce(
+      new Error("native list is unavailable"),
+    );
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "text/plain",
+      ContentLength: 5,
+      LastModified: lastModified,
+      ETag: '"etag"',
+      VersionId: "v1",
+      Metadata: { owner: "fixture" },
+    });
+
+    const result = parseResult(
+      await callTool(server, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "visible.txt",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      key: "visible.txt",
+      contentLength: 5,
+      versionId: "v1",
+    });
+    expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
+    expect(sendSpy.mock.calls[0][0].constructor.name).toBe("HeadObjectCommand");
+  });
+
+  it("supports current-version HeadObject with readFiles-only credentials", async () => {
+    const readOnlyServer = createServer(testConfig, ["readFiles"]);
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "text/plain",
+      ContentLength: 5,
+      ETag: '"etag"',
+      VersionId: "v1",
+      Metadata: {},
+    });
+
+    const result = parseResult(
+      await callTool(readOnlyServer, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "visible.txt",
+      }),
+    );
+
+    expect(getRegisteredTools(readOnlyServer)?.["s3_head_object"]).toBeDefined();
+    expect(result).toMatchObject({ key: "visible.txt", versionId: "v1" });
+    expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
+  });
+
+  it("falls back to native current version only to synthesize delete markers", async () => {
+    vi.mocked(B2Client.prototype.getCurrentS3FileVersion).mockResolvedValueOnce(
+      matchingVersion({
+        fileName: "hidden.txt",
+        fileId: "hide-current",
+        action: "hide",
+      }),
+    );
+    sendSpy.mockRejectedValueOnce(
+      Object.assign(new Error("not found"), {
+        name: "NotFound",
+        $metadata: { httpStatusCode: 404 },
+      }),
+    );
+
+    const result = parseResult(
+      await callTool(server, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "hidden.txt",
+      }),
+    );
+
+    expect(result).toMatchObject({
+      key: "hidden.txt",
+      versionId: "hide-current",
+      deleteMarker: true,
+    });
+    expect(B2Client.prototype.getCurrentS3FileVersion).toHaveBeenCalledWith({
+      bucket: "head-bucket",
+      key: "hidden.txt",
     });
   });
 
@@ -586,19 +717,50 @@ describe("s3_get_presigned_url", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
-  it("fails fast while the shared circuit breaker is open", async () => {
+  it.each(["text/html", "image/svg+xml", "application/javascript", "text/xml", "application/xml"])(
+    "rejects presigned PutObject browser-executable type %s",
+    async (contentType) => {
+      const result = await callTool(server, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "profile",
+        operation: "PutObject",
+        expiresIn: 3600,
+        contentType,
+        confirm: true,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(parseResult(result)).toMatch(/browser-executable content type/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("generates local presigned URLs while the native circuit breaker is open", async () => {
     circuitBreaker.open();
 
-    const result = await callTool(server, "s3_get_presigned_url", {
-      bucket: "my-bucket",
-      key: "photo.jpg",
-      operation: "PutObject",
-      expiresIn: 3600,
-      confirm: true,
-    });
+    const put = parseResult(
+      await callTool(server, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "PutObject",
+        expiresIn: 3600,
+        contentType: "image/jpeg",
+        confirm: true,
+      }),
+    );
+    const get = parseResult(
+      await callTool(server, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "GetObject",
+        expiresIn: 3600,
+      }),
+    );
 
-    expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/breaker|open/i);
+    expect(put.operation).toBe("PutObject");
+    expect(typeof put.url).toBe("string");
+    expect(get.operation).toBe("GetObject");
+    expect(typeof get.url).toBe("string");
     expect(sendSpy).not.toHaveBeenCalled();
   });
 });
