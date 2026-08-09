@@ -197,9 +197,13 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth);
   const reportClient = new B2ReportClient(auth);
-  const s3Client = createS3Client(config);
+  const s3Client = createS3Client(config, {
+    applicationKeyId: config.applicationKeyId,
+    applicationKey: config.applicationKey,
+  });
   const allowExplicitVersionInspection = !filterActive || (capsSet?.has("readFiles") ?? false);
   const allowCurrentVersionInspection = !filterActive || (capsSet?.has("listFiles") ?? false);
+  const allowBypassGovernance = !filterActive || (capsSet?.has("bypassGovernance") ?? false);
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
   const masterConfig = {
@@ -234,6 +238,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   registerS3ObjectTools(registrar, s3Client, b2Client, config, {
     allowExplicitVersionInspection,
     allowCurrentVersionInspection,
+    allowBypassGovernance,
   });
   registerS3MultipartTools(registrar, s3Client, config);
   registerS3PresignedTools(registrar, s3Client, b2Client, config, {

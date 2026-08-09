@@ -12,13 +12,14 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
 import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
+import { logger } from "../utils/logger.js";
 import type {
   B2S3DeleteObjectsResult,
   B2S3HeadObjectResult,
   B2S3ObjectBody,
   B2S3PeerClient,
 } from "./aws-sdk-adapter.js";
-import { b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
+import { assertSafeObjectContentType, b2S3DeleteErrorEntry } from "./aws-sdk-adapter.js";
 import { timeoutError } from "../utils/named-error.js";
 
 const CONFIRM_DESC =
@@ -323,8 +324,50 @@ function headResultFromDeleteMarker(version: B2S3FileVersionBinding) {
   };
 }
 
-function is404(e: any) {
-  return e?.status === 404 || e?.$metadata?.httpStatusCode === 404;
+function hasS3DeleteMarkerSignal(err: unknown): boolean {
+  const e = err as
+    | {
+        DeleteMarker?: unknown;
+        status?: unknown;
+        $metadata?: { httpStatusCode?: unknown; httpHeaders?: Record<string, string> };
+        $response?: { headers?: Record<string, string> };
+      }
+    | undefined;
+  if (e?.$metadata?.httpStatusCode !== 404 && e?.status !== 404) return false;
+  const header =
+    e?.$metadata?.httpHeaders?.["x-amz-delete-marker"] ??
+    e?.$response?.headers?.["x-amz-delete-marker"];
+  return e?.DeleteMarker === true || header === "true";
+}
+
+function inlineUploadLimitError(size?: number): Error {
+  return new Error(
+    `Payload ${
+      size === undefined ? "exceeds" : `is ${size} bytes, over`
+    } the ${MAX_INLINE_OBJECT_BYTES}-byte inline limit for s3_put_object. Use s3_get_presigned_url or multipart tools for large objects.`,
+  );
+}
+
+async function readSmallRegularFile(filePath: string): Promise<Buffer> {
+  const handle = await fs.promises.open(
+    filePath,
+    fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0),
+  );
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error("s3_put_object filePath must be a regular file.");
+    if (stat.size > MAX_INLINE_OBJECT_BYTES) throw inlineUploadLimitError(stat.size);
+    const output = new Uint8Array(stat.size);
+    let total = 0;
+    while (total < output.byteLength) {
+      const { bytesRead } = await handle.read(output, total, output.byteLength - total, total);
+      if (bytesRead === 0) break;
+      total += bytesRead;
+    }
+    return Buffer.from(output.subarray(0, total));
+  } finally {
+    await handle.close();
+  }
 }
 
 async function validateDeleteObjectVersions(
@@ -400,6 +443,7 @@ const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 interface S3ObjectToolOptions {
   allowExplicitVersionInspection?: boolean;
   allowCurrentVersionInspection?: boolean;
+  allowBypassGovernance?: boolean;
 }
 
 export function registerS3ObjectTools(
@@ -411,6 +455,7 @@ export function registerS3ObjectTools(
 ): void {
   const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   const allowCurrentVersionInspection = options.allowCurrentVersionInspection ?? true;
+  const allowBypassGovernance = options.allowBypassGovernance ?? true;
   const getObjectVersionIdInput: z.ZodRawShape = {
     versionId: z.string().optional().describe("Specific version of the object to retrieve."),
   };
@@ -460,33 +505,18 @@ export function registerS3ObjectTools(
           return toolError(new Error("Either filePath or content must be provided."));
         }
 
+        assertSafeObjectContentType(args.contentType, "s3_put_object");
+
         const safePath = args.filePath
           ? resolveLocalPath(config, args.filePath, "read")
           : undefined;
 
-        // Enforce the inline cap before sending any bytes. Bulk uploads must use
-        // a presigned PutObject URL (s3_get_presigned_url) or the multipart flow
-        // so object data never streams through the server / model context.
-        const statSize = safePath ? fs.statSync(safePath).size : undefined;
-        if (statSize !== undefined && statSize > MAX_INLINE_OBJECT_BYTES) {
-          return toolError(
-            new Error(
-              `Payload is ${statSize} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline limit for s3_put_object. ` +
-                `Generate a PutObject URL with s3_get_presigned_url and upload directly to B2, or use the ` +
-                `multipart tools (s3_create_multipart_upload → s3_presign_upload_part → s3_complete_multipart_upload) for large objects.`,
-            ),
-          );
-        }
-        const body = safePath ? fs.readFileSync(safePath) : Buffer.from(args.content!, "base64");
+        const body = safePath
+          ? await readSmallRegularFile(safePath)
+          : Buffer.from(args.content!, "base64");
         const size = body.byteLength;
         if (size > MAX_INLINE_OBJECT_BYTES) {
-          return toolError(
-            new Error(
-              `Payload is ${size} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline limit for s3_put_object. ` +
-                `Generate a PutObject URL with s3_get_presigned_url and upload directly to B2, or use the ` +
-                `multipart tools (s3_create_multipart_upload → s3_presign_upload_part → s3_complete_multipart_upload) for large objects.`,
-            ),
-          );
+          return toolError(inlineUploadLimitError(size));
         }
 
         await s3.putObject({
@@ -667,6 +697,16 @@ export function registerS3ObjectTools(
       try {
         const gate = checkDestructive("s3_delete_objects", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        if (args.bypassGovernance === true && !allowBypassGovernance) {
+          return toolError(
+            Object.assign(
+              new Error(
+                "s3_delete_objects bypassGovernance requires the bypassGovernance capability.",
+              ),
+              { status: 403, code: "missing_capability" },
+            ),
+          );
+        }
         const objects = args.objects as DeleteObjectEntry[];
         const validation = await validateDeleteObjectVersions(versions, {
           bucket: args.bucket,
@@ -735,7 +775,11 @@ export function registerS3ObjectTools(
             versionId: args.versionId,
           });
         } catch (headErr) {
-          if (!args.versionId && allowCurrentVersionInspection && is404(headErr)) {
+          if (
+            !args.versionId &&
+            allowCurrentVersionInspection &&
+            hasS3DeleteMarkerSignal(headErr)
+          ) {
             try {
               const currentVersion = await versions.getCurrentS3FileVersion({
                 bucket: args.bucket,
@@ -744,7 +788,8 @@ export function registerS3ObjectTools(
               if (currentVersion?.action === "hide") {
                 return toolJson(headResultFromDeleteMarker(currentVersion));
               }
-            } catch {
+            } catch (fallbackErr) {
+              logger.warn({ err: fallbackErr }, "s3.head_object.delete_marker_fallback_failed");
               // Preserve the S3 HeadObject failure; native inspection is only a
               // best-effort fallback for synthesizing current delete markers.
             }

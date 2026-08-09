@@ -1,4 +1,7 @@
 import { ReadableStream } from "node:stream/web";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { S3Client } from "@aws-sdk/client-s3";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { B2Client } from "../../src/b2/client";
@@ -266,10 +269,90 @@ describe("s3_put_object and s3_get_object", () => {
       bucket: "b",
       key: "k",
       content: tooBig,
+      contentType: "text/plain",
     });
     expect(result.isError).toBe(true);
     expect(parseResult(result)).toMatch(/inline limit|s3_get_presigned_url/i);
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects inline uploads without a safe content type", async () => {
+    const result = await callTool(server, "s3_put_object", {
+      bucket: "b",
+      key: "k",
+      content: Buffer.from("hello").toString("base64"),
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/contentType/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects local filePath uploads that are not regular files", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-s3-put-"));
+    try {
+      const result = await callTool(server, "s3_put_object", {
+        bucket: "b",
+        key: "k",
+        filePath: dir,
+        contentType: "text/plain",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(parseResult(result)).toMatch(/regular file/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects oversized local filePath uploads before sending to S3", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-mcp-s3-put-"));
+    const filePath = path.join(dir, "large.bin");
+    try {
+      fs.writeFileSync(filePath, new Uint8Array(1024 * 1024 + 1));
+      const result = await callTool(server, "s3_put_object", {
+        bucket: "b",
+        key: "k",
+        filePath,
+        contentType: "text/plain",
+      });
+
+      expect(result.isError).toBe(true);
+      expect(parseResult(result)).toMatch(/inline limit/i);
+      expect(sendSpy).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("signs object uploads with the authorized primary credential", async () => {
+    let accessKeyId: string | undefined;
+    sendSpy.mockImplementationOnce(async function (this: any) {
+      const credentials = await this.config.credentials();
+      accessKeyId = credentials.accessKeyId;
+      return {};
+    });
+    const scopedServer = createServer(
+      {
+        ...testConfig,
+        applicationKeyId: "tenant-key-id",
+        applicationKey: "tenant-secret",
+        appKeyId: "broad-s3-key-id",
+        appKey: "broad-s3-secret",
+      },
+      ["writeFiles"],
+    );
+
+    const result = await callTool(scopedServer, "s3_put_object", {
+      bucket: "tenant-bucket",
+      key: "k",
+      content: Buffer.from("hello").toString("base64"),
+      contentType: "text/plain",
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(accessKeyId).toBe("tenant-key-id");
   });
 
   it("refuses an inline read over the cap and cancels the body", async () => {
@@ -408,6 +491,36 @@ describe("s3_delete_object and s3_delete_objects", () => {
       VersionId: "v2",
       BypassGovernanceRetention: true,
     });
+  });
+
+  it("rejects governance bypass without the bypassGovernance capability", async () => {
+    const cleanupServer = createServer(testConfig, ["deleteFiles"]);
+
+    const ordinary = parseResult(
+      await callTool(cleanupServer, "s3_delete_objects", {
+        bucket: "b",
+        objects: [{ key: "latest.txt" }],
+        quiet: false,
+        confirm: true,
+      }),
+    );
+    expect(ordinary).toMatchObject({
+      deleted: [{ Key: "latest.txt" }],
+      errors: [],
+      attempted: 1,
+    });
+
+    sendSpy.mockClear();
+    const bypass = await callTool(cleanupServer, "s3_delete_objects", {
+      bucket: "b",
+      objects: [{ key: "locked.txt", versionId: "v1" }],
+      bypassGovernance: true,
+      confirm: true,
+    });
+
+    expect(bypass.isError).toBe(true);
+    expect(parseResult(bypass)).toMatch(/bypassGovernance capability/i);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 
   it("rejects version-targeted deletes for deleteFiles-only credentials", async () => {
@@ -577,10 +690,36 @@ describe("s3_head_object and s3_copy_object", () => {
       Object.assign(new Error("not found"), {
         name: "NotFound",
         $metadata: { httpStatusCode: 404 },
+        $response: { headers: { "x-amz-delete-marker": "true" } },
       }),
     );
 
     const result = await callTool(readOnlyServer, "s3_head_object", {
+      bucket: "head-bucket",
+      key: "hidden.txt",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
+  });
+
+  it("does not use native delete-marker lookup for ordinary HeadObject 404s", async () => {
+    vi.mocked(B2Client.prototype.getCurrentS3FileVersion).mockResolvedValueOnce(
+      matchingVersion({
+        fileName: "hidden.txt",
+        fileId: "hide-current",
+        action: "hide",
+      }),
+    );
+    sendSpy.mockRejectedValueOnce(
+      Object.assign(new Error("not found"), {
+        name: "NotFound",
+        $metadata: { httpStatusCode: 404 },
+      }),
+    );
+
+    const result = await callTool(server, "s3_head_object", {
       bucket: "head-bucket",
       key: "hidden.txt",
     });
@@ -627,7 +766,10 @@ describe("s3_head_object and s3_copy_object", () => {
     sendSpy.mockRejectedValueOnce(
       Object.assign(new Error("not found"), {
         name: "NotFound",
-        $metadata: { httpStatusCode: 404 },
+        $metadata: {
+          httpHeaders: { "x-amz-delete-marker": "true" },
+          httpStatusCode: 404,
+        },
       }),
     );
 
@@ -846,6 +988,46 @@ describe("s3_get_presigned_url", () => {
 
     expect(result.isError).toBe(true);
     expect(parseResult(result)).toMatch(/Confirmation required/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects presigned PutObject URLs without a signed content type", async () => {
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "profile",
+      operation: "PutObject",
+      expiresIn: 3600,
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/contentType/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("signs presigned URLs with the authorized primary credential", async () => {
+    const scopedServer = createServer(
+      {
+        ...testConfig,
+        applicationKeyId: "tenant-key-id",
+        applicationKey: "tenant-secret",
+        appKeyId: "broad-s3-key-id",
+        appKey: "broad-s3-secret",
+      },
+      ["readFiles"],
+    );
+
+    const result = parseResult(
+      await callTool(scopedServer, "s3_get_presigned_url", {
+        bucket: "tenant-bucket",
+        key: "photo.jpg",
+        operation: "GetObject",
+      }),
+    );
+
+    const url = decodeURIComponent(result.url);
+    expect(url).toContain("tenant-key-id");
+    expect(url).not.toContain("broad-s3-key-id");
     expect(sendSpy).not.toHaveBeenCalled();
   });
 

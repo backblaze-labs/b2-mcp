@@ -366,30 +366,24 @@ function mapDeleteMarker(input: {
   };
 }
 
-const BLOCKED_PRESIGNED_PUT_CONTENT_TYPES = new Set([
-  "application/ecmascript",
-  "application/javascript",
-  "application/xml",
-  "image/svg+xml",
-  "text/ecmascript",
-  "text/html",
-  "text/javascript",
-  "text/xml",
-]);
+const BROWSER_EXECUTABLE_CONTENT_TYPE =
+  /^(?:application\/(?:ecmascript|javascript|xml)|image\/svg\+xml|text\/(?:ecmascript|html|javascript|xml)|.+\+xml)$/;
 
 function normalizedMediaType(contentType: string | undefined): string | null {
-  if (contentType === undefined) return null;
-  const mediaType = contentType.split(";")[0]?.trim().toLowerCase();
+  const mediaType = contentType?.split(";")[0]?.trim().toLowerCase();
   return mediaType ? mediaType : null;
 }
 
-function assertPresignedPutContentTypeAllowed(contentType: string | undefined): void {
+export function assertSafeObjectContentType(
+  contentType: string | undefined,
+  context: string,
+): void {
   const mediaType = normalizedMediaType(contentType);
-  if (!mediaType) return;
-  if (BLOCKED_PRESIGNED_PUT_CONTENT_TYPES.has(mediaType) || mediaType.endsWith("+xml")) {
-    throw new Error(
-      `Presigned PutObject URLs do not allow browser-executable content type '${contentType}'.`,
-    );
+  if (!mediaType) {
+    throw new Error(`${context} requires a signed contentType.`);
+  }
+  if (BROWSER_EXECUTABLE_CONTENT_TYPE.test(mediaType)) {
+    throw new Error(`${context} rejects browser-executable content type '${contentType}'.`);
   }
 }
 
@@ -457,7 +451,7 @@ export class B2S3PeerClient {
   }
 
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {
-    await this.sendUnsafeMutationWithCircuit(
+    await this.sendWithCircuit(
       new PutBucketLifecycleConfigurationCommand({
         Bucket: input.bucket,
         LifecycleConfiguration: {
@@ -493,7 +487,7 @@ export class B2S3PeerClient {
   }
 
   async putObject(input: B2S3PutObjectOptions): Promise<void> {
-    await this.sendUnsafeMutationWithCircuit(
+    await this.sendWithCircuit(
       new PutObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -549,7 +543,7 @@ export class B2S3PeerClient {
   }
 
   async deleteObject(input: B2S3DeleteObjectOptions): Promise<B2S3DeleteObjectResult> {
-    const result = await this.sendUnsafeMutationWithCircuit(
+    const result = await this.sendWithCircuit(
       new DeleteObjectCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -609,7 +603,7 @@ export class B2S3PeerClient {
   }
 
   async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
-    await this.sendUnsafeMutationWithCircuit(
+    await this.sendWithCircuit(
       new CopyObjectCommand({
         Bucket: input.destinationBucket,
         Key: input.destinationKey,
@@ -669,7 +663,8 @@ export class B2S3PeerClient {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
       throw new Error("versionId is only valid for GetObject presigned URLs.");
     }
-    if (input.operation === "PutObject") assertPresignedPutContentTypeAllowed(input.contentType);
+    if (input.operation === "PutObject")
+      assertSafeObjectContentType(input.contentType, "Presigned PutObject URLs");
     const command =
       input.operation === "GetObject"
         ? new GetObjectCommand({
@@ -763,7 +758,7 @@ export class B2S3PeerClient {
     key: string;
     uploadId: string;
   }): Promise<void> {
-    await this.sendUnsafeMutationWithCircuit(
+    await this.sendWithCircuit(
       new AbortMultipartUploadCommand({
         Bucket: input.bucket,
         Key: input.key,
@@ -839,7 +834,7 @@ export class B2S3PeerClient {
     copySource: string;
     copySourceRange?: string;
   }): Promise<{ etag?: string; lastModified?: Date }> {
-    const result = await this.sendUnsafeMutationWithCircuit(
+    const result = await this.sendWithCircuit(
       new UploadPartCopyCommand({
         Bucket: input.bucket,
         Key: input.key,

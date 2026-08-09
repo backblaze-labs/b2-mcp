@@ -508,7 +508,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     currentVersion = fileVersion({ action: "hide", fileId: "hide-current" });
     nextHeadObjectError = Object.assign(new Error("not found"), {
       name: "NotFound",
-      $metadata: { httpStatusCode: 404 },
+      $metadata: { httpHeaders: { "x-amz-delete-marker": "true" }, httpStatusCode: 404 },
     });
     const current = parseResult(
       await tools.call("s3_head_object", { bucket: "b", key: "hello.txt" }),

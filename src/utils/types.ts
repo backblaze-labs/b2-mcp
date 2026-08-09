@@ -13,12 +13,7 @@ export interface B2Config {
    */
   applicationKeyId: string;
   applicationKey: string;
-  /**
-   * Credential the S3-compatible client signs with. Defaults to the application
-   *  key (which is what should be used). The deprecated B2_APP_KEY_ID override
-   *  remains only for legacy setups whose application key is a master key (B2's
-   *  S3 endpoint rejects master keys).
-   */
+  /** Deprecated legacy alias. Tool-serving S3 clients use applicationKeyId/applicationKey. */
   appKeyId: string;
   appKey: string;
   /**

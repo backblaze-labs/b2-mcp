@@ -57,6 +57,33 @@ describe("B2S3PeerClient object data-plane behavior", () => {
           destinationKey: "copy",
         }),
     ],
+  ])("retries idempotent %s after a retryable S3 failure", async (_name, call) => {
+    const handle = vi.fn().mockResolvedValue({
+      response: { statusCode: 500, headers: {}, body: Readable.from([]) },
+    });
+    const s3 = clientWithHandler(handle);
+
+    await expect(call(s3)).rejects.toBeTruthy();
+
+    expect(handle).toHaveBeenCalledTimes(3);
+    s3.destroy();
+  });
+
+  it.each([
+    [
+      "createMultipartUpload",
+      (s3: B2S3PeerClient) => s3.createMultipartUpload({ bucket: "b", key: "k" }),
+    ],
+    [
+      "completeMultipartUpload",
+      (s3: B2S3PeerClient) =>
+        s3.completeMultipartUpload({
+          bucket: "b",
+          key: "k",
+          uploadId: "upload-id",
+          parts: [{ partNumber: 1, etag: '"etag"' }],
+        }),
+    ],
   ])("does not replay %s after a retryable S3 failure", async (_name, call) => {
     const handle = vi.fn().mockResolvedValue({
       response: { statusCode: 500, headers: {}, body: Readable.from([]) },

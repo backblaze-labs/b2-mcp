@@ -45,8 +45,8 @@ describe("live B2 contract helper", () => {
       if (name === "s3_list_object_versions") {
         return {
           structuredContent: {
-            versions: [{ key: "run/object.txt", versionId: "version-1" }],
-            deleteMarkers: [{ key: "run/deleted.txt", versionId: "marker-1" }],
+            versions: [{ Key: "run/object.txt", VersionId: "version-1" }],
+            deleteMarkers: [{ Key: "run/deleted.txt", VersionId: "marker-1" }],
             isTruncated: false,
           },
         };

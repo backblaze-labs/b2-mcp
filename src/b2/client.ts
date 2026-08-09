@@ -897,12 +897,14 @@ export class B2Client {
     versionId: string;
   }): Promise<B2S3FileVersionBinding> {
     return this.withNativeCircuit(async (client, auth) => {
-      const bucket = await client.getBucket(options.bucket);
-      if (!bucket) throw b2NotFound(`Bucket '${options.bucket}' not found.`);
       const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
         fileId: fileId(options.versionId),
       });
-      if (version.fileName !== options.key || String(version.bucketId) !== String(bucket.id)) {
+      const bucket = await client.getBucket(options.bucket).catch(() => null);
+      if (
+        version.fileName !== options.key ||
+        (bucket !== null && String(version.bucketId) !== String(bucket.id))
+      ) {
         throw b2NotFound(`Object '${options.key}' not found in bucket '${options.bucket}'.`);
       }
       return toS3FileVersionBinding(version);
@@ -920,15 +922,7 @@ export class B2Client {
     }
 
     return this.withNativeCircuit(async (client, auth) => {
-      const bucket = await client.getBucket(options.bucket);
-      if (!bucket) {
-        const err = b2NotFound(`Bucket '${options.bucket}' not found.`);
-        return options.objects.map((object) =>
-          object.versionId === undefined
-            ? { object, version: null }
-            : { object, version: null, error: err },
-        );
-      }
+      const bucket = await client.getBucket(options.bucket).catch(() => null);
 
       const signal = currentMcpRequestSignal();
       const results: Array<B2S3FileVersionResolution | undefined> = [];
@@ -944,7 +938,10 @@ export class B2Client {
             const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
               fileId: fileId(object.versionId),
             });
-            if (version.fileName !== object.key || String(version.bucketId) !== String(bucket.id)) {
+            if (
+              version.fileName !== object.key ||
+              (bucket !== null && String(version.bucketId) !== String(bucket.id))
+            ) {
               throw b2NotFound(`Object '${object.key}' not found in bucket '${options.bucket}'.`);
             }
             results[index] = { object, version: toS3FileVersionBinding(version) };

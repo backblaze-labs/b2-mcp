@@ -266,6 +266,6 @@ If Partner API tools require a distinct master key, also send `X-B2-MCP-Master-K
 - **stdio:** the key goes in the `env` block of the client's config file, in **plaintext**. Protect that file and never commit it to a repo.
 - **hosted server/principal modes:** the client sends no B2 key. Front the server with TLS and, for principal mode, an MCP OAuth resource-server validation layer that supplies verified `authInfo`.
 - **hosted headers mode:** the key travels in `X-B2-MCP-*` headers on every request. Treat those headers as durable secrets in the proxy, logs, APM, and test fixtures.
-- **Master-key caveat:** only the Partner API and account-level key management need a master key in Phase 1. If you use one, also supply a non-master key (`B2_APP_KEY_ID`/`B2_APP_KEY` for stdio, or `X-B2-MCP-App-Key-Id`/`X-B2-MCP-App-Key` in hosted headers mode) for the S3 tools.
+- **Master-key caveat:** only the Partner API and account-level key management need a master key in Phase 1. S3 tools use the same authorized application key that controls tool registration, so use a non-master `B2_APPLICATION_KEY_*` credential for object and presign tools.
 
 See the [README](../README.md) for the full environment-variable list and the tool catalog.
