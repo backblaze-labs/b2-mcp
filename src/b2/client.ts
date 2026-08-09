@@ -506,6 +506,26 @@ function toFileRetentionResult(value: UpdateFileRetentionResult): UpdateFileRete
   };
 }
 
+function bucketIdFromAuthorizedScope(auth: B2AuthResponse, bucketName: string): string | null {
+  const buckets = auth.allowedBuckets;
+  if (!buckets || buckets.length === 0) return null;
+  const namedBucket = buckets.find((bucket) => bucket.name === bucketName);
+  if (namedBucket) return namedBucket.id;
+  return buckets.length === 1 && buckets[0]?.name === null ? buckets[0].id : null;
+}
+
+async function resolveTrustedBucketId(
+  client: SdkB2Client,
+  auth: B2AuthResponse,
+  bucketName: string,
+): Promise<string> {
+  const scopedBucketId = bucketIdFromAuthorizedScope(auth, bucketName);
+  if (scopedBucketId) return scopedBucketId;
+  const bucket = await client.getBucket(bucketName);
+  if (!bucket) throw b2NotFound(`Bucket '${bucketName}' not found.`);
+  return String(bucket.id);
+}
+
 function maybeBucketId(value: string | undefined): BucketId | undefined {
   return value ? bucketId(value) : undefined;
 }
@@ -897,14 +917,11 @@ export class B2Client {
     versionId: string;
   }): Promise<B2S3FileVersionBinding> {
     return this.withNativeCircuit(async (client, auth) => {
+      const expectedBucketId = await resolveTrustedBucketId(client, auth, options.bucket);
       const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
         fileId: fileId(options.versionId),
       });
-      const bucket = await client.getBucket(options.bucket).catch(() => null);
-      if (
-        version.fileName !== options.key ||
-        (bucket !== null && String(version.bucketId) !== String(bucket.id))
-      ) {
+      if (version.fileName !== options.key || String(version.bucketId) !== expectedBucketId) {
         throw b2NotFound(`Object '${options.key}' not found in bucket '${options.bucket}'.`);
       }
       return toS3FileVersionBinding(version);
@@ -922,7 +939,16 @@ export class B2Client {
     }
 
     return this.withNativeCircuit(async (client, auth) => {
-      const bucket = await client.getBucket(options.bucket).catch(() => null);
+      let expectedBucketId: string;
+      try {
+        expectedBucketId = await resolveTrustedBucketId(client, auth, options.bucket);
+      } catch (err) {
+        return options.objects.map((object) =>
+          object.versionId === undefined
+            ? { object, version: null }
+            : { object, version: null, error: err },
+        );
+      }
 
       const signal = currentMcpRequestSignal();
       const results: Array<B2S3FileVersionResolution | undefined> = [];
@@ -938,10 +964,7 @@ export class B2Client {
             const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
               fileId: fileId(object.versionId),
             });
-            if (
-              version.fileName !== object.key ||
-              (bucket !== null && String(version.bucketId) !== String(bucket.id))
-            ) {
+            if (version.fileName !== object.key || String(version.bucketId) !== expectedBucketId) {
               throw b2NotFound(`Object '${object.key}' not found in bucket '${options.bucket}'.`);
             }
             results[index] = { object, version: toS3FileVersionBinding(version) };

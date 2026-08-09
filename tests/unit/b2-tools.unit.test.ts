@@ -131,6 +131,130 @@ describe("B2Client S3 version guard", () => {
       transport.requests.filter((request) => b2EndpointName(request) === "b2_get_file_info"),
     ).toHaveLength(2);
   });
+
+  it("uses authorize bucket scope for version binding without listBuckets", async () => {
+    invalidateAuthManagerCache();
+    const auth = authorizeResponse(["readFiles"]) as any;
+    auth.apiInfo.storageApi.allowed.buckets = [{ id: "bucket-1", name: "scoped-bucket" }];
+    auth.apiInfo.storageApi.allowed.bucketId = "bucket-1";
+    auth.apiInfo.storageApi.allowed.bucketName = "scoped-bucket";
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(500, {
+          status: 500,
+          code: "unexpected",
+          message: "listBuckets should not be called",
+        });
+      }
+      if (endpoint === "b2_get_file_info") {
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          bucketId: "bucket-1",
+          fileId: "version-a",
+          fileName: "a.txt",
+          action: "upload",
+          contentLength: 1,
+          contentSha1: "none",
+          contentType: "text/plain",
+          fileInfo: {},
+          uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    const result = await client.resolveS3FileVersion({
+      bucket: "scoped-bucket",
+      key: "a.txt",
+      versionId: "version-a",
+    });
+
+    expect(result.fileId).toBe("version-a");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(0);
+  });
+
+  it("fails bulk version binding closed when bucket ownership is unknown", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["readFiles"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(403, {
+          status: 403,
+          code: "unauthorized",
+          message: "listBuckets denied",
+        });
+      }
+      if (endpoint === "b2_get_file_info") {
+        return new StaticHttpResponse(500, {
+          status: 500,
+          code: "unexpected",
+          message: "getFileInfo should not be called",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    const result = await client.resolveS3FileVersions({
+      bucket: "bulk-bucket",
+      objects: [{ key: "a.txt", versionId: "version-a" }, { key: "latest.txt" }],
+    });
+
+    expect(result[0].error).toBeTruthy();
+    expect(result[0].version).toBeNull();
+    expect(result[1].version).toBeNull();
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_get_file_info"),
+    ).toHaveLength(0);
+  });
+
+  it("fails single version binding closed when bucket ownership is unknown", async () => {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["readFiles"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(403, {
+          status: 403,
+          code: "unauthorized",
+          message: "listBuckets denied",
+        });
+      }
+      if (endpoint === "b2_get_file_info") {
+        return new StaticHttpResponse(500, {
+          status: 500,
+          code: "unexpected",
+          message: "getFileInfo should not be called",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    await expect(
+      client.resolveS3FileVersion({
+        bucket: "bucket",
+        key: "a.txt",
+        versionId: "version-a",
+      }),
+    ).rejects.toThrow(/listBuckets denied/i);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_get_file_info"),
+    ).toHaveLength(0);
+  });
 });
 
 describe("b2_authorize_account", () => {

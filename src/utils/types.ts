@@ -69,6 +69,8 @@ export interface B2AuthResponse {
    *  Drives capability-aware tool registration. Empty array if unknown.
    */
   capabilities: string[];
+  /** Bucket restrictions from authorize, or null when the key is unrestricted. */
+  allowedBuckets?: Array<{ id: string; name: string | null }> | null;
 }
 
 export type B2FileAction = "upload" | "hide" | "start" | "folder" | "copy";
