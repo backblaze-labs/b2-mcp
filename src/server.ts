@@ -198,7 +198,8 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   const b2Client = new B2Client(auth);
   const reportClient = new B2ReportClient(auth);
   const s3Client = createS3Client(config);
-  const allowNativeVersionInspection = !filterActive || (capsSet?.has("listFiles") ?? false);
+  const allowExplicitVersionInspection = !filterActive || (capsSet?.has("readFiles") ?? false);
+  const allowCurrentVersionInspection = !filterActive || (capsSet?.has("listFiles") ?? false);
 
   const masterIsDistinct = config.masterKeyId !== config.applicationKeyId;
   const masterConfig = {
@@ -231,13 +232,14 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // ── S3-Compatible API tools (data plane: objects + multipart) ────────────
   registerS3BucketTools(registrar, s3Client, config);
   registerS3ObjectTools(registrar, s3Client, b2Client, config, {
-    allowNativeVersionInspection,
+    allowExplicitVersionInspection,
+    allowCurrentVersionInspection,
   });
   registerS3MultipartTools(registrar, s3Client, config);
   registerS3PresignedTools(registrar, s3Client, b2Client, config, {
     allowGetObjectUrl: !filterActive || (capsSet?.has("readFiles") ?? false),
     allowPutObjectUrl: !filterActive || (capsSet?.has("writeFiles") ?? false),
-    allowNativeVersionInspection,
+    allowExplicitVersionInspection,
   });
   registerS3ExtraTools(registrar, s3Client);
 

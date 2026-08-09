@@ -16,7 +16,7 @@ import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 interface S3PresignedToolOptions {
   allowGetObjectUrl?: boolean;
   allowPutObjectUrl?: boolean;
-  allowNativeVersionInspection?: boolean;
+  allowExplicitVersionInspection?: boolean;
 }
 
 type B2S3PresignedClient = Pick<B2S3PeerClient, "presignObjectUrl">;
@@ -55,7 +55,7 @@ export function registerS3PresignedTools(
 ): void {
   const allowGetObjectUrl = options.allowGetObjectUrl ?? true;
   const allowPutObjectUrl = options.allowPutObjectUrl ?? true;
-  const allowNativeVersionInspection = options.allowNativeVersionInspection ?? true;
+  const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   const inputSchema = {
     bucket: z.string().describe("The bucket name."),
     key: z.string().describe("The object key."),
@@ -68,7 +68,7 @@ export function registerS3PresignedTools(
       .optional()
       .default(3600)
       .describe("URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days)."),
-    ...(allowGetObjectUrl && allowNativeVersionInspection
+    ...(allowGetObjectUrl
       ? {
           versionId: z
             .string()
@@ -112,12 +112,12 @@ export function registerS3PresignedTools(
         const gate = checkDestructive("s3_get_presigned_url", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
         if (args.operation === "GetObject" && args.versionId) {
-          if (!allowNativeVersionInspection) {
+          if (!allowExplicitVersionInspection) {
             return toolError({
               status: 403,
               code: "missing_capability",
               message:
-                "Version-targeted S3 presigned URLs require the listFiles capability for native version binding.",
+                "Version-targeted S3 presigned URLs require the readFiles capability for native version binding.",
             });
           }
           await versions.resolveS3FileVersion({

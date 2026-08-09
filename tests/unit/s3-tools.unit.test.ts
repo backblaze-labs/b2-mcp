@@ -412,6 +412,24 @@ describe("s3_delete_object and s3_delete_objects", () => {
 
   it("rejects version-targeted deletes for deleteFiles-only credentials", async () => {
     const cleanupServer = createServer(testConfig, ["deleteFiles"]);
+    const deleteOneTool = getRegisteredTools(cleanupServer)?.["s3_delete_object"];
+    const deleteManyTool = getRegisteredTools(cleanupServer)?.["s3_delete_objects"];
+
+    expect(
+      deleteOneTool?.inputSchema?.parse({
+        bucket: "b",
+        key: "old.txt",
+        versionId: "v1",
+        confirm: true,
+      }),
+    ).toMatchObject({ versionId: "v1" });
+    expect(
+      deleteManyTool?.inputSchema?.parse({
+        bucket: "b",
+        objects: [{ key: "old.txt", versionId: "v1" }],
+        confirm: true,
+      }),
+    ).toMatchObject({ objects: [{ versionId: "v1" }] });
 
     const one = await callTool(cleanupServer, "s3_delete_object", {
       bucket: "b",
@@ -420,7 +438,7 @@ describe("s3_delete_object and s3_delete_objects", () => {
       confirm: true,
     });
     expect(one.isError).toBe(true);
-    expect(parseResult(one)).toMatch(/listFiles capability/i);
+    expect(parseResult(one)).toMatch(/readFiles capability/i);
     expect(sendSpy).not.toHaveBeenCalled();
 
     const many = parseResult(
@@ -444,6 +462,18 @@ describe("s3_delete_object and s3_delete_objects", () => {
     });
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy.mock.calls[0][0].input).toMatchObject({ Bucket: "b", Key: "latest.txt" });
+
+    sendSpy.mockClear();
+    const listOnlyCleanupServer = createServer(testConfig, ["deleteFiles", "listFiles"]);
+    const listOnly = await callTool(listOnlyCleanupServer, "s3_delete_object", {
+      bucket: "b",
+      key: "old.txt",
+      versionId: "v1",
+      confirm: true,
+    });
+    expect(listOnly.isError).toBe(true);
+    expect(parseResult(listOnly)).toMatch(/readFiles capability/i);
+    expect(sendSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -539,6 +569,51 @@ describe("s3_head_object and s3_copy_object", () => {
     expect(getRegisteredTools(readOnlyServer)?.["s3_head_object"]).toBeDefined();
     expect(result).toMatchObject({ key: "visible.txt", versionId: "v1" });
     expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
+  });
+
+  it("does not use current delete-marker lookup without listFiles", async () => {
+    const readOnlyServer = createServer(testConfig, ["readFiles"]);
+    sendSpy.mockRejectedValueOnce(
+      Object.assign(new Error("not found"), {
+        name: "NotFound",
+        $metadata: { httpStatusCode: 404 },
+      }),
+    );
+
+    const result = await callTool(readOnlyServer, "s3_head_object", {
+      bucket: "head-bucket",
+      key: "hidden.txt",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/not found/i);
+    expect(B2Client.prototype.getCurrentS3FileVersion).not.toHaveBeenCalled();
+  });
+
+  it("supports explicit-version HeadObject with readFiles-only credentials", async () => {
+    const readOnlyServer = createServer(testConfig, ["readFiles"]);
+    sendSpy.mockResolvedValueOnce({
+      ContentType: "text/plain",
+      ContentLength: 5,
+      ETag: '"etag"',
+      VersionId: "v1",
+      Metadata: {},
+    });
+
+    const result = parseResult(
+      await callTool(readOnlyServer, "s3_head_object", {
+        bucket: "head-bucket",
+        key: "visible.txt",
+        versionId: "v1",
+      }),
+    );
+
+    expect(result).toMatchObject({ key: "visible.txt", versionId: "v1" });
+    expect(B2Client.prototype.resolveS3FileVersion).toHaveBeenCalledWith({
+      bucket: "head-bucket",
+      key: "visible.txt",
+      versionId: "v1",
+    });
   });
 
   it("falls back to native current version only to synthesize delete markers", async () => {
@@ -701,6 +776,38 @@ describe("s3_get_presigned_url", () => {
 
     expect(result.isError).toBe(true);
     expect(parseResult(result)).toMatch(/writeFiles capability/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps GetObject versionId available for readFiles-only credentials", async () => {
+    const readOnlyServer = createServer(testConfig, ["readFiles"]);
+    const tool = getRegisteredTools(readOnlyServer)?.["s3_get_presigned_url"];
+
+    expect(
+      tool?.inputSchema?.parse({
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "GetObject",
+        versionId: "v1",
+      }),
+    ).toMatchObject({ versionId: "v1" });
+
+    const result = parseResult(
+      await callTool(readOnlyServer, "s3_get_presigned_url", {
+        bucket: "my-bucket",
+        key: "photo.jpg",
+        operation: "GetObject",
+        versionId: "v1",
+      }),
+    );
+
+    expect(result.operation).toBe("GetObject");
+    expect(typeof result.url).toBe("string");
+    expect(B2Client.prototype.resolveS3FileVersion).toHaveBeenCalledWith({
+      bucket: "my-bucket",
+      key: "photo.jpg",
+      versionId: "v1",
+    });
     expect(sendSpy).not.toHaveBeenCalled();
   });
 

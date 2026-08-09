@@ -288,10 +288,11 @@ async function bodyToBuffer(body: B2S3ObjectBody, maxBytes: number): Promise<Buf
 async function verifyVersionBinding(
   versions: B2S3VersionGuard,
   input: { bucket: string; key: string; versionId?: string },
-  options: { allowNativeVersionInspection: boolean },
+  options: { allowExplicitVersionInspection: boolean },
 ): Promise<B2S3FileVersionBinding | null> {
   if (!input.versionId) return null;
-  if (!options.allowNativeVersionInspection) throw missingVersionInspectionCapabilityError();
+  if (!options.allowExplicitVersionInspection)
+    throw missingExplicitVersionInspectionCapabilityError();
   return versions.resolveS3FileVersion({
     bucket: input.bucket,
     key: input.key,
@@ -299,10 +300,10 @@ async function verifyVersionBinding(
   });
 }
 
-function missingVersionInspectionCapabilityError(): Error {
+function missingExplicitVersionInspectionCapabilityError(): Error {
   return Object.assign(
     new Error(
-      "Version-targeted S3 operations require the listFiles capability for native version binding.",
+      "Version-targeted S3 operations require the readFiles capability for native version binding.",
     ),
     { status: 403, code: "missing_capability" },
   );
@@ -327,7 +328,7 @@ async function validateDeleteObjectVersions(
   input: {
     bucket: string;
     objects: DeleteObjectEntry[];
-    allowNativeVersionInspection: boolean;
+    allowExplicitVersionInspection: boolean;
   },
 ): Promise<{
   validObjects: DeleteObjectEntry[];
@@ -339,12 +340,14 @@ async function validateDeleteObjectVersions(
   const signal = currentMcpRequestSignal();
   const validObjectsByIndex: Array<DeleteObjectEntry | undefined> = [];
   const errors: B2S3DeleteObjectsResult["errors"] = [];
-  if (!input.allowNativeVersionInspection) {
+  if (!input.allowExplicitVersionInspection) {
     for (const [index, object] of input.objects.entries()) {
       if (object.versionId === undefined) {
         validObjectsByIndex[index] = object;
       } else {
-        errors.push(b2S3DeleteErrorEntry(object, missingVersionInspectionCapabilityError()));
+        errors.push(
+          b2S3DeleteErrorEntry(object, missingExplicitVersionInspectionCapabilityError()),
+        );
       }
     }
     return {
@@ -391,7 +394,8 @@ async function validateDeleteObjectVersions(
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
 interface S3ObjectToolOptions {
-  allowNativeVersionInspection?: boolean;
+  allowExplicitVersionInspection?: boolean;
+  allowCurrentVersionInspection?: boolean;
 }
 
 export function registerS3ObjectTools(
@@ -401,27 +405,20 @@ export function registerS3ObjectTools(
   config: B2Config,
   options: S3ObjectToolOptions = {},
 ): void {
-  const allowNativeVersionInspection = options.allowNativeVersionInspection ?? true;
-  const getObjectVersionIdInput: z.ZodRawShape = allowNativeVersionInspection
-    ? {
-        versionId: z.string().optional().describe("Specific version of the object to retrieve."),
-      }
-    : {};
-  const deleteVersionIdInput: z.ZodRawShape = allowNativeVersionInspection
-    ? {
-        versionId: z.string().optional().describe("Version ID of the specific version to delete."),
-      }
-    : {};
-  const headVersionIdInput: z.ZodRawShape = allowNativeVersionInspection
-    ? {
-        versionId: z.string().optional().describe("Specific version of the object."),
-      }
-    : {};
+  const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
+  const allowCurrentVersionInspection = options.allowCurrentVersionInspection ?? true;
+  const getObjectVersionIdInput: z.ZodRawShape = {
+    versionId: z.string().optional().describe("Specific version of the object to retrieve."),
+  };
+  const deleteVersionIdInput: z.ZodRawShape = {
+    versionId: z.string().optional().describe("Version ID of the specific version to delete."),
+  };
+  const headVersionIdInput: z.ZodRawShape = {
+    versionId: z.string().optional().describe("Specific version of the object."),
+  };
   const deleteObjectEntrySchema = z.object({
     key: z.string().describe("The object key."),
-    ...(allowNativeVersionInspection
-      ? { versionId: z.string().optional().describe("Specific version to delete.") }
-      : {}),
+    versionId: z.string().optional().describe("Specific version to delete."),
   });
 
   server.registerTool(
@@ -530,7 +527,7 @@ export function registerS3ObjectTools(
             key: args.key,
             versionId: args.versionId,
           },
-          { allowNativeVersionInspection },
+          { allowExplicitVersionInspection },
         );
         const result = await s3.getObject({
           bucket: args.bucket,
@@ -626,7 +623,7 @@ export function registerS3ObjectTools(
             key: args.key,
             versionId: args.versionId,
           },
-          { allowNativeVersionInspection },
+          { allowExplicitVersionInspection },
         );
         await s3.deleteObject({
           bucket: args.bucket,
@@ -670,7 +667,7 @@ export function registerS3ObjectTools(
         const validation = await validateDeleteObjectVersions(versions, {
           bucket: args.bucket,
           objects,
-          allowNativeVersionInspection,
+          allowExplicitVersionInspection,
         });
         const deleteResult =
           !validation.aborted && validation.validObjects.length > 0
@@ -721,7 +718,7 @@ export function registerS3ObjectTools(
               key: args.key,
               versionId: args.versionId,
             },
-            { allowNativeVersionInspection },
+            { allowExplicitVersionInspection },
           );
           if (version?.action === "hide") return toolJson(headResultFromDeleteMarker(version));
         }
@@ -734,7 +731,7 @@ export function registerS3ObjectTools(
             versionId: args.versionId,
           });
         } catch (headErr) {
-          if (!args.versionId && allowNativeVersionInspection) {
+          if (!args.versionId && allowCurrentVersionInspection) {
             try {
               const currentVersion = await versions.getCurrentS3FileVersion({
                 bucket: args.bucket,
@@ -771,20 +768,16 @@ export function registerS3ObjectTools(
     "s3_copy_object",
     {
       description:
-        "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+        "Copy an object within B2 or between B2 buckets through the B2 S3-compatible endpoint. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
       inputSchema: {
         sourceBucket: z.string().describe("The source bucket name."),
         sourceKey: z.string().describe("The source object key."),
         destinationBucket: z.string().describe("The destination bucket name."),
         destinationKey: z.string().describe("The destination object key."),
-        ...(allowNativeVersionInspection
-          ? {
-              sourceVersionId: z
-                .string()
-                .optional()
-                .describe("Copy a specific version of the source object."),
-            }
-          : {}),
+        sourceVersionId: z
+          .string()
+          .optional()
+          .describe("Copy a specific version of the source object."),
         metadataDirective: z
           .enum(["COPY", "REPLACE"])
           .optional()
@@ -812,7 +805,7 @@ export function registerS3ObjectTools(
             key: args.sourceKey,
             versionId: args.sourceVersionId,
           },
-          { allowNativeVersionInspection },
+          { allowExplicitVersionInspection },
         );
         await s3.copyObject({
           sourceBucket: args.sourceBucket,
