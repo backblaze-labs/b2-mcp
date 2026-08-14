@@ -80,6 +80,52 @@ function itemCount(value: unknown, singular: string, plural: string): string {
     : plural;
 }
 
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function hasVersionId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function objectEntries(value: unknown): ToolArgs[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is ToolArgs => typeof entry === "object" && entry !== null)
+    : [];
+}
+
+function s3DeleteObjectEffect(args: ToolArgs): string {
+  return hasVersionId(args.versionId)
+    ? "permanently delete a specific object version (irreversible)"
+    : "create a delete marker for an object, hiding the current version";
+}
+
+function s3DeleteObjectsBaseEffect(args: ToolArgs): string {
+  const objects = objectEntries(args.objects);
+  if (objects.length === 0) {
+    return "delete the requested objects or object versions";
+  }
+  const versionedCount = objects.filter((object) => hasVersionId(object.versionId)).length;
+  const markerCount = objects.length - versionedCount;
+  const parts: string[] = [];
+  if (markerCount > 0) {
+    parts.push(`create delete markers for ${countLabel(markerCount, "object", "objects")}`);
+  }
+  if (versionedCount > 0) {
+    parts.push(
+      `permanently delete ${countLabel(versionedCount, "object version", "object versions")}`,
+    );
+  }
+  return parts.join(" and ");
+}
+
+function s3DeleteObjectsEffect(args: ToolArgs): string {
+  const base = s3DeleteObjectsBaseEffect(args);
+  return args.bypassGovernance === true
+    ? `${base} and bypass governance-mode Object Lock retention`
+    : base;
+}
+
 function updateFileRetentionEffect(args: ToolArgs): string | null {
   const fr = args.fileRetention as { mode?: unknown } | undefined;
   const reasons: string[] = [];
@@ -111,17 +157,16 @@ const DESTRUCTIVE_TOOL_SPECS = {
       `permanently delete bucket ID ${safeLabel(args.bucketId, "the requested bucket")}`,
   },
   s3_delete_object: {
-    effect: () => "permanently delete an object",
+    effect: s3DeleteObjectEffect,
     describe: (args) =>
-      `permanently delete object ${safeLabel(args.key, "the requested object")} from bucket ${safeLabel(args.bucket, "the requested bucket")}`,
+      hasVersionId(args.versionId)
+        ? `permanently delete version ${safeLabel(args.versionId, "the requested version")} of object ${safeLabel(args.key, "the requested object")} from bucket ${safeLabel(args.bucket, "the requested bucket")}`
+        : `create a delete marker for object ${safeLabel(args.key, "the requested object")} in bucket ${safeLabel(args.bucket, "the requested bucket")}, hiding the current version`,
   },
   s3_delete_objects: {
-    effect: (args) =>
-      args.bypassGovernance === true
-        ? "permanently delete multiple objects and bypass governance-mode Object Lock retention (irreversible)"
-        : "permanently delete multiple objects (irreversible)",
+    effect: s3DeleteObjectsEffect,
     describe: (args) =>
-      `${args.bypassGovernance === true ? "permanently delete and bypass governance-mode Object Lock retention for" : "permanently delete"} ${itemCount(args.objects, "object", "objects")} from bucket ${safeLabel(args.bucket, "the requested bucket")}`,
+      `${s3DeleteObjectsEffect(args)} in bucket ${safeLabel(args.bucket, "the requested bucket")}`,
   },
   s3_get_presigned_url: {
     effect: (args) =>
@@ -159,8 +204,8 @@ const DESTRUCTIVE_TOOL_SPECS = {
   },
   b2_update_file_retention: {
     effect: updateFileRetentionEffect,
-    describe: (args) =>
-      `weaken Object Lock retention for file ${safeLabel(args.fileName, "the requested file")} (${safeLabel(args.fileId, "requested file ID")})`,
+    describe: (args, effect) =>
+      `${effect} for file ${safeLabel(args.fileName, "the requested file")} (${safeLabel(args.fileId, "requested file ID")})`,
   },
   b2_update_file_legal_hold: {
     effect: (args) =>

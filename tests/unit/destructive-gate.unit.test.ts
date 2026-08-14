@@ -89,18 +89,53 @@ describe("destructive-gate", () => {
     });
   });
 
-  describe("s3_delete_objects Object Lock bypass text", () => {
-    it("keeps the plain delete effect unchanged", () => {
-      const r = checkDestructive("s3_delete_objects", { bucket: "b", objects: [] }, cfg());
+  describe("S3 delete effects", () => {
+    it("describes versionless single-object deletes as delete-marker creation", () => {
+      const r = checkDestructive("s3_delete_object", { bucket: "b", key: "k" }, cfg());
+
       expect(r.ok).toBe(false);
-      expect(r.message).toContain("permanently delete multiple objects (irreversible)");
+      expect(r.message).toContain("create a delete marker");
+      expect(r.message).not.toContain("permanently delete an object");
+    });
+
+    it("describes explicit single-object version deletes as permanent", () => {
+      const message = destructiveElicitationMessage("s3_delete_object", {
+        bucket: "b",
+        key: "k",
+        versionId: "v1",
+      });
+
+      expect(message).toContain('permanently delete version "v1"');
+      expect(message).toContain('object "k"');
+    });
+
+    it("distinguishes delete markers from permanent version deletes in bulk calls", () => {
+      const r = checkDestructive(
+        "s3_delete_objects",
+        { bucket: "b", objects: [{ key: "latest.txt" }, { key: "old.txt", versionId: "v1" }] },
+        cfg(),
+      );
+
+      expect(r.ok).toBe(false);
+      expect(r.message).toContain("create delete markers for 1 object");
+      expect(r.message).toContain("permanently delete 1 object version");
+    });
+
+    it("keeps Object Lock bypass text only when bypassGovernance is set", () => {
+      const r = checkDestructive(
+        "s3_delete_objects",
+        { bucket: "b", objects: [{ key: "latest.txt" }] },
+        cfg(),
+      );
+
+      expect(r.ok).toBe(false);
       expect(r.message).not.toMatch(/Object Lock|retention/i);
     });
 
     it("states when governance-mode Object Lock retention is bypassed", () => {
       const r = checkDestructive(
         "s3_delete_objects",
-        { bucket: "b", objects: [], bypassGovernance: true },
+        { bucket: "b", objects: [{ key: "locked.txt", versionId: "v1" }], bypassGovernance: true },
         cfg(),
       );
       expect(r.ok).toBe(false);
@@ -363,6 +398,18 @@ describe("destructive-gate", () => {
   });
 
   describe("destructive elicitation prompts", () => {
+    it("reuses the actual retention reason in retention prompts", () => {
+      const message = destructiveElicitationMessage("b2_update_file_retention", {
+        fileName: "locked.txt",
+        fileId: "file-v1",
+        fileRetention: { mode: "governance", retainUntilTimestamp: Date.now() + 1000 },
+        bypassGovernance: true,
+      });
+
+      expect(message).toContain("bypass governance-mode retention");
+      expect(message).not.toContain("weaken Object Lock retention");
+    });
+
     it("renders user-controlled labels without markdown or bidi spoofing", () => {
       const message = destructiveElicitationMessage("s3_delete_object", {
         bucket: "prod`bucket",
