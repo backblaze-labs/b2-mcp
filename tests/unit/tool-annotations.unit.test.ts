@@ -5,9 +5,9 @@ import {
   NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES,
   NON_READ_ONLY_TOOL_NAMES,
   READ_ONLY_OPERATION_TOOL_NAMES,
+  TOOL_CAPABILITIES,
   annotationsForTool,
-} from "../../src/utils/tool-annotations";
-import { TOOL_CAPABILITIES } from "../../src/utils/tool-capabilities";
+} from "../../src/utils/tool-capabilities";
 
 const config = {
   applicationKeyId: "test",

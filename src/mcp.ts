@@ -1,6 +1,6 @@
 import { McpServer as V2McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { annotationsForTool, type McpToolAnnotations } from "./utils/tool-annotations.js";
+import { annotationsForTool, type McpToolAnnotations } from "./utils/tool-capabilities.js";
 
 export type McpServer = V2McpServer;
 
