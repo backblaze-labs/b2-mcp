@@ -263,6 +263,29 @@ describe("createAuditedToolCallback", () => {
     );
   });
 
+  it("rejects replay of an accepted destructive challenge", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+    const args = { bucket: "photos", key: "old.jpg" };
+    const requestState = await requestStateFor(wrapped, args);
+
+    const first = await wrapped(args, elicitationExtra(acceptedResponse(), requestState));
+    const replay = await wrapped(args, elicitationExtra(acceptedResponse(), requestState));
+
+    expect(first).toEqual({ content: [{ type: "text", text: "deleted" }] });
+    expect(replay.isError).toBe(true);
+    expect(replay.content[0].text).toContain("human approval challenge was invalid");
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "approval_invalid",
+        destructiveApproval: "invalid",
+        challengeStatus: "replayed",
+      }),
+      "tool.call",
+    );
+  });
+
   it("refuses destructive calls when capable clients decline elicitation", async () => {
     const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
     const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);

@@ -583,6 +583,8 @@ type DestructiveElicitationDecision =
 const DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION = 1;
 const DESTRUCTIVE_ELICITATION_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const DESTRUCTIVE_ELICITATION_CHALLENGE_MAX_CHARS = 2048;
+const DESTRUCTIVE_ELICITATION_CONSUMED_MAX_ENTRIES = 10_000;
+const destructiveElicitationConsumedChallenges = new Map<string, number>();
 
 interface DestructiveElicitationChallenge {
   v: typeof DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION;
@@ -745,7 +747,7 @@ function verifyDestructiveElicitationChallenge(
   args: ToolArgs,
   config: B2Config,
   now = Date.now(),
-): { ok: true } | { ok: false; reason: string } {
+): { ok: true; challenge: DestructiveElicitationChallenge } | { ok: false; reason: string } {
   const parsed = parseDestructiveElicitationChallenge(token, config);
   if (!parsed.ok) return parsed;
   const { challenge } = parsed;
@@ -757,7 +759,46 @@ function verifyDestructiveElicitationChallenge(
   if (challenge.argsDigest !== destructiveArgsDigest(args)) {
     return { ok: false, reason: "args_mismatch" };
   }
-  return { ok: true };
+  return { ok: true, challenge };
+}
+
+function destructiveElicitationConsumeKey(challenge: DestructiveElicitationChallenge): string {
+  return createHash("sha256")
+    .update(
+      [
+        String(challenge.v),
+        challenge.toolName,
+        challenge.argsDigest,
+        challenge.credential,
+        challenge.nonce,
+      ].join("\0"),
+    )
+    .digest("base64url");
+}
+
+function pruneConsumedDestructiveElicitationChallenges(now = Date.now()): void {
+  for (const [key, expiresAt] of destructiveElicitationConsumedChallenges) {
+    if (expiresAt < now) destructiveElicitationConsumedChallenges.delete(key);
+  }
+  while (
+    destructiveElicitationConsumedChallenges.size > DESTRUCTIVE_ELICITATION_CONSUMED_MAX_ENTRIES
+  ) {
+    const oldest = destructiveElicitationConsumedChallenges.keys().next().value;
+    if (oldest === undefined) break;
+    destructiveElicitationConsumedChallenges.delete(oldest);
+  }
+}
+
+function consumeDestructiveElicitationChallenge(
+  challenge: DestructiveElicitationChallenge,
+  now = Date.now(),
+): boolean {
+  pruneConsumedDestructiveElicitationChallenges(now);
+  const key = destructiveElicitationConsumeKey(challenge);
+  if (destructiveElicitationConsumedChallenges.has(key)) return false;
+  destructiveElicitationConsumedChallenges.set(key, challenge.expiresAt);
+  pruneConsumedDestructiveElicitationChallenges(now);
+  return true;
 }
 
 function requestStateFromExtra(extra: unknown): string | undefined {
@@ -840,6 +881,13 @@ function maybeRequireDestructiveElicitation(
       kind: "result",
       result: destructiveElicitationRefusal(toolName, "invalid"),
       audit: { destructiveApproval: "invalid", challengeStatus: verified.reason },
+    };
+  }
+  if (!consumeDestructiveElicitationChallenge(verified.challenge)) {
+    return {
+      kind: "result",
+      result: destructiveElicitationRefusal(toolName, "invalid"),
+      audit: { destructiveApproval: "invalid", challengeStatus: "replayed" },
     };
   }
 

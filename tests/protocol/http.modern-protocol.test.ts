@@ -284,6 +284,58 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     expect(s3CommandNames()).not.toContain("DeleteObjectCommand");
   });
 
+  it("rejects replay of an accepted destructive challenge with the same args", async () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    await replaceHandle();
+    s3SendSpy.mockClear().mockResolvedValue({});
+    const args = {
+      bucket: "protocol-http-modern",
+      key: "old.txt",
+    };
+
+    const first = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "s3_delete_object") },
+      body: callToolBodyWithModernMeta("s3_delete_object", args),
+    });
+    const firstResult = parsedJson(first.body).result;
+    expect(firstResult.resultType).toBe("input_required");
+    expect(firstResult.requestState).toEqual(expect.any(String));
+
+    const accepted = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "s3_delete_object") },
+      body: callToolBodyWithModernMeta(
+        "s3_delete_object",
+        args,
+        {
+          requestState: firstResult.requestState,
+          inputResponses: acceptedInputResponses(),
+        },
+        2,
+      ),
+    });
+    const acceptedResult = parsedJson(accepted.body).result;
+    expect(acceptedResult.isError).not.toBe(true);
+
+    const replay = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/call", "s3_delete_object") },
+      body: callToolBodyWithModernMeta(
+        "s3_delete_object",
+        args,
+        {
+          requestState: firstResult.requestState,
+          inputResponses: acceptedInputResponses(),
+        },
+        3,
+      ),
+    });
+    const replayResult = parsedJson(replay.body).result;
+
+    expect(replay.status).toBe(200);
+    expect(replayResult.isError).toBe(true);
+    expect(replayResult.content[0].text).toContain("human approval challenge was invalid");
+    expect(s3CommandNames().filter((name) => name === "DeleteObjectCommand")).toHaveLength(1);
+  });
+
   it("refuses destructive calls when capable clients decline elicitation", async () => {
     process.env.B2_DESTRUCTIVE_POLICY = "confirm";
     await replaceHandle();
