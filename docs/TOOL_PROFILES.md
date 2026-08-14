@@ -8,15 +8,15 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `f0296a679de2` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `bc05ad4dc226` |
-| `read-only` | 20 | 11 | 9 | 0 | `656054243dc9` |
+| `full` | 40 | 21 | 19 | 0 | `8e39a095341b` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `e3287d86be09` |
+| `read-only` | 20 | 11 | 9 | 0 | `4d56be08d66d` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection.
 
-Profile hash: `f0296a679de2bf24fa6c2ebe03752649a0e679ef055bac6dcce3d708ec374f96`
+Profile hash: `8e39a095341b58f937553b8c4d85f0ef1bd8fd203c111f5cb3f740195cb3aaef`
 
 ### Capability Input
 
@@ -72,7 +72,7 @@ Profile hash: `f0296a679de2bf24fa6c2ebe03752649a0e679ef055bac6dcce3d708ec374f96`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, durable-secret producers exposed only as unavailable compatibility stubs.
 
-Profile hash: `bc05ad4dc226f9ae96d1b67f993409e398e88044d41037b4ce381aada75adb02`
+Profile hash: `e3287d86be0922eca35213fe3372135fa3796e57cbfe45498790f79eeac720be`
 
 ### Capability Input
 
@@ -137,7 +137,7 @@ Profile hash: `bc05ad4dc226f9ae96d1b67f993409e398e88044d41037b4ce381aada75adb02`
 
 Deterministic read/list profile for safe production use and contract tests; b2_create_key, b2_create_group_member, and b2_reserve_trial_create_account remain present only as unavailable 410 compatibility stubs.
 
-Profile hash: `656054243dc9ee4485bc29b8b9913851184e55660fec6bc69d8f0a9a9654b30c`
+Profile hash: `4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2`
 
 ### Capability Input
 

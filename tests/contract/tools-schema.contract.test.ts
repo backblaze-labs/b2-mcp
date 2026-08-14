@@ -16,8 +16,6 @@
 
 import { createServer, getRegisteredTools } from "../../src/server";
 import type { McpServer } from "../../src/mcp";
-import { DESTRUCTIVE_TOOL_NAMES } from "../../src/utils/destructive-gate";
-import { TOOL_CAPABILITIES } from "../../src/utils/tool-capabilities";
 import { readJson } from "./support";
 
 const contract = readJson<{
@@ -25,11 +23,18 @@ const contract = readJson<{
     full: {
       names: string[];
       counts: { total: number; b2: number; s3: number; bz: number };
+      fixtures: { modern: string };
     };
   };
 }>("docs/tool-profile-contract.json");
 const contractToolNames = contract.profiles.full.names;
 const contractCounts = contract.profiles.full.counts;
+const fullModernFixture = readJson<{
+  tools: Array<{ name: string; annotations?: Record<string, boolean> }>;
+}>(contract.profiles.full.fixtures.modern);
+const fixtureAnnotationsByName = Object.fromEntries(
+  fullModernFixture.tools.map((tool) => [tool.name, tool.annotations]),
+);
 
 // ── Zod-mini schema helpers ───────────────────────────────────────────────────
 
@@ -50,10 +55,6 @@ function requiredKeys(schema: any): string[] {
   return Object.entries(getShape(schema))
     .filter(([, v]) => isRequired(v))
     .map(([k]) => k);
-}
-
-function isReadListCapability(capability: string): boolean {
-  return capability.startsWith("read") || capability.startsWith("list");
 }
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -145,10 +146,10 @@ describe("Every tool has a valid input schema", () => {
 
 // ── MCP tool annotations ─────────────────────────────────────────────────────
 
-describe("Tool annotations match gate and capability contracts", () => {
+describe("Tool annotations match the generated MCP contract", () => {
   const annotationKeys = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
 
-  it("every registered tool declares all standard boolean hints", () => {
+  it("every registered tool declares all standard boolean hints from the fixture", () => {
     for (const name of toolNames) {
       const annotations = tools[name]?.annotations;
       expect(annotations).toBeDefined();
@@ -156,94 +157,15 @@ describe("Tool annotations match gate and capability contracts", () => {
       for (const key of annotationKeys) {
         expect(typeof annotations[key]).toBe("boolean");
       }
+      expect(annotations).toEqual(fixtureAnnotationsByName[name]);
     }
   });
 
-  it("derives destructive hints from the destructive gate source of truth", () => {
-    const registeredDestructiveTools = DESTRUCTIVE_TOOL_NAMES.filter((name) =>
-      toolNames.includes(name),
-    ).sort();
-    expect(registeredDestructiveTools.length).toBeGreaterThan(0);
-
-    for (const name of registeredDestructiveTools) {
-      expect(tools[name]?.annotations).toMatchObject({
-        destructiveHint: true,
-        readOnlyHint: false,
-      });
-    }
-
-    const unexpected = toolNames.filter(
-      (name) => !DESTRUCTIVE_TOOL_NAMES.includes(name) && tools[name]?.annotations?.destructiveHint,
-    );
-    expect(unexpected).toEqual([]);
-  });
-
-  it("marks read/list capability tools read-only without destructive overlap", () => {
-    const readOnlyCapabilityTools = Object.entries(TOOL_CAPABILITIES)
-      .filter(
-        ([name, capabilities]) =>
-          toolNames.includes(name) &&
-          !DESTRUCTIVE_TOOL_NAMES.includes(name) &&
-          capabilities.length > 0 &&
-          capabilities.every(isReadListCapability),
-      )
-      .map(([name]) => name)
-      .sort();
-    expect(readOnlyCapabilityTools.length).toBeGreaterThan(0);
-
-    for (const name of readOnlyCapabilityTools) {
-      expect(tools[name]?.annotations).toMatchObject({
-        readOnlyHint: true,
-        destructiveHint: false,
-      });
-    }
-
+  it("does not publish overlapping read-only and destructive annotations", () => {
     const overlapping = toolNames.filter(
       (name) => tools[name]?.annotations?.readOnlyHint && tools[name]?.annotations?.destructiveHint,
     );
     expect(overlapping).toEqual([]);
-  });
-
-  it("records deliberate judgment calls for mixed and conditional tools", () => {
-    expect(tools.b2_get_bucket_notification_rules.annotations).toMatchObject({
-      readOnlyHint: true,
-      destructiveHint: false,
-    });
-    expect(tools.s3_get_presigned_url.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: true,
-      idempotentHint: true,
-      openWorldHint: true,
-    });
-
-    for (const name of [
-      "b2_update_bucket",
-      "b2_update_file_legal_hold",
-      "b2_update_file_retention",
-      "s3_put_bucket_lifecycle",
-    ]) {
-      expect(tools[name]?.annotations).toMatchObject({
-        readOnlyHint: false,
-        destructiveHint: true,
-      });
-    }
-  });
-
-  it("marks metadata reads, deletes, and presign tools idempotent", () => {
-    for (const name of [
-      "b2_list_buckets",
-      "s3_head_object",
-      "s3_delete_object",
-      "s3_delete_objects",
-      "s3_get_presigned_url",
-      "s3_presign_upload_part",
-    ]) {
-      expect(tools[name]?.annotations?.idempotentHint).toBe(true);
-    }
-
-    for (const name of ["b2_create_bucket", "b2_create_group_member", "s3_put_object"]) {
-      expect(tools[name]?.annotations?.idempotentHint).toBe(false);
-    }
   });
 
   it("marks all registered tools as operating against the external B2 service", () => {

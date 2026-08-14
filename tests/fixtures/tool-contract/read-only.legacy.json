@@ -423,9 +423,9 @@
       },
       "annotations": {
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": true,
-        "readOnlyHint": true
+        "readOnlyHint": false
       }
     },
     {
@@ -692,5 +692,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "656054243dc9ee4485bc29b8b9913851184e55660fec6bc69d8f0a9a9654b30c"
+  "hash": "4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2"
 }

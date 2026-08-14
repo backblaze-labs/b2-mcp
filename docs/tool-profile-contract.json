@@ -138,7 +138,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "f0296a679de2bf24fa6c2ebe03752649a0e679ef055bac6dcce3d708ec374f96",
+      "hash": "8e39a095341b58f937553b8c4d85f0ef1bd8fd203c111f5cb3f740195cb3aaef",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -275,7 +275,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "bc05ad4dc226f9ae96d1b67f993409e398e88044d41037b4ce381aada75adb02",
+      "hash": "e3287d86be0922eca35213fe3372135fa3796e57cbfe45498790f79eeac720be",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -342,7 +342,7 @@
       },
       "confirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
       "destructiveConfirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
-      "hash": "656054243dc9ee4485bc29b8b9913851184e55660fec6bc69d8f0a9a9654b30c",
+      "hash": "4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"
