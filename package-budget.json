@@ -11,10 +11,10 @@
     "directProductionDependencyCount": 8,
     "totalProductionPackageCount": 47,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 320407,
-    "unpackedPackageBytes": 1438422,
+    "packedTarballBytes": 320426,
+    "unpackedPackageBytes": 1438456,
     "packedEntryCount": 197,
-    "cleanConsumerInstallFootprintBytes": 28298178
+    "cleanConsumerInstallFootprintBytes": 28298212
   },
   "limits": {
     "directProductionDependencyCount": 8,
