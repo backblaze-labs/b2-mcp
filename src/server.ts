@@ -825,6 +825,7 @@ function maybeRequireDestructiveElicitation(
   config: B2Config,
 ): DestructiveElicitationDecision {
   if (getDestructivePolicy(config) !== "confirm") return { kind: "proceed", args };
+  if (config.destructiveElicitation === false) return { kind: "proceed", args };
 
   const toolArgs = toolArgsFromUnknown(args);
   const message = destructiveElicitationMessage(toolName, toolArgs);

@@ -366,12 +366,15 @@ describe("health and readiness endpoints", () => {
 });
 
 describe("configFromHeaders — destructive policy default (HTTP is safe-by-default)", () => {
-  const saved = process.env.B2_DESTRUCTIVE_POLICY;
+  const savedPolicy = process.env.B2_DESTRUCTIVE_POLICY;
+  const savedElicitation = process.env.B2_DESTRUCTIVE_ELICITATION;
   const creds = { "x-b2-key-id": "key-abc", "x-b2-key": "secret-xyz" };
 
   afterEach(() => {
-    if (saved === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;
-    else process.env.B2_DESTRUCTIVE_POLICY = saved;
+    if (savedPolicy === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;
+    else process.env.B2_DESTRUCTIVE_POLICY = savedPolicy;
+    if (savedElicitation === undefined) delete process.env.B2_DESTRUCTIVE_ELICITATION;
+    else process.env.B2_DESTRUCTIVE_ELICITATION = savedElicitation;
   });
 
   it("defaults to block when B2_DESTRUCTIVE_POLICY is unset (internet-facing)", () => {
@@ -389,6 +392,16 @@ describe("configFromHeaders — destructive policy default (HTTP is safe-by-defa
   it("honors an explicit allow", () => {
     process.env.B2_DESTRUCTIVE_POLICY = "allow";
     expect(getDestructivePolicy(configFromHeaders({ headers: creds })!)).toBe("allow");
+  });
+
+  it("enables destructive elicitation by default", () => {
+    delete process.env.B2_DESTRUCTIVE_ELICITATION;
+    expect(configFromHeaders({ headers: creds })!.destructiveElicitation).toBe(true);
+  });
+
+  it("honors the destructive elicitation kill switch", () => {
+    process.env.B2_DESTRUCTIVE_ELICITATION = "false";
+    expect(configFromHeaders({ headers: creds })!.destructiveElicitation).toBe(false);
   });
 });
 

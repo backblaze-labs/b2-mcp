@@ -42,6 +42,7 @@ const savedHttpEnv = saveEnv([
   "B2_REGISTER_ALL_TOOLS",
   "B2_HTTP_CREDENTIAL_MODE",
   "B2_DESTRUCTIVE_POLICY",
+  "B2_DESTRUCTIVE_ELICITATION",
 ]);
 
 beforeAll(() => {
@@ -441,6 +442,36 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
 
       expect(result.isError).toBe(true);
       expect((result.content[0] as { text: string }).text).toContain("Confirmation required");
+      expect(s3CommandNames()).not.toContain("DeleteObjectCommand");
+    } finally {
+      await closeClient(client);
+    }
+  });
+
+  it("falls back to confirm when destructive elicitation is disabled", async () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    process.env.B2_DESTRUCTIVE_ELICITATION = "false";
+    await replaceHandle();
+    s3SendSpy.mockClear().mockResolvedValue({});
+    const elicitationHandler = vi.fn();
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "destructive-elicitation-disabled",
+      capabilities: { elicitation: {} },
+      inputRequired: { autoFulfill: true },
+    });
+    client.setRequestHandler("elicitation/create", elicitationHandler);
+
+    try {
+      const result = await client.callTool({
+        name: "s3_delete_object",
+        arguments: { bucket: "protocol-http-modern", key: "old.txt" },
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain("Confirmation required");
+      expect(elicitationHandler).not.toHaveBeenCalled();
       expect(s3CommandNames()).not.toContain("DeleteObjectCommand");
     } finally {
       await closeClient(client);

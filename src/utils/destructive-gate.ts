@@ -10,12 +10,13 @@ import { B2Config, DestructivePolicy } from "./types.js";
  * not have installed).
  *
  * Policy (env `B2_DESTRUCTIVE_POLICY`, default `confirm`):
- *   - `confirm` — a destructive call must pass `confirm: true`; otherwise it is
- *     refused with a description of the effect and how to proceed. This turns a
- *     silent destructive action into a deliberate, auditable two-step and gives an
- *     MCP host a clear point to require human approval. (Defense-in-depth: a fully
- *     hijacked model could also set `confirm`, so pair with host consent and/or
- *     `block` for untrusted/automated deployments.)
+ *   - `confirm` — capable MCP clients are first routed through challenge-bound
+ *     form elicitation by the server wrapper, then this gate receives
+ *     `confirm:true`; clients without form elicitation, or deployments with
+ *     `B2_DESTRUCTIVE_ELICITATION=false`, must pass `confirm:true` directly. This
+ *     turns silent destructive action into a deliberate, auditable two-step.
+ *     (Defense-in-depth: on untrusted transports, elicitation accept is still
+ *     client-attested; pair with host-enforced consent and/or `block`.)
  *   - `block` — destructive operations are refused outright. The hard control for
  *     read-mostly / unattended deployments.
  *   - `allow` — no gate (explicit opt-out for a trusted single-user stdio session).

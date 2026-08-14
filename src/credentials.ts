@@ -124,6 +124,11 @@ function resolveDestructivePolicy(transport: "stdio" | "http"): DestructivePolic
   return value === "allow" || value === "block" ? value : "confirm";
 }
 
+function resolveDestructiveElicitation(): boolean {
+  const value = (process.env.B2_DESTRUCTIVE_ELICITATION ?? "").trim().toLowerCase();
+  return value !== "false" && value !== "0" && value !== "off" && value !== "disabled";
+}
+
 function resolveOptionalPair(
   id: string | undefined,
   key: string | undefined,
@@ -186,6 +191,7 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     allowLocalFiles: options.allowLocalFiles,
     fileRoot: options.fileRoot,
     destructivePolicy: resolveDestructivePolicy(options.transport),
+    destructiveElicitation: resolveDestructiveElicitation(),
     outputFormat: resolveOutputFormat(),
     transport: options.transport,
   };

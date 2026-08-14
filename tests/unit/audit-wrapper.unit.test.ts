@@ -440,6 +440,21 @@ describe("createAuditedToolCallback", () => {
     expect(original).toHaveBeenCalledWith(args, expect.any(Object));
   });
 
+  it("falls back when destructive elicitation is disabled", async () => {
+    const original = vi.fn().mockResolvedValue({ ok: true });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, {
+      ...cfg,
+      destructiveElicitation: false,
+    });
+    const args = { bucket: "photos", key: "old.jpg" };
+
+    const result = await wrapped(args, elicitationExtra());
+
+    expect(isInputRequiredResult(result)).toBe(false);
+    expect(result).toEqual({ ok: true });
+    expect(original).toHaveBeenCalledWith(args, expect.any(Object));
+  });
+
   it("falls back to existing destructive policy when clients lack elicitation", async () => {
     const original = vi.fn().mockResolvedValue({ ok: true });
     const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);

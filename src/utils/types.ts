@@ -41,10 +41,17 @@ export interface B2Config {
    * Gate policy for destructive/irreversible tools (delete bucket/file-version/
    *  key, cancel large file, eject group member, make-public / weaken-lock /
    *  replication via b2_update_bucket, outbound notification rules).
-   *  "confirm" (default) requires confirm:true; "block" refuses;
-   *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY.
+   *  "confirm" (default) uses MCP form elicitation when available and otherwise
+   *  requires confirm:true; "block" refuses; "allow" disables the gate. Set via
+   *  B2_DESTRUCTIVE_POLICY.
    */
   destructivePolicy?: DestructivePolicy;
+  /**
+   * Whether the confirm policy may intercept destructive calls with MCP form
+   * elicitation. false falls back to the existing confirm:true gate. Set via
+   * B2_DESTRUCTIVE_ELICITATION=false as an operational kill switch.
+   */
+  destructiveElicitation?: boolean;
   /**
    * LLM-facing TextContent serialization for structured successful tool results.
    * structuredContent always remains canonical JSON.
