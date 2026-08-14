@@ -583,7 +583,7 @@ type DestructiveElicitationDecision =
 const DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION = 1;
 const DESTRUCTIVE_ELICITATION_CHALLENGE_TTL_MS = 10 * 60 * 1000;
 const DESTRUCTIVE_ELICITATION_CHALLENGE_MAX_CHARS = 2048;
-const DESTRUCTIVE_ELICITATION_CONSUMED_MAX_ENTRIES = 10_000;
+const DESTRUCTIVE_ELICITATION_INSTANCE_ID = randomBytes(16).toString("base64url");
 const destructiveElicitationConsumedChallenges = new Map<string, number>();
 
 interface DestructiveElicitationChallenge {
@@ -592,6 +592,7 @@ interface DestructiveElicitationChallenge {
   argsDigest: string;
   credential: string;
   expiresAt: number;
+  instance: string;
   nonce: string;
 }
 
@@ -694,6 +695,7 @@ function createDestructiveElicitationChallenge(
     argsDigest: destructiveArgsDigest(args),
     credential: verificationFingerprintConfig(config),
     expiresAt: now + DESTRUCTIVE_ELICITATION_CHALLENGE_TTL_MS,
+    instance: DESTRUCTIVE_ELICITATION_INSTANCE_ID,
     nonce: randomBytes(16).toString("base64url"),
   };
   const payload = Buffer.from(JSON.stringify(challenge), "utf8").toString("base64url");
@@ -731,6 +733,7 @@ function parseDestructiveElicitationChallenge(
       typeof challenge.argsDigest !== "string" ||
       typeof challenge.credential !== "string" ||
       typeof challenge.expiresAt !== "number" ||
+      typeof challenge.instance !== "string" ||
       typeof challenge.nonce !== "string"
     ) {
       return { ok: false, reason: "invalid_payload" };
@@ -755,6 +758,9 @@ function verifyDestructiveElicitationChallenge(
   if (challenge.credential !== verificationFingerprintConfig(config)) {
     return { ok: false, reason: "credential_mismatch" };
   }
+  if (challenge.instance !== DESTRUCTIVE_ELICITATION_INSTANCE_ID) {
+    return { ok: false, reason: "instance_mismatch" };
+  }
   if (challenge.toolName !== toolName) return { ok: false, reason: "tool_mismatch" };
   if (challenge.argsDigest !== destructiveArgsDigest(args)) {
     return { ok: false, reason: "args_mismatch" };
@@ -770,6 +776,7 @@ function destructiveElicitationConsumeKey(challenge: DestructiveElicitationChall
         challenge.toolName,
         challenge.argsDigest,
         challenge.credential,
+        challenge.instance,
         challenge.nonce,
       ].join("\0"),
     )
@@ -779,13 +786,6 @@ function destructiveElicitationConsumeKey(challenge: DestructiveElicitationChall
 function pruneConsumedDestructiveElicitationChallenges(now = Date.now()): void {
   for (const [key, expiresAt] of destructiveElicitationConsumedChallenges) {
     if (expiresAt < now) destructiveElicitationConsumedChallenges.delete(key);
-  }
-  while (
-    destructiveElicitationConsumedChallenges.size > DESTRUCTIVE_ELICITATION_CONSUMED_MAX_ENTRIES
-  ) {
-    const oldest = destructiveElicitationConsumedChallenges.keys().next().value;
-    if (oldest === undefined) break;
-    destructiveElicitationConsumedChallenges.delete(oldest);
   }
 }
 

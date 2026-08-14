@@ -625,8 +625,12 @@ comfortably serves many short requests; memory grows by ~50–100 MB per active
 large-file upload (one `partSize` chunk per worker).
 
 For larger deployments, run multiple instances behind an ALB. Sticky sessions
-are not required by the MCP transport, though your own auth/proxy layer may
-still choose affinity for operational reasons.
+are not required by the MCP transport for ordinary tool calls, though your own
+auth/proxy layer may still choose affinity for operational reasons. When using
+`B2_DESTRUCTIVE_POLICY=confirm` with MCP form elicitation, the approval
+challenge is bound to the issuing process and fails closed on other instances or
+after restart; use sticky sessions for the approval round if you need smooth
+interactive approval behind multiple replicas.
 
 ## Updates
 

@@ -3,6 +3,7 @@
  */
 
 import { CLIENT_CAPABILITIES_META_KEY, isInputRequiredResult } from "@modelcontextprotocol/server";
+import { createHmac } from "node:crypto";
 import { createAuditedToolCallback, createServer, getRegisteredTools } from "../../src/server";
 import { ToolRegistrationAdapter, type McpServer } from "../../src/mcp";
 import { formatB2Error } from "../../src/utils/errors";
@@ -56,6 +57,29 @@ function acceptedResponse() {
   return {
     [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "accept", content: { confirm: true } },
   };
+}
+
+function signChallengePayload(payload: string, config: B2Config = cfg): string {
+  return createHmac(
+    "sha256",
+    [
+      "b2-mcp destructive elicitation challenge v1",
+      config.applicationKey,
+      config.appKey,
+      config.masterKey,
+    ].join("\0"),
+  )
+    .update(payload)
+    .digest("base64url");
+}
+
+function requestStateWithInstance(requestState: string, instance: string): string {
+  const [payload] = requestState.split(".");
+  const challenge = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  const rewrittenPayload = Buffer.from(JSON.stringify({ ...challenge, instance }), "utf8").toString(
+    "base64url",
+  );
+  return `${rewrittenPayload}.${signChallengePayload(rewrittenPayload)}`;
 }
 
 async function requestStateFor(
@@ -281,6 +305,29 @@ describe("createAuditedToolCallback", () => {
         phase: "approval_invalid",
         destructiveApproval: "invalid",
         challengeStatus: "replayed",
+      }),
+      "tool.call",
+    );
+  });
+
+  it("refuses approval challenges issued by another process instance", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+    const args = { bucket: "photos", key: "old.jpg" };
+    const requestState = requestStateWithInstance(
+      await requestStateFor(wrapped, args),
+      "other-process-instance",
+    );
+
+    const result = await wrapped(args, elicitationExtra(acceptedResponse(), requestState));
+
+    expect(original).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "approval_invalid",
+        destructiveApproval: "invalid",
+        challengeStatus: "instance_mismatch",
       }),
       "tool.call",
     );
