@@ -88,6 +88,31 @@ install and then copies the packaged `dist/` tree. If dependencies or image
 digests change, update them through the runbook and run the deployment policy
 tests before publishing.
 
+## Supported Vercel adapter
+
+The supported Vercel adapter is
+[`deploy/vercel/README.md`](../deploy/vercel/README.md). It is an additional
+runtime adapter, not a replacement for the container reference above. The
+adapter exposes `/mcp`, `/health`, and OAuth metadata only; it does not add a
+Next.js UI or a separate tool implementation.
+
+Use it when the operator wants Vercel to host the MCP resource server and keep
+B2 credentials in Vercel Production environment secrets. The adapter validates
+OAuth bearer tokens before credential resolution, uses the shared
+`src/http-fetch-handler.ts` pipeline, and keeps the MCP route stateless for MCP
+`2026-07-28`. Production must set `B2_HTTP_CREDENTIAL_MODE=server` and assign
+`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` to Production only. Preview
+deployments must be protected and must not receive production B2 credentials.
+The reference `server` mode is single-tenant and requires exactly one
+`B2_OAUTH_ALLOWED_SUBJECTS` value unless a separate review accepts shared
+server-credential access by multiple principals.
+
+Before deploying, review the current Vercel docs linked from the guide for
+function limits, Node.js versions, Fluid Compute, environments, and deployment
+protection. Do not infer B2 data residency from the selected Vercel region, and
+do not proxy large object bodies through Vercel Functions; use bounded inline
+payloads or short-lived B2 presigned URLs.
+
 ## Security baseline
 
 Before exposing the server, confirm each of these. Most are on by default; the
@@ -102,9 +127,9 @@ two **you must set for any internet-facing HTTP deployment** are marked ⚠️.
 | **Destructive-op gate** | `B2_DESTRUCTIVE_POLICY` — `confirm` (interactive), `block` (unattended/read-mostly), `allow` (trusted).                                                                                                                                                      | `confirm`         |
 | **Unavailable stubs**   | `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are non-secret compatibility stubs until a reviewed secret sink exists; Partner/Groups names are SDK-gap stubs until stable SDK support ships.                              | unavailable       |
 | **Tool-result text**    | `B2_MCP_OUTPUT_FORMAT=json\|toon` selects only the LLM-facing `TextContent.text` serialization for structured successes. `structuredContent` and MCP envelopes remain JSON. Keep `json` during rolling deploys unless every client explicitly supports TOON. | `json`            |
-| **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`; in `server` mode the shared server-held key makes this an aggregate per-replica cap.                                                                          | on                |
+| **Request rate caps**   | Per-credential token-bucket rate limit via `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`; with verified `authInfo` in `server` mode, the non-secret rate key is per authenticated principal while capability discovery remains bound to the server-held B2 secret. | on                |
 | **SDK retries**         | Native SDK calls use 3 retries with 1s exponential backoff capped at 4s and a 30s per-attempt timeout; expired auth tokens are refreshed by the SDK retry transport.                                                                                         | configured        |
-| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; in `server` mode the per-key cap applies to the shared key per replica. The container reference raises the per-key cap to 200.        | 1000 / 20         |
+| **In-flight caps**      | Concurrent `/mcp` requests are capped globally and per credential with `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`; with verified `authInfo` in `server` mode, the per-key cap is keyed by authenticated principal. The container reference raises the per-key cap to 200. | 1000 / 20         |
 | **Local file access**   | On HTTP, `filePath`/`saveToPath` are off unless `B2_ALLOW_LOCAL_FILES=true` **and** `B2_FILE_ROOT=/sandbox` (paths confined to that root). Prefer base64 `content`.                                                                                          | off               |
 | **Capability cache**    | Capability discovery is cached by a secret-bound verifier or verified principal, with non-secret labels for logs. `B2_CAPABILITY_CACHE_TTL_MS` and `B2_CAPABILITY_CACHE_MAX_ENTRIES` bound staleness and size. Lookup failures fail closed.                  | 5 minutes / 10000 |
 | **Webhook targets**     | `b2_set_bucket_notification_rules` is gated by `B2_DESTRUCTIVE_POLICY`, enforces HTTPS, and rejects internal/SSRF URLs; responses redact signing secrets.                                                                                                    | enforced          |
@@ -657,6 +682,8 @@ Server or principal mode, where the client sends no B2 key:
 
 ```bash
 MCP_URL=https://mcp.your-domain.example/mcp \
+B2_MCP_SMOKE_CREDENTIAL_MODE=server \
+MCP_AUTHORIZATION="Bearer <access-token>" \
 B2_MCP_EXPECTED_TOOL_PROFILE=phase1-default \
 pnpm run smoke
 ```
@@ -701,8 +728,14 @@ It depends on these protected `live-b2-smoke` environment secrets and variables:
   probe
 - `vars.B2_MCP_EXPECTED_TOOL_PROFILE` — expected frozen profile for the live
   credential set (`phase1-default`, `read-only`, or `full`)
+- `vars.B2_MCP_SMOKE_CREDENTIAL_MODE` — `headers`, `server`, or `principal`;
+  manual dispatch can override it
 - `secrets.LIVE_B2_KEY_ID`, `secrets.LIVE_B2_KEY`
 - `secrets.LIVE_B2_APP_KEY_ID`, `secrets.LIVE_B2_APP_KEY`
+- `secrets.MCP_AUTHORIZATION` — required when the smoke mode is `server` or
+  `principal`
+- `secrets.VERCEL_PROTECTION_BYPASS` — optional automation value sent only as
+  `x-vercel-protection-bypass`
 
 The deployment-status guard also reads repository or organization variable
 `B2_MCP_SMOKE_DEPLOYMENT_ENVIRONMENT` before binding the `live-b2-smoke`

@@ -67,6 +67,14 @@ const jobField = (job: string, field: string, value: string) =>
     "m",
   );
 
+function workflowStepBlock(text: string, stepName: string): string {
+  const marker = `- name: ${stepName}`;
+  const start = text.indexOf(marker);
+  if (start === -1) return "";
+  const next = text.indexOf("\n      - name:", start + marker.length);
+  return text.slice(start, next === -1 ? undefined : next);
+}
+
 describe("live secret workflow policy", () => {
   it.each(liveWorkflows)(
     "$path wires the protected environment, trusted triggers, and serialized Node matrix",
@@ -236,8 +244,33 @@ describe("live secret workflow policy", () => {
     expect(smokeJob).toContain(
       "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
     );
+    expect(smokeJob).toContain(
+      "MCP_URL MCP_AUTHORIZATION B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
+    );
+    expect(smokeJob).toContain("B2_MCP_SMOKE_CREDENTIAL_MODE");
+    expect(smokeJob).toContain("VERCEL_PROTECTION_BYPASS");
+    expect(smokeJob).toContain("x-vercel-protection-bypass");
+    expect(smokeJob).toContain("Run live B2 smoke (headers)");
+    expect(smokeJob).toContain("Run live B2 smoke (server/principal)");
     expect(smokeJob).toContain("B2_SMOKE_BUCKET: ${{ vars.B2_SMOKE_BUCKET }}");
     expect(smokeJob).toContain('B2_MCP_REQUIRE_SMOKE_BUCKET: "1"');
+  });
+
+  it("does not inject raw live B2 secrets into server/principal smoke steps", () => {
+    const text = workflowText(".github/workflows/smoke.yml");
+    const serverValidate = workflowStepBlock(
+      text,
+      "Validate live B2 smoke environment (server/principal)",
+    );
+    const serverRun = workflowStepBlock(text, "Run live B2 smoke (server/principal)");
+
+    for (const block of [serverValidate, serverRun]) {
+      expect(block).not.toContain("LIVE_B2_");
+      expect(block).not.toContain("B2_KEY_ID");
+      expect(block).not.toContain("B2_KEY:");
+      expect(block).not.toContain("B2_APP_KEY");
+      expect(block).toContain("MCP_AUTHORIZATION");
+    }
   });
 
   it.each(liveWorkflows)(

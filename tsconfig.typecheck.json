@@ -12,6 +12,6 @@
     "sourceMap": false,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*", "tests/**/*"],
+  "include": ["src/**/*", "tests/**/*", "api/**/*", "deploy/vercel/**/*"],
   "exclude": ["node_modules", "dist"]
 }

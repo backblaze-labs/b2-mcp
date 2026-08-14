@@ -21,7 +21,12 @@ import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { B2ReportClient } from "./b2/report-client.js";
 import { createS3Client } from "./s3/client.js";
-import { DURABLE_SECRET_PRODUCING_TOOLS, isToolEnabled } from "./utils/tool-capabilities.js";
+import {
+  DURABLE_SECRET_PRODUCING_TOOLS,
+  isToolAllowedByOAuthScopes,
+  isToolEnabled,
+  oauthScopesAllowOperation,
+} from "./utils/tool-capabilities.js";
 import {
   sanitizeError,
   sanitizeMcpResponse,
@@ -81,8 +86,12 @@ export function loadConfig(): B2Config {
   }
 }
 
-function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void {
+function registerDurableSecretCompatibilityStubs(
+  registrar: ToolRegistrar,
+  shouldRegister = (_name: string) => true,
+): void {
   for (const name of DURABLE_SECRET_PRODUCING_TOOLS) {
+    if (!shouldRegister(name)) continue;
     const inputSchema: z.ZodRawShape = isDestructiveTool(name)
       ? { confirm: z.boolean().optional().describe(COMPATIBILITY_STUB_CONFIRM_DESC) }
       : {};
@@ -134,8 +143,17 @@ function registerDurableSecretCompatibilityStubs(registrar: ToolRegistrar): void
  *
  * @returns The configured MCP server instance.
  */
-export function createServer(config: B2Config, capabilities?: string[] | null): McpServer {
+export interface CreateServerOptions {
+  oauthScopes?: readonly string[];
+}
+
+export function createServer(
+  config: B2Config,
+  capabilities?: string[] | null,
+  options: CreateServerOptions = {},
+): McpServer {
   const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
+  const oauthScopes = options.oauthScopes ? new Set(options.oauthScopes) : null;
   const server = createMcpServer(
     {
       name: "backblaze-b2",
@@ -185,8 +203,11 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // "unknown".
   const filterActive = Array.isArray(capabilities);
   const capsSet = filterActive ? new Set(capabilities) : null;
+  const oauthAllowsRead = oauthScopesAllowOperation(oauthScopes, "read");
+  const oauthAllowsWrite = oauthScopesAllowOperation(oauthScopes, "write");
   const registrar = new ToolRegistrationAdapter(server, {
-    shouldRegister: (name) => isToolEnabled(name, capsSet),
+    shouldRegister: (name) =>
+      isToolEnabled(name, capsSet) && isToolAllowedByOAuthScopes(name, oauthScopes),
     wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config),
   });
 
@@ -241,11 +262,17 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
     allowBypassGovernance,
   });
   registerS3MultipartTools(registrar, s3Client, config);
-  registerS3PresignedTools(registrar, s3Client, b2Client, config, {
-    allowGetObjectUrl: !filterActive || (capsSet?.has("readFiles") ?? false),
-    allowPutObjectUrl: !filterActive || (capsSet?.has("writeFiles") ?? false),
-    allowExplicitVersionInspection,
-  });
+  const allowGetObjectUrl =
+    (!filterActive || (capsSet?.has("readFiles") ?? false)) && oauthAllowsRead;
+  const allowPutObjectUrl =
+    (!filterActive || (capsSet?.has("writeFiles") ?? false)) && oauthAllowsWrite;
+  if (allowGetObjectUrl || allowPutObjectUrl) {
+    registerS3PresignedTools(registrar, s3Client, b2Client, config, {
+      allowGetObjectUrl,
+      allowPutObjectUrl,
+      allowExplicitVersionInspection,
+    });
+  }
   registerS3ExtraTools(registrar, s3Client);
 
   // ── Storage-activity (insights) tools — read-only, caller-scoped ─────────
@@ -257,7 +284,9 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   // included durable-secret-producing tools. Keep those names callable, but
   // return a stable non-secret unavailable error instead of reintroducing the
   // old secret-producing handlers.
-  registerDurableSecretCompatibilityStubs(registrar);
+  registerDurableSecretCompatibilityStubs(registrar, (name) =>
+    isToolAllowedByOAuthScopes(name, oauthScopes),
+  );
 
   const toolCount = registrar.commit();
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");

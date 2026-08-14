@@ -4,6 +4,7 @@
  */
 
 import * as http from "http";
+import * as net from "net";
 import { AsyncLocalStorage } from "async_hooks";
 import { ReadableStream } from "node:stream/web";
 import type { ReadableStreamDefaultController } from "node:stream/web";
@@ -122,6 +123,21 @@ function requestAndTrackEnd(
     timer.unref();
     if (opts.body) req.write(opts.body);
     req.end();
+  });
+}
+
+function rawHttpRequest(port: number, payload: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    const socket = net.createConnection({ host: "127.0.0.1", port }, () => {
+      socket.write(payload);
+    });
+    socket.setTimeout(4000, () => socket.destroy(new Error("request timed out")));
+    socket.on("data", (chunk) => {
+      data += chunk;
+    });
+    socket.on("end", () => resolve(data));
+    socket.on("error", reject);
   });
 }
 
@@ -316,6 +332,12 @@ describe("HTTP transport handler", () => {
     const res = await request(port, "GET", "/mcp", { headers: { host: "evil.example" } });
     expect(res.status).toBe(403);
     expect(res.body).toMatch(/host\/origin/i);
+  });
+
+  it("rejects /mcp requests with no Host header", async () => {
+    const raw = await rawHttpRequest(port, "GET /mcp HTTP/1.0\r\n\r\n");
+    expect(raw).toContain("403 Forbidden");
+    expect(raw).toMatch(/host\/origin/i);
   });
 
   it("rejects a hostile Origin on /mcp when no allowlist is configured", async () => {
@@ -975,13 +997,66 @@ describe("HTTP transport handler", () => {
     expect(ok.status).toBe(200);
   });
 
+  it("server mode applies in-flight caps per verified principal", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    process.env.B2_APPLICATION_KEY_ID = "server-key";
+    process.env.B2_APPLICATION_KEY = "server-secret";
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = [];
+    await replaceHandle(
+      (req) => {
+        const principal = String(req.headers["x-test-principal"] ?? "unknown");
+        return {
+          token: "verified-token",
+          clientId: `client-${principal}`,
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: principal },
+        };
+      },
+      {
+        fetchCapabilities: vi.fn(async () => ["listBuckets"]),
+        mcpHandler: {
+          fetch: vi.fn(async () => {
+            const stream = new ReadableStream<Uint8Array>({
+              start(controller) {
+                controllers.push(controller);
+                controller.enqueue(new TextEncoder().encode("data: open\n\n"));
+              },
+            });
+            return new Response(stream, {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            });
+          }),
+          close: vi.fn(),
+        },
+      },
+    );
+
+    const first = request(port, "POST", "/mcp", {
+      headers: { ...modernHeaders("tools/list"), "x-test-principal": "alice" },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(1));
+
+    const second = request(port, "POST", "/mcp", {
+      headers: { ...modernHeaders("tools/list"), "x-test-principal": "bob" },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(controllers).toHaveLength(2));
+
+    for (const controller of controllers) controller.close();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+    await expect(second).resolves.toMatchObject({ status: 200 });
+  });
+
   it("principal mode supports broker injection and rejects B2 header spoofing", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
     process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({ alice: "tenant_a" });
     await replaceHandle(() => ({
       token: "verified-token",
       clientId: "client-a",
-      scopes: [],
+      scopes: ["b2:read"],
       extra: { sub: "alice" },
     }));
     await closeHttpServer(handle);
@@ -989,7 +1064,7 @@ describe("HTTP transport handler", () => {
       getAuthInfo: () => ({
         token: "verified-token",
         clientId: "client-a",
-        scopes: [],
+        scopes: ["b2:read"],
         extra: { sub: "alice" },
       }),
       secretBroker: {

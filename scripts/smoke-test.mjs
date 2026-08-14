@@ -23,6 +23,8 @@
  *
  * Optional env for a customer OAuth/resource-server edge:
  *   MCP_AUTHORIZATION — Authorization header value, e.g. Bearer ...
+ *   B2_MCP_SMOKE_CREDENTIAL_MODE — headers, server, or principal
+ *   VERCEL_PROTECTION_BYPASS — optional x-vercel-protection-bypass value
  *
  * Exits 0 on success, 1 if any check fails. Credential values are never
  * printed.
@@ -52,6 +54,8 @@ const {
   B2_MCP_ALLOW_ANY_TOOL_PROFILE,
   B2_MCP_REQUIRE_SMOKE_BUCKET,
   MCP_AUTHORIZATION,
+  B2_MCP_SMOKE_CREDENTIAL_MODE,
+  VERCEL_PROTECTION_BYPASS,
 } = process.env;
 
 const failures = [];
@@ -196,23 +200,38 @@ function configureRequestContext() {
     process.exit(2);
   }
 
-  if ((B2_KEY_ID && !B2_KEY) || (!B2_KEY_ID && B2_KEY)) {
-    console.error("B2_KEY_ID and B2_KEY must be set together for headers mode");
+  const credentialMode = (B2_MCP_SMOKE_CREDENTIAL_MODE || "headers").trim().toLowerCase();
+  if (!["headers", "server", "principal"].includes(credentialMode)) {
+    console.error("B2_MCP_SMOKE_CREDENTIAL_MODE must be headers, server, or principal");
     process.exit(2);
   }
 
   mcpUrl = MCP_URL;
   headers = {};
-  if (B2_KEY_ID && B2_KEY) {
+  if (credentialMode === "headers") {
+    if ((B2_KEY_ID && !B2_KEY) || (!B2_KEY_ID && B2_KEY)) {
+      console.error("B2_KEY_ID and B2_KEY must be set together for headers mode");
+      process.exit(2);
+    }
+    if (!B2_KEY_ID || !B2_KEY) {
+      console.error("B2_KEY_ID and B2_KEY are required for headers mode");
+      process.exit(2);
+    }
     headers["X-B2-Key-Id"] = B2_KEY_ID;
     headers["X-B2-Key"] = B2_KEY;
-  }
-  if (B2_APP_KEY_ID && B2_APP_KEY) {
-    headers["X-B2-App-Key-Id"] = B2_APP_KEY_ID;
-    headers["X-B2-App-Key"] = B2_APP_KEY;
+    if (B2_APP_KEY_ID && B2_APP_KEY) {
+      headers["X-B2-App-Key-Id"] = B2_APP_KEY_ID;
+      headers["X-B2-App-Key"] = B2_APP_KEY;
+    }
+  } else if (!MCP_AUTHORIZATION) {
+    console.error("MCP_AUTHORIZATION is required for server/principal smoke modes");
+    process.exit(2);
   }
   if (MCP_AUTHORIZATION) {
     headers.Authorization = MCP_AUTHORIZATION;
+  }
+  if (VERCEL_PROTECTION_BYPASS) {
+    headers["x-vercel-protection-bypass"] = VERCEL_PROTECTION_BYPASS;
   }
 }
 
@@ -292,9 +311,12 @@ async function main() {
     console.log("  [SKIP] b2_list_buckets — not exposed for this credential profile");
   }
 
-  // s3_head_bucket — only when an app key and known smoke bucket were supplied
+  // s3_head_bucket — headers mode needs explicit app-key headers; server and
+  // principal modes use server-side credential resolution.
   const requireSmokeBucket = B2_MCP_REQUIRE_SMOKE_BUCKET === "1";
-  if (B2_APP_KEY_ID && B2_APP_KEY && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
+  const credentialMode = (B2_MCP_SMOKE_CREDENTIAL_MODE || "headers").trim().toLowerCase();
+  const hasS3CredentialContext = credentialMode === "headers" ? B2_APP_KEY_ID && B2_APP_KEY : true;
+  if (hasS3CredentialContext && B2_SMOKE_BUCKET && toolNames.has("s3_head_bucket")) {
     try {
       assertToolSuccess(
         await mcp("tools/call", {
@@ -309,7 +331,9 @@ async function main() {
     }
   } else {
     const detail =
-      "set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable";
+      credentialMode === "headers"
+        ? "set B2_APP_KEY_ID / B2_APP_KEY / B2_SMOKE_BUCKET and expose s3_head_bucket to enable"
+        : "set B2_SMOKE_BUCKET and expose s3_head_bucket to enable";
     if (requireSmokeBucket) {
       check("s3_head_bucket confirms smoke bucket", false, detail);
     } else {

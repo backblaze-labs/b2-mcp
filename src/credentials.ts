@@ -312,10 +312,14 @@ export class HttpServerCredentialProvider implements CredentialProvider {
       );
     }
     const config = configFromMaterial(envMaterial(), httpConfigOptions());
+    const principal = rateLimitPrincipalFromAuthInfo(context?.req?.auth);
     return {
       config,
-      cacheKey: `credential:${config.credentialFingerprint}`,
+      cacheKey: principal
+        ? `server-principal:${credentialFingerprint(principal)}`
+        : `credential:${config.credentialFingerprint}`,
       capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
+      ...(principal && { principal }),
     };
   }
 
@@ -362,6 +366,13 @@ function principalFromAuthInfo(authInfo: AuthInfo): string | null {
     return value.trim();
   }
   return null;
+}
+
+function rateLimitPrincipalFromAuthInfo(authInfo: AuthInfo | undefined): string | null {
+  if (!authInfo) return null;
+  const subject = principalFromAuthInfo(authInfo);
+  if (subject) return subject;
+  return authInfo.clientId.trim() ? `client:${authInfo.clientId.trim()}` : null;
 }
 
 let cachedPrincipalMapRaw: string | undefined;

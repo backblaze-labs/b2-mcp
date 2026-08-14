@@ -216,6 +216,7 @@ describe("CI workflow policy", () => {
     expect(summaryJob).toContain("Linux deterministic Node matrix | 22.23.1, 24, 26");
     expect(summaryJob).toContain("Runtime engine floor | Node.js 22.3.0 package install smoke");
     expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
+    expect(summaryJob).toContain("Vercel adapter budget | Uploaded as vercel-bundle artifact path");
     expect(summaryJob).toContain("Container image | Docker build plus HTTP health/readiness smoke");
   });
 
