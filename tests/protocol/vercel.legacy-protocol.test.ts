@@ -2,6 +2,7 @@
  * Vercel adapter parity for the explicit 2025-era stateless fallback.
  */
 
+import { S3Client } from "@aws-sdk/client-s3";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { closeVercelMcpHandlerForTests } from "../../deploy/vercel/adapter";
 import { invalidateAuthManagerCache, invalidateCapabilityCache } from "../../src/server";
@@ -17,11 +18,21 @@ beforeEach(async () => {
   installSdkTransport(
     new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
   );
+  // s3_* tools run on the AWS SDK, which the B2 simulator transport does not
+  // intercept; stub the S3 client so the representative s3_list_objects_v2 call
+  // stays deterministic and offline.
+  vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({
+    Contents: [],
+    CommonPrefixes: [],
+    IsTruncated: false,
+    KeyCount: 0,
+  });
   invalidateCapabilityCache();
   await closeVercelMcpHandlerForTests();
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
   invalidateCapabilityCache();
