@@ -2,8 +2,11 @@ import {
   CLIENT_CAPABILITIES_META_KEY,
   inputRequired,
   inputResponse,
+  isInputRequiredResult,
   type ClientCapabilities,
+  type InputResponseView,
 } from "@modelcontextprotocol/server";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
   createMcpServer,
   ToolRegistrationAdapter,
@@ -60,6 +63,7 @@ import {
   DESTRUCTIVE_ELICITATION_REQUEST_SCHEMA,
   DESTRUCTIVE_ELICITATION_RESPONSE_KEY,
   destructiveElicitationMessage,
+  getDestructivePolicy,
   isDestructiveTool,
 } from "./utils/destructive-gate.js";
 
@@ -198,7 +202,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   const capsSet = filterActive ? new Set(capabilities) : null;
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) => isToolEnabled(name, capsSet),
-    wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config, server),
+    wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config),
   });
 
   // Initialize clients. The application (workhorse) key drives the B2 native
@@ -555,75 +559,258 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
 
-function clientCapabilitiesFromRequest(extra: any, server?: McpServer): ClientCapabilities | null {
-  const envelopeCapabilities = asRecord(extra?.mcpReq?.envelope)?.[CLIENT_CAPABILITIES_META_KEY];
-  if (asRecord(envelopeCapabilities)) return envelopeCapabilities as ClientCapabilities;
+type ToolArgs = Record<string, unknown>;
+type RequestStateAccessor = <T = unknown>() => T | undefined;
+type ToolExtraRequest = {
+  envelope?: Record<string, unknown>;
+  inputResponses?: Record<string, unknown>;
+  requestState?: RequestStateAccessor;
+  signal?: AbortSignal;
+};
+type DestructiveApproval = "requested" | "accepted" | "declined" | "invalid";
+type DestructiveElicitationAudit = {
+  destructiveApproval: DestructiveApproval;
+  challengeStatus?: string;
+};
+type DestructiveElicitationDecision =
+  | { kind: "proceed"; args: unknown; audit?: DestructiveElicitationAudit }
+  | {
+      kind: "result";
+      result: ReturnType<typeof inputRequired> | ReturnType<typeof toolError>;
+      audit: DestructiveElicitationAudit;
+    };
 
-  const serverCapabilityView = asRecord(server as unknown as Record<string, unknown>)?.[
-    "_inputRequestCapabilityView"
-  ];
-  if (typeof serverCapabilityView === "function") {
-    try {
-      const capabilities = serverCapabilityView.call(server, extra);
-      if (asRecord(capabilities)) return capabilities as ClientCapabilities;
-    } catch {
-      // Best-effort compatibility with SDK internals; fall through to the
-      // request envelope when this private helper is unavailable.
-    }
-  }
+const DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION = 1;
+const DESTRUCTIVE_ELICITATION_CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const DESTRUCTIVE_ELICITATION_CHALLENGE_MAX_CHARS = 2048;
 
-  const legacyCapabilities = asRecord(server as unknown as Record<string, unknown>)?.[
-    "_clientCapabilities"
-  ];
-  return asRecord(legacyCapabilities) ? (legacyCapabilities as ClientCapabilities) : null;
+interface DestructiveElicitationChallenge {
+  v: typeof DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION;
+  toolName: string;
+  argsDigest: string;
+  credential: string;
+  expiresAt: number;
+  nonce: string;
 }
 
-function clientSupportsFormElicitation(extra: any, server?: McpServer): boolean {
-  const capabilities = clientCapabilitiesFromRequest(extra, server);
-  if (!capabilities || !("elicitation" in capabilities)) return false;
-  return (capabilities as Record<string, unknown>).elicitation !== false;
+function mcpRequestFromExtra(extra: unknown): ToolExtraRequest | null {
+  const extraRecord = asRecord(extra);
+  const mcpReq = asRecord(extraRecord?.mcpReq);
+  return mcpReq ? (mcpReq as ToolExtraRequest) : null;
 }
 
-function destructiveElicitationRefusal(toolName: string) {
+function signalFromExtra(extra: unknown): AbortSignal | undefined {
+  const signal = mcpRequestFromExtra(extra)?.signal;
+  return signal instanceof AbortSignal ? signal : undefined;
+}
+
+function toolArgsFromUnknown(args: unknown): ToolArgs {
+  return args && typeof args === "object" && !Array.isArray(args) ? (args as ToolArgs) : {};
+}
+
+function clientCapabilitiesFromRequest(extra: unknown): ClientCapabilities | null {
+  const envelope = asRecord(mcpRequestFromExtra(extra)?.envelope);
+  const capabilities = envelope?.[CLIENT_CAPABILITIES_META_KEY];
+  return asRecord(capabilities) ? (capabilities as ClientCapabilities) : null;
+}
+
+function clientSupportsFormElicitation(capabilities: ClientCapabilities | null): boolean {
+  const capabilityRecord = asRecord(capabilities);
+  if (!capabilityRecord || !("elicitation" in capabilityRecord)) return false;
+  const elicitation = asRecord(capabilityRecord.elicitation);
+  if (!elicitation) return false;
+  if (Object.keys(elicitation).length === 0) return true;
+  if ("form" in elicitation) return elicitation.form !== false;
+  if (elicitation.mode === "form") return true;
+  return Array.isArray(elicitation.modes) && elicitation.modes.includes("form");
+}
+
+function destructiveElicitationRefusal(toolName: string, challengeStatus?: string) {
   return toolError({
     status: 403,
     code: "destructive_elicitation_refused",
-    message: `Refused: human approval was not accepted for ${toolName}.`,
+    message:
+      challengeStatus === "invalid"
+        ? `Refused: human approval challenge was invalid for ${toolName}.`
+        : `Refused: human approval was not accepted for ${toolName}.`,
   });
 }
 
-function addConfirmedArg(args: any): any {
+function addConfirmedArg(args: unknown): unknown {
   return args && typeof args === "object" && !Array.isArray(args)
     ? { ...args, confirm: true }
     : args;
 }
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value ?? null;
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record)
+      .filter((key) => record[key] !== undefined)
+      .sort()
+      .map((key) => [key, canonicalize(record[key])]),
+  );
+}
+
+function destructiveOperationArgs(args: ToolArgs): ToolArgs {
+  const { confirm: _confirm, ...operationArgs } = args;
+  return operationArgs;
+}
+
+function destructiveArgsDigest(args: ToolArgs): string {
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalize(destructiveOperationArgs(args))))
+    .digest("base64url");
+}
+
+function destructiveElicitationSigningKey(config: B2Config): string {
+  return [
+    "b2-mcp destructive elicitation challenge v1",
+    config.applicationKey,
+    config.appKey,
+    config.masterKey,
+  ].join("\0");
+}
+
+function signDestructiveElicitationPayload(payload: string, config: B2Config): string {
+  return createHmac("sha256", destructiveElicitationSigningKey(config))
+    .update(payload)
+    .digest("base64url");
+}
+
+function createDestructiveElicitationChallenge(
+  toolName: string,
+  args: ToolArgs,
+  config: B2Config,
+  now = Date.now(),
+): string {
+  const challenge: DestructiveElicitationChallenge = {
+    v: DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION,
+    toolName,
+    argsDigest: destructiveArgsDigest(args),
+    credential: verificationFingerprintConfig(config),
+    expiresAt: now + DESTRUCTIVE_ELICITATION_CHALLENGE_TTL_MS,
+    nonce: randomBytes(16).toString("base64url"),
+  };
+  const payload = Buffer.from(JSON.stringify(challenge), "utf8").toString("base64url");
+  return `${payload}.${signDestructiveElicitationPayload(payload, config)}`;
+}
+
+function parseDestructiveElicitationChallenge(
+  token: string | undefined,
+  config: B2Config,
+): { ok: true; challenge: DestructiveElicitationChallenge } | { ok: false; reason: string } {
+  if (!token) return { ok: false, reason: "missing" };
+  if (token.length > DESTRUCTIVE_ELICITATION_CHALLENGE_MAX_CHARS) {
+    return { ok: false, reason: "too_large" };
+  }
+  const [payload, signature, extra] = token.split(".");
+  if (!payload || !signature || extra !== undefined) return { ok: false, reason: "malformed" };
+
+  const expected = signDestructiveElicitationPayload(payload, config);
+  const actualBuffer = new Uint8Array(Buffer.from(signature));
+  const expectedBuffer = new Uint8Array(Buffer.from(expected));
+  if (
+    actualBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(actualBuffer, expectedBuffer)
+  ) {
+    return { ok: false, reason: "bad_signature" };
+  }
+
+  try {
+    const challenge = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as DestructiveElicitationChallenge;
+    if (
+      challenge.v !== DESTRUCTIVE_ELICITATION_CHALLENGE_VERSION ||
+      typeof challenge.toolName !== "string" ||
+      typeof challenge.argsDigest !== "string" ||
+      typeof challenge.credential !== "string" ||
+      typeof challenge.expiresAt !== "number" ||
+      typeof challenge.nonce !== "string"
+    ) {
+      return { ok: false, reason: "invalid_payload" };
+    }
+    return { ok: true, challenge };
+  } catch {
+    return { ok: false, reason: "bad_payload" };
+  }
+}
+
+function verifyDestructiveElicitationChallenge(
+  token: string | undefined,
+  toolName: string,
+  args: ToolArgs,
+  config: B2Config,
+  now = Date.now(),
+): { ok: true } | { ok: false; reason: string } {
+  const parsed = parseDestructiveElicitationChallenge(token, config);
+  if (!parsed.ok) return parsed;
+  const { challenge } = parsed;
+  if (challenge.expiresAt < now) return { ok: false, reason: "expired" };
+  if (challenge.credential !== verificationFingerprintConfig(config)) {
+    return { ok: false, reason: "credential_mismatch" };
+  }
+  if (challenge.toolName !== toolName) return { ok: false, reason: "tool_mismatch" };
+  if (challenge.argsDigest !== destructiveArgsDigest(args)) {
+    return { ok: false, reason: "args_mismatch" };
+  }
+  return { ok: true };
+}
+
+function requestStateFromExtra(extra: unknown): string | undefined {
+  const requestState = mcpRequestFromExtra(extra)?.requestState;
+  if (typeof requestState !== "function") return undefined;
+  const state = requestState<string>();
+  return typeof state === "string" ? state : undefined;
+}
+
+function inputResponsesFromExtra(extra: unknown): Record<string, unknown> | undefined {
+  return mcpRequestFromExtra(extra)?.inputResponses;
+}
+
+function declinedOrCancelled(response: InputResponseView): boolean {
+  return (
+    response.kind === "elicit" && (response.action === "decline" || response.action === "cancel")
+  );
+}
+
 function maybeRequireDestructiveElicitation(
   toolName: string,
-  args: any,
-  extra: any,
+  args: unknown,
+  extra: unknown,
   config: B2Config,
-  server?: McpServer,
-):
-  | { kind: "proceed"; args: any }
-  | { kind: "result"; result: ReturnType<typeof inputRequired> | ReturnType<typeof toolError> } {
-  if (!clientSupportsFormElicitation(extra, server)) return { kind: "proceed", args };
+): DestructiveElicitationDecision {
+  if (getDestructivePolicy(config) !== "confirm") return { kind: "proceed", args };
 
-  const unsafeArgs =
-    args && typeof args === "object" && !Array.isArray(args)
-      ? (args as Record<string, unknown>)
-      : {};
-  const message = destructiveElicitationMessage(toolName, unsafeArgs);
+  const toolArgs = toolArgsFromUnknown(args);
+  const message = destructiveElicitationMessage(toolName, toolArgs);
   if (!message) return { kind: "proceed", args };
 
+  if (!clientSupportsFormElicitation(clientCapabilitiesFromRequest(extra))) {
+    return { kind: "proceed", args };
+  }
+
   const response = inputResponse(
-    extra?.mcpReq?.inputResponses,
+    inputResponsesFromExtra(extra),
     DESTRUCTIVE_ELICITATION_RESPONSE_KEY,
   );
+  const requestState = requestStateFromExtra(extra);
   if (response.kind === "missing") {
+    if (requestState) {
+      return {
+        kind: "result",
+        result: destructiveElicitationRefusal(toolName, "invalid"),
+        audit: { destructiveApproval: "invalid", challengeStatus: "missing_response" },
+      };
+    }
+    const challenge = createDestructiveElicitationChallenge(toolName, toolArgs, config);
     return {
       kind: "result",
       result: inputRequired({
+        requestState: challenge,
         inputRequests: {
           [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: inputRequired.elicit({
             message: sanitizeText(message, sanitizerOptionsFromConfig(config)),
@@ -631,25 +818,44 @@ function maybeRequireDestructiveElicitation(
           }),
         },
       }),
+      audit: { destructiveApproval: "requested" },
     };
   }
 
   if (
+    declinedOrCancelled(response) ||
     response.kind !== "elicit" ||
-    response.action !== "accept" ||
     response.content?.confirm !== true
   ) {
-    return { kind: "result", result: destructiveElicitationRefusal(toolName) };
+    return {
+      kind: "result",
+      result: destructiveElicitationRefusal(toolName),
+      audit: { destructiveApproval: "declined" },
+    };
   }
 
-  return { kind: "proceed", args: addConfirmedArg(args) };
+  const verified = verifyDestructiveElicitationChallenge(requestState, toolName, toolArgs, config);
+  if (!verified.ok) {
+    return {
+      kind: "result",
+      result: destructiveElicitationRefusal(toolName, "invalid"),
+      audit: { destructiveApproval: "invalid", challengeStatus: verified.reason },
+    };
+  }
+
+  return {
+    kind: "proceed",
+    args: addConfirmedArg(args),
+    audit: { destructiveApproval: "accepted" },
+  };
 }
 
 /**
- * Wrap a tool handler to emit an audit log entry on invocation: tool name,
- * non-secret credential fingerprint, top-level arg keys, duration, and
- * success/error. Argument values are not logged to avoid leaking file content,
- * bucket data, or credentials.
+ * Wrap a tool handler with shared execution controls: destructive-operation
+ * elicitation when the negotiated MCP request supports it, result
+ * serialization/sanitization, request cancellation, and audit logging.
+ * Argument values are not logged to avoid leaking file content, bucket data,
+ * or credentials.
  *
  * @returns The wrapped tool callback.
  */
@@ -657,28 +863,23 @@ export function createAuditedToolCallback(
   name: string,
   original: ToolCallback,
   config: B2Config,
-  server?: McpServer,
 ): ToolCallback {
   const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
 
-  return async function auditedToolCallback(args: any, extra: any) {
+  return async function auditedToolCallback(args: unknown, extra: unknown) {
     const start = Date.now();
     const argKeys =
       args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+    let destructiveAudit: DestructiveElicitationAudit | undefined;
     try {
       const sanitizerOptions = sanitizerOptionsFromConfig(config);
       const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
-      const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
+      const signal = signalFromExtra(extra) ?? currentMcpRequestSignal();
       const rawResult = await runWithMcpRequestSignal(signal, () =>
         runWithSanitizerOptions(sanitizerOptions, () =>
           runWithResultSerializationOptions({ outputFormat }, () => {
-            const elicitation = maybeRequireDestructiveElicitation(
-              name,
-              args,
-              extra,
-              config,
-              server,
-            );
+            const elicitation = maybeRequireDestructiveElicitation(name, args, extra, config);
+            destructiveAudit = elicitation.audit;
             if (elicitation.kind === "result") return elicitation.result;
             return original(elicitation.args, extra);
           }),
@@ -689,6 +890,13 @@ export function createAuditedToolCallback(
         : sanitizeMcpResponse(rawResult, sanitizerOptions);
       const durationMs = Date.now() - start;
       const isError = result?.isError === true;
+      const phase = isInputRequiredResult(result)
+        ? "approval_requested"
+        : destructiveAudit?.destructiveApproval === "declined"
+          ? "approval_declined"
+          : destructiveAudit?.destructiveApproval === "invalid"
+            ? "approval_invalid"
+            : "tool_execution";
       // When the tool returned a structured error, surface the classified
       // code/status/requestId in the audit event. Values stay out of logs.
       const errInfo = isError ? parseErrorText(result?.content?.[0]?.text) : null;
@@ -706,7 +914,14 @@ export function createAuditedToolCallback(
           outputFormat,
           argKeys,
           durationMs,
+          phase,
           error: isError,
+          ...(destructiveAudit && {
+            destructiveApproval: destructiveAudit.destructiveApproval,
+            ...(destructiveAudit.challengeStatus && {
+              challengeStatus: destructiveAudit.challengeStatus,
+            }),
+          }),
           ...(safeErrInfo && {
             code: safeErrInfo.code,
             status: safeErrInfo.status,

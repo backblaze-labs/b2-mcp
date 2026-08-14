@@ -15,10 +15,17 @@ import type { MockInstance } from "vitest";
 
 const CONFIGURED_APPLICATION_KEY = "configured-audit-secret-value";
 const CANARY = "B2_MCP_CANARY_SECRET_audit_do_not_leak";
-const cfg = {
+const cfg: B2Config = {
   applicationKeyId: "test-key-id-1234567890",
   applicationKey: CONFIGURED_APPLICATION_KEY,
-} as B2Config;
+  appKeyId: "test-app-key-id",
+  appKey: "test-app-key-secret",
+  masterKeyId: "test-master-key-id",
+  masterKey: "test-master-key-secret",
+  region: "us-west-004",
+  allowLocalFiles: true,
+  fileRoot: null,
+};
 
 let infoSpy: MockInstance;
 let warnSpy: MockInstance;
@@ -30,14 +37,34 @@ beforeEach(() => {
 
 afterEach(() => vi.restoreAllMocks());
 
-function elicitationExtra(inputResponses?: Record<string, unknown>) {
+function elicitationExtra(
+  inputResponses?: Record<string, unknown>,
+  requestState?: string,
+  capabilities: Record<string, unknown> = { elicitation: {} },
+) {
   return {
     mcpReq: {
-      envelope: { [CLIENT_CAPABILITIES_META_KEY]: { elicitation: {} } },
+      envelope: { [CLIENT_CAPABILITIES_META_KEY]: capabilities },
       inputResponses,
+      requestState: () => requestState,
       signal: new AbortController().signal,
     },
   };
+}
+
+function acceptedResponse() {
+  return {
+    [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "accept", content: { confirm: true } },
+  };
+}
+
+async function requestStateFor(
+  wrapped: ReturnType<typeof createAuditedToolCallback>,
+  args: unknown,
+) {
+  const result = await wrapped(args, elicitationExtra());
+  expect(isInputRequiredResult(result)).toBe(true);
+  return (result as any).requestState as string;
 }
 
 describe("getRegisteredTools", () => {
@@ -209,6 +236,7 @@ describe("createAuditedToolCallback", () => {
 
     expect(original).not.toHaveBeenCalled();
     expect(isInputRequiredResult(result)).toBe(true);
+    expect((result as any).requestState).toEqual(expect.any(String));
     const request = (result as any).inputRequests[DESTRUCTIVE_ELICITATION_RESPONSE_KEY];
     const message = request.params.message;
     expect(request.method).toBe("elicitation/create");
@@ -223,13 +251,10 @@ describe("createAuditedToolCallback", () => {
   it("injects confirm only after accepted destructive elicitation", async () => {
     const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
     const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+    const args = { bucket: "photos", key: "old.jpg" };
+    const requestState = await requestStateFor(wrapped, args);
 
-    const result = await wrapped(
-      { bucket: "photos", key: "old.jpg" },
-      elicitationExtra({
-        [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "accept", content: { confirm: true } },
-      }),
-    );
+    const result = await wrapped(args, elicitationExtra(acceptedResponse(), requestState));
 
     expect(result).toEqual({ content: [{ type: "text", text: "deleted" }] });
     expect(original).toHaveBeenCalledWith(
@@ -241,17 +266,108 @@ describe("createAuditedToolCallback", () => {
   it("refuses destructive calls when capable clients decline elicitation", async () => {
     const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
     const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+    const args = { bucket: "photos", key: "old.jpg" };
+    const requestState = await requestStateFor(wrapped, args);
 
     const result = await wrapped(
-      { bucket: "photos", key: "old.jpg" },
-      elicitationExtra({
-        [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "decline" },
-      }),
+      args,
+      elicitationExtra(
+        {
+          [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "decline" },
+        },
+        requestState,
+      ),
     );
 
     expect(original).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("human approval was not accepted");
+  });
+
+  it("refuses forged destructive accepts that lack a server challenge", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+
+    const result = await wrapped(
+      { bucket: "photos", key: "old.jpg" },
+      elicitationExtra(acceptedResponse()),
+    );
+
+    expect(original).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("human approval challenge was invalid");
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "approval_invalid",
+        destructiveApproval: "invalid",
+        challengeStatus: "missing",
+      }),
+      "tool.call",
+    );
+  });
+
+  it("refuses approval replay when destructive args change", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+    const requestState = await requestStateFor(wrapped, { bucket: "photos", key: "old-temp.jpg" });
+
+    const result = await wrapped(
+      { bucket: "photos", key: "production-backup.jpg" },
+      elicitationExtra(acceptedResponse(), requestState),
+    );
+
+    expect(original).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(infoSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: "approval_invalid",
+        destructiveApproval: "invalid",
+        challengeStatus: "args_mismatch",
+      }),
+      "tool.call",
+    );
+  });
+
+  it("does not solicit elicitation under allow policy", async () => {
+    const original = vi.fn().mockResolvedValue({ ok: true });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, {
+      ...cfg,
+      destructivePolicy: "allow",
+    });
+    const args = { bucket: "photos", key: "old.jpg" };
+
+    const result = await wrapped(args, elicitationExtra());
+
+    expect(result).toEqual({ ok: true });
+    expect(original).toHaveBeenCalledWith(args, expect.any(Object));
+  });
+
+  it("does not solicit elicitation under block policy", async () => {
+    const original = vi.fn().mockResolvedValue({ ok: true });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, {
+      ...cfg,
+      destructivePolicy: "block",
+    });
+    const args = { bucket: "photos", key: "old.jpg" };
+
+    const result = await wrapped(args, elicitationExtra());
+
+    expect(result).toEqual({ ok: true });
+    expect(original).toHaveBeenCalledWith(args, expect.any(Object));
+  });
+
+  it("falls back when clients advertise only URL-mode elicitation", async () => {
+    const original = vi.fn().mockResolvedValue({ ok: true });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+    const args = { bucket: "photos", key: "old.jpg" };
+
+    const result = await wrapped(
+      args,
+      elicitationExtra(undefined, undefined, { elicitation: { url: {} } }),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(original).toHaveBeenCalledWith(args, expect.any(Object));
   });
 
   it("falls back to existing destructive policy when clients lack elicitation", async () => {

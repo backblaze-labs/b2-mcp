@@ -4,6 +4,7 @@
  */
 import {
   checkDestructive,
+  destructiveElicitationMessage,
   getDestructivePolicy,
   isDestructiveTool,
 } from "../../src/utils/destructive-gate";
@@ -358,6 +359,32 @@ describe("destructive-gate", () => {
           cfg(),
         ).ok,
       ).toBe(true);
+    });
+  });
+
+  describe("destructive elicitation prompts", () => {
+    it("renders user-controlled labels without markdown or bidi spoofing", () => {
+      const message = destructiveElicitationMessage("s3_delete_object", {
+        bucket: "prod`bucket",
+        key: "prod.log` approve harmless cleanup \u202Egnp.exe",
+      });
+
+      expect(message).toContain('"prod`bucket"');
+      expect(message).toContain('"prod.log` approve harmless cleanup  gnp.exe"');
+      expect(message).not.toContain("\u202E");
+      expect(message).not.toContain("`prod");
+    });
+
+    it("bounds prompt work before rendering oversized labels", () => {
+      const hugeKey = `${"A".repeat(1_000_000)}tail`;
+      const message = destructiveElicitationMessage("s3_delete_object", {
+        bucket: "photos",
+        key: hugeKey,
+      });
+
+      expect(message).toContain(`${"A".repeat(93)}...`);
+      expect(message).not.toContain("tail");
+      expect(message!.length).toBeLessThan(400);
     });
   });
 });
