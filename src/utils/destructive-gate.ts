@@ -59,7 +59,11 @@ function safeLabel(value: unknown, fallback: string): string {
     const code = char.codePointAt(0) ?? 0;
     if (
       code < 32 ||
+      code === 0x85 ||
+      code === 0x061c ||
       code === 127 ||
+      (code >= 0x200e && code <= 0x200f) ||
+      (code >= 0x2028 && code <= 0x2029) ||
       (code >= 0x202a && code <= 0x202e) ||
       (code >= 0x2066 && code <= 0x2069)
     ) {

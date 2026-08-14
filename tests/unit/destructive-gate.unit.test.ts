@@ -411,14 +411,18 @@ describe("destructive-gate", () => {
     });
 
     it("renders user-controlled labels without markdown or bidi spoofing", () => {
+      const extraSpoofingControls = ["\u061C", "\u200E", "\u200F", "\u0085", "\u2028", "\u2029"];
       const message = destructiveElicitationMessage("s3_delete_object", {
         bucket: "prod`bucket",
-        key: "prod.log` approve harmless cleanup \u202Egnp.exe",
+        key: `prod.log\` approve harmless cleanup ${extraSpoofingControls.join("")}\u202Egnp.exe`,
       });
 
       expect(message).toContain('"prod`bucket"');
-      expect(message).toContain('"prod.log` approve harmless cleanup  gnp.exe"');
+      expect(message).toMatch(/"prod\.log` approve harmless cleanup +gnp\.exe"/);
       expect(message).not.toContain("\u202E");
+      for (const control of extraSpoofingControls) {
+        expect(message).not.toContain(control);
+      }
       expect(message).not.toContain("`prod");
     });
 
