@@ -66,7 +66,6 @@ export interface McpToolAnnotations {
 }
 
 const DESTRUCTIVE_TOOL_NAME_SET = new Set(DESTRUCTIVE_TOOL_NAMES);
-const DESTRUCTIVE_WRITE_CAPABILITIES = new Set(["writeFiles", "writeBuckets"]);
 
 export const READ_ONLY_OPERATION_TOOL_NAMES = new Set([
   "b2_authorize_account",
@@ -92,8 +91,15 @@ export const NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES = new Set([
 ]);
 
 export const IDEMPOTENT_NON_READONLY_TOOL_NAMES = new Set([
-  // s3_presign_upload_part mints PUT bearer capabilities, so it is destructive,
-  // but issuing the same presign request again does not mutate B2 state.
+  // Non-destructive writes whose repeat with the same arguments lands the same
+  // final state: overwriting PUT/copy, part-copy, multipart completion, and
+  // presigning (mints an equivalent URL, no B2 mutation). Resource creators
+  // (create_bucket / create_key / create_multipart) are omitted because a
+  // repeat call makes a new resource.
+  "s3_put_object",
+  "s3_copy_object",
+  "s3_upload_part_copy",
+  "s3_complete_multipart_upload",
   "s3_presign_upload_part",
 ]);
 
@@ -110,20 +116,16 @@ export function hasReadOnlyToolCapabilities(name: string): boolean {
   );
 }
 
-export function hasDestructiveWriteCapabilities(name: string): boolean {
-  return (
-    TOOL_CAPABILITIES[name]?.some((capability) => DESTRUCTIVE_WRITE_CAPABILITIES.has(capability)) ??
-    false
-  );
-}
-
 function hasIdempotentDestructiveGate(name: string): boolean {
   return DESTRUCTIVE_TOOL_NAME_SET.has(name) && !NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES.has(name);
 }
 
 export function annotationsForTool(name: string): McpToolAnnotations {
-  const destructiveHint =
-    DESTRUCTIVE_TOOL_NAME_SET.has(name) || hasDestructiveWriteCapabilities(name);
+  // destructiveHint tracks the server destructive gate exactly. Per the B2 MCP
+  // spec, destructive means deletes, protection removal, and irreversible/billable
+  // creation; overwrites (s3_put_object / s3_copy_object) are deliberately not
+  // gated, so they are additive writes, not destructive.
+  const destructiveHint = DESTRUCTIVE_TOOL_NAME_SET.has(name);
   const readOnlyHint =
     !destructiveHint &&
     !NON_READ_ONLY_TOOL_NAMES.has(name) &&

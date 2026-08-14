@@ -250,7 +250,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -1198,8 +1198,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1260,8 +1260,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1308,7 +1308,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -1766,7 +1766,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -1916,8 +1916,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1963,8 +1963,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1974,5 +1974,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "8e39a095341b58f937553b8c4d85f0ef1bd8fd203c111f5cb3f740195cb3aaef"
+  "hash": "e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221"
 }

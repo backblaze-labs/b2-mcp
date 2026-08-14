@@ -257,7 +257,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -1092,8 +1092,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1154,8 +1154,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1202,7 +1202,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -1660,7 +1660,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -1810,8 +1810,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1857,8 +1857,8 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1881,5 +1881,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "e3287d86be0922eca35213fe3372135fa3796e57cbfe45498790f79eeac720be"
+  "hash": "1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83"
 }

@@ -57,7 +57,7 @@ describe("tool annotation policy", () => {
     }
   });
 
-  it("marks writeFiles/writeBuckets tools destructive at tool granularity", () => {
+  it("never marks write tools read-only and marks them destructive only when gated", () => {
     const writeTools = Object.entries(TOOL_CAPABILITIES)
       .filter(([, capabilities]) =>
         capabilities.some(
@@ -82,8 +82,23 @@ describe("tool annotation policy", () => {
 
     for (const name of writeTools) {
       expect(annotationsForTool(name)).toMatchObject({
-        destructiveHint: true,
+        destructiveHint: DESTRUCTIVE_TOOL_NAMES.includes(name),
         readOnlyHint: false,
+      });
+    }
+  });
+
+  it("treats non-gated overwriting writes as additive and idempotent, not destructive", () => {
+    for (const name of [
+      "s3_put_object",
+      "s3_copy_object",
+      "s3_upload_part_copy",
+      "s3_complete_multipart_upload",
+    ]) {
+      expect(annotationsForTool(name)).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
       });
     }
   });
@@ -136,13 +151,19 @@ describe("tool annotation policy", () => {
     }
   });
 
-  it("keeps presigned write bearer minters destructive and idempotent", () => {
-    for (const name of ["s3_get_presigned_url", "s3_presign_upload_part"]) {
-      expect(annotationsForTool(name)).toMatchObject({
-        readOnlyHint: false,
-        destructiveHint: true,
-        idempotentHint: true,
-      });
-    }
+  it("keeps presign minting idempotent, destructive only for the gated PutObject minter", () => {
+    // s3_get_presigned_url is gated (a PutObject URL mints overwrite/create bearer
+    // capability); s3_presign_upload_part is not gated. Both are idempotent: the
+    // same request mints an equivalent URL without mutating B2 state.
+    expect(annotationsForTool("s3_get_presigned_url")).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: true,
+    });
+    expect(annotationsForTool("s3_presign_upload_part")).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+    });
   });
 });
