@@ -1,4 +1,10 @@
 import {
+  CLIENT_CAPABILITIES_META_KEY,
+  inputRequired,
+  inputResponse,
+  type ClientCapabilities,
+} from "@modelcontextprotocol/server";
+import {
   createMcpServer,
   ToolRegistrationAdapter,
   type McpServer,
@@ -50,7 +56,12 @@ import { registerS3ObjectTools } from "./s3/objects.js";
 import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
-import { isDestructiveTool } from "./utils/destructive-gate.js";
+import {
+  DESTRUCTIVE_ELICITATION_REQUEST_SCHEMA,
+  DESTRUCTIVE_ELICITATION_RESPONSE_KEY,
+  destructiveElicitationMessage,
+  isDestructiveTool,
+} from "./utils/destructive-gate.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
@@ -187,7 +198,7 @@ export function createServer(config: B2Config, capabilities?: string[] | null): 
   const capsSet = filterActive ? new Set(capabilities) : null;
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) => isToolEnabled(name, capsSet),
-    wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config),
+    wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config, server),
   });
 
   // Initialize clients. The application (workhorse) key drives the B2 native
@@ -540,6 +551,100 @@ export async function fetchCapabilities(
   return [...(await discovery)];
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function clientCapabilitiesFromRequest(extra: any, server?: McpServer): ClientCapabilities | null {
+  const envelopeCapabilities = asRecord(extra?.mcpReq?.envelope)?.[CLIENT_CAPABILITIES_META_KEY];
+  if (asRecord(envelopeCapabilities)) return envelopeCapabilities as ClientCapabilities;
+
+  const serverCapabilityView = asRecord(server as unknown as Record<string, unknown>)?.[
+    "_inputRequestCapabilityView"
+  ];
+  if (typeof serverCapabilityView === "function") {
+    try {
+      const capabilities = serverCapabilityView.call(server, extra);
+      if (asRecord(capabilities)) return capabilities as ClientCapabilities;
+    } catch {
+      // Best-effort compatibility with SDK internals; fall through to the
+      // request envelope when this private helper is unavailable.
+    }
+  }
+
+  const legacyCapabilities = asRecord(server as unknown as Record<string, unknown>)?.[
+    "_clientCapabilities"
+  ];
+  return asRecord(legacyCapabilities) ? (legacyCapabilities as ClientCapabilities) : null;
+}
+
+function clientSupportsFormElicitation(extra: any, server?: McpServer): boolean {
+  const capabilities = clientCapabilitiesFromRequest(extra, server);
+  if (!capabilities || !("elicitation" in capabilities)) return false;
+  return (capabilities as Record<string, unknown>).elicitation !== false;
+}
+
+function destructiveElicitationRefusal(toolName: string) {
+  return toolError({
+    status: 403,
+    code: "destructive_elicitation_refused",
+    message: `Refused: human approval was not accepted for ${toolName}.`,
+  });
+}
+
+function addConfirmedArg(args: any): any {
+  return args && typeof args === "object" && !Array.isArray(args)
+    ? { ...args, confirm: true }
+    : args;
+}
+
+function maybeRequireDestructiveElicitation(
+  toolName: string,
+  args: any,
+  extra: any,
+  config: B2Config,
+  server?: McpServer,
+):
+  | { kind: "proceed"; args: any }
+  | { kind: "result"; result: ReturnType<typeof inputRequired> | ReturnType<typeof toolError> } {
+  if (!clientSupportsFormElicitation(extra, server)) return { kind: "proceed", args };
+
+  const unsafeArgs =
+    args && typeof args === "object" && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : {};
+  const message = destructiveElicitationMessage(toolName, unsafeArgs);
+  if (!message) return { kind: "proceed", args };
+
+  const response = inputResponse(
+    extra?.mcpReq?.inputResponses,
+    DESTRUCTIVE_ELICITATION_RESPONSE_KEY,
+  );
+  if (response.kind === "missing") {
+    return {
+      kind: "result",
+      result: inputRequired({
+        inputRequests: {
+          [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: inputRequired.elicit({
+            message: sanitizeText(message, sanitizerOptionsFromConfig(config)),
+            requestedSchema: DESTRUCTIVE_ELICITATION_REQUEST_SCHEMA,
+          }),
+        },
+      }),
+    };
+  }
+
+  if (
+    response.kind !== "elicit" ||
+    response.action !== "accept" ||
+    response.content?.confirm !== true
+  ) {
+    return { kind: "result", result: destructiveElicitationRefusal(toolName) };
+  }
+
+  return { kind: "proceed", args: addConfirmedArg(args) };
+}
+
 /**
  * Wrap a tool handler to emit an audit log entry on invocation: tool name,
  * non-secret credential fingerprint, top-level arg keys, duration, and
@@ -552,6 +657,7 @@ export function createAuditedToolCallback(
   name: string,
   original: ToolCallback,
   config: B2Config,
+  server?: McpServer,
 ): ToolCallback {
   const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
 
@@ -565,7 +671,17 @@ export function createAuditedToolCallback(
       const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
       const rawResult = await runWithMcpRequestSignal(signal, () =>
         runWithSanitizerOptions(sanitizerOptions, () =>
-          runWithResultSerializationOptions({ outputFormat }, () => original(args, extra)),
+          runWithResultSerializationOptions({ outputFormat }, () => {
+            const elicitation = maybeRequireDestructiveElicitation(
+              name,
+              args,
+              extra,
+              config,
+              server,
+            );
+            if (elicitation.kind === "result") return elicitation.result;
+            return original(elicitation.args, extra);
+          }),
         ),
       );
       const result = isSanitizedMcpResponse(rawResult)

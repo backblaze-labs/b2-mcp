@@ -25,6 +25,7 @@ import { B2Config, DestructivePolicy } from "./types.js";
  * `b2_update_bucket` that does not flip the bucket public or weaken Object Lock).
  */
 type Detector = (args: Record<string, unknown>) => string | null;
+type Description = (args: Record<string, unknown>) => string;
 
 const DETECTORS: Record<string, Detector> = {
   b2_delete_bucket: () => "permanently delete a bucket",
@@ -88,9 +89,94 @@ const DETECTORS: Record<string, Detector> = {
 };
 
 export const DESTRUCTIVE_TOOL_NAMES = Object.keys(DETECTORS).sort();
+export const DESTRUCTIVE_ELICITATION_RESPONSE_KEY = "destructive-confirm";
+export const DESTRUCTIVE_ELICITATION_REQUEST_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    confirm: {
+      type: "boolean" as const,
+      title: "Approve",
+      description: "Set true to approve this destructive operation.",
+    },
+  },
+  required: ["confirm"],
+};
+
+function safeLabel(value: unknown, fallback: string): string {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    return fallback;
+  }
+  const text = String(value)
+    .split("")
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code < 32 || code === 127 ? " " : char;
+    })
+    .join("")
+    .trim();
+  if (!text) return fallback;
+  return `\`${text.length > 96 ? `${text.slice(0, 93)}...` : text}\``;
+}
+
+function itemCount(value: unknown, singular: string, plural: string): string {
+  return Array.isArray(value)
+    ? `${value.length} ${value.length === 1 ? singular : plural}`
+    : plural;
+}
+
+const ELICITATION_DESCRIPTIONS: Record<string, Description> = {
+  b2_delete_bucket: (args) =>
+    `permanently delete bucket ID ${safeLabel(args.bucketId, "the requested bucket")}`,
+  s3_delete_object: (args) =>
+    `permanently delete object ${safeLabel(args.key, "the requested object")} from bucket ${safeLabel(args.bucket, "the requested bucket")}`,
+  s3_delete_objects: (args) => {
+    const governance =
+      args.bypassGovernance === true ? " and bypass governance-mode Object Lock retention" : "";
+    return `permanently delete ${itemCount(args.objects, "object", "objects")} from bucket ${safeLabel(args.bucket, "the requested bucket")}${governance}`;
+  },
+  s3_get_presigned_url: (args) =>
+    `mint a PutObject presigned URL for object ${safeLabel(args.key, "the requested object")} in bucket ${safeLabel(args.bucket, "the requested bucket")} that can create or overwrite object data`,
+  s3_abort_multipart_upload: (args) =>
+    `abort multipart upload ${safeLabel(args.uploadId, "for the requested upload")} for object ${safeLabel(args.key, "the requested object")} in bucket ${safeLabel(args.bucket, "the requested bucket")}, discarding uploaded parts`,
+  b2_delete_key: (args) =>
+    `permanently delete application key ID ${safeLabel(args.applicationKeyId, "the requested application key")}; anything using it loses access immediately`,
+  b2_eject_group_member: (args) =>
+    `eject group member account ${safeLabel(args.memberAccountId, "the requested member account")} from group ${safeLabel(args.groupId, "the requested group")}`,
+  b2_create_group_member: () =>
+    "create a real, non-deletable Backblaze account for the specified group member; eject cannot remove it",
+  b2_reserve_trial_create_account: () => "create a real trial Backblaze account",
+  b2_update_file_retention: (args) =>
+    `weaken Object Lock retention for file ${safeLabel(args.fileName, "the requested file")} (${safeLabel(args.fileId, "requested file ID")})`,
+  b2_update_file_legal_hold: (args) =>
+    `remove a legal hold from file ${safeLabel(args.fileName, "the requested file")}, making it deletable again`,
+  s3_put_bucket_lifecycle: (args) =>
+    `set lifecycle rules on bucket ${safeLabel(args.bucket, "the requested bucket")} that schedule deletion or expiration of objects`,
+  b2_update_bucket: (args) =>
+    `${destructiveEffect("b2_update_bucket", args) ?? "make destructive bucket changes"} for bucket ID ${safeLabel(args.bucketId, "the requested bucket")}`,
+  b2_set_bucket_notification_rules: (args) =>
+    `replace ${itemCount(args.eventNotificationRules, "persistent bucket event notification webhook rule", "persistent bucket event notification webhook rules")} for bucket ID ${safeLabel(args.bucketId, "the requested bucket")}`,
+};
 
 export function isDestructiveTool(toolName: string): boolean {
   return toolName in DETECTORS;
+}
+
+export function destructiveEffect(
+  toolName: string,
+  args: Record<string, unknown> = {},
+): string | null {
+  const detector = DETECTORS[toolName];
+  return detector ? detector(args ?? {}) : null;
+}
+
+export function destructiveElicitationMessage(
+  toolName: string,
+  args: Record<string, unknown> = {},
+): string | null {
+  const effect = destructiveEffect(toolName, args);
+  if (!effect) return null;
+  const concreteEffect = ELICITATION_DESCRIPTIONS[toolName]?.(args) ?? effect;
+  return `Human approval required for ${toolName}: this would ${concreteEffect}.`;
 }
 
 export function getDestructivePolicy(config: B2Config): DestructivePolicy {
@@ -114,10 +200,7 @@ export function checkDestructive(
   args: Record<string, unknown>,
   config: B2Config,
 ): GateResult {
-  const detector = DETECTORS[toolName];
-  if (!detector) return { ok: true };
-
-  const effect = detector(args ?? {});
+  const effect = destructiveEffect(toolName, args ?? {});
   if (!effect) return { ok: true }; // this specific call is not destructive
 
   const policy = getDestructivePolicy(config);

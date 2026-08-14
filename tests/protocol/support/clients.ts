@@ -167,6 +167,8 @@ export async function connectHttpClient(
     era: "modern" | "legacy" | "auto";
     headers?: Record<string, string>;
     cachePartition?: string;
+    capabilities?: ClientOptions["capabilities"];
+    inputRequired?: ClientOptions["inputRequired"];
   },
 ): Promise<{
   client: Client;
@@ -196,6 +198,8 @@ export async function connectHttpClient(
         : options.era === "auto"
           ? { mode: "auto" }
           : { mode: "legacy" },
+    capabilities: options.capabilities,
+    inputRequired: options.inputRequired,
     defaultCacheTtlMs: 0,
     cachePartition: options.cachePartition,
   });

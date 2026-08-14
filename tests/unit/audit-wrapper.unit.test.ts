@@ -2,11 +2,13 @@
  * Tests for the registration-time audit wrapper and repo-owned tool registry.
  */
 
+import { CLIENT_CAPABILITIES_META_KEY, isInputRequiredResult } from "@modelcontextprotocol/server";
 import { createAuditedToolCallback, createServer, getRegisteredTools } from "../../src/server";
 import { ToolRegistrationAdapter, type McpServer } from "../../src/mcp";
 import { formatB2Error } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
+import { DESTRUCTIVE_ELICITATION_RESPONSE_KEY } from "../../src/utils/destructive-gate";
 import { B2Config } from "../../src/utils/types";
 import { z } from "zod";
 import type { MockInstance } from "vitest";
@@ -27,6 +29,16 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.restoreAllMocks());
+
+function elicitationExtra(inputResponses?: Record<string, unknown>) {
+  return {
+    mcpReq: {
+      envelope: { [CLIENT_CAPABILITIES_META_KEY]: { elicitation: {} } },
+      inputResponses,
+      signal: new AbortController().signal,
+    },
+  };
+}
 
 describe("getRegisteredTools", () => {
   it("returns null when the repo registry is absent", () => {
@@ -170,5 +182,88 @@ describe("createAuditedToolCallback", () => {
       expect.objectContaining({ tool: "t", err: "boom" }),
       "tool.error",
     );
+  });
+
+  it("requests redacted elicitation before destructive calls on capable clients", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "done" }] });
+    const wrapped = createAuditedToolCallback("b2_set_bucket_notification_rules", original, cfg);
+
+    const result = await wrapped(
+      {
+        bucketId: "bucket-id-123",
+        eventNotificationRules: [
+          {
+            name: "rule-1",
+            targetConfiguration: {
+              targetType: "webhook",
+              url: `https://example.invalid/hook/${CANARY}`,
+              hmacSha256SigningSecret: CANARY,
+              customHeaders: [{ name: "Authorization", value: CONFIGURED_APPLICATION_KEY }],
+            },
+          },
+        ],
+        confirm: true,
+      },
+      elicitationExtra(),
+    );
+
+    expect(original).not.toHaveBeenCalled();
+    expect(isInputRequiredResult(result)).toBe(true);
+    const request = (result as any).inputRequests[DESTRUCTIVE_ELICITATION_RESPONSE_KEY];
+    const message = request.params.message;
+    expect(request.method).toBe("elicitation/create");
+    expect(message).toContain("b2_set_bucket_notification_rules");
+    expect(message).toContain("bucket-id-123");
+    expect(message).not.toContain(CANARY);
+    expect(message).not.toContain(CONFIGURED_APPLICATION_KEY);
+    expect(message).not.toContain("example.invalid");
+    expect(request.params.requestedSchema.properties.confirm.type).toBe("boolean");
+  });
+
+  it("injects confirm only after accepted destructive elicitation", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+
+    const result = await wrapped(
+      { bucket: "photos", key: "old.jpg" },
+      elicitationExtra({
+        [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "accept", content: { confirm: true } },
+      }),
+    );
+
+    expect(result).toEqual({ content: [{ type: "text", text: "deleted" }] });
+    expect(original).toHaveBeenCalledWith(
+      { bucket: "photos", key: "old.jpg", confirm: true },
+      expect.any(Object),
+    );
+  });
+
+  it("refuses destructive calls when capable clients decline elicitation", async () => {
+    const original = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "deleted" }] });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+
+    const result = await wrapped(
+      { bucket: "photos", key: "old.jpg" },
+      elicitationExtra({
+        [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: { action: "decline" },
+      }),
+    );
+
+    expect(original).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("human approval was not accepted");
+  });
+
+  it("falls back to existing destructive policy when clients lack elicitation", async () => {
+    const original = vi.fn().mockResolvedValue({ ok: true });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, cfg);
+
+    const args = { bucket: "photos", key: "old.jpg" };
+    const result = await wrapped(args, {
+      mcpReq: { envelope: {}, signal: new AbortController().signal },
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(original).toHaveBeenCalledWith(args, expect.any(Object));
   });
 });

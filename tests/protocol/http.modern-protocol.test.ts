@@ -34,8 +34,13 @@ import { installSdkTransport } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
+let s3SendSpy: any;
 
-const savedHttpEnv = saveEnv();
+const savedHttpEnv = saveEnv([
+  "B2_REGISTER_ALL_TOOLS",
+  "B2_HTTP_CREDENTIAL_MODE",
+  "B2_DESTRUCTIVE_POLICY",
+]);
 
 beforeAll(() => {
   setDefaultHttpTestEnv();
@@ -46,9 +51,11 @@ afterAll(() => {
 });
 
 beforeEach(async () => {
+  restoreEnv(savedHttpEnv);
+  setDefaultHttpTestEnv();
   const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
   installSdkTransport(simulator.transport());
-  vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({
+  s3SendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({
     Contents: [],
     CommonPrefixes: [],
     IsTruncated: false,
@@ -82,6 +89,10 @@ function parsedJson(body: string): any {
 
 function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
   return modernBody("tools/call", { name, arguments: args }, id);
+}
+
+function s3CommandNames(): string[] {
+  return s3SendSpy.mock.calls.map(([command]: [any]) => command.constructor.name);
 }
 
 describe("HTTP handler (MCP 2026-07-28)", () => {
@@ -138,6 +149,99 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
         ),
       ).toBe(true);
       expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
+    } finally {
+      await closeClient(client);
+    }
+  });
+
+  it("requires accepted elicitation before destructive calls on capable clients", async () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    await replaceHandle();
+    s3SendSpy.mockClear().mockResolvedValue({});
+    const elicitationRequests: any[] = [];
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "destructive-accept",
+      capabilities: { elicitation: {} },
+      inputRequired: { autoFulfill: true },
+    });
+    client.setRequestHandler("elicitation/create", async (request) => {
+      elicitationRequests.push(request);
+      return { action: "accept", content: { confirm: true } };
+    });
+
+    try {
+      const result = await client.callTool({
+        name: "s3_delete_object",
+        arguments: { bucket: "protocol-http-modern", key: "old.txt" },
+      });
+
+      expect(result.isError).not.toBe(true);
+      expect(elicitationRequests).toHaveLength(1);
+      expect(elicitationRequests[0].params.message).toContain("s3_delete_object");
+      expect(elicitationRequests[0].params.message).toContain("old.txt");
+      expect(elicitationRequests[0].params.message).not.toContain(creds["x-b2-key"]);
+      expect(s3CommandNames()).toContain("DeleteObjectCommand");
+    } finally {
+      await closeClient(client);
+    }
+  });
+
+  it("refuses destructive calls when capable clients decline elicitation", async () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    await replaceHandle();
+    s3SendSpy.mockClear().mockResolvedValue({});
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "destructive-decline",
+      capabilities: { elicitation: {} },
+      inputRequired: { autoFulfill: true },
+    });
+    client.setRequestHandler("elicitation/create", async () => ({ action: "decline" }));
+
+    try {
+      const result = await client.callTool({
+        name: "s3_delete_object",
+        arguments: { bucket: "protocol-http-modern", key: "old.txt" },
+      });
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain(
+        "human approval was not accepted",
+      );
+      expect(s3CommandNames()).not.toContain("DeleteObjectCommand");
+    } finally {
+      await closeClient(client);
+    }
+  });
+
+  it("falls back to confirm when clients do not advertise elicitation", async () => {
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    await replaceHandle();
+    s3SendSpy.mockClear().mockResolvedValue({});
+    const { client } = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "destructive-fallback",
+    });
+
+    try {
+      const blocked = await client.callTool({
+        name: "s3_delete_object",
+        arguments: { bucket: "protocol-http-modern", key: "old.txt" },
+      });
+      expect(blocked.isError).toBe(true);
+      expect((blocked.content[0] as { text: string }).text).toContain("Confirmation required");
+      expect(s3CommandNames()).not.toContain("DeleteObjectCommand");
+
+      const confirmed = await client.callTool({
+        name: "s3_delete_object",
+        arguments: { bucket: "protocol-http-modern", key: "old.txt", confirm: true },
+      });
+      expect(confirmed.isError).not.toBe(true);
+      expect(s3CommandNames()).toContain("DeleteObjectCommand");
     } finally {
       await closeClient(client);
     }
