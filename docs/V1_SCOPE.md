@@ -113,20 +113,19 @@ for Phase 1. The reviewed adoption and parity matrix lives in
 implementation allowance from #55 that accepted direct B2 HTTP calls and direct
 AWS SDK S3 calls as the default architecture.
 
-Direct B2 HTTP calls are not allowed in runtime code. Direct AWS SDK calls to
-B2's S3-compatible endpoint are retained only when anchored through the SDK
-`/s3` helper and justified by S3-material behavior. New B2 behavior must use
-the public high-level `@backblaze-labs/b2-sdk` facade, documented
+Direct B2 HTTP calls are not allowed in runtime code. Runtime AWS SDK calls to
+B2's S3-compatible endpoint are allowed only through
+`src/s3/aws-sdk-adapter.ts`, with configuration anchored through the official
+SDK `/s3` helper. That adapter is the permanent S3-compatible data-plane
+boundary for `s3_*` object, presigned URL, multipart, bucket, lifecycle, and
+usage-report object-read paths. New native B2 behavior must use the public
+high-level `@backblaze-labs/b2-sdk` facade, documented
 `@backblaze-labs/b2-sdk/raw`, documented `@backblaze-labs/b2-sdk/s3`, or
-composition of public SDK operations. Missing SDK capabilities must be tracked
-upstream and released in a stable SDK version before the MCP release consumes
-them.
+composition of public SDK operations.
 
 The product contract is Backblaze B2 through MCP, not S3 as a standalone product
-surface. Existing `s3_*` names remain compatibility names only until #49 freezes
-the final public tool contract. #49 must keep `s3_*` names only where S3
-semantics are material, turn compatible rows into aliases over public SDK
-operations, or rename/remove/defer them before contract freeze.
+surface. Existing `s3_*` names remain compatibility names for the public data
+plane, implemented through the AWS S3 SDK against B2's S3-compatible endpoint.
 
 ## Decision Levels
 
@@ -640,7 +639,7 @@ The tracker issues that should consume this decision include:
 
 - [#49](https://github.com/backblaze-labs/b2-mcp/issues/49) for deterministic
   tool contract fixtures. #49 must freeze the post-SDK-migration surface, not
-  inherited direct B2 HTTP/AWS behavior.
+  inherited direct B2 HTTP behavior.
 - [#71](https://github.com/backblaze-labs/b2-mcp/issues/71) for the official
   SDK adoption and MCP tool parity contract.
 - [#57](https://github.com/backblaze-labs/b2-mcp/issues/57) for credential

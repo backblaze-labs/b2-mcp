@@ -3,14 +3,31 @@
 // so future fixtures can move to focused files without changing test behavior.
 
 import type { HttpRequest, HttpResponse, HttpTransport } from "@backblaze-labs/b2-sdk";
+import { ReadableStream } from "node:stream/web";
 import { getRegisteredTools } from "../../src/server";
 import type { McpServer, ToolCallback, ToolRegistrar } from "../../src/mcp";
 import type {
   B2S3CompletedMultipartPart,
+  B2S3CopyObjectOptions,
+  B2S3DeleteObjectOptions,
+  B2S3DeleteObjectResult,
+  B2S3DeleteObjectsResult,
+  B2S3DeleteObjectsOptions,
+  B2S3DownloadedObject,
+  B2S3GetObjectOptions,
+  B2S3HeadObjectResult,
+  B2S3HeadObjectOptions,
   B2S3LifecycleRule,
+  B2S3ListObjectsV2Options,
+  B2S3ListObjectsV2Result,
+  B2S3ListObjectVersionsOptions,
+  B2S3ListObjectVersionsResult,
   B2S3MultipartUploadSummary,
   B2S3PartSummary,
   B2S3PeerClient,
+  B2S3PresignObjectUrlOptions,
+  B2S3PresignObjectUrlResult,
+  B2S3PutObjectOptions,
 } from "../../src/s3/aws-sdk-adapter";
 import { currentMcpRequestSignal } from "../../src/request-context";
 import { abortError } from "../../src/utils/named-error";
@@ -197,6 +214,15 @@ export type DeterministicS3PeerClient = Pick<
   | "headBucket"
   | "putBucketLifecycle"
   | "getBucketLocation"
+  | "putObject"
+  | "getObject"
+  | "deleteObject"
+  | "deleteObjects"
+  | "headObject"
+  | "copyObject"
+  | "listObjectsV2"
+  | "listObjectVersions"
+  | "presignObjectUrl"
   | "createMultipartUpload"
   | "presignUploadPart"
   | "completeMultipartUpload"
@@ -245,6 +271,88 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
 
   async getBucketLocation(input: string): Promise<{ locationConstraint?: string }> {
     return this.next("getBucketLocation", input, { locationConstraint: "us-west-004" });
+  }
+
+  async putObject(input: B2S3PutObjectOptions): Promise<void> {
+    await this.next("putObject", input, undefined);
+  }
+
+  async getObject(input: B2S3GetObjectOptions): Promise<B2S3DownloadedObject> {
+    return this.next("getObject", input, {
+      key: input.key,
+      contentType: "text/plain",
+      contentLength: 0,
+      lastModified: new Date("2026-01-01T00:00:00.000Z"),
+      etag: '"etag"',
+      versionId: "version-1",
+      metadata: {},
+      body: new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.close();
+        },
+      }) as unknown as B2S3DownloadedObject["body"],
+    });
+  }
+
+  async deleteObject(input: B2S3DeleteObjectOptions): Promise<B2S3DeleteObjectResult> {
+    return this.next("deleteObject", input, {});
+  }
+
+  async deleteObjects(input: B2S3DeleteObjectsOptions): Promise<B2S3DeleteObjectsResult> {
+    return this.next("deleteObjects", input, {
+      deleted: input.quiet === true ? [] : input.objects.map((object) => ({ Key: object.key })),
+      errors: [],
+      attempted: input.objects.length,
+      aborted: false,
+      maxConcurrency: Math.min(8, input.objects.length),
+    });
+  }
+
+  async headObject(input: B2S3HeadObjectOptions): Promise<B2S3HeadObjectResult> {
+    return this.next("headObject", input, {
+      key: input.key,
+      contentType: "text/plain",
+      contentLength: 0,
+      lastModified: new Date("2026-01-01T00:00:00.000Z"),
+      etag: '"etag"',
+      versionId: "version-1",
+      metadata: {},
+    });
+  }
+
+  async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
+    await this.next("copyObject", input, undefined);
+  }
+
+  async listObjectsV2(input: B2S3ListObjectsV2Options): Promise<B2S3ListObjectsV2Result> {
+    return this.next("listObjectsV2", input, {
+      objects: [],
+      commonPrefixes: [],
+      isTruncated: false,
+      keyCount: 0,
+    });
+  }
+
+  async listObjectVersions(
+    input: B2S3ListObjectVersionsOptions,
+  ): Promise<B2S3ListObjectVersionsResult> {
+    return this.next("listObjectVersions", input, {
+      versions: [],
+      deleteMarkers: [],
+      commonPrefixes: [],
+      isTruncated: false,
+    });
+  }
+
+  async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
+    return this.next("presignObjectUrl", input, {
+      url: `https://s3.example.invalid/${encodeURIComponent(input.bucket)}/${encodeURIComponent(
+        input.key,
+      )}?operation=${input.operation}`,
+      operation: input.operation,
+      expiresIn: input.expiresIn,
+      expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
+    });
   }
 
   async createMultipartUpload(input: {

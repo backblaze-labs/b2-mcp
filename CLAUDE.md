@@ -58,7 +58,7 @@ pnpm run test:integration:live
 
 - `loadConfig()` — reads env vars, validates required keys, returns `B2Config`
 - `fetchCapabilities(config)` — one-shot authorize that returns the key's `allowed.capabilities`; returns `null` only for `B2_REGISTER_ALL_TOOLS=true`. Lookup failures throw so HTTP fails closed.
-- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the retained S3 peer client for S3-material gaps, then calls all `register*Tools()` functions
+- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the AWS S3 data-plane client (configured through `@backblaze-labs/b2-sdk/s3`), then calls all `register*Tools()` functions
 
 Each register function receives the server + client(s) and calls `server.tool(name, description, zodSchema, handler)` for each tool. Adding a new tool means adding it to the appropriate register file — no changes to `server.ts` needed unless it's a new register file. **New tools should also be added to the capability map** (`src/utils/tool-capabilities.ts`).
 
@@ -68,9 +68,9 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 The surface is split by plane: **control plane = native B2 semantics, data plane = compatibility `s3_*` tool contracts.**
 
-**B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, native bucket/key/Object Lock/notification operations, and SDK-backed object compatibility operations. `B2Client` owns the shared auth/circuit wrapper and currently hosts the `s3*` object facade methods used by `src/s3/objects.ts` and `src/s3/presigned.ts`.
+**B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, and native bucket/key/Object Lock/notification operations. `B2Client` owns the shared auth/circuit wrapper and native lookups used by S3 safety guards, such as version-ID ownership checks and delete-marker metadata synthesis.
 
-**S3-compatible API** (`src/s3/`) — the **data-plane tool contract**: object put/get/copy/delete/list handlers are thin adapters over the B2 SDK facade where semantics match; S3-material multipart, bucket reachability/location/lifecycle, upload-part-copy, and report-bucket reads retain the AWS SDK peer client configured through `@backblaze-labs/b2-sdk/s3`. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted — which is why the application key (`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`) is the primary credential and signs retained S3 requests. (The deprecated `B2_APP_KEY_ID` / `B2_APP_KEY` override remains only for legacy setups whose application key is a master key.)
+**S3-compatible API** (`src/s3/`) — the **data-plane tool contract**: all `s3_*` object, presigned URL, multipart, bucket reachability/location/lifecycle, upload-part-copy, and report-bucket reads use the permanent AWS S3 SDK peer client configured through `@backblaze-labs/b2-sdk/s3`. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted — which is why the application key (`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`) is the primary credential and signs S3 requests. (The deprecated `B2_APP_KEY_ID` / `B2_APP_KEY` override remains only for legacy setups whose application key is a master key.)
 
 **Credential routing** (`createServer` in `server.ts`): the application key drives the B2 native API, S3, and key management. Only the Partner API tools use the master key — `createServer` builds a second `B2Client` from `B2_MASTER_KEY_*` and wires it into `registerPartnerTools`, falling back to the application-key client when no distinct master key is set.
 
@@ -80,16 +80,16 @@ The surface is split by plane: **control plane = native B2 semantics, data plane
 
 ### Object upload / data plane
 
-Object data movement runs through the **`s3_*` data-plane tools**. Inline object operations in `src/s3/objects.ts` call SDK-backed `B2Client.s3*` compatibility methods; S3-material multipart remains in `src/s3/multipart.ts` via the retained AWS SDK peer client.
+Object data movement runs through the **`s3_*` data-plane tools**. Inline object operations in `src/s3/objects.ts`, presigning in `src/s3/presigned.ts`, and multipart in `src/s3/multipart.ts` all call the repository-owned AWS S3 peer adapter configured for B2's S3-compatible endpoint.
 
 **Control-plane-first data path.** The preferred way to move real object data is a **presigned URL** (`s3_get_presigned_url`, PutObject or GetObject): the bytes flow directly between the client/worker and B2 and never pass through the server. The inline `s3_put_object` / `s3_get_object` paths are bounded to **≤ 1 MiB** (`MAX_INLINE_OBJECT_BYTES` in `src/s3/objects.ts`) — a control-plane convenience for manifests, sidecars, and tiny configs; anything larger is refused with a pointer to `s3_get_presigned_url` or the multipart flow. **Multipart is presigned-per-part too**: `s3_create_multipart_upload` → `s3_presign_upload_part` (mints a presigned PUT URL per part) → the client PUTs each part directly to B2 → `s3_complete_multipart_upload` with the returned ETags. No multipart tool streams part bytes through the server. On the trusted stdio transport, `saveToPath` still streams any size straight to disk without buffering. Because the HTTP transport also disables local-file access by default, the internet-facing server is **control-plane-only by construction**: no bulk object data can flow through it.
 
-> The former native data tools and their files (`src/b2/files.ts`, `src/b2/large-files.ts`, `src/b2/download-urls.ts` — including `b2_upload_file`'s auto-multipart path and the native download-URL builders) were **removed** from the public tool surface. The inherited `s3_*` object names remain compatibility aliases, but their implementation now uses public B2 SDK operations whenever equivalent semantics exist.
+> The former native data tools and their files (`src/b2/files.ts`, `src/b2/large-files.ts`, `src/b2/download-urls.ts` — including `b2_upload_file`'s auto-multipart path and the native download-URL builders) were **removed** from the public tool surface. The inherited `s3_*` object names remain compatibility aliases, and their implementation now uses the AWS S3 SDK against B2's S3-compatible endpoint.
 
 ### Tool naming conventions
 
 - `b2_*` — B2 native **control-plane** tools (buckets, application keys, Object Lock, notifications), plus Partner API group/trial tools (use b2api/v3)
-- `s3_*` — compatibility **data-plane** tools; object aliases use the B2 SDK facade, while S3-material multipart/reachability/lifecycle paths use the retained AWS SDK peer client through the SDK `/s3` boundary
+- `s3_*` — compatibility **data-plane** tools; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary
 
 ### Retry logic (`src/utils/retry.ts`)
 

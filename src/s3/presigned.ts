@@ -1,9 +1,9 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
-import { B2Client } from "../b2/client.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-import type { B2Config } from "../utils/types.js";
+import type { B2Config, B2S3VersionGuard } from "../utils/types.js";
+import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 
 /**
  * Presigned URL tools for the B2 S3-compatible API.
@@ -16,7 +16,10 @@ import type { B2Config } from "../utils/types.js";
 interface S3PresignedToolOptions {
   allowGetObjectUrl?: boolean;
   allowPutObjectUrl?: boolean;
+  allowExplicitVersionInspection?: boolean;
 }
+
+type B2S3PresignedClient = Pick<B2S3PeerClient, "presignObjectUrl">;
 
 const PUT_OBJECT_CONFIRM_DESC =
   "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
@@ -45,12 +48,14 @@ function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean)
 
 export function registerS3PresignedTools(
   server: ToolRegistrar,
-  b2: B2Client,
+  s3: B2S3PresignedClient,
+  versions: B2S3VersionGuard,
   config: B2Config,
   options: S3PresignedToolOptions = {},
 ): void {
   const allowGetObjectUrl = options.allowGetObjectUrl ?? true;
   const allowPutObjectUrl = options.allowPutObjectUrl ?? true;
+  const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   const inputSchema = {
     bucket: z.string().describe("The bucket name."),
     key: z.string().describe("The object key."),
@@ -106,8 +111,23 @@ export function registerS3PresignedTools(
         }
         const gate = checkDestructive("s3_get_presigned_url", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        if (args.operation === "GetObject" && args.versionId) {
+          if (!allowExplicitVersionInspection) {
+            return toolError({
+              status: 403,
+              code: "missing_capability",
+              message:
+                "Version-targeted S3 presigned URLs require the readFiles capability for native version binding.",
+            });
+          }
+          await versions.resolveS3FileVersion({
+            bucket: args.bucket,
+            key: args.key,
+            versionId: args.versionId,
+          });
+        }
         return toolJson(
-          await b2.s3PresignObjectUrl({
+          await s3.presignObjectUrl({
             bucket: args.bucket,
             key: args.key,
             operation: args.operation,

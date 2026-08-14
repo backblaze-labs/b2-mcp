@@ -209,25 +209,27 @@ describe("SDK adoption contract", () => {
     expect(partner).toContain('client.call("b2_list_group_members"');
     expect(partner).not.toContain("partnerSdkGap");
 
-    expectMatrixPath("s3_put_object", "facade", "Bucket.upload");
-    expectMatrixPath("s3_get_object", "facade", "Bucket.download");
-    expectMatrixPath("s3_delete_objects", "compose", "Bucket.deleteFileVersion");
-    expectMatrixPath("s3_list_objects_v2", "facade", "Bucket.listFileNames");
-    expect(b2Client).toContain("s3PutObject");
-    expect(b2Client).toContain("s3ListObjectsV2");
-    expect(s3Objects).toContain("s3PutObject");
+    expectMatrixPath("s3_put_object", "s3", "B2S3PeerClient.putObject");
+    expectMatrixPath("s3_get_object", "s3", "B2S3PeerClient.getObject");
+    expectMatrixPath("s3_delete_object", "s3", "B2S3PeerClient.deleteObject");
+    expectMatrixPath("s3_delete_objects", "s3", "B2S3PeerClient.deleteObjects");
+    expectMatrixPath("s3_copy_object", "s3", "B2S3PeerClient.copyObject");
+    expectMatrixPath("s3_list_objects_v2", "s3", "B2S3PeerClient.listObjectsV2");
+    expectMatrixPath("s3_list_object_versions", "s3", "B2S3PeerClient.listObjectVersions");
+    expectMatrixPath("s3_get_presigned_url", "s3", "B2S3PeerClient.presignObjectUrl");
+    expect(b2Client).not.toContain("s3PutObject");
+    expect(b2Client).not.toContain("presignS3GetObjectUrl");
+    expect(s3Objects).toContain("putObject");
+    expect(s3Objects).not.toContain("../b2/client");
     expect(s3Objects).not.toContain("@aws-sdk/client-s3");
-    expectMatrixPath("s3_get_presigned_url", "s3", "presignS3GetObjectUrl");
-    expect(b2Client).toContain("presignS3GetObjectUrl");
-    expect(b2Client).toContain("presignS3PutObjectUrl");
-    expect(s3Presigned).toContain("s3PresignObjectUrl");
+    expect(s3Presigned).toContain("presignObjectUrl");
     expect(s3Presigned).not.toContain("@aws-sdk/s3-request-presigner");
 
     expectMatrixPath("b2_usage_growth", "compose", "createReportS3Client");
     expectMatrixPath("b2_egress_leaders", "compose", "createReportS3Client");
     expect(reportClient).toContain("createReportS3Client");
     expect(s3Adapter).toContain("export class B2S3PeerClient");
-    for (const caller of [s3Buckets, s3Extras, s3Multipart, reportClient]) {
+    for (const caller of [s3Buckets, s3Objects, s3Presigned, s3Extras, s3Multipart, reportClient]) {
       expect(caller).not.toMatch(/\b[A-Z][A-Za-z0-9]*Command\b/);
       expect(caller).not.toContain("getSignedUrl");
     }

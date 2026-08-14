@@ -2,42 +2,33 @@ import type {
   ApplicationKey,
   ApplicationKeyId,
   B2Client as SdkB2Client,
-  Bucket as SdkBucket,
-  BucketUploadOptions,
   BucketRetentionPolicy as SdkBucketRetentionPolicy,
   CorsRule as SdkCorsRule,
-  DownloadResult,
   EncryptionSetting as SdkEncryptionSetting,
   BucketInfo,
   BucketId,
   EventNotificationRule as SdkEventNotificationRule,
   FileVersion,
-  HeadResult,
   GetBucketNotificationRulesResponse,
   ListBucketsRequest,
   LifecycleRule as SdkLifecycleRule,
-  MetadataDirective as SdkMetadataDirective,
   PartInfo,
   ReplicationConfiguration as SdkReplicationConfiguration,
   SetBucketNotificationRulesResponse,
   UpdateBucketRequest,
   UnfinishedLargeFile,
 } from "@backblaze-labs/b2-sdk";
-import {
-  BufferSource,
-  FileSource,
-  accountId,
-  applicationKeyId,
-  bucketId,
-  fileId,
-  largeFileId,
-} from "@backblaze-labs/b2-sdk";
-import { presignS3GetObjectUrl, presignS3PutObjectUrl } from "@backblaze-labs/b2-sdk/s3";
-import type { ReadableStream as WebReadableStream } from "node:stream/web";
+import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
 import { B2AuthManager } from "../auth.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
-import { B2AuthResponse } from "../utils/types.js";
+import type {
+  B2AuthResponse,
+  B2S3FileVersionBinding,
+  B2S3FileVersionResolution,
+  B2S3VersionTarget,
+} from "../utils/types.js";
+import { forEachBounded } from "../utils/concurrency.js";
 import { buildUserAgent } from "../utils/user-agent.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
@@ -305,147 +296,6 @@ export interface ListPartsResult {
   nextPartNumber?: number | null;
 }
 
-export interface S3PutObjectOptions {
-  bucket: string;
-  key: string;
-  source: { kind: "buffer"; buffer: Uint8Array } | { kind: "file"; path: string };
-  contentType?: string;
-  metadata?: Record<string, string>;
-  serverSideEncryption?: "AES256";
-}
-
-export interface S3GetObjectOptions {
-  bucket: string;
-  key: string;
-  range?: string;
-  versionId?: string;
-}
-
-export interface S3DownloadedObject {
-  key: string;
-  contentType: string;
-  contentLength: number;
-  lastModified: Date;
-  etag?: string;
-  versionId: string;
-  metadata: Record<string, string>;
-  body: WebReadableStream<Uint8Array>;
-}
-
-export type S3HeadObjectResult = Omit<S3DownloadedObject, "body"> & {
-  serverSideEncryption?: string;
-  deleteMarker?: boolean;
-};
-
-export interface S3DeleteObjectOptions {
-  bucket: string;
-  key: string;
-  versionId?: string;
-}
-
-export interface S3DeleteObjectsOptions {
-  bucket: string;
-  objects: Array<{ key: string; versionId?: string }>;
-  quiet?: boolean;
-  bypassGovernance?: boolean;
-}
-
-export interface S3DeleteObjectsResult {
-  deleted: Array<{ Key: string; VersionId?: string }>;
-  errors: Array<{ Key: string; VersionId?: string; Code: string; Message: string }>;
-  attempted: number;
-  aborted: boolean;
-  maxConcurrency: number;
-}
-
-export interface S3CopyObjectOptions {
-  sourceBucket: string;
-  sourceKey: string;
-  sourceVersionId?: string;
-  destinationBucket: string;
-  destinationKey: string;
-  metadataDirective?: "COPY" | "REPLACE";
-  contentType?: string;
-  metadata?: Record<string, string>;
-}
-
-export interface S3ObjectSummary {
-  Key: string;
-  LastModified: Date;
-  ETag?: string;
-  Size: number;
-  StorageClass: "STANDARD";
-}
-
-export interface S3CommonPrefix {
-  Prefix: string;
-}
-
-export interface S3ListObjectsV2Options {
-  bucket: string;
-  prefix?: string;
-  delimiter?: string;
-  maxKeys?: number;
-  continuationToken?: string;
-  startAfter?: string;
-}
-
-export interface S3ListObjectsV2Result {
-  objects: S3ObjectSummary[];
-  commonPrefixes: S3CommonPrefix[];
-  isTruncated: boolean;
-  nextContinuationToken?: string;
-  keyCount: number;
-}
-
-export interface S3ObjectVersionSummary extends S3ObjectSummary {
-  VersionId: string;
-  IsLatest?: boolean;
-}
-
-export interface S3DeleteMarkerSummary {
-  Key: string;
-  VersionId: string;
-  IsLatest?: boolean;
-  LastModified: Date;
-}
-
-export interface S3ListObjectVersionsOptions {
-  bucket: string;
-  prefix?: string;
-  delimiter?: string;
-  maxKeys?: number;
-  keyMarker?: string;
-  versionIdMarker?: string;
-}
-
-export interface S3ListObjectVersionsResult {
-  versions: S3ObjectVersionSummary[];
-  deleteMarkers: S3DeleteMarkerSummary[];
-  commonPrefixes: S3CommonPrefix[];
-  isTruncated: boolean;
-  nextKeyMarker?: string;
-  nextVersionIdMarker?: string;
-}
-
-export interface S3PresignObjectUrlOptions {
-  bucket: string;
-  key: string;
-  operation: "GetObject" | "PutObject";
-  expiresIn?: number;
-  versionId?: string;
-  contentType?: string;
-}
-
-export interface S3PresignObjectUrlResult {
-  url: string;
-  operation: "GetObject" | "PutObject";
-  expiresIn: number;
-  expiresAt: string;
-}
-
-const S3_DELETE_OBJECTS_MAX_CONCURRENCY = 8;
-
 function cloneJsonResponse<T>(value: T): T {
   // SDK simulator responses can contain shared object references that the MCP
   // sanitizer would otherwise mark as circular. B2 API payloads are JSON-only,
@@ -605,6 +455,23 @@ function toFileVersionResult(value: FileVersion): FileVersionResult {
   };
 }
 
+function toS3FileVersionBinding(value: FileVersion): B2S3FileVersionBinding {
+  return {
+    fileName: value.fileName,
+    fileId: String(value.fileId),
+    bucketId: String(value.bucketId),
+    contentLength: value.contentLength,
+    contentType: value.contentType,
+    uploadTimestamp: value.uploadTimestamp,
+    fileInfo: cloneJsonField(value.fileInfo),
+    action: value.action,
+    serverSideEncryption:
+      value.serverSideEncryption?.mode === "SSE-B2"
+        ? value.serverSideEncryption.algorithm
+        : undefined,
+  };
+}
+
 function toUnfinishedLargeFileResult(value: UnfinishedLargeFile): UnfinishedLargeFileResult {
   return {
     fileId: String(value.fileId),
@@ -617,136 +484,6 @@ function toPartInfoResult(value: PartInfo): PartInfoResult {
   return {
     partNumber: value.partNumber,
     contentLength: value.contentLength,
-  };
-}
-
-function b2NotFound(message: string): Error & { status: number; code: string } {
-  const err = new Error(message) as Error & { status: number; code: string };
-  err.status = 404;
-  err.code = "not_found";
-  return err;
-}
-
-function s3Etag(value: string | null | undefined): string | undefined {
-  return value && value !== "none" ? `"${value}"` : undefined;
-}
-
-function uploadTimestampDate(value: number): Date {
-  return new Date(value);
-}
-
-function sseB2Setting(value: "AES256" | undefined): SdkEncryptionSetting | undefined {
-  return value ? { mode: "SSE-B2", algorithm: value } : undefined;
-}
-
-function s3FileEtag(
-  file: FileVersion | null | undefined,
-  fallback?: string | null,
-): string | undefined {
-  return s3Etag(file?.contentMd5 ?? file?.contentSha1 ?? fallback);
-}
-
-function fileServerSideEncryption(file: FileVersion | null | undefined): string | undefined {
-  const encryption = file?.serverSideEncryption;
-  if (!encryption || encryption.mode === "none" || encryption.mode === null) return undefined;
-  return encryption.algorithm;
-}
-
-function toS3DownloadedObject(
-  key: string,
-  value: DownloadResult,
-  file?: FileVersion | null,
-): S3DownloadedObject {
-  return {
-    key,
-    contentType: value.headers.contentType,
-    contentLength: value.headers.contentLength,
-    lastModified: uploadTimestampDate(value.headers.uploadTimestamp),
-    etag: s3FileEtag(file, value.headers.contentSha1),
-    versionId: String(value.headers.fileId),
-    metadata: cloneJsonField(value.headers.fileInfo) ?? {},
-    body: value.body as WebReadableStream<Uint8Array>,
-  };
-}
-
-function toS3HeadObjectResult(
-  key: string,
-  value: HeadResult,
-  file?: FileVersion | null,
-): S3HeadObjectResult {
-  return {
-    key,
-    contentType: value.headers.contentType,
-    contentLength: value.headers.contentLength,
-    lastModified: uploadTimestampDate(value.headers.uploadTimestamp),
-    etag: s3FileEtag(file, value.headers.contentSha1),
-    versionId: String(value.headers.fileId),
-    metadata: cloneJsonField(value.headers.fileInfo) ?? {},
-    serverSideEncryption: fileServerSideEncryption(file),
-    deleteMarker: file?.action === "hide" ? true : undefined,
-  };
-}
-
-function toS3HeadObjectResultFromFile(file: FileVersion): S3HeadObjectResult {
-  return {
-    key: file.fileName,
-    contentType: file.contentType,
-    contentLength: file.contentLength,
-    lastModified: uploadTimestampDate(file.uploadTimestamp),
-    etag: s3FileEtag(file),
-    versionId: String(file.fileId),
-    metadata: cloneJsonField(file.fileInfo) ?? {},
-    serverSideEncryption: fileServerSideEncryption(file),
-    deleteMarker: file.action === "hide" ? true : undefined,
-  };
-}
-
-function toS3ObjectSummary(file: FileVersion): S3ObjectSummary {
-  return {
-    Key: file.fileName,
-    LastModified: uploadTimestampDate(file.uploadTimestamp),
-    ETag: s3FileEtag(file),
-    Size: file.contentLength,
-    StorageClass: "STANDARD",
-  };
-}
-
-function toS3ObjectVersionSummary(file: FileVersion, isLatest: boolean): S3ObjectVersionSummary {
-  return {
-    ...toS3ObjectSummary(file),
-    VersionId: String(file.fileId),
-    IsLatest: isLatest,
-  };
-}
-
-function toS3DeleteMarkerSummary(file: FileVersion, isLatest: boolean): S3DeleteMarkerSummary {
-  return {
-    Key: file.fileName,
-    VersionId: String(file.fileId),
-    IsLatest: isLatest,
-    LastModified: uploadTimestampDate(file.uploadTimestamp),
-  };
-}
-
-function toS3CommonPrefix(file: FileVersion): S3CommonPrefix {
-  return { Prefix: file.fileName };
-}
-
-function deleteObjectsError(
-  target: { key: string; versionId?: string },
-  err: unknown,
-): { Key: string; VersionId?: string; Code: string; Message: string } {
-  const e = err as { code?: unknown; name?: unknown; message?: unknown };
-  const code =
-    (typeof e?.code === "string" && e.code) ||
-    (typeof e?.name === "string" && e.name) ||
-    "delete_failed";
-  const message = typeof e?.message === "string" && e.message ? e.message : "Object delete failed.";
-  return {
-    Key: target.key,
-    VersionId: target.versionId,
-    Code: code,
-    Message: message,
   };
 }
 
@@ -767,6 +504,26 @@ function toFileRetentionResult(value: UpdateFileRetentionResult): UpdateFileRete
       retainUntilTimestamp: value.fileRetention.retainUntilTimestamp,
     },
   };
+}
+
+function bucketIdFromAuthorizedScope(auth: B2AuthResponse, bucketName: string): string | null {
+  const buckets = auth.allowedBuckets;
+  if (!buckets || buckets.length === 0) return null;
+  const namedBucket = buckets.find((bucket) => bucket.name === bucketName);
+  if (namedBucket) return namedBucket.id;
+  return null;
+}
+
+async function resolveTrustedBucketId(
+  client: SdkB2Client,
+  auth: B2AuthResponse,
+  bucketName: string,
+): Promise<string> {
+  const scopedBucketId = bucketIdFromAuthorizedScope(auth, bucketName);
+  if (scopedBucketId) return scopedBucketId;
+  const bucket = await client.getBucket(bucketName);
+  if (!bucket) throw b2NotFound(`Bucket '${bucketName}' not found.`);
+  return String(bucket.id);
 }
 
 function maybeBucketId(value: string | undefined): BucketId | undefined {
@@ -983,6 +740,10 @@ function isUnauthorized(err: unknown): boolean {
   return e.status === 401 || e.response?.status === 401;
 }
 
+function b2NotFound(message: string): Error {
+  return Object.assign(new Error(message), { status: 404, code: "not_found" });
+}
+
 export interface NativeCallOptions {
   method?: "GET" | "POST";
   useDownloadUrl?: boolean;
@@ -1150,6 +911,90 @@ export class B2Client {
     };
   }
 
+  async resolveS3FileVersion(options: {
+    bucket: string;
+    key: string;
+    versionId: string;
+  }): Promise<B2S3FileVersionBinding> {
+    return this.withNativeCircuit(async (client, auth) => {
+      const expectedBucketId = await resolveTrustedBucketId(client, auth, options.bucket);
+      const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
+        fileId: fileId(options.versionId),
+      });
+      if (version.fileName !== options.key || String(version.bucketId) !== expectedBucketId) {
+        throw b2NotFound(`Object '${options.key}' not found in bucket '${options.bucket}'.`);
+      }
+      return toS3FileVersionBinding(version);
+    });
+  }
+
+  async resolveS3FileVersions(options: {
+    bucket: string;
+    objects: B2S3VersionTarget[];
+    maxConcurrency?: number;
+  }): Promise<B2S3FileVersionResolution[]> {
+    if (options.objects.length === 0) return [];
+    if (options.objects.every((object) => object.versionId === undefined)) {
+      return options.objects.map((object) => ({ object, version: null }));
+    }
+
+    return this.withNativeCircuit(async (client, auth) => {
+      let expectedBucketId: string;
+      try {
+        expectedBucketId = await resolveTrustedBucketId(client, auth, options.bucket);
+      } catch (err) {
+        return options.objects.map((object) =>
+          object.versionId === undefined
+            ? { object, version: null }
+            : { object, version: null, error: err },
+        );
+      }
+
+      const signal = currentMcpRequestSignal();
+      const results: Array<B2S3FileVersionResolution | undefined> = [];
+      await forEachBounded(
+        options.objects,
+        { maxConcurrency: options.maxConcurrency, signal },
+        async (object, index) => {
+          if (object.versionId === undefined) {
+            results[index] = { object, version: null };
+            return;
+          }
+          try {
+            const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
+              fileId: fileId(object.versionId),
+            });
+            if (version.fileName !== object.key || String(version.bucketId) !== expectedBucketId) {
+              throw b2NotFound(`Object '${object.key}' not found in bucket '${options.bucket}'.`);
+            }
+            results[index] = { object, version: toS3FileVersionBinding(version) };
+          } catch (error) {
+            results[index] = { object, version: null, error };
+          }
+        },
+      );
+
+      return results.flatMap((result) => (result ? [result] : []));
+    });
+  }
+
+  async getCurrentS3FileVersion(options: {
+    bucket: string;
+    key: string;
+  }): Promise<B2S3FileVersionBinding | null> {
+    return this.withNativeCircuit(async (client, auth) => {
+      const bucket = await client.getBucket(options.bucket);
+      if (!bucket) throw b2NotFound(`Bucket '${options.bucket}' not found.`);
+      const result = await client.raw.listFileVersions(auth.apiUrl, auth.authorizationToken, {
+        bucketId: bucket.id,
+        prefix: options.key,
+        maxFileCount: 1,
+      });
+      const version = result.files.find((file) => file.fileName === options.key) ?? null;
+      return version ? toS3FileVersionBinding(version) : null;
+    });
+  }
+
   async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKeyResult> {
     return toApplicationKeyResult(
       await this.withNativeCircuit((client) =>
@@ -1223,388 +1068,6 @@ export class B2Client {
       parts: result.parts.map(toPartInfoResult),
       nextPartNumber: result.nextPartNumber,
     };
-  }
-
-  async s3PutObject(options: S3PutObjectOptions): Promise<FileVersionResult> {
-    const source =
-      options.source.kind === "file"
-        ? await FileSource.fromPath(options.source.path)
-        : new BufferSource(options.source.buffer);
-    const serverSideEncryption = sseB2Setting(options.serverSideEncryption);
-    return toFileVersionResult(
-      await this.withNativeCircuit(async (client) => {
-        const bucket = await this.getSdkBucket(client, options.bucket);
-        const upload: BucketUploadOptions = {
-          fileName: options.key,
-          source,
-          ...(options.contentType !== undefined ? { contentType: options.contentType } : {}),
-          ...(options.metadata !== undefined ? { fileInfo: options.metadata } : {}),
-          ...(serverSideEncryption !== undefined ? { serverSideEncryption } : {}),
-          ...(currentMcpRequestSignal() !== undefined ? { signal: currentMcpRequestSignal() } : {}),
-        };
-        return bucket.upload(upload);
-      }),
-    );
-  }
-
-  async s3GetObject(options: S3GetObjectOptions): Promise<S3DownloadedObject> {
-    return this.withNativeCircuit(async (client, auth) => {
-      const bucket = await this.getSdkBucket(client, options.bucket);
-      const signal = currentMcpRequestSignal();
-      const version = options.versionId
-        ? await this.resolveFileVersion(
-            client,
-            auth,
-            bucket,
-            options.bucket,
-            options.key,
-            options.versionId,
-          )
-        : null;
-      const result = options.versionId
-        ? await bucket.file(options.key).downloadById(fileId(options.versionId), {
-            ...(options.range !== undefined ? { range: options.range } : {}),
-            ...(signal !== undefined ? { signal } : {}),
-          })
-        : await bucket.download(options.key, {
-            ...(options.range !== undefined ? { range: options.range } : {}),
-            ...(signal !== undefined ? { signal } : {}),
-          });
-      return toS3DownloadedObject(options.key, result, version);
-    });
-  }
-
-  async s3HeadObject(options: S3GetObjectOptions): Promise<S3HeadObjectResult> {
-    return this.withNativeCircuit(async (client, auth) => {
-      const bucket = await this.getSdkBucket(client, options.bucket);
-      const signal = currentMcpRequestSignal();
-      const version = options.versionId
-        ? await this.resolveFileVersion(
-            client,
-            auth,
-            bucket,
-            options.bucket,
-            options.key,
-            options.versionId,
-          )
-        : await bucket.getFileInfoByName(options.key);
-      if (version?.action === "hide") {
-        return toS3HeadObjectResultFromFile(version);
-      }
-      const result = options.versionId
-        ? await bucket.file(options.key).headById(fileId(options.versionId), {
-            ...(options.range !== undefined ? { range: options.range } : {}),
-            ...(signal !== undefined ? { signal } : {}),
-          })
-        : await bucket.head(options.key, {
-            ...(options.range !== undefined ? { range: options.range } : {}),
-            ...(signal !== undefined ? { signal } : {}),
-          });
-      return toS3HeadObjectResult(options.key, result, version);
-    });
-  }
-
-  async s3DeleteObject(options: S3DeleteObjectOptions): Promise<void> {
-    await this.withNativeCircuit(async (client, auth) => {
-      const bucket = await this.getSdkBucket(client, options.bucket);
-      const signal = currentMcpRequestSignal();
-      if (options.versionId) {
-        await this.resolveFileVersion(
-          client,
-          auth,
-          bucket,
-          options.bucket,
-          options.key,
-          options.versionId,
-        );
-        await bucket.deleteFileVersion(options.key, fileId(options.versionId), {
-          ...(signal !== undefined ? { signal } : {}),
-        });
-        return;
-      }
-      await bucket.hideFile(options.key, { ...(signal !== undefined ? { signal } : {}) });
-    });
-  }
-
-  async s3DeleteObjects(options: S3DeleteObjectsOptions): Promise<S3DeleteObjectsResult> {
-    return this.withNativeCircuit(async (client, auth) => {
-      const bucket = await this.getSdkBucket(client, options.bucket);
-      const signal = currentMcpRequestSignal();
-      const deleted: S3DeleteObjectsResult["deleted"] = [];
-      const errors: S3DeleteObjectsResult["errors"] = [];
-      let aborted = signal?.aborted === true;
-      let attempted = 0;
-      let cursor = 0;
-
-      const deleteTarget = async (target: { key: string; versionId?: string }): Promise<void> => {
-        try {
-          let deletedVersionId: string | undefined;
-          if (target.versionId) {
-            await this.resolveFileVersion(
-              client,
-              auth,
-              bucket,
-              options.bucket,
-              target.key,
-              target.versionId,
-            );
-            await bucket.deleteFileVersion(target.key, fileId(target.versionId), {
-              ...(options.bypassGovernance !== undefined
-                ? { bypassGovernance: options.bypassGovernance }
-                : {}),
-              ...(signal !== undefined ? { signal } : {}),
-            });
-            deletedVersionId = target.versionId;
-          } else {
-            const hidden = await bucket.hideFile(target.key, {
-              ...(signal !== undefined ? { signal } : {}),
-            });
-            deletedVersionId = String(hidden.fileId);
-          }
-          if (options.quiet !== true) {
-            deleted.push({ Key: target.key, VersionId: deletedVersionId });
-          }
-        } catch (err) {
-          errors.push(deleteObjectsError(target, err));
-        }
-      };
-
-      const worker = async (): Promise<void> => {
-        for (;;) {
-          if (signal?.aborted) {
-            aborted = true;
-            return;
-          }
-          const index = cursor++;
-          if (index >= options.objects.length) return;
-          attempted++;
-          await deleteTarget(options.objects[index]);
-        }
-      };
-
-      const maxConcurrency = Math.min(S3_DELETE_OBJECTS_MAX_CONCURRENCY, options.objects.length);
-      await Promise.all(Array.from({ length: maxConcurrency }, () => worker()));
-      return {
-        deleted,
-        errors,
-        attempted,
-        aborted,
-        maxConcurrency,
-      };
-    });
-  }
-
-  async s3CopyObject(options: S3CopyObjectOptions): Promise<FileVersionResult> {
-    return toFileVersionResult(
-      await this.withNativeCircuit(async (client, auth) => {
-        const sourceBucket = await this.getSdkBucket(client, options.sourceBucket);
-        const destinationBucket = await this.getSdkBucket(client, options.destinationBucket);
-        const source = options.sourceVersionId
-          ? await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
-              fileId: fileId(options.sourceVersionId),
-            })
-          : await sourceBucket.getFileInfoByName(options.sourceKey);
-        if (!source || source.action === "hide") {
-          throw b2NotFound(
-            `Object '${options.sourceKey}' not found in bucket '${options.sourceBucket}'.`,
-          );
-        }
-        if (
-          source.fileName !== options.sourceKey ||
-          String(source.bucketId) !== String(sourceBucket.id)
-        ) {
-          throw b2NotFound(
-            `Version '${String(source.fileId)}' is not '${options.sourceBucket}/${options.sourceKey}'.`,
-          );
-        }
-        const replaceMetadata = options.metadataDirective === "REPLACE";
-        return destinationBucket.copyFile({
-          sourceFileId: source.fileId,
-          destinationBucketId: destinationBucket.id,
-          fileName: options.destinationKey,
-          metadataDirective: options.metadataDirective as SdkMetadataDirective | undefined,
-          ...(replaceMetadata && options.contentType !== undefined
-            ? { contentType: options.contentType }
-            : {}),
-          ...(replaceMetadata && options.metadata !== undefined
-            ? { fileInfo: options.metadata }
-            : {}),
-          ...(currentMcpRequestSignal() !== undefined ? { signal: currentMcpRequestSignal() } : {}),
-        });
-      }),
-    );
-  }
-
-  async s3ListObjectsV2(options: S3ListObjectsV2Options): Promise<S3ListObjectsV2Result> {
-    return this.withNativeCircuit(async (client) => {
-      const bucket = await this.getSdkBucket(client, options.bucket);
-      const maxKeys = options.maxKeys ?? 1000;
-      const signal = currentMcpRequestSignal();
-      const page = await bucket.listFileNames({
-        ...(options.continuationToken !== undefined || options.startAfter !== undefined
-          ? { startFileName: options.continuationToken ?? options.startAfter }
-          : {}),
-        pageSize: options.startAfter && !options.continuationToken ? maxKeys + 1 : maxKeys,
-        ...(options.prefix !== undefined ? { prefix: options.prefix } : {}),
-        ...(options.delimiter !== undefined ? { delimiter: options.delimiter } : {}),
-        ...(signal !== undefined ? { signal } : {}),
-      });
-
-      // StartAfter is a caller-supplied, S3-exclusive marker, while later
-      // continuationToken values are SDK/B2 cursors. Over-fetch one row only on
-      // the first StartAfter page so an exact marker can be dropped if returned
-      // without shortening the visible page or losing the next continuation.
-      let files = page.files;
-      let nextContinuationToken = page.nextFileName ?? undefined;
-      if (options.startAfter && !options.continuationToken) {
-        if (files[0]?.fileName === options.startAfter) {
-          files = files.slice(1);
-        } else if (files.length > maxKeys) {
-          nextContinuationToken = files[maxKeys]?.fileName;
-          files = files.slice(0, maxKeys);
-        }
-      }
-
-      const objects = files
-        .filter((file) => file.action !== "folder")
-        .map((file) => toS3ObjectSummary(file));
-      const commonPrefixes = files
-        .filter((file) => file.action === "folder")
-        .map((file) => toS3CommonPrefix(file));
-      return {
-        objects,
-        commonPrefixes,
-        isTruncated: nextContinuationToken !== undefined,
-        nextContinuationToken,
-        keyCount: objects.length,
-      };
-    });
-  }
-
-  async s3ListObjectVersions(
-    options: S3ListObjectVersionsOptions,
-  ): Promise<S3ListObjectVersionsResult> {
-    return this.withNativeCircuit(async (client) => {
-      const bucket = await this.getSdkBucket(client, options.bucket);
-      const signal = currentMcpRequestSignal();
-      const page = await bucket.listFileVersions({
-        ...(options.keyMarker !== undefined ? { startFileName: options.keyMarker } : {}),
-        ...(options.versionIdMarker !== undefined
-          ? { startFileId: fileId(options.versionIdMarker) }
-          : {}),
-        ...(options.maxKeys !== undefined ? { pageSize: options.maxKeys } : {}),
-        ...(options.prefix !== undefined ? { prefix: options.prefix } : {}),
-        ...(options.delimiter !== undefined ? { delimiter: options.delimiter } : {}),
-        ...(signal !== undefined ? { signal } : {}),
-      });
-      const latestByName = new Set<string>(options.keyMarker ? [options.keyMarker] : []);
-      const commonPrefixes: S3CommonPrefix[] = [];
-      const versions: S3ObjectVersionSummary[] = [];
-      const deleteMarkers: S3DeleteMarkerSummary[] = [];
-      for (const file of page.files) {
-        if (file.action === "folder") {
-          commonPrefixes.push(toS3CommonPrefix(file));
-        } else if (file.action === "hide") {
-          const isLatest = !latestByName.has(file.fileName);
-          latestByName.add(file.fileName);
-          deleteMarkers.push(toS3DeleteMarkerSummary(file, isLatest));
-        } else {
-          const isLatest = !latestByName.has(file.fileName);
-          latestByName.add(file.fileName);
-          versions.push(toS3ObjectVersionSummary(file, isLatest));
-        }
-      }
-      return {
-        versions,
-        deleteMarkers,
-        commonPrefixes,
-        isTruncated: page.nextFileName !== null,
-        nextKeyMarker: page.nextFileName ?? undefined,
-        nextVersionIdMarker: page.nextFileId == null ? undefined : String(page.nextFileId),
-      };
-    });
-  }
-
-  async s3PresignObjectUrl(options: S3PresignObjectUrlOptions): Promise<S3PresignObjectUrlResult> {
-    const config = this.auth.getConfig();
-    const expiresIn = options.expiresIn ?? 3600;
-    if (options.operation === "PutObject" && options.versionId !== undefined) {
-      throw new Error("versionId is only valid for GetObject presigned URLs.");
-    }
-
-    if (options.operation === "GetObject" && options.versionId !== undefined) {
-      await this.withNativeCircuit(async (client, auth) => {
-        const bucket = await this.getSdkBucket(client, options.bucket);
-        await this.resolveFileVersion(
-          client,
-          auth,
-          bucket,
-          options.bucket,
-          options.key,
-          options.versionId!,
-        );
-      });
-    }
-
-    const { client, auth } = await this.getAuthorizedSdkWithoutCircuit();
-    assertB2ApiUrl(auth.apiUrl);
-    const base = {
-      accountInfo: client.accountInfo,
-      applicationKeyId: config.appKeyId,
-      applicationKey: config.appKey,
-      region: config.region,
-      bucketName: options.bucket,
-      fileName: options.key,
-      expiresIn,
-    };
-    const url =
-      options.operation === "GetObject"
-        ? await presignS3GetObjectUrl({
-            ...base,
-            ...(options.versionId !== undefined ? { versionId: options.versionId } : {}),
-          })
-        : await presignS3PutObjectUrl({
-            ...base,
-            ...(options.contentType !== undefined ? { contentType: options.contentType } : {}),
-          });
-    return {
-      url,
-      operation: options.operation,
-      expiresIn,
-      expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
-    };
-  }
-
-  private async resolveFileVersion(
-    client: SdkB2Client,
-    auth: B2AuthResponse,
-    bucket: SdkBucket,
-    bucketName: string,
-    key: string,
-    versionIdValue: string,
-  ): Promise<FileVersion> {
-    const version = await client.raw.getFileInfo(auth.apiUrl, auth.authorizationToken, {
-      fileId: fileId(versionIdValue),
-    });
-    if (version.fileName !== key || String(version.bucketId) !== String(bucket.id)) {
-      throw b2NotFound(`Object '${key}' not found in bucket '${bucketName}'.`);
-    }
-    return version;
-  }
-
-  private async getAuthorizedSdkWithoutCircuit(): Promise<{
-    client: SdkB2Client;
-    auth: B2AuthResponse;
-  }> {
-    const sdk = await this.auth.getAuthorizedSdk();
-    this.auth.syncCachedAuthFromSdk();
-    return sdk;
-  }
-
-  private async getSdkBucket(client: SdkB2Client, bucketName: string): Promise<SdkBucket> {
-    const bucket = await client.getBucket(bucketName);
-    if (!bucket) throw b2NotFound(`Bucket '${bucketName}' not found.`);
-    return bucket;
   }
 
   private async withNativeCircuit<T>(

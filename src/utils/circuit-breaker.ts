@@ -112,6 +112,50 @@ reportBreaker.on("open", () => logger.warn("circuit.reportS3.open"));
 reportBreaker.on("halfOpen", () => logger.info("circuit.reportS3.halfOpen"));
 reportBreaker.on("close", () => logger.info("circuit.reportS3.close"));
 
+/**
+ * Separate breaker for the B2 S3-compatible data plane.
+ *
+ * Object traffic is much higher-volume than native bucket/key/Object Lock
+ * control-plane traffic, and the S3-compatible endpoint is a distinct failure
+ * domain. Keeping this breaker separate means an S3 endpoint incident cannot
+ * open the native control-plane breaker that operators use to investigate or
+ * mitigate the incident.
+ */
+const s3Breaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
+  timeout: CIRCUIT_TIMEOUT_MS,
+  errorThresholdPercentage: 50,
+  resetTimeout: 30_000,
+  rollingCountTimeout: 10_000,
+  rollingCountBuckets: 10,
+  volumeThreshold: 10,
+  errorFilter: isClientError,
+  name: "b2-s3-api",
+});
+
+s3Breaker.on("open", () => logger.warn("circuit.s3.open"));
+s3Breaker.on("halfOpen", () => logger.info("circuit.s3.halfOpen"));
+s3Breaker.on("close", () => logger.info("circuit.s3.close"));
+
+/**
+ * Long-running B2 S3 object transfers share the S3 breaker state but do not use
+ * the default whole-call deadline. Callers still need their own body-progress
+ * or SDK socket deadlines where an operation can stall after response headers.
+ */
+const s3LongBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
+  timeout: false,
+  errorThresholdPercentage: 50,
+  resetTimeout: 30_000,
+  rollingCountTimeout: 10_000,
+  rollingCountBuckets: 10,
+  volumeThreshold: 10,
+  errorFilter: isClientError,
+  name: "b2-s3-transfer",
+});
+
+s3LongBreaker.on("open", () => logger.warn("circuit.s3Transfer.open"));
+s3LongBreaker.on("halfOpen", () => logger.info("circuit.s3Transfer.halfOpen"));
+s3LongBreaker.on("close", () => logger.info("circuit.s3Transfer.close"));
+
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   const maybeUnref = (timer as { unref?: unknown }).unref;
   if (typeof maybeUnref === "function") maybeUnref.call(timer);
@@ -172,6 +216,26 @@ export async function withReportCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return reportBreaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
 }
 
+/**
+ * Run B2 S3-compatible data-plane calls through their isolated breaker.
+ *
+ * @returns The callback result after the S3 data-plane circuit allows execution.
+ */
+export async function withS3Circuit<T>(fn: () => Promise<T>): Promise<T> {
+  return s3Breaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
+}
+
+/**
+ * Run long B2 S3-compatible transfers through the isolated transfer breaker.
+ *
+ * @returns The callback result after the S3 transfer circuit allows execution.
+ */
+export async function withS3LongCircuit<T>(fn: () => Promise<T>): Promise<T> {
+  return s3LongBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+}
+
 export const circuitBreaker = breaker;
 export const transferCircuitBreaker = longBreaker;
 export const reportCircuitBreaker = reportBreaker;
+export const s3CircuitBreaker = s3Breaker;
+export const s3TransferCircuitBreaker = s3LongBreaker;

@@ -133,7 +133,6 @@ function writeFixture(
         },
         reviewedTransitiveProductionDependencies:
           options.reviewedTransitiveProductionDependencies ?? {},
-        temporaryAdapters: [],
         approvedDuplicatePackageVersions: {},
       },
       null,
@@ -496,6 +495,22 @@ describe("package budget policy gate", () => {
     expect(budget.reviewedBaseline.transitiveProductionPackageCount).toBe(
       budget.reviewedBaseline.totalProductionPackageCount - 1 - directProductionDependencyCount,
     );
+  });
+
+  it("keeps AWS S3 dependencies as permanent data-plane dependencies", () => {
+    const budget = JSON.parse(readFileSync(join(root, "package-budget.json"), "utf8")) as {
+      directProductionDependencies: Record<string, Record<string, unknown>>;
+    };
+    const awsEntries = [
+      budget.directProductionDependencies["@aws-sdk/client-s3"],
+      budget.directProductionDependencies["@aws-sdk/s3-request-presigner"],
+    ];
+
+    for (const entry of awsEntries) {
+      expect(String(entry.purpose)).toMatch(/Permanent primary/i);
+      expect(JSON.stringify(entry)).not.toMatch(/temporary|must be removed|upstreamIssue/i);
+    }
+    expect(budget).not.toHaveProperty("temporaryAdapters");
   });
 
   it("runs the package budget before npm publish", () => {

@@ -189,7 +189,7 @@ function errorHint(parsed: B2ApiError): string {
     return (
       " — B2's S3-compatible API (used by the s3_* and insight tools) only accepts a regular " +
       "application key, not an account master key. If you're connecting with a master key, switch " +
-      "to a non-master application key (or set B2_APP_KEY_ID / B2_APP_KEY to one for the S3 surface)."
+      "B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY to a non-master application key for S3 tools."
     );
   }
   return "";

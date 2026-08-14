@@ -224,13 +224,15 @@ async function abortMultipartUploads(callTool, bucketName, options = {}) {
 async function clearObjectLockForVersions(callTool, versions, options = {}) {
   if (options.dryRun) return;
   for (const version of versions) {
-    if (!version.Key || !version.VersionId) continue;
+    const key = version.key ?? version.Key;
+    const versionId = version.versionId ?? version.VersionId;
+    if (!key || !versionId) continue;
     const legalHold = await callOptional(
       callTool,
       "b2_update_file_legal_hold",
       {
-        fileId: version.VersionId,
-        fileName: version.Key,
+        fileId: versionId,
+        fileName: key,
         legalHold: "off",
         confirm: true,
       },
@@ -242,8 +244,8 @@ async function clearObjectLockForVersions(callTool, versions, options = {}) {
       callTool,
       "b2_update_file_retention",
       {
-        fileId: version.VersionId,
-        fileName: version.Key,
+        fileId: versionId,
+        fileName: key,
         fileRetention: { mode: null, retainUntilTimestamp: null },
         bypassGovernance: true,
         confirm: true,
@@ -274,10 +276,12 @@ async function deleteObjectVersions(callTool, bucketName, options = {}) {
     const parsed = parseResult(listed);
     const versions = parsed.versions ?? [];
     const deleteMarkers = parsed.deleteMarkers ?? [];
-    const objects = [...versions, ...deleteMarkers].map((entry) => ({
-      key: entry.Key,
-      versionId: entry.VersionId,
-    }));
+    const objects = [...versions, ...deleteMarkers]
+      .map((entry) => ({
+        key: entry.key ?? entry.Key,
+        versionId: entry.versionId ?? entry.VersionId,
+      }))
+      .filter((entry) => entry.key && entry.versionId);
     if (options.stats) options.stats.objectVersions += objects.length;
     if (!options.dryRun && objects.length > 0) {
       await clearObjectLockForVersions(callTool, versions, options);

@@ -13,12 +13,7 @@ export interface B2Config {
    */
   applicationKeyId: string;
   applicationKey: string;
-  /**
-   * Credential the S3-compatible client signs with. Defaults to the application
-   *  key (which is what should be used). The deprecated B2_APP_KEY_ID override
-   *  remains only for legacy setups whose application key is a master key (B2's
-   *  S3 endpoint rejects master keys).
-   */
+  /** Deprecated legacy alias. Tool-serving S3 clients use applicationKeyId/applicationKey. */
   appKeyId: string;
   appKey: string;
   /**
@@ -74,6 +69,50 @@ export interface B2AuthResponse {
    *  Drives capability-aware tool registration. Empty array if unknown.
    */
   capabilities: string[];
+  /** Bucket restrictions from authorize, or null when the key is unrestricted. */
+  allowedBuckets?: Array<{ id: string; name: string | null }> | null;
+}
+
+export type B2FileAction = "upload" | "hide" | "start" | "folder" | "copy";
+
+export interface B2S3FileVersionBinding {
+  fileName: string;
+  fileId: string;
+  bucketId: string;
+  contentLength: number;
+  contentType: string;
+  uploadTimestamp: number;
+  fileInfo: Record<string, string>;
+  action: B2FileAction;
+  serverSideEncryption?: string;
+}
+
+export interface B2S3VersionTarget {
+  key: string;
+  versionId?: string;
+}
+
+export interface B2S3FileVersionResolution {
+  object: B2S3VersionTarget;
+  version: B2S3FileVersionBinding | null;
+  error?: unknown;
+}
+
+export interface B2S3VersionGuard {
+  resolveS3FileVersion(input: {
+    bucket: string;
+    key: string;
+    versionId: string;
+  }): Promise<B2S3FileVersionBinding>;
+  resolveS3FileVersions(input: {
+    bucket: string;
+    objects: B2S3VersionTarget[];
+    maxConcurrency?: number;
+  }): Promise<B2S3FileVersionResolution[]>;
+  getCurrentS3FileVersion(input: {
+    bucket: string;
+    key: string;
+  }): Promise<B2S3FileVersionBinding | null>;
 }
 
 export interface B2Bucket {
@@ -113,7 +152,7 @@ export interface B2FileInfo {
   contentMd5?: string;
   contentType: string;
   fileInfo: Record<string, string>;
-  action: "upload" | "hide" | "start" | "folder";
+  action: B2FileAction;
   uploadTimestamp: number;
   serverSideEncryption?: B2Encryption;
 }

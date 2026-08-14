@@ -10,9 +10,9 @@ B2 behavior. The reviewed adoption contract is
 [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md), which is normative for
 issue [#71](https://github.com/backblaze-labs/b2-mcp/issues/71).
 
-Direct B2 HTTP calls are not allowed in runtime code. Direct AWS SDK calls to
-B2's S3-compatible endpoint are retained only when anchored through the SDK
-`/s3` helper and justified by S3-material behavior.
+Direct B2 HTTP calls are not allowed in runtime code. AWS SDK calls to B2's
+S3-compatible endpoint are the permanent S3 data-plane implementation and must
+stay anchored through the SDK `/s3` helper.
 
 The approved implementation order is:
 
@@ -20,7 +20,8 @@ The approved implementation order is:
 2. documented `@backblaze-labs/b2-sdk/raw` API;
 3. documented `@backblaze-labs/b2-sdk/s3` helper;
 4. composition of public SDK operations;
-5. a linked upstream SDK gap with an explicit v0.1 disposition.
+5. a linked upstream SDK gap with an explicit v0.1 disposition for non-S3
+   native gaps.
 
 No runtime code may import SDK private modules, package-internal files, or
 unpublished branches.
@@ -40,12 +41,9 @@ The package-budget gate rejects unapproved direct production dependencies, Axios
 runtime imports, SDK private or unpublished imports, Git/path SDK dependencies,
 unpinned or provenance-mismatched direct dependencies, production lockfile
 entries without npm registry provenance and integrity, and AWS runtime imports
-outside `src/s3/aws-sdk-adapter.ts`. The AWS adapter is a
-temporary S3-material compatibility boundary tracked by
-[backblaze-labs/b2-sdk-typescript#154](https://github.com/backblaze-labs/b2-sdk-typescript/issues/154).
-It may remain only for report-object reads, S3 endpoint probes, lifecycle
-operations with `AbortIncompleteMultipartUpload`, multipart operations, and
-UploadPart presigning until a stable SDK release covers those helpers.
+outside `src/s3/aws-sdk-adapter.ts`. The AWS adapter is the permanent
+repository-owned S3 data-plane boundary for `s3_*` object, multipart, bucket,
+lifecycle, and presigned URL operations against B2's S3-compatible endpoint.
 
 New runtime dependencies must not exist solely for Node.js 18/20, browser, Bun,
 Deno, stream, abort, retry, or HTTP-client compatibility. Prefer Node.js 22+
@@ -131,11 +129,8 @@ streaming, local-file, base64, or presigned-URL paths instead.
 
 ## S3-Compatible Surface
 
-Backblaze B2 through MCP is the product contract. S3-compatible behavior is
-retained only where S3 semantics are material, such as endpoint reachability,
-S3 region checks, presigned URLs, S3 multipart flows, upload-part-copy, and
-`AbortIncompleteMultipartUpload` lifecycle rules.
-
-Any `s3_*` compatibility name that can be implemented faithfully through native
-SDK operations must either become a compatibility alias over public SDK calls or
-be renamed/removed before the public tool contract freezes.
+Backblaze B2 through MCP is the product contract. The compatibility `s3_*`
+data plane is implemented by the permanent AWS S3 SDK adapter configured
+against B2's S3-compatible endpoint through the official SDK `/s3` helper.
+That adapter owns object, presigned URL, multipart, endpoint reachability,
+location, lifecycle, upload-part-copy, and usage-report object-read paths.

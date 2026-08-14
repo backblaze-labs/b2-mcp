@@ -82,7 +82,7 @@ describe("live B2 contract helper", () => {
       if (name === "s3_list_object_versions") {
         return {
           structuredContent: {
-            versions: [{ Key: "run/locked.txt", VersionId: "version-1" }],
+            versions: [{ key: "run/locked.txt", versionId: "version-1" }],
             deleteMarkers: [],
             isTruncated: false,
           },

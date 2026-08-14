@@ -250,6 +250,11 @@ function flattenAuth(data: AuthorizeAccountResponse): B2AuthResponse {
     recommendedPartSize: storageApi.recommendedPartSize,
     absoluteMinimumPartSize: storageApi.absoluteMinimumPartSize,
     capabilities: [...(storageApi.allowed?.capabilities ?? [])],
+    allowedBuckets:
+      storageApi.allowed?.buckets?.map((bucket) => ({
+        id: String(bucket.id),
+        name: bucket.name,
+      })) ?? null,
   };
 }
 

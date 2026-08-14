@@ -1,6 +1,7 @@
 import {
   buildB2S3ClientConfig,
   createReportS3Client,
+  createS3ObjectClient,
   expectedB2S3Endpoint,
   validateB2S3ApiUrl,
 } from "../../src/s3/client";
@@ -30,6 +31,30 @@ describe("B2 S3 client configuration", () => {
       accessKeyId: "legacy-s3-key-id",
       secretAccessKey: "legacy-s3-secret",
     });
+    expect(s3.maxAttempts).toBeUndefined();
+  });
+
+  it("can build primary object-tool config with caller credentials", () => {
+    const s3 = buildB2S3ClientConfig(config, {
+      applicationKeyId: config.applicationKeyId,
+      applicationKey: config.applicationKey,
+      surface: "s3-object-tools",
+    });
+
+    expect(s3.credentials).toEqual({
+      accessKeyId: "principal-key-id",
+      secretAccessKey: "principal-secret",
+    });
+    expect(JSON.stringify(s3.customUserAgent)).toContain("s3-object-tools");
+  });
+
+  it("creates object clients with the configured S3 credential override", async () => {
+    const s3 = createS3ObjectClient(config, "s3-object-tools");
+
+    expect(typeof s3.destroy).toBe("function");
+    expect((s3 as unknown as { config?: unknown }).config).toBeUndefined();
+    expect((s3 as unknown as { send?: unknown }).send).toBeUndefined();
+    s3.destroy();
   });
 
   it("can build report client config with explicit caller credentials", () => {
@@ -59,10 +84,9 @@ describe("B2 S3 client configuration", () => {
       capabilities: [],
     });
 
-    await expect(s3.config.credentials()).resolves.toMatchObject({
-      accessKeyId: "principal-key-id",
-      secretAccessKey: "principal-secret",
-    });
+    expect(typeof s3.destroy).toBe("function");
+    expect((s3 as unknown as { config?: unknown }).config).toBeUndefined();
+    expect((s3 as unknown as { send?: unknown }).send).toBeUndefined();
     s3.destroy();
   });
 

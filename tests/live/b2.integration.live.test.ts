@@ -206,6 +206,7 @@ describe("S3-compatible bucket and object tools", () => {
   liveIt("uploads, downloads, copies, paginates, and deletes run-owned objects", async () => {
     const sourceKey = contractObjectKey("objects", "source.txt");
     const copyKey = contractObjectKey("objects", "copy.txt");
+    const versionedKey = contractObjectKey("objects-version", "versioned.txt");
     const pagedKeys = [1, 2, 3].map((n) => contractObjectKey("objects-page", `item-${n}.txt`));
 
     for (const key of [sourceKey, ...pagedKeys]) {
@@ -259,6 +260,73 @@ describe("S3-compatible bucket and object tools", () => {
       }),
     );
     expect(secondPage.objects.length).toBeGreaterThanOrEqual(1);
+
+    for (const content of ["version:1", "version:2"]) {
+      expectLiveSuccess(
+        await callTool(server, "s3_put_object", {
+          bucket: bucketName(),
+          key: versionedKey,
+          content: base64(content),
+          contentType: "text/plain",
+          metadata: { run: liveRunPrefix() },
+        }),
+        "s3_put_object versioned fixture",
+      );
+    }
+
+    expectLiveSuccess(
+      await callTool(server, "s3_delete_object", {
+        bucket: bucketName(),
+        key: versionedKey,
+        confirm: true,
+      }),
+      "s3_delete_object versioned fixture",
+    );
+
+    const firstVersionPage = parseResult(
+      await callTool(server, "s3_list_object_versions", {
+        bucket: bucketName(),
+        prefix: `${liveRunPrefix()}/objects-version/`,
+        maxKeys: 1,
+      }),
+    );
+    expect(firstVersionPage.isTruncated).toBe(true);
+    expect(firstVersionPage.nextKeyMarker).toEqual(expect.any(String));
+    expect(firstVersionPage.nextVersionIdMarker).toEqual(expect.any(String));
+    const secondVersionPage = parseResult(
+      await callTool(server, "s3_list_object_versions", {
+        bucket: bucketName(),
+        prefix: `${liveRunPrefix()}/objects-version/`,
+        keyMarker: firstVersionPage.nextKeyMarker,
+        versionIdMarker: firstVersionPage.nextVersionIdMarker,
+        maxKeys: 1000,
+      }),
+    );
+    const versionRows = [
+      ...(firstVersionPage.versions ?? []),
+      ...(secondVersionPage.versions ?? []),
+    ];
+    const deleteMarkerRows = [
+      ...(firstVersionPage.deleteMarkers ?? []),
+      ...(secondVersionPage.deleteMarkers ?? []),
+    ];
+    expect(versionRows.some((version: any) => version.Key === versionedKey)).toBe(true);
+    expect(deleteMarkerRows.some((marker: any) => marker.Key === versionedKey)).toBe(true);
+
+    const versionDeleteTargets = [...versionRows, ...deleteMarkerRows]
+      .filter((entry: any) => entry.Key === versionedKey && typeof entry.VersionId === "string")
+      .map((entry: any) => ({ key: entry.Key, versionId: entry.VersionId }));
+    expect(versionDeleteTargets.length).toBeGreaterThanOrEqual(2);
+    const versionCleanup = parseResult(
+      await callTool(server, "s3_delete_objects", {
+        bucket: bucketName(),
+        objects: versionDeleteTargets,
+        quiet: false,
+        confirm: true,
+      }),
+    );
+    expect(versionCleanup.errors).toEqual([]);
+    expect(versionCleanup.attempted).toBe(versionDeleteTargets.length);
 
     const deleted = parseResult(
       await callTool(server, "s3_delete_objects", {
