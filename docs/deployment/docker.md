@@ -1,0 +1,134 @@
+# Portable Docker And OCI
+
+Shared guide: docs/deployment/security-and-credentials.md
+
+## Status
+
+Support level: supported and continuously tested. This is the common foundation
+for container-host recipes. The checked-in customer-hosted reference is
+[`../../deploy/customer-hosted/README.md`](../../deploy/customer-hosted/README.md).
+
+## Prerequisites
+
+- Docker Engine and the Compose plugin, or an OCI-compatible runtime.
+- A TLS and authentication reverse proxy.
+- A non-master, least-privilege B2 application key.
+- An immutable image digest from GHCR or a locally built release image.
+
+## Architecture
+
+```text
+MCP client -> TLS/auth proxy -> b2-mcp container -> Backblaze B2
+```
+
+The proxy handles TLS, OAuth or mTLS, trusted-header stripping, rate limits, and
+public routing. The container keeps MCP serving stateless.
+
+## Setup
+
+Pull a versioned image by digest and follow the canonical source for build/run
+steps in `deploy/customer-hosted/README.md`:
+
+```bash
+B2_MCP_IMAGE=ghcr.io/backblaze-labs/b2-mcp@sha256:DIGEST_FROM_RELEASE
+docker pull "$B2_MCP_IMAGE"
+```
+
+## Secrets
+
+Use Docker secrets, read-only mounted files under `/run/secrets`, or a provider
+secret manager. Do not bake credentials into the image. Set
+`B2_HTTP_CREDENTIAL_MODE=server`, `B2_ALLOW_LOCAL_FILES=false`,
+`B2_ALLOWED_HOSTS=mcp.example.com`, and `B2_DESTRUCTIVE_POLICY=block`.
+
+## Deployment
+
+Smallest safe local bind:
+
+```bash
+docker run --rm --name b2-mcp \
+  --stop-timeout 20 \
+  -p 127.0.0.1:3000:3000 \
+  -e B2_HTTP_CREDENTIAL_MODE=server \
+  -e B2_APPLICATION_KEY_ID=your-application-key-id \
+  -e B2_APPLICATION_KEY=your-application-key-secret \
+  -e B2_ALLOWED_HOSTS=mcp.example.com \
+  -e B2_ALLOW_LOCAL_FILES=false \
+  "$B2_MCP_IMAGE"
+```
+
+Run behind a TLS/auth reverse proxy before accepting remote traffic.
+
+## Domains And TLS
+
+Terminate TLS at nginx, Caddy, Envoy, a load balancer, or another reviewed
+proxy. Do not expose raw port 3000 publicly. Strip inbound B2 credential and
+trusted identity headers unless explicitly running `headers` compatibility
+mode.
+
+## Authentication
+
+Use OAuth, mTLS, or another reviewed identity layer at the proxy. Convert
+verified identity to standard MCP `AuthInfo` before principal-mode credential
+lookup.
+
+## Health Checks
+
+Use container `/health` and the proxy health check. Keep internal readiness
+endpoints private.
+
+## Smoke Testing
+
+Smoke through the public TLS endpoint with the shared command from
+docs/deployment/security-and-credentials.md.
+
+## Logs
+
+Bound container logs and ship stderr to a rotated sink. Confirm values are
+redacted before long retention.
+
+## Scaling
+
+Replicas are stateless and do not require MCP sticky sessions. Application
+rate, concurrency, and capability caches are per process.
+
+## Rollback
+
+Roll back by immutable image digest. Keep previous digests and proxy config in
+the release record.
+
+## Secret Rotation
+
+Mount replacement secrets, roll one replica at a time, smoke, then revoke the
+old B2 key.
+
+## Teardown
+
+Stop containers, remove deployment state, delete secrets, remove DNS/proxy
+routes, and revoke the B2 key.
+
+## Limitations
+
+No broad host mounts. If local filesystem tools are required, mount one
+explicit sandbox volume and set `B2_FILE_ROOT=/sandbox`; otherwise keep
+`B2_ALLOW_LOCAL_FILES=false`.
+
+## Cost Controls
+
+Set CPU/memory limits, log rotation, proxy rate limits, and B2 lifecycle rules.
+Use presigned B2 URLs for large transfers.
+
+## Verification Record
+
+- Last verified: 2026-08-14
+- Repository baseline commit: `197d781`
+- Package version: `0.1.0`
+- MCP revision: 2026-07-28
+- Runtime: container image with Node `22.23.1`
+- Documentation owner: Gonza
+
+## Official References
+
+- Docker run reference: https://docs.docker.com/reference/cli/docker/container/run/
+- Docker Compose: https://docs.docker.com/compose/
+- GitHub Container Registry: https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry

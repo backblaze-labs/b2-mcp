@@ -12,6 +12,12 @@
     "sourceMap": false,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["src/**/*", "tests/**/*", "api/**/*", "deploy/vercel/**/*"],
+  "include": [
+    "src/**/*",
+    "tests/**/*",
+    "api/**/*",
+    "deploy/vercel/**/*",
+    "deploy/cloudflare-worker/**/*"
+  ],
   "exclude": ["node_modules", "dist"]
 }
