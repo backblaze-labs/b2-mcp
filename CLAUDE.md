@@ -58,7 +58,7 @@ pnpm run test:integration:live
 
 - `loadConfig()` — reads env vars, validates required keys, returns `B2Config`
 - `fetchCapabilities(config)` — one-shot authorize that returns the key's `allowed.capabilities`; returns `null` only for `B2_REGISTER_ALL_TOOLS=true`. Lookup failures throw so HTTP fails closed.
-- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the retained S3 peer client for S3-material gaps, then calls all `register*Tools()` functions
+- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the AWS S3 data-plane client (configured through `@backblaze-labs/b2-sdk/s3`), then calls all `register*Tools()` functions
 
 Each register function receives the server + client(s) and calls `server.tool(name, description, zodSchema, handler)` for each tool. Adding a new tool means adding it to the appropriate register file — no changes to `server.ts` needed unless it's a new register file. **New tools should also be added to the capability map** (`src/utils/tool-capabilities.ts`).
 
