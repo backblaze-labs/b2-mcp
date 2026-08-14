@@ -23,11 +23,18 @@ const contract = readJson<{
     full: {
       names: string[];
       counts: { total: number; b2: number; s3: number; bz: number };
+      fixtures: { modern: string };
     };
   };
 }>("docs/tool-profile-contract.json");
 const contractToolNames = contract.profiles.full.names;
 const contractCounts = contract.profiles.full.counts;
+const fullModernFixture = readJson<{
+  tools: Array<{ name: string; annotations?: Record<string, boolean> }>;
+}>(contract.profiles.full.fixtures.modern);
+const fixtureAnnotationsByName = Object.fromEntries(
+  fullModernFixture.tools.map((tool) => [tool.name, tool.annotations]),
+);
 
 // ── Zod-mini schema helpers ───────────────────────────────────────────────────
 
@@ -133,6 +140,36 @@ describe("Every tool has a valid input schema", () => {
 
   it("all tool schemas have a shape (properties) field in def", () => {
     const missing = toolNames.filter((n) => typeof getShape(tools[n]?.inputSchema) !== "object");
+    expect(missing).toEqual([]);
+  });
+});
+
+// ── MCP tool annotations ─────────────────────────────────────────────────────
+
+describe("Tool annotations match the generated MCP contract", () => {
+  const annotationKeys = ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"];
+
+  it("every registered tool declares all standard boolean hints from the fixture", () => {
+    for (const name of toolNames) {
+      const annotations = tools[name]?.annotations;
+      expect(annotations).toBeDefined();
+      expect(Object.keys(annotations).sort()).toEqual([...annotationKeys].sort());
+      for (const key of annotationKeys) {
+        expect(typeof annotations[key]).toBe("boolean");
+      }
+      expect(annotations).toEqual(fixtureAnnotationsByName[name]);
+    }
+  });
+
+  it("does not publish overlapping read-only and destructive annotations", () => {
+    const overlapping = toolNames.filter(
+      (name) => tools[name]?.annotations?.readOnlyHint && tools[name]?.annotations?.destructiveHint,
+    );
+    expect(overlapping).toEqual([]);
+  });
+
+  it("marks all registered tools as operating against the external B2 service", () => {
+    const missing = toolNames.filter((name) => tools[name]?.annotations?.openWorldHint !== true);
     expect(missing).toEqual([]);
   });
 });

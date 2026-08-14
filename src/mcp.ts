@@ -1,5 +1,6 @@
 import { McpServer as V2McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
 import { z } from "zod";
+import { annotationsForTool, type McpToolAnnotations } from "./utils/tool-capabilities.js";
 
 export type McpServer = V2McpServer;
 
@@ -16,6 +17,7 @@ export interface RegisteredToolRecord {
   name: string;
   description?: string;
   inputSchema?: z.ZodObject<z.ZodRawShape>;
+  annotations: McpToolAnnotations;
   execute: ToolCallback;
 }
 
@@ -34,6 +36,7 @@ interface PendingTool {
   title?: string;
   description?: string;
   inputSchema: z.ZodObject<z.ZodRawShape>;
+  annotations: McpToolAnnotations;
   callback: ToolCallback;
 }
 
@@ -71,10 +74,12 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
 
     const callback = this.options.wrapCallback?.(name, cb as ToolCallback) ?? (cb as ToolCallback);
     const inputSchema = z.object(config.inputSchema ?? {});
+    const annotations = annotationsForTool(name);
     this.records[name] = {
       name,
       description: config.description,
       inputSchema,
+      annotations,
       execute: callback,
     };
     this.pending.push({
@@ -82,6 +87,7 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
       title: config.title,
       description: config.description,
       inputSchema,
+      annotations,
       callback,
     });
   }
@@ -89,15 +95,16 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
   commit(): number {
     if (this.committed) return Object.keys(this.records).length;
     this.committed = true;
-    for (const { name, title, description, inputSchema, callback } of [...this.pending].sort(
-      (a, b) => a.name.localeCompare(b.name),
-    )) {
+    for (const { name, title, description, inputSchema, annotations, callback } of [
+      ...this.pending,
+    ].sort((a, b) => a.name.localeCompare(b.name))) {
       this.server.registerTool(
         name,
         {
           title,
           description,
           inputSchema,
+          annotations,
         },
         callback as any,
       );

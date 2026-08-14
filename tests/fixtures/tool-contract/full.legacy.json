@@ -126,6 +126,12 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {},
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -242,6 +248,12 @@
         },
         "required": ["bucketName", "bucketType"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -256,6 +268,12 @@
           }
         },
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -265,6 +283,12 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {},
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -284,6 +308,12 @@
         },
         "required": ["bucketId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -303,6 +333,12 @@
         },
         "required": ["applicationKeyId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -332,6 +368,12 @@
           }
         },
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -365,6 +407,12 @@
         },
         "required": ["adminAccountId", "groupId", "memberAccountId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -380,6 +428,12 @@
         },
         "required": ["bucketId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -413,6 +467,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -446,6 +506,12 @@
           }
         },
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -476,6 +542,12 @@
         },
         "required": ["adminAccountId", "groupId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -508,6 +580,12 @@
         },
         "required": ["adminAccountId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -529,6 +607,12 @@
           }
         },
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -543,6 +627,12 @@
           }
         },
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -624,6 +714,12 @@
         },
         "required": ["bucketId", "eventNotificationRules"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -652,6 +748,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -874,6 +976,12 @@
         },
         "required": ["bucketId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -902,6 +1010,12 @@
         },
         "required": ["fileId", "fileName", "legalHold"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -959,6 +1073,12 @@
         },
         "required": ["fileId", "fileName", "fileRetention"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -994,6 +1114,12 @@
           }
         },
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1021,6 +1147,12 @@
         },
         "required": ["bucket", "key", "uploadId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1064,6 +1196,12 @@
         },
         "required": ["bucket", "key", "parts", "uploadId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1120,6 +1258,12 @@
         },
         "required": ["destinationBucket", "destinationKey", "sourceBucket", "sourceKey"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1162,6 +1306,12 @@
         },
         "required": ["bucket", "key"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1189,6 +1339,12 @@
         },
         "required": ["bucket", "key"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1236,6 +1392,12 @@
         },
         "required": ["bucket", "objects"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1251,6 +1413,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1282,6 +1450,12 @@
         },
         "required": ["bucket", "key"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1325,6 +1499,12 @@
         },
         "required": ["bucket", "key", "operation"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1340,6 +1520,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1363,6 +1549,12 @@
         },
         "required": ["bucket", "key"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1399,6 +1591,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1435,6 +1633,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1472,6 +1676,12 @@
         },
         "required": ["bucket"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1507,6 +1717,12 @@
         },
         "required": ["bucket", "key", "uploadId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": true
       }
     },
     {
@@ -1548,6 +1764,12 @@
         },
         "required": ["bucket", "key", "partNumbers", "uploadId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1631,6 +1853,12 @@
         },
         "required": ["bucket", "rules"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1686,6 +1914,12 @@
         },
         "required": ["bucket", "key"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     },
     {
@@ -1727,6 +1961,12 @@
         },
         "required": ["bucket", "copySource", "key", "partNumber", "uploadId"],
         "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
       }
     }
   ],
@@ -1734,5 +1974,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "41832d9a61e75c761c3fe73f79a9713e854aa31e34efec923e751a9cbeb933b9"
+  "hash": "e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221"
 }

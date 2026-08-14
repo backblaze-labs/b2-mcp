@@ -74,6 +74,12 @@ describe("getRegisteredTools", () => {
     expect(sdkConfig.inputSchema).toBeInstanceOf(z.ZodObject);
     expect(sdkConfig.inputSchema.safeParse({ bucketName: "bucket" }).success).toBe(true);
     expect(sdkConfig.inputSchema.safeParse({ bucketName: 123 }).success).toBe(false);
+    expect(sdkConfig.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
     expect(sdkCallback).toBe(callback);
   });
 });

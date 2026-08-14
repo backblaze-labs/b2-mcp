@@ -1,3 +1,5 @@
+import { DESTRUCTIVE_TOOL_NAMES } from "./destructive-gate.js";
+
 /**
  * Capability-aware tool registration.
  *
@@ -55,6 +57,90 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_get_bucket_location: ["listBuckets"],
   s3_put_bucket_lifecycle: ["writeBuckets"],
 };
+
+export interface McpToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
+const DESTRUCTIVE_TOOL_NAME_SET = new Set(DESTRUCTIVE_TOOL_NAMES);
+
+export const READ_ONLY_OPERATION_TOOL_NAMES = new Set([
+  "b2_authorize_account",
+  "b2_list_groups",
+  "b2_list_group_members",
+  // This is a read operation. TOOL_CAPABILITIES includes writeBucketNotifications
+  // because B2 permits writers to read rules too, not because the tool mutates rules.
+  "b2_get_bucket_notification_rules",
+]);
+
+export const NON_READ_ONLY_TOOL_NAMES = new Set([
+  // s3_get_object can write downloaded bytes to saveToPath, so the tool is not
+  // read-only at tool granularity while that local-write option shares the schema.
+  "s3_get_object",
+]);
+
+export const NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES = new Set([
+  "b2_create_group_member",
+  "b2_reserve_trial_create_account",
+  // Versionless S3 deletes can create additional delete markers on each retry.
+  "s3_delete_object",
+  "s3_delete_objects",
+]);
+
+export const IDEMPOTENT_NON_READONLY_TOOL_NAMES = new Set([
+  // Non-destructive writes whose repeat with the same arguments lands the same
+  // final state: overwriting PUT/copy, part-copy, multipart completion, and
+  // presigning (mints an equivalent URL, no B2 mutation). Resource creators
+  // (create_bucket / create_key / create_multipart) are omitted because a
+  // repeat call makes a new resource.
+  "s3_put_object",
+  "s3_copy_object",
+  "s3_upload_part_copy",
+  "s3_complete_multipart_upload",
+  "s3_presign_upload_part",
+]);
+
+function isReadListCapability(capability: string): boolean {
+  return capability.startsWith("read") || capability.startsWith("list");
+}
+
+export function hasReadOnlyToolCapabilities(name: string): boolean {
+  const capabilities = TOOL_CAPABILITIES[name];
+  return (
+    capabilities !== undefined &&
+    capabilities.length > 0 &&
+    capabilities.every(isReadListCapability)
+  );
+}
+
+function hasIdempotentDestructiveGate(name: string): boolean {
+  return DESTRUCTIVE_TOOL_NAME_SET.has(name) && !NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES.has(name);
+}
+
+export function annotationsForTool(name: string): McpToolAnnotations {
+  // destructiveHint tracks the server destructive gate exactly. Per the B2 MCP
+  // spec, destructive means deletes, protection removal, and irreversible/billable
+  // creation; overwrites (s3_put_object / s3_copy_object) are deliberately not
+  // gated, so they are additive writes, not destructive.
+  const destructiveHint = DESTRUCTIVE_TOOL_NAME_SET.has(name);
+  const readOnlyHint =
+    !destructiveHint &&
+    !NON_READ_ONLY_TOOL_NAMES.has(name) &&
+    (hasReadOnlyToolCapabilities(name) || READ_ONLY_OPERATION_TOOL_NAMES.has(name));
+
+  return {
+    readOnlyHint,
+    destructiveHint,
+    idempotentHint:
+      readOnlyHint ||
+      hasIdempotentDestructiveGate(name) ||
+      IDEMPOTENT_NON_READONLY_TOOL_NAMES.has(name),
+    openWorldHint: true,
+  };
+}
 
 /** Durable-secret-producing tool handlers excluded from Phase 1 registration. */
 export const DURABLE_SECRET_PRODUCING_TOOLS = new Set<string>([

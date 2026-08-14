@@ -49,6 +49,8 @@ interface LockPackage {
   version?: string;
   integrity?: string;
   dev?: boolean;
+  dependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
 }
 
 interface PackageLock {
@@ -83,6 +85,56 @@ function productionEntries(lock: PackageLock): Array<[string, LockPackage]> {
   return Object.entries(lock.packages).filter(
     ([path, entry]) => path.startsWith("node_modules/") && !entry.dev && Boolean(entry.version),
   );
+}
+
+function exactVersionFromDependencySpecifier(specifier: unknown): string | null {
+  const match = String(specifier ?? "").match(/^(\d+\.\d+\.\d+(?:[-+][^()\s]+)?)/);
+  return match?.[1] ?? null;
+}
+
+function committedProductionOverrides(lock: PackageLock): Record<string, unknown> {
+  const entries = productionEntries(lock).map(([path, entry]) => ({
+    path,
+    name: packageNameFromNodeModulesPath(path),
+    version: entry.version as string,
+    entry,
+  }));
+  const byName = new Map<string, typeof entries>();
+
+  for (const record of entries) {
+    const records = byName.get(record.name) ?? [];
+    records.push(record);
+    byName.set(record.name, records);
+  }
+
+  const overrides: Record<string, unknown> = {};
+  for (const [name, records] of byName) {
+    if (records.length === 1) overrides[name] = records[0].version;
+  }
+
+  for (const { name, version, entry } of entries) {
+    const dependencies = {
+      ...(entry.dependencies ?? {}),
+      ...(entry.optionalDependencies ?? {}),
+    };
+    const dependencyOverrides: Record<string, string> = {};
+    for (const [dependencyName, specifier] of Object.entries(dependencies)) {
+      const dependencyVersion = exactVersionFromDependencySpecifier(specifier);
+      if (dependencyVersion) {
+        dependencyOverrides[dependencyName] = dependencyVersion;
+        continue;
+      }
+      const dependencyRecords = byName.get(dependencyName);
+      if (dependencyRecords?.length === 1) {
+        dependencyOverrides[dependencyName] = dependencyRecords[0].version;
+      }
+    }
+    if (Object.keys(dependencyOverrides).length > 0) {
+      overrides[`${name}@${version}`] = dependencyOverrides;
+    }
+  }
+
+  return overrides;
 }
 
 function committedProductionGraphMismatches(
@@ -199,6 +251,7 @@ describe("packed package", () => {
             name: "b2-mcp-pack-test",
             private: true,
             dependencies: { [repoPkg.name]: tarballSpec },
+            overrides: committedProductionOverrides(repoLock),
           },
           null,
           2,
