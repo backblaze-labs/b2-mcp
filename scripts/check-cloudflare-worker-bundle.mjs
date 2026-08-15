@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createServer } from "net";
+import { spawn, spawnSync } from "child_process";
 import {
   existsSync,
   mkdirSync,
@@ -10,10 +10,10 @@ import {
   statSync,
   writeFileSync,
 } from "fs";
-import os from "os";
 import { createRequire } from "module";
+import { createServer } from "net";
+import os from "os";
 import path from "path";
-import { spawn, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
 import { gzipSync } from "zlib";
 
@@ -33,6 +33,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const reportDir = path.join(root, "reports", "cloudflare-worker-bundle");
 const wranglerConfigPath = path.join(root, "deploy/cloudflare-worker/wrangler.jsonc");
 const entrypoints = ["deploy/cloudflare-worker/worker.ts"];
+const WORKER_SMOKE_TIMEOUT_MS = 30_000;
+const WORKER_SMOKE_PROBE_TIMEOUT_MS = 1_000;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Wrangler may emit ANSI colors.
 const ansiEscapePattern = /\u001B\[[0-9;]*m/g;
 
@@ -226,13 +228,21 @@ async function runWranglerStartupSmoke(config) {
   });
 
   try {
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + WORKER_SMOKE_TIMEOUT_MS;
     let lastError = new Error("Worker did not start");
     while (Date.now() < deadline) {
       if (child.exitCode !== null) break;
+      const probeController = new AbortController();
+      const probeTimeout = setTimeout(
+        () => {
+          probeController.abort();
+        },
+        Math.min(WORKER_SMOKE_PROBE_TIMEOUT_MS, Math.max(1, deadline - Date.now())),
+      );
       try {
         const response = await fetch(`http://127.0.0.1:${port}/health`, {
           headers: { Host: `127.0.0.1:${port}` },
+          signal: probeController.signal,
         });
         const body = await response.json();
         if (response.status === 200 && body.status === "ok" && body.server === "backblaze-b2-mcp") {
@@ -243,6 +253,8 @@ async function runWranglerStartupSmoke(config) {
         );
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+      } finally {
+        clearTimeout(probeTimeout);
       }
       await new Promise((resolve) => setTimeout(resolve, 250));
     }

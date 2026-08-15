@@ -191,6 +191,10 @@ describe("deployment documentation policy", () => {
     const wranglerConfig = parseJsoncObject(wrangler);
     const workerGuide = doc("deployment/cloudflare-workers.md");
     const workerReadme = readFileSync(join(root, "deploy/cloudflare-worker/README.md"), "utf8");
+    const workerBundleCheck = readFileSync(
+      join(root, "scripts/check-cloudflare-worker-bundle.mjs"),
+      "utf8",
+    );
     const tsconfig = readFileSync(join(root, "tsconfig.typecheck.json"), "utf8");
     const pkg = readJson<{ scripts?: Record<string, string>; files?: string[] }>("package.json");
 
@@ -213,6 +217,9 @@ describe("deployment documentation policy", () => {
     expect(WORKER_EMITTED_TOTAL_BYTES_BUDGET).toBeGreaterThan(0);
     expect(WORKER_UPLOAD_SCRIPT_BYTES_BUDGET).toBeGreaterThan(0);
     expect(WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET).toBeGreaterThan(0);
+    expect(workerBundleCheck).toContain("WORKER_SMOKE_PROBE_TIMEOUT_MS");
+    expect(workerBundleCheck).toContain("AbortController");
+    expect(workerBundleCheck).toContain("signal: probeController.signal");
 
     const files = collectLocalImportGraph(root, ["deploy/cloudflare-worker/worker.ts"]);
     const bytes = [...files].reduce((sum, file) => sum + statSync(file).size, 0);
