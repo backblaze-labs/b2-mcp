@@ -1019,7 +1019,7 @@ describe("bucket notification rules", () => {
     });
 
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/resolve|non-public|public IP/i);
+    expect(res.content[0].text).toMatch(/must not resolve to a non-public IP address/i);
   });
 
   it("rejects webhook hostnames that do not resolve", async () => {
@@ -1035,7 +1035,7 @@ describe("bucket notification rules", () => {
     });
 
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/resolve.*public IP/i);
+    expect(res.content[0].text).toMatch(/must resolve to a public IP address/i);
   });
 
   it("rejects webhook URLs with embedded credentials", async () => {

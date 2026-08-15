@@ -20,7 +20,6 @@ let server: McpServer;
 
 beforeEach(() => {
   invalidateAuthManagerCache();
-  setWebhookDnsLookupForTests(async () => [{ address: "93.184.216.34" }]);
   installSdkTransport(
     new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
@@ -70,7 +69,6 @@ describe("B2 tool error paths (catch blocks)", () => {
     "b2_delete_bucket",
     "b2_update_bucket",
     "b2_get_bucket_notification_rules",
-    "b2_set_bucket_notification_rules",
     "b2_list_keys",
     "b2_delete_key",
     "b2_update_file_legal_hold",
@@ -79,6 +77,14 @@ describe("B2 tool error paths (catch blocks)", () => {
 
   it.each(nativeTools)("%s returns a structured SDK error", async (tool) => {
     const result = await callTool(server, tool, args);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("bad_request");
+    expect(result.content[0].text).toContain("req-native-error");
+  });
+
+  it("b2_set_bucket_notification_rules returns a structured SDK error", async () => {
+    setWebhookDnsLookupForTests(async () => [{ address: "93.184.216.34" }]);
+    const result = await callTool(server, "b2_set_bucket_notification_rules", args);
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("bad_request");
     expect(result.content[0].text).toContain("req-native-error");
