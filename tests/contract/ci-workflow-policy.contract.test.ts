@@ -56,6 +56,7 @@ const requiredJobNames = [
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publish = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const qualityKeeper = readFileSync(join(root, ".github/workflows/quality-keeper.yml"), "utf8");
 
   function workflowJob(name: string): string {
     const job = workflowJobBlock(ci, name);
@@ -71,6 +72,23 @@ describe("CI workflow policy", () => {
       "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
     );
     expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+  });
+
+  it("keeps Quality Keeper pull_request execution unprivileged", () => {
+    const qualityKeeperJob = workflowJobBlock(qualityKeeper, "quality-keeper");
+    expect(qualityKeeper).toContain("pull_request:");
+    expect(qualityKeeper).toContain(
+      "Reporting credentials must stay in a separate trusted workflow_run path",
+    );
+    expect(qualityKeeperJob).toBeTruthy();
+    expect(qualityKeeperJob).toContain("backblaze-labs/quality-keeper/");
+    expect(qualityKeeperJob).not.toContain("QK_APP_PRIVATE_KEY");
+    expect(qualityKeeperJob).not.toContain("secrets:");
+
+    const permissions = yamlMappingForKey(qualityKeeperJob ?? "", "permissions");
+    expect(permissions).toMatchObject({ contents: "read", actions: "read" });
+    expect(permissions).not.toHaveProperty("pull-requests");
+    expect(permissions).not.toHaveProperty("statuses");
   });
 
   it("exposes stable required check names", () => {

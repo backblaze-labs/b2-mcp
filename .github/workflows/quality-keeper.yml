@@ -5,11 +5,11 @@
 # contract, smoke, and publish workflows as the authoritative product gates;
 # Quality Keeper adds an advisory quality view and does not replace them.
 #
-# Authentication boundary:
+# Trust boundary:
+# - This pull_request workflow is analysis-only and passes no repository secrets.
 # - GitHub's private Actions-sharing token fetches QK; no QK_INSTALL_TOKEN/PAT.
-# - Target code runs only in the reusable workflow's contents-read execute job.
-# - QK_APP_PRIVATE_KEY reaches only its separate report job, which runs no target
-#   code and mints a short-lived Quality Keeper GitHub App token.
+# - Reporting credentials must stay in a separate trusted workflow_run path that
+#   consumes inert artifacts and never checks out or runs PR head code.
 
 name: Quality Keeper
 
@@ -32,7 +32,4 @@ jobs:
     uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@f7abca3b354393a7d6d908547857a50c2b6f7010
     permissions:
       contents: read
-      pull-requests: write
       actions: read
-    secrets:
-      QK_APP_PRIVATE_KEY: ${{ secrets.QK_APP_PRIVATE_KEY }}
