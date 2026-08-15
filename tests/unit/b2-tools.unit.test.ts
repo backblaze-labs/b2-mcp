@@ -1019,7 +1019,40 @@ describe("bucket notification rules", () => {
     });
 
     expect(res.isError).toBe(true);
-    expect(res.content[0].text).toMatch(/resolve|non-public|public IP/i);
+    expect(res.content[0].text).toMatch(/must not resolve to a non-public IP address/i);
+  });
+
+  it("rejects webhook hostnames that resolve to mixed public and private addresses", async () => {
+    setWebhookDnsLookupForTests(async () => [
+      { address: "93.184.216.34" },
+      { address: "169.254.169.254" },
+    ]);
+    const bucket = await createBucket("notify-dns-rebind");
+
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: bucket.id,
+      eventNotificationRules: [ruleWith("https://customer.example.com/hook")],
+      confirm: true,
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/must not resolve to a non-public IP address/i);
+  });
+
+  it("rejects webhook hostnames that do not resolve", async () => {
+    setWebhookDnsLookupForTests(async () => {
+      throw new Error("ENOTFOUND");
+    });
+    const bucket = await createBucket("notify-dns-unresolved");
+
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: bucket.id,
+      eventNotificationRules: [ruleWith("https://customer.example.com/hook")],
+      confirm: true,
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/must resolve to a public IP address/i);
   });
 
   it("rejects webhook URLs with embedded credentials", async () => {
