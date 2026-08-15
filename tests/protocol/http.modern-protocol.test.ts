@@ -309,6 +309,45 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(acceptedResult.content?.[0]?.text).toContain("deleted");
       expect(s3Send).toHaveBeenCalledTimes(1);
 
+      const swapped = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "swapped.jpg" },
+          {
+            id: 5,
+            requestState: initialResult.requestState,
+            inputResponses: {
+              destructiveConfirmation: { action: "accept", content: { confirm: true } },
+            },
+          },
+        ),
+      });
+      const swappedResult = parsedJson(swapped.body).result;
+      expect(swapped.status).toBe(200);
+      expect(swappedResult.isError).toBe(true);
+      expect(swappedResult.content?.[0]?.text).toMatch(/target did not match/i);
+      expect(s3Send).toHaveBeenCalledTimes(1);
+
+      const tamperedState = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "old.jpg" },
+          {
+            id: 6,
+            requestState: `${initialResult.requestState}tampered`,
+            inputResponses: {
+              destructiveConfirmation: { action: "accept", content: { confirm: true } },
+            },
+          },
+        ),
+      });
+      const tamperedBody = parsedJson(tamperedState.body);
+      expect(tamperedState.status).toBe(200);
+      expect(tamperedBody.error.data.reason).toBe("invalid_request_state");
+      expect(s3Send).toHaveBeenCalledTimes(1);
+
       const declineInitial = await request(port, "POST", "/mcp", {
         headers,
         body: elicitationCallToolBody(

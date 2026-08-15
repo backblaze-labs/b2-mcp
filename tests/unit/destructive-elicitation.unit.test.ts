@@ -9,9 +9,14 @@ import {
   DESTRUCTIVE_ELICITATION_RESPONSE_KEY,
   clientCanUseReturnBasedElicitation,
   clientSupportsFormElicitation,
+  createDestructiveElicitationRequestStateCodec,
   destructiveElicitationMessage,
 } from "../../src/utils/destructive-elicitation";
-import { checkDestructive, DESTRUCTIVE_TOOL_NAMES } from "../../src/utils/destructive-gate";
+import {
+  checkDestructive,
+  DESTRUCTIVE_TOOL_NAMES,
+  destructiveEffect,
+} from "../../src/utils/destructive-gate";
 import { toolError } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import type { B2Config, DestructivePolicy } from "../../src/utils/types";
@@ -68,6 +73,26 @@ const DESTRUCTIVE_ARGS: Record<string, Record<string, unknown>> = {
     rules: [{ id: "delete", status: "Enabled", expiration: { days: 1 } }],
   },
 };
+const EXPECTED_PROMPT_SNIPPETS: Record<string, string[]> = {
+  b2_create_group_member: ["Member email: member@example.com."],
+  b2_delete_bucket: ["Bucket ID: bucket-id."],
+  b2_delete_key: ["Application key ID: key-id."],
+  b2_eject_group_member: [
+    "Admin account ID: admin-account-id.",
+    "Group ID: group-id.",
+    "Member account ID: member-account-id.",
+  ],
+  b2_reserve_trial_create_account: ["Account email: trial@example.com."],
+  b2_set_bucket_notification_rules: ["Bucket ID: bucket-id.", "Notification rule count: 1."],
+  b2_update_bucket: ["Bucket ID: bucket-id.", "make the bucket PUBLIC"],
+  b2_update_file_legal_hold: ["File ID: file-id.", "File name: old.txt."],
+  b2_update_file_retention: ["File ID: file-id.", "File name: old.txt."],
+  s3_abort_multipart_upload: ["Bucket: bucket.", "Object key: old.txt.", "Upload ID: upload-id."],
+  s3_delete_object: ["Bucket: bucket.", "Object key: old.txt."],
+  s3_delete_objects: ["Bucket: bucket.", "Object count: 1."],
+  s3_get_presigned_url: ["Bucket: bucket.", "Object key: old.txt.", "Operation: PutObject."],
+  s3_put_bucket_lifecycle: ["Bucket: bucket.", "Rule count: 1.", "Deletion rule count: 1."],
+};
 
 function providers(
   clientCapabilities: ClientCapabilities | undefined = FORM_ELICITATION,
@@ -109,9 +134,9 @@ function acceptedResponse() {
   };
 }
 
-function destructiveOriginal(config: B2Config) {
+function destructiveOriginal(config: B2Config, toolName = "s3_delete_object") {
   return vi.fn((args: Record<string, unknown>) => {
-    const gate = checkDestructive("s3_delete_object", args, config);
+    const gate = checkDestructive(toolName, args, config);
     if (!gate.ok) return toolError(new Error(gate.message));
     return { content: [{ type: "text" as const, text: "deleted" }] };
   });
@@ -183,6 +208,23 @@ describe("destructive elicitation", () => {
     expect(original).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects tampered server-minted requestState through the SDK codec", async () => {
+    const codec = createDestructiveElicitationRequestStateCodec(cfg());
+    const payload = {
+      v: 1 as const,
+      kind: "destructive-elicitation" as const,
+      toolName: "s3_delete_object",
+      effect: "permanently delete an object",
+      argsDigest: "digest",
+      issuedAt: Date.now(),
+    };
+    const requestState = await codec.mint(payload, {} as never);
+
+    expect(requestState).toContain(DESTRUCTIVE_ELICITATION_REQUEST_STATE);
+    await expect(codec.verify(requestState, {} as never)).resolves.toEqual(payload);
+    await expect(codec.verify(`${requestState}tampered`, {} as never)).rejects.toThrow();
+  });
+
   it("refuses accepted approval when the destructive target changes", async () => {
     const config = cfg();
     const original = destructiveOriginal(config);
@@ -194,6 +236,40 @@ describe("destructive elicitation", () => {
 
     const result = await wrapped(
       { bucket: "prod", key: "customer-backups.tar", confirm: true },
+      extraWithElicitation(acceptedResponse(), requestState),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content?.[0]?.text).toMatch(/target did not match/i);
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it("refuses forged first-shot approval without server-minted state", async () => {
+    const config = cfg();
+    const original = destructiveOriginal(config);
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
+
+    const result = await wrapped(
+      { bucket: "photos", key: "old.jpg", confirm: true },
+      extraWithElicitation(acceptedResponse()),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content?.[0]?.text).toMatch(/requestState is missing/i);
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it("refuses target swaps for arg-derived destructive effects", async () => {
+    const config = cfg();
+    const original = destructiveOriginal(config, "b2_update_bucket");
+    const wrapped = createAuditedToolCallback("b2_update_bucket", original, config, providers());
+    const requestState = await requestStateFor(wrapped, {
+      bucketId: "approved-bucket-id",
+      bucketType: "allPublic",
+    });
+
+    const result = await wrapped(
+      { bucketId: "different-bucket-id", bucketType: "allPublic", confirm: true },
       extraWithElicitation(acceptedResponse(), requestState),
     );
 
@@ -381,6 +457,21 @@ describe("destructive elicitation", () => {
     expect(message).toContain("Member account ID: member-account-id.");
   });
 
+  it("keeps destructive prompt target details pinned for every tool", () => {
+    expect(Object.keys(EXPECTED_PROMPT_SNIPPETS).sort()).toEqual(DESTRUCTIVE_TOOL_NAMES);
+
+    for (const toolName of DESTRUCTIVE_TOOL_NAMES) {
+      const args = DESTRUCTIVE_ARGS[toolName];
+      const effect = destructiveEffect(toolName, args);
+      expect(effect, toolName).toBeTruthy();
+
+      const message = destructiveElicitationMessage(toolName, effect!, args);
+      for (const snippet of EXPECTED_PROMPT_SNIPPETS[toolName]) {
+        expect(message, `${toolName} missing ${snippet}`).toContain(snippet);
+      }
+    }
+  });
+
   it("sanitizes secret-shaped values from elicitation prompts", () => {
     const message = destructiveElicitationMessage(
       "s3_delete_object",
@@ -397,7 +488,7 @@ describe("destructive elicitation", () => {
     expect(message).toContain("[redacted]");
   });
 
-  it("logs requested, accepted, and refused elicitation decisions without args", async () => {
+  it("logs requested, accepted, and declined elicitation decisions without args", async () => {
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     const config = cfg();
     const original = destructiveOriginal(config);
@@ -424,13 +515,33 @@ describe("destructive elicitation", () => {
       "requested",
       "accepted",
       "requested",
-      "refused",
+      "declined",
+    ]);
+    expect(elicitationLogs.map(([entry]) => (entry as { outcome: string }).outcome)).toEqual([
+      "requested",
+      "accepted",
+      "requested",
+      "declined",
     ]);
     expect(elicitationLogs.map(([entry]) => (entry as { tool: string }).tool)).toEqual([
       "s3_delete_object",
       "s3_delete_object",
       "s3_delete_object",
       "s3_delete_object",
+    ]);
+
+    const toolCallLogs = info.mock.calls.filter(([, message]) => message === "tool.call");
+    expect(
+      toolCallLogs.map(([entry]) => ({
+        resultType: (entry as { resultType: string }).resultType,
+        outcome: (entry as { elicitationOutcome?: string }).elicitationOutcome,
+        handlerRan: (entry as { handlerRan?: boolean }).handlerRan,
+      })),
+    ).toEqual([
+      { resultType: "input_required", outcome: "requested", handlerRan: false },
+      { resultType: "complete", outcome: "accepted", handlerRan: true },
+      { resultType: "input_required", outcome: "requested", handlerRan: false },
+      { resultType: "complete", outcome: "declined", handlerRan: false },
     ]);
     const serializedLogs = JSON.stringify(elicitationLogs);
     expect(serializedLogs).not.toContain("photos");

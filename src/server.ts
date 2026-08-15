@@ -46,7 +46,9 @@ import {
 } from "./credentials.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import {
+  createDestructiveElicitationRequestStateCodec,
   maybeRequireDestructiveElicitation,
+  type DestructiveElicitationAuditEvent,
   type DestructiveElicitationContextProviders,
 } from "./utils/destructive-elicitation.js";
 
@@ -160,6 +162,7 @@ export function createServer(
 ): McpServer {
   const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
   const oauthScopes = options.oauthScopes ? new Set(options.oauthScopes) : null;
+  const requestStateCodec = createDestructiveElicitationRequestStateCodec(config);
   const server = createMcpServer(
     {
       name: "backblaze-b2",
@@ -197,6 +200,9 @@ export function createServer(
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
         "tools/list": { ttlMs: 30_000, cacheScope: "private" },
       },
+      requestState: {
+        verify: requestStateCodec.verify,
+      },
     },
   );
 
@@ -218,6 +224,7 @@ export function createServer(
       createAuditedToolCallback(name, callback, config, {
         getClientCapabilities: () => getMcpClientCapabilities(server),
         getProtocolVersion: () => getMcpNegotiatedProtocolVersion(server),
+        requestStateCodec,
       }),
   });
 
@@ -603,6 +610,8 @@ export function createAuditedToolCallback(
       const sanitizerOptions = sanitizerOptionsFromConfig(config);
       const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
       const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
+      let destructiveElicitationAudit: DestructiveElicitationAuditEvent | undefined;
+      let handlerRan = false;
       const callOriginal = () =>
         runWithMcpRequestSignal(signal, () =>
           runWithSanitizerOptions(sanitizerOptions, () =>
@@ -616,13 +625,18 @@ export function createAuditedToolCallback(
         config,
         sanitizerOptions,
         contextProviders,
+        onDecision: (event) => {
+          destructiveElicitationAudit = event;
+        },
         runOriginal: callOriginal,
       });
+      handlerRan = destructiveElicitationAudit?.outcome === "accepted";
       const result = isSanitizedMcpResponse(rawResult)
         ? rawResult
         : sanitizeMcpResponse(rawResult, sanitizerOptions);
       const durationMs = Date.now() - start;
       const isError = result?.isError === true;
+      const resultType = result?.resultType === "input_required" ? "input_required" : "complete";
       // When the tool returned a structured error, surface the classified
       // code/status/requestId in the audit event. Values stay out of logs.
       const errInfo = isError ? parseErrorText(result?.content?.[0]?.text) : null;
@@ -641,6 +655,14 @@ export function createAuditedToolCallback(
           argKeys,
           durationMs,
           error: isError,
+          resultType,
+          ...(destructiveElicitationAudit && {
+            elicitationOutcome: destructiveElicitationAudit.outcome,
+            handlerRan,
+            ...(destructiveElicitationAudit.reason && {
+              elicitationReason: destructiveElicitationAudit.reason,
+            }),
+          }),
           ...(safeErrInfo && {
             code: safeErrInfo.code,
             status: safeErrInfo.status,

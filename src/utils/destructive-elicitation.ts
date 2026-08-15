@@ -3,13 +3,17 @@ import {
   inputRequired,
   inputResponse,
   PROTOCOL_VERSION_META_KEY,
+  createRequestStateCodec,
   type ClientCapabilities,
   type InputRequiredResult,
+  type RequestStateCodec,
+  type ServerContext,
 } from "@modelcontextprotocol/server";
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash } from "crypto";
 import { toolError } from "./errors.js";
 import {
   destructiveEffect,
+  destructiveTargetDigest,
   getDestructivePolicy,
   runWithDestructiveElicitationConsent,
 } from "./destructive-gate.js";
@@ -23,12 +27,23 @@ export const DESTRUCTIVE_ELICITATION_REQUEST_STATE = "b2-mcp-destructive-elicita
 
 export type ClientCapabilitiesProvider = () => ClientCapabilities | undefined;
 export type ProtocolVersionProvider = () => string | undefined;
+export type DestructiveElicitationRequestStateCodec =
+  RequestStateCodec<DestructiveElicitationState>;
+
+export interface DestructiveElicitationAuditEvent {
+  outcome: ElicitationDecision;
+  reason?: string;
+}
 
 export interface DestructiveElicitationContextProviders {
   getClientCapabilities?: ClientCapabilitiesProvider;
   getProtocolVersion?: ProtocolVersionProvider;
+  requestStateCodec?: DestructiveElicitationRequestStateCodec;
 }
 
+// Single adapter boundary for the SDK tool-callback context fields this module
+// consumes. The SDK owns mcpReq/envelope/requestState shape, so upgrades should
+// be reconciled here rather than through scattered structural casts.
 interface McpRequestExtra {
   clientCapabilities?: ClientCapabilities;
   mcpReq?: {
@@ -39,22 +54,25 @@ interface McpRequestExtra {
   };
 }
 
-interface DestructiveElicitationState {
+export interface DestructiveElicitationState {
   v: 1;
+  kind: "destructive-elicitation";
   toolName: string;
   effect: string;
   argsDigest: string;
   issuedAt: number;
 }
 
-type ElicitationDecision = "requested" | "accepted" | "refused";
+export type ElicitationDecision = "requested" | "accepted" | "declined" | "cancelled" | "refused";
 type StateVerification =
   | { ok: true; state: DestructiveElicitationState }
   | { ok: false; reason: string };
 
 const DESTRUCTIVE_ELICITATION_STATE_MAX_AGE_MS = 10 * 60 * 1000;
+const DESTRUCTIVE_ELICITATION_STATE_TTL_SECONDS = DESTRUCTIVE_ELICITATION_STATE_MAX_AGE_MS / 1000;
 const DESTRUCTIVE_ELICITATION_ENV = "B2_DESTRUCTIVE_ELICITATION";
 const RETURN_BASED_INPUT_PROTOCOL_VERSION = "2026-07-28";
+const REQUEST_STATE_PREFIX = `${DESTRUCTIVE_ELICITATION_REQUEST_STATE}.`;
 
 // Prompt coverage is pinned by tests that enumerate DESTRUCTIVE_TOOL_NAMES and
 // assert representative destructive args surface concrete, sanitized details.
@@ -83,6 +101,7 @@ interface DestructiveElicitationOptions<T> {
   config: B2Config;
   sanitizerOptions: SanitizerOptions;
   contextProviders?: DestructiveElicitationContextProviders;
+  onDecision?: (event: DestructiveElicitationAuditEvent) => void;
   runOriginal: () => T | Promise<T>;
 }
 
@@ -95,6 +114,7 @@ export async function maybeRequireDestructiveElicitation<T>({
   config,
   sanitizerOptions,
   contextProviders,
+  onDecision,
   runOriginal,
 }: DestructiveElicitationOptions<T>): Promise<T | InputRequiredResult | ToolErrorResult> {
   const effect = destructiveEffect(toolName, args);
@@ -118,10 +138,29 @@ export async function maybeRequireDestructiveElicitation<T>({
   );
   if (response.kind === "missing") {
     if (mcpRequestState(requestExtra) !== undefined) {
-      return destructiveElicitationRefused(toolName, effect, "human confirmation was not provided");
+      return destructiveElicitationRefused(
+        toolName,
+        effect,
+        "human confirmation was not provided",
+        sanitizerOptions,
+        onDecision,
+      );
     }
-    const requestState = mintDestructiveElicitationState(config, toolName, effect, args);
-    logDestructiveElicitation(toolName, effect, "requested", sanitizerOptions);
+    const requestState = await mintDestructiveElicitationState(
+      config,
+      toolName,
+      effect,
+      args,
+      extra,
+      contextProviders,
+    );
+    recordDestructiveElicitationDecision(
+      toolName,
+      effect,
+      "requested",
+      sanitizerOptions,
+      onDecision,
+    );
     return inputRequired({
       inputRequests: {
         [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: inputRequired.elicit({
@@ -144,15 +183,23 @@ export async function maybeRequireDestructiveElicitation<T>({
     });
   }
 
-  const state = verifyDestructiveElicitationState(
+  const state = await verifyDestructiveElicitationState(
     config,
     mcpRequestState(requestExtra),
     toolName,
     effect,
     args,
+    extra,
+    contextProviders,
   );
   if (!state.ok) {
-    return destructiveElicitationRefused(toolName, effect, state.reason);
+    return destructiveElicitationRefused(
+      toolName,
+      effect,
+      state.reason,
+      sanitizerOptions,
+      onDecision,
+    );
   }
 
   if (response.kind !== "elicit") {
@@ -160,23 +207,39 @@ export async function maybeRequireDestructiveElicitation<T>({
       toolName,
       effect,
       "human confirmation response was invalid",
+      sanitizerOptions,
+      onDecision,
     );
   }
 
   if (response.action !== "accept") {
+    const outcome = response.action === "decline" ? "declined" : "cancelled";
     return destructiveElicitationRefused(
       toolName,
       effect,
       `human confirmation was ${response.action}`,
+      sanitizerOptions,
+      onDecision,
+      outcome,
     );
   }
 
   if (response.content?.confirm !== true) {
-    return destructiveElicitationRefused(toolName, effect, "human confirmation did not approve");
+    return destructiveElicitationRefused(
+      toolName,
+      effect,
+      "human confirmation did not approve",
+      sanitizerOptions,
+      onDecision,
+    );
   }
 
-  logDestructiveElicitation(toolName, effect, "accepted", sanitizerOptions);
-  return runWithDestructiveElicitationConsent(toolName, effect, runOriginal);
+  recordDestructiveElicitationDecision(toolName, effect, "accepted", sanitizerOptions, onDecision);
+  return runWithDestructiveElicitationConsent(
+    toolName,
+    destructiveTargetDigest(config, args),
+    runOriginal,
+  );
 }
 
 export function clientCanUseReturnBasedElicitation(
@@ -250,8 +313,18 @@ function destructiveElicitationRefused(
   toolName: string,
   effect: string,
   reason: string,
+  sanitizerOptions: SanitizerOptions = {},
+  onDecision?: (event: DestructiveElicitationAuditEvent) => void,
+  outcome: ElicitationDecision = "refused",
 ): ToolErrorResult {
-  logDestructiveElicitation(toolName, effect, "refused", undefined, reason);
+  recordDestructiveElicitationDecision(
+    toolName,
+    effect,
+    outcome,
+    sanitizerOptions,
+    onDecision,
+    reason,
+  );
   return toolError(
     new Error(
       `Refused: ${toolName} requires explicit human approval by MCP elicitation; ${reason}.`,
@@ -330,44 +403,59 @@ function requestSupportsReturnBasedInput(
   return mcpProtocolVersion(extra, contextProviders) === RETURN_BASED_INPUT_PROTOCOL_VERSION;
 }
 
-function mintDestructiveElicitationState(
+export function createDestructiveElicitationRequestStateCodec(
+  config: B2Config,
+): DestructiveElicitationRequestStateCodec {
+  const codec = createRequestStateCodec<DestructiveElicitationState>({
+    key: destructiveElicitationStateKey(config),
+    ttlSeconds: DESTRUCTIVE_ELICITATION_STATE_TTL_SECONDS,
+  });
+
+  return {
+    async mint(payload, ctx) {
+      return `${REQUEST_STATE_PREFIX}${await codec.mint(payload, ctx)}`;
+    },
+    async verify(state, ctx) {
+      if (!state.startsWith(REQUEST_STATE_PREFIX)) throw new Error("malformed");
+      return codec.verify(state.slice(REQUEST_STATE_PREFIX.length), ctx);
+    },
+  };
+}
+
+async function mintDestructiveElicitationState(
   config: B2Config,
   toolName: string,
   effect: string,
   args: Record<string, unknown>,
-): string {
+  extra: unknown,
+  contextProviders?: DestructiveElicitationContextProviders,
+): Promise<string> {
   const payload: DestructiveElicitationState = {
     v: 1,
+    kind: "destructive-elicitation",
     toolName,
     effect,
-    argsDigest: destructiveArgsDigest(config, args),
+    argsDigest: destructiveTargetDigest(config, args),
     issuedAt: Date.now(),
   };
-  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
-  return `${DESTRUCTIVE_ELICITATION_REQUEST_STATE}.${encodedPayload}.${destructiveStateSignature(
-    config,
-    encodedPayload,
-  )}`;
+  return requestStateCodec(config, contextProviders).mint(payload, extra as ServerContext);
 }
 
-function verifyDestructiveElicitationState(
+async function verifyDestructiveElicitationState(
   config: B2Config,
   requestState: unknown,
   toolName: string,
   effect: string,
   args: Record<string, unknown>,
-): StateVerification {
-  if (typeof requestState !== "string") return { ok: false, reason: "requestState is missing" };
+  extra: unknown,
+  contextProviders?: DestructiveElicitationContextProviders,
+): Promise<StateVerification> {
+  if (requestState === undefined) return { ok: false, reason: "requestState is missing" };
 
-  const [prefix, encodedPayload, signature, extra] = requestState.split(".");
-  if (prefix !== DESTRUCTIVE_ELICITATION_REQUEST_STATE || !encodedPayload || !signature || extra) {
-    return { ok: false, reason: "requestState was malformed" };
-  }
-  if (!safeEqual(signature, destructiveStateSignature(config, encodedPayload))) {
-    return { ok: false, reason: "requestState integrity check failed" };
-  }
-
-  const state = parseDestructiveElicitationState(encodedPayload);
+  const state =
+    typeof requestState === "string"
+      ? await verifyRawDestructiveElicitationState(config, requestState, extra, contextProviders)
+      : parseDestructiveElicitationState(requestState);
   if (!state) return { ok: false, reason: "requestState payload was invalid" };
   if (Date.now() - state.issuedAt > DESTRUCTIVE_ELICITATION_STATE_MAX_AGE_MS) {
     return { ok: false, reason: "requestState expired" };
@@ -375,7 +463,7 @@ function verifyDestructiveElicitationState(
   if (
     state.toolName !== toolName ||
     state.effect !== effect ||
-    state.argsDigest !== destructiveArgsDigest(config, args)
+    state.argsDigest !== destructiveTargetDigest(config, args)
   ) {
     return { ok: false, reason: "approved destructive target did not match this call" };
   }
@@ -383,77 +471,82 @@ function verifyDestructiveElicitationState(
   return { ok: true, state };
 }
 
-function parseDestructiveElicitationState(
-  encodedPayload: string,
-): DestructiveElicitationState | null {
+async function verifyRawDestructiveElicitationState(
+  config: B2Config,
+  requestState: string,
+  extra: unknown,
+  contextProviders?: DestructiveElicitationContextProviders,
+): Promise<DestructiveElicitationState | null> {
   try {
-    const state = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as {
-      v?: unknown;
-      toolName?: unknown;
-      effect?: unknown;
-      argsDigest?: unknown;
-      issuedAt?: unknown;
-    };
-    if (
-      state?.v !== 1 ||
-      typeof state.toolName !== "string" ||
-      typeof state.effect !== "string" ||
-      typeof state.argsDigest !== "string" ||
-      typeof state.issuedAt !== "number"
-    ) {
-      return null;
-    }
-    return state as DestructiveElicitationState;
+    return parseDestructiveElicitationState(
+      await requestStateCodec(config, contextProviders).verify(
+        requestState,
+        extra as ServerContext,
+      ),
+    );
   } catch {
     return null;
   }
 }
 
-function destructiveStateSignature(config: B2Config, encodedPayload: string): string {
-  return createHmac("sha256", destructiveElicitationKey(config))
-    .update("b2-mcp-destructive-elicitation-state\0")
-    .update(encodedPayload)
-    .digest("base64url");
+function parseDestructiveElicitationState(value: unknown): DestructiveElicitationState | null {
+  const state = value as {
+    v?: unknown;
+    kind?: unknown;
+    toolName?: unknown;
+    effect?: unknown;
+    argsDigest?: unknown;
+    issuedAt?: unknown;
+  };
+  if (
+    !state ||
+    typeof state !== "object" ||
+    state.v !== 1 ||
+    state.kind !== "destructive-elicitation" ||
+    typeof state.toolName !== "string" ||
+    typeof state.effect !== "string" ||
+    typeof state.argsDigest !== "string" ||
+    typeof state.issuedAt !== "number"
+  ) {
+    return null;
+  }
+  return state as DestructiveElicitationState;
 }
 
-function destructiveArgsDigest(config: B2Config, args: Record<string, unknown>): string {
-  return createHmac("sha256", destructiveElicitationKey(config))
-    .update("b2-mcp-destructive-elicitation-args\0")
-    .update(canonicalJson(securityRelevantArgs(args)))
-    .digest("base64url");
+function requestStateCodec(
+  config: B2Config,
+  contextProviders?: DestructiveElicitationContextProviders,
+): DestructiveElicitationRequestStateCodec {
+  return (
+    contextProviders?.requestStateCodec ?? createDestructiveElicitationRequestStateCodec(config)
+  );
 }
 
-function destructiveElicitationKey(config: B2Config): string {
+function destructiveElicitationStateKey(config: B2Config): Uint8Array {
+  return Uint8Array.from(
+    createHash("sha256")
+      .update("b2-mcp-destructive-elicitation-request-state\0")
+      .update(destructiveElicitationKeyMaterial(config))
+      .digest(),
+  );
+}
+
+function destructiveElicitationKeyMaterial(config: B2Config): string {
   return [config.applicationKey, config.appKey, config.masterKey, config.credentialFingerprint]
     .filter((part): part is string => typeof part === "string" && part.length > 0)
     .join("\0");
 }
 
-function securityRelevantArgs(args: Record<string, unknown>): Record<string, unknown> {
-  const relevant = { ...args };
-  delete relevant.confirm;
-  return relevant;
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === undefined) return "null";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-
-  const object = value as Record<string, unknown>;
-  const entries = Object.keys(object)
-    .filter((key) => object[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`);
-  return `{${entries.join(",")}}`;
-}
-
-function safeEqual(actual: string, expected: string): boolean {
-  const actualBuffer = Uint8Array.from(Buffer.from(actual));
-  const expectedBuffer = Uint8Array.from(Buffer.from(expected));
-  return (
-    actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer)
-  );
+function recordDestructiveElicitationDecision(
+  toolName: string,
+  effect: string,
+  decision: ElicitationDecision,
+  sanitizerOptions: SanitizerOptions,
+  onDecision?: (event: DestructiveElicitationAuditEvent) => void,
+  reason?: string,
+): void {
+  logDestructiveElicitation(toolName, effect, decision, sanitizerOptions, reason);
+  onDecision?.({ outcome: decision, ...(reason && { reason }) });
 }
 
 function logDestructiveElicitation(
@@ -468,6 +561,7 @@ function logDestructiveElicitation(
       tool: toolName,
       effect: sanitizeText(effect, sanitizerOptions),
       decision,
+      outcome: decision,
       ...(reason && { reason }),
     },
     "destructive.elicitation",

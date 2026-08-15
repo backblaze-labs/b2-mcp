@@ -30,9 +30,9 @@ version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
     examples and internet-facing HTTP deployments. Use `confirm` only for
     trusted interactive examples. Under `confirm`, 2026 MCP clients that
     advertise form elicitation are prompted before the server-side confirm gate;
-    clients without compatible elicitation fall back to the explicit
-    `confirm: true` retry. Under `allow`, both elicitation and the confirm gate
-    are skipped.
+    clients without compatible elicitation, or servers with
+    `B2_DESTRUCTIVE_ELICITATION=off`, fall back to the explicit `confirm: true`
+    retry. Under `allow`, both elicitation and the confirm gate are skipped.
 12. Never log B2 credentials, bearer tokens, presigned URLs, authorization
     responses, or provider deployment-bypass tokens.
 13. Create, rotate, revoke, and tear down B2 keys outside the MCP tool flow
@@ -72,6 +72,13 @@ boundary for internet-facing transports. A compromised or malicious client can
 fabricate an approval response. Keep `B2_DESTRUCTIVE_POLICY=block` as the hard
 wall for those deployments; do not downgrade to `confirm` just because a client
 advertises elicitation.
+
+Rollout note: elicitation changes compatible 2026 `confirm` clients from a
+one-request `confirm: true` flow to a two-request flow carrying server-minted
+`requestState`. Deploy all HTTP replicas with the same credentials and config.
+During an expand/contract rollout, an elicitation follow-up routed to a
+pre-elicitation pod fails safe with the old confirmation refusal; it does not
+execute an unapproved destructive operation.
 
 ## Least-Privilege B2 Key
 
