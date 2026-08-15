@@ -4,6 +4,7 @@
  */
 
 import { createServer, invalidateAuthManagerCache } from "../../src/server";
+import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import type { McpServer } from "../../src/mcp";
 import { callTool, testConfig } from "../support/deterministic-fakes";
@@ -19,6 +20,7 @@ let server: McpServer;
 
 beforeEach(() => {
   invalidateAuthManagerCache();
+  setWebhookDnsLookupForTests(async () => [{ address: "93.184.216.34" }]);
   installSdkTransport(
     new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
@@ -36,6 +38,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  setWebhookDnsLookupForTests(null);
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
 });

@@ -1022,6 +1022,22 @@ describe("bucket notification rules", () => {
     expect(res.content[0].text).toMatch(/resolve|non-public|public IP/i);
   });
 
+  it("rejects webhook hostnames that do not resolve", async () => {
+    setWebhookDnsLookupForTests(async () => {
+      throw new Error("ENOTFOUND");
+    });
+    const bucket = await createBucket("notify-dns-unresolved");
+
+    const res = await callTool(server, "b2_set_bucket_notification_rules", {
+      bucketId: bucket.id,
+      eventNotificationRules: [ruleWith("https://customer.example.com/hook")],
+      confirm: true,
+    });
+
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/resolve.*public IP/i);
+  });
+
   it("rejects webhook URLs with embedded credentials", async () => {
     const bucket = await createBucket("notify-userinfo");
     const res = await callTool(server, "b2_set_bucket_notification_rules", {
