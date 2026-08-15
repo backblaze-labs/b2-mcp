@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "async_hooks";
+import { createHmac } from "crypto";
 import { B2Config, DestructivePolicy } from "./types.js";
 
 /**
@@ -26,6 +28,9 @@ import { B2Config, DestructivePolicy } from "./types.js";
  */
 type Detector = (args: Record<string, unknown>) => string | null;
 
+// Keep this detector list and destructive-elicitation.ts PROMPT_FIELDS in sync:
+// detectors decide which calls need approval, while prompt fields decide which
+// target details the human sees. Unit coverage pins both registries.
 const DETECTORS: Record<string, Detector> = {
   b2_delete_bucket: () => "permanently delete a bucket",
   s3_delete_object: () => "permanently delete an object",
@@ -93,6 +98,70 @@ export function isDestructiveTool(toolName: string): boolean {
   return toolName in DETECTORS;
 }
 
+export function destructiveEffect(
+  toolName: string,
+  args: Record<string, unknown> = {},
+): string | null {
+  return DETECTORS[toolName]?.(args) ?? null;
+}
+
+interface DestructiveConsent {
+  toolName: string;
+  argsDigest: string;
+}
+
+const destructiveConsentStorage = new AsyncLocalStorage<DestructiveConsent | undefined>();
+
+// Elicitation is enforced in the shared tool wrapper, while each tool still
+// calls this gate internally. AsyncLocalStorage carries only the approved
+// (toolName, argsDigest) through that call stack, avoiding signature churn
+// across every handler. The digest is bound to the exact approved target args,
+// so the gate does not depend on human-readable effect prose.
+export function runWithDestructiveElicitationConsent<T>(
+  toolName: string,
+  argsDigest: string,
+  callback: () => T,
+): T {
+  return destructiveConsentStorage.run({ toolName, argsDigest }, callback);
+}
+
+function hasDestructiveElicitationConsent(toolName: string, argsDigest: string): boolean {
+  const consent = destructiveConsentStorage.getStore();
+  return consent?.toolName === toolName && consent.argsDigest === argsDigest;
+}
+
+export function destructiveTargetDigest(config: B2Config, args: Record<string, unknown>): string {
+  return createHmac("sha256", destructiveGateKey(config))
+    .update("b2-mcp-destructive-target-args\0")
+    .update(canonicalJson(securityRelevantArgs(args)))
+    .digest("base64url");
+}
+
+function destructiveGateKey(config: B2Config): string {
+  return [config.applicationKey, config.appKey, config.masterKey, config.credentialFingerprint]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join("\0");
+}
+
+function securityRelevantArgs(args: Record<string, unknown>): Record<string, unknown> {
+  const relevant = { ...args };
+  delete relevant.confirm;
+  return relevant;
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+
+  const object = value as Record<string, unknown>;
+  const entries = Object.keys(object)
+    .filter((key) => object[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`);
+  return `{${entries.join(",")}}`;
+}
+
 export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   const p = config.destructivePolicy;
   return p === "allow" || p === "block" ? p : "confirm";
@@ -107,6 +176,11 @@ export interface GateResult {
  * Evaluate whether a tool call may proceed. Call at the top of a destructive
  * tool's handler; if `ok` is false, return `toolError(new Error(message))`.
  *
+ * Under the `confirm` policy, approval can be supplied by the legacy
+ * model-provided `confirm: true` fallback, or by the audited tool wrapper
+ * installing elicitation consent after validating server-minted requestState.
+ * New handlers should keep calling this function normally.
+ *
  * @returns The gate decision for the requested tool call.
  */
 export function checkDestructive(
@@ -114,10 +188,7 @@ export function checkDestructive(
   args: Record<string, unknown>,
   config: B2Config,
 ): GateResult {
-  const detector = DETECTORS[toolName];
-  if (!detector) return { ok: true };
-
-  const effect = detector(args ?? {});
+  const effect = destructiveEffect(toolName, args ?? {});
   if (!effect) return { ok: true }; // this specific call is not destructive
 
   const policy = getDestructivePolicy(config);
@@ -133,6 +204,13 @@ export function checkDestructive(
   }
 
   // policy === "confirm"
+  // Human elicitation approval is a wrapper-to-gate signal. It composes with
+  // the confirm policy without mutating tool args, and is matched to this
+  // tool plus canonical target digest before the explicit model-supplied
+  // confirm fallback.
+  if (hasDestructiveElicitationConsent(toolName, destructiveTargetDigest(config, args))) {
+    return { ok: true };
+  }
   if (args.confirm === true) return { ok: true };
   return {
     ok: false,

@@ -5,6 +5,11 @@
  */
 
 import {
+  CLIENT_CAPABILITIES_META_KEY,
+  CLIENT_INFO_META_KEY,
+  PROTOCOL_VERSION_META_KEY,
+} from "@modelcontextprotocol/server";
+import {
   buildHttpServer,
   type HttpServerHandle,
   type HttpServerOptions,
@@ -82,6 +87,33 @@ function parsedJson(body: string): any {
 
 function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
   return modernBody("tools/call", { name, arguments: args }, id);
+}
+
+function elicitationCallToolBody(
+  name: string,
+  args: Record<string, unknown>,
+  options: {
+    id: number;
+    inputResponses?: Record<string, unknown>;
+    requestState?: string;
+  },
+): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id: options.id,
+    method: "tools/call",
+    params: {
+      name,
+      arguments: args,
+      ...(options.inputResponses && { inputResponses: options.inputResponses }),
+      ...(options.requestState && { requestState: options.requestState }),
+      _meta: {
+        [PROTOCOL_VERSION_META_KEY]: MODERN_PROTOCOL_VERSION,
+        [CLIENT_CAPABILITIES_META_KEY]: { elicitation: { form: {} } },
+        [CLIENT_INFO_META_KEY]: { name: "b2-mcp-protocol-test", version: "1.0.0" },
+      },
+    },
+  });
 }
 
 describe("HTTP handler (MCP 2026-07-28)", () => {
@@ -230,6 +262,127 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     });
 
     expect(list.status).toBe(200);
+  });
+
+  it("round-trips destructive elicitation through modern HTTP", async () => {
+    const savedPolicy = process.env.B2_DESTRUCTIVE_POLICY;
+    process.env.B2_DESTRUCTIVE_POLICY = "confirm";
+    await replaceHandle();
+    const s3Send = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({});
+    const headers = { ...creds, ...modernHeaders("tools/call", "s3_delete_object") };
+
+    try {
+      const initial = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "old.jpg", confirm: true },
+          { id: 1 },
+        ),
+      });
+      expect(initial.status).toBe(200);
+      const initialResult = parsedJson(initial.body).result;
+      expect(initialResult.resultType).toBe("input_required");
+      expect(initialResult.inputRequests?.destructiveConfirmation).toMatchObject({
+        method: "elicitation/create",
+      });
+      expect(initialResult.requestState).toEqual(expect.stringContaining("destructive"));
+      expect(s3Send).not.toHaveBeenCalled();
+
+      const accepted = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "old.jpg" },
+          {
+            id: 2,
+            requestState: initialResult.requestState,
+            inputResponses: {
+              destructiveConfirmation: { action: "accept", content: { confirm: true } },
+            },
+          },
+        ),
+      });
+      const acceptedResult = parsedJson(accepted.body).result;
+      expect(accepted.status).toBe(200);
+      expect(acceptedResult.isError).not.toBe(true);
+      expect(acceptedResult.content?.[0]?.text).toContain("deleted");
+      expect(s3Send).toHaveBeenCalledTimes(1);
+
+      const swapped = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "swapped.jpg" },
+          {
+            id: 5,
+            requestState: initialResult.requestState,
+            inputResponses: {
+              destructiveConfirmation: { action: "accept", content: { confirm: true } },
+            },
+          },
+        ),
+      });
+      const swappedResult = parsedJson(swapped.body).result;
+      expect(swapped.status).toBe(200);
+      expect(swappedResult.isError).toBe(true);
+      expect(swappedResult.content?.[0]?.text).toMatch(/target did not match/i);
+      expect(s3Send).toHaveBeenCalledTimes(1);
+
+      const tamperedState = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "old.jpg" },
+          {
+            id: 6,
+            requestState: `${initialResult.requestState}tampered`,
+            inputResponses: {
+              destructiveConfirmation: { action: "accept", content: { confirm: true } },
+            },
+          },
+        ),
+      });
+      const tamperedBody = parsedJson(tamperedState.body);
+      expect(tamperedState.status).toBe(200);
+      expect(tamperedBody.error.data.reason).toBe("invalid_request_state");
+      expect(s3Send).toHaveBeenCalledTimes(1);
+
+      const declineInitial = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "do-not-delete.jpg" },
+          { id: 3 },
+        ),
+      });
+      const declineInitialResult = parsedJson(declineInitial.body).result;
+      expect(declineInitialResult.resultType).toBe("input_required");
+      expect(s3Send).toHaveBeenCalledTimes(1);
+
+      const declined = await request(port, "POST", "/mcp", {
+        headers,
+        body: elicitationCallToolBody(
+          "s3_delete_object",
+          { bucket: "photos", key: "do-not-delete.jpg" },
+          {
+            id: 4,
+            requestState: declineInitialResult.requestState,
+            inputResponses: {
+              destructiveConfirmation: { action: "decline" },
+            },
+          },
+        ),
+      });
+      const declinedResult = parsedJson(declined.body).result;
+      expect(declined.status).toBe(200);
+      expect(declinedResult.isError).toBe(true);
+      expect(declinedResult.content?.[0]?.text).toMatch(/human confirmation was decline/i);
+      expect(s3Send).toHaveBeenCalledTimes(1);
+    } finally {
+      if (savedPolicy === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;
+      else process.env.B2_DESTRUCTIVE_POLICY = savedPolicy;
+    }
   });
 
   it("rejects mismatched tool-name mirror headers before credential resolution", async () => {

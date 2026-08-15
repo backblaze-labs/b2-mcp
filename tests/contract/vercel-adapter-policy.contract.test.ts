@@ -8,7 +8,7 @@ const VERCEL_FUNCTION_ENTRYPOINTS = [
   "api/oauth-protected-resource.ts",
   "api/oauth-authorization-server.ts",
 ];
-const VERCEL_FUNCTION_SOURCE_BYTES_BUDGET = 465_000;
+const VERCEL_FUNCTION_SOURCE_BYTES_BUDGET = 485_000;
 const VERCEL_FUNCTION_SOURCE_FILES_BUDGET = 55;
 
 function resolveLocalImport(from: string, specifier: string): string | null {
