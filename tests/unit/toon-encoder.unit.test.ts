@@ -1,12 +1,7 @@
 import { encodeToon } from "../../src/utils/toon-encoder";
-import {
-  MAX_TOON_INPUT_DEPTH,
-  MAX_TOON_INPUT_JSON_CHARS,
-  MAX_TOON_INPUT_NODES,
-  serializeStructuredToolResult,
-} from "../../src/utils/result-serializer";
-import type { JsonCompatible } from "../../src/utils/result-serializer";
-import { decodeToon } from "./toon-decoder-helper";
+
+type ToonValue = Parameters<typeof encodeToon>[0];
+type ToonObject = { [key: string]: ToonValue };
 
 describe("TOON encoder", () => {
   it.each([
@@ -146,102 +141,69 @@ describe("TOON encoder", () => {
     ).toBe(["accounts[2:]{enabled,quota}:", "  alpha: true,null", "  beta: false,100"].join("\n"));
   });
 
-  it("falls back to list items for non-tabular arrays of objects", () => {
-    expect(encodeToon({ items: [{ id: 1 }, { name: "beta" }, {}] })).toBe(
-      ["items[3]:", "  - id: 1", "  - name: beta", "  -"].join("\n"),
-    );
-
-    expect(
-      encodeToon({
-        items: [
-          {
-            files: [
-              { name: "a", size: 1 },
-              { name: "b", size: 2 },
-            ],
-            note: "ok",
-          },
-          { lookup: { alpha: { size: 1 }, beta: { size: 2 } }, note: "map" },
-          { first: [], note: "empty" },
-          { first: [1, 2], note: "inline" },
-          { first: [[1], [2]], note: "nested" },
-          { first: {}, note: "empty-object" },
-          { first: { nested: 1 }, note: "object" },
-        ],
-      }),
-    ).toBe(
+  it.each([
+    [
+      "primitive field",
+      [{ id: 1 }, { other: "sentinel" }],
+      ["items[2]:", "  - id: 1", "  - other: sentinel"],
+    ],
+    ["empty object item", [{}, { other: "sentinel" }], ["items[2]:", "  -", "  - other: sentinel"]],
+    [
+      "nested tabular array field",
       [
-        "items[7]:",
-        "  - files[2]{name,size}:",
-        "      a,1",
-        "      b,2",
-        "    note: ok",
+        {
+          files: [
+            { name: "a", size: 1 },
+            { name: "b", size: 2 },
+          ],
+          note: "ok",
+        },
+      ],
+      ["items[1]:", "  - files[2]{name,size}:", "      a,1", "      b,2", "    note: ok"],
+    ],
+    [
+      "keyed object field",
+      [{ lookup: { alpha: { size: 1 }, beta: { size: 2 } }, note: "map" }, { other: "sentinel" }],
+      [
+        "items[2]:",
         "  - lookup[2:]{size}:",
         "      alpha: 1",
         "      beta: 2",
         "    note: map",
-        "  - first: []",
-        "    note: empty",
-        "  - first[2]: 1,2",
-        "    note: inline",
-        "  - first[2]:",
-        "      - [1]: 1",
-        "      - [1]: 2",
-        "    note: nested",
-        "  - first:",
-        "    note: empty-object",
-        "  - first:",
-        "      nested: 1",
-        "    note: object",
-      ].join("\n"),
-    );
-  });
-
-  it("keeps canonical structured content while only changing text rendering", async () => {
-    const data = {
-      buckets: [
-        { bucketName: "alpha", bucketType: "allPrivate" },
-        { bucketName: "beta", bucketType: "allPublic" },
+        "  - other: sentinel",
       ],
-      nextContinuationToken: "cursor==",
-    };
-
-    const jsonResult = serializeStructuredToolResult(data, {}, "json");
-    const toonResult = serializeStructuredToolResult(data, {}, "toon");
-
-    expect(jsonResult.structuredContent).toEqual(data);
-    expect(toonResult.structuredContent).toEqual(data);
-    expect(jsonResult.content[0].text).toBe(JSON.stringify(data));
-    expect(toonResult.content[0].text).toBe(
-      [
-        "buckets[2]{bucketName,bucketType}:",
-        "  alpha,allPrivate",
-        "  beta,allPublic",
-        "nextContinuationToken: cursor==",
-      ].join("\n"),
-    );
-    expect(toonResult.content[0].text).not.toBe(jsonResult.content[0].text);
-    await expect(decodeToon(toonResult.content[0].text)).resolves.toEqual(
-      toonResult.structuredContent,
-    );
-  });
-
-  it("falls back to JSON text without changing structured content at TOON bounds", () => {
-    const largeValue = { value: "x".repeat(MAX_TOON_INPUT_JSON_CHARS) };
-    const largeValueResult = serializeStructuredToolResult(largeValue, {}, "toon");
-    expect(largeValueResult.structuredContent).toEqual(largeValue);
-    expect(largeValueResult.content[0].text).toBe(JSON.stringify(largeValue));
-
-    const deepValue = nestedValue(MAX_TOON_INPUT_DEPTH + 1);
-    const deepValueResult = serializeStructuredToolResult(deepValue, {}, "toon");
-    expect(deepValueResult.structuredContent).toEqual(deepValue);
-    expect(deepValueResult.content[0].text).toBe(JSON.stringify(deepValue));
-
-    const manyNodes = Array.from({ length: MAX_TOON_INPUT_NODES + 1 }, () => "");
-    const manyNodesResult = serializeStructuredToolResult(manyNodes, {}, "toon");
-    expect(manyNodesResult.structuredContent).toEqual(manyNodes);
-    expect(manyNodesResult.content[0].text).toBe(JSON.stringify(manyNodes));
-  });
+    ],
+    [
+      "empty array field",
+      [{ first: [], note: "empty" }],
+      ["items[1]:", "  - first: []", "    note: empty"],
+    ],
+    [
+      "inline primitive array field",
+      [{ first: [1, 2], note: "inline" }],
+      ["items[1]:", "  - first[2]: 1,2", "    note: inline"],
+    ],
+    [
+      "nested primitive array field",
+      [{ first: [[1], [2]], note: "nested" }],
+      ["items[1]:", "  - first[2]:", "      - [1]: 1", "      - [1]: 2", "    note: nested"],
+    ],
+    [
+      "empty object field",
+      [{ first: {}, note: "empty-object" }],
+      ["items[1]:", "  - first:", "    note: empty-object"],
+    ],
+    [
+      "nested object field",
+      [{ first: { nested: 1 }, note: "object" }, { other: "sentinel" }],
+      ["items[2]:", "  - first:", "      nested: 1", "    note: object", "  - other: sentinel"],
+    ],
+  ])(
+    "falls back to list items for non-tabular arrays of objects with %s",
+    (_name, items, lines) => {
+      expect(encodeToon({ items: items as ToonObject[] })).toBe(lines.join("\n"));
+    },
+  );
 
   it("encodes large primitive values directly when they are inside encoder limits", () => {
     const value = "x".repeat(4096);
@@ -249,11 +211,3 @@ describe("TOON encoder", () => {
     expect(encodeToon(value)).toBe(value);
   });
 });
-
-function nestedValue(depth: number): JsonCompatible {
-  let value: JsonCompatible = "leaf";
-  for (let index = 0; index < depth; index++) {
-    value = { child: value };
-  }
-  return value;
-}

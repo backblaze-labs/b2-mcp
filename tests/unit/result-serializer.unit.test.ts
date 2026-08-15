@@ -1,5 +1,7 @@
 import {
+  MAX_TOON_INPUT_DEPTH,
   MAX_TOON_INPUT_JSON_CHARS,
+  MAX_TOON_INPUT_NODES,
   parseMcpOutputFormat,
   preflightMcpOutputFormat,
   runWithResultSerializationOptions,
@@ -7,6 +9,7 @@ import {
   TOON_IMPLEMENTATION,
   TOON_SPEC_VERSION,
 } from "../../src/utils/result-serializer";
+import type { JsonCompatible } from "../../src/utils/result-serializer";
 import {
   runWithSanitizerOptions,
   SECRET_SANITIZER_REDACTION,
@@ -53,6 +56,35 @@ describe("result serializer", () => {
 
     expect(result.content[0].text).toContain("buckets[2]{bucketName,bucketType}:");
     await expect(decodeToon(result.content[0].text)).resolves.toEqual(result.structuredContent);
+  });
+
+  it("keeps canonical structured content while only changing text rendering", async () => {
+    const data = {
+      buckets: [
+        { bucketName: "alpha", bucketType: "allPrivate" },
+        { bucketName: "beta", bucketType: "allPublic" },
+      ],
+      nextContinuationToken: "cursor==",
+    };
+
+    const jsonResult = serializeStructuredToolResult(data, {}, "json");
+    const toonResult = serializeStructuredToolResult(data, {}, "toon");
+
+    expect(jsonResult.structuredContent).toEqual(data);
+    expect(toonResult.structuredContent).toEqual(data);
+    expect(jsonResult.content[0].text).toBe(JSON.stringify(data));
+    expect(toonResult.content[0].text).toBe(
+      [
+        "buckets[2]{bucketName,bucketType}:",
+        "  alpha,allPrivate",
+        "  beta,allPublic",
+        "nextContinuationToken: cursor==",
+      ].join("\n"),
+    );
+    expect(toonResult.content[0].text).not.toBe(jsonResult.content[0].text);
+    await expect(decodeToon(toonResult.content[0].text)).resolves.toEqual(
+      toonResult.structuredContent,
+    );
   });
 
   it("serializes compact JSON when compatibility mode is selected", async () => {
@@ -164,6 +196,23 @@ describe("result serializer", () => {
     expect(result.content[0].text).toBe(JSON.stringify(result.structuredContent));
   });
 
+  it("falls back to JSON text without changing structured content at TOON bounds", () => {
+    const largeValue = { value: "x".repeat(MAX_TOON_INPUT_JSON_CHARS) };
+    const largeValueResult = serializeStructuredToolResult(largeValue, {}, "toon");
+    expect(largeValueResult.structuredContent).toEqual(largeValue);
+    expect(largeValueResult.content[0].text).toBe(JSON.stringify(largeValue));
+
+    const deepValue = nestedValue(MAX_TOON_INPUT_DEPTH + 1);
+    const deepValueResult = serializeStructuredToolResult(deepValue, {}, "toon");
+    expect(deepValueResult.structuredContent).toEqual(deepValue);
+    expect(deepValueResult.content[0].text).toBe(JSON.stringify(deepValue));
+
+    const manyNodes = Array.from({ length: MAX_TOON_INPUT_NODES + 1 }, () => "");
+    const manyNodesResult = serializeStructuredToolResult(manyNodes, {}, "toon");
+    expect(manyNodesResult.structuredContent).toEqual(manyNodes);
+    expect(manyNodesResult.content[0].text).toBe(JSON.stringify(manyNodes));
+  });
+
   it("preflights TOON mode with a smoke serialization", () => {
     expect(() => preflightMcpOutputFormat("json")).not.toThrow();
     expect(() => preflightMcpOutputFormat("toon")).not.toThrow();
@@ -269,3 +318,11 @@ describe("result serializer", () => {
     }
   });
 });
+
+function nestedValue(depth: number): JsonCompatible {
+  let value: JsonCompatible = "leaf";
+  for (let index = 0; index < depth; index++) {
+    value = { child: value };
+  }
+  return value;
+}
