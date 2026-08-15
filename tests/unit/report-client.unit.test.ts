@@ -1,8 +1,12 @@
-import { S3Client } from "@aws-sdk/client-s3";
-import type { MockInstance } from "vitest";
 import { B2ReportClient } from "../../src/b2/report-client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
-import { testConfig } from "../support/deterministic-fakes";
+import { createReportS3Client } from "../../src/s3/client";
+import { DeterministicS3ClientFake, testConfig } from "../support/deterministic-fakes";
+
+vi.mock("../../src/s3/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/s3/client")>()),
+  createReportS3Client: vi.fn(),
+}));
 
 function reportAuth() {
   return {
@@ -17,36 +21,35 @@ function reportAuth() {
   };
 }
 
-function createReportClient() {
+function createReportClient(s3 = new DeterministicS3ClientFake()) {
   const getAuth = vi.fn(async () => reportAuth());
   const getConfig = vi.fn(() => testConfig);
+  vi.mocked(createReportS3Client).mockReturnValue(
+    s3.asPeerClient() as ReturnType<typeof createReportS3Client>,
+  );
   return {
     client: new B2ReportClient({ getAuth, getConfig } as never),
     getAuth,
-    getConfig,
+    s3,
   };
 }
 
 describe("B2ReportClient", () => {
-  let sendSpy: MockInstance;
-
-  beforeEach(() => {
-    sendSpy = vi.spyOn(S3Client.prototype as any, "send");
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("lists report object keys with paging options and reuses the S3 client", async () => {
-    sendSpy
-      .mockResolvedValueOnce({
-        Contents: [{ Key: "2026-01-09/usage.account-a.csv" }, {}, { Key: 123 }],
-        IsTruncated: true,
-        NextContinuationToken: "next-page",
-      })
-      .mockResolvedValueOnce({ Contents: [], IsTruncated: false });
-    const { client, getAuth } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond(
+      "listReportObjectKeys",
+      {
+        keys: ["2026-01-09/usage.account-a.csv"],
+        isTruncated: true,
+        nextContinuationToken: "next-page",
+      },
+      { keys: [], isTruncated: false },
+    );
+    const { client, getAuth } = createReportClient(s3);
 
     const page = await client.listReportObjectKeys("b2-reports-test", {
       prefix: "2026-01-09/",
@@ -63,13 +66,28 @@ describe("B2ReportClient", () => {
       nextContinuationToken: "next-page",
     });
     expect(secondPage).toEqual({ keys: [], isTruncated: false, nextContinuationToken: undefined });
-    expect(sendSpy.mock.calls[0][0].input).toMatchObject({
-      Bucket: "b2-reports-test",
-      Prefix: "2026-01-09/",
-      StartAfter: "2026-01-01",
-      ContinuationToken: "page-1",
-      MaxKeys: 5,
-    });
+    expect(s3.requestsFor("listReportObjectKeys")).toEqual([
+      {
+        operation: "listReportObjectKeys",
+        input: {
+          bucketName: "b2-reports-test",
+          prefix: "2026-01-09/",
+          startAfter: "2026-01-01",
+          continuationToken: "page-1",
+          maxKeys: 5,
+        },
+        aborted: false,
+      },
+      {
+        operation: "listReportObjectKeys",
+        input: { bucketName: "b2-reports-test" },
+        aborted: false,
+      },
+    ]);
+    expect(createReportS3Client).toHaveBeenCalledWith(
+      testConfig,
+      expect.objectContaining({ accountId: "test-account-123" }),
+    );
     expect(getAuth).toHaveBeenCalledTimes(1);
   });
 
@@ -81,18 +99,29 @@ describe("B2ReportClient", () => {
         yield Buffer.from([108, 111]);
       },
     };
-    sendSpy.mockResolvedValueOnce({ Body: body });
-    const { client } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond("downloadReportObject", {
+      body,
+    });
+    const { client } = createReportClient(s3);
 
     const result = await client.downloadReportObjectText("b2-reports-test", "usage.csv");
 
     expect(result).toEqual({ text: "hello", bytes: 5, truncated: false });
+    expect(s3.requestsFor("downloadReportObject")).toEqual([
+      {
+        operation: "downloadReportObject",
+        input: { bucketName: "b2-reports-test", key: "usage.csv" },
+        aborted: false,
+      },
+    ]);
   });
 
   it("reads transformToByteArray bodies", async () => {
     const transformToByteArray = vi.fn(async () => Uint8Array.of(97, 98, 99));
-    sendSpy.mockResolvedValueOnce({ Body: { transformToByteArray } });
-    const { client } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond("downloadReportObject", {
+      body: { transformToByteArray },
+    });
+    const { client } = createReportClient(s3);
 
     const result = await client.downloadReportObjectText("b2-reports-test", "usage.csv");
 
@@ -109,8 +138,10 @@ describe("B2ReportClient", () => {
       cancel: vi.fn(),
       releaseLock: vi.fn(),
     };
-    sendSpy.mockResolvedValueOnce({ Body: { getReader: vi.fn(() => reader) } });
-    const { client } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond("downloadReportObject", {
+      body: { getReader: vi.fn(() => reader) },
+    });
+    const { client } = createReportClient(s3);
 
     const result = await client.downloadReportObjectText("b2-reports-test", "usage.csv");
 
@@ -125,8 +156,10 @@ describe("B2ReportClient", () => {
       cancel: vi.fn(),
       releaseLock: vi.fn(),
     };
-    sendSpy.mockResolvedValueOnce({ Body: { getReader: vi.fn(() => reader) } });
-    const { client } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond("downloadReportObject", {
+      body: { getReader: vi.fn(() => reader) },
+    });
+    const { client } = createReportClient(s3);
 
     const result = await client.downloadReportObjectText("b2-reports-test", "usage.csv", {
       maxBytes: 3,
@@ -139,8 +172,10 @@ describe("B2ReportClient", () => {
 
   it("returns an empty result without reading when maxBytes is zero", async () => {
     const transformToByteArray = vi.fn(async () => Uint8Array.of(97));
-    sendSpy.mockResolvedValueOnce({ Body: { transformToByteArray } });
-    const { client } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond("downloadReportObject", {
+      body: { transformToByteArray },
+    });
+    const { client } = createReportClient(s3);
 
     const result = await client.downloadReportObjectText("b2-reports-test", "usage.csv", {
       maxBytes: 0,
@@ -156,11 +191,13 @@ describe("B2ReportClient", () => {
         yield 42;
       },
     };
-    sendSpy
-      .mockResolvedValueOnce({})
-      .mockResolvedValueOnce({ Body: unsupportedChunkBody })
-      .mockResolvedValueOnce({ Body: {} });
-    const { client } = createReportClient();
+    const s3 = new DeterministicS3ClientFake().respond(
+      "downloadReportObject",
+      { body: undefined },
+      { body: unsupportedChunkBody },
+      { body: {} },
+    );
+    const { client } = createReportClient(s3);
 
     await expect(client.downloadReportObjectText("b2-reports-test", "missing.csv")).rejects.toThrow(
       "did not include a body",
@@ -173,19 +210,23 @@ describe("B2ReportClient", () => {
     ).rejects.toThrow("Unsupported B2 report object body.");
   });
 
-  it("cleans up a report body when the parent request is already aborted", async () => {
+  it("cleans up a report body when the parent request aborts during a read", async () => {
+    const controller = new AbortController();
     const iterator = {
-      next: vi.fn(async () => ({ done: false, value: Buffer.from("ignored") })),
+      next: vi.fn(async () => {
+        controller.abort();
+        return { done: false, value: Buffer.from("ignored") };
+      }),
       return: vi.fn(async () => ({ done: true, value: undefined as never })),
     };
     const body = {
       destroy: vi.fn(),
       [Symbol.asyncIterator]: () => iterator,
     };
-    sendSpy.mockResolvedValueOnce({ Body: body });
-    const { client } = createReportClient();
-    const controller = new AbortController();
-    controller.abort();
+    const s3 = new DeterministicS3ClientFake().respond("downloadReportObject", {
+      body,
+    });
+    const { client } = createReportClient(s3);
 
     await expect(
       runWithMcpRequestSignal(controller.signal, () =>

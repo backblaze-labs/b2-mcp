@@ -25,6 +25,8 @@ import { parseResult, ToolHarness } from "../support/deterministic-fakes";
 const GB = 1e9;
 const DAY_MS = 86400_000;
 const REPORT_CLOCK = new Date("2026-01-31T12:00:00.000Z");
+// Mirrors the private 12s scan budget in src/b2/insights.ts; +1 trips the deadline branch.
+const AFTER_SCAN_TIME_BUDGET_MS = 12_001;
 const bucket: BucketInfoResult = {
   bucketId: "bucket-1",
   bucketName: "photos",
@@ -460,7 +462,7 @@ describe("insight native bucket read paths", () => {
       ],
     });
     nativeClient.listFileNames.mockImplementationOnce(async () => {
-      clock = 12_001;
+      clock = AFTER_SCAN_TIME_BUDGET_MS;
       return { files: [file("raw/a.bin", 10 * GB)], nextFileName: "raw/b.bin" };
     });
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
@@ -510,7 +512,7 @@ describe("insight native bucket read paths", () => {
       uploadPages: [{ files: [], nextFileId: "next-upload" }],
     });
     nativeClient.listUnfinishedLargeFiles.mockImplementationOnce(async () => {
-      clock = 12_001;
+      clock = AFTER_SCAN_TIME_BUDGET_MS;
       return { files: [], nextFileId: "next-upload" };
     });
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
