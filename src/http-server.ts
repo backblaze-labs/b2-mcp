@@ -135,13 +135,24 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
 
 export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
   const port = options.port ?? getPort();
-  const { server: httpServer, sessions, drain } = buildHttpServer();
-
-  httpServer.listen(port, () => {
-    logger.info({ transport: "http", port }, "server.started");
-  });
-
+  const handle = buildHttpServer();
+  const { server: httpServer, sessions, drain } = handle;
   let shuttingDown = false;
+  let drainTimer: NodeJS.Timeout | null = null;
+  const onSigterm = () => shutdown("SIGTERM");
+  const onSigint = () => shutdown("SIGINT");
+  const onRuntimeError = (err: Error) => {
+    logger.error({ err: err.message }, "server.error");
+    shutdown("server.error");
+  };
+  function removeSignalHandlers(): void {
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+  }
+  function removeLifecycleHandlers(): void {
+    removeSignalHandlers();
+    httpServer.off("error", onRuntimeError);
+  }
   function shutdown(signal: string): void {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -151,17 +162,43 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
     );
     drain();
     httpServer.close(() => {
+      removeLifecycleHandlers();
+      if (drainTimer) {
+        clearTimeout(drainTimer);
+        drainTimer = null;
+      }
       logger.info("server.closed");
       process.exit(0);
     });
-    setTimeout(() => {
+    drainTimer = setTimeout(() => {
+      removeLifecycleHandlers();
       logger.error("server.drainTimeout");
       process.exit(1);
     }, SHUTDOWN_DRAIN_MS).unref();
   }
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  await new Promise<void>((resolve, reject) => {
+    const failStartup = (err: Error) => {
+      httpServer.off("error", onError);
+      drain();
+      reject(err);
+    };
+    const onError = (err: Error) => failStartup(err);
+    httpServer.once("error", onError);
+    try {
+      httpServer.listen(port, () => {
+        httpServer.off("error", onError);
+        httpServer.on("error", onRuntimeError);
+        logger.info({ transport: "http", port }, "server.started");
+        resolve();
+      });
+    } catch (err) {
+      failStartup(err instanceof Error ? err : new Error(String(err)));
+    }
+  });
+
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
 }
 
 if (require.main === module) {

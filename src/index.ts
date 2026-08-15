@@ -20,8 +20,10 @@
  *   }
  */
 
-import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { createServer, fetchCapabilities, loadConfig } from "./server.js";
+// Namespace imports keep ESM bootstrap dependencies spy-able in tests without
+// exporting dependency-injection seams from the package root.
+import * as stdioTransport from "@modelcontextprotocol/server/stdio";
+import * as serverModule from "./server.js";
 import { CredentialResolutionError } from "./credentials.js";
 import { logger } from "./utils/logger.js";
 import { VERSION } from "./version.js";
@@ -29,11 +31,11 @@ import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { PortUsageError } from "./utils/config.js";
 
 export async function startStdio(): Promise<void> {
-  const config = loadConfig();
+  const config = serverModule.loadConfig();
   // Right-size the surface to the key's capabilities (null → full surface).
   let capabilities: string[] | null;
   try {
-    capabilities = await fetchCapabilities(config);
+    capabilities = await serverModule.fetchCapabilities(config);
   } catch (err) {
     if (
       !(err instanceof CredentialResolutionError) ||
@@ -49,11 +51,16 @@ export async function startStdio(): Promise<void> {
     );
     capabilities = null;
   }
-  serveStdio(() => createServer(config, capabilities), {
+  stdioTransport.serveStdio(() => serverModule.createServer(config, capabilities), {
     onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
   });
 
   logger.info({ transport: "stdio" }, "server.started");
+}
+
+async function startHttpTransport(options: { port?: number }): Promise<void> {
+  const { startHttp } = await import("./http-server.js");
+  await startHttp({ port: options.port });
 }
 
 async function runCli(argv = process.argv.slice(2)): Promise<void> {
@@ -68,8 +75,7 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
   }
 
   if (options.transport === "http") {
-    const { startHttp } = await import("./http-server.js");
-    await startHttp({ port: options.port });
+    await startHttpTransport({ port: options.port });
     return;
   }
 

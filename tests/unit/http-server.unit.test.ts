@@ -3,17 +3,63 @@
  * Covers configFromHeaders parsing and getPort validation.
  */
 
+import type { AuthInfo } from "@modelcontextprotocol/server";
+import * as http from "http";
+import type { AddressInfo } from "net";
+import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
 import {
   buildHttpServer,
   configFromHeaders,
   createInFlightLimiter,
   deriveRateKey,
   getPort,
+  startHttp,
 } from "../../src/http-server";
 import { createB2McpFetchHandler } from "../../src/http-fetch-handler";
+import type { AuthenticatedIncomingMessage } from "../../src/credentials";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+import { logger } from "../../src/utils/logger";
 import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
+
+type ShutdownSignal = "SIGTERM" | "SIGINT";
+
+const shutdownSignals: readonly ShutdownSignal[] = ["SIGTERM", "SIGINT"];
+
+function signalListeners(signal: ShutdownSignal): NodeJS.SignalsListener[] {
+  return process.listeners(signal) as NodeJS.SignalsListener[];
+}
+
+function snapshotSignalListeners(): Record<ShutdownSignal, Set<NodeJS.SignalsListener>> {
+  return {
+    SIGTERM: new Set(signalListeners("SIGTERM")),
+    SIGINT: new Set(signalListeners("SIGINT")),
+  };
+}
+
+function findNewSignalListener(
+  signal: ShutdownSignal,
+  snapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>,
+): NodeJS.SignalsListener | undefined {
+  return signalListeners(signal).find((listener) => !snapshot[signal].has(listener));
+}
+
+function newSignalListeners(
+  signal: ShutdownSignal,
+  snapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>,
+): NodeJS.SignalsListener[] {
+  return signalListeners(signal).filter((listener) => !snapshot[signal].has(listener));
+}
+
+function removeNewSignalListeners(
+  snapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>,
+): void {
+  for (const signal of shutdownSignals) {
+    for (const registeredListener of newSignalListeners(signal, snapshot)) {
+      process.off(signal, registeredListener);
+    }
+  }
+}
 
 describe("configFromHeaders", () => {
   const baseEnv = { ...process.env };
@@ -194,6 +240,218 @@ describe("createInFlightLimiter", () => {
     expect(limiter.acquire("credential:c")).toMatchObject({ ok: false, status: 503 });
     limiter.release("credential:a");
     expect(limiter.acquire("credential:c")).toEqual({ ok: true });
+  });
+});
+
+describe("HTTP server lifecycle", () => {
+  const encoder = new TextEncoder();
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("listens on an ephemeral localhost port and shuts down", async () => {
+    const handle = buildHttpServer();
+    const port = await listenOnLocalhost(handle);
+
+    const res = await request(port, "GET", "/health");
+
+    expect(res.status).toBe(200);
+    await closeHttpServer(handle);
+    expect(handle.server.listening).toBe(false);
+  });
+
+  it("schedules periodic cache sweeps and clears them on drain", () => {
+    vi.useFakeTimers();
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const previousTimerCount = setIntervalSpy.mock.results.length;
+
+    const handle = buildHttpServer();
+    const sweepTimer = setIntervalSpy.mock.results.at(-1)?.value;
+
+    expect(setIntervalSpy.mock.results.length).toBe(previousTimerCount + 1);
+    handle.drain();
+    expect(clearIntervalSpy).toHaveBeenCalledWith(sweepTimer);
+  });
+
+  it("rejects startup when the requested HTTP port is already bound", async () => {
+    const blocker = http.createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, resolve));
+    const port = (blocker.address() as AddressInfo).port;
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const previousTimerCount = setIntervalSpy.mock.results.length;
+
+    try {
+      await expect(startHttp({ port })).rejects.toMatchObject({ code: "EADDRINUSE" });
+      const startupTimers = setIntervalSpy.mock.results
+        .slice(previousTimerCount)
+        .map((result) => result.value);
+      expect(startupTimers.length).toBeGreaterThan(0);
+      expect(clearIntervalSpy).toHaveBeenCalledWith(startupTimers.at(-1));
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
+  });
+
+  it("drains startup resources when listen throws synchronously", async () => {
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const previousTimerCount = setIntervalSpy.mock.results.length;
+
+    await expect(startHttp({ port: 70_000 })).rejects.toThrow();
+    const startupTimers = setIntervalSpy.mock.results
+      .slice(previousTimerCount)
+      .map((result) => result.value);
+    expect(startupTimers.length).toBeGreaterThan(0);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(startupTimers.at(-1));
+  });
+
+  it("drains in-flight requests before closing the MCP handler", async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const close = vi.fn(async () => undefined);
+    const handle = buildHttpServer({
+      idleSweepMode: "request",
+      mcpHandler: {
+        fetch: vi.fn(
+          async () =>
+            new Response(
+              new ReadableStream<Uint8Array>({
+                start(streamController) {
+                  controller = streamController;
+                  streamController.enqueue(encoder.encode("drained"));
+                },
+              }),
+              { status: 200 },
+            ),
+        ),
+        close,
+      },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const pending = request(port, "GET", "/mcp");
+      await vi.waitFor(() => expect(controller).toBeDefined());
+
+      handle.drain();
+      expect(close).not.toHaveBeenCalled();
+      const drainingRes = await request(port, "GET", "/health");
+      expect(drainingRes.status).toBe(503);
+
+      controller?.close();
+      const res = await pending;
+      expect(res.status).toBe(200);
+      expect(res.body).toBe("drained");
+      await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    } finally {
+      await new Promise<void>((resolve) => handle.server.close(() => resolve()));
+    }
+  });
+
+  it("passes verified authInfo from the hook into the MCP handler", async () => {
+    const authInfo: AuthInfo = {
+      token: "verified:test-token",
+      clientId: "client-1",
+      scopes: ["b2:read"],
+      expiresAt: Math.floor(Date.now() / 1000) + 600,
+      resource: new URL("http://localhost/mcp"),
+      extra: { sub: "subject-1" },
+    };
+    const getAuthInfo = vi.fn((req: AuthenticatedIncomingMessage) => {
+      expect(req.auth).toBeUndefined();
+      return authInfo;
+    });
+    const fetch = vi.fn(async (_req: Request, options?: { authInfo?: AuthInfo }) => {
+      return new Response(JSON.stringify({ clientId: options?.authInfo?.clientId }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const handle = buildHttpServer({
+      idleSweepMode: "request",
+      getAuthInfo,
+      mcpHandler: { fetch, close: vi.fn(async () => undefined) },
+    });
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/mcp");
+
+      expect(res.status).toBe(202);
+      expect(JSON.parse(res.body)).toEqual({ clientId: "client-1" });
+      expect(getAuthInfo).toHaveBeenCalledTimes(1);
+      expect(getAuthInfo.mock.calls[0]?.[0].auth).toBe(authInfo);
+      expect(fetch.mock.calls[0]?.[1]?.authInfo).toBe(authInfo);
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
+  it.each(["SIGTERM", "SIGINT"] as const)("handles %s by draining and closing", async (signal) => {
+    const signalSnapshot = snapshotSignalListeners();
+    const exitCodes: Array<string | number | null | undefined> = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      exitCodes.push(code);
+      return undefined as never;
+    }) as typeof process.exit);
+    let listener: NodeJS.SignalsListener | undefined;
+
+    try {
+      await startHttp({ port: 0 });
+      listener = findNewSignalListener(signal, signalSnapshot);
+      expect(listener).toBeTypeOf("function");
+      listener?.(signal);
+
+      await vi.waitFor(() => expect(exitCodes).toContain(0));
+      expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
+      expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
+    } finally {
+      if (listener && !exitCodes.includes(0)) {
+        listener(signal);
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      }
+      removeNewSignalListeners(signalSnapshot);
+      exitSpy.mockRestore();
+    }
+  });
+
+  it("logs runtime server errors before shutting down", async () => {
+    const signalSnapshot = snapshotSignalListeners();
+    const exitCodes: Array<string | number | null | undefined> = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      exitCodes.push(code);
+      return undefined as never;
+    }) as typeof process.exit);
+    const loggerError = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    const serverOn = vi.spyOn(http.Server.prototype, "on");
+    let signalListener: NodeJS.SignalsListener | undefined;
+
+    try {
+      await startHttp({ port: 0 });
+      signalListener = findNewSignalListener("SIGTERM", signalSnapshot);
+      const serverOnCalls = serverOn.mock.calls as Array<[string | symbol, unknown, ...unknown[]]>;
+      const runtimeErrorListener = serverOnCalls
+        .filter(([event]) => event === "error")
+        .at(-1)?.[1] as ((err: Error) => void) | undefined;
+
+      expect(runtimeErrorListener).toBeTypeOf("function");
+      runtimeErrorListener?.(new Error("runtime socket failed"));
+
+      await vi.waitFor(() => expect(exitCodes).toContain(0));
+      expect(loggerError).toHaveBeenCalledWith({ err: "runtime socket failed" }, "server.error");
+      expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
+      expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
+    } finally {
+      if (signalListener && !exitCodes.includes(0)) {
+        signalListener("SIGTERM");
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      }
+      removeNewSignalListeners(signalSnapshot);
+      exitSpy.mockRestore();
+    }
   });
 });
 
@@ -443,6 +701,10 @@ describe("getPort", () => {
   it("uses the same strict port validation as the unified CLI", () => {
     process.argv.push("--port", "3000abc");
     expect(() => getPort()).toThrow("Invalid port: 3000abc");
+  });
+
+  it("prefers explicit argv over PORT env when resolving HTTP ports", () => {
+    expect(getPort(["http", "--port=4567"], { PORT: "1234" })).toBe(4567);
   });
 
   it("throws on port <= 0", () => {
