@@ -129,13 +129,7 @@ export async function maybeRequireDestructiveElicitation<T>({
     return runOriginal();
   }
   if (!clientCanUseReturnBasedElicitation(requestExtra, contextProviders)) {
-    return destructiveElicitationRefused(
-      toolName,
-      effect,
-      "client does not support required MCP form elicitation",
-      sanitizerOptions,
-      onDecision,
-    );
+    return runOriginal();
   }
 
   const response = inputResponse(
@@ -264,7 +258,7 @@ export function clientSupportsFormElicitation(
   getClientCapabilities?: ClientCapabilitiesProvider,
 ): boolean {
   const requestExtra = mcpRequestExtra(extra);
-  const capabilities = mcpClientCapabilities(requestExtra) ?? getClientCapabilities?.();
+  const capabilities = getClientCapabilities?.() ?? mcpClientCapabilities(requestExtra);
   const elicitation = capabilities?.elicitation;
   if (!elicitation || typeof elicitation !== "object" || Array.isArray(elicitation)) {
     return false;
@@ -541,8 +535,10 @@ function mcpProtocolVersion(
   extra: McpRequestExtra,
   contextProviders?: DestructiveElicitationContextProviders,
 ): string | undefined {
+  const providerVersion = contextProviders?.getProtocolVersion?.();
+  if (providerVersion) return providerVersion;
   const version = extra?.mcpReq?.envelope?.[PROTOCOL_VERSION_META_KEY];
-  return typeof version === "string" ? version : contextProviders?.getProtocolVersion?.();
+  return typeof version === "string" ? version : undefined;
 }
 
 function mcpRequestState(extra: McpRequestExtra): unknown {

@@ -407,6 +407,32 @@ describe("destructive elicitation", () => {
   });
 
   it.each([
+    ["missing form capability", { mcpReq: { envelope: envelope() } }],
+    [
+      "url-only request capability",
+      { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
+    ],
+    [
+      "legacy protocol marker",
+      {
+        mcpReq: {
+          clientCapabilities: FORM_ELICITATION,
+          envelope: envelope(LEGACY_PROTOCOL_VERSION),
+        },
+      },
+    ],
+  ])("uses trusted context for %s downgrade attempts", async (_case, extra) => {
+    const config = cfg();
+    const original = destructiveOriginal(config);
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
+
+    const result = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
+
+    expect(result.resultType).toBe("input_required");
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it.each([
     [
       "missing form elicitation capability",
       {
@@ -417,12 +443,12 @@ describe("destructive elicitation", () => {
     ],
     [
       "url-only elicitation capability",
-      providers(undefined),
+      providers(URL_ONLY_ELICITATION),
       { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
     ],
     [
-      "legacy protocol marker",
-      providers(FORM_ELICITATION),
+      "legacy protocol requests",
+      providers(FORM_ELICITATION, LEGACY_PROTOCOL_VERSION),
       {
         mcpReq: {
           clientCapabilities: FORM_ELICITATION,
@@ -430,16 +456,19 @@ describe("destructive elicitation", () => {
         },
       },
     ],
-  ])("refuses %s downgrade attempts before confirm:true can run", async (_case, context, extra) => {
+  ])("falls back to the confirm gate for %s", async (_case, context, extra) => {
     const config = cfg();
     const original = destructiveOriginal(config);
     const wrapped = createAuditedToolCallback("s3_delete_object", original, config, context);
 
-    const result = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
+    const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, extra);
+    expect(missingConfirm.resultType).not.toBe("input_required");
+    expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(original).toHaveBeenCalledTimes(1);
 
-    expect(result.isError).toBe(true);
-    expect(result.content?.[0]?.text).toMatch(/required MCP form elicitation/i);
-    expect(original).not.toHaveBeenCalled();
+    const confirmed = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
+    expect(confirmed.content?.[0]?.text).toBe("deleted");
+    expect(original).toHaveBeenCalledTimes(2);
   });
 
   it.each([
