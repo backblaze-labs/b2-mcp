@@ -105,7 +105,7 @@ function assertB2S3ApiUrl(raw: string, region: string): void {
   if (reason) throw new Error(`Authorized B2 S3 endpoint ${reason}.`);
 }
 
-function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
+export function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
   // The SDK S3 helper only needs AccountInfo for the endpoint. S3 signing uses
   // the B2 application key pair passed below, not a native B2 authorization
   // token, so this object intentionally carries no placeholder credentials.

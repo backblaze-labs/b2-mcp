@@ -1,10 +1,12 @@
-import type { AuthInfo } from "@modelcontextprotocol/server";
+import { OAuthError, OAuthErrorCode, type AuthInfo } from "@modelcontextprotocol/server";
 import {
   OAuthDependencyError,
   OAuthIntrospectionVerifier,
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
+  oauthMetadataOptions,
   protectedResourceMetadata,
+  protectedResourceMetadataUrl,
   resetOAuthVerifierCacheForTests,
   validatePreverifiedOAuthAuthInfo,
 } from "../../src/oauth-resource-server";
@@ -20,6 +22,8 @@ const baseConfig = {
   introspectionEndpoint: "http://localhost:9000/oauth2/introspect",
   introspectionClientId: "client",
   introspectionClientSecret: "secret",
+  introspectionBearerToken: undefined as string | undefined,
+  serviceDocumentationUrl: undefined as string | undefined,
   requiredScopes: [] as string[],
   allowedSubjects: [] as string[],
   allowedTokenTypes: ["bearer"],
@@ -141,6 +145,58 @@ describe("OAuthIntrospectionVerifier", () => {
 
     expect(authInfo.clientId).toBe("mcp-client");
     expect(authInfo.extra?.alg).toBe("RS256");
+  });
+
+  it("uses bearer authentication for token introspection when configured", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = init?.headers as Headers;
+      expect(headers.get("authorization")).toBe("Bearer issuer-introspection-token");
+      return Response.json(claims());
+    });
+    const verifier = verifierWithFetch(fetchMock, {
+      introspectionClientId: undefined,
+      introspectionClientSecret: undefined,
+      introspectionBearerToken: "issuer-introspection-token",
+    });
+
+    await expect(verifier.verifyAccessToken("access-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+  });
+
+  it("rejects structurally invalid introspection payloads as invalid tokens", async () => {
+    const { verifier } = verifierFor(["not", "a", "record"]);
+
+    await expect(verifier.verifyAccessToken("access-token")).rejects.toThrow(
+      /Invalid introspection response/,
+    );
+  });
+
+  it("treats non-JSON introspection responses as dependency failures", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () => new Response("not json", { status: 200 }));
+    const verifier = verifierWithFetch(fetchMock, { introspectionMaxRetries: 0 });
+
+    await expect(verifier.verifyAccessToken("access-token")).rejects.toBeInstanceOf(
+      OAuthDependencyError,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ dependency: "oauth_introspection", reason: "network_error" }),
+      "oauth.introspection.dependency_failed",
+    );
+  });
+
+  it("allows deployments that disable token algorithm checking", async () => {
+    const verifier = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ alg: undefined }))),
+      { allowedAlgorithms: [] },
+    );
+
+    const authInfo = await verifier.verifyAccessToken("access-token");
+
+    expect(authInfo.clientId).toBe("mcp-client");
+    expect(authInfo.extra?.alg).toBeUndefined();
   });
 
   it.each([
@@ -443,6 +499,33 @@ describe("OAuthIntrospectionVerifier", () => {
   });
 });
 
+describe("OAuth bearer rejection responses", () => {
+  it.each([
+    ["decline", OAuthErrorCode.AccessDenied, "declined by user"],
+    ["cancel", OAuthErrorCode.InvalidRequest, "authorization canceled"],
+  ])("maps authorization %s errors to OAuth JSON responses", async (_name, code, message) => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, { headers: { Authorization: "Bearer access-token" } }),
+      baseConfig,
+      {
+        verifier: {
+          verifyAccessToken: vi.fn(async () => {
+            throw new OAuthError(code, message);
+          }),
+        },
+      },
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(400);
+    expect((response as Response).headers.get("www-authenticate")).toBeNull();
+    await expect((response as Response).json()).resolves.toMatchObject({
+      error: code,
+      error_description: message,
+    });
+  });
+});
+
 describe("validatePreverifiedOAuthAuthInfo", () => {
   it("accepts preverified AuthInfo that matches the introspection policy", () => {
     expect(
@@ -518,6 +601,28 @@ describe("OAuth resource metadata", () => {
 
     expect(metadata.resource).toBe("http://localhost:3000/resources/b2-mcp");
     expect(metadata.scopes_supported).toEqual(["b2:read", "b2:write", "b2:admin", "custom:tenant"]);
+  });
+
+  it("builds auth-server metadata with service documentation and de-duplicated scopes", () => {
+    const options = oauthMetadataOptions({
+      ...baseConfig,
+      serviceDocumentationUrl: "http://localhost:3000/docs/oauth",
+      requiredScopes: ["b2:read", "custom:tenant"],
+    });
+
+    expect(options.serviceDocumentationUrl?.href).toBe("http://localhost:3000/docs/oauth");
+    expect(options.resourceServerUrl.href).toBe(baseConfig.resource);
+    expect(options.scopesSupported).toEqual(["b2:read", "b2:write", "b2:admin", "custom:tenant"]);
+    expect(options.oauthMetadata.scopes_supported).toEqual(options.scopesSupported);
+  });
+
+  it("builds the protected-resource metadata URL from the configured public URL", () => {
+    expect(
+      protectedResourceMetadataUrl({
+        ...baseConfig,
+        publicUrl: "http://localhost:3000/api/b2/mcp",
+      }),
+    ).toBe("http://localhost:3000/.well-known/oauth-protected-resource/api/b2/mcp");
   });
 
   it("fails closed without authenticated introspection credentials by default", () => {
