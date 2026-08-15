@@ -137,6 +137,45 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   const port = options.port ?? getPort();
   const handle = buildHttpServer();
   const { server: httpServer, sessions, drain } = handle;
+  let shuttingDown = false;
+  let drainTimer: NodeJS.Timeout | null = null;
+  const onSigterm = () => shutdown("SIGTERM");
+  const onSigint = () => shutdown("SIGINT");
+  const onRuntimeError = (err: Error) => {
+    logger.error({ err: err.message }, "server.error");
+    shutdown("server.error");
+  };
+  function removeSignalHandlers(): void {
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+  }
+  function removeLifecycleHandlers(): void {
+    removeSignalHandlers();
+    httpServer.off("error", onRuntimeError);
+  }
+  function shutdown(signal: string): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info(
+      { signal, drainMs: SHUTDOWN_DRAIN_MS, activeSessions: sessions.size },
+      "server.shutdown",
+    );
+    drain();
+    httpServer.close(() => {
+      removeLifecycleHandlers();
+      if (drainTimer) {
+        clearTimeout(drainTimer);
+        drainTimer = null;
+      }
+      logger.info("server.closed");
+      process.exit(0);
+    });
+    drainTimer = setTimeout(() => {
+      removeLifecycleHandlers();
+      logger.error("server.drainTimeout");
+      process.exit(1);
+    }, SHUTDOWN_DRAIN_MS).unref();
+  }
 
   await new Promise<void>((resolve, reject) => {
     const failStartup = (err: Error) => {
@@ -149,6 +188,7 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
     try {
       httpServer.listen(port, () => {
         httpServer.off("error", onError);
+        httpServer.on("error", onRuntimeError);
         logger.info({ transport: "http", port }, "server.started");
         resolve();
       });
@@ -156,38 +196,6 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
       failStartup(err instanceof Error ? err : new Error(String(err)));
     }
   });
-
-  let shuttingDown = false;
-  let drainTimer: NodeJS.Timeout | null = null;
-  const onSigterm = () => shutdown("SIGTERM");
-  const onSigint = () => shutdown("SIGINT");
-  function removeSignalHandlers(): void {
-    process.off("SIGTERM", onSigterm);
-    process.off("SIGINT", onSigint);
-  }
-  function shutdown(signal: string): void {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    logger.info(
-      { signal, drainMs: SHUTDOWN_DRAIN_MS, activeSessions: sessions.size },
-      "server.shutdown",
-    );
-    drain();
-    httpServer.close(() => {
-      removeSignalHandlers();
-      if (drainTimer) {
-        clearTimeout(drainTimer);
-        drainTimer = null;
-      }
-      logger.info("server.closed");
-      process.exit(0);
-    });
-    drainTimer = setTimeout(() => {
-      removeSignalHandlers();
-      logger.error("server.drainTimeout");
-      process.exit(1);
-    }, SHUTDOWN_DRAIN_MS).unref();
-  }
 
   process.on("SIGTERM", onSigterm);
   process.on("SIGINT", onSigint);

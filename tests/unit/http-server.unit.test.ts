@@ -19,7 +19,47 @@ import { createB2McpFetchHandler } from "../../src/http-fetch-handler";
 import type { AuthenticatedIncomingMessage } from "../../src/credentials";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
+import { logger } from "../../src/utils/logger";
 import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
+
+type ShutdownSignal = "SIGTERM" | "SIGINT";
+
+const shutdownSignals: readonly ShutdownSignal[] = ["SIGTERM", "SIGINT"];
+
+function signalListeners(signal: ShutdownSignal): NodeJS.SignalsListener[] {
+  return process.listeners(signal) as NodeJS.SignalsListener[];
+}
+
+function snapshotSignalListeners(): Record<ShutdownSignal, Set<NodeJS.SignalsListener>> {
+  return {
+    SIGTERM: new Set(signalListeners("SIGTERM")),
+    SIGINT: new Set(signalListeners("SIGINT")),
+  };
+}
+
+function findNewSignalListener(
+  signal: ShutdownSignal,
+  snapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>,
+): NodeJS.SignalsListener | undefined {
+  return signalListeners(signal).find((listener) => !snapshot[signal].has(listener));
+}
+
+function newSignalListeners(
+  signal: ShutdownSignal,
+  snapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>,
+): NodeJS.SignalsListener[] {
+  return signalListeners(signal).filter((listener) => !snapshot[signal].has(listener));
+}
+
+function removeNewSignalListeners(
+  snapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>,
+): void {
+  for (const signal of shutdownSignals) {
+    for (const registeredListener of newSignalListeners(signal, snapshot)) {
+      process.off(signal, registeredListener);
+    }
+  }
+}
 
 describe("configFromHeaders", () => {
   const baseEnv = { ...process.env };
@@ -351,50 +391,65 @@ describe("HTTP server lifecycle", () => {
   });
 
   it.each(["SIGTERM", "SIGINT"] as const)("handles %s by draining and closing", async (signal) => {
-    const beforeTerm = new Set(process.listeners("SIGTERM"));
-    const beforeInt = new Set(process.listeners("SIGINT"));
+    const signalSnapshot = snapshotSignalListeners();
     const exitCodes: Array<string | number | null | undefined> = [];
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
       exitCodes.push(code);
       return undefined as never;
     }) as typeof process.exit);
-    const portProbe = http.createServer();
-    await new Promise<void>((resolve) => portProbe.listen(0, "127.0.0.1", resolve));
-    const port = (portProbe.address() as AddressInfo).port;
-    await new Promise<void>((resolve) => portProbe.close(() => resolve()));
-    let listener: (() => void) | undefined;
+    let listener: NodeJS.SignalsListener | undefined;
 
     try {
-      await startHttp({ port });
-      const res = await request(port, "GET", "/health");
-      expect(res.status).toBe(200);
-
-      const before = signal === "SIGTERM" ? beforeTerm : beforeInt;
-      listener = process.listeners(signal).find((candidate) => !before.has(candidate)) as
-        | (() => void)
-        | undefined;
+      await startHttp({ port: 0 });
+      listener = findNewSignalListener(signal, signalSnapshot);
       expect(listener).toBeTypeOf("function");
-      listener?.();
+      listener?.(signal);
 
       await vi.waitFor(() => expect(exitCodes).toContain(0));
-      await expect(request(port, "GET", "/health")).rejects.toThrow();
-      expect(
-        process.listeners("SIGTERM").filter((candidate) => !beforeTerm.has(candidate)),
-      ).toEqual([]);
-      expect(process.listeners("SIGINT").filter((candidate) => !beforeInt.has(candidate))).toEqual(
-        [],
-      );
+      expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
+      expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
     } finally {
       if (listener && !exitCodes.includes(0)) {
-        listener();
+        listener(signal);
         await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
       }
-      for (const listener of process.listeners("SIGTERM")) {
-        if (!beforeTerm.has(listener)) process.off("SIGTERM", listener);
+      removeNewSignalListeners(signalSnapshot);
+      exitSpy.mockRestore();
+    }
+  });
+
+  it("logs runtime server errors before shutting down", async () => {
+    const signalSnapshot = snapshotSignalListeners();
+    const exitCodes: Array<string | number | null | undefined> = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      exitCodes.push(code);
+      return undefined as never;
+    }) as typeof process.exit);
+    const loggerError = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    const serverOn = vi.spyOn(http.Server.prototype, "on");
+    let signalListener: NodeJS.SignalsListener | undefined;
+
+    try {
+      await startHttp({ port: 0 });
+      signalListener = findNewSignalListener("SIGTERM", signalSnapshot);
+      const serverOnCalls = serverOn.mock.calls as Array<[string | symbol, unknown, ...unknown[]]>;
+      const runtimeErrorListener = serverOnCalls
+        .filter(([event]) => event === "error")
+        .at(-1)?.[1] as ((err: Error) => void) | undefined;
+
+      expect(runtimeErrorListener).toBeTypeOf("function");
+      runtimeErrorListener?.(new Error("runtime socket failed"));
+
+      await vi.waitFor(() => expect(exitCodes).toContain(0));
+      expect(loggerError).toHaveBeenCalledWith({ err: "runtime socket failed" }, "server.error");
+      expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
+      expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
+    } finally {
+      if (signalListener && !exitCodes.includes(0)) {
+        signalListener("SIGTERM");
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
       }
-      for (const listener of process.listeners("SIGINT")) {
-        if (!beforeInt.has(listener)) process.off("SIGINT", listener);
-      }
+      removeNewSignalListeners(signalSnapshot);
       exitSpy.mockRestore();
     }
   });

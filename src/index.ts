@@ -20,6 +20,8 @@
  *   }
  */
 
+// Namespace imports keep ESM bootstrap dependencies spy-able in tests without
+// exporting dependency-injection seams from the package root.
 import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import * as serverModule from "./server.js";
 import { CredentialResolutionError } from "./credentials.js";
