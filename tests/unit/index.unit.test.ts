@@ -1,10 +1,17 @@
+import { spawnSync } from "child_process";
 import * as http from "http";
 import type { AddressInfo } from "net";
+import * as path from "path";
+import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import { CredentialResolutionError } from "../../src/credentials";
-import { runCli, startStdio, type StdioBootstrapDependencies } from "../../src/index";
+import { startStdio } from "../../src/index";
+import * as serverModule from "../../src/server";
 import { logger } from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
-import { VERSION } from "../../src/version";
+
+vi.mock("@modelcontextprotocol/server/stdio", () => ({
+  serveStdio: vi.fn(),
+}));
 
 const credentialEnvKeys = [
   "B2_APPLICATION_KEY_ID",
@@ -14,6 +21,13 @@ const credentialEnvKeys = [
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
 ] as const;
+
+const tsxBin = path.join(
+  process.cwd(),
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "tsx.cmd" : "tsx",
+);
 
 function testConfig(): B2Config {
   return {
@@ -33,6 +47,23 @@ function testConfig(): B2Config {
   };
 }
 
+function executableEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test" };
+  for (const key of credentialEnvKeys) delete env[key];
+  delete env.FORCE_COLOR;
+  delete env.NO_COLOR;
+  return env;
+}
+
+function runEntrypoint(args: string[]) {
+  return spawnSync(tsxBin, ["src/index.ts", ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: executableEnv(),
+    timeout: 10_000,
+  });
+}
+
 describe("stdio entry point", () => {
   let savedEnv: Record<string, string | undefined>;
 
@@ -47,21 +78,24 @@ describe("stdio entry point", () => {
       else process.env[key] = value;
     }
     vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it("bootstraps stdio with fetched credential capabilities", async () => {
     const config = testConfig();
     const server = { close: vi.fn(async () => undefined) };
-    const createServer = vi.fn(() => server);
-    const serveStdio = vi.fn();
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 
-    await startStdio({
-      loadConfig: vi.fn(() => config),
-      fetchCapabilities: vi.fn(async () => ["listBuckets"]),
-      createServer: createServer as unknown as StdioBootstrapDependencies["createServer"],
-      serveStdio: serveStdio as unknown as StdioBootstrapDependencies["serveStdio"],
-    });
+    await startStdio();
 
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     const options = serveStdio.mock.calls[0]?.[1] as { onerror(error: Error): void } | undefined;
@@ -74,21 +108,23 @@ describe("stdio entry point", () => {
   it("falls back to the full stdio surface when capability lookup is unavailable", async () => {
     const config = testConfig();
     const server = { close: vi.fn(async () => undefined) };
-    const createServer = vi.fn(() => server);
-    const serveStdio = vi.fn();
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockRejectedValue(
+      new CredentialResolutionError(
+        "capability service unavailable",
+        503,
+        "capability_upstream_unavailable",
+      ),
+    );
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
 
-    await startStdio({
-      loadConfig: vi.fn(() => config),
-      fetchCapabilities: vi.fn(async () => {
-        throw new CredentialResolutionError(
-          "capability service unavailable",
-          503,
-          "capability_upstream_unavailable",
-        );
-      }),
-      createServer: createServer as unknown as StdioBootstrapDependencies["createServer"],
-      serveStdio: serveStdio as unknown as StdioBootstrapDependencies["serveStdio"],
-    });
+    await startStdio();
 
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
@@ -109,86 +145,36 @@ describe("stdio entry point", () => {
   });
 });
 
-describe("unified CLI entry point", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
+describe("executable CLI entry point", () => {
+  it("prints usage errors with help and exit code 2", () => {
+    const result = runEntrypoint(["--transport", "sse"]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("b2-mcp: Invalid transport: sse");
+    expect(result.stderr).toContain("Usage: b2-mcp");
   });
 
-  it("routes HTTP transport to startHttp with the parsed port", async () => {
-    const startHttp = vi.fn(async () => undefined);
-    const startStdio = vi.fn(async () => undefined);
+  it("selects stdio by default and reports missing credentials with exit code 1", () => {
+    const result = runEntrypoint([]);
 
-    await runCli(["http", "--port", "4321"], { startHttp, startStdio });
-
-    expect(startHttp).toHaveBeenCalledWith({ port: 4321 });
-    expect(startStdio).not.toHaveBeenCalled();
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio",
+    );
   });
 
-  it("routes stdio transport to startStdio", async () => {
-    const startHttp = vi.fn(async () => undefined);
-    const startStdio = vi.fn(async () => undefined);
-
-    await runCli(["--transport", "stdio"], { startHttp, startStdio });
-
-    expect(startStdio).toHaveBeenCalledTimes(1);
-    expect(startHttp).not.toHaveBeenCalled();
-  });
-
-  it("prints help and version without starting a transport", async () => {
-    const output: string[] = [];
-    const runtime = {
-      startHttp: vi.fn(async () => undefined),
-      startStdio: vi.fn(async () => undefined),
-      stdout: {
-        write(chunk: string) {
-          output.push(chunk);
-        },
-      },
-    };
-
-    await runCli(["--help"], runtime);
-    await runCli(["--version"], runtime);
-
-    expect(output[0]).toContain("Usage: b2-mcp");
-    expect(output[1]).toBe(`${VERSION}\n`);
-    expect(runtime.startHttp).not.toHaveBeenCalled();
-    expect(runtime.startStdio).not.toHaveBeenCalled();
-  });
-
-  it("uses the default HTTP starter when no runtime override is supplied", async () => {
-    const portProbe = http.createServer();
-    await new Promise<void>((resolve) => portProbe.listen(0, "127.0.0.1", resolve));
-    const port = (portProbe.address() as AddressInfo).port;
-    await new Promise<void>((resolve) => portProbe.close(() => resolve()));
-    const beforeTerm = new Set(process.listeners("SIGTERM"));
-    const beforeInt = new Set(process.listeners("SIGINT"));
-    const exitCodes: Array<string | number | null | undefined> = [];
-    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
-      exitCodes.push(code);
-      return undefined as never;
-    }) as typeof process.exit);
-    let listener: (() => void) | undefined;
+  it("selects HTTP transport and reports startup failures with exit code 1", async () => {
+    const blocker = http.createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, resolve));
+    const port = (blocker.address() as AddressInfo).port;
 
     try {
-      await runCli(["http", "--port", String(port)]);
-      listener = process.listeners("SIGTERM").find((candidate) => !beforeTerm.has(candidate)) as
-        | (() => void)
-        | undefined;
-      expect(listener).toBeTypeOf("function");
-      listener?.();
-      await vi.waitFor(() => expect(exitCodes).toContain(0));
+      const result = runEntrypoint(["http", "--port", String(port)]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("b2-mcp: listen EADDRINUSE");
     } finally {
-      if (listener && !exitCodes.includes(0)) {
-        listener();
-        await vi.waitFor(() => expect(exitCodes).toContain(0));
-      }
-      exitSpy.mockRestore();
-      for (const candidate of process.listeners("SIGTERM")) {
-        if (!beforeTerm.has(candidate)) process.off("SIGTERM", candidate);
-      }
-      for (const candidate of process.listeners("SIGINT")) {
-        if (!beforeInt.has(candidate)) process.off("SIGINT", candidate);
-      }
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
   });
 });

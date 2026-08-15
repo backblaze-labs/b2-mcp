@@ -226,12 +226,12 @@ describe("HTTP server lifecycle", () => {
     vi.useFakeTimers();
     const setIntervalSpy = vi.spyOn(global, "setInterval");
     const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const previousTimerCount = setIntervalSpy.mock.results.length;
 
     const handle = buildHttpServer();
-    const sweepResultIndex = setIntervalSpy.mock.calls.findIndex((call) => call[1] === 60_000);
-    const sweepTimer = setIntervalSpy.mock.results[sweepResultIndex]?.value;
+    const sweepTimer = setIntervalSpy.mock.results.at(-1)?.value;
 
-    expect(sweepResultIndex).toBeGreaterThanOrEqual(0);
+    expect(setIntervalSpy.mock.results.length).toBe(previousTimerCount + 1);
     handle.drain();
     expect(clearIntervalSpy).toHaveBeenCalledWith(sweepTimer);
   });
@@ -240,9 +240,17 @@ describe("HTTP server lifecycle", () => {
     const blocker = http.createServer();
     await new Promise<void>((resolve) => blocker.listen(0, resolve));
     const port = (blocker.address() as AddressInfo).port;
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const previousTimerCount = setIntervalSpy.mock.results.length;
 
     try {
       await expect(startHttp({ port })).rejects.toMatchObject({ code: "EADDRINUSE" });
+      const startupTimers = setIntervalSpy.mock.results
+        .slice(previousTimerCount)
+        .map((result) => result.value);
+      expect(startupTimers.length).toBeGreaterThan(0);
+      expect(clearIntervalSpy).toHaveBeenCalledWith(startupTimers.at(-1));
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
@@ -337,20 +345,26 @@ describe("HTTP server lifecycle", () => {
       exitCodes.push(code);
       return undefined as never;
     }) as typeof process.exit);
-    const handle = await startHttp({ port: 0 });
+    const portProbe = http.createServer();
+    await new Promise<void>((resolve) => portProbe.listen(0, "127.0.0.1", resolve));
+    const port = (portProbe.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => portProbe.close(() => resolve()));
+    let listener: (() => void) | undefined;
 
     try {
-      const port = (handle.server.address() as AddressInfo).port;
+      await startHttp({ port });
       const res = await request(port, "GET", "/health");
       expect(res.status).toBe(200);
 
       const before = signal === "SIGTERM" ? beforeTerm : beforeInt;
-      const listener = process.listeners(signal).find((candidate) => !before.has(candidate));
+      listener = process.listeners(signal).find((candidate) => !before.has(candidate)) as
+        | (() => void)
+        | undefined;
       expect(listener).toBeTypeOf("function");
-      (listener as () => void)();
+      listener?.();
 
       await vi.waitFor(() => expect(exitCodes).toContain(0));
-      expect(handle.server.listening).toBe(false);
+      await expect(request(port, "GET", "/health")).rejects.toThrow();
       expect(
         process.listeners("SIGTERM").filter((candidate) => !beforeTerm.has(candidate)),
       ).toEqual([]);
@@ -358,15 +372,17 @@ describe("HTTP server lifecycle", () => {
         [],
       );
     } finally {
-      exitSpy.mockRestore();
+      if (listener && !exitCodes.includes(0)) {
+        listener();
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      }
       for (const listener of process.listeners("SIGTERM")) {
         if (!beforeTerm.has(listener)) process.off("SIGTERM", listener);
       }
       for (const listener of process.listeners("SIGINT")) {
         if (!beforeInt.has(listener)) process.off("SIGINT", listener);
       }
-      if (handle.server.listening)
-        await new Promise<void>((resolve) => handle.server.close(() => resolve()));
+      exitSpy.mockRestore();
     }
   });
 });

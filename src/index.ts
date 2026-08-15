@@ -20,31 +20,20 @@
  *   }
  */
 
-import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { createServer, fetchCapabilities, loadConfig } from "./server.js";
+import * as stdioTransport from "@modelcontextprotocol/server/stdio";
+import * as serverModule from "./server.js";
 import { CredentialResolutionError } from "./credentials.js";
 import { logger } from "./utils/logger.js";
 import { VERSION } from "./version.js";
 import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { PortUsageError } from "./utils/config.js";
 
-export interface StdioBootstrapDependencies {
-  loadConfig?: typeof loadConfig;
-  fetchCapabilities?: typeof fetchCapabilities;
-  createServer?: typeof createServer;
-  serveStdio?: typeof serveStdio;
-}
-
-export async function startStdio(deps: StdioBootstrapDependencies = {}): Promise<void> {
-  const loadConfigFn = deps.loadConfig ?? loadConfig;
-  const fetchCapabilitiesFn = deps.fetchCapabilities ?? fetchCapabilities;
-  const createServerFn = deps.createServer ?? createServer;
-  const serveStdioFn = deps.serveStdio ?? serveStdio;
-  const config = loadConfigFn();
+export async function startStdio(): Promise<void> {
+  const config = serverModule.loadConfig();
   // Right-size the surface to the key's capabilities (null → full surface).
   let capabilities: string[] | null;
   try {
-    capabilities = await fetchCapabilitiesFn(config);
+    capabilities = await serverModule.fetchCapabilities(config);
   } catch (err) {
     if (
       !(err instanceof CredentialResolutionError) ||
@@ -60,49 +49,35 @@ export async function startStdio(deps: StdioBootstrapDependencies = {}): Promise
     );
     capabilities = null;
   }
-  serveStdioFn(() => createServerFn(config, capabilities), {
+  stdioTransport.serveStdio(() => serverModule.createServer(config, capabilities), {
     onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
   });
 
   logger.info({ transport: "stdio" }, "server.started");
 }
 
-interface CliOutput {
-  write(chunk: string): unknown;
-}
-
-export interface CliRuntime {
-  startStdio?: () => Promise<void>;
-  startHttp?: (options: { port?: number }) => Promise<unknown>;
-  stdout?: CliOutput;
-}
-
-async function defaultStartHttp(options: { port?: number }): Promise<unknown> {
+async function startHttpTransport(options: { port?: number }): Promise<void> {
   const { startHttp } = await import("./http-server.js");
-  return startHttp({ port: options.port });
+  await startHttp({ port: options.port });
 }
 
-export async function runCli(
-  argv = process.argv.slice(2),
-  runtime: CliRuntime = {},
-): Promise<void> {
+async function runCli(argv = process.argv.slice(2)): Promise<void> {
   const options = parseCliArgs(argv);
-  const stdout = runtime.stdout ?? process.stdout;
   if (options.action === "help") {
-    stdout.write(`${helpText()}\n`);
+    process.stdout.write(`${helpText()}\n`);
     return;
   }
   if (options.action === "version") {
-    stdout.write(`${VERSION}\n`);
+    process.stdout.write(`${VERSION}\n`);
     return;
   }
 
   if (options.transport === "http") {
-    await (runtime.startHttp ?? defaultStartHttp)({ port: options.port });
+    await startHttpTransport({ port: options.port });
     return;
   }
 
-  await (runtime.startStdio ?? (() => startStdio()))();
+  await startStdio();
 }
 
 // Only run when invoked directly (not when imported by tests).

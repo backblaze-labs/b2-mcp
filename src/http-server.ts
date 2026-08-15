@@ -133,7 +133,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   };
 }
 
-export async function startHttp(options: HttpListenOptions = {}): Promise<HttpServerHandle> {
+export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
   const port = options.port ?? getPort();
   const handle = buildHttpServer();
   const { server: httpServer, sessions, drain } = handle;
@@ -186,7 +186,6 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<HttpSe
 
   process.on("SIGTERM", onSigterm);
   process.on("SIGINT", onSigint);
-  return handle;
 }
 
 if (require.main === module) {
