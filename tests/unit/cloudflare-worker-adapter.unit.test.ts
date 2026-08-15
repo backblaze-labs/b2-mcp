@@ -6,6 +6,8 @@ import {
   cloudflareProtectedResourceMetadataFetch,
   cloudflareWorkerFetch,
 } from "../../deploy/cloudflare-worker/adapter";
+import { deriveRateKey } from "../../src/http-fetch-handler";
+import { _getBucket, _resetRateLimiter } from "../../src/utils/rate-limiter";
 
 const savedEnv = { ...process.env };
 
@@ -91,7 +93,9 @@ describe("Cloudflare Worker adapter", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     await closeCloudflareMcpHandlerForTests();
+    _resetRateLimiter();
     process.env = savedEnv;
   });
 
@@ -136,6 +140,86 @@ describe("Cloudflare Worker adapter", () => {
     expect(discover.result?.supportedVersions).toContain("2026-07-28");
   });
 
+  it("rejects missing bearer auth through the internet-facing OAuth branch", async () => {
+    const response = await cloudflareMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("tools/list"),
+        body: modernBody("tools/list"),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+
+  it("rejects bearer tokens whose subject is outside the local allowlist", async () => {
+    const introspection = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          active: true,
+          iss: "https://issuer.example.com/",
+          sub: "attacker-subject",
+          aud: ["https://mcp.example.com/mcp"],
+          resource: ["https://mcp.example.com/mcp"],
+          exp: Math.floor(Date.now() / 1000) + 600,
+          token_type: "bearer",
+          alg: "RS256",
+          scope: "b2:read",
+          client_id: "attacker-client",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await cloudflareMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: { ...modernHeaders("tools/list"), Authorization: "Bearer access-token" },
+        body: modernBody("tools/list"),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
+  it("revalidates pre-supplied AuthInfo subjects before MCP dispatch", async () => {
+    const response = await cloudflareMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("tools/list"),
+        body: modernBody("tools/list"),
+      }),
+      {
+        ...validAuthInfo,
+        extra: { ...validAuthInfo.extra, sub: "attacker-subject" },
+      },
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+
+  it("rejects pre-supplied AuthInfo without an accepted B2 scope", async () => {
+    const response = await cloudflareMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("tools/list"),
+        body: modernBody("tools/list"),
+      }),
+      {
+        ...validAuthInfo,
+        scopes: ["profile"],
+      },
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("www-authenticate")).toContain("insufficient_scope");
+  });
+
   it("rejects public B2 credential headers in server mode", async () => {
     const response = await cloudflareMcpFetch(
       new Request("https://mcp.example.com/mcp", {
@@ -173,5 +257,49 @@ describe("Cloudflare Worker adapter", () => {
 
     expect(response.status).toBe(503);
     expect(body.code).toBe("configuration_error");
+  });
+
+  it("honors Worker binding rate-limit overrides after request-scoped env install", async () => {
+    process.env = { ...savedEnv };
+    const env = { ...cloudflareEnv(), B2_MCP_RATE_LIMIT_RPS: "1", B2_MCP_RATE_LIMIT_BURST: "1" };
+    const request = () =>
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: { ...modernHeaders("tools/list"), "cf-connecting-ip": "198.51.100.5" },
+        body: modernBody("tools/list"),
+      });
+
+    const first = await cloudflareWorkerFetch(request(), env);
+    const second = await cloudflareWorkerFetch(request(), env);
+
+    expect(first.status).toBe(401);
+    expect(second.status).toBe(429);
+  });
+
+  it("does not trust spoofed x-real-ip for unauthenticated admission keys", async () => {
+    process.env = { ...savedEnv };
+    const env = { ...cloudflareEnv(), B2_MCP_RATE_LIMIT_RPS: "1", B2_MCP_RATE_LIMIT_BURST: "2" };
+    const first = await cloudflareWorkerFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: { ...modernHeaders("tools/list"), "x-real-ip": "198.51.100.10" },
+        body: modernBody("tools/list"),
+      }),
+      env,
+    );
+    const second = await cloudflareWorkerFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: { ...modernHeaders("tools/list"), "x-real-ip": "198.51.100.11" },
+        body: modernBody("tools/list"),
+      }),
+      env,
+    );
+
+    expect(first.status).toBe(401);
+    expect(second.status).toBe(401);
+    expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:unknown"))).toBeDefined();
+    expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.10"))).toBeUndefined();
+    expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.11"))).toBeUndefined();
   });
 });

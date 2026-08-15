@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added the hosted deployment matrix, shared deployment security contract,
+  provider guides, troubleshooting checklist, and an experimental Cloudflare
+  Worker adapter with a Wrangler runtime smoke gate.
 - Added an OAuth-secured Vercel adapter for the shared HTTP MCP pipeline,
   including protected-resource metadata, server-mode hosted deployment
   configuration, and `headers` / `server` / `principal` smoke credential modes.

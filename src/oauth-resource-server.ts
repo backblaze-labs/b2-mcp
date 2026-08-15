@@ -303,6 +303,14 @@ function assertDeploymentScope(scopes: readonly string[]): void {
   }
 }
 
+function assertRequiredScopes(scopes: readonly string[], requiredScopes: readonly string[]): void {
+  for (const scope of requiredScopes) {
+    if (!scopes.includes(scope)) {
+      throw new OAuthError(OAuthErrorCode.InsufficientScope, "Missing required OAuth scope");
+    }
+  }
+}
+
 function subjectClaim(claims: Record<string, unknown>): string | undefined {
   return stringClaim(claims.sub) ?? stringClaim(claims.subject) ?? stringClaim(claims.principal);
 }
@@ -351,10 +359,15 @@ interface IntrospectionCircuitState {
 
 const introspectionCache = new Map<string, IntrospectionCacheEntry>();
 const introspectionCircuits = new Map<string, IntrospectionCircuitState>();
-const tokenLabelKey = createSecretKey(Uint8Array.from(randomBytes(32)));
+let tokenLabelKey: ReturnType<typeof createSecretKey> | null = null;
+
+function getTokenLabelKey(): ReturnType<typeof createSecretKey> {
+  tokenLabelKey ??= createSecretKey(Uint8Array.from(randomBytes(32)));
+  return tokenLabelKey;
+}
 
 function tokenLabel(token: string): string {
-  return createHmac("sha256", tokenLabelKey).update(token).digest("hex").slice(0, 32);
+  return createHmac("sha256", getTokenLabelKey()).update(token).digest("hex").slice(0, 32);
 }
 
 function configCacheKey(config: OAuthResourceServerConfig): string {
@@ -715,6 +728,39 @@ export function protectedResourceMetadataUrl(config = loadOAuthResourceServerCon
   return getOAuthProtectedResourceMetadataUrl(new URL(config.publicUrl));
 }
 
+export function oauthRejectionResponse(
+  error: unknown,
+  config = loadOAuthResourceServerConfig(),
+): Response {
+  if (error instanceof OAuthDependencyError) return serviceUnavailableOAuthResponse(error);
+  return bearerAuthChallengeResponse(error, {
+    requiredScopes: config.requiredScopes,
+    resourceMetadataUrl: protectedResourceMetadataUrl(config),
+  });
+}
+
+export function validatePreverifiedOAuthAuthInfo(
+  authInfo: AuthInfo,
+  config = loadOAuthResourceServerConfig(),
+  nowSeconds: () => number = () => Math.floor(Date.now() / 1000),
+): AuthInfo {
+  const extra = asRecord(authInfo.extra ?? {});
+  const issuer = stringClaim(extra.iss ?? extra.issuer);
+  if (issuer !== config.issuer) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token issuer is not trusted");
+  }
+  if (authInfo.resource?.href !== config.resource) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token resource is not accepted");
+  }
+  if (extra.aud !== undefined) requireMatch(extra.aud, config.audience, "audience");
+  requireMatch(extra.resource ?? authInfo.resource?.href, config.resource, "resource");
+  assertTimeWindow({ exp: authInfo.expiresAt }, nowSeconds());
+  assertDeploymentScope(authInfo.scopes);
+  assertRequiredScopes(authInfo.scopes, config.requiredScopes);
+  assertAllowedSubject(extra, issuer, config.allowedSubjects);
+  return authInfo;
+}
+
 export function oauthMetadataRouteResponse(request: Request): Response | undefined {
   return oauthMetadataResponse(request, oauthMetadataOptions());
 }
@@ -742,10 +788,6 @@ export async function authenticateOAuthRequest(
       resourceMetadataUrl: protectedResourceMetadataUrl(config),
     });
   } catch (error) {
-    if (error instanceof OAuthDependencyError) return serviceUnavailableOAuthResponse(error);
-    return bearerAuthChallengeResponse(error, {
-      requiredScopes: config.requiredScopes,
-      resourceMetadataUrl: protectedResourceMetadataUrl(config),
-    });
+    return oauthRejectionResponse(error, config);
   }
 }

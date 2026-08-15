@@ -26,9 +26,18 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const RPS = envInt("B2_MCP_RATE_LIMIT_RPS", DEFAULT_RPS);
-const BURST = envInt("B2_MCP_RATE_LIMIT_BURST", DEFAULT_BURST);
-const REFILL_PER_MS = RPS / 1000;
+export interface RateLimiterConfig {
+  readonly rps: number;
+  readonly burst: number;
+}
+
+function currentRateLimiterConfig(): RateLimiterConfig {
+  const rps = envInt("B2_MCP_RATE_LIMIT_RPS", DEFAULT_RPS);
+  return {
+    rps,
+    burst: envInt("B2_MCP_RATE_LIMIT_BURST", DEFAULT_BURST),
+  };
+}
 
 interface Bucket {
   tokens: number;
@@ -44,15 +53,17 @@ const buckets = new Map<string, Bucket>();
  * @returns True when a token was consumed and the request may proceed.
  */
 export function allowRequest(key: string): boolean {
+  const config = currentRateLimiterConfig();
+  const refillPerMs = config.rps / 1000;
   const now = Date.now();
   let bucket = buckets.get(key);
   if (!bucket) {
-    bucket = { tokens: BURST, lastRefill: now };
+    bucket = { tokens: config.burst, lastRefill: now };
     buckets.set(key, bucket);
   }
   const elapsed = now - bucket.lastRefill;
   if (elapsed > 0) {
-    bucket.tokens = Math.min(BURST, bucket.tokens + elapsed * REFILL_PER_MS);
+    bucket.tokens = Math.min(config.burst, bucket.tokens + elapsed * refillPerMs);
     bucket.lastRefill = now;
   }
   if (bucket.tokens >= 1) {
@@ -67,8 +78,9 @@ export function allowRequest(key: string): boolean {
  * Called periodically from the HTTP server; safe to call any time.
  */
 export function sweepIdleBuckets(now: number = Date.now()): void {
+  const { burst } = currentRateLimiterConfig();
   for (const [key, bucket] of buckets) {
-    if (now - bucket.lastRefill > IDLE_TTL_MS && bucket.tokens >= BURST) {
+    if (now - bucket.lastRefill > IDLE_TTL_MS && bucket.tokens >= burst) {
       buckets.delete(key);
     }
   }
@@ -88,4 +100,11 @@ export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);
 }
 
-export const rateLimiterConfig = { rps: RPS, burst: BURST };
+export const rateLimiterConfig: RateLimiterConfig = {
+  get rps() {
+    return currentRateLimiterConfig().rps;
+  },
+  get burst() {
+    return currentRateLimiterConfig().burst;
+  },
+};

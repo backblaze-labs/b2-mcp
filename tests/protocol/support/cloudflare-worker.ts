@@ -15,6 +15,10 @@ const authInfo: AuthInfo = {
   scopes: ["b2:read", "b2:write", "b2:admin"],
   expiresAt: Math.floor(Date.now() / 1000) + 600,
   resource: new URL(CLOUDFLARE_WORKER_MCP_URL),
+  extra: {
+    iss: "https://issuer.example.com/",
+    sub: "cloudflare-worker-protocol-client",
+  },
 };
 
 export interface RecordedCloudflareWorkerRequest {

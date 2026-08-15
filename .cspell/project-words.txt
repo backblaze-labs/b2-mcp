@@ -25,6 +25,7 @@ cspell
 CycloneDX
 envrc
 flyctl
+workerd
 GHCR
 iocs
 junit

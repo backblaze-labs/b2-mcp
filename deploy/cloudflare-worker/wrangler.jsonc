@@ -27,6 +27,9 @@
     "B2_OAUTH_ALLOWED_ALGORITHMS": "RS256,ES256,EdDSA",
     "B2_OAUTH_INTROSPECTION_TIMEOUT_MS": "3000",
     "B2_OAUTH_INTROSPECTION_RETRIES": "1",
+    // These caps are per-isolate best-effort only; they are not global across
+    // Cloudflare colos or isolates. Use Cloudflare Rate Limiting or Durable
+    // Objects when upstream B2 key protection needs a cross-isolate ceiling.
     "B2_MCP_RATE_LIMIT_RPS": "60",
     "B2_MCP_RATE_LIMIT_BURST": "120",
     "B2_MAX_SESSIONS": "1000",

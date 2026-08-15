@@ -112,7 +112,8 @@
     "tsx": "4.23.11",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "wrangler": "4.123.0"
   },
   "engines": {
     "node": ">=22.3.0"
@@ -129,11 +130,6 @@
     "deploy/customer-hosted/nginx.conf",
     "deploy/customer-hosted/pnpm-lock.yaml",
     "deploy/customer-hosted/pnpm-workspace.yaml",
-    "deploy/cloudflare-worker/README.md",
-    "deploy/cloudflare-worker/adapter.ts",
-    "deploy/cloudflare-worker/cloudflare.env.example",
-    "deploy/cloudflare-worker/worker.ts",
-    "deploy/cloudflare-worker/wrangler.jsonc",
     "docs/CLIENTS.md",
     "docs/DEPLOY.md",
     "docs/deployment/*.md",

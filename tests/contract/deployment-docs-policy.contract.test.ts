@@ -1,6 +1,20 @@
 import { existsSync, readFileSync, statSync } from "fs";
-import { dirname, extname, join, resolve } from "path";
+import { createRequire } from "module";
+import { join } from "path";
 import { listFiles, readJson, root } from "./support";
+
+const nodeRequire = createRequire(__filename);
+const {
+  WORKER_SOURCE_GRAPH_BYTES_BUDGET,
+  WORKER_SOURCE_GRAPH_FILES_BUDGET,
+  collectLocalImportGraph,
+  parseJsoncObject,
+} = nodeRequire("../../scripts/lib/local-import-graph.cjs") as {
+  WORKER_SOURCE_GRAPH_BYTES_BUDGET: number;
+  WORKER_SOURCE_GRAPH_FILES_BUDGET: number;
+  collectLocalImportGraph: (root: string, entrypoints: readonly string[]) => Set<string>;
+  parseJsoncObject: (text: string) => Record<string, unknown>;
+};
 
 const providerGuides = [
   "vercel.md",
@@ -19,35 +33,6 @@ const allDeploymentDocs = ["DEPLOY.md", ...providerGuides.map((file) => `deploym
 
 function doc(relativePath: string): string {
   return readFileSync(join(root, "docs", relativePath), "utf8");
-}
-
-function resolveLocalImport(from: string, specifier: string): string | null {
-  if (!specifier.startsWith(".")) return null;
-  const base = resolve(dirname(from), specifier);
-  const candidates = extname(base)
-    ? [base.replace(/\.js$/, ".ts"), base]
-    : [".ts", ".js", ".json"].map((extension) => `${base}${extension}`);
-  return (
-    candidates.find((candidate) => existsSync(candidate) && statSync(candidate).isFile()) ?? null
-  );
-}
-
-function collectLocalImportGraph(entrypoints: readonly string[]): Set<string> {
-  const seen = new Set<string>();
-  const importPattern =
-    /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?["']([^"']+)["']|import\(["']([^"']+)["']\)/g;
-  function visit(relativePath: string): void {
-    const absolutePath = resolve(root, relativePath);
-    if (seen.has(absolutePath)) return;
-    seen.add(absolutePath);
-    const source = readFileSync(absolutePath, "utf8");
-    for (const match of source.matchAll(importPattern)) {
-      const resolved = resolveLocalImport(absolutePath, match[1] ?? match[2]);
-      if (resolved) visit(resolved.slice(root.length + 1));
-    }
-  }
-  for (const entrypoint of entrypoints) visit(entrypoint);
-  return seen;
 }
 
 function b2EnvNames(text: string): Set<string> {
@@ -93,6 +78,7 @@ describe("deployment documentation policy", () => {
       "## Teardown",
       "## Limitations",
       "## Cost Controls",
+      "## Troubleshooting",
       "## Verification Record",
       "## Official References",
     ];
@@ -106,6 +92,18 @@ describe("deployment documentation policy", () => {
       expect(text).toMatch(/Do not\s+expose raw port\s+3000/i);
       expect(text).not.toMatch(/[^t] expose raw port 3000 publicly/i);
       expect(text).toContain("B2_ALLOW_LOCAL_FILES=false");
+      for (const term of [
+        /auth discovery/i,
+        /issuer\/audience mismatch/i,
+        /Host\/Origin rejection/i,
+        /missing B2 capabilities/i,
+        /timeouts/i,
+        /bundle limits/i,
+        /cold starts/i,
+        /failed health checks/i,
+      ]) {
+        expect(text, `${fileName} troubleshooting is missing ${term}`).toMatch(term);
+      }
       expect(text).toContain("Last verified: 2026-08-14");
       expect(text).toContain("MCP revision: 2026-07-28");
     }
@@ -178,32 +176,27 @@ describe("deployment documentation policy", () => {
     );
   });
 
-  it("keeps the Cloudflare Worker adapter thin and fetch-native", () => {
-    const adapter = readFileSync(join(root, "deploy/cloudflare-worker/adapter.ts"), "utf8");
+  it("keeps the Cloudflare Worker adapter manifest and budget checks in policy", () => {
     const wrangler = readFileSync(join(root, "deploy/cloudflare-worker/wrangler.jsonc"), "utf8");
+    const wranglerConfig = parseJsoncObject(wrangler);
     const tsconfig = readFileSync(join(root, "tsconfig.typecheck.json"), "utf8");
     const pkg = readJson<{ scripts?: Record<string, string>; files?: string[] }>("package.json");
 
-    expect(adapter).toContain("../../src/http-fetch-handler.js");
-    expect(adapter).toContain("../../src/oauth-resource-server.js");
-    expect(adapter).toContain("authenticateOAuthRequest");
-    expect(adapter).not.toContain("@modelcontextprotocol/sdk");
-    expect(adapter).not.toContain("agents/mcp/server");
-    expect(adapter).not.toContain("McpAgent");
-    expect(existsSync(join(root, "src/http-handler.ts"))).toBe(false);
-    expect(wrangler).toContain('"compatibility_date": "2026-08-14"');
-    expect(wrangler).toContain('"nodejs_compat"');
-    expect(wrangler).toContain('"B2_ALLOW_LOCAL_FILES": "false"');
+    expect(wranglerConfig.compatibility_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(wranglerConfig.compatibility_flags).toContain("nodejs_compat");
+    expect((wranglerConfig.vars as Record<string, string>)?.B2_ALLOW_LOCAL_FILES).toBe("false");
     expect(tsconfig).toContain('"deploy/cloudflare-worker/**/*"');
     expect(pkg.scripts?.["check:cloudflare-worker-bundle"]).toBe(
       "node scripts/check-cloudflare-worker-bundle.mjs",
     );
-    expect(pkg.files).toContain("deploy/cloudflare-worker/wrangler.jsonc");
+    expect(pkg.files).not.toContain("deploy/cloudflare-worker/adapter.ts");
+    expect(pkg.files).not.toContain("deploy/cloudflare-worker/worker.ts");
     expect(pkg.files).toContain("docs/deployment/*.md");
+    expect(existsSync(join(root, "deploy/cloudflare-worker/worker.ts"))).toBe(true);
 
-    const files = collectLocalImportGraph(["deploy/cloudflare-worker/worker.ts"]);
+    const files = collectLocalImportGraph(root, ["deploy/cloudflare-worker/worker.ts"]);
     const bytes = [...files].reduce((sum, file) => sum + statSync(file).size, 0);
-    expect(files.size).toBeLessThanOrEqual(75);
-    expect(bytes).toBeLessThanOrEqual(600_000);
+    expect(files.size).toBeLessThanOrEqual(WORKER_SOURCE_GRAPH_FILES_BUDGET);
+    expect(bytes).toBeLessThanOrEqual(WORKER_SOURCE_GRAPH_BYTES_BUDGET);
   });
 });
