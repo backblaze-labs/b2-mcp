@@ -133,15 +133,33 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   };
 }
 
-export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
+export async function startHttp(options: HttpListenOptions = {}): Promise<HttpServerHandle> {
   const port = options.port ?? getPort();
-  const { server: httpServer, sessions, drain } = buildHttpServer();
+  const handle = buildHttpServer();
+  const { server: httpServer, sessions, drain } = handle;
 
-  httpServer.listen(port, () => {
-    logger.info({ transport: "http", port }, "server.started");
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => {
+      httpServer.off("error", onError);
+      drain();
+      reject(err);
+    };
+    httpServer.once("error", onError);
+    httpServer.listen(port, () => {
+      httpServer.off("error", onError);
+      logger.info({ transport: "http", port }, "server.started");
+      resolve();
+    });
   });
 
   let shuttingDown = false;
+  let drainTimer: NodeJS.Timeout | null = null;
+  const onSigterm = () => shutdown("SIGTERM");
+  const onSigint = () => shutdown("SIGINT");
+  function removeSignalHandlers(): void {
+    process.off("SIGTERM", onSigterm);
+    process.off("SIGINT", onSigint);
+  }
   function shutdown(signal: string): void {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -151,17 +169,24 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
     );
     drain();
     httpServer.close(() => {
+      removeSignalHandlers();
+      if (drainTimer) {
+        clearTimeout(drainTimer);
+        drainTimer = null;
+      }
       logger.info("server.closed");
       process.exit(0);
     });
-    setTimeout(() => {
+    drainTimer = setTimeout(() => {
+      removeSignalHandlers();
       logger.error("server.drainTimeout");
       process.exit(1);
     }, SHUTDOWN_DRAIN_MS).unref();
   }
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
+  return handle;
 }
 
 if (require.main === module) {
