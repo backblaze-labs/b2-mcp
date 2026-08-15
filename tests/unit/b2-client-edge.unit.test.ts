@@ -115,13 +115,20 @@ describe("B2Client native edge branches", () => {
     const client = clientWithTransport(transport);
     circuitBreaker.open();
 
+    await expect(client.listBuckets()).rejects.toMatchObject({ code: "EOPENBREAKER" });
+    expect(transport.requests).toHaveLength(0);
+
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect((circuitBreaker as unknown as { halfOpen: boolean }).halfOpen).toBe(true);
     await expect(client.listBuckets()).resolves.toMatchObject({
       buckets: [{ bucketName: "half-open-bucket" }],
     });
-    expect((circuitBreaker as unknown as { closed: boolean }).closed).toBe(true);
+    await expect(client.listBuckets()).resolves.toMatchObject({
+      buckets: [{ bucketName: "half-open-bucket" }],
+    });
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(2);
   });
 
   it("normalizes direct native HTTP error bodies and request IDs", async () => {

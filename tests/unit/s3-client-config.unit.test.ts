@@ -1,5 +1,5 @@
 import {
-  accountInfoForS3Endpoint,
+  accountInfoForS3EndpointForTests,
   buildB2S3ClientConfig,
   createReportS3Client,
   createS3ObjectClient,
@@ -146,7 +146,7 @@ describe("B2 S3 client configuration", () => {
   });
 
   it("keeps the endpoint-only AccountInfo shim credential-free", () => {
-    const accountInfo = accountInfoForS3Endpoint("https://s3.us-west-004.backblazeb2.com");
+    const accountInfo = accountInfoForS3EndpointForTests("https://s3.us-west-004.backblazeb2.com");
     const bucketId = "bucket-id" as never;
     const fileId = "file-id" as never;
     const uploadUrlEntry = {
@@ -177,7 +177,7 @@ describe("B2 S3 client configuration", () => {
     ["getRecommendedPartSize"],
     ["getAbsoluteMinimumPartSize"],
   ] as const)("throws if the S3 helper unexpectedly asks for %s", (method) => {
-    const accountInfo = accountInfoForS3Endpoint("https://s3.us-west-004.backblazeb2.com");
+    const accountInfo = accountInfoForS3EndpointForTests("https://s3.us-west-004.backblazeb2.com");
 
     expect(() => accountInfo[method]()).toThrow(
       `${method} is not used when deriving B2 S3 client configuration.`,
