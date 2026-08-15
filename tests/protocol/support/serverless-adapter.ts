@@ -65,6 +65,11 @@ function authInfo(url: string, subject: string): AuthInfo {
     extra: {
       iss: "https://issuer.example.com/",
       sub: subject,
+      aud: [url],
+      resource: [url],
+      alg: "RS256",
+      token_type: "Bearer",
+      nbf: Math.floor(Date.now() / 1000) - 60,
     },
   };
 }

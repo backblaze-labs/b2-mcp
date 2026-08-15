@@ -752,9 +752,11 @@ export function validatePreverifiedOAuthAuthInfo(
   if (authInfo.resource?.href !== config.resource) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token resource is not accepted");
   }
-  if (extra.aud !== undefined) requireMatch(extra.aud, config.audience, "audience");
+  requireMatch(extra.aud, config.audience, "audience");
   requireMatch(extra.resource ?? authInfo.resource?.href, config.resource, "resource");
-  assertTimeWindow({ exp: authInfo.expiresAt }, nowSeconds());
+  assertTimeWindow({ exp: authInfo.expiresAt, nbf: extra.nbf }, nowSeconds());
+  assertTokenType(extra, config.allowedTokenTypes);
+  assertTokenAlgorithm(extra, config.allowedAlgorithms);
   assertDeploymentScope(authInfo.scopes);
   assertRequiredScopes(authInfo.scopes, config.requiredScopes);
   assertAllowedSubject(extra, issuer, config.allowedSubjects);

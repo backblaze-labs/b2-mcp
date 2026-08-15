@@ -30,6 +30,7 @@ deploy/customer-hosted/**/*.pem
 .claude/settings.local.json
 probe-output/
 .audit/
+.wrangler/
 
 # Internal-only docs — never ship in a public/open-sourced repo
 docs/STRATEGY-*.md

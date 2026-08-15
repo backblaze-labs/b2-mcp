@@ -78,6 +78,7 @@ const runtime = createServerlessAdapterRuntime<VercelMcpFetchContext>({
   configurationInvalidEvent: "vercel.config.invalid",
   admissionRejectedEvent: "vercel.oauth.admission_rejected",
   validateStaticConfiguration: validateVercelStaticConfiguration,
+  validateInjectedAuthInfo: true,
   oauthAdmissionKey: (_request, context) =>
     `vercel-oauth:${context.remoteAddress?.trim() || "unknown"}`,
   warn: (fields, message) => logger.warn(fields, message),

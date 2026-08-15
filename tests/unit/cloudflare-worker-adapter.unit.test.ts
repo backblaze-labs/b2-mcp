@@ -20,6 +20,11 @@ const validAuthInfo: AuthInfo = {
   extra: {
     iss: "https://issuer.example.com/",
     sub: "subject",
+    aud: ["https://mcp.example.com/mcp"],
+    resource: ["https://mcp.example.com/mcp"],
+    alg: "RS256",
+    token_type: "Bearer",
+    nbf: Math.floor(Date.now() / 1000) - 60,
   },
 };
 
