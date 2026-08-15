@@ -5,13 +5,21 @@ import { listFiles, readJson, root } from "./support";
 
 const nodeRequire = createRequire(__filename);
 const {
+  WORKER_EMITTED_FILES_BUDGET,
+  WORKER_EMITTED_TOTAL_BYTES_BUDGET,
   WORKER_SOURCE_GRAPH_BYTES_BUDGET,
   WORKER_SOURCE_GRAPH_FILES_BUDGET,
+  WORKER_UPLOAD_SCRIPT_BYTES_BUDGET,
+  WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET,
   collectLocalImportGraph,
   parseJsoncObject,
 } = nodeRequire("../../scripts/lib/local-import-graph.cjs") as {
+  WORKER_EMITTED_FILES_BUDGET: number;
+  WORKER_EMITTED_TOTAL_BYTES_BUDGET: number;
   WORKER_SOURCE_GRAPH_BYTES_BUDGET: number;
   WORKER_SOURCE_GRAPH_FILES_BUDGET: number;
+  WORKER_UPLOAD_SCRIPT_BYTES_BUDGET: number;
+  WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET: number;
   collectLocalImportGraph: (root: string, entrypoints: readonly string[]) => Set<string>;
   parseJsoncObject: (text: string) => Record<string, unknown>;
 };
@@ -193,6 +201,10 @@ describe("deployment documentation policy", () => {
     expect(pkg.files).not.toContain("deploy/cloudflare-worker/worker.ts");
     expect(pkg.files).toContain("docs/deployment/*.md");
     expect(existsSync(join(root, "deploy/cloudflare-worker/worker.ts"))).toBe(true);
+    expect(WORKER_EMITTED_FILES_BUDGET).toBeGreaterThan(0);
+    expect(WORKER_EMITTED_TOTAL_BYTES_BUDGET).toBeGreaterThan(0);
+    expect(WORKER_UPLOAD_SCRIPT_BYTES_BUDGET).toBeGreaterThan(0);
+    expect(WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET).toBeGreaterThan(0);
 
     const files = collectLocalImportGraph(root, ["deploy/cloudflare-worker/worker.ts"]);
     const bytes = [...files].reduce((sum, file) => sum + statSync(file).size, 0);

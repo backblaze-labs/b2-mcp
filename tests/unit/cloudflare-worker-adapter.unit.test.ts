@@ -75,6 +75,29 @@ function modernHeaders(method: string): Record<string, string> {
   };
 }
 
+function introspectionClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    active: true,
+    iss: "https://issuer.example.com/",
+    sub: "subject",
+    aud: ["https://mcp.example.com/mcp"],
+    resource: ["https://mcp.example.com/mcp"],
+    exp: Math.floor(Date.now() / 1000) + 600,
+    token_type: "bearer",
+    alg: "RS256",
+    scope: "b2:read",
+    client_id: "client",
+    ...overrides,
+  };
+}
+
+function introspectionResponse(overrides: Record<string, unknown> = {}): Response {
+  return new Response(JSON.stringify(introspectionClaims(overrides)), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 async function rpcJson(response: Response): Promise<Record<string, any>> {
   expect(response.status).toBe(200);
   const text = await response.text();
@@ -140,50 +163,100 @@ describe("Cloudflare Worker adapter", () => {
     expect(discover.result?.supportedVersions).toContain("2026-07-28");
   });
 
-  it("rejects missing bearer auth through the internet-facing OAuth branch", async () => {
-    const response = await cloudflareMcpFetch(
+  it("rejects missing bearer auth through the Worker entrypoint", async () => {
+    process.env = { ...savedEnv };
+    const response = await cloudflareWorkerFetch(
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: modernHeaders("tools/list"),
         body: modernBody("tools/list"),
       }),
+      cloudflareEnv(),
     );
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
   });
 
-  it("rejects bearer tokens whose subject is outside the local allowlist", async () => {
-    const introspection = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          active: true,
-          iss: "https://issuer.example.com/",
-          sub: "attacker-subject",
-          aud: ["https://mcp.example.com/mcp"],
-          resource: ["https://mcp.example.com/mcp"],
-          exp: Math.floor(Date.now() / 1000) + 600,
-          token_type: "bearer",
-          alg: "RS256",
-          scope: "b2:read",
-          client_id: "attacker-client",
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+  it("rejects inactive bearer tokens through the Worker entrypoint", async () => {
+    process.env = { ...savedEnv };
+    const introspection = vi.fn().mockResolvedValue(introspectionResponse({ active: false }));
     vi.stubGlobal("fetch", introspection);
 
-    const response = await cloudflareMcpFetch(
+    const response = await cloudflareWorkerFetch(
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
         headers: { ...modernHeaders("tools/list"), Authorization: "Bearer access-token" },
         body: modernBody("tools/list"),
       }),
+      cloudflareEnv(),
     );
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
     expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts introspected bearer tokens through the Worker entrypoint", async () => {
+    process.env = { ...savedEnv };
+    const introspection = vi.fn().mockResolvedValue(introspectionResponse());
+    vi.stubGlobal("fetch", introspection);
+
+    const discover = await rpcJson(
+      await cloudflareWorkerFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: { ...modernHeaders("server/discover"), Authorization: "Bearer access-token" },
+          body: modernBody("server/discover"),
+        }),
+        cloudflareEnv(),
+      ),
+    );
+
+    expect(discover.result?.supportedVersions).toContain("2026-07-28");
+    expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects bearer tokens whose subject is outside the local allowlist", async () => {
+    process.env = { ...savedEnv };
+    const introspection = vi
+      .fn()
+      .mockResolvedValue(
+        introspectionResponse({ sub: "attacker-subject", client_id: "attacker-client" }),
+      );
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await cloudflareWorkerFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: { ...modernHeaders("tools/list"), Authorization: "Bearer access-token" },
+        body: modernBody("tools/list"),
+      }),
+      cloudflareEnv(),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects oversized MCP bodies before Worker OAuth introspection", async () => {
+    process.env = { ...savedEnv };
+    const introspection = vi.fn().mockResolvedValue(introspectionResponse());
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await cloudflareWorkerFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: { ...modernHeaders("tools/list"), Authorization: "Bearer access-token" },
+        body: "x".repeat(1 * 1024 * 1024 + 1),
+      }),
+      cloudflareEnv(),
+    );
+
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "Request body too large" });
+    expect(introspection).not.toHaveBeenCalled();
   });
 
   it("revalidates pre-supplied AuthInfo subjects before MCP dispatch", async () => {
