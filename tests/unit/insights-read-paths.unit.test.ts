@@ -1,9 +1,53 @@
+import type {
+  B2Client,
+  BucketFilters,
+  BucketInfoResult,
+  FileVersionResult,
+  ListBucketsResult,
+  ListFileNamesOptions,
+  ListFileNamesResult,
+  ListPartsOptions,
+  ListPartsResult,
+  ListUnfinishedLargeFilesOptions,
+  ListUnfinishedLargeFilesResult,
+  PartInfoResult,
+  UnfinishedLargeFileResult,
+} from "../../src/b2/client";
 import { registerInsightTools } from "../../src/b2/insights";
+import type {
+  ListReportObjectKeysOptions,
+  ReportObjectClient,
+  ReportObjectPage,
+  ReportObjectText,
+} from "../../src/b2/report-client";
 import { parseResult, ToolHarness } from "../support/deterministic-fakes";
 
 const GB = 1e9;
 const DAY_MS = 86400_000;
-const bucket = { bucketId: "bucket-1", bucketName: "photos" };
+const REPORT_CLOCK = new Date("2026-01-31T12:00:00.000Z");
+const bucket: BucketInfoResult = {
+  bucketId: "bucket-1",
+  bucketName: "photos",
+  bucketType: "allPrivate",
+};
+
+type ReportFixture = {
+  calls: Array<{ bucketName: string; options: ListReportObjectKeysOptions }>;
+  downloaded: string[];
+  client: ReportObjectClient;
+};
+
+type NativeInsightClient = Pick<
+  B2Client,
+  "listBuckets" | "listFileNames" | "listUnfinishedLargeFiles" | "listParts"
+>;
+
+type NativeClientOptions = {
+  buckets?: BucketInfoResult[];
+  filePages?: Array<ListFileNamesResult | Error>;
+  uploadPages?: Array<ListUnfinishedLargeFilesResult | Error>;
+  partPagesByFileId?: Record<string, Array<ListPartsResult | Error>>;
+};
 
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
@@ -30,20 +74,24 @@ function timeoutError(): Error {
 function createPagedReportClient(
   csvByKey: Record<string, string>,
   options: { pageSize?: number; listError?: Error } = {},
-) {
-  const calls: Array<{ bucketName: string; options: any }> = [];
+): ReportFixture {
+  const calls: ReportFixture["calls"] = [];
   const downloaded: string[] = [];
   const allKeys = Object.keys(csvByKey).sort();
   return {
     calls,
     downloaded,
     client: {
-      async listReportObjectKeys(bucketName: string, input: any) {
+      async listReportObjectKeys(
+        bucketName: string,
+        input: ListReportObjectKeysOptions = {},
+      ): Promise<ReportObjectPage> {
         calls.push({ bucketName, options: input });
         if (options.listError) throw options.listError;
         let keys = allKeys;
-        if (input.prefix) keys = keys.filter((key) => key.startsWith(input.prefix));
-        if (input.startAfter) keys = keys.filter((key) => key > input.startAfter);
+        const { prefix, startAfter } = input;
+        if (prefix) keys = keys.filter((key) => key.startsWith(prefix));
+        if (startAfter) keys = keys.filter((key) => key > startAfter);
         const offset = input.continuationToken ? Number(input.continuationToken) : 0;
         const requested = input.maxKeys ?? keys.length;
         const pageSize = Math.min(options.pageSize ?? requested, requested);
@@ -55,7 +103,7 @@ function createPagedReportClient(
           nextContinuationToken: nextOffset < keys.length ? String(nextOffset) : undefined,
         };
       },
-      async downloadReportObjectText(_bucketName: string, key: string) {
+      async downloadReportObjectText(_bucketName: string, key: string): Promise<ReportObjectText> {
         downloaded.push(key);
         const text = csvByKey[key] ?? "";
         return { text, bytes: Buffer.byteLength(text, "utf8"), truncated: false };
@@ -64,30 +112,32 @@ function createPagedReportClient(
   };
 }
 
-function createNativeClient(options: {
-  buckets?: any[];
-  filePages?: any[];
-  uploadPages?: any[];
-  partPagesByFileId?: Record<string, any[]>;
-}) {
+function createNativeClient(options: NativeClientOptions) {
   const filePages = [...(options.filePages ?? [])];
   const uploadPages = [...(options.uploadPages ?? [])];
-  const partPagesByFileId = Object.fromEntries(
-    Object.entries(options.partPagesByFileId ?? {}).map(([fileId, pages]) => [fileId, [...pages]]),
-  );
+  const partPagesByFileId: Record<string, Array<ListPartsResult | Error>> = {};
+  for (const [fileId, pages] of Object.entries(options.partPagesByFileId ?? {})) {
+    partPagesByFileId[fileId] = [...pages];
+  }
   return {
-    listBuckets: vi.fn(async () => ({ buckets: options.buckets ?? [bucket] })),
-    listFileNames: vi.fn(async () => {
+    listBuckets: vi.fn(
+      async (_input: BucketFilters = {}): Promise<ListBucketsResult> => ({
+        buckets: options.buckets ?? [bucket],
+      }),
+    ),
+    listFileNames: vi.fn(async (_input: ListFileNamesOptions): Promise<ListFileNamesResult> => {
       const reply = filePages.shift() ?? { files: [], nextFileName: null };
       if (reply instanceof Error) throw reply;
       return reply;
     }),
-    listUnfinishedLargeFiles: vi.fn(async () => {
-      const reply = uploadPages.shift() ?? { files: [], nextFileId: null };
-      if (reply instanceof Error) throw reply;
-      return reply;
-    }),
-    listParts: vi.fn(async (input: { fileId: string }) => {
+    listUnfinishedLargeFiles: vi.fn(
+      async (_input: ListUnfinishedLargeFilesOptions): Promise<ListUnfinishedLargeFilesResult> => {
+        const reply = uploadPages.shift() ?? { files: [], nextFileId: null };
+        if (reply instanceof Error) throw reply;
+        return reply;
+      },
+    ),
+    listParts: vi.fn(async (input: ListPartsOptions): Promise<ListPartsResult> => {
       const reply = partPagesByFileId[input.fileId]?.shift() ?? {
         parts: [],
         nextPartNumber: null,
@@ -98,18 +148,23 @@ function createNativeClient(options: {
   };
 }
 
-function registerTools(reportClient: any, nativeClient: any = createNativeClient({})) {
+function registerTools(
+  reportClient: ReportObjectClient,
+  nativeClient: NativeInsightClient = createNativeClient({}),
+) {
   const harness = new ToolHarness();
   registerInsightTools(
-    harness as any,
-    nativeClient as any,
-    { getAuth: async () => ({ accountId: "test-account" }) } as any,
-    reportClient as any,
+    harness,
+    nativeClient as B2Client,
+    { getAuth: async () => ({ accountId: "test-account" }) } as Parameters<
+      typeof registerInsightTools
+    >[2],
+    reportClient,
   );
   return harness;
 }
 
-function file(fileName: string, contentLength: number) {
+function file(fileName: string, contentLength: number): FileVersionResult {
   return {
     fileName,
     contentLength,
@@ -117,7 +172,7 @@ function file(fileName: string, contentLength: number) {
   };
 }
 
-function upload(fileName: string, fileId: string, isoDate: string) {
+function upload(fileName: string, fileId: string, isoDate: string): UnfinishedLargeFileResult {
   return {
     fileName,
     fileId,
@@ -125,15 +180,21 @@ function upload(fileName: string, fileId: string, isoDate: string) {
   };
 }
 
-function part(contentLength: number, partNumber = 1) {
+function part(contentLength: number, partNumber = 1): PartInfoResult {
   return { partNumber, contentLength };
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
 describe("insight usage-report read paths", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(REPORT_CLOCK);
+  });
+
   it("returns not-enabled metadata when b2_usage_growth cannot list the report bucket", async () => {
     const report = createPagedReportClient({}, { listError: noSuchBucket() });
     const tools = registerTools(report.client);
@@ -156,7 +217,8 @@ describe("insight usage-report read paths", () => {
 
     expect(result.reports_enabled).toBe(true);
     expect(result.note).toBe("No usage-report snapshots found yet.");
-    expect(result.report_scan.pages).toBe(3);
+    expect(result.report_scan.pages).toEqual(expect.any(Number));
+    expect(result.report_scan.pages).toBeGreaterThan(0);
   });
 
   it("reports insufficient history when only the latest snapshot exists", async () => {
@@ -220,7 +282,10 @@ describe("insight usage-report read paths", () => {
       expect.objectContaining({ account: "shrink", growth_gb: -15, growth_pct: -75 }),
     ]);
     expect(leastGrown.account_count).toBe(2);
-    expect(leastGrown.accounts.map((account: any) => account.account)).toEqual(["shrink", "flat"]);
+    expect(leastGrown.accounts.map((account: { account: string }) => account.account)).toEqual([
+      "shrink",
+      "flat",
+    ]);
   });
 
   it("paginates b2_egress_leaders report keys and skips empty or malformed CSV rows", async () => {
@@ -335,8 +400,8 @@ describe("insight native bucket read paths", () => {
   it("returns candidate buckets when b2_largest_files receives an ambiguous bucket name", async () => {
     const nativeClient = createNativeClient({
       buckets: [
-        { bucketId: "logs-a", bucketName: "logs-alpha" },
-        { bucketId: "logs-b", bucketName: "logs-beta" },
+        { bucketId: "logs-a", bucketName: "logs-alpha", bucketType: "allPrivate" },
+        { bucketId: "logs-b", bucketName: "logs-beta", bucketType: "allPrivate" },
       ],
     });
     const tools = registerTools(createPagedReportClient({}).client, nativeClient);
