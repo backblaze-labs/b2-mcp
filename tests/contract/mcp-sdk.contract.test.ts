@@ -39,14 +39,16 @@ describe("MCP SDK and protocol contract", () => {
     const serverSdk = await import("@modelcontextprotocol/server");
     const stdioSdk = await import("@modelcontextprotocol/server/stdio");
     const nodeSdk = await import("@modelcontextprotocol/node");
-    const nodeAdapter = await import("../../src/node-http-adapter");
+    const nodeWebBridge = await import("../../src/utils/node-web-bridge");
 
     expect(typeof serverSdk.createMcpHandler).toBe("function");
     expect(typeof serverSdk.inputRequired).toBe("function");
     expect(typeof serverSdk.inputResponse).toBe("function");
     expect(typeof stdioSdk.serveStdio).toBe("function");
     expect(typeof nodeSdk.toWebRequest).toBe("function");
-    expect(typeof nodeAdapter.createNodeHttpHandler).toBe("function");
+    expect(typeof nodeWebBridge.nodeRequestToWeb).toBe("function");
+    expect(typeof nodeWebBridge.writeWebResponse).toBe("function");
+    expect(typeof nodeWebBridge.resumeUnreadRequest).toBe("function");
   });
 
   it("keeps the MCP Node adapter out of runtime source imports", () => {
