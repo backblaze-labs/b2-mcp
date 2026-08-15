@@ -27,7 +27,8 @@ version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
    unless a documented, isolated container volume is intentionally enabled.
 10. Set exact `B2_ALLOWED_HOSTS` and only required `B2_ALLOWED_ORIGINS`.
 11. Select `B2_DESTRUCTIVE_POLICY` deliberately. Use `block` for unattended
-    examples and `confirm` for interactive examples.
+    examples and `confirm` for interactive examples. Clients that advertise
+    MCP form elicitation also require human approval for destructive tools.
 12. Never log B2 credentials, bearer tokens, presigned URLs, authorization
     responses, or provider deployment-bypass tokens.
 13. Create, rotate, revoke, and tear down B2 keys outside the MCP tool flow

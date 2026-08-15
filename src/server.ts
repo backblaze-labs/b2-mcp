@@ -43,6 +43,10 @@ import {
   verificationFingerprintConfig,
 } from "./credentials.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
+import {
+  maybeRequireDestructiveElicitation,
+  type ClientCapabilitiesProvider,
+} from "./utils/destructive-elicitation.js";
 
 import { registerBucketTools } from "./b2/buckets.js";
 import { registerKeyTools } from "./b2/keys.js";
@@ -208,7 +212,10 @@ export function createServer(
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) =>
       isToolEnabled(name, capsSet) && isToolAllowedByOAuthScopes(name, oauthScopes),
-    wrapCallback: (name, callback) => createAuditedToolCallback(name, callback, config),
+    wrapCallback: (name, callback) =>
+      createAuditedToolCallback(name, callback, config, () =>
+        server.server.getClientCapabilities(),
+      ),
   });
 
   // Initialize clients. The application (workhorse) key drives the B2 native
@@ -581,6 +588,7 @@ export function createAuditedToolCallback(
   name: string,
   original: ToolCallback,
   config: B2Config,
+  getClientCapabilities?: ClientCapabilitiesProvider,
 ): ToolCallback {
   const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
 
@@ -592,10 +600,21 @@ export function createAuditedToolCallback(
       const sanitizerOptions = sanitizerOptionsFromConfig(config);
       const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
       const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
-      const rawResult = await runWithMcpRequestSignal(signal, () =>
-        runWithSanitizerOptions(sanitizerOptions, () =>
-          runWithResultSerializationOptions({ outputFormat }, () => original(args, extra)),
-        ),
+      const callOriginal = () =>
+        runWithMcpRequestSignal(signal, () =>
+          runWithSanitizerOptions(sanitizerOptions, () =>
+            runWithResultSerializationOptions({ outputFormat }, () => original(args, extra)),
+          ),
+        );
+      const rawResult = await runWithSanitizerOptions(sanitizerOptions, () =>
+        maybeRequireDestructiveElicitation({
+          toolName: name,
+          args: args ?? {},
+          extra,
+          sanitizerOptions,
+          getClientCapabilities,
+          runOriginal: callOriginal,
+        }),
       );
       const result = isSanitizedMcpResponse(rawResult)
         ? rawResult

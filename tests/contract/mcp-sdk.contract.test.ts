@@ -42,6 +42,8 @@ describe("MCP SDK and protocol contract", () => {
     const nodeAdapter = await import("../../src/node-http-adapter");
 
     expect(typeof serverSdk.createMcpHandler).toBe("function");
+    expect(typeof serverSdk.inputRequired).toBe("function");
+    expect(typeof serverSdk.inputResponse).toBe("function");
     expect(typeof stdioSdk.serveStdio).toBe("function");
     expect(typeof nodeSdk.toWebRequest).toBe("function");
     expect(typeof nodeAdapter.createNodeHttpHandler).toBe("function");

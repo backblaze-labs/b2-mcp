@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "async_hooks";
 import { B2Config, DestructivePolicy } from "./types.js";
 
 /**
@@ -93,6 +94,33 @@ export function isDestructiveTool(toolName: string): boolean {
   return toolName in DETECTORS;
 }
 
+export function destructiveEffect(
+  toolName: string,
+  args: Record<string, unknown> = {},
+): string | null {
+  return DETECTORS[toolName]?.(args) ?? null;
+}
+
+interface DestructiveConsent {
+  toolName: string;
+  effect: string;
+}
+
+const destructiveConsentStorage = new AsyncLocalStorage<DestructiveConsent | undefined>();
+
+export function runWithDestructiveElicitationConsent<T>(
+  toolName: string,
+  effect: string,
+  callback: () => T,
+): T {
+  return destructiveConsentStorage.run({ toolName, effect }, callback);
+}
+
+function hasDestructiveElicitationConsent(toolName: string, effect: string): boolean {
+  const consent = destructiveConsentStorage.getStore();
+  return consent?.toolName === toolName && consent.effect === effect;
+}
+
 export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   const p = config.destructivePolicy;
   return p === "allow" || p === "block" ? p : "confirm";
@@ -114,10 +142,7 @@ export function checkDestructive(
   args: Record<string, unknown>,
   config: B2Config,
 ): GateResult {
-  const detector = DETECTORS[toolName];
-  if (!detector) return { ok: true };
-
-  const effect = detector(args ?? {});
+  const effect = destructiveEffect(toolName, args ?? {});
   if (!effect) return { ok: true }; // this specific call is not destructive
 
   const policy = getDestructivePolicy(config);
@@ -133,6 +158,7 @@ export function checkDestructive(
   }
 
   // policy === "confirm"
+  if (hasDestructiveElicitationConsent(toolName, effect)) return { ok: true };
   if (args.confirm === true) return { ok: true };
   return {
     ok: false,

@@ -142,7 +142,7 @@ the healthcheck probes the same port the server binds.
 
 | Variable                                                         | Default            | Description                                                                                                               |
 | ---------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| `B2_DESTRUCTIVE_POLICY`                                          | `confirm`          | Gate on destructive tools: `confirm` (require `confirm: true`), `block` (refuse), `allow` (off)                           |
+| `B2_DESTRUCTIVE_POLICY`                                          | `confirm`          | Gate on destructive tools: `confirm` (require `confirm: true`, or human elicitation approval on capable clients), `block` (refuse), `allow` (off after elicitation on capable clients) |
 | `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS`                        | _none_             | HTTP transport: Host/Origin allowlists (DNS-rebinding protection) — **set these for any internet-facing HTTP deployment** |
 | `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`              | `60` / `120`       | HTTP transport: per-credential request throttling                                                                         |
 | `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`                    | `1000` / `20`      | HTTP transport: global and per-credential concurrent in-flight request caps                                               |
@@ -266,7 +266,7 @@ Scope follows the caller's key — a partner key sees its sub-accounts; a custom
 
 ## Security & self-hosting
 
-Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), durable-secret-producing tool exclusion until a secret sink exists, central recursive response sanitization, explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
+Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), human elicitation approval for destructive tools when the MCP client advertises form elicitation, durable-secret-producing tool exclusion until a secret sink exists, central recursive response sanitization, explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
 
 Running it safely:
 
