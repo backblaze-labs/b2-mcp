@@ -59,13 +59,15 @@ the stable SDK v2 package split pinned at `2.0.0`:
   `serveStdio`;
 - `@modelcontextprotocol/client` for protocol/package tests.
 
-`src/node-http-adapter.ts` is the repository-owned bridge between Node HTTP and
-the server SDK's web-standard `fetch` handler. It uses only Node and Web
-platform APIs and preserves request aborts, auth metadata, streamed responses,
-and response backpressure. `@modelcontextprotocol/node` is intentionally absent:
-its `2.0.0` release pulls a vulnerable Node adapter transitively, and a package
-manager override would protect this checkout without protecting consumers of
-the published package.
+`src/http-server.ts` owns Node HTTP listen/shutdown and delegates each request
+to the runtime-neutral `src/http-fetch-handler.ts` pipeline. Its
+repository-owned Web bridge helpers live in `src/utils/node-web-bridge.ts`;
+they translate Node `IncomingMessage` objects to Web `Request`s, resume unread
+request bodies, and stream Web `Response`s back to `ServerResponse` while
+preserving request aborts and response backpressure. `@modelcontextprotocol/node`
+is intentionally absent: its `2.0.0` release pulls a vulnerable Node adapter
+transitively, and a package manager override would protect this checkout
+without protecting consumers of the published package.
 
 The monolithic `@modelcontextprotocol/sdk` v1 package is not a direct or
 runtime dependency and must not be imported by production or test code. Its only
@@ -75,13 +77,13 @@ B2 credential resolution, rate/concurrency limits, body-size limits, drain, and
 shutdown checks run outside the SDK handler; protocol header/body validation
 remains inside `createMcpHandler`.
 
-The repository-owned Node request adapter receives only an allowlisted
-MCP/header set; B2
-credential headers and caller `Authorization` are consumed by repository-owned
-credential resolution before the adapter boundary. Per-request credential state
-is then carried into the SDK factory by `AsyncLocalStorage` and fails closed when
-absent. The repository tracks each SDK server built for the request and closes
-it after the Node response lifecycle completes; local HTTP tests cover
+The HTTP serving pipeline passes only an allowlisted MCP/header set to the SDK
+handler; B2 credential headers and caller `Authorization` are consumed by
+repository-owned credential resolution before the SDK handler boundary.
+Per-request credential state is then carried into the SDK factory by
+`AsyncLocalStorage` and fails closed when absent. The repository tracks each SDK
+server built for the request and closes it after the Node response lifecycle
+completes; local HTTP tests cover
 credential-header stripping, concurrent tenant isolation, per-request disposal,
 and drain survival for this model.
 

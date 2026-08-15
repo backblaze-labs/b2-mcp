@@ -89,7 +89,7 @@ to the global floor:
 | Secret redaction     | `src/utils/secret-sanitizer.ts`, audited tool wrapping                                      | Canary redaction branch tests   |
 | Destructive actions  | `src/utils/destructive-gate.ts`, bucket/object/multipart delete handlers                    | Confirm/block/allow branches    |
 | Filesystem boundary  | `src/utils/fs-guard.ts`, S3 local file upload/download paths                                | Root escape and symlink tests   |
-| Transport boundary   | `src/http-server.ts`, `src/node-http-adapter.ts`, stdio and HTTP protocol suites            | Close/abort/listener tests      |
+| Transport boundary   | `src/http-server.ts`, `src/utils/node-web-bridge.ts`, stdio and HTTP protocol suites        | Close/abort/listener tests      |
 
 The v1.0.0 target is 90% statements, 80% branches, 90% functions, and 90% lines
 globally, with credential/redaction/destructive/filesystem modules kept at 95%+
