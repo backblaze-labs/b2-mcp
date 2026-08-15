@@ -189,19 +189,16 @@ describe("result serializer", () => {
   });
 
   it("falls back to compact JSON when TOON input bounds are exceeded", () => {
+    const value = { value: "x".repeat(MAX_TOON_INPUT_JSON_CHARS) };
     const result = runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
-      toolJson({ value: "x".repeat(MAX_TOON_INPUT_JSON_CHARS) }),
+      toolJson(value),
     );
 
+    expect(result.structuredContent).toEqual(value);
     expect(result.content[0].text).toBe(JSON.stringify(result.structuredContent));
   });
 
-  it("falls back to JSON text without changing structured content at TOON bounds", () => {
-    const largeValue = { value: "x".repeat(MAX_TOON_INPUT_JSON_CHARS) };
-    const largeValueResult = serializeStructuredToolResult(largeValue, {}, "toon");
-    expect(largeValueResult.structuredContent).toEqual(largeValue);
-    expect(largeValueResult.content[0].text).toBe(JSON.stringify(largeValue));
-
+  it("falls back to JSON text without changing structured content at depth and node bounds", () => {
     const deepValue = nestedValue(MAX_TOON_INPUT_DEPTH + 1);
     const deepValueResult = serializeStructuredToolResult(deepValue, {}, "toon");
     expect(deepValueResult.structuredContent).toEqual(deepValue);

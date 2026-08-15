@@ -2,6 +2,66 @@ import { encodeToon } from "../../src/utils/toon-encoder";
 
 type ToonValue = Parameters<typeof encodeToon>[0];
 type ToonObject = { [key: string]: ToonValue };
+type FallbackListItemCase = [name: string, items: ToonObject[], lines: string[]];
+
+const fallbackListItemCases: FallbackListItemCase[] = [
+  [
+    "primitive field",
+    [{ id: 1 }, { other: "sentinel" }],
+    ["items[2]:", "  - id: 1", "  - other: sentinel"],
+  ],
+  ["empty object item", [{}, { other: "sentinel" }], ["items[2]:", "  -", "  - other: sentinel"]],
+  [
+    "nested tabular array field",
+    [
+      {
+        files: [
+          { name: "a", size: 1 },
+          { name: "b", size: 2 },
+        ],
+        note: "ok",
+      },
+    ],
+    ["items[1]:", "  - files[2]{name,size}:", "      a,1", "      b,2", "    note: ok"],
+  ],
+  [
+    "keyed object field",
+    [{ lookup: { alpha: { size: 1 }, beta: { size: 2 } }, note: "map" }, { other: "sentinel" }],
+    [
+      "items[2]:",
+      "  - lookup[2:]{size}:",
+      "      alpha: 1",
+      "      beta: 2",
+      "    note: map",
+      "  - other: sentinel",
+    ],
+  ],
+  [
+    "empty array field",
+    [{ first: [], note: "empty" }],
+    ["items[1]:", "  - first: []", "    note: empty"],
+  ],
+  [
+    "inline primitive array field",
+    [{ first: [1, 2], note: "inline" }],
+    ["items[1]:", "  - first[2]: 1,2", "    note: inline"],
+  ],
+  [
+    "nested primitive array field",
+    [{ first: [[1], [2]], note: "nested" }],
+    ["items[1]:", "  - first[2]:", "      - [1]: 1", "      - [1]: 2", "    note: nested"],
+  ],
+  [
+    "empty object field",
+    [{ first: {}, note: "empty-object" }],
+    ["items[1]:", "  - first:", "    note: empty-object"],
+  ],
+  [
+    "nested object field",
+    [{ first: { nested: 1 }, note: "object" }, { other: "sentinel" }],
+    ["items[2]:", "  - first:", "      nested: 1", "    note: object", "  - other: sentinel"],
+  ],
+];
 
 describe("TOON encoder", () => {
   it.each([
@@ -40,7 +100,7 @@ describe("TOON encoder", () => {
         "bad,key": "x",
         " spaced key": "y",
         "a{b}c": "z",
-        pairedSurrogate,
+        emoji: pairedSurrogate,
       }),
     ).toBe(
       [
@@ -48,7 +108,7 @@ describe("TOON encoder", () => {
         '"bad,key": x',
         '" spaced key": y',
         '"a{b}c": z',
-        `pairedSurrogate: ${pairedSurrogate}`,
+        `emoji: ${pairedSurrogate}`,
       ].join("\n"),
     );
     expect(() => encodeToon({ bad: "\uD800" })).toThrow(/unpaired surrogate U\+D800/);
@@ -141,67 +201,10 @@ describe("TOON encoder", () => {
     ).toBe(["accounts[2:]{enabled,quota}:", "  alpha: true,null", "  beta: false,100"].join("\n"));
   });
 
-  it.each([
-    [
-      "primitive field",
-      [{ id: 1 }, { other: "sentinel" }],
-      ["items[2]:", "  - id: 1", "  - other: sentinel"],
-    ],
-    ["empty object item", [{}, { other: "sentinel" }], ["items[2]:", "  -", "  - other: sentinel"]],
-    [
-      "nested tabular array field",
-      [
-        {
-          files: [
-            { name: "a", size: 1 },
-            { name: "b", size: 2 },
-          ],
-          note: "ok",
-        },
-      ],
-      ["items[1]:", "  - files[2]{name,size}:", "      a,1", "      b,2", "    note: ok"],
-    ],
-    [
-      "keyed object field",
-      [{ lookup: { alpha: { size: 1 }, beta: { size: 2 } }, note: "map" }, { other: "sentinel" }],
-      [
-        "items[2]:",
-        "  - lookup[2:]{size}:",
-        "      alpha: 1",
-        "      beta: 2",
-        "    note: map",
-        "  - other: sentinel",
-      ],
-    ],
-    [
-      "empty array field",
-      [{ first: [], note: "empty" }],
-      ["items[1]:", "  - first: []", "    note: empty"],
-    ],
-    [
-      "inline primitive array field",
-      [{ first: [1, 2], note: "inline" }],
-      ["items[1]:", "  - first[2]: 1,2", "    note: inline"],
-    ],
-    [
-      "nested primitive array field",
-      [{ first: [[1], [2]], note: "nested" }],
-      ["items[1]:", "  - first[2]:", "      - [1]: 1", "      - [1]: 2", "    note: nested"],
-    ],
-    [
-      "empty object field",
-      [{ first: {}, note: "empty-object" }],
-      ["items[1]:", "  - first:", "    note: empty-object"],
-    ],
-    [
-      "nested object field",
-      [{ first: { nested: 1 }, note: "object" }, { other: "sentinel" }],
-      ["items[2]:", "  - first:", "      nested: 1", "    note: object", "  - other: sentinel"],
-    ],
-  ])(
+  it.each(fallbackListItemCases)(
     "falls back to list items for non-tabular arrays of objects with %s",
     (_name, items, lines) => {
-      expect(encodeToon({ items: items as ToonObject[] })).toBe(lines.join("\n"));
+      expect(encodeToon({ items })).toBe(lines.join("\n"));
     },
   );
 
