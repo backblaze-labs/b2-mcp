@@ -1,0 +1,38 @@
+# Quality Keeper private-repository caller (backblaze-labs/quality-keeper#312).
+#
+# All assessment, execution, artifact, and comment behavior lives in the QK-owned
+# reusable workflow pinned below. This repository keeps its existing test,
+# contract, smoke, and publish workflows as the authoritative product gates;
+# Quality Keeper adds an advisory quality view and does not replace them.
+#
+# Authentication boundary:
+# - GitHub's private Actions-sharing token fetches QK; no QK_INSTALL_TOKEN/PAT.
+# - Target code runs only in the reusable workflow's contents-read execute job.
+# - QK_APP_PRIVATE_KEY reaches only its separate report job, which runs no target
+#   code and mints a short-lived Quality Keeper GitHub App token.
+
+name: Quality Keeper
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# No pull_request_target: fork, draft, and unknown-head code is never trusted.
+permissions: {}
+
+jobs:
+  quality-keeper:
+    if: >-
+      ${{
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.draft == false
+      }}
+    # QK PRs #313/#315: activation with package-manager provisioning and #213 prerequisites.
+    # backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml reviewed 2026-08-15.
+    uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@f7abca3b354393a7d6d908547857a50c2b6f7010
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    secrets:
+      QK_APP_PRIVATE_KEY: ${{ secrets.QK_APP_PRIVATE_KEY }}
