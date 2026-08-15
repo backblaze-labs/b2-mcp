@@ -27,8 +27,8 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.draft == false
       }}
-    # QK PRs #313/#315: explicit b2-mcp Repository Activation with private-runner
-    # package-manager provisioning and #213 Run Contract prerequisite support.
+    # QK PRs #313/#315: activation with package-manager provisioning and #213 prerequisites.
+    # backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml reviewed 2026-08-15.
     uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@f7abca3b354393a7d6d908547857a50c2b6f7010
     permissions:
       contents: read
