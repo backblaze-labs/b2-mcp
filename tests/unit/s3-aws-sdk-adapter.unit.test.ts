@@ -1,5 +1,5 @@
 import { Readable } from "stream";
-import { B2S3PeerClient } from "../../src/s3/aws-sdk-adapter";
+import { B2S3PeerClient, b2S3DeleteErrorEntry } from "../../src/s3/aws-sdk-adapter";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 
 function clientWithHandler(handle: ReturnType<typeof vi.fn>) {
@@ -130,6 +130,49 @@ describe("B2S3PeerClient object data-plane behavior", () => {
       },
     ]);
     s3.destroy();
+  });
+
+  it("maps direct provider error codes and request IDs into deleteObjects errors", () => {
+    const error = Object.assign(new Error("slow down"), {
+      code: "SlowDown",
+      name: "ThrottlingException",
+      requestId: "direct-request-id",
+    });
+
+    expect(b2S3DeleteErrorEntry({ key: "a.txt", versionId: "v1" }, error)).toEqual({
+      Key: "a.txt",
+      VersionId: "v1",
+      Code: "SlowDown",
+      Message: "slow down",
+      RequestId: "direct-request-id",
+    });
+  });
+
+  it("falls back through provider error names, messages, and extended request IDs", () => {
+    expect(
+      b2S3DeleteErrorEntry(
+        { key: "a.txt" },
+        {
+          name: "InternalError",
+          message: "provider failed",
+          $metadata: { extendedRequestId: "extended-request-id" },
+        },
+      ),
+    ).toEqual({
+      Key: "a.txt",
+      VersionId: undefined,
+      Code: "InternalError",
+      Message: "provider failed",
+      RequestId: "extended-request-id",
+    });
+
+    expect(b2S3DeleteErrorEntry({ key: "b.txt" }, "socket closed")).toEqual({
+      Key: "b.txt",
+      VersionId: undefined,
+      Code: "unknown_error",
+      Message: "socket closed",
+      RequestId: undefined,
+    });
   });
 
   it("preserves delete marker metadata in the bulk delete ledger", async () => {

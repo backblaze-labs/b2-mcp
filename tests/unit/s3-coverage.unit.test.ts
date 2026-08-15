@@ -118,4 +118,20 @@ describe("S3 tool error paths (catch blocks)", () => {
       errors: [{ Key: "k", Code: "AccessDenied", Message: "denied", RequestId: "rq" }],
     });
   });
+
+  it("surfaces the S3 master-key rejection hint for malformed access key errors", async () => {
+    sendSpy.mockRejectedValue({
+      name: "InvalidAccessKeyId",
+      message: "Malformed Access Key Id",
+      $metadata: { httpStatusCode: 403, requestId: "rq-master-key" },
+    });
+
+    const result = await callTool(server, "s3_head_bucket", args);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("InvalidAccessKeyId");
+    expect(result.content[0].text).toContain("regular application key");
+    expect(result.content[0].text).toContain("master key");
+    expect(result.content[0].text).toContain("rq-master-key");
+  });
 });
