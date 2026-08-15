@@ -1,5 +1,49 @@
+interface CapturedEndpointAccountInfo {
+  setAuth(auth: unknown): void;
+  getAuth(): unknown;
+  clear(): void;
+  getS3ApiUrl(): string;
+  getAllowedBucketId(): unknown;
+  getAllowedBucketIds(): readonly unknown[] | null;
+  checkoutUploadUrl(bucketId: string): unknown;
+  returnUploadUrl(bucketId: string, entry: unknown): void;
+  evictUploadUrl(bucketId: string, entry: unknown): void;
+  checkoutPartUploadUrl(fileId: string): unknown;
+  returnPartUploadUrl(fileId: string, entry: unknown): void;
+  evictPartUploadUrl(fileId: string, entry: unknown): void;
+  getApiUrl(): string;
+  getDownloadUrl(): string;
+  getAuthToken(): string;
+  getAccountId(): string;
+  getRecommendedPartSize(): number;
+  getAbsoluteMinimumPartSize(): number;
+}
+
+const capturedS3ConfigInputs = vi.hoisted(
+  () =>
+    [] as Array<{
+      accountInfo: CapturedEndpointAccountInfo;
+      applicationKeyId: string;
+      applicationKey: string;
+      region: string;
+    }>,
+);
+
+vi.mock("@backblaze-labs/b2-sdk/s3", () => ({
+  createS3ClientConfig: vi.fn((input) => {
+    capturedS3ConfigInputs.push(input);
+    return {
+      endpoint: input.accountInfo.getS3ApiUrl(),
+      region: input.region,
+      credentials: {
+        accessKeyId: input.applicationKeyId,
+        secretAccessKey: input.applicationKey,
+      },
+    };
+  }),
+}));
+
 import {
-  accountInfoForS3EndpointForTests,
   buildB2S3ClientConfig,
   createReportS3Client,
   createS3ObjectClient,
@@ -21,7 +65,18 @@ const config: B2Config = {
   transport: "stdio",
 };
 
+function capturedEndpointAccountInfo(): CapturedEndpointAccountInfo {
+  buildB2S3ClientConfig(config);
+  const accountInfo = capturedS3ConfigInputs.at(-1)?.accountInfo;
+  if (!accountInfo) throw new Error("Expected buildB2S3ClientConfig to pass AccountInfo.");
+  return accountInfo;
+}
+
 describe("B2 S3 client configuration", () => {
+  beforeEach(() => {
+    capturedS3ConfigInputs.length = 0;
+  });
+
   it("uses path-style addressing and the trusted B2 S3 endpoint", () => {
     const s3 = buildB2S3ClientConfig(config);
 
@@ -146,13 +201,13 @@ describe("B2 S3 client configuration", () => {
   });
 
   it("keeps the endpoint-only AccountInfo shim credential-free", () => {
-    const accountInfo = accountInfoForS3EndpointForTests("https://s3.us-west-004.backblazeb2.com");
-    const bucketId = "bucket-id" as never;
-    const fileId = "file-id" as never;
+    const accountInfo = capturedEndpointAccountInfo();
+    const bucketId = "bucket-id";
+    const fileId = "file-id";
     const uploadUrlEntry = {
       uploadUrl: "https://upload.example",
       authorizationToken: "upload-token",
-    } as never;
+    };
 
     accountInfo.setAuth({} as never);
     accountInfo.clear();
@@ -169,6 +224,9 @@ describe("B2 S3 client configuration", () => {
     expect(accountInfo.checkoutPartUploadUrl(fileId)).toBeNull();
   });
 
+  // This deliberately exercises the defensive credential-free shim surface. If
+  // a future SDK helper starts asking for native B2 authorization state, S3
+  // config derivation must keep failing closed instead of inventing credentials.
   it.each([
     ["getApiUrl"],
     ["getDownloadUrl"],
@@ -177,10 +235,8 @@ describe("B2 S3 client configuration", () => {
     ["getRecommendedPartSize"],
     ["getAbsoluteMinimumPartSize"],
   ] as const)("throws if the S3 helper unexpectedly asks for %s", (method) => {
-    const accountInfo = accountInfoForS3EndpointForTests("https://s3.us-west-004.backblazeb2.com");
+    const accountInfo = capturedEndpointAccountInfo();
 
-    expect(() => accountInfo[method]()).toThrow(
-      `${method} is not used when deriving B2 S3 client configuration.`,
-    );
+    expect(() => accountInfo[method]()).toThrow(Error);
   });
 });

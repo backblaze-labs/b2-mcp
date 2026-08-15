@@ -112,19 +112,6 @@ function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
   return new EndpointOnlyAccountInfo(endpoint);
 }
 
-/**
- * Test-only access for the endpoint-only AccountInfo shim.
- *
- * @param endpoint - Trusted B2 S3 endpoint used by the shim.
- *
- * @returns An endpoint-only AccountInfo implementation for tests.
- *
- * @internal
- */
-export function accountInfoForS3EndpointForTests(endpoint: string): AccountInfo {
-  return accountInfoForS3Endpoint(endpoint);
-}
-
 interface B2S3ClientOptions {
   accountInfo?: AccountInfo;
   applicationKeyId?: string;
