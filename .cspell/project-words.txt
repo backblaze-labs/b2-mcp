@@ -24,6 +24,8 @@ cosign
 cspell
 CycloneDX
 envrc
+flyctl
+workerd
 GHCR
 iocs
 junit
@@ -42,6 +44,7 @@ tmpfs
 toon
 tsx
 tvzf
+unstub
 ustar
 xvda
 zizmor

@@ -47,24 +47,47 @@ export function isClientError(err: unknown): boolean {
  * Per-process singleton — B2 being down affects every session, so a shared
  * breaker is the correct scope.
  */
-const breaker = new CircuitBreaker(
-  // Pass-through action; the caller's function is invoked via .fire(fn).
-  async (fn: () => Promise<unknown>) => fn(),
-  {
-    timeout: CIRCUIT_TIMEOUT_MS,
-    errorThresholdPercentage: 50,
-    resetTimeout: 30_000,
-    rollingCountTimeout: 10_000,
-    rollingCountBuckets: 10,
-    volumeThreshold: 10,
-    errorFilter: isClientError,
-    name: "b2-api",
-  },
-);
+type CircuitBreakerInstance = InstanceType<typeof CircuitBreaker>;
 
-breaker.on("open", () => logger.warn("circuit.open"));
-breaker.on("halfOpen", () => logger.info("circuit.halfOpen"));
-breaker.on("close", () => logger.info("circuit.close"));
+let breaker: CircuitBreakerInstance | null = null;
+let longBreaker: CircuitBreakerInstance | null = null;
+let reportBreaker: CircuitBreakerInstance | null = null;
+let s3Breaker: CircuitBreakerInstance | null = null;
+let s3LongBreaker: CircuitBreakerInstance | null = null;
+
+function createBreaker(
+  name: string,
+  timeout: number | false,
+  events: { open: string; halfOpen: string; close: string },
+): CircuitBreakerInstance {
+  const instance = new CircuitBreaker(
+    // Pass-through action; the caller's function is invoked via .fire(fn).
+    async (fn: () => Promise<unknown>) => fn(),
+    {
+      timeout,
+      errorThresholdPercentage: 50,
+      resetTimeout: 30_000,
+      rollingCountTimeout: 10_000,
+      rollingCountBuckets: 10,
+      volumeThreshold: 10,
+      errorFilter: isClientError,
+      name,
+    },
+  );
+  instance.on("open", () => logger.warn(events.open));
+  instance.on("halfOpen", () => logger.info(events.halfOpen));
+  instance.on("close", () => logger.info(events.close));
+  return instance;
+}
+
+function defaultBreaker(): CircuitBreakerInstance {
+  breaker ??= createBreaker("b2-api", CIRCUIT_TIMEOUT_MS, {
+    open: "circuit.open",
+    halfOpen: "circuit.halfOpen",
+    close: "circuit.close",
+  });
+  return breaker;
+}
 
 /**
  * Circuit breaker for long-running data transfers (uploads / large downloads).
@@ -75,20 +98,14 @@ breaker.on("close", () => logger.info("circuit.close"));
  * surface a non-retryable error, and unfairly push the breaker toward open.
  * Transfer health is governed by SDK/request timeouts and the retry layer instead.
  */
-const longBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
-  timeout: false,
-  errorThresholdPercentage: 50,
-  resetTimeout: 30_000,
-  rollingCountTimeout: 10_000,
-  rollingCountBuckets: 10,
-  volumeThreshold: 10,
-  errorFilter: isClientError,
-  name: "b2-transfer",
-});
-
-longBreaker.on("open", () => logger.warn("circuit.transfer.open"));
-longBreaker.on("halfOpen", () => logger.info("circuit.transfer.halfOpen"));
-longBreaker.on("close", () => logger.info("circuit.transfer.close"));
+function transferBreaker(): CircuitBreakerInstance {
+  longBreaker ??= createBreaker("b2-transfer", false, {
+    open: "circuit.transfer.open",
+    halfOpen: "circuit.transfer.halfOpen",
+    close: "circuit.transfer.close",
+  });
+  return longBreaker;
+}
 
 /**
  * Separate breaker for optional Usage Report S3 reads.
@@ -97,20 +114,14 @@ longBreaker.on("close", () => logger.info("circuit.transfer.close"));
  * breaker prevents a report endpoint incident or oversized CSV read from
  * opening the native control-plane breaker used by bucket/key/Object Lock tools.
  */
-const reportBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
-  timeout: CIRCUIT_TIMEOUT_MS,
-  errorThresholdPercentage: 50,
-  resetTimeout: 30_000,
-  rollingCountTimeout: 10_000,
-  rollingCountBuckets: 10,
-  volumeThreshold: 10,
-  errorFilter: isClientError,
-  name: "b2-report-s3",
-});
-
-reportBreaker.on("open", () => logger.warn("circuit.reportS3.open"));
-reportBreaker.on("halfOpen", () => logger.info("circuit.reportS3.halfOpen"));
-reportBreaker.on("close", () => logger.info("circuit.reportS3.close"));
+function usageReportBreaker(): CircuitBreakerInstance {
+  reportBreaker ??= createBreaker("b2-report-s3", CIRCUIT_TIMEOUT_MS, {
+    open: "circuit.reportS3.open",
+    halfOpen: "circuit.reportS3.halfOpen",
+    close: "circuit.reportS3.close",
+  });
+  return reportBreaker;
+}
 
 /**
  * Separate breaker for the B2 S3-compatible data plane.
@@ -121,40 +132,28 @@ reportBreaker.on("close", () => logger.info("circuit.reportS3.close"));
  * open the native control-plane breaker that operators use to investigate or
  * mitigate the incident.
  */
-const s3Breaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
-  timeout: CIRCUIT_TIMEOUT_MS,
-  errorThresholdPercentage: 50,
-  resetTimeout: 30_000,
-  rollingCountTimeout: 10_000,
-  rollingCountBuckets: 10,
-  volumeThreshold: 10,
-  errorFilter: isClientError,
-  name: "b2-s3-api",
-});
-
-s3Breaker.on("open", () => logger.warn("circuit.s3.open"));
-s3Breaker.on("halfOpen", () => logger.info("circuit.s3.halfOpen"));
-s3Breaker.on("close", () => logger.info("circuit.s3.close"));
+function s3ApiBreaker(): CircuitBreakerInstance {
+  s3Breaker ??= createBreaker("b2-s3-api", CIRCUIT_TIMEOUT_MS, {
+    open: "circuit.s3.open",
+    halfOpen: "circuit.s3.halfOpen",
+    close: "circuit.s3.close",
+  });
+  return s3Breaker;
+}
 
 /**
  * Long-running B2 S3 object transfers share the S3 breaker state but do not use
  * the default whole-call deadline. Callers still need their own body-progress
  * or SDK socket deadlines where an operation can stall after response headers.
  */
-const s3LongBreaker = new CircuitBreaker(async (fn: () => Promise<unknown>) => fn(), {
-  timeout: false,
-  errorThresholdPercentage: 50,
-  resetTimeout: 30_000,
-  rollingCountTimeout: 10_000,
-  rollingCountBuckets: 10,
-  volumeThreshold: 10,
-  errorFilter: isClientError,
-  name: "b2-s3-transfer",
-});
-
-s3LongBreaker.on("open", () => logger.warn("circuit.s3Transfer.open"));
-s3LongBreaker.on("halfOpen", () => logger.info("circuit.s3Transfer.halfOpen"));
-s3LongBreaker.on("close", () => logger.info("circuit.s3Transfer.close"));
+function s3TransferBreaker(): CircuitBreakerInstance {
+  s3LongBreaker ??= createBreaker("b2-s3-transfer", false, {
+    open: "circuit.s3Transfer.open",
+    halfOpen: "circuit.s3Transfer.halfOpen",
+    close: "circuit.s3Transfer.close",
+  });
+  return s3LongBreaker;
+}
 
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   const maybeUnref = (timer as { unref?: unknown }).unref;
@@ -194,7 +193,7 @@ async function withDeadlineSignal<T>(timeoutMs: number, fn: () => Promise<T>): P
  * @returns The callback result after the default circuit breaker allows execution.
  */
 export async function withCircuit<T>(fn: () => Promise<T>): Promise<T> {
-  return breaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
+  return defaultBreaker().fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
 }
 
 /**
@@ -204,7 +203,7 @@ export async function withCircuit<T>(fn: () => Promise<T>): Promise<T> {
  * @returns The callback result after the transfer circuit breaker allows execution.
  */
 export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
-  return longBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+  return transferBreaker().fire(fn as () => Promise<unknown>) as Promise<T>;
 }
 
 /**
@@ -213,7 +212,7 @@ export async function withLongCircuit<T>(fn: () => Promise<T>): Promise<T> {
  * @returns The callback result after the usage-report circuit breaker allows execution.
  */
 export async function withReportCircuit<T>(fn: () => Promise<T>): Promise<T> {
-  return reportBreaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
+  return usageReportBreaker().fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
 }
 
 /**
@@ -222,7 +221,7 @@ export async function withReportCircuit<T>(fn: () => Promise<T>): Promise<T> {
  * @returns The callback result after the S3 data-plane circuit allows execution.
  */
 export async function withS3Circuit<T>(fn: () => Promise<T>): Promise<T> {
-  return s3Breaker.fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
+  return s3ApiBreaker().fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
 }
 
 /**
@@ -231,11 +230,21 @@ export async function withS3Circuit<T>(fn: () => Promise<T>): Promise<T> {
  * @returns The callback result after the S3 transfer circuit allows execution.
  */
 export async function withS3LongCircuit<T>(fn: () => Promise<T>): Promise<T> {
-  return s3LongBreaker.fire(fn as () => Promise<unknown>) as Promise<T>;
+  return s3TransferBreaker().fire(fn as () => Promise<unknown>) as Promise<T>;
 }
 
-export const circuitBreaker = breaker;
-export const transferCircuitBreaker = longBreaker;
-export const reportCircuitBreaker = reportBreaker;
-export const s3CircuitBreaker = s3Breaker;
-export const s3TransferCircuitBreaker = s3LongBreaker;
+function breakerProxy(get: () => CircuitBreakerInstance): CircuitBreakerInstance {
+  return new Proxy({} as CircuitBreakerInstance, {
+    get(_target, property) {
+      const instance = get() as unknown as Record<PropertyKey, unknown>;
+      const value = instance[property];
+      return typeof value === "function" ? value.bind(instance) : value;
+    },
+  });
+}
+
+export const circuitBreaker = breakerProxy(defaultBreaker);
+export const transferCircuitBreaker = breakerProxy(transferBreaker);
+export const reportCircuitBreaker = breakerProxy(usageReportBreaker);
+export const s3CircuitBreaker = breakerProxy(s3ApiBreaker);
+export const s3TransferCircuitBreaker = breakerProxy(s3TransferBreaker);

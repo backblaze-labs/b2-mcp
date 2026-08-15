@@ -1,3 +1,4 @@
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   OAuthDependencyError,
   OAuthIntrospectionVerifier,
@@ -5,6 +6,7 @@ import {
   loadOAuthResourceServerConfig,
   protectedResourceMetadata,
   resetOAuthVerifierCacheForTests,
+  validatePreverifiedOAuthAuthInfo,
 } from "../../src/oauth-resource-server";
 import { logger } from "../../src/utils/logger";
 
@@ -79,6 +81,26 @@ function verifierWithFetch(
     fetch: fetchMock as typeof fetch,
     nowSeconds: () => 1000,
   });
+}
+
+function preverifiedAuthInfo(overrides: Partial<AuthInfo> = {}): AuthInfo {
+  return {
+    token: "verified:test-token",
+    clientId: "mcp-client",
+    scopes: ["b2:read"],
+    expiresAt: 2000,
+    resource: new URL(baseConfig.resource),
+    extra: {
+      iss: baseConfig.issuer,
+      sub: "user-123",
+      aud: [baseConfig.audience],
+      resource: [baseConfig.resource],
+      alg: "RS256",
+      token_type: "Bearer",
+      nbf: 900,
+    },
+    ...overrides,
+  };
 }
 
 describe("OAuthIntrospectionVerifier", () => {
@@ -418,6 +440,39 @@ describe("OAuthIntrospectionVerifier", () => {
     await expect(verifier.verifyAccessToken("inactive-token")).rejects.toThrow(/inactive/i);
     await expect(verifier.verifyAccessToken("inactive-token")).rejects.toThrow(/inactive/i);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("validatePreverifiedOAuthAuthInfo", () => {
+  it("accepts preverified AuthInfo that matches the introspection policy", () => {
+    expect(
+      validatePreverifiedOAuthAuthInfo(preverifiedAuthInfo(), baseConfig, () => 1000),
+    ).toMatchObject({
+      clientId: "mcp-client",
+      scopes: ["b2:read"],
+    });
+  });
+
+  it.each([
+    ["missing audience", { aud: undefined }, /audience/i],
+    ["wrong audience", { aud: "other" }, /audience/i],
+    ["future not-before", { nbf: 1001 }, /not yet valid/i],
+    ["wrong token type", { token_type: "mac" }, /token type/i],
+    ["missing token algorithm", { alg: undefined }, /algorithm/i],
+    ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
+  ])("rejects preverified AuthInfo with %s", (_name, extraOverrides, message) => {
+    expect(() =>
+      validatePreverifiedOAuthAuthInfo(
+        preverifiedAuthInfo({
+          extra: {
+            ...preverifiedAuthInfo().extra,
+            ...extraOverrides,
+          },
+        }),
+        baseConfig,
+        () => 1000,
+      ),
+    ).toThrow(message);
   });
 });
 

@@ -11,8 +11,9 @@
  * Defaults: 60 requests/sec sustained, burst capacity 120. Override via
  * B2_MCP_RATE_LIMIT_RPS and B2_MCP_RATE_LIMIT_BURST env vars.
  *
- * Buckets that have been full for over IDLE_TTL_MS are evicted on every
- * check so the Map doesn't grow unbounded.
+ * Buckets that have been full for over IDLE_TTL_MS are evicted by periodic
+ * HTTP sweeps and by throttled opportunistic sweeps so the Map doesn't grow
+ * unbounded.
  */
 
 const DEFAULT_RPS = 60;
@@ -26,9 +27,18 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-const RPS = envInt("B2_MCP_RATE_LIMIT_RPS", DEFAULT_RPS);
-const BURST = envInt("B2_MCP_RATE_LIMIT_BURST", DEFAULT_BURST);
-const REFILL_PER_MS = RPS / 1000;
+export interface RateLimiterConfig {
+  readonly rps: number;
+  readonly burst: number;
+}
+
+function currentRateLimiterConfig(): RateLimiterConfig {
+  const rps = envInt("B2_MCP_RATE_LIMIT_RPS", DEFAULT_RPS);
+  return {
+    rps,
+    burst: envInt("B2_MCP_RATE_LIMIT_BURST", DEFAULT_BURST),
+  };
+}
 
 interface Bucket {
   tokens: number;
@@ -36,6 +46,7 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+let nextOpportunisticSweepAt = 0;
 
 /**
  * Try to consume one token for `key`. Returns true if allowed, false if
@@ -44,15 +55,18 @@ const buckets = new Map<string, Bucket>();
  * @returns True when a token was consumed and the request may proceed.
  */
 export function allowRequest(key: string): boolean {
+  const config = currentRateLimiterConfig();
+  const refillPerMs = config.rps / 1000;
   const now = Date.now();
+  maybeSweepIdleBuckets(now);
   let bucket = buckets.get(key);
   if (!bucket) {
-    bucket = { tokens: BURST, lastRefill: now };
+    bucket = { tokens: config.burst, lastRefill: now };
     buckets.set(key, bucket);
   }
   const elapsed = now - bucket.lastRefill;
   if (elapsed > 0) {
-    bucket.tokens = Math.min(BURST, bucket.tokens + elapsed * REFILL_PER_MS);
+    bucket.tokens = Math.min(config.burst, bucket.tokens + elapsed * refillPerMs);
     bucket.lastRefill = now;
   }
   if (bucket.tokens >= 1) {
@@ -62,13 +76,23 @@ export function allowRequest(key: string): boolean {
   return false;
 }
 
+function maybeSweepIdleBuckets(now: number): void {
+  if (now < nextOpportunisticSweepAt) return;
+  nextOpportunisticSweepAt = now + IDLE_TTL_MS;
+  sweepIdleBuckets(now);
+}
+
 /**
  * Drop idle buckets (full and untouched for more than IDLE_TTL_MS).
  * Called periodically from the HTTP server; safe to call any time.
  */
 export function sweepIdleBuckets(now: number = Date.now()): void {
+  const { burst, rps } = currentRateLimiterConfig();
+  const refillPerMs = rps / 1000;
   for (const [key, bucket] of buckets) {
-    if (now - bucket.lastRefill > IDLE_TTL_MS && bucket.tokens >= BURST) {
+    const idleMs = now - bucket.lastRefill;
+    const refilledTokens = Math.min(burst, bucket.tokens + Math.max(0, idleMs) * refillPerMs);
+    if (idleMs > IDLE_TTL_MS && refilledTokens >= burst) {
       buckets.delete(key);
     }
   }
@@ -77,6 +101,7 @@ export function sweepIdleBuckets(now: number = Date.now()): void {
 /** Test-only: clear all buckets. */
 export function _resetRateLimiter(): void {
   buckets.clear();
+  nextOpportunisticSweepAt = 0;
 }
 
 /**
@@ -88,4 +113,11 @@ export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);
 }
 
-export const rateLimiterConfig = { rps: RPS, burst: BURST };
+export const rateLimiterConfig: RateLimiterConfig = {
+  get rps() {
+    return currentRateLimiterConfig().rps;
+  },
+  get burst() {
+    return currentRateLimiterConfig().burst;
+  },
+};

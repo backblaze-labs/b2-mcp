@@ -15,11 +15,16 @@ const validAuthInfo: AuthInfo = {
   token: "redacted-test-token",
   clientId: "client",
   scopes: ["b2:read"],
-  expiresAt: 2000,
+  expiresAt: Math.floor(Date.now() / 1000) + 600,
   resource: new URL("https://mcp.example.com/mcp"),
   extra: {
     iss: "https://issuer.example.com/",
     sub: "subject",
+    aud: ["https://mcp.example.com/mcp"],
+    resource: ["https://mcp.example.com/mcp"],
+    alg: "RS256",
+    token_type: "Bearer",
+    nbf: Math.floor(Date.now() / 1000) - 60,
   },
 };
 

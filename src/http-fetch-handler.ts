@@ -82,6 +82,7 @@ export interface HttpPipelineOptions {
   mcpHandler?: Pick<McpHttpHandler, "fetch" | "close">;
   createServer?: typeof createMcpServerDefinition;
   fetchCapabilities?: typeof fetchCredentialCapabilities;
+  idleSweepMode?: "interval" | "request";
 }
 
 export interface HttpFetchContext {
@@ -306,6 +307,20 @@ function jsonResponse(
     status,
     headers: { "Content-Type": "application/json", ...headers },
   });
+}
+
+function maybeUnrefTimer(
+  timer: ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>,
+): void {
+  const unref = (timer as { unref?: unknown }).unref;
+  if (typeof unref === "function") unref.call(timer);
+}
+
+function runIdleSweep(): void {
+  const now = Date.now();
+  sweepIdleBuckets(now);
+  sweepCapabilityCache(now);
+  sweepAuthManagerCache(now);
 }
 
 function credentialErrorResponse(err: unknown): Response {
@@ -702,13 +717,9 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
   );
   const mcpHandler = options.mcpHandler ?? defaultMcpHandler;
 
-  const idleSweep = setInterval(() => {
-    const now = Date.now();
-    sweepIdleBuckets(now);
-    sweepCapabilityCache(now);
-    sweepAuthManagerCache(now);
-  }, IDLE_SWEEP_INTERVAL_MS);
-  idleSweep.unref();
+  const idleSweep =
+    options.idleSweepMode === "request" ? null : setInterval(runIdleSweep, IDLE_SWEEP_INTERVAL_MS);
+  if (idleSweep) maybeUnrefTimer(idleSweep);
 
   function closeMcpHandler(): void {
     if (mcpHandlerClosed) return;
@@ -756,6 +767,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
   }
 
   async function fetch(request: Request, context: HttpFetchContext = {}): Promise<Response> {
+    if (options.idleSweepMode === "request") runIdleSweep();
     const authInfo = context.authInfo ?? undefined;
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
@@ -915,9 +927,9 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
   function drain(): void {
     if (shuttingDown) return;
     shuttingDown = true;
-    clearInterval(idleSweep);
+    if (idleSweep) clearInterval(idleSweep);
     forcedCloseTimer = setTimeout(closeMcpHandler, SHUTDOWN_DRAIN_MS);
-    forcedCloseTimer.unref();
+    maybeUnrefTimer(forcedCloseTimer);
     maybeCloseMcpHandlerAfterDrain();
   }
 

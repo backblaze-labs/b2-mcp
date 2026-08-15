@@ -1,9 +1,9 @@
 import {
-  allowRequest,
-  sweepIdleBuckets,
-  rateLimiterConfig,
-  _resetRateLimiter,
   _getBucket,
+  _resetRateLimiter,
+  allowRequest,
+  rateLimiterConfig,
+  sweepIdleBuckets,
 } from "../../src/utils/rate-limiter";
 
 describe("rate-limiter", () => {
@@ -51,5 +51,27 @@ describe("rate-limiter", () => {
     allowRequest("key-A");
     sweepIdleBuckets();
     expect(_getBucket("key-A")).toBeDefined();
+  });
+
+  it("allowRequest throttles opportunistic idle sweeps", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      allowRequest("key-A");
+      const bucket = _getBucket("key-A") as { tokens: number; lastRefill: number };
+      bucket.tokens = rateLimiterConfig.burst;
+      bucket.lastRefill = Date.now() - 11 * 60 * 1000;
+
+      expect(allowRequest("key-B")).toBe(true);
+      expect(_getBucket("key-A")).toBeDefined();
+
+      vi.setSystemTime(new Date("2026-01-01T00:10:00.001Z"));
+      expect(allowRequest("key-C")).toBe(true);
+
+      expect(_getBucket("key-A")).toBeUndefined();
+      expect(_getBucket("key-C")).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

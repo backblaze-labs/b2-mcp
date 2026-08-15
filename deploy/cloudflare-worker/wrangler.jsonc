@@ -1,0 +1,43 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "b2-mcp",
+  "main": "worker.ts",
+  "compatibility_date": "2026-08-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "limits": {
+    "cpu_ms": 30000
+  },
+  // Required encrypted Worker secrets:
+  // B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY,
+  // B2_OAUTH_INTROSPECTION_CLIENT_ID, and
+  // B2_OAUTH_INTROSPECTION_CLIENT_SECRET. Upload them with
+  // wrangler deploy --secrets-file or wrangler versions upload --secrets-file.
+  "vars": {
+    "B2_HTTP_CREDENTIAL_MODE": "server",
+    "B2_ALLOWED_HOSTS": "b2-mcp.example.com",
+    "B2_DESTRUCTIVE_POLICY": "block",
+    "B2_REGISTER_ALL_TOOLS": "false",
+    "B2_ALLOW_LOCAL_FILES": "false",
+    "B2_MCP_OUTPUT_FORMAT": "json",
+    "B2_MCP_PUBLIC_URL": "https://b2-mcp.example.com/mcp",
+    "B2_MCP_SERVICE_DOCUMENTATION_URL": "https://github.com/backblaze-labs/b2-mcp/blob/main/docs/deployment/cloudflare-workers.md",
+    "B2_OAUTH_ISSUER": "https://issuer.example.com/",
+    "B2_OAUTH_AUTHORIZATION_ENDPOINT": "https://issuer.example.com/oauth2/authorize",
+    "B2_OAUTH_TOKEN_ENDPOINT": "https://issuer.example.com/oauth2/token",
+    "B2_OAUTH_INTROSPECTION_ENDPOINT": "https://issuer.example.com/oauth2/introspect",
+    "B2_OAUTH_RESOURCE": "https://b2-mcp.example.com/mcp",
+    "B2_OAUTH_AUDIENCE": "https://b2-mcp.example.com/mcp",
+    "B2_OAUTH_ALLOWED_SUBJECTS": "issuer-subject-for-this-single-tenant-deployment",
+    "B2_OAUTH_ALLOWED_TOKEN_TYPES": "bearer",
+    "B2_OAUTH_ALLOWED_ALGORITHMS": "RS256,ES256,EdDSA",
+    "B2_OAUTH_INTROSPECTION_TIMEOUT_MS": "3000",
+    "B2_OAUTH_INTROSPECTION_RETRIES": "1",
+    // These caps are per-isolate best-effort only; they are not global across
+    // Cloudflare colos or isolates. Use Cloudflare Rate Limiting or Durable
+    // Objects when upstream B2 key protection needs a cross-isolate ceiling.
+    "B2_MCP_RATE_LIMIT_RPS": "60",
+    "B2_MCP_RATE_LIMIT_BURST": "120",
+    "B2_MAX_SESSIONS": "1000",
+    "B2_MAX_SESSIONS_PER_KEY": "20"
+  }
+}
