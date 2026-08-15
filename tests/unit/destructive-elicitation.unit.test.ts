@@ -55,7 +55,15 @@ const DESTRUCTIVE_ARGS: Record<string, Record<string, unknown>> = {
   b2_reserve_trial_create_account: { email: "trial@example.com" },
   b2_set_bucket_notification_rules: {
     bucketId: "bucket-id",
-    eventNotificationRules: [{ name: "rule" }],
+    eventNotificationRules: [
+      {
+        name: "rule",
+        objectNamePrefix: "incoming/",
+        eventTypes: ["b2:ObjectDeleted:*"],
+        targetConfiguration: { targetType: "webhook", url: "https://hooks.example.com/b2" },
+        isEnabled: true,
+      },
+    ],
   },
   b2_update_bucket: { bucketId: "bucket-id", bucketType: "allPublic" },
   b2_update_file_legal_hold: { fileId: "file-id", fileName: "old.txt", legalHold: "off" },
@@ -66,11 +74,19 @@ const DESTRUCTIVE_ARGS: Record<string, Record<string, unknown>> = {
   },
   s3_abort_multipart_upload: { bucket: "bucket", key: "old.txt", uploadId: "upload-id" },
   s3_delete_object: { bucket: "bucket", key: "old.txt" },
-  s3_delete_objects: { bucket: "bucket", objects: [{ Key: "old.txt" }] },
+  s3_delete_objects: { bucket: "bucket", objects: [{ key: "old.txt", versionId: "version-1" }] },
   s3_get_presigned_url: { bucket: "bucket", key: "old.txt", operation: "PutObject" },
   s3_put_bucket_lifecycle: {
     bucket: "bucket",
-    rules: [{ id: "delete", status: "Enabled", expiration: { days: 1 } }],
+    rules: [
+      {
+        id: "delete",
+        status: "Enabled",
+        filter: { prefix: "archive/" },
+        expiration: { days: 1 },
+        noncurrentVersionExpiration: { noncurrentDays: 7 },
+      },
+    ],
   },
 };
 const EXPECTED_PROMPT_SNIPPETS: Record<string, string[]> = {
@@ -83,15 +99,35 @@ const EXPECTED_PROMPT_SNIPPETS: Record<string, string[]> = {
     "Member account ID: member-account-id.",
   ],
   b2_reserve_trial_create_account: ["Account email: trial@example.com."],
-  b2_set_bucket_notification_rules: ["Bucket ID: bucket-id.", "Notification rule count: 1."],
+  b2_set_bucket_notification_rules: [
+    "Bucket ID: bucket-id.",
+    "Notification rule count: 1.",
+    "Notification rule 1 name: rule.",
+    "Notification rule 1 object prefix: incoming/.",
+    "Notification rule 1 event types: b2:ObjectDeleted:*.",
+    "Notification rule 1 enabled: true.",
+  ],
   b2_update_bucket: ["Bucket ID: bucket-id.", "make the bucket PUBLIC"],
   b2_update_file_legal_hold: ["File ID: file-id.", "File name: old.txt."],
   b2_update_file_retention: ["File ID: file-id.", "File name: old.txt."],
   s3_abort_multipart_upload: ["Bucket: bucket.", "Object key: old.txt.", "Upload ID: upload-id."],
   s3_delete_object: ["Bucket: bucket.", "Object key: old.txt."],
-  s3_delete_objects: ["Bucket: bucket.", "Object count: 1."],
+  s3_delete_objects: [
+    "Bucket: bucket.",
+    "Object count: 1.",
+    "Object 1 key: old.txt.",
+    "Object 1 version ID: version-1.",
+  ],
   s3_get_presigned_url: ["Bucket: bucket.", "Object key: old.txt.", "Operation: PutObject."],
-  s3_put_bucket_lifecycle: ["Bucket: bucket.", "Rule count: 1.", "Deletion rule count: 1."],
+  s3_put_bucket_lifecycle: [
+    "Bucket: bucket.",
+    "Rule count: 1.",
+    "Rule 1 ID: delete.",
+    "Rule 1 prefix: archive/.",
+    "Rule 1 expiration days: 1.",
+    "Rule 1 noncurrent expiration days: 7.",
+    "Deletion rule count: 1.",
+  ],
 };
 
 function providers(
@@ -99,8 +135,8 @@ function providers(
   protocolVersion: string | undefined = MODERN_PROTOCOL_VERSION,
 ) {
   return {
-    getClientCapabilities: () => clientCapabilities,
-    getProtocolVersion: () => protocolVersion,
+    getClientCapabilities: (): ClientCapabilities | undefined => clientCapabilities,
+    getProtocolVersion: (): string | undefined => protocolVersion,
   };
 }
 
@@ -370,35 +406,69 @@ describe("destructive elicitation", () => {
     expect(original).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to the destructive gate when the client has no elicitation", async () => {
+  it.each([
+    ["missing form capability", { mcpReq: { envelope: envelope() } }],
+    [
+      "url-only request capability",
+      { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
+    ],
+    [
+      "legacy protocol marker",
+      {
+        mcpReq: {
+          clientCapabilities: FORM_ELICITATION,
+          envelope: envelope(LEGACY_PROTOCOL_VERSION),
+        },
+      },
+    ],
+  ])("uses trusted context for %s downgrade attempts", async (_case, extra) => {
     const config = cfg();
     const original = destructiveOriginal(config);
-    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers({}));
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
 
-    const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, {});
-    expect(missingConfirm.isError).toBe(true);
-    expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
-    expect(original).toHaveBeenCalledTimes(1);
+    const result = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
 
-    const confirmed = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, {});
-    expect(confirmed.content?.[0]?.text).toBe("deleted");
-    expect(original).toHaveBeenCalledTimes(2);
+    expect(result.resultType).toBe("input_required");
+    expect(original).not.toHaveBeenCalled();
   });
 
-  it("falls back to the destructive gate on legacy protocol requests", async () => {
+  it.each([
+    [
+      "missing form elicitation capability",
+      {
+        getClientCapabilities: (): undefined => undefined,
+        getProtocolVersion: (): string => MODERN_PROTOCOL_VERSION,
+      },
+      { mcpReq: { envelope: envelope() } },
+    ],
+    [
+      "url-only elicitation capability",
+      providers(URL_ONLY_ELICITATION),
+      { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
+    ],
+    [
+      "legacy protocol requests",
+      providers(FORM_ELICITATION, LEGACY_PROTOCOL_VERSION),
+      {
+        mcpReq: {
+          clientCapabilities: FORM_ELICITATION,
+          envelope: envelope(LEGACY_PROTOCOL_VERSION),
+        },
+      },
+    ],
+  ])("falls back to the confirm gate for %s", async (_case, context, extra) => {
     const config = cfg();
     const original = destructiveOriginal(config);
-    const wrapped = createAuditedToolCallback(
-      "s3_delete_object",
-      original,
-      config,
-      providers(FORM_ELICITATION, LEGACY_PROTOCOL_VERSION),
-    );
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, context);
 
-    const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, {});
+    const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, extra);
     expect(missingConfirm.resultType).not.toBe("input_required");
     expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
     expect(original).toHaveBeenCalledTimes(1);
+
+    const confirmed = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
+    expect(confirmed.content?.[0]?.text).toBe("deleted");
+    expect(original).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -470,6 +540,33 @@ describe("destructive elicitation", () => {
         expect(message, `${toolName} missing ${snippet}`).toContain(snippet);
       }
     }
+  });
+
+  it("shows bounded bulk object identities without leaking secrets", () => {
+    const message = destructiveElicitationMessage(
+      "s3_delete_objects",
+      "permanently delete multiple objects",
+      {
+        bucket: "photos",
+        objects: [
+          { Key: "customer-backups.tar", VersionId: "version-1" },
+          { Key: `token-${CONFIGURED_SECRET}`, VersionId: "version-2" },
+          { Key: "file-3.txt" },
+          { Key: "file-4.txt" },
+          { Key: "file-5.txt" },
+          { Key: "file-6.txt" },
+        ],
+      },
+      { secrets: [CONFIGURED_SECRET] },
+    );
+
+    expect(message).toContain("Object count: 6.");
+    expect(message).toContain("Object 1 key: customer-backups.tar.");
+    expect(message).toContain("Object 1 version ID: version-1.");
+    expect(message).toContain("Object 2 key: [redacted].");
+    expect(message).toContain("Object 2 version ID: version-2.");
+    expect(message).toContain("Additional object targets: 1.");
+    expect(message).not.toContain(CONFIGURED_SECRET);
   });
 
   it("sanitizes secret-shaped values from elicitation prompts", () => {

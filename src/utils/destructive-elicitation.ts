@@ -73,6 +73,7 @@ const DESTRUCTIVE_ELICITATION_STATE_TTL_SECONDS = DESTRUCTIVE_ELICITATION_STATE_
 const DESTRUCTIVE_ELICITATION_ENV = "B2_DESTRUCTIVE_ELICITATION";
 const RETURN_BASED_INPUT_PROTOCOL_VERSION = "2026-07-28";
 const REQUEST_STATE_PREFIX = `${DESTRUCTIVE_ELICITATION_REQUEST_STATE}.`;
+const PROMPT_TARGET_DETAIL_LIMIT = 5;
 
 // Prompt coverage is pinned by tests that enumerate DESTRUCTIVE_TOOL_NAMES and
 // assert representative destructive args surface concrete, sanitized details.
@@ -124,11 +125,10 @@ export async function maybeRequireDestructiveElicitation<T>({
 
   const policy = getDestructivePolicy(config);
   const requestExtra = mcpRequestExtra(extra);
-  if (
-    policy !== "confirm" ||
-    !destructiveElicitationEnabled() ||
-    !clientCanUseReturnBasedElicitation(requestExtra, contextProviders)
-  ) {
+  if (policy !== "confirm" || !destructiveElicitationEnabled()) {
+    return runOriginal();
+  }
+  if (!clientCanUseReturnBasedElicitation(requestExtra, contextProviders)) {
     return runOriginal();
   }
 
@@ -258,7 +258,7 @@ export function clientSupportsFormElicitation(
   getClientCapabilities?: ClientCapabilitiesProvider,
 ): boolean {
   const requestExtra = mcpRequestExtra(extra);
-  const capabilities = mcpClientCapabilities(requestExtra) ?? getClientCapabilities?.();
+  const capabilities = getClientCapabilities?.() ?? mcpClientCapabilities(requestExtra);
   const elicitation = capabilities?.elicitation;
   if (!elicitation || typeof elicitation !== "object" || Array.isArray(elicitation)) {
     return false;
@@ -292,12 +292,15 @@ function destructiveElicitationDetails(
   );
   details.push(
     ...promptDetail("Object count", arrayCount(args.objects), sanitizerOptions),
+    ...bulkObjectTargetDetails(args.objects, sanitizerOptions),
     ...promptDetail("Rule count", arrayCount(args.rules), sanitizerOptions),
+    ...lifecycleRuleTargetDetails(args.rules, sanitizerOptions),
     ...promptDetail(
       "Notification rule count",
       arrayCount(args.eventNotificationRules),
       sanitizerOptions,
     ),
+    ...notificationRuleTargetDetails(args.eventNotificationRules, sanitizerOptions),
     ...promptDetail(
       "Deletion rule count",
       lifecycleDeletionRuleCount(args.rules),
@@ -346,6 +349,151 @@ function promptDetail(label: string, value: unknown, sanitizerOptions: Sanitizer
   return safe ? [`${label}: ${safe}.`] : [];
 }
 
+function promptListDetail(
+  label: string,
+  value: unknown,
+  sanitizerOptions: SanitizerOptions,
+): string[] {
+  if (!Array.isArray(value)) return [];
+  const safeValues = value
+    .slice(0, PROMPT_TARGET_DETAIL_LIMIT)
+    .map((item) => safePromptValue(item, sanitizerOptions))
+    .filter((item): item is string => Boolean(item));
+  if (safeValues.length === 0) return [];
+  const omitted = value.length - safeValues.length;
+  const suffix = omitted > 0 ? `, +${omitted} more` : "";
+  return [`${label}: ${safeValues.join(", ")}${suffix}.`];
+}
+
+function promptTruncationDetail(label: string, count: number): string[] {
+  return count > PROMPT_TARGET_DETAIL_LIMIT
+    ? [`Additional ${label}: ${count - PROMPT_TARGET_DETAIL_LIMIT}.`]
+    : [];
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function recordValue(record: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null) return record[key];
+  }
+  return undefined;
+}
+
+function recordObject(
+  record: Record<string, unknown>,
+  ...keys: string[]
+): Record<string, unknown> | null {
+  return objectRecord(recordValue(record, ...keys));
+}
+
+function bulkObjectTargetDetails(value: unknown, sanitizerOptions: SanitizerOptions): string[] {
+  if (!Array.isArray(value)) return [];
+  const details = value.slice(0, PROMPT_TARGET_DETAIL_LIMIT).flatMap((item, index) => {
+    const record = objectRecord(item);
+    if (!record) return [];
+    const prefix = `Object ${index + 1}`;
+    return [
+      ...promptDetail(`${prefix} key`, recordValue(record, "key", "Key"), sanitizerOptions),
+      ...promptDetail(
+        `${prefix} version ID`,
+        recordValue(record, "versionId", "VersionId"),
+        sanitizerOptions,
+      ),
+    ];
+  });
+  details.push(...promptTruncationDetail("object targets", value.length));
+  return details;
+}
+
+function lifecycleRuleTargetDetails(value: unknown, sanitizerOptions: SanitizerOptions): string[] {
+  if (!Array.isArray(value)) return [];
+  const details = value.slice(0, PROMPT_TARGET_DETAIL_LIMIT).flatMap((item, index) => {
+    const rule = objectRecord(item);
+    if (!rule) return [];
+    const prefix = `Rule ${index + 1}`;
+    const filter = recordObject(rule, "filter", "Filter");
+    const expiration = recordObject(rule, "expiration", "Expiration");
+    const noncurrent = recordObject(
+      rule,
+      "noncurrentVersionExpiration",
+      "NoncurrentVersionExpiration",
+    );
+    const abortIncomplete = recordObject(
+      rule,
+      "abortIncompleteMultipartUpload",
+      "AbortIncompleteMultipartUpload",
+    );
+    return [
+      ...promptDetail(`${prefix} ID`, recordValue(rule, "id", "ID"), sanitizerOptions),
+      ...promptDetail(`${prefix} status`, recordValue(rule, "status", "Status"), sanitizerOptions),
+      ...promptDetail(
+        `${prefix} prefix`,
+        filter ? recordValue(filter, "prefix", "Prefix") : undefined,
+        sanitizerOptions,
+      ),
+      ...promptDetail(
+        `${prefix} expiration days`,
+        expiration ? recordValue(expiration, "days", "Days") : undefined,
+        sanitizerOptions,
+      ),
+      ...promptDetail(
+        `${prefix} expired object delete marker`,
+        expiration
+          ? recordValue(expiration, "expiredObjectDeleteMarker", "ExpiredObjectDeleteMarker")
+          : undefined,
+        sanitizerOptions,
+      ),
+      ...promptDetail(
+        `${prefix} noncurrent expiration days`,
+        noncurrent ? recordValue(noncurrent, "noncurrentDays", "NoncurrentDays") : undefined,
+        sanitizerOptions,
+      ),
+      ...promptDetail(
+        `${prefix} abort incomplete upload days`,
+        abortIncomplete
+          ? recordValue(abortIncomplete, "daysAfterInitiation", "DaysAfterInitiation")
+          : undefined,
+        sanitizerOptions,
+      ),
+    ];
+  });
+  details.push(...promptTruncationDetail("lifecycle rules", value.length));
+  return details;
+}
+
+function notificationRuleTargetDetails(
+  value: unknown,
+  sanitizerOptions: SanitizerOptions,
+): string[] {
+  if (!Array.isArray(value)) return [];
+  const details = value.slice(0, PROMPT_TARGET_DETAIL_LIMIT).flatMap((item, index) => {
+    const rule = objectRecord(item);
+    if (!rule) return [];
+    const prefix = `Notification rule ${index + 1}`;
+    return [
+      ...promptDetail(`${prefix} name`, recordValue(rule, "name"), sanitizerOptions),
+      ...promptDetail(
+        `${prefix} object prefix`,
+        recordValue(rule, "objectNamePrefix"),
+        sanitizerOptions,
+      ),
+      ...promptListDetail(
+        `${prefix} event types`,
+        recordValue(rule, "eventTypes"),
+        sanitizerOptions,
+      ),
+      ...promptDetail(`${prefix} enabled`, recordValue(rule, "isEnabled"), sanitizerOptions),
+    ];
+  });
+  details.push(...promptTruncationDetail("notification rules", value.length));
+  return details;
+}
+
 function arrayCount(value: unknown): number | null {
   return Array.isArray(value) ? value.length : null;
 }
@@ -387,8 +535,10 @@ function mcpProtocolVersion(
   extra: McpRequestExtra,
   contextProviders?: DestructiveElicitationContextProviders,
 ): string | undefined {
+  const providerVersion = contextProviders?.getProtocolVersion?.();
+  if (providerVersion) return providerVersion;
   const version = extra?.mcpReq?.envelope?.[PROTOCOL_VERSION_META_KEY];
-  return typeof version === "string" ? version : contextProviders?.getProtocolVersion?.();
+  return typeof version === "string" ? version : undefined;
 }
 
 function mcpRequestState(extra: McpRequestExtra): unknown {
