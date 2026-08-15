@@ -276,7 +276,7 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
         headers,
         body: elicitationCallToolBody(
           "s3_delete_object",
-          { bucket: "photos", key: "old.jpg" },
+          { bucket: "photos", key: "old.jpg", confirm: true },
           { id: 1 },
         ),
       });

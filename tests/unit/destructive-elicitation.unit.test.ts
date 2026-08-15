@@ -265,16 +265,15 @@ describe("destructive elicitation", () => {
     },
   );
 
-  it("skips elicitation when confirm is already true", async () => {
+  it("requires elicitation for capable clients even when confirm is already true", async () => {
     const config = cfg("confirm");
     const original = destructiveOriginal(config);
     const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
 
     const result = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, {});
 
-    expect(result.resultType).not.toBe("input_required");
-    expect(result.content?.[0]?.text).toBe("deleted");
-    expect(original).toHaveBeenCalledTimes(1);
+    expect(result.resultType).toBe("input_required");
+    expect(original).not.toHaveBeenCalled();
   });
 
   it("can disable elicitation while preserving the confirm gate", async () => {
@@ -289,6 +288,10 @@ describe("destructive elicitation", () => {
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toMatch(/Confirmation required/i);
     expect(original).toHaveBeenCalledTimes(1);
+
+    const confirmed = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, {});
+    expect(confirmed.content?.[0]?.text).toBe("deleted");
+    expect(original).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to the destructive gate when the client has no elicitation", async () => {

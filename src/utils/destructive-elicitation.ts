@@ -104,11 +104,8 @@ export async function maybeRequireDestructiveElicitation<T>({
 
   const policy = getDestructivePolicy(config);
   const requestExtra = mcpRequestExtra(extra);
-  const hasElicitationRetry =
-    mcpInputResponses(requestExtra) !== undefined || mcpRequestState(requestExtra) !== undefined;
   if (
     policy !== "confirm" ||
-    (args.confirm === true && !hasElicitationRetry) ||
     !destructiveElicitationEnabled() ||
     !clientCanUseReturnBasedElicitation(requestExtra, contextProviders)
   ) {
