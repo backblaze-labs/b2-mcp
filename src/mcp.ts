@@ -1,4 +1,8 @@
-import { McpServer as V2McpServer, type McpRequestContext } from "@modelcontextprotocol/server";
+import {
+  McpServer as V2McpServer,
+  type ClientCapabilities,
+  type McpRequestContext,
+} from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { annotationsForTool, type McpToolAnnotations } from "./utils/tool-capabilities.js";
 
@@ -122,6 +126,14 @@ export function createMcpServer(...args: ConstructorParameters<typeof V2McpServe
 
 export function getRegisteredTools(server: McpServer): RegisteredToolMap | null {
   return (server as ServerWithRegistry)[REGISTERED_TOOLS] ?? null;
+}
+
+export function getMcpClientCapabilities(server: McpServer): ClientCapabilities | undefined {
+  return server.server.getClientCapabilities();
+}
+
+export function getMcpNegotiatedProtocolVersion(server: McpServer): string | undefined {
+  return server.server.getNegotiatedProtocolVersion();
 }
 
 export { V2McpServer };

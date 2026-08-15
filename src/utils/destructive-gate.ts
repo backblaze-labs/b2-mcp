@@ -108,6 +108,10 @@ interface DestructiveConsent {
 
 const destructiveConsentStorage = new AsyncLocalStorage<DestructiveConsent | undefined>();
 
+// Elicitation is enforced in the shared tool wrapper, while each tool still
+// calls this gate internally. AsyncLocalStorage carries only the approved
+// (toolName, effect) through that call stack, avoiding signature churn across
+// every handler; the elicitation layer separately binds approval to exact args.
 export function runWithDestructiveElicitationConsent<T>(
   toolName: string,
   effect: string,
@@ -158,6 +162,9 @@ export function checkDestructive(
   }
 
   // policy === "confirm"
+  // Human elicitation approval is a wrapper-to-gate signal. It composes with
+  // the confirm policy without mutating tool args, and is matched to this
+  // tool/effect pair before the explicit model-supplied confirm fallback.
   if (hasDestructiveElicitationConsent(toolName, effect)) return { ok: true };
   if (args.confirm === true) return { ok: true };
   return {

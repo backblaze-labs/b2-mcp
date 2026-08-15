@@ -27,8 +27,12 @@ version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
    unless a documented, isolated container volume is intentionally enabled.
 10. Set exact `B2_ALLOWED_HOSTS` and only required `B2_ALLOWED_ORIGINS`.
 11. Select `B2_DESTRUCTIVE_POLICY` deliberately. Use `block` for unattended
-    examples and `confirm` for interactive examples. Clients that advertise
-    MCP form elicitation also require human approval for destructive tools.
+    examples and internet-facing HTTP deployments. Use `confirm` only for
+    trusted interactive examples. Under `confirm`, 2026 MCP clients that
+    advertise form elicitation are prompted before the server-side confirm gate;
+    clients without compatible elicitation fall back to the explicit
+    `confirm: true` retry. Under `allow`, both elicitation and the confirm gate
+    are skipped.
 12. Never log B2 credentials, bearer tokens, presigned URLs, authorization
     responses, or provider deployment-bypass tokens.
 13. Create, rotate, revoke, and tear down B2 keys outside the MCP tool flow
@@ -62,6 +66,12 @@ Backblaze B2 Native and S3-compatible APIs
 Provider secret stores are inside the hosting-service trust boundary. The LLM
 harness is outside that boundary and must see only MCP request/response data
 after the server has redacted secrets.
+
+MCP elicitation is relayed by the client, so it is not an independent security
+boundary for internet-facing transports. A compromised or malicious client can
+fabricate an approval response. Keep `B2_DESTRUCTIVE_POLICY=block` as the hard
+wall for those deployments; do not downgrade to `confirm` just because a client
+advertises elicitation.
 
 ## Least-Privilege B2 Key
 
