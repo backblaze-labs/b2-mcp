@@ -98,10 +98,12 @@ docker run --rm -i \
   "$B2_MCP_IMAGE" stdio
 ```
 
-See [`docs/DEPLOY.md`](docs/DEPLOY.md) for hardened HTTP examples with
-signature verification, `B2_ALLOWED_ORIGINS`, rate limits, in-flight request
-caps, and the OAuth-secured [`deploy/vercel`](deploy/vercel/README.md)
-adapter. Direct deployment guides are available for
+See [`deploy/customer-hosted/README.md`](deploy/customer-hosted/README.md) for
+hardened HTTP examples with signature verification, `B2_ALLOWED_ORIGINS`, rate
+limits, and in-flight request caps. The deployment index is
+[`docs/DEPLOY.md`](docs/DEPLOY.md), and the OAuth-secured Vercel adapter
+runbook is [`deploy/vercel`](deploy/vercel/README.md). Direct deployment guides
+are available for
 [`Vercel`](docs/deployment/vercel.md),
 [`Cloudflare Workers`](docs/deployment/cloudflare-workers.md),
 [`Cloudflare Containers`](docs/deployment/cloudflare-containers.md),

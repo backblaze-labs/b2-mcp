@@ -338,24 +338,33 @@ describe("Cloudflare Worker adapter", () => {
     const request = () =>
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
-        headers: { ...modernHeaders("tools/list"), "cf-connecting-ip": "198.51.100.5" },
+        headers: modernHeaders("tools/list"),
         body: modernBody("tools/list"),
       });
 
-    const first = await cloudflareWorkerFetch(request(), env);
-    const second = await cloudflareWorkerFetch(request(), env);
+    const first = await cloudflareWorkerFetch(request(), env, {
+      remoteAddress: "198.51.100.5",
+    });
+    const second = await cloudflareWorkerFetch(request(), env, {
+      remoteAddress: "198.51.100.5",
+    });
 
     expect(first.status).toBe(401);
     expect(second.status).toBe(429);
+    expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.5"))).toBeDefined();
   });
 
-  it("does not trust spoofed x-real-ip for unauthenticated admission keys", async () => {
+  it("does not trust spoofed IP headers for unauthenticated admission keys", async () => {
     process.env = { ...savedEnv };
-    const env = { ...cloudflareEnv(), B2_MCP_RATE_LIMIT_RPS: "1", B2_MCP_RATE_LIMIT_BURST: "2" };
+    const env = { ...cloudflareEnv(), B2_MCP_RATE_LIMIT_RPS: "1", B2_MCP_RATE_LIMIT_BURST: "1" };
     const first = await cloudflareWorkerFetch(
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
-        headers: { ...modernHeaders("tools/list"), "x-real-ip": "198.51.100.10" },
+        headers: {
+          ...modernHeaders("tools/list"),
+          "cf-connecting-ip": "198.51.100.20",
+          "x-real-ip": "198.51.100.10",
+        },
         body: modernBody("tools/list"),
       }),
       env,
@@ -363,16 +372,22 @@ describe("Cloudflare Worker adapter", () => {
     const second = await cloudflareWorkerFetch(
       new Request("https://mcp.example.com/mcp", {
         method: "POST",
-        headers: { ...modernHeaders("tools/list"), "x-real-ip": "198.51.100.11" },
+        headers: {
+          ...modernHeaders("tools/list"),
+          "cf-connecting-ip": "198.51.100.21",
+          "x-real-ip": "198.51.100.11",
+        },
         body: modernBody("tools/list"),
       }),
       env,
     );
 
     expect(first.status).toBe(401);
-    expect(second.status).toBe(401);
+    expect(second.status).toBe(429);
     expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:unknown"))).toBeDefined();
     expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.10"))).toBeUndefined();
     expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.11"))).toBeUndefined();
+    expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.20"))).toBeUndefined();
+    expect(_getBucket(deriveRateKey("cloudflare-worker-oauth:198.51.100.21"))).toBeUndefined();
   });
 });

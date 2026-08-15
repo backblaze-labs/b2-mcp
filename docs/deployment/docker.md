@@ -46,12 +46,20 @@ secret manager. Do not bake credentials into the image. Set
 Smallest safe local bind:
 
 ```bash
+mkdir -p secrets
+printf '%s' 'your-application-key-id' > secrets/b2_application_key_id
+printf '%s' 'your-application-key-secret' > secrets/b2_application_key
+chmod 700 secrets
+chmod 0444 secrets/b2_application_key_id secrets/b2_application_key
+
 docker run --rm --name b2-mcp \
   --stop-timeout 20 \
   -p 127.0.0.1:3000:3000 \
+  --mount type=bind,src="$PWD/secrets/b2_application_key_id",dst=/run/secrets/b2_application_key_id,readonly \
+  --mount type=bind,src="$PWD/secrets/b2_application_key",dst=/run/secrets/b2_application_key,readonly \
   -e B2_HTTP_CREDENTIAL_MODE=server \
-  -e B2_APPLICATION_KEY_ID=your-application-key-id \
-  -e B2_APPLICATION_KEY=your-application-key-secret \
+  -e B2_APPLICATION_KEY_ID_FILE=/run/secrets/b2_application_key_id \
+  -e B2_APPLICATION_KEY_FILE=/run/secrets/b2_application_key \
   -e B2_ALLOWED_HOSTS=mcp.example.com \
   -e B2_ALLOW_LOCAL_FILES=false \
   "$B2_MCP_IMAGE"

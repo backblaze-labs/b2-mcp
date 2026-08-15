@@ -7,6 +7,11 @@
   "limits": {
     "cpu_ms": 30000
   },
+  // Required encrypted Worker secrets:
+  // B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY,
+  // B2_OAUTH_INTROSPECTION_CLIENT_ID, and
+  // B2_OAUTH_INTROSPECTION_CLIENT_SECRET. Upload them with
+  // wrangler deploy --secrets-file or wrangler versions upload --secrets-file.
   "vars": {
     "B2_HTTP_CREDENTIAL_MODE": "server",
     "B2_ALLOWED_HOSTS": "b2-mcp.example.com",
@@ -34,13 +39,5 @@
     "B2_MCP_RATE_LIMIT_BURST": "120",
     "B2_MAX_SESSIONS": "1000",
     "B2_MAX_SESSIONS_PER_KEY": "20"
-  },
-  "secrets": {
-    "required": [
-      "B2_APPLICATION_KEY_ID",
-      "B2_APPLICATION_KEY",
-      "B2_OAUTH_INTROSPECTION_CLIENT_ID",
-      "B2_OAUTH_INTROSPECTION_CLIENT_SECRET"
-    ]
   }
 }

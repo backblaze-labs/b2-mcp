@@ -37,7 +37,10 @@ protocol handler.
 
 Use `deploy/cloudflare-worker/wrangler.jsonc`. It pins
 `compatibility_date` to `2026-08-14`, enables `nodejs_compat`, configures a CPU
-budget, and declares required secrets. Review the file before deploying:
+budget, and lists the required encrypted secrets in comments. This Worker
+source is a repo-checkout deployment template, not a published npm package
+entrypoint; run Wrangler from a checkout with repository dependencies
+installed. Review the file before deploying:
 
 ```bash
 cd deploy/cloudflare-worker
@@ -53,17 +56,21 @@ Use Worker encrypted secrets for single-tenant server mode:
 
 ```bash
 cd deploy/cloudflare-worker
-npx wrangler secret put B2_APPLICATION_KEY_ID
-npx wrangler secret put B2_APPLICATION_KEY
-npx wrangler secret put B2_OAUTH_INTROSPECTION_CLIENT_ID
-npx wrangler secret put B2_OAUTH_INTROSPECTION_CLIENT_SECRET
+export WORKER_SECRETS_FILE="$(mktemp)"
+cat > "$WORKER_SECRETS_FILE" <<'EOF'
+B2_APPLICATION_KEY_ID=prod-non-master-key-id
+B2_APPLICATION_KEY=prod-non-master-key-secret
+B2_OAUTH_INTROSPECTION_CLIENT_ID=resource-server-client-id
+B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
+EOF
+chmod 600 "$WORKER_SECRETS_FILE"
 ```
 
 Do not store B2 credentials in ordinary Worker `vars`, source code, `.dev.vars`
-committed to git, or logs. Use `cloudflare.env.example` only as a checklist.
-For multi-tenant use, put credentials behind a reviewed secret broker and use
-`B2_HTTP_CREDENTIAL_MODE=principal`; do not place a growing customer credential
-map in Worker variables.
+committed to git, shell history, or logs. Use `cloudflare.env.example` only as
+a checklist. For multi-tenant use, put credentials behind a reviewed secret
+broker and use `B2_HTTP_CREDENTIAL_MODE=principal`; do not place a growing
+customer credential map in Worker variables.
 Set `B2_ALLOW_LOCAL_FILES=false`; the Worker adapter fails closed if hosted
 local file access is enabled.
 
@@ -73,7 +80,8 @@ Deploy the checked-in Worker entrypoint:
 
 ```bash
 cd deploy/cloudflare-worker
-npx wrangler deploy
+npx wrangler deploy --secrets-file "$WORKER_SECRETS_FILE"
+rm -f "$WORKER_SECRETS_FILE"
 ```
 
 `worker.ts` passes the Web `Request` directly to the shared adapter. New routes
@@ -133,9 +141,17 @@ version. Confirm secrets still match that code path, then rerun smoke.
 
 ## Secret Rotation
 
-Add replacement Worker secrets, deploy a new version, smoke it, then revoke the
-old B2 key. `wrangler secret put` creates a new Worker version, so plan
-rotation with the same review as code deployment.
+Upload replacement Worker secrets with a new version, smoke that version, shift
+traffic, then revoke the old B2 key:
+
+```bash
+cd deploy/cloudflare-worker
+npx wrangler versions upload --secrets-file "$WORKER_SECRETS_FILE"
+```
+
+For single-secret maintenance on an existing Worker, `wrangler secret put NAME`
+also creates a new Worker version. Review, smoke, and deploy that version with
+the same care as a code change.
 
 ## Teardown
 

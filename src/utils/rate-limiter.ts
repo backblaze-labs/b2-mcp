@@ -56,6 +56,7 @@ export function allowRequest(key: string): boolean {
   const config = currentRateLimiterConfig();
   const refillPerMs = config.rps / 1000;
   const now = Date.now();
+  sweepIdleBuckets(now);
   let bucket = buckets.get(key);
   if (!bucket) {
     bucket = { tokens: config.burst, lastRefill: now };
@@ -78,9 +79,12 @@ export function allowRequest(key: string): boolean {
  * Called periodically from the HTTP server; safe to call any time.
  */
 export function sweepIdleBuckets(now: number = Date.now()): void {
-  const { burst } = currentRateLimiterConfig();
+  const { burst, rps } = currentRateLimiterConfig();
+  const refillPerMs = rps / 1000;
   for (const [key, bucket] of buckets) {
-    if (now - bucket.lastRefill > IDLE_TTL_MS && bucket.tokens >= burst) {
+    const idleMs = now - bucket.lastRefill;
+    const refilledTokens = Math.min(burst, bucket.tokens + Math.max(0, idleMs) * refillPerMs);
+    if (idleMs > IDLE_TTL_MS && refilledTokens >= burst) {
       buckets.delete(key);
     }
   }

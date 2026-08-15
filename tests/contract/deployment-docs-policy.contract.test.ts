@@ -59,6 +59,7 @@ describe("deployment documentation policy", () => {
     expect(deployIndex).toContain("Supported and continuously tested");
     expect(deployIndex).toContain("OCI-compatible");
     expect(deployIndex).toContain("Experimental compatibility");
+    expect(readme).toContain("deploy/customer-hosted/README.md");
 
     for (const fileName of ["security-and-credentials.md", ...providerGuides]) {
       const link = `docs/deployment/${fileName}`;
@@ -179,6 +180,7 @@ describe("deployment documentation policy", () => {
   it("forbids credential values in documented URLs and examples", () => {
     const text = allDeploymentDocs.map(doc).join("\n");
     expect(text).not.toMatch(/https?:\/\/[^\s`)"]*[?&][^\s`)"]*(?:key|secret|token)=/i);
+    expect(text).not.toMatch(/-e\s+B2_APPLICATION_KEY(?:_ID)?=/);
     expect(text).not.toMatch(
       /\b(?:B2_APPLICATION_KEY|B2_KEY|B2_OAUTH_INTROSPECTION_CLIENT_SECRET)\s*=\s*(?!your-|prod-|resource-|<|\.\.\.)[A-Za-z0-9_+=/-]{20,}/,
     );
@@ -187,12 +189,18 @@ describe("deployment documentation policy", () => {
   it("keeps the Cloudflare Worker adapter manifest and budget checks in policy", () => {
     const wrangler = readFileSync(join(root, "deploy/cloudflare-worker/wrangler.jsonc"), "utf8");
     const wranglerConfig = parseJsoncObject(wrangler);
+    const workerGuide = doc("deployment/cloudflare-workers.md");
+    const workerReadme = readFileSync(join(root, "deploy/cloudflare-worker/README.md"), "utf8");
     const tsconfig = readFileSync(join(root, "tsconfig.typecheck.json"), "utf8");
     const pkg = readJson<{ scripts?: Record<string, string>; files?: string[] }>("package.json");
 
     expect(wranglerConfig.compatibility_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(wranglerConfig.compatibility_flags).toContain("nodejs_compat");
+    expect(Object.prototype.hasOwnProperty.call(wranglerConfig, "secrets")).toBe(false);
     expect((wranglerConfig.vars as Record<string, string>)?.B2_ALLOW_LOCAL_FILES).toBe("false");
+    expect(workerGuide).toContain("--secrets-file");
+    expect(workerGuide).toContain("repo-checkout deployment template");
+    expect(workerReadme).toContain("repo-checkout deployment template");
     expect(tsconfig).toContain('"deploy/cloudflare-worker/**/*"');
     expect(pkg.scripts?.["check:cloudflare-worker-bundle"]).toBe(
       "node scripts/check-cloudflare-worker-bundle.mjs",

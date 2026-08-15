@@ -86,10 +86,8 @@ function isCloudflareMcpFetchContext(
   return "authInfo" in input || "remoteAddress" in input || !("token" in input);
 }
 
-function cloudflareClientAddress(request: Request, context: CloudflareMcpFetchContext): string {
-  return (
-    context.remoteAddress?.trim() || request.headers.get("cf-connecting-ip")?.trim() || "unknown"
-  );
+function cloudflareClientAddress(context: CloudflareMcpFetchContext): string {
+  return context.remoteAddress?.trim() || "unknown";
 }
 
 function cloudflareWarn(fields: Record<string, unknown>, message: string): void {
@@ -109,8 +107,8 @@ const runtime = createServerlessAdapterRuntime<CloudflareMcpFetchContext>({
   configurationInvalidEvent: "cloudflare_worker.config.invalid",
   admissionRejectedEvent: "cloudflare_worker.oauth.admission_rejected",
   validateStaticConfiguration: validateCloudflareWorkerStaticConfiguration,
-  oauthAdmissionKey: (request, context) =>
-    `cloudflare-worker-oauth:${cloudflareClientAddress(request, context)}`,
+  oauthAdmissionKey: (_request, context) =>
+    `cloudflare-worker-oauth:${cloudflareClientAddress(context)}`,
   createHandlerOptions: { idleSweepMode: "request" },
   validateInjectedAuthInfo: true,
   warn: cloudflareWarn,

@@ -52,4 +52,16 @@ describe("rate-limiter", () => {
     sweepIdleBuckets();
     expect(_getBucket("key-A")).toBeDefined();
   });
+
+  it("allowRequest opportunistically sweeps idle buckets", () => {
+    allowRequest("key-A");
+    const bucket = _getBucket("key-A") as { tokens: number; lastRefill: number };
+    bucket.tokens = 0;
+    bucket.lastRefill = Date.now() - 11 * 60 * 1000;
+
+    expect(allowRequest("key-B")).toBe(true);
+
+    expect(_getBucket("key-A")).toBeUndefined();
+    expect(_getBucket("key-B")).toBeDefined();
+  });
 });
