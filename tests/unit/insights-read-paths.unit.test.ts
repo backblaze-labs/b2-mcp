@@ -550,5 +550,9 @@ describe("insight native bucket read paths", () => {
     expect(result.wasted_gb).toBe(1.5);
     expect(result.oldest_file).toBe("old.bin");
     expect(nativeClient.listParts).toHaveBeenCalledTimes(2);
+    expect(nativeClient.listParts).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ fileId: "upload-1", startPartNumber: 2 }),
+    );
   });
 });
