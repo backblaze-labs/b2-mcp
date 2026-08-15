@@ -139,17 +139,22 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   const { server: httpServer, sessions, drain } = handle;
 
   await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error) => {
+    const failStartup = (err: Error) => {
       httpServer.off("error", onError);
       drain();
       reject(err);
     };
+    const onError = (err: Error) => failStartup(err);
     httpServer.once("error", onError);
-    httpServer.listen(port, () => {
-      httpServer.off("error", onError);
-      logger.info({ transport: "http", port }, "server.started");
-      resolve();
-    });
+    try {
+      httpServer.listen(port, () => {
+        httpServer.off("error", onError);
+        logger.info({ transport: "http", port }, "server.started");
+        resolve();
+      });
+    } catch (err) {
+      failStartup(err instanceof Error ? err : new Error(String(err)));
+    }
   });
 
   let shuttingDown = false;

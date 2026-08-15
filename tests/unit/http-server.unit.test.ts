@@ -256,6 +256,19 @@ describe("HTTP server lifecycle", () => {
     }
   });
 
+  it("drains startup resources when listen throws synchronously", async () => {
+    const setIntervalSpy = vi.spyOn(global, "setInterval");
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    const previousTimerCount = setIntervalSpy.mock.results.length;
+
+    await expect(startHttp({ port: 70_000 })).rejects.toThrow();
+    const startupTimers = setIntervalSpy.mock.results
+      .slice(previousTimerCount)
+      .map((result) => result.value);
+    expect(startupTimers.length).toBeGreaterThan(0);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(startupTimers.at(-1));
+  });
+
   it("drains in-flight requests before closing the MCP handler", async () => {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     const close = vi.fn(async () => undefined);
