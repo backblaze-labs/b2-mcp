@@ -206,138 +206,144 @@ function installPackedConsumer(appDir: string, cacheDir: string): void {
   assertSuccessfulNpmResult(result, "packed consumer npm install");
 }
 
+const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 120_000;
+
 describe("packed package", () => {
-  it("installs from npm pack and exposes the package entry point", async () => {
-    const tmp = mkdtempSync(join(tmpdir(), "b2-mcp-package-"));
+  it(
+    "installs from npm pack and exposes the package entry point",
+    async () => {
+      const tmp = mkdtempSync(join(tmpdir(), "b2-mcp-package-"));
 
-    try {
-      const packDir = join(tmp, "pack");
-      const appDir = join(tmp, "app");
-      const cacheDir = join(tmp, "npm-cache");
-      mkdirSync(packDir);
-      mkdirSync(appDir);
-      mkdirSync(cacheDir);
-      const repoPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageJson;
-      const repoLock = readLock<PackageLock>();
-
-      const packCommand = npmInvocation(["pack", "--json", "--pack-destination", packDir]);
-      const packOutput = execFileSync(packCommand.command, packCommand.args, {
-        cwd: root,
-        encoding: "utf8",
-        timeout: 120_000,
-      });
-      const [pack] = JSON.parse(packOutput) as PackResult[];
-      const packedPaths = pack.files.map((file) => file.path).sort();
-
-      expect(packedPaths).toEqual(
-        expect.arrayContaining([
-          "dist/index.js",
-          "dist/http-server.js",
-          "deploy/customer-hosted/Dockerfile",
-          "deploy/customer-hosted/docker-compose.yml",
-          "deploy/customer-hosted/nginx.conf",
-          "docs/CLIENTS.md",
-          "docs/DEPLOY.md",
-          "README.md",
-        ]),
-      );
-
-      const tarball = join(packDir, pack.filename);
-      const tarballSpec = `file:${relative(appDir, tarball)}`;
-      writeFileSync(
-        join(appDir, "package.json"),
-        JSON.stringify(
-          {
-            name: "b2-mcp-pack-test",
-            private: true,
-            dependencies: { [repoPkg.name]: tarballSpec },
-            overrides: committedProductionOverrides(repoLock),
-          },
-          null,
-          2,
-        ),
-      );
-      installPackedConsumer(appDir, cacheDir);
-
-      expect(
-        committedProductionGraphMismatches(
-          repoLock,
-          readNpmLock(join(appDir, "package-lock.json")),
-        ),
-      ).toEqual([]);
-
-      execFileSync(
-        "node",
-        [
-          "-e",
-          'const pkg = require("@backblaze-labs/b2-mcp"); if (typeof pkg.startStdio !== "function") process.exit(3);',
-        ],
-        {
-          cwd: appDir,
-          stdio: "pipe",
-          timeout: 30_000,
-        },
-      );
-
-      execFileSync(
-        "node",
-        [
-          "-e",
-          'try { require("@backblaze-labs/b2-mcp/dist/b2/client.js"); process.exit(4); } catch (err) { if (err.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw err; }',
-        ],
-        {
-          cwd: appDir,
-          stdio: "pipe",
-          timeout: 30_000,
-        },
-      );
-
-      const binPath = join(
-        appDir,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "b2-mcp.cmd" : "b2-mcp",
-      );
-      const aliasBinPath = join(
-        appDir,
-        "node_modules",
-        ".bin",
-        process.platform === "win32" ? "b2-mcp-server.cmd" : "b2-mcp-server",
-      );
-      expect(statSync(binPath).isFile()).toBe(true);
-      expect(statSync(aliasBinPath).isFile()).toBe(true);
-
-      const transport = new StdioClientTransport({
-        command: binPath,
-        cwd: appDir,
-        env: {
-          PATH: process.env.PATH ?? "",
-          ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-          ...(process.env.ComSpec ? { ComSpec: process.env.ComSpec } : {}),
-          ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
-          B2_REGISTER_ALL_TOOLS: "true",
-          B2_APPLICATION_KEY_ID: "package-bin-key-id",
-          B2_APPLICATION_KEY: "package-bin-key-secret",
-          LOG_LEVEL: "silent",
-          NODE_OPTIONS: `--import ${pathToFileURL(join(root, "scripts/no-network-guard.mjs")).href}`,
-        },
-        stderr: "pipe",
-      });
-      const client = new Client(
-        { name: "b2-mcp-package-bin-smoke", version: "1.0.0" },
-        { versionNegotiation: { mode: "auto", probe: { timeoutMs: 5_000 } } },
-      );
       try {
-        await client.connect(transport, { timeout: 10_000 });
-        const listed = await client.listTools(undefined, { timeout: 10_000 });
-        expect(listed.tools.map((tool) => tool.name)).toEqual(
-          expect.arrayContaining(["b2_list_buckets", "s3_list_objects_v2"]),
+        const packDir = join(tmp, "pack");
+        const appDir = join(tmp, "app");
+        const cacheDir = join(tmp, "npm-cache");
+        mkdirSync(packDir);
+        mkdirSync(appDir);
+        mkdirSync(cacheDir);
+        const repoPkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as PackageJson;
+        const repoLock = readLock<PackageLock>();
+
+        const packCommand = npmInvocation(["pack", "--json", "--pack-destination", packDir]);
+        const packOutput = execFileSync(packCommand.command, packCommand.args, {
+          cwd: root,
+          encoding: "utf8",
+          timeout: 120_000,
+        });
+        const [pack] = JSON.parse(packOutput) as PackResult[];
+        const packedPaths = pack.files.map((file) => file.path).sort();
+
+        expect(packedPaths).toEqual(
+          expect.arrayContaining([
+            "dist/index.js",
+            "dist/http-server.js",
+            "deploy/customer-hosted/Dockerfile",
+            "deploy/customer-hosted/docker-compose.yml",
+            "deploy/customer-hosted/nginx.conf",
+            "docs/CLIENTS.md",
+            "docs/DEPLOY.md",
+            "README.md",
+          ]),
         );
+
+        const tarball = join(packDir, pack.filename);
+        const tarballSpec = `file:${relative(appDir, tarball)}`;
+        writeFileSync(
+          join(appDir, "package.json"),
+          JSON.stringify(
+            {
+              name: "b2-mcp-pack-test",
+              private: true,
+              dependencies: { [repoPkg.name]: tarballSpec },
+              overrides: committedProductionOverrides(repoLock),
+            },
+            null,
+            2,
+          ),
+        );
+        installPackedConsumer(appDir, cacheDir);
+
+        expect(
+          committedProductionGraphMismatches(
+            repoLock,
+            readNpmLock(join(appDir, "package-lock.json")),
+          ),
+        ).toEqual([]);
+
+        execFileSync(
+          "node",
+          [
+            "-e",
+            'const pkg = require("@backblaze-labs/b2-mcp"); if (typeof pkg.startStdio !== "function") process.exit(3);',
+          ],
+          {
+            cwd: appDir,
+            stdio: "pipe",
+            timeout: 30_000,
+          },
+        );
+
+        execFileSync(
+          "node",
+          [
+            "-e",
+            'try { require("@backblaze-labs/b2-mcp/dist/b2/client.js"); process.exit(4); } catch (err) { if (err.code !== "ERR_PACKAGE_PATH_NOT_EXPORTED") throw err; }',
+          ],
+          {
+            cwd: appDir,
+            stdio: "pipe",
+            timeout: 30_000,
+          },
+        );
+
+        const binPath = join(
+          appDir,
+          "node_modules",
+          ".bin",
+          process.platform === "win32" ? "b2-mcp.cmd" : "b2-mcp",
+        );
+        const aliasBinPath = join(
+          appDir,
+          "node_modules",
+          ".bin",
+          process.platform === "win32" ? "b2-mcp-server.cmd" : "b2-mcp-server",
+        );
+        expect(statSync(binPath).isFile()).toBe(true);
+        expect(statSync(aliasBinPath).isFile()).toBe(true);
+
+        const transport = new StdioClientTransport({
+          command: binPath,
+          cwd: appDir,
+          env: {
+            PATH: process.env.PATH ?? "",
+            ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+            ...(process.env.ComSpec ? { ComSpec: process.env.ComSpec } : {}),
+            ...(process.env.PATHEXT ? { PATHEXT: process.env.PATHEXT } : {}),
+            B2_REGISTER_ALL_TOOLS: "true",
+            B2_APPLICATION_KEY_ID: "package-bin-key-id",
+            B2_APPLICATION_KEY: "package-bin-key-secret",
+            LOG_LEVEL: "silent",
+            NODE_OPTIONS: `--import ${pathToFileURL(join(root, "scripts/no-network-guard.mjs")).href}`,
+          },
+          stderr: "pipe",
+        });
+        const client = new Client(
+          { name: "b2-mcp-package-bin-smoke", version: "1.0.0" },
+          { versionNegotiation: { mode: "auto", probe: { timeoutMs: 5_000 } } },
+        );
+        try {
+          await client.connect(transport, { timeout: 10_000 });
+          const listed = await client.listTools(undefined, { timeout: 10_000 });
+          expect(listed.tools.map((tool) => tool.name)).toEqual(
+            expect.arrayContaining(["b2_list_buckets", "s3_list_objects_v2"]),
+          );
+        } finally {
+          await client.close().catch(() => undefined);
+        }
       } finally {
-        await client.close().catch(() => undefined);
+        rmSync(tmp, { recursive: true, force: true });
       }
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+    },
+    PACKED_INSTALL_TEST_TIMEOUT_MS,
+  );
 });
