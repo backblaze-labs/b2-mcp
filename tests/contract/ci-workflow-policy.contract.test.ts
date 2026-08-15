@@ -78,16 +78,20 @@ describe("CI workflow policy", () => {
     const qualityKeeperJob = workflowJobBlock(qualityKeeper, "quality-keeper");
     expect(qualityKeeper).toContain("pull_request:");
     expect(qualityKeeper).toContain(
-      "Reporting credentials must stay in a separate trusted workflow_run path",
+      "A future trusted workflow_run reporter must consume inert artifacts",
     );
     expect(qualityKeeperJob).toBeTruthy();
-    expect(qualityKeeperJob).toContain("backblaze-labs/quality-keeper/");
+    expect(qualityKeeperJob).toContain("runs-on: ubuntu-latest");
+    expect(qualityKeeperJob).not.toContain("backblaze-labs/quality-keeper/");
+    expect(qualityKeeperJob).not.toContain("actions/checkout");
+    expect(qualityKeeperJob).not.toContain("github.event.pull_request.head.sha");
     expect(qualityKeeperJob).not.toContain("QK_APP_PRIVATE_KEY");
     expect(qualityKeeperJob).not.toContain("secrets:");
 
     const permissions = yamlMappingForKey(qualityKeeperJob ?? "", "permissions");
-    expect(permissions).toMatchObject({ contents: "read", actions: "read" });
+    expect(permissions).toMatchObject({ contents: "read" });
     expect(permissions).not.toHaveProperty("pull-requests");
+    expect(permissions).not.toHaveProperty("actions");
     expect(permissions).not.toHaveProperty("statuses");
   });
 

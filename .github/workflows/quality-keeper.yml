@@ -1,15 +1,15 @@
 # Quality Keeper private-repository caller (backblaze-labs/quality-keeper#312).
 #
-# All assessment, execution, artifact, and comment behavior lives in the QK-owned
-# reusable workflow pinned below. This repository keeps its existing test,
-# contract, smoke, and publish workflows as the authoritative product gates;
-# Quality Keeper adds an advisory quality view and does not replace them.
+# This repository keeps its existing test, contract, smoke, and publish
+# workflows as the authoritative product gates; Quality Keeper is advisory and
+# must not block required CI.
 #
 # Trust boundary:
 # - This pull_request workflow is analysis-only and passes no repository secrets.
-# - GitHub's private Actions-sharing token fetches QK; no QK_INSTALL_TOKEN/PAT.
-# - Reporting credentials must stay in a separate trusted workflow_run path that
-#   consumes inert artifacts and never checks out or runs PR head code.
+# - It does not call the private reusable workflow because that workflow's report
+#   job requires PR write permission and an app private key.
+# - A future trusted workflow_run reporter must consume inert artifacts and never
+#   check out or run PR head code before minting any reporting credential.
 
 name: Quality Keeper
 
@@ -27,9 +27,13 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         github.event.pull_request.draft == false
       }}
-    # QK PRs #313/#315: activation with package-manager provisioning and #213 prerequisites.
-    # backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml reviewed 2026-08-15.
-    uses: backblaze-labs/quality-keeper/.github/workflows/quality-keeper-private-reusable.yml@f7abca3b354393a7d6d908547857a50c2b6f7010
+    name: Quality Keeper advisory guard
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
+    steps:
+      - name: Keep PR Quality Keeper unprivileged
+        shell: bash
+        run: |
+          echo "Quality Keeper reporting is disabled on pull_request."
+          echo "A trusted workflow_run reporter must consume inert artifacts only."
