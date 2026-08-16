@@ -111,14 +111,6 @@ async function rpcJson(response: Response): Promise<Record<string, any>> {
   return JSON.parse(dataLine ?? text) as Record<string, any>;
 }
 
-function expectAuthenticatedMcpCacheHeader(response: Response): void {
-  const cacheControl = response.headers.get("cache-control");
-  if (!cacheControl) return;
-
-  expect(cacheControl).not.toMatch(/(?:^|,)\s*(?:public|s-maxage)\b/i);
-  expect(cacheControl).toMatch(/(?:^|,)\s*(?:private|no-store|no-cache)\b/i);
-}
-
 describe("Vercel adapter", () => {
   beforeEach(async () => {
     await closeVercelMcpHandlerForTests();
@@ -228,30 +220,37 @@ describe("Vercel adapter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects disallowed token claims despite allowed forged identity headers", async () => {
-    const introspection = vi
-      .fn()
-      .mockResolvedValue(
-        introspectionResponse({ sub: "attacker-subject", client_id: "attacker-client" }),
-      );
+  it("uses verified token claims instead of forged identity headers in principal mode", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({
+      "https://issuer.example.com/#subject": "tenant_a",
+    });
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-id";
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
+    const introspection = vi.fn().mockResolvedValue(introspectionResponse());
     vi.stubGlobal("fetch", introspection);
 
-    const response = await vercelMcpFetch(
-      new Request("https://mcp.example.com/mcp", {
-        method: "POST",
-        headers: {
-          ...modernHeaders("tools/list"),
-          Authorization: "Bearer access-token",
-          "X-Principal": "subject",
-          "X-User": "subject",
-        },
-        body: modernBody("tools/list"),
-      }),
-      { remoteAddress: "203.0.113.42" },
+    const listed = await rpcJson(
+      await vercelMcpFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: {
+            ...modernHeaders("tools/list"),
+            Authorization: "Bearer access-token",
+            "X-Principal": "attacker-subject",
+            "X-User": "attacker-user",
+          },
+          body: modernBody("tools/list"),
+        }),
+        { remoteAddress: "203.0.113.42" },
+      ),
+    );
+    const toolNames = new Set(
+      ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
     );
 
-    expect(response.status).toBe(401);
-    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(toolNames.has("b2_list_buckets")).toBe(true);
+    expect(toolNames.has("b2_create_bucket")).toBe(false);
     expect(introspection).toHaveBeenCalledTimes(1);
   });
 
@@ -278,8 +277,8 @@ describe("Vercel adapter", () => {
       ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
     );
 
-    expectAuthenticatedMcpCacheHeader(discoverResponse);
-    expectAuthenticatedMcpCacheHeader(listedResponse);
+    expect(discoverResponse.headers.get("cache-control")).toBeNull();
+    expect(listedResponse.headers.get("cache-control")).toBeNull();
     expect(discover.result?.supportedVersions).toContain("2026-07-28");
     expect(discover.result?.capabilities?.tools).toBeDefined();
     expect(discover.result?.ttlMs).toBe(30_000);
