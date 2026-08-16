@@ -149,8 +149,10 @@ jobs:
           import { loadConfig } from "./dist/server.js";
           import liveB2Capabilities from "./scripts/lib/live-b2-capabilities.cjs";
 
-          const { LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: requiredCapabilities } =
-            liveB2Capabilities;
+          const {
+            LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES: forbiddenCapabilities,
+            LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: requiredCapabilities,
+          } = liveB2Capabilities;
           const auth = await new B2AuthManager(loadConfig()).getAuth();
           if (auth.accountId !== process.env.B2_LIVE_TEST_ACCOUNT_ID) {
             throw new Error("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
@@ -161,6 +163,14 @@ jobs:
           if (missingCapabilities.length > 0) {
             throw new Error(
               `live B2 contract key is missing required capability: ${missingCapabilities.join(", ")}`,
+            );
+          }
+          const forbiddenGrantedCapabilities = forbiddenCapabilities.filter((capability) =>
+            auth.capabilities.includes(capability),
+          );
+          if (forbiddenGrantedCapabilities.length > 0) {
+            throw new Error(
+              `live B2 contract key grants forbidden capability: ${forbiddenGrantedCapabilities.join(", ")}`,
             );
           }
           NODE

@@ -293,7 +293,9 @@ describe("live secret workflow policy", () => {
     const workflow = workflowText(".github/workflows/contract.yml");
     expect(workflow).toContain("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
     expect(workflow).toContain("scripts/lib/live-b2-capabilities.cjs");
+    expect(workflow).toContain("LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES");
     expect(workflow).toContain("LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES");
+    expect(workflow).toContain("live B2 contract key grants forbidden capability");
     const liveTests = [
       workflowText("tests/live/b2.integration.live.test.ts"),
       workflowText("tests/live/request-shape.contract.live.test.ts"),
