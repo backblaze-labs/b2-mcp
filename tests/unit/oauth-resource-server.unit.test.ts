@@ -7,7 +7,6 @@ import {
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
   oauthMetadataOptions,
-  oauthVerifierCacheStatsForTests,
   protectedResourceMetadata,
   protectedResourceMetadataUrl,
   resetOAuthVerifierCacheForTests,
@@ -223,6 +222,17 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(authInfo.extra?.alg).toBeUndefined();
   });
 
+  it("rejects tokens that lack configured required scopes", async () => {
+    const verifier = verifierWithFetch(
+      vi.fn(async () => Response.json(claims())),
+      {
+        requiredScopes: ["custom:report"],
+      },
+    );
+
+    await expect(verifier.verifyAccessToken("access-token")).rejects.toThrow(/required/i);
+  });
+
   it.each([
     ["inactive", { active: false }, /inactive/i],
     ["expired", { exp: 999 }, /expired/i],
@@ -298,6 +308,30 @@ describe("OAuthIntrospectionVerifier", () => {
 
     expect(authInfo.clientId).toBe("mcp-client");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels introspection retry delay when the caller aborts", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => Response.json({ error: "temporary" }, { status: 503 }));
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const verifier = new OAuthIntrospectionVerifier({
+      config: {
+        ...baseConfig,
+        introspectionMaxRetries: 1,
+        introspectionRetryDelayMs: 10_000,
+      },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+      signal: controller.signal,
+    });
+
+    const verification = verifier.verifyAccessToken("access-token");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.abort();
+
+    await expect(verification).rejects.toMatchObject({ reason: "request_aborted" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("opens a short circuit after repeated introspection dependency failures", async () => {
@@ -629,6 +663,37 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("coalesces concurrent JWKS refreshes for key rotation", async () => {
+    const rotatedKey = { ...rsaPublicJwk, kid: "rotated-key" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            setTimeout(() => resolve(jwksResponse([rotatedKey])), 5);
+          }),
+      );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-rotation" }));
+    await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        verifier.verifyAccessToken(
+          jwtFor({ client_id: `rotated-client-${index}` }, { kid: "rotated-key" }),
+        ),
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("refreshes JWKS after the cached document expires", async () => {
     let now = 1000;
     const fetchMock = vi.fn(async () =>
@@ -874,6 +939,36 @@ describe("OAuthJwtVerifier", () => {
     );
   });
 
+  it("keeps rotated-kid JWKS outages retryable instead of invalid", async () => {
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const rotatedKey = { ...rsaPublicJwk, kid: "rotated-key" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+      )
+      .mockRejectedValue(new TypeError("offline"));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({
+        jwksCircuitFailures: 5,
+        jwksMaxRetries: 0,
+        jwksRefreshCooldownMs: 30_000,
+      }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-rotation-outage" }));
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "rotated-one" }, { kid: rotatedKey.kid })),
+    ).rejects.toMatchObject({ reason: "network_error" });
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "rotated-two" }, { kid: rotatedKey.kid })),
+    ).rejects.toMatchObject({ reason: "network_error" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it.each([
     ["invalid_jwks", async () => Response.json({ keys: "not-array" })],
     [
@@ -1010,14 +1105,18 @@ describe("OAuthJwtVerifier", () => {
     await expect(
       verifier.verifyAccessToken(jwtFor({ client_id: "missing-one" }, { kid: "missing-one" })),
     ).rejects.toThrow(/signature/i);
-    expect(oauthVerifierCacheStatsForTests().jwksUnknownKidEntries).toBe(1);
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "missing-one-again" }, { kid: "missing-one" }),
+      ),
+    ).rejects.toThrow(/signature/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     now = 1002;
     await expect(
       verifier.verifyAccessToken(jwtFor({ client_id: "missing-two" }, { kid: "missing-two" })),
     ).rejects.toThrow(/signature/i);
 
-    expect(oauthVerifierCacheStatsForTests().jwksUnknownKidEntries).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -1037,6 +1136,25 @@ describe("OAuthJwtVerifier", () => {
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects kid-less JWTs without checking every matching key", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([
+        { ...rsaPublicJwk, kid: "first-key" },
+        { ...rsaPublicJwk, kid: "second-key" },
+      ]),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "kid-less" }, { kid: undefined })),
+    ).rejects.toThrow(/signature/i);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

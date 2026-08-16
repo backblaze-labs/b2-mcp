@@ -126,6 +126,13 @@ revocation and opaque-token compatibility. JWKS-only deployments fail closed on
 signature or claim mismatch and do not observe authorization-server revocation
 before JWT expiry.
 
+Use an expand-contract rollout when moving an existing deployment to JWKS-only
+verification: first deploy the new code with both introspection and JWKS
+settings present, wait until older instances are drained, then remove
+introspection settings in a later deploy if opaque-token fallback is not
+required. Removing introspection settings during the code rollout can make older
+instances fail `/health`.
+
 ## Principal Mode
 
 Use `B2_HTTP_CREDENTIAL_MODE=principal` only when a trusted identity layer maps

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package/build-context secret exclusion policy.
 
 ### Changed
+- Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
+  other supported algorithms with `B2_OAUTH_ALLOWED_ALGORITHMS`.
+- Documented the exported OAuth config TypeScript surface change: token-cache
+  fields now use `tokenCache*` names and `OAuthResourceServerConfig` models
+  verifier-specific introspection or JWKS modes. The legacy
+  `B2_OAUTH_INTROSPECTION_CACHE_*` environment variables remain accepted.
 - Moved all `s3_*` data-plane object, presigned URL, multipart, bucket, and
   lifecycle paths onto the AWS S3 SDK configured for B2's S3-compatible
   endpoint, while native `b2_*` control-plane tools remain on the B2 SDK.

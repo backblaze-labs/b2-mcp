@@ -19,7 +19,7 @@ import { logger } from "./utils/logger.js";
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
 
 const DEFAULT_TOKEN_TYPES = ["bearer"];
-const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256", "EdDSA"];
+const DEFAULT_ALLOWED_ALGORITHMS = ["RS256"];
 const DEFAULT_INTROSPECTION_TIMEOUT_MS = 3000;
 const DEFAULT_INTROSPECTION_RETRIES = 1;
 const DEFAULT_INTROSPECTION_RETRY_DELAY_MS = 50;
@@ -100,10 +100,17 @@ export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig 
   introspectionCircuitOpenMs?: number;
 }
 
-export type OAuthResourceServerConfig =
-  | OAuthIntrospectionVerifierConfig
-  | OAuthJwtVerifierConfig
-  | (OAuthIntrospectionVerifierConfig & OAuthJwtVerifierConfig);
+type OAuthResourceServerLoadedConfig = OAuthResourceServerCommonConfig &
+  Omit<
+    OAuthIntrospectionVerifierConfig,
+    keyof OAuthResourceServerCommonConfig | "introspectionEndpoint"
+  > &
+  Omit<OAuthJwtVerifierConfig, keyof OAuthResourceServerCommonConfig | "jwksUri"> & {
+    introspectionEndpoint?: string;
+    jwksUri?: string;
+  };
+
+export type OAuthResourceServerConfig = OAuthIntrospectionVerifierConfig | OAuthJwtVerifierConfig;
 
 export type OAuthIntrospectionVerifierOptions =
   OAuthVerifierOptions<OAuthIntrospectionVerifierConfig>;
@@ -305,7 +312,7 @@ export function loadOAuthResourceServerConfig(
       DEFAULT_JWT_CLOCK_SKEW_SECONDS,
       0,
     ),
-  };
+  } satisfies OAuthResourceServerLoadedConfig;
 
   ensureHttpsOrLocalhost(config.issuer, "B2_OAUTH_ISSUER", dangerouslyAllowInsecureIssuerUrl);
   ensureHttpsOrLocalhost(
@@ -331,7 +338,11 @@ export function loadOAuthResourceServerConfig(
   }
   ensureHttpsOrLocalhost(config.publicUrl, "B2_MCP_PUBLIC_URL", dangerouslyAllowInsecureIssuerUrl);
   ensureHttpsOrLocalhost(config.resource, "B2_OAUTH_RESOURCE", dangerouslyAllowInsecureIssuerUrl);
-  return config as OAuthResourceServerConfig;
+  if (hasIntrospectionConfig(config)) return config;
+  if (hasJwtConfig(config)) return config;
+  throw new Error(
+    "B2_OAUTH_INTROSPECTION_ENDPOINT or B2_OAUTH_JWKS_URI is required for OAuth token verification",
+  );
 }
 
 function values(value: unknown): string[] {
@@ -529,6 +540,7 @@ function authInfoFromVerifiedClaims(
       : assertAllowedAlgorithm(verification.algorithm, config.allowedAlgorithms);
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
   assertDeploymentScope(scopes);
+  assertRequiredScopes(scopes, config.requiredScopes);
   assertAllowedSubject(claims, issuer, config.allowedSubjects, verification.source);
   const clientId =
     stringClaim(claims.client_id) ??
@@ -568,6 +580,153 @@ export class OAuthDependencyError extends Error {
   }
 }
 
+interface OAuthDependencyCircuitState {
+  failures: number;
+  openedUntilMs: number;
+}
+
+// Keep the public verifier exports in this module while sharing retry, circuit,
+// and dependency logging policy so introspection and JWKS behavior cannot drift.
+interface OAuthDependencyPolicy {
+  dependency: "oauth_introspection" | "oauth_jwks";
+  logMessage: "oauth.introspection.dependency_failed" | "oauth.jwks.dependency_failed";
+  endpoint: string;
+  timeoutMs: number;
+  maxRetries: number;
+  retryDelayMs: number;
+  circuitFailures: number;
+  circuitOpenMs: number;
+  circuitKey: string;
+  circuits: Map<string, OAuthDependencyCircuitState>;
+  nowMs: () => number;
+  signal?: AbortSignal;
+}
+
+function logOAuthDependencyFailure(
+  policy: OAuthDependencyPolicy,
+  reason: string,
+  status?: number,
+  attempt?: number,
+): void {
+  const endpoint = new URL(policy.endpoint);
+  logger.warn(
+    {
+      dependency: policy.dependency,
+      reason,
+      status,
+      attempt,
+      maxAttempts: policy.maxRetries + 1,
+      endpointHost: endpoint.host,
+      endpointPath: endpoint.pathname,
+      timeoutMs: policy.timeoutMs,
+    },
+    policy.logMessage,
+  );
+}
+
+function retryAfterSeconds(policy: OAuthDependencyPolicy, nowMs: number): number | undefined {
+  const state = policy.circuits.get(policy.circuitKey);
+  if (!state || state.openedUntilMs <= nowMs) return undefined;
+  return Math.max(1, Math.ceil((state.openedUntilMs - nowMs) / 1000));
+}
+
+function assertOAuthDependencyCircuitClosed(policy: OAuthDependencyPolicy): void {
+  const retryAfter = retryAfterSeconds(policy, policy.nowMs());
+  if (retryAfter === undefined) return;
+  logOAuthDependencyFailure(policy, "open_circuit");
+  throw new OAuthDependencyError(
+    "OAuth authorization server unavailable",
+    "open_circuit",
+    undefined,
+    retryAfter,
+  );
+}
+
+function noteOAuthDependencySuccess(policy: OAuthDependencyPolicy): void {
+  policy.circuits.delete(policy.circuitKey);
+}
+
+function noteOAuthDependencyFailure(
+  policy: OAuthDependencyPolicy,
+  error: OAuthDependencyError,
+): OAuthDependencyError {
+  const nowMs = policy.nowMs();
+  const state = policy.circuits.get(policy.circuitKey) ?? { failures: 0, openedUntilMs: 0 };
+  const failures = state.failures + 1;
+  const openedUntilMs =
+    failures >= policy.circuitFailures ? nowMs + policy.circuitOpenMs : state.openedUntilMs;
+  policy.circuits.set(policy.circuitKey, { failures, openedUntilMs });
+  if (openedUntilMs > nowMs) {
+    logOAuthDependencyFailure(policy, "open_circuit", error.dependencyStatus);
+    return new OAuthDependencyError(
+      "OAuth authorization server unavailable",
+      "open_circuit",
+      error.dependencyStatus,
+      Math.max(1, Math.ceil((openedUntilMs - nowMs) / 1000)),
+    );
+  }
+  return error;
+}
+
+function isRetryableOAuthDependencyError(error: OAuthDependencyError): boolean {
+  return (
+    error.reason === "timeout" || error.reason === "network_error" || error.reason === "http_status"
+  );
+}
+
+async function oauthDependencyRetryDelay(policy: OAuthDependencyPolicy): Promise<void> {
+  if (policy.retryDelayMs <= 0) return;
+  if (policy.signal?.aborted) {
+    throw new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted");
+  }
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
+    function cleanup() {
+      policy.signal?.removeEventListener("abort", abort);
+    }
+    function abort() {
+      clearTimeout(timer);
+      cleanup();
+      reject(new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"));
+    }
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, policy.retryDelayMs);
+    policy.signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function runOAuthDependencyWithRetry<T>(
+  policy: OAuthDependencyPolicy,
+  attemptFn: () => Promise<T>,
+  unexpectedError: () => Error,
+): Promise<T> {
+  assertOAuthDependencyCircuitClosed(policy);
+  const maxAttempts = policy.maxRetries + 1;
+  let lastDependencyError: OAuthDependencyError | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const result = await attemptFn();
+      noteOAuthDependencySuccess(policy);
+      return result;
+    } catch (error) {
+      if (error instanceof OAuthError) throw error;
+      if (!(error instanceof OAuthDependencyError)) throw unexpectedError();
+      if (error.reason === "request_aborted") throw error;
+      lastDependencyError = error;
+      logOAuthDependencyFailure(policy, error.reason, error.dependencyStatus, attempt);
+      if (attempt >= maxAttempts || !isRetryableOAuthDependencyError(error)) break;
+      await oauthDependencyRetryDelay(policy);
+    }
+  }
+  throw noteOAuthDependencyFailure(
+    policy,
+    lastDependencyError ??
+      new OAuthDependencyError("OAuth authorization server unavailable", "network_error"),
+  );
+}
+
 interface IntrospectionCacheEntry {
   authInfo: AuthInfo;
   expiresAtMs: number;
@@ -585,15 +744,10 @@ interface JwksLookupResult {
   fromCache: boolean;
 }
 
-interface IntrospectionCircuitState {
-  failures: number;
-  openedUntilMs: number;
-}
-
 const introspectionCache = new Map<string, IntrospectionCacheEntry>();
-const introspectionCircuits = new Map<string, IntrospectionCircuitState>();
+const introspectionCircuits = new Map<string, OAuthDependencyCircuitState>();
 const jwksCache = new Map<string, JwksCacheEntry>();
-const jwksCircuits = new Map<string, IntrospectionCircuitState>();
+const jwksCircuits = new Map<string, OAuthDependencyCircuitState>();
 const jwksInFlight = new Map<string, Promise<JwksLookupResult>>();
 const jwksUnknownKidCache = new Map<string, number>();
 const jwksLastForcedRefreshMs = new Map<string, number>();
@@ -699,19 +853,17 @@ export function resetOAuthVerifierCacheForTests(): void {
   jwksLastForcedRefreshMs.clear();
 }
 
-export function oauthVerifierCacheStatsForTests(): { jwksUnknownKidEntries: number } {
-  return { jwksUnknownKidEntries: jwksUnknownKidCache.size };
-}
-
 function hasIntrospectionConfig(
-  config: OAuthResourceServerConfig,
+  config: OAuthResourceServerConfig | OAuthResourceServerLoadedConfig,
 ): config is OAuthIntrospectionVerifierConfig {
   return (
     typeof config.introspectionEndpoint === "string" && config.introspectionEndpoint.length > 0
   );
 }
 
-function hasJwtConfig(config: OAuthResourceServerConfig): config is OAuthJwtVerifierConfig {
+function hasJwtConfig(
+  config: OAuthResourceServerConfig | OAuthResourceServerLoadedConfig,
+): config is OAuthJwtVerifierConfig {
   return typeof config.jwksUri === "string" && config.jwksUri.length > 0;
 }
 
@@ -773,6 +925,23 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
     return this.nowSeconds() * 1000;
   }
 
+  private dependencyPolicy(): OAuthDependencyPolicy {
+    return {
+      dependency: "oauth_introspection",
+      logMessage: "oauth.introspection.dependency_failed",
+      endpoint: this.introspectionEndpoint(),
+      timeoutMs: this.config.introspectionTimeoutMs,
+      maxRetries: this.config.introspectionMaxRetries,
+      retryDelayMs: this.config.introspectionRetryDelayMs,
+      circuitFailures: this.config.introspectionCircuitFailures,
+      circuitOpenMs: this.config.introspectionCircuitOpenMs,
+      circuitKey: this.circuitKey,
+      circuits: introspectionCircuits,
+      nowMs: () => this.nowMs(),
+      signal: this.signal,
+    };
+  }
+
   private introspectionSignal(): AbortSignal {
     const timeoutSignal = AbortSignal.timeout(this.config.introspectionTimeoutMs);
     if (!this.signal) return timeoutSignal;
@@ -789,116 +958,11 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
     return this.config.introspectionEndpoint;
   }
 
-  private logDependencyFailure(reason: string, status?: number, attempt?: number): void {
-    const endpoint = new URL(this.introspectionEndpoint());
-    logger.warn(
-      {
-        dependency: "oauth_introspection",
-        reason,
-        status,
-        attempt,
-        maxAttempts: this.config.introspectionMaxRetries + 1,
-        endpointHost: endpoint.host,
-        endpointPath: endpoint.pathname,
-        timeoutMs: this.config.introspectionTimeoutMs,
-      },
-      "oauth.introspection.dependency_failed",
-    );
-  }
-
-  private retryAfterSeconds(nowMs: number): number | undefined {
-    const state = introspectionCircuits.get(this.circuitKey);
-    if (!state || state.openedUntilMs <= nowMs) return undefined;
-    return Math.max(1, Math.ceil((state.openedUntilMs - nowMs) / 1000));
-  }
-
-  private assertCircuitClosed(): void {
-    const nowMs = this.nowMs();
-    const retryAfterSeconds = this.retryAfterSeconds(nowMs);
-    if (retryAfterSeconds === undefined) return;
-    this.logDependencyFailure("open_circuit");
-    throw new OAuthDependencyError(
-      "OAuth authorization server unavailable",
-      "open_circuit",
-      undefined,
-      retryAfterSeconds,
-    );
-  }
-
-  private noteDependencySuccess(): void {
-    introspectionCircuits.delete(this.circuitKey);
-  }
-
-  private noteDependencyFailure(error: OAuthDependencyError): OAuthDependencyError {
-    const nowMs = this.nowMs();
-    const state = introspectionCircuits.get(this.circuitKey) ?? { failures: 0, openedUntilMs: 0 };
-    const failures = state.failures + 1;
-    const openedUntilMs =
-      failures >= this.config.introspectionCircuitFailures
-        ? nowMs + this.config.introspectionCircuitOpenMs
-        : state.openedUntilMs;
-    introspectionCircuits.set(this.circuitKey, { failures, openedUntilMs });
-    if (openedUntilMs > nowMs) {
-      this.logDependencyFailure("open_circuit", error.dependencyStatus);
-      return new OAuthDependencyError(
-        "OAuth authorization server unavailable",
-        "open_circuit",
-        error.dependencyStatus,
-        Math.max(1, Math.ceil((openedUntilMs - nowMs) / 1000)),
-      );
-    }
-    return error;
-  }
-
-  private isRetryable(error: OAuthDependencyError): boolean {
-    return (
-      error.reason === "timeout" ||
-      error.reason === "network_error" ||
-      error.reason === "http_status"
-    );
-  }
-
-  private async retryDelay(): Promise<void> {
-    if (this.config.introspectionRetryDelayMs <= 0) return;
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, this.config.introspectionRetryDelayMs);
-      this.signal?.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          reject(
-            new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"),
-          );
-        },
-        { once: true },
-      );
-    });
-  }
-
   private async introspect(token: string): Promise<Record<string, unknown>> {
-    this.assertCircuitClosed();
-    const maxAttempts = this.config.introspectionMaxRetries + 1;
-    let lastDependencyError: OAuthDependencyError | null = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        const claims = await this.introspectionAttempt(token);
-        this.noteDependencySuccess();
-        return claims;
-      } catch (error) {
-        if (error instanceof OAuthError) throw error;
-        if (!(error instanceof OAuthDependencyError)) {
-          throw new OAuthError(OAuthErrorCode.InvalidToken, "Token introspection failed");
-        }
-        if (error.reason === "request_aborted") throw error;
-        lastDependencyError = error;
-        this.logDependencyFailure(error.reason, error.dependencyStatus, attempt);
-        if (attempt >= maxAttempts || !this.isRetryable(error)) break;
-        await this.retryDelay();
-      }
-    }
-    throw this.noteDependencyFailure(
-      lastDependencyError ??
-        new OAuthDependencyError("OAuth authorization server unavailable", "network_error"),
+    return runOAuthDependencyWithRetry(
+      this.dependencyPolicy(),
+      () => this.introspectionAttempt(token),
+      () => new OAuthError(OAuthErrorCode.InvalidToken, "Token introspection failed"),
     );
   }
 
@@ -1214,78 +1278,24 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     return this.nowSeconds() * 1000;
   }
 
+  private dependencyPolicy(): OAuthDependencyPolicy {
+    return {
+      dependency: "oauth_jwks",
+      logMessage: "oauth.jwks.dependency_failed",
+      endpoint: this.jwksUri(),
+      timeoutMs: this.config.jwksTimeoutMs,
+      maxRetries: this.config.jwksMaxRetries,
+      retryDelayMs: this.config.jwksRetryDelayMs,
+      circuitFailures: this.config.jwksCircuitFailures,
+      circuitOpenMs: this.config.jwksCircuitOpenMs,
+      circuitKey: this.cacheKey,
+      circuits: jwksCircuits,
+      nowMs: () => this.nowMs(),
+    };
+  }
+
   private logDependencyFailure(reason: string, status?: number, attempt?: number): void {
-    const endpoint = new URL(this.jwksUri());
-    logger.warn(
-      {
-        dependency: "oauth_jwks",
-        reason,
-        status,
-        attempt,
-        maxAttempts: this.config.jwksMaxRetries + 1,
-        endpointHost: endpoint.host,
-        endpointPath: endpoint.pathname,
-        timeoutMs: this.config.jwksTimeoutMs,
-      },
-      "oauth.jwks.dependency_failed",
-    );
-  }
-
-  private jwksRetryAfterSeconds(nowMs: number): number | undefined {
-    const state = jwksCircuits.get(this.cacheKey);
-    if (!state || state.openedUntilMs <= nowMs) return undefined;
-    return Math.max(1, Math.ceil((state.openedUntilMs - nowMs) / 1000));
-  }
-
-  private assertJwksCircuitClosed(): void {
-    const nowMs = this.nowMs();
-    const retryAfterSeconds = this.jwksRetryAfterSeconds(nowMs);
-    if (retryAfterSeconds === undefined) return;
-    this.logDependencyFailure("open_circuit");
-    throw new OAuthDependencyError(
-      "OAuth authorization server unavailable",
-      "open_circuit",
-      undefined,
-      retryAfterSeconds,
-    );
-  }
-
-  private noteJwksDependencySuccess(): void {
-    jwksCircuits.delete(this.cacheKey);
-  }
-
-  private noteJwksDependencyFailure(error: OAuthDependencyError): OAuthDependencyError {
-    const nowMs = this.nowMs();
-    const state = jwksCircuits.get(this.cacheKey) ?? { failures: 0, openedUntilMs: 0 };
-    const failures = state.failures + 1;
-    const openedUntilMs =
-      failures >= this.config.jwksCircuitFailures
-        ? nowMs + this.config.jwksCircuitOpenMs
-        : state.openedUntilMs;
-    jwksCircuits.set(this.cacheKey, { failures, openedUntilMs });
-    if (openedUntilMs > nowMs) {
-      this.logDependencyFailure("open_circuit", error.dependencyStatus);
-      return new OAuthDependencyError(
-        "OAuth authorization server unavailable",
-        "open_circuit",
-        error.dependencyStatus,
-        Math.max(1, Math.ceil((openedUntilMs - nowMs) / 1000)),
-      );
-    }
-    return error;
-  }
-
-  private isJwksRetryable(error: OAuthDependencyError): boolean {
-    return (
-      error.reason === "timeout" ||
-      error.reason === "network_error" ||
-      error.reason === "http_status"
-    );
-  }
-
-  private async jwksRetryDelay(): Promise<void> {
-    if (this.config.jwksRetryDelayMs <= 0) return;
-    await new Promise<void>((resolve) => setTimeout(resolve, this.config.jwksRetryDelayMs));
+    logOAuthDependencyFailure(this.dependencyPolicy(), reason, status, attempt);
   }
 
   private async fetchJwksAttempt(): Promise<JwksDocument> {
@@ -1330,30 +1340,12 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   }
 
   private async fetchJwksWithRetry(): Promise<JwksLookupResult> {
-    this.assertJwksCircuitClosed();
-    const maxAttempts = this.config.jwksMaxRetries + 1;
-    let lastDependencyError: OAuthDependencyError | null = null;
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        const jwks = await this.fetchJwksAttempt();
-        this.noteJwksDependencySuccess();
-        return { jwks, fromCache: false };
-      } catch (error) {
-        if (error instanceof OAuthError) throw error;
-        if (!(error instanceof OAuthDependencyError)) {
-          throw new OAuthDependencyError("OAuth authorization server unavailable", "network_error");
-        }
-        lastDependencyError = error;
-        this.logDependencyFailure(error.reason, error.dependencyStatus, attempt);
-        if (error.reason === "request_aborted") throw error;
-        if (attempt >= maxAttempts || !this.isJwksRetryable(error)) break;
-        await this.jwksRetryDelay();
-      }
-    }
-    throw this.noteJwksDependencyFailure(
-      lastDependencyError ??
-        new OAuthDependencyError("OAuth authorization server unavailable", "network_error"),
+    const result = await runOAuthDependencyWithRetry(
+      this.dependencyPolicy(),
+      () => this.fetchJwksAttempt(),
+      () => new OAuthDependencyError("OAuth authorization server unavailable", "network_error"),
     );
+    return { jwks: result, fromCache: false };
   }
 
   private fetchJwks(): Promise<JwksLookupResult> {
@@ -1449,6 +1441,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   private async verifySignature(parsed: ParsedJwt, algorithm: string): Promise<boolean> {
     const initial = await this.jwks(false);
     const keys = this.candidateKeys(initial.jwks, parsed.header, algorithm);
+    if (!stringClaim(parsed.header.kid) && keys.length > 1) return false;
     for (const jwk of keys) {
       if (await verifyJwtWithJwk(parsed, algorithm, jwk)) return true;
     }
@@ -1458,9 +1451,10 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     const nowMs = this.nowMs();
     if (this.unresolvedKidCoolingDown(kid, algorithm, nowMs)) return false;
     if (!this.forcedRefreshAllowed(nowMs)) return false;
-    this.noteForcedRefresh(nowMs);
     const refreshed = await this.jwks(true);
+    this.noteForcedRefresh(nowMs);
     const refreshedKeys = this.candidateKeys(refreshed.jwks, parsed.header, algorithm);
+    if (refreshedKeys.length > 1) return false;
     for (const jwk of refreshedKeys) {
       if (await verifyJwtWithJwk(parsed, algorithm, jwk)) return true;
     }
@@ -1485,6 +1479,7 @@ export class OAuthBearerTokenVerifier implements OAuthTokenVerifier {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
+    // Introspection stays authoritative in dual-mode deployments because it can enforce revocation.
     if (this.introspectionVerifier) return this.introspectionVerifier.verifyAccessToken(token);
     if (this.jwtVerifier) return this.jwtVerifier.verifyAccessToken(token);
     throw new OAuthError(OAuthErrorCode.InvalidToken, "OAuth token verifier is not configured");
