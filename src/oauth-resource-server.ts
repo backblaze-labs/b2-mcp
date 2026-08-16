@@ -1264,6 +1264,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
       const response = await this.fetchImpl(uri, {
         method: "GET",
         headers: { Accept: "application/json" },
+        redirect: "error",
         signal: this.jwksSignal(),
       });
       if (!response.ok) {

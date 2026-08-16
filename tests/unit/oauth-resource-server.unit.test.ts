@@ -555,6 +555,7 @@ describe("OAuthJwtVerifier", () => {
   it("verifies signed JWT access tokens against the configured JWKS", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(init?.method).toBe("GET");
+      expect(init?.redirect).toBe("error");
       return jwksResponse();
     });
     const verifier = new OAuthJwtVerifier({
