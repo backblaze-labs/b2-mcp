@@ -932,10 +932,22 @@ interface JwksDocument {
 }
 
 function base64UrlToBytes(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
+  }
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
   try {
-    return Uint8Array.from(Buffer.from(padded, "base64"));
+    const decoded = Uint8Array.from(Buffer.from(padded, "base64"));
+    const encoded = Buffer.from(decoded)
+      .toString("base64")
+      .replace(/=/g, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_");
+    if (encoded !== value) {
+      throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
+    }
+    return decoded;
   } catch {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
   }
@@ -1150,9 +1162,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   }
 
   private jwksSignal(): AbortSignal {
-    const timeoutSignal = AbortSignal.timeout(this.config.jwksTimeoutMs);
-    if (!this.signal) return timeoutSignal;
-    return AbortSignal.any([this.signal, timeoutSignal]);
+    return AbortSignal.timeout(this.config.jwksTimeoutMs);
   }
 
   private cachedJwks(nowMs: number): JwksLookupResult | null {
@@ -1243,19 +1253,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
 
   private async jwksRetryDelay(): Promise<void> {
     if (this.config.jwksRetryDelayMs <= 0) return;
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(resolve, this.config.jwksRetryDelayMs);
-      this.signal?.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timer);
-          reject(
-            new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"),
-          );
-        },
-        { once: true },
-      );
-    });
+    await new Promise<void>((resolve) => setTimeout(resolve, this.config.jwksRetryDelayMs));
   }
 
   private async fetchJwksAttempt(): Promise<JwksDocument> {
@@ -1291,9 +1289,6 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
       return jwks;
     } catch (error) {
       if (error instanceof OAuthError || error instanceof OAuthDependencyError) throw error;
-      if (this.signal?.aborted) {
-        throw new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted");
-      }
       const reason =
         error instanceof Error && /abort|timeout/i.test(`${error.name} ${error.message}`)
           ? "timeout"
@@ -1331,12 +1326,41 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
 
   private fetchJwks(): Promise<JwksLookupResult> {
     const inFlight = jwksInFlight.get(this.cacheKey);
-    if (inFlight) return inFlight;
+    if (inFlight) return this.raceWithCallerAbort(inFlight);
     const request = this.fetchJwksWithRetry().finally(() => {
       jwksInFlight.delete(this.cacheKey);
     });
     jwksInFlight.set(this.cacheKey, request);
-    return request;
+    return this.raceWithCallerAbort(request);
+  }
+
+  private raceWithCallerAbort<T>(request: Promise<T>): Promise<T> {
+    if (!this.signal) return request;
+    if (this.signal.aborted) {
+      this.logDependencyFailure("request_aborted");
+      return Promise.reject(
+        new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"),
+      );
+    }
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => {
+        this.logDependencyFailure("request_aborted");
+        reject(
+          new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"),
+        );
+      };
+      this.signal?.addEventListener("abort", abort, { once: true });
+      request.then(
+        (value) => {
+          this.signal?.removeEventListener("abort", abort);
+          resolve(value);
+        },
+        (error: unknown) => {
+          this.signal?.removeEventListener("abort", abort);
+          reject(error);
+        },
+      );
+    });
   }
 
   private async jwks(forceRefresh: boolean): Promise<JwksLookupResult> {

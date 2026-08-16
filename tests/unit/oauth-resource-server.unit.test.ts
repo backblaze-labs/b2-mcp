@@ -543,6 +543,13 @@ function jwtFor(
   );
 }
 
+function tamperJwtSignature(token: string): string {
+  const parts = token.split(".");
+  const signature = parts[2] ?? "";
+  const first = signature[0] === "A" ? "B" : "A";
+  return `${parts[0]}.${parts[1]}.${first}${signature.slice(1)}`;
+}
+
 describe("OAuthJwtVerifier", () => {
   beforeEach(() => {
     resetOAuthVerifierCacheForTests();
@@ -612,9 +619,21 @@ describe("OAuthJwtVerifier", () => {
       nowSeconds: () => 1000,
     });
     const token = jwtFor();
-    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+    const tampered = tamperJwtSignature(token);
 
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
+  });
+
+  it("rejects non-canonical base64url JWT segments before fetching JWKS", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse());
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(`${jwtFor()}!`)).rejects.toThrow(/malformed/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("accepts standards-compliant access tokens bound by aud only", async () => {
@@ -748,6 +767,44 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps shared JWKS fetches alive when one caller aborts", async () => {
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    let resolveFetch: ((response: Response) => void) | undefined;
+    let fetchSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      fetchSignal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const firstVerifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+      signal: firstController.signal,
+    });
+    const secondVerifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+      signal: secondController.signal,
+    });
+
+    const first = firstVerifier.verifyAccessToken(jwtFor({ client_id: "aborted-client" }));
+    first.catch(() => undefined);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const second = secondVerifier.verifyAccessToken(jwtFor({ client_id: "waiting-client" }));
+    firstController.abort();
+
+    await expect(first).rejects.toMatchObject({ reason: "request_aborted" });
+    expect(fetchSignal?.aborted).toBe(false);
+    resolveFetch?.(jwksResponse());
+    await expect(second).resolves.toMatchObject({ clientId: "waiting-client" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a minimum JWKS cache TTL for no-store responses", async () => {
     const fetchMock = vi.fn(async () =>
       jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "no-store" } }),
@@ -796,7 +853,7 @@ describe("OAuthJwtVerifier", () => {
       nowSeconds: () => 1000,
     });
     const token = jwtFor({ client_id: "tampered" });
-    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+    const tampered = tamperJwtSignature(token);
 
     await verifier.verifyAccessToken(jwtFor({ client_id: "prime-bad-sig-cache" }));
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
@@ -869,7 +926,7 @@ describe("OAuthBearerTokenVerifier", () => {
       nowSeconds: () => 1000,
     });
     const token = jwtFor();
-    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+    const tampered = tamperJwtSignature(token);
 
     await expect(verifier.verifyAccessToken(tampered)).resolves.toMatchObject({
       clientId: "introspected-client",
