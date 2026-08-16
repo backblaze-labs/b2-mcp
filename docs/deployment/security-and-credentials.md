@@ -120,8 +120,11 @@ logs, query strings, screenshots, or client configuration.
 
 For authorization servers that issue signed JWT access tokens, set
 `B2_OAUTH_JWKS_URI` to the issuer's JWKS URL. Then
-`B2_OAUTH_INTROSPECTION_ENDPOINT` and introspection credentials are optional
-unless opaque-token fallback is also required.
+`B2_OAUTH_INTROSPECTION_ENDPOINT` and introspection credentials are optional.
+Configure both only when RFC 7662 introspection should remain authoritative for
+revocation and opaque-token compatibility. JWKS-only deployments fail closed on
+signature or claim mismatch and do not observe authorization-server revocation
+before JWT expiry.
 
 ## Principal Mode
 

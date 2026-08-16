@@ -53,7 +53,9 @@ adapter unit tests, protocol tests, and `pnpm run check:cloudflare-worker-bundle
 
 ## Secrets
 
-Use Worker encrypted secrets for single-tenant server mode:
+Use Worker encrypted secrets for single-tenant server mode. Include
+introspection credentials only when `B2_OAUTH_INTROSPECTION_ENDPOINT` remains
+set in `wrangler.jsonc`:
 
 ```bash
 cd deploy/cloudflare-worker
@@ -66,6 +68,21 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 EOF
 chmod 600 "$WORKER_SECRETS_FILE"
 ```
+
+For a JWKS-only Worker, remove the introspection endpoint from `vars`, omit the
+introspection credential lines from the secrets file, and set the non-secret
+JWKS values in `wrangler.jsonc`:
+
+```jsonc
+"B2_OAUTH_JWKS_URI": "https://issuer.example.com/.well-known/jwks.json",
+"B2_OAUTH_JWKS_CACHE_TTL_SECONDS": "300",
+```
+
+That configuration passes `/health` without
+`B2_OAUTH_INTROSPECTION_CLIENT_ID` or
+`B2_OAUTH_INTROSPECTION_CLIENT_SECRET`. Configure both introspection and JWKS
+only when introspection should stay authoritative for revocation and
+JWT-shaped opaque-token compatibility.
 
 Do not store B2 credentials in ordinary Worker `vars`, source code, `.dev.vars`
 committed to git, shell history, or logs. Use `cloudflare.env.example` only as
@@ -99,9 +116,14 @@ exact hostname. Cloudflare terminates TLS at the edge. Do not expose raw port
 
 The checked-in adapter validates OAuth bearer tokens by introspection for
 opaque tokens, or by local JWT signature verification when `B2_OAUTH_JWKS_URI`
-is configured. A Cloudflare Access or OAuth Provider integration may run before
-the adapter only if it converts a verified identity into MCP `AuthInfo`. Never
-trust public identity headers from the internet.
+is configured without introspection. When both verifier mechanisms are
+configured, introspection remains authoritative so authorization-server
+revocation and JWT-shaped opaque tokens behave the same during rolling
+deploys. JWKS-only mode validates signatures and claims locally, caches and
+coalesces JWKS fetches, rate-limits forced key-refresh attempts, and cannot
+observe revocation before JWT expiry. A Cloudflare Access or OAuth Provider
+integration may run before the adapter only if it converts a verified identity
+into MCP `AuthInfo`. Never trust public identity headers from the internet.
 
 ## Health Checks
 

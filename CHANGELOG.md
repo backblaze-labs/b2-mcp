@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added `B2_OAUTH_JWKS_URI` local JWT access-token verification against cached
+  JWKS with bounded refresh, made `B2_OAUTH_INTROSPECTION_ENDPOINT` optional
+  for JWKS-only deployments, and added JWT/JWKS cache, timeout, retry, and
+  clock-skew settings.
 - Added the hosted deployment matrix, shared deployment security contract,
   provider guides, troubleshooting checklist, and an experimental Cloudflare
   Worker adapter with a Wrangler runtime smoke gate.

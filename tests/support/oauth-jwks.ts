@@ -48,7 +48,7 @@ export function signedJwt(
 ): string {
   const header = {
     alg: "RS256",
-    typ: "JWT",
+    typ: "at+jwt",
     kid: rsaPublicJwk.kid,
     ...headerOverrides,
   };

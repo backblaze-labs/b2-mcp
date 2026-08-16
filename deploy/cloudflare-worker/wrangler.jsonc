@@ -8,10 +8,11 @@
     "cpu_ms": 30000
   },
   // Required encrypted Worker secrets:
-  // B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY,
-  // B2_OAUTH_INTROSPECTION_CLIENT_ID, and
-  // B2_OAUTH_INTROSPECTION_CLIENT_SECRET. Upload them with
-  // wrangler deploy --secrets-file or wrangler versions upload --secrets-file.
+  // B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY.
+  // Add B2_OAUTH_INTROSPECTION_CLIENT_ID and
+  // B2_OAUTH_INTROSPECTION_CLIENT_SECRET only when introspection is configured.
+  // Upload secrets with wrangler deploy --secrets-file or
+  // wrangler versions upload --secrets-file.
   "vars": {
     "B2_HTTP_CREDENTIAL_MODE": "server",
     "B2_ALLOWED_HOSTS": "b2-mcp.example.com",
@@ -25,6 +26,9 @@
     "B2_OAUTH_AUTHORIZATION_ENDPOINT": "https://issuer.example.com/oauth2/authorize",
     "B2_OAUTH_TOKEN_ENDPOINT": "https://issuer.example.com/oauth2/token",
     "B2_OAUTH_INTROSPECTION_ENDPOINT": "https://issuer.example.com/oauth2/introspect",
+    // For JWKS-only Workers, remove B2_OAUTH_INTROSPECTION_ENDPOINT and set:
+    // "B2_OAUTH_JWKS_URI": "https://issuer.example.com/.well-known/jwks.json",
+    // "B2_OAUTH_JWKS_CACHE_TTL_SECONDS": "300",
     "B2_OAUTH_RESOURCE": "https://b2-mcp.example.com/mcp",
     "B2_OAUTH_AUDIENCE": "https://b2-mcp.example.com/mcp",
     "B2_OAUTH_ALLOWED_SUBJECTS": "issuer-subject-for-this-single-tenant-deployment",

@@ -1,8 +1,9 @@
 import { OAuthError, OAuthErrorCode, type AuthInfo } from "@modelcontextprotocol/server";
 import {
   OAuthDependencyError,
-  OAuthJwtVerifier,
+  OAuthBearerTokenVerifier,
   OAuthIntrospectionVerifier,
+  OAuthJwtVerifier,
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
   oauthMetadataOptions,
@@ -31,17 +32,26 @@ const baseConfig = {
   allowedSubjects: [] as string[],
   allowedTokenTypes: ["bearer"],
   allowedAlgorithms: ["RS256"],
+  allowedJwtTypes: ["at+jwt", "application/at+jwt"],
   dangerouslyAllowInsecureIssuerUrl: true,
   dangerouslyAllowUnauthenticatedIntrospection: false,
+  tokenCacheMaxEntries: 100,
+  tokenCacheTtlSeconds: 300,
+  tokenCacheSkewSeconds: 0,
   introspectionTimeoutMs: 50,
   introspectionMaxRetries: 1,
   introspectionRetryDelayMs: 0,
   introspectionCircuitFailures: 5,
   introspectionCircuitOpenMs: 30_000,
-  introspectionCacheMaxEntries: 100,
-  introspectionCacheTtlSeconds: 300,
-  introspectionCacheSkewSeconds: 0,
   jwksCacheTtlSeconds: 300,
+  jwksCacheMinTtlSeconds: 30,
+  jwksTimeoutMs: 50,
+  jwksMaxRetries: 0,
+  jwksRetryDelayMs: 0,
+  jwksCircuitFailures: 5,
+  jwksCircuitOpenMs: 30_000,
+  jwksRefreshCooldownMs: 30_000,
+  jwtClockSkewSeconds: 60,
 };
 
 function claims(overrides: Record<string, unknown> = {}) {
@@ -423,7 +433,7 @@ describe("OAuthIntrospectionVerifier", () => {
     let now = 1000;
     const fetchMock = vi.fn(async () => Response.json(claims({ exp: now + 100 })));
     const verifier = new OAuthIntrospectionVerifier({
-      config: { ...baseConfig, introspectionCacheTtlSeconds: 5, introspectionCacheSkewSeconds: 0 },
+      config: { ...baseConfig, tokenCacheTtlSeconds: 5, tokenCacheSkewSeconds: 0 },
       fetch: fetchMock as typeof fetch,
       nowSeconds: () => now,
     });
@@ -478,8 +488,8 @@ describe("OAuthIntrospectionVerifier", () => {
     const verifier = new OAuthIntrospectionVerifier({
       config: {
         ...baseConfig,
-        introspectionCacheTtlSeconds: 300,
-        introspectionCacheSkewSeconds: 0,
+        tokenCacheTtlSeconds: 300,
+        tokenCacheSkewSeconds: 0,
       },
       fetch: fetchMock as typeof fetch,
       nowSeconds: () => now,
@@ -536,6 +546,10 @@ function jwtFor(
 describe("OAuthJwtVerifier", () => {
   beforeEach(() => {
     resetOAuthVerifierCacheForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("verifies signed JWT access tokens against the configured JWKS", async () => {
@@ -602,6 +616,194 @@ describe("OAuthJwtVerifier", () => {
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
   });
 
+  it("accepts standards-compliant access tokens bound by aud only", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ aud: baseConfig.audience, resource: undefined })),
+    ).resolves.toMatchObject({ clientId: "mcp-client" });
+  });
+
+  it("rejects JWTs where neither aud nor resource binds to this deployment", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ aud: "http://localhost:3000/other", resource: undefined }),
+      ),
+    ).rejects.toThrow(/audience\/resource/i);
+  });
+
+  it("applies bounded JWT clock skew to exp, nbf, and iat", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwtClockSkewSeconds: 60 }),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "within-skew", nbf: 1059, iat: 1059 })),
+    ).resolves.toMatchObject({ clientId: "within-skew" });
+    await expect(verifier.verifyAccessToken(jwtFor({ exp: 939 }))).rejects.toThrow(/expired/i);
+    await expect(verifier.verifyAccessToken(jwtFor({ nbf: 1061 }))).rejects.toThrow(
+      /not yet valid/i,
+    );
+    await expect(verifier.verifyAccessToken(jwtFor({ iat: 1061 }))).rejects.toThrow(/issued-at/i);
+  });
+
+  it.each([
+    ["wrong issuer", { iss: "http://localhost:9001/" }, {}, /issuer/i],
+    ["missing scope", { scope: "profile" }, {}, /deployment scope/i],
+    ["alg none", {}, { alg: "none" }, /algorithm/i],
+    ["non-empty crit", {}, { crit: ["exp"] }, /critical/i],
+    ["non-access typ", {}, { typ: "id+jwt" }, /type/i],
+  ])("rejects JWTs with %s", async (_name, claimOverrides, headerOverrides, message) => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor(claimOverrides, headerOverrides)),
+    ).rejects.toThrow(message);
+  });
+
+  it("fails closed and logs when the JWKS endpoint is unavailable", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () =>
+      Response.json({ error: "down" }, { status: 503, headers: { "Retry-After": "7" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksMaxRetries: 0 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toBeInstanceOf(OAuthDependencyError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dependency: "oauth_jwks",
+        reason: "http_status",
+        status: 503,
+        endpointHost: "localhost:9000",
+        endpointPath: "/oauth2/jwks",
+      }),
+      "oauth.jwks.dependency_failed",
+    );
+  });
+
+  it.each([
+    ["invalid_jwks", async () => Response.json({ keys: "not-array" })],
+    [
+      "network_error",
+      async () => {
+        throw new TypeError("offline");
+      },
+    ],
+  ])("logs JWKS %s dependency failures", async (reason, fetchImpl) => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksMaxRetries: 0 }),
+      fetch: vi.fn(fetchImpl) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toBeInstanceOf(OAuthDependencyError);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ dependency: "oauth_jwks", reason }),
+      "oauth.jwks.dependency_failed",
+    );
+  });
+
+  it("coalesces concurrent cold-cache JWKS fetches", async () => {
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          setTimeout(() => resolve(jwksResponse()), 5);
+        }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await Promise.all(
+      Array.from({ length: 5 }, (_, index) =>
+        verifier.verifyAccessToken(jwtFor({ client_id: `client-${index}` })),
+      ),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a minimum JWKS cache TTL for no-store responses", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "no-store" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksCacheMinTtlSeconds: 30 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "first-no-store" }));
+    await verifier.verifyAccessToken(jwtFor({ client_id: "second-no-store" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds JWKS refreshes for repeated unknown kid tokens", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksRefreshCooldownMs: 30_000 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-cache" }));
+    for (let index = 0; index < 5; index += 1) {
+      await expect(
+        verifier.verifyAccessToken(
+          jwtFor({ client_id: `unknown-kid-${index}` }, { kid: "missing-key" }),
+        ),
+      ).rejects.toThrow(/signature/i);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not force JWKS refreshes for bad signatures with a matching kid", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const token = jwtFor({ client_id: "tampered" });
+    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-bad-sig-cache" }));
+    await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
+    await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("authenticates JWKS-only deployments without introspection credentials", async () => {
     const fetchMock = vi.fn(async () => jwksResponse());
     const auth = await authenticateOAuthRequest(
@@ -614,6 +816,63 @@ describe("OAuthJwtVerifier", () => {
 
     expect(auth).not.toBeInstanceOf(Response);
     expect(auth).toMatchObject({ clientId: "mcp-client" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OAuthBearerTokenVerifier", () => {
+  beforeEach(() => {
+    resetOAuthVerifierCacheForTests();
+  });
+
+  it("uses introspection as authoritative validation when both verifiers are configured", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      return Response.json(claims({ active: false }));
+    });
+    const verifier = new OAuthBearerTokenVerifier({
+      config: { ...baseConfig, jwksUri: "http://localhost:9000/oauth2/jwks" },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toThrow(/inactive/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("introspects dot-delimited opaque tokens when both verifiers are configured", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      return Response.json(claims());
+    });
+    const verifier = new OAuthBearerTokenVerifier({
+      config: { ...baseConfig, jwksUri: "http://localhost:9000/oauth2/jwks" },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken("abc.def.ghi")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to introspection for JWT-shaped tokens when JWKS would fail", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.method).toBe("POST");
+      return Response.json(claims({ client_id: "introspected-client" }));
+    });
+    const verifier = new OAuthBearerTokenVerifier({
+      config: { ...baseConfig, jwksUri: "http://localhost:9000/oauth2/jwks" },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const token = jwtFor();
+    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+
+    await expect(verifier.verifyAccessToken(tampered)).resolves.toMatchObject({
+      clientId: "introspected-client",
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -695,14 +954,14 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_REQUIRED_SCOPES: "b2:read,custom:report",
       B2_OAUTH_ALLOWED_ALGORITHMS: "RS256,ES256",
       B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "2500",
-      B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS: "120",
+      B2_OAUTH_TOKEN_CACHE_TTL_SECONDS: "120",
     });
 
     expect(config.requiredScopes).toEqual(["b2:read", "custom:report"]);
     expect(config.allowedSubjects).toEqual(["user-123", "https://issuer.example/#user-456"]);
     expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
     expect(config.introspectionTimeoutMs).toBe(2500);
-    expect(config.introspectionCacheTtlSeconds).toBe(120);
+    expect(config.tokenCacheTtlSeconds).toBe(120);
     expect(config.jwksUri).toBeUndefined();
     expect(protectedResourceMetadata(config)).toMatchObject({
       resource: baseConfig.resource,
@@ -722,11 +981,31 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_RESOURCE: baseConfig.resource,
       B2_OAUTH_AUDIENCE: baseConfig.audience,
       B2_OAUTH_JWKS_CACHE_TTL_SECONDS: "45",
+      B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS: "15",
+      B2_OAUTH_JWT_CLOCK_SKEW_SECONDS: "30",
     });
 
     expect(config.introspectionEndpoint).toBeUndefined();
     expect(config.jwksUri).toBe("http://localhost:9000/oauth2/jwks");
-    expect(config.jwksCacheTtlSeconds).toBe(45);
+    expect("jwksCacheTtlSeconds" in config && config.jwksCacheTtlSeconds).toBe(45);
+    expect("jwksCacheMinTtlSeconds" in config && config.jwksCacheMinTtlSeconds).toBe(15);
+    expect("jwtClockSkewSeconds" in config && config.jwtClockSkewSeconds).toBe(30);
+  });
+
+  it("rejects JWKS configuration with unsupported allowed algorithms", () => {
+    expect(() =>
+      loadOAuthResourceServerConfig({
+        B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+        B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+        B2_OAUTH_ISSUER: baseConfig.issuer,
+        B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+        B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+        B2_OAUTH_JWKS_URI: "http://localhost:9000/oauth2/jwks",
+        B2_OAUTH_RESOURCE: baseConfig.resource,
+        B2_OAUTH_AUDIENCE: baseConfig.audience,
+        B2_OAUTH_ALLOWED_ALGORITHMS: "RS512",
+      }),
+    ).toThrow(/unsupported JWT algorithm RS512/);
   });
 
   it("requires either introspection or JWKS token verification", () => {
