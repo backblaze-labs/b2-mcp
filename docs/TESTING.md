@@ -393,6 +393,56 @@ is still `refs/heads/main`, then have a maintainer with write access advance
 records the override. Do not use this path for new dependency changes or any
 audit-policy expiry.
 
+## Live And Integration Test Credentials
+
+The default deterministic gate must stay credential-free. Local direct Vitest
+selection skips live cases when B2 credentials are absent, but trusted hosted
+live jobs set `B2_REQUIRE_LIVE_TESTS=1`; with that flag set, missing or partial
+`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` credentials fail the live layer
+instead of reporting skipped tests as a pass.
+
+For the 17 integration and request-shape contract tests, use the
+`live-b2-contract` GitHub Environment:
+
+- Buckets to pre-create: NONE. The tests create and delete their own run-owned
+  buckets through `b2_create_bucket` in `tests/live/support/contract-buckets.ts`,
+  with strict cleanup by the live B2 janitor.
+- Keys: one non-master B2 application key. Because it creates buckets, it cannot
+  be scoped to a single bucket; it is account-wide. Capabilities:
+  `listBuckets`, `writeBuckets`, `deleteBuckets`, `listKeys`, `listFiles`,
+  `readFiles`, `writeFiles`, `deleteFiles`, `writeFileLegalHolds`,
+  `writeFileRetentions`, and `bypassGovernance`. Do not grant `writeKeys`,
+  `deleteKeys`, master-key access, or account-admin capabilities.
+- Secrets: `LIVE_B2_KEY_ID` and `LIVE_B2_KEY`, mapped by
+  `.github/workflows/contract.yml` to `B2_APPLICATION_KEY_ID` and
+  `B2_APPLICATION_KEY`.
+- Variables: `B2_LIVE_TEST_ACCOUNT_ID` and the workflow-generated
+  `B2_MCP_LIVE_RUN_PREFIX`.
+- Use a dedicated, disposable key in an isolated test account. A bucket-creating
+  key is account-wide, so the test account is the isolation boundary.
+
+For the deployed MCP smoke, use the `live-b2-smoke` GitHub Environment. This
+path needs a reviewed deployment from issue #137 before it can provide release
+evidence.
+
+- Buckets to pre-create: ONE. The smoke probes a known bucket with
+  `s3_head_bucket` in `scripts/smoke-test.mjs`; it does not create a bucket.
+  Put that bucket name in `B2_SMOKE_BUCKET`.
+- Keys: `LIVE_B2_KEY_ID` / `LIVE_B2_KEY`, which the smoke client sends to the
+  deployed MCP, and `LIVE_B2_APP_KEY_ID` / `LIVE_B2_APP_KEY`, a non-master key
+  for the S3 path because B2's S3 endpoint rejects master keys. Both pairs can
+  point at the same non-master key when the primary key is already non-master.
+  They only need read access to the smoke bucket: `listBuckets`, `listFiles`,
+  and `readFiles`; they may be bucket-scoped.
+- Also required as variables or secrets: `MCP_URL`,
+  `B2_MCP_EXPECTED_TOOL_PROFILE`, `B2_MCP_REQUIRE_SMOKE_BUCKET=1`, and
+  `MCP_AUTHORIZATION` / `VERCEL_PROTECTION_BYPASS` according to the deployment.
+
+Remove obsolete repository-level B2 secrets named `B2_KEY`, `B2_KEY_ID`,
+`B2_APP_KEY`, and `B2_APP_KEY_ID` in the GitHub UI. The live workflows use the
+environment-scoped secrets above and do not reference those repository-level
+secrets.
+
 ## Live B2 Smoke Gate
 
 Live B2 evidence is required before release sign-off but must be isolated from
@@ -402,14 +452,13 @@ Required properties:
 
 - dedicated live B2 test account, not a customer account;
 - dedicated account-level application key with the bucket, file, Object Lock,
-  notification, lifecycle, and key-management capabilities needed by the suite;
-  it must not be bucket- or prefix-restricted, and the dedicated account is the
-  isolation boundary because `writeKeys` grants full account access. The
-  workflow validation step and fixture helpers both enforce the
+  notification, and lifecycle capabilities needed by the suite; it must not be
+  bucket- or prefix-restricted, and the dedicated account is the isolation
+  boundary. The workflow validation step and fixture helpers both enforce the
   `B2_LIVE_TEST_ACCOUNT_ID` allowlist before live fixture mutation or cleanup;
 - unique `B2_MCP_LIVE_RUN_PREFIX` for every run, rooted at `mcp-contract-`;
-- test-owned buckets, objects, multipart uploads, notification rules, and keys
-  only; live tests must never choose an arbitrary listed bucket as writable;
+- test-owned buckets, objects, multipart uploads, and notification rules only;
+  live tests must never choose an arbitrary listed bucket as writable;
 - Object Lock live fixtures use only governance-mode retention with short
   retain-until windows, never compliance mode, so cleanup can clear retention
   with the required `bypassGovernance` capability;
@@ -427,9 +476,10 @@ using the deployed SHA after checking that the deployment environment is approve
 from a repository or organization variable and the SHA is reachable from
 protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
 because live credentials must not be exposed to PR-head code. Trusted runs set
-`B2_INTEGRATION_REQUIRE_CREDENTIALS=1` or the smoke equivalent and fail loudly
-when credentials or required variables are absent; a skipped-only trusted run is
-not accepted as release evidence. The contract validation step and janitor both
+`B2_REQUIRE_LIVE_TESTS=1`, `B2_INTEGRATION_REQUIRE_CREDENTIALS=1`, or the smoke
+equivalent and fail loudly when credentials or required variables are absent; a
+skipped-only trusted run is not accepted as release evidence. The contract
+validation step and janitor both
 require `B2_LIVE_TEST_ACCOUNT_ID` and refuse to proceed when the authorized
 account ID does not match that dedicated test-account allowlist. The protected
 live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26.

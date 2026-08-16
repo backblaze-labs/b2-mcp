@@ -30,9 +30,10 @@ import {
   redactedLiveResourceDetail,
   type ContractBucketRef,
 } from "./support/contract-buckets";
+import { hasLiveB2Credentials, selectLiveB2Test } from "../support/live-b2-test-guard";
 
-const HAS_CREDS = !!(process.env.B2_APPLICATION_KEY_ID && process.env.B2_APPLICATION_KEY);
-const liveIt = HAS_CREDS ? test : test.skip;
+const HAS_CREDS = hasLiveB2Credentials();
+const liveIt = selectLiveB2Test(test);
 
 const isError = (r: any): boolean => r?.isError === true;
 

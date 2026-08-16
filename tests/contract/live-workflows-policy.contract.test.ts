@@ -212,8 +212,11 @@ describe("live secret workflow policy", () => {
     const workflow = workflowText(".github/workflows/contract.yml");
     expect(workflow).toContain("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
     expect(workflow).toContain(
-      'const requiredCapabilities = ["bypassGovernance", "deleteKeys", "listKeys", "writeKeys"];',
+      'const requiredCapabilities = [\n            "bypassGovernance",\n            "deleteBuckets",',
     );
+    expect(workflow).toContain('"writeFileRetentions",');
+    expect(workflow).not.toContain('"writeKeys"');
+    expect(workflow).not.toContain('"deleteKeys"');
     const liveTests = [
       workflowText("tests/live/b2.integration.live.test.ts"),
       workflowText("tests/live/request-shape.contract.live.test.ts"),
@@ -231,6 +234,7 @@ describe("live secret workflow policy", () => {
     expect(contractJob).not.toContain("pnpm run test:contract\n");
     expect(contractJob).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
+    expect(contractJob).toContain('B2_REQUIRE_LIVE_TESTS: "1"');
     expect(contractJob).toContain('B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"');
   });
 
@@ -241,6 +245,7 @@ describe("live secret workflow policy", () => {
     expect(smokeJob).toContain(
       "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
     );
+    expect(smokeJob).toContain('B2_REQUIRE_LIVE_TESTS: "1"');
     expect(smokeJob).toContain(
       "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
     );
