@@ -114,8 +114,11 @@ is configured without introspection. When both are configured, introspection is
 authoritative so authorization-server revocation, inactive-token responses, and
 JWT-shaped opaque tokens are handled consistently during rollout. JWKS-only
 mode validates signatures and claims locally but cannot observe server-side
-revocation before token expiry. JWKS verification checks the JWT signature
-against the issuer's published keys, caches the JWKS for
+revocation before token expiry, so pair JWKS-only mode with short IdP
+access-token lifetimes (the revocation window equals the token lifetime), or
+configure introspection alongside JWKS when immediate revocation is required.
+JWKS verification uses the `jose` library to check the JWT signature against
+the issuer's published keys, caches the JWKS for
 `B2_OAUTH_JWKS_CACHE_TTL_SECONDS` with a minimum floor from
 `B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS`, coalesces concurrent fetches, uses a
 circuit breaker, and rate-limits forced refresh for normal key rotation.
@@ -127,7 +130,9 @@ The adapter additionally checks:
 - JWT `aud` or `resource` binding to this deployment
 - `exp`, `nbf`, and JWT `iat` with bounded `B2_OAUTH_JWT_CLOCK_SKEW_SECONDS`
 - token type, when returned
-- JWT header `typ`, defaulting to RFC 9068 access-token types
+- JWT header `typ`, defaulting to RFC 9068 access-token types (`at+jwt`); an
+  issuer that omits `typ` or sends a different value needs
+  `B2_OAUTH_ALLOWED_JWT_TYPES` set to accept it
 - token signing algorithm from the JWT header or introspection `alg`,
   `jwt_alg`, or `token_alg`, matched against `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`

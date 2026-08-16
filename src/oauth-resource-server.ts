@@ -1,4 +1,5 @@
 import { createHmac, createSecretKey, randomBytes, type JsonWebKey } from "node:crypto";
+import { compactVerify, importJWK, type JWK } from "jose";
 import {
   OAuthError,
   OAuthErrorCode,
@@ -37,7 +38,6 @@ const DEFAULT_ALLOWED_JWT_TYPES = ["at+jwt", "application/at+jwt"];
 const JWKS_UNKNOWN_KID_CACHE_MAX_ENTRIES = 1000;
 
 type FetchLike = typeof fetch;
-type WebCryptoAlgorithm = { name: string; hash?: string; namedCurve?: string };
 
 export interface OAuthVerifierOptions<Config extends OAuthResourceServerConfig> {
   config?: Config;
@@ -1107,7 +1107,11 @@ function assertJwtHeader(header: Record<string, unknown>, config: OAuthJwtVerifi
   }
   const tokenType = stringClaim(header.typ)?.toLowerCase();
   if (!tokenType || !config.allowedJwtTypes.includes(tokenType)) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Unsupported JWT type");
+    const received = tokenType ? `'${tokenType}'` : "(missing)";
+    throw new OAuthError(
+      OAuthErrorCode.InvalidToken,
+      `Unsupported JWT type ${received}; set B2_OAUTH_ALLOWED_JWT_TYPES to accept it`,
+    );
   }
   return algorithm;
 }
@@ -1150,26 +1154,15 @@ function asJwksDocument(value: unknown): JwksDocument {
 
 interface JwtAlgorithmDescriptor {
   keyMatches(jwk: JsonWebKey): boolean;
-  importAlgorithm(jwk: JsonWebKey): WebCryptoAlgorithm;
-  signatureAlgorithm(jwk: JsonWebKey): WebCryptoAlgorithm;
 }
 
+// Only asymmetric signature algorithms are accepted: no HMAC family, so a JWT
+// can never be verified with an RSA/EC public key mistaken for a shared secret.
+// jose performs the JWK import and signature verification (see verifyJwtWithJwk).
 const SUPPORTED_JWT_ALGORITHMS: Record<string, JwtAlgorithmDescriptor> = {
-  RS256: {
-    keyMatches: (jwk) => jwk.kty === "RSA",
-    importAlgorithm: () => ({ name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }),
-    signatureAlgorithm: () => ({ name: "RSASSA-PKCS1-v1_5" }),
-  },
-  ES256: {
-    keyMatches: (jwk) => jwk.kty === "EC" && jwk.crv === "P-256",
-    importAlgorithm: () => ({ name: "ECDSA", namedCurve: "P-256" }),
-    signatureAlgorithm: () => ({ name: "ECDSA", hash: "SHA-256" }),
-  },
-  EdDSA: {
-    keyMatches: (jwk) => jwk.kty === "OKP" && !!jwk.crv?.startsWith("Ed"),
-    importAlgorithm: (jwk) => ({ name: jwk.crv ?? "Ed25519" }),
-    signatureAlgorithm: (jwk) => ({ name: jwk.crv ?? "Ed25519" }),
-  },
+  RS256: { keyMatches: (jwk) => jwk.kty === "RSA" },
+  ES256: { keyMatches: (jwk) => jwk.kty === "EC" && jwk.crv === "P-256" },
+  EdDSA: { keyMatches: (jwk) => jwk.kty === "OKP" && !!jwk.crv?.startsWith("Ed") },
 };
 
 function supportedJwtAlgorithm(algorithm: string): JwtAlgorithmDescriptor {
@@ -1199,33 +1192,15 @@ function jwkMatchesHeader(jwk: JsonWebKey, algorithm: string, kid: string | unde
   return supportedJwtAlgorithm(algorithm).keyMatches(jwk);
 }
 
-function keyImportAlgorithm(algorithm: string, jwk: JsonWebKey): WebCryptoAlgorithm {
-  return supportedJwtAlgorithm(algorithm).importAlgorithm(jwk);
-}
-
-function signatureAlgorithm(algorithm: string, jwk: JsonWebKey): WebCryptoAlgorithm {
-  return supportedJwtAlgorithm(algorithm).signatureAlgorithm(jwk);
-}
-
 async function verifyJwtWithJwk(
-  parsed: ParsedJwt,
+  token: string,
   algorithm: string,
   jwk: JsonWebKey,
 ): Promise<boolean> {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) {
-    throw new OAuthDependencyError("OAuth JWT verification unavailable", "crypto_unavailable");
-  }
   try {
-    const key = await subtle.importKey("jwk", jwk, keyImportAlgorithm(algorithm, jwk), false, [
-      "verify",
-    ]);
-    return await subtle.verify(
-      signatureAlgorithm(algorithm, jwk),
-      key,
-      parsed.signature,
-      new TextEncoder().encode(parsed.signingInput),
-    );
+    const key = await importJWK(jwk as JWK, algorithm);
+    await compactVerify(token, key, { algorithms: [algorithm] });
+    return true;
   } catch (error) {
     if (error instanceof OAuthDependencyError || error instanceof OAuthError) throw error;
     return false;
@@ -1257,7 +1232,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
       const parsed = parseJwt(token);
       const algorithm = assertJwtHeader(parsed.header, this.config);
       assertAllowedAlgorithm(algorithm, this.config.allowedJwtAlgorithms);
-      if (!(await this.verifySignature(parsed, algorithm))) {
+      if (!(await this.verifySignature(token, parsed, algorithm))) {
         throw new OAuthError(OAuthErrorCode.InvalidToken, "JWT signature is not accepted");
       }
       const authInfo = authInfoFromVerifiedClaims(token, parsed.claims, this.config, now, {
@@ -1461,12 +1436,16 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     jwksLastForcedRefreshMs.set(this.cacheKey, nowMs);
   }
 
-  private async verifySignature(parsed: ParsedJwt, algorithm: string): Promise<boolean> {
+  private async verifySignature(
+    token: string,
+    parsed: ParsedJwt,
+    algorithm: string,
+  ): Promise<boolean> {
     const initial = await this.jwks(false);
     const keys = this.candidateKeys(initial.jwks, parsed.header, algorithm);
     if (!stringClaim(parsed.header.kid) && keys.length > 1) return false;
     for (const jwk of keys) {
-      if (await verifyJwtWithJwk(parsed, algorithm, jwk)) return true;
+      if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
     }
     if (keys.length > 0) return false;
     const kid = stringClaim(parsed.header.kid);
@@ -1479,7 +1458,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     const refreshedKeys = this.candidateKeys(refreshed.jwks, parsed.header, algorithm);
     if (refreshedKeys.length > 1) return false;
     for (const jwk of refreshedKeys) {
-      if (await verifyJwtWithJwk(parsed, algorithm, jwk)) return true;
+      if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
     }
     this.rememberUnresolvedKid(kid, algorithm, nowMs);
     return false;
