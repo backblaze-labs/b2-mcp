@@ -643,6 +643,15 @@ describe("OAuthJwtVerifier", () => {
     ).toThrow(/B2_OAUTH_JWKS_URI must use https/);
   });
 
+  it("rejects empty direct JWT algorithm allowlists", () => {
+    expect(
+      () =>
+        new OAuthJwtVerifier({
+          config: jwksOnlyConfig({ allowedJwtAlgorithms: [] }),
+        }),
+    ).toThrow(/must include at least one JWT algorithm/);
+  });
+
   it("verifies signed JWT access tokens against the configured JWKS", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(init?.method).toBe("GET");

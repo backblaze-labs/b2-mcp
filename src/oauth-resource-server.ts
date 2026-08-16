@@ -1179,6 +1179,9 @@ function supportedJwtAlgorithm(algorithm: string): JwtAlgorithmDescriptor {
 }
 
 function assertSupportedJwtAlgorithms(allowedAlgorithms: readonly string[]): void {
+  if (allowedAlgorithms.length === 0) {
+    throw new Error("B2_OAUTH_ALLOWED_ALGORITHMS must include at least one JWT algorithm");
+  }
   for (const algorithm of allowedAlgorithms) {
     if (!SUPPORTED_JWT_ALGORITHMS[algorithm]) {
       throw new Error(
