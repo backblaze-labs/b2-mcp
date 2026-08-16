@@ -494,7 +494,10 @@ function authInfoFromVerifiedClaims(
   now: number,
   verification: VerifiedClaimsSource,
 ): AuthInfo {
-  const issuer = stringClaim(claims.iss ?? claims.issuer);
+  const issuer =
+    verification.source === "jwt"
+      ? stringClaim(claims.iss)
+      : stringClaim(claims.iss ?? claims.issuer);
   if (issuer !== config.issuer) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token issuer is not trusted");
   }

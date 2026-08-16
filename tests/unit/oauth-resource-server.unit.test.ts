@@ -161,6 +161,14 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(authInfo.extra?.alg).toBe("RS256");
   });
 
+  it("accepts the introspection issuer alias when iss is absent", async () => {
+    const { verifier } = verifierFor(claims({ iss: undefined, issuer: baseConfig.issuer }));
+
+    await expect(verifier.verifyAccessToken("access-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+  });
+
   it("uses bearer authentication for token introspection when configured", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       const headers = init?.headers as Headers;
@@ -681,6 +689,7 @@ describe("OAuthJwtVerifier", () => {
 
   it.each([
     ["wrong issuer", { iss: "http://localhost:9001/" }, {}, /issuer/i],
+    ["issuer alias without iss", { iss: undefined, issuer: baseConfig.issuer }, {}, /issuer/i],
     ["missing scope", { scope: "profile" }, {}, /deployment scope/i],
     ["alg none", {}, { alg: "none" }, /algorithm/i],
     ["non-empty crit", {}, { crit: ["exp"] }, /critical/i],
