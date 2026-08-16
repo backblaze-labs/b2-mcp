@@ -147,20 +147,10 @@ jobs:
           node --input-type=module <<'NODE'
           import { B2AuthManager } from "./dist/auth.js";
           import { loadConfig } from "./dist/server.js";
+          import liveB2Capabilities from "./scripts/lib/live-b2-capabilities.cjs";
 
-          const requiredCapabilities = [
-            "bypassGovernance",
-            "deleteBuckets",
-            "deleteFiles",
-            "listBuckets",
-            "listFiles",
-            "listKeys",
-            "readFiles",
-            "writeBuckets",
-            "writeFileLegalHolds",
-            "writeFileRetentions",
-            "writeFiles",
-          ];
+          const { LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: requiredCapabilities } =
+            liveB2Capabilities;
           const auth = await new B2AuthManager(loadConfig()).getAuth();
           if (auth.accountId !== process.env.B2_LIVE_TEST_ACCOUNT_ID) {
             throw new Error("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");

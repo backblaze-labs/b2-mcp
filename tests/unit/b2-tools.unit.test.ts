@@ -601,6 +601,81 @@ describe("b2_list_keys and b2_delete_key", () => {
     );
     expect(deleted.applicationKeyId).toBe(created.applicationKeyId);
   });
+
+  it("omits key secrets from every paginated b2_list_keys page", async () => {
+    invalidateAuthManagerCache();
+    const listKeyBodies: Record<string, unknown>[] = [];
+    installSdkTransport(
+      new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(200, authorizeResponse(["listKeys"]));
+        }
+        if (endpoint === "b2_list_keys") {
+          const body = requestJson(request);
+          listKeyBodies.push(body);
+          if (!body.startApplicationKeyId) {
+            return new StaticHttpResponse(200, {
+              keys: [
+                {
+                  keyName: "page-one",
+                  applicationKeyId: "key-page-one",
+                  capabilities: ["readFiles"],
+                  accountId: "test-account-123",
+                  expirationTimestamp: null,
+                  bucketIds: null,
+                  bucketId: null,
+                  namePrefix: null,
+                  options: [],
+                  applicationKey: "secret-page-one",
+                },
+              ],
+              nextApplicationKeyId: "key-page-two",
+            });
+          }
+          return new StaticHttpResponse(200, {
+            keys: [
+              {
+                keyName: "page-two",
+                applicationKeyId: "key-page-two",
+                capabilities: ["listFiles"],
+                accountId: "test-account-123",
+                expirationTimestamp: null,
+                bucketIds: ["bucket-1"],
+                bucketId: "bucket-1",
+                namePrefix: "prefix/",
+                options: [],
+                applicationKey: "secret-page-two",
+              },
+            ],
+            nextApplicationKeyId: null,
+          });
+        }
+        return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+      }),
+    );
+    server = createServer(testConfig);
+
+    const firstPage = parseResult(await callTool(server, "b2_list_keys", { maxKeyCount: 1 }));
+    const secondPage = parseResult(
+      await callTool(server, "b2_list_keys", {
+        maxKeyCount: 1,
+        startApplicationKeyId: firstPage.nextApplicationKeyId,
+      }),
+    );
+
+    expect(firstPage.nextApplicationKeyId).toBe("key-page-two");
+    expect(secondPage.nextApplicationKeyId).toBeNull();
+    expect(listKeyBodies.map((body) => body.startApplicationKeyId ?? null)).toEqual([
+      null,
+      "key-page-two",
+    ]);
+    expect(JSON.stringify([firstPage, secondPage])).not.toContain("secret-page");
+    for (const key of [...firstPage.keys, ...secondPage.keys]) {
+      expect(key).not.toHaveProperty("applicationKey");
+      expect(key).not.toHaveProperty("masterApplicationKey");
+    }
+  });
 });
 
 describe("native SDK DTO boundaries", () => {

@@ -397,11 +397,11 @@ audit-policy expiry.
 
 The default deterministic gate must stay credential-free. Local direct Vitest
 selection skips live cases when B2 credentials are absent, but trusted hosted
-live jobs set `B2_REQUIRE_LIVE_TESTS=1`; with that flag set, missing or partial
-`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` credentials fail the live layer
-instead of reporting skipped tests as a pass.
+Vitest live-suite jobs set `B2_REQUIRE_LIVE_TESTS=1`; with that flag set,
+missing or partial `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` credentials
+fail the live layer instead of reporting skipped tests as a pass.
 
-For the 17 integration and request-shape contract tests, use the
+For the integration and request-shape contract suites, use the
 `live-b2-contract` GitHub Environment:
 
 - Buckets to pre-create: NONE. The tests create and delete their own run-owned
@@ -409,10 +409,13 @@ For the 17 integration and request-shape contract tests, use the
   with strict cleanup by the live B2 janitor.
 - Keys: one non-master B2 application key. Because it creates buckets, it cannot
   be scoped to a single bucket; it is account-wide. Capabilities:
-  `listBuckets`, `writeBuckets`, `deleteBuckets`, `listKeys`, `listFiles`,
-  `readFiles`, `writeFiles`, `deleteFiles`, `writeFileLegalHolds`,
-  `writeFileRetentions`, and `bypassGovernance`. Do not grant `writeKeys`,
-  `deleteKeys`, master-key access, or account-admin capabilities.
+  `bypassGovernance`, `deleteBuckets`, `deleteFiles`, `listBuckets`,
+  `listFiles`, `listKeys`, `readBucketEncryption`, `readBucketRetentions`,
+  `readBuckets`, `readFileLegalHolds`, `readFileRetentions`, `readFiles`,
+  `writeBucketEncryption`, `writeBucketNotifications`, `writeBucketRetentions`,
+  `writeBuckets`, `writeFileLegalHolds`, `writeFileRetentions`, and
+  `writeFiles`. Do not grant `writeKeys`, `deleteKeys`, master-key access, or
+  account-admin capabilities.
 - Secrets: `LIVE_B2_KEY_ID` and `LIVE_B2_KEY`, mapped by
   `.github/workflows/contract.yml` to `B2_APPLICATION_KEY_ID` and
   `B2_APPLICATION_KEY`.
@@ -476,10 +479,12 @@ using the deployed SHA after checking that the deployment environment is approve
 from a repository or organization variable and the SHA is reachable from
 protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
 because live credentials must not be exposed to PR-head code. Trusted runs set
-`B2_REQUIRE_LIVE_TESTS=1`, `B2_INTEGRATION_REQUIRE_CREDENTIALS=1`, or the smoke
-equivalent and fail loudly when credentials or required variables are absent; a
-skipped-only trusted run is not accepted as release evidence. The contract
-validation step and janitor both
+`B2_REQUIRE_LIVE_TESTS=1` and `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` for
+Vitest live-suite selection. Smoke uses its own credential scheme and fails
+loudly through the `Validate live B2 smoke environment` steps and
+`B2_MCP_REQUIRE_SMOKE_BUCKET=1`. Missing credentials or required variables fail
+trusted live jobs; a skipped-only trusted run is not accepted as release
+evidence. The contract validation step and janitor both
 require `B2_LIVE_TEST_ACCOUNT_ID` and refuse to proceed when the authorized
 account ID does not match that dedicated test-account allowlist. The protected
 live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26.

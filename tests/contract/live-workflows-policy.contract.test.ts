@@ -11,6 +11,11 @@ const { workflowJobBlock, yamlBlockForKey, yamlValuesForKey } = nodeRequire(
   workflowJobBlock: (text: string, jobName: string) => string | null;
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
+const { LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES, LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES } =
+  nodeRequire("../../scripts/lib/live-b2-capabilities.cjs") as {
+    LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES: readonly string[];
+    LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: readonly string[];
+  };
 const runtimePolicy = JSON.parse(readFileSync(join(root, "runtime-policy.json"), "utf8")) as {
   liveNodeMatrix: string[];
 };
@@ -73,6 +78,82 @@ function workflowStepBlock(text: string, stepName: string): string {
   if (start === -1) return "";
   const next = text.indexOf("\n      - name:", start + marker.length);
   return text.slice(start, next === -1 ? undefined : next);
+}
+
+const liveSuiteSources = [
+  "tests/live/b2.integration.live.test.ts",
+  "tests/live/request-shape.contract.live.test.ts",
+  "tests/live/support/contract-buckets.ts",
+  "scripts/lib/live-b2-contract.cjs",
+];
+
+const liveToolCapabilities: Record<string, readonly string[]> = {
+  b2_authorize_account: [],
+  b2_create_bucket: [
+    "readBucketEncryption",
+    "readBucketRetentions",
+    "writeBucketEncryption",
+    "writeBucketRetentions",
+    "writeBuckets",
+  ],
+  b2_delete_bucket: ["deleteBuckets", "readBucketEncryption", "readBucketRetentions"],
+  b2_largest_files: ["listFiles"],
+  b2_list_buckets: ["listBuckets", "readBucketEncryption", "readBucketRetentions"],
+  b2_list_group_members: [],
+  b2_list_groups: [],
+  b2_list_keys: ["listKeys"],
+  b2_set_bucket_notification_rules: ["writeBucketNotifications"],
+  b2_unfinished_uploads: ["listFiles"],
+  b2_update_bucket: [
+    "readBucketEncryption",
+    "readBucketRetentions",
+    "writeBucketEncryption",
+    "writeBucketRetentions",
+    "writeBuckets",
+  ],
+  b2_update_file_legal_hold: ["writeFileLegalHolds"],
+  b2_update_file_retention: ["bypassGovernance", "writeFileRetentions"],
+  s3_abort_multipart_upload: ["writeFiles"],
+  s3_copy_object: ["readFiles", "writeFiles"],
+  s3_create_multipart_upload: ["readFileLegalHolds", "readFileRetentions", "writeFiles"],
+  s3_delete_object: ["deleteFiles"],
+  s3_delete_objects: ["bypassGovernance", "deleteFiles"],
+  s3_get_bucket_location: ["readBuckets"],
+  s3_get_object: ["readFiles"],
+  s3_get_presigned_url: ["readFiles", "writeFiles"],
+  s3_head_bucket: ["listBuckets"],
+  s3_head_object: ["readFileLegalHolds", "readFileRetentions", "readFiles"],
+  s3_list_multipart_uploads: ["listFiles"],
+  s3_list_object_versions: ["listFiles", "readFileLegalHolds", "readFileRetentions"],
+  s3_list_objects_v2: ["listFiles"],
+  s3_presign_upload_part: ["writeFiles"],
+  s3_put_object: ["readFileLegalHolds", "readFileRetentions", "writeFiles"],
+};
+
+function liveSuiteToolNames(): string[] {
+  const names = new Set<string>();
+  for (const sourcePath of liveSuiteSources) {
+    const text = workflowText(sourcePath);
+    for (const match of text.matchAll(/["']((?:b2|s3)_[a-z0-9_]+)["']/g)) {
+      names.add(match[1]);
+    }
+  }
+  return [...names].sort();
+}
+
+function sortedUnique(values: Iterable<string>): string[] {
+  return [...new Set(values)].sort();
+}
+
+function documentedContractCapabilities(): string[] {
+  const testingDoc = workflowText("docs/TESTING.md");
+  const match =
+    /use the\s+`live-b2-contract` GitHub Environment:[\s\S]*?Capabilities:\s*([\s\S]*?)\. Do not grant/.exec(
+      testingDoc,
+    );
+  if (!match)
+    throw new Error("Could not locate live-b2-contract capability list in docs/TESTING.md");
+  return sortedUnique([...match[1].matchAll(/`([^`]+)`/g)].map((capability) => capability[1]));
 }
 
 describe("live secret workflow policy", () => {
@@ -211,18 +292,33 @@ describe("live secret workflow policy", () => {
     );
     const workflow = workflowText(".github/workflows/contract.yml");
     expect(workflow).toContain("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
-    expect(workflow).toContain(
-      'const requiredCapabilities = [\n            "bypassGovernance",\n            "deleteBuckets",',
-    );
-    expect(workflow).toContain('"writeFileRetentions",');
-    expect(workflow).not.toContain('"writeKeys"');
-    expect(workflow).not.toContain('"deleteKeys"');
+    expect(workflow).toContain("scripts/lib/live-b2-capabilities.cjs");
+    expect(workflow).toContain("LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES");
     const liveTests = [
       workflowText("tests/live/b2.integration.live.test.ts"),
       workflowText("tests/live/request-shape.contract.live.test.ts"),
     ].join("\n");
     expect(liveTests).toContain('mode: "governance"');
     expect(liveTests).not.toContain('mode: "compliance"');
+  });
+
+  it("keeps the live contract capability policy aligned with exercised live tools", () => {
+    const missingMappings = liveSuiteToolNames().filter((name) => !(name in liveToolCapabilities));
+    expect(missingMappings).toEqual([]);
+
+    const exercisedCapabilities = sortedUnique(
+      liveSuiteToolNames().flatMap((name) => liveToolCapabilities[name]),
+    );
+    expect(sortedUnique(LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES)).toEqual(exercisedCapabilities);
+    for (const forbidden of LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES) {
+      expect(LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES).not.toContain(forbidden);
+    }
+  });
+
+  it("documents the same live contract capability list used by workflow preflight", () => {
+    expect(documentedContractCapabilities()).toEqual(
+      sortedUnique(LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES),
+    );
   });
 
   it("runs the explicit live contract layer with B2 credentials", () => {
@@ -245,7 +341,7 @@ describe("live secret workflow policy", () => {
     expect(smokeJob).toContain(
       "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
     );
-    expect(smokeJob).toContain('B2_REQUIRE_LIVE_TESTS: "1"');
+    expect(smokeJob).not.toContain("B2_REQUIRE_LIVE_TESTS");
     expect(smokeJob).toContain(
       "MCP_URL B2_KEY_ID B2_KEY B2_APP_KEY_ID B2_APP_KEY B2_SMOKE_BUCKET B2_MCP_EXPECTED_TOOL_PROFILE B2_MCP_REQUIRE_SMOKE_BUCKET",
     );
