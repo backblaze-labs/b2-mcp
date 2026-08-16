@@ -12,6 +12,7 @@ import {
   protectedResourceMetadataUrl,
   resetOAuthVerifierCacheForTests,
   validatePreverifiedOAuthAuthInfo,
+  validateOAuthResourceServerConfiguration,
 } from "../../src/oauth-resource-server";
 import { logger } from "../../src/utils/logger";
 import { jwtClaims, jwksResponse, rsaPublicJwk, signedJwt } from "../support/oauth-jwks";
@@ -628,6 +629,24 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("refreshes JWKS after the cached document expires", async () => {
+    let now = 1000;
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=1" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksCacheMinTtlSeconds: 0 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => now,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "before-expiry" }));
+    now = 1002;
+    await verifier.verifyAccessToken(jwtFor({ client_id: "after-expiry" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects JWTs with invalid signatures", async () => {
     const verifier = new OAuthJwtVerifier({
       config: jwksOnlyConfig(),
@@ -801,6 +820,56 @@ describe("OAuthJwtVerifier", () => {
         endpointHost: "localhost:9000",
         endpointPath: "/oauth2/jwks",
       }),
+      "oauth.jwks.dependency_failed",
+    );
+  });
+
+  it("retries transient JWKS fetch failures before accepting a token", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ error: "busy" }, { status: 503 }))
+      .mockResolvedValueOnce(jwksResponse());
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksMaxRetries: 1, jwksRetryDelayMs: 1 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "retried-jwks-client" })),
+    ).resolves.toMatchObject({ clientId: "retried-jwks-client" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ dependency: "oauth_jwks", reason: "http_status", attempt: 1 }),
+      "oauth.jwks.dependency_failed",
+    );
+  });
+
+  it("opens the JWKS circuit after dependency failures", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () => Response.json({ error: "down" }, { status: 503 }));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({
+        jwksCircuitFailures: 1,
+        jwksCircuitOpenMs: 30_000,
+        jwksMaxRetries: 0,
+      }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "open-circuit-first" })),
+    ).rejects.toMatchObject({ reason: "open_circuit" });
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "open-circuit-second" })),
+    ).rejects.toMatchObject({ reason: "open_circuit" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ dependency: "oauth_jwks", reason: "open_circuit" }),
       "oauth.jwks.dependency_failed",
     );
   });
@@ -1105,6 +1174,15 @@ describe("validatePreverifiedOAuthAuthInfo", () => {
 });
 
 describe("OAuth resource metadata", () => {
+  it("requires a public URL or resource for OAuth metadata", () => {
+    expect(() =>
+      loadOAuthResourceServerConfig({
+        B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+        B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+      }),
+    ).toThrow(/B2_MCP_PUBLIC_URL.*B2_OAUTH_RESOURCE/);
+  });
+
   it("loads static configuration from an explicit env object", () => {
     const config = loadOAuthResourceServerConfig({
       B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
@@ -1135,6 +1213,29 @@ describe("OAuth resource metadata", () => {
       authorization_servers: [baseConfig.issuer],
       scopes_supported: ["b2:read", "b2:write", "b2:admin", "custom:report"],
     });
+  });
+
+  it("validates the current OAuth resource server configuration from env", () => {
+    try {
+      for (const [name, value] of Object.entries({
+        B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+        B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+        B2_OAUTH_ISSUER: baseConfig.issuer,
+        B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+        B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+        B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+        B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+        B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+        B2_OAUTH_RESOURCE: baseConfig.resource,
+        B2_OAUTH_AUDIENCE: baseConfig.audience,
+      })) {
+        vi.stubEnv(name, value);
+      }
+
+      expect(() => validateOAuthResourceServerConfiguration()).not.toThrow();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("loads JWKS-only static configuration without introspection credentials", () => {
