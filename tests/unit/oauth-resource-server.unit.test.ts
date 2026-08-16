@@ -1276,13 +1276,8 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects kid-less JWTs without checking every matching key", async () => {
-    const fetchMock = vi.fn(async () =>
-      jwksResponse([
-        { ...rsaPublicJwk, kid: "first-key" },
-        { ...rsaPublicJwk, kid: "second-key" },
-      ]),
-    );
+  it("rejects JWTs without a nonempty string kid", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse([rsaPublicJwk]));
     const verifier = new OAuthJwtVerifier({
       config: jwksOnlyConfig(),
       fetch: fetchMock as typeof fetch,
@@ -1292,7 +1287,10 @@ describe("OAuthJwtVerifier", () => {
     await expect(
       verifier.verifyAccessToken(jwtFor({ client_id: "kid-less" }, { kid: undefined })),
     ).rejects.toThrow(/signature/i);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "numeric-kid" }, { kid: 123 })),
+    ).rejects.toThrow(/signature/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not share verified token cache across verifier sources", async () => {

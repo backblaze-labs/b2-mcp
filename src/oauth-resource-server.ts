@@ -1401,12 +1401,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     return this.fetchJwks();
   }
 
-  private candidateKeys(
-    jwks: JwksDocument,
-    header: Record<string, unknown>,
-    algorithm: string,
-  ): JsonWebKey[] {
-    const kid = stringClaim(header.kid);
+  private candidateKeys(jwks: JwksDocument, algorithm: string, kid: string): JsonWebKey[] {
     return jwks.keys.filter((jwk) => jwkMatchesHeader(jwk, algorithm, kid));
   }
 
@@ -1449,21 +1444,21 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     parsed: ParsedJwt,
     algorithm: string,
   ): Promise<boolean> {
+    const kid = stringClaim(parsed.header.kid);
+    if (!kid) return false;
     const initial = await this.jwks(false);
-    const keys = this.candidateKeys(initial.jwks, parsed.header, algorithm);
-    if (!stringClaim(parsed.header.kid) && keys.length > 1) return false;
+    const keys = this.candidateKeys(initial.jwks, algorithm, kid);
     for (const jwk of keys) {
       if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
     }
     if (keys.length > 0) return false;
-    const kid = stringClaim(parsed.header.kid);
-    if (!kid || !initial.fromCache) return false;
+    if (!initial.fromCache) return false;
     const nowMs = this.nowMs();
     if (this.unresolvedKidCoolingDown(kid, algorithm, nowMs)) return false;
     if (!this.forcedRefreshAllowed(nowMs)) return false;
     const refreshed = await this.jwks(true);
     this.noteForcedRefresh(nowMs);
-    const refreshedKeys = this.candidateKeys(refreshed.jwks, parsed.header, algorithm);
+    const refreshedKeys = this.candidateKeys(refreshed.jwks, algorithm, kid);
     if (refreshedKeys.length > 1) return false;
     for (const jwk of refreshedKeys) {
       if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
