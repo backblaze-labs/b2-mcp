@@ -1,5 +1,4 @@
 import { createHmac, createSecretKey, randomBytes, type JsonWebKey } from "node:crypto";
-import { compactVerify, importJWK, type JWK } from "jose";
 import {
   OAuthError,
   OAuthErrorCode,
@@ -14,8 +13,32 @@ import {
   type OAuthProtectedResourceMetadata,
   type OAuthTokenVerifier,
 } from "@modelcontextprotocol/server";
+import {
+  OAuthDependencyError,
+  logOAuthDependencyFailure,
+  noteOAuthDependencyFailure,
+  runOAuthDependencyWithRetry,
+  type OAuthDependencyCircuitState,
+  type OAuthDependencyPolicy,
+} from "./oauth-dependency.js";
+import {
+  InvalidJwksError,
+  JwksKeyImportError,
+  asJwksDocument,
+  assertJwtHeader,
+  assertSupportedJwtAlgorithms,
+  jwkMatchesHeader,
+  jwksCacheKey,
+  jwksTtlSeconds,
+  parseJwt,
+  verifyJwtWithJwk,
+  type JwksDocument,
+  type ParsedJwt,
+} from "./oauth-jwt.js";
 import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
+
+export { OAuthDependencyError } from "./oauth-dependency.js";
 
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
 
@@ -57,11 +80,7 @@ export interface OAuthResourceServerCommonConfig {
   requiredScopes: string[];
   allowedSubjects: string[];
   allowedTokenTypes: string[];
-  allowedAlgorithms: string[];
-  allowedJwtAlgorithms: string[];
-  allowedJwtTypes: string[];
-  dangerouslyAllowInsecureIssuerUrl: boolean;
-  dangerouslyAllowUnauthenticatedIntrospection: boolean;
+  dangerouslyAllowInsecureIssuerUrl?: boolean;
   tokenCacheMaxEntries: number;
   tokenCacheTtlSeconds: number;
   tokenCacheSkewSeconds: number;
@@ -72,6 +91,7 @@ export interface OAuthIntrospectionVerifierConfig extends OAuthResourceServerCom
   introspectionClientId?: string;
   introspectionClientSecret?: string;
   introspectionBearerToken?: string;
+  allowedAlgorithms: string[];
   introspectionTimeoutMs: number;
   introspectionMaxRetries: number;
   introspectionRetryDelayMs: number;
@@ -81,6 +101,8 @@ export interface OAuthIntrospectionVerifierConfig extends OAuthResourceServerCom
 
 export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig {
   jwksUri: string;
+  allowedJwtAlgorithms: string[];
+  allowedJwtTypes: string[];
   jwksCacheTtlSeconds: number;
   jwksCacheMinTtlSeconds: number;
   jwksTimeoutMs: number;
@@ -106,8 +128,11 @@ type OAuthResourceServerLoadedConfig = OAuthResourceServerCommonConfig &
     keyof OAuthResourceServerCommonConfig | "introspectionEndpoint"
   > &
   Omit<OAuthJwtVerifierConfig, keyof OAuthResourceServerCommonConfig | "jwksUri"> & {
+    // The env loader builds one flat object so shared validation can run once,
+    // then narrows it to the public verifier-mode union before returning.
     introspectionEndpoint?: string;
     jwksUri?: string;
+    dangerouslyAllowUnauthenticatedIntrospection: boolean;
   };
 
 export type OAuthResourceServerConfig =
@@ -175,6 +200,7 @@ export function loadOAuthResourceServerConfig(
   const introspectionEndpoint = optionalEnv(env, "B2_OAUTH_INTROSPECTION_ENDPOINT");
   const jwksUri = optionalEnv(env, "B2_OAUTH_JWKS_URI");
   const allowedAlgorithmsEnv = optionalEnv(env, "B2_OAUTH_ALLOWED_ALGORITHMS");
+  const allowedJwtAlgorithmsEnv = optionalEnv(env, "B2_OAUTH_ALLOWED_JWT_ALGORITHMS");
   if (!introspectionEndpoint && !jwksUri) {
     throw new Error(
       "B2_OAUTH_INTROSPECTION_ENDPOINT or B2_OAUTH_JWKS_URI is required for OAuth token verification",
@@ -215,7 +241,7 @@ export function loadOAuthResourceServerConfig(
       value.toLowerCase(),
     ),
     allowedAlgorithms: csv(allowedAlgorithmsEnv, DEFAULT_ALLOWED_ALGORITHMS),
-    allowedJwtAlgorithms: csv(allowedAlgorithmsEnv, DEFAULT_ALLOWED_JWT_ALGORITHMS),
+    allowedJwtAlgorithms: csv(allowedJwtAlgorithmsEnv, DEFAULT_ALLOWED_JWT_ALGORITHMS),
     allowedJwtTypes: csv(env.B2_OAUTH_ALLOWED_JWT_TYPES, DEFAULT_ALLOWED_JWT_TYPES).map((value) =>
       value.toLowerCase(),
     ),
@@ -504,12 +530,15 @@ type VerifiedClaimsSource =
 
 function assertJwtDeploymentBinding(
   claims: Record<string, unknown>,
-  config: OAuthResourceServerConfig,
+  config: OAuthResourceServerCommonConfig,
 ): void {
-  const bound =
-    values(claims.aud).includes(config.audience) ||
-    values(claims.resource).includes(config.resource);
-  if (!bound) {
+  const audiences = values(claims.aud);
+  const resources = values(claims.resource);
+  const hasAudience = audiences.length > 0;
+  const hasResource = resources.length > 0;
+  const audienceAccepted = !hasAudience || audiences.includes(config.audience);
+  const resourceAccepted = !hasResource || resources.includes(config.resource);
+  if ((!hasAudience && !hasResource) || !audienceAccepted || !resourceAccepted) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token audience/resource is not accepted");
   }
 }
@@ -541,8 +570,11 @@ function authInfoFromVerifiedClaims(
   assertTokenType(claims, config.allowedTokenTypes);
   const acceptedAlgorithm =
     verification.source === "introspection"
-      ? assertTokenAlgorithm(claims, config.allowedAlgorithms)
-      : assertAllowedAlgorithm(verification.algorithm, config.allowedJwtAlgorithms);
+      ? assertTokenAlgorithm(claims, requireIntrospectionConfig(config).allowedAlgorithms)
+      : assertAllowedAlgorithm(
+          verification.algorithm,
+          requireJwtConfig(config).allowedJwtAlgorithms,
+        );
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
   assertDeploymentScope(scopes);
   assertRequiredScopes(scopes, config.requiredScopes);
@@ -570,169 +602,7 @@ function authInfoFromVerifiedClaims(
   };
 }
 
-export class OAuthDependencyError extends Error {
-  readonly retryAfterSeconds?: number;
-
-  constructor(
-    message: string,
-    readonly reason: string,
-    readonly dependencyStatus?: number,
-    retryAfterSeconds?: number,
-  ) {
-    super(message);
-    this.name = "OAuthDependencyError";
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-interface OAuthDependencyCircuitState {
-  failures: number;
-  openedUntilMs: number;
-}
-
-// Keep the public verifier exports in this module while sharing retry, circuit,
-// and dependency logging policy so introspection and JWKS behavior cannot drift.
-interface OAuthDependencyPolicy {
-  dependency: "oauth_introspection" | "oauth_jwks";
-  logMessage: "oauth.introspection.dependency_failed" | "oauth.jwks.dependency_failed";
-  endpoint: string;
-  timeoutMs: number;
-  maxRetries: number;
-  retryDelayMs: number;
-  circuitFailures: number;
-  circuitOpenMs: number;
-  circuitKey: string;
-  circuits: Map<string, OAuthDependencyCircuitState>;
-  nowMs: () => number;
-  signal?: AbortSignal;
-}
-
-function logOAuthDependencyFailure(
-  policy: OAuthDependencyPolicy,
-  reason: string,
-  status?: number,
-  attempt?: number,
-): void {
-  const endpoint = new URL(policy.endpoint);
-  logger.warn(
-    {
-      dependency: policy.dependency,
-      reason,
-      status,
-      attempt,
-      maxAttempts: policy.maxRetries + 1,
-      endpointHost: endpoint.host,
-      endpointPath: endpoint.pathname,
-      timeoutMs: policy.timeoutMs,
-    },
-    policy.logMessage,
-  );
-}
-
-function retryAfterSeconds(policy: OAuthDependencyPolicy, nowMs: number): number | undefined {
-  const state = policy.circuits.get(policy.circuitKey);
-  if (!state || state.openedUntilMs <= nowMs) return undefined;
-  return Math.max(1, Math.ceil((state.openedUntilMs - nowMs) / 1000));
-}
-
-function assertOAuthDependencyCircuitClosed(policy: OAuthDependencyPolicy): void {
-  const retryAfter = retryAfterSeconds(policy, policy.nowMs());
-  if (retryAfter === undefined) return;
-  logOAuthDependencyFailure(policy, "open_circuit");
-  throw new OAuthDependencyError(
-    "OAuth authorization server unavailable",
-    "open_circuit",
-    undefined,
-    retryAfter,
-  );
-}
-
-function noteOAuthDependencySuccess(policy: OAuthDependencyPolicy): void {
-  policy.circuits.delete(policy.circuitKey);
-}
-
-function noteOAuthDependencyFailure(
-  policy: OAuthDependencyPolicy,
-  error: OAuthDependencyError,
-): OAuthDependencyError {
-  const nowMs = policy.nowMs();
-  const state = policy.circuits.get(policy.circuitKey) ?? { failures: 0, openedUntilMs: 0 };
-  const failures = state.failures + 1;
-  const openedUntilMs =
-    failures >= policy.circuitFailures ? nowMs + policy.circuitOpenMs : state.openedUntilMs;
-  policy.circuits.set(policy.circuitKey, { failures, openedUntilMs });
-  if (openedUntilMs > nowMs) {
-    logOAuthDependencyFailure(policy, "open_circuit", error.dependencyStatus);
-    return new OAuthDependencyError(
-      "OAuth authorization server unavailable",
-      "open_circuit",
-      error.dependencyStatus,
-      Math.max(1, Math.ceil((openedUntilMs - nowMs) / 1000)),
-    );
-  }
-  return error;
-}
-
-function isRetryableOAuthDependencyError(error: OAuthDependencyError): boolean {
-  return (
-    error.reason === "timeout" || error.reason === "network_error" || error.reason === "http_status"
-  );
-}
-
-async function oauthDependencyRetryDelay(policy: OAuthDependencyPolicy): Promise<void> {
-  if (policy.retryDelayMs <= 0) return;
-  if (policy.signal?.aborted) {
-    throw new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted");
-  }
-  await new Promise<void>((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout>;
-    function cleanup() {
-      policy.signal?.removeEventListener("abort", abort);
-    }
-    function abort() {
-      clearTimeout(timer);
-      cleanup();
-      reject(new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"));
-    }
-    timer = setTimeout(() => {
-      cleanup();
-      resolve();
-    }, policy.retryDelayMs);
-    policy.signal?.addEventListener("abort", abort, { once: true });
-  });
-}
-
-async function runOAuthDependencyWithRetry<T>(
-  policy: OAuthDependencyPolicy,
-  attemptFn: () => Promise<T>,
-  unexpectedError: () => Error,
-): Promise<T> {
-  assertOAuthDependencyCircuitClosed(policy);
-  const maxAttempts = policy.maxRetries + 1;
-  let lastDependencyError: OAuthDependencyError | null = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      const result = await attemptFn();
-      noteOAuthDependencySuccess(policy);
-      return result;
-    } catch (error) {
-      if (error instanceof OAuthError) throw error;
-      if (!(error instanceof OAuthDependencyError)) throw unexpectedError();
-      if (error.reason === "request_aborted") throw error;
-      lastDependencyError = error;
-      logOAuthDependencyFailure(policy, error.reason, error.dependencyStatus, attempt);
-      if (attempt >= maxAttempts || !isRetryableOAuthDependencyError(error)) break;
-      await oauthDependencyRetryDelay(policy);
-    }
-  }
-  throw noteOAuthDependencyFailure(
-    policy,
-    lastDependencyError ??
-      new OAuthDependencyError("OAuth authorization server unavailable", "network_error"),
-  );
-}
-
-interface IntrospectionCacheEntry {
+interface TokenVerificationCacheEntry {
   authInfo: AuthInfo;
   expiresAtMs: number;
   lastAccessMs: number;
@@ -749,7 +619,7 @@ interface JwksLookupResult {
   fromCache: boolean;
 }
 
-const introspectionCache = new Map<string, IntrospectionCacheEntry>();
+const tokenVerificationCache = new Map<string, TokenVerificationCacheEntry>();
 const introspectionCircuits = new Map<string, OAuthDependencyCircuitState>();
 const jwksCache = new Map<string, JwksCacheEntry>();
 const jwksCircuits = new Map<string, OAuthDependencyCircuitState>();
@@ -784,9 +654,9 @@ function configCacheKey(config: OAuthResourceServerConfig): string {
     introspectionClientId: introspectionClientId ?? "",
     introspectionAuth: introspectionBearerToken ? "bearer" : "client",
     allowedTokenTypes: config.allowedTokenTypes,
-    allowedAlgorithms: config.allowedAlgorithms,
-    allowedJwtAlgorithms: config.allowedJwtAlgorithms,
-    allowedJwtTypes: config.allowedJwtTypes,
+    allowedAlgorithms: hasIntrospectionConfig(config) ? config.allowedAlgorithms : [],
+    allowedJwtAlgorithms: hasJwtConfig(config) ? config.allowedJwtAlgorithms : [],
+    allowedJwtTypes: hasJwtConfig(config) ? config.allowedJwtTypes : [],
     allowedSubjects: config.allowedSubjects,
     requiredScopes: config.requiredScopes,
     jwtClockSkewSeconds: "jwtClockSkewSeconds" in config ? config.jwtClockSkewSeconds : undefined,
@@ -813,15 +683,15 @@ function cloneAuthInfo(authInfo: AuthInfo): AuthInfo {
 }
 
 function cachedAuthInfo(key: string, nowMs: number): AuthInfo | null {
-  const entry = introspectionCache.get(key);
+  const entry = tokenVerificationCache.get(key);
   if (!entry) return null;
   if (entry.expiresAtMs <= nowMs) {
-    introspectionCache.delete(key);
+    tokenVerificationCache.delete(key);
     return null;
   }
   entry.lastAccessMs = nowMs;
-  introspectionCache.delete(key);
-  introspectionCache.set(key, entry);
+  tokenVerificationCache.delete(key);
+  tokenVerificationCache.set(key, entry);
   return cloneAuthInfo(entry.authInfo);
 }
 
@@ -851,12 +721,12 @@ function rememberAuthInfo(
   const ttlExpiresAtMs = nowMs + config.tokenCacheTtlSeconds * 1000;
   const expiresAtMs = Math.min(tokenExpiresAtMs, ttlExpiresAtMs);
   if (expiresAtMs <= nowMs) return;
-  introspectionCache.delete(key);
-  if (introspectionCache.size >= config.tokenCacheMaxEntries) {
-    const oldest = introspectionCache.keys().next().value;
-    if (oldest) introspectionCache.delete(oldest);
+  tokenVerificationCache.delete(key);
+  if (tokenVerificationCache.size >= config.tokenCacheMaxEntries) {
+    const oldest = tokenVerificationCache.keys().next().value;
+    if (oldest) tokenVerificationCache.delete(oldest);
   }
-  introspectionCache.set(key, {
+  tokenVerificationCache.set(key, {
     authInfo: cloneAuthInfo(authInfo),
     expiresAtMs,
     lastAccessMs: nowMs,
@@ -864,7 +734,7 @@ function rememberAuthInfo(
 }
 
 export function resetOAuthVerifierCacheForTests(): void {
-  introspectionCache.clear();
+  tokenVerificationCache.clear();
   introspectionCircuits.clear();
   jwksCache.clear();
   jwksCircuits.clear();
@@ -908,7 +778,7 @@ function requireJwtConfig(config: OAuthResourceServerConfig): OAuthJwtVerifierCo
   ensureHttpsOrLocalhost(
     config.jwksUri,
     "B2_OAUTH_JWKS_URI",
-    config.dangerouslyAllowInsecureIssuerUrl,
+    config.dangerouslyAllowInsecureIssuerUrl === true,
   );
   return config;
 }
@@ -1043,178 +913,6 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
   }
 }
 
-interface ParsedJwt {
-  header: Record<string, unknown>;
-  claims: Record<string, unknown>;
-  signingInput: string;
-  signature: Uint8Array;
-}
-
-interface JwksDocument {
-  keys: JsonWebKey[];
-}
-
-function base64UrlToBytes(value: string): Uint8Array {
-  if (!/^[A-Za-z0-9_-]+$/.test(value) || value.length % 4 === 1) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
-  }
-  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
-  try {
-    const decoded = Uint8Array.from(Buffer.from(padded, "base64"));
-    const encoded = Buffer.from(decoded)
-      .toString("base64")
-      .replace(/=/g, "")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_");
-    if (encoded !== value) {
-      throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
-    }
-    return decoded;
-  } catch {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
-  }
-}
-
-function decodeJwtJsonSegment(segment: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(new TextDecoder().decode(base64UrlToBytes(segment)));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
-    }
-    return parsed as Record<string, unknown>;
-  } catch (error) {
-    if (error instanceof OAuthError) throw error;
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
-  }
-}
-
-function parseJwt(token: string): ParsedJwt {
-  const parts = token.split(".");
-  if (parts.length !== 3 || parts.some((part) => part.length === 0)) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Malformed JWT access token");
-  }
-  return {
-    header: decodeJwtJsonSegment(parts[0]),
-    claims: decodeJwtJsonSegment(parts[1]),
-    signingInput: `${parts[0]}.${parts[1]}`,
-    signature: base64UrlToBytes(parts[2]),
-  };
-}
-
-function assertJwtHeader(header: Record<string, unknown>, config: OAuthJwtVerifierConfig): string {
-  const algorithm = stringClaim(header.alg);
-  if (!algorithm) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
-  }
-  if (header.crit !== undefined && (!Array.isArray(header.crit) || header.crit.length > 0)) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Unsupported JWT critical header");
-  }
-  const tokenType = stringClaim(header.typ)?.toLowerCase();
-  if (!tokenType || !config.allowedJwtTypes.includes(tokenType)) {
-    const received = tokenType ? `'${tokenType}'` : "(missing)";
-    throw new OAuthError(
-      OAuthErrorCode.InvalidToken,
-      `Unsupported JWT type ${received}; set B2_OAUTH_ALLOWED_JWT_TYPES to accept it`,
-    );
-  }
-  return algorithm;
-}
-
-function jwksCacheKey(config: OAuthResourceServerConfig): string {
-  const jwksUri = "jwksUri" in config ? config.jwksUri : undefined;
-  return JSON.stringify({
-    issuer: config.issuer,
-    jwksUri: jwksUri ?? "",
-    allowedJwtAlgorithms: config.allowedJwtAlgorithms,
-  });
-}
-
-function jwksTtlSeconds(
-  response: Response,
-  fallbackSeconds: number,
-  minimumSeconds: number,
-): number {
-  const floor = Math.min(fallbackSeconds, minimumSeconds);
-  const cacheControl = response.headers.get("cache-control") ?? "";
-  if (/(?:^|,)\s*no-store\s*(?:,|$)/i.test(cacheControl)) return floor;
-  const maxAge = /(?:^|,)\s*max-age=(\d+)\s*(?:,|$)/i.exec(cacheControl)?.[1];
-  if (!maxAge) return fallbackSeconds;
-  return Math.max(floor, Math.min(fallbackSeconds, Number(maxAge)));
-}
-
-function asJwksDocument(value: unknown): JwksDocument {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new OAuthDependencyError("OAuth authorization server unavailable", "invalid_jwks");
-  }
-  const record = value as Record<string, unknown>;
-  if (!Array.isArray(record.keys)) {
-    throw new OAuthDependencyError("OAuth authorization server unavailable", "invalid_jwks");
-  }
-  const keys = record.keys.filter(
-    (key): key is JsonWebKey => !!key && typeof key === "object" && !Array.isArray(key),
-  );
-  return { keys };
-}
-
-interface JwtAlgorithmDescriptor {
-  keyMatches(jwk: JsonWebKey): boolean;
-}
-
-// Only asymmetric signature algorithms are accepted: no HMAC family, so a JWT
-// can never be verified with an RSA/EC public key mistaken for a shared secret.
-// jose performs the JWK import and signature verification (see verifyJwtWithJwk).
-const SUPPORTED_JWT_ALGORITHMS: Record<string, JwtAlgorithmDescriptor> = {
-  RS256: { keyMatches: (jwk) => jwk.kty === "RSA" },
-  ES256: { keyMatches: (jwk) => jwk.kty === "EC" && jwk.crv === "P-256" },
-  EdDSA: { keyMatches: (jwk) => jwk.kty === "OKP" && !!jwk.crv?.startsWith("Ed") },
-};
-
-function supportedJwtAlgorithm(algorithm: string): JwtAlgorithmDescriptor {
-  const descriptor = SUPPORTED_JWT_ALGORITHMS[algorithm];
-  if (!descriptor) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not supported");
-  }
-  return descriptor;
-}
-
-function assertSupportedJwtAlgorithms(allowedAlgorithms: readonly string[]): void {
-  if (allowedAlgorithms.length === 0) {
-    throw new Error("B2_OAUTH_ALLOWED_ALGORITHMS must include at least one JWT algorithm");
-  }
-  for (const algorithm of allowedAlgorithms) {
-    if (!SUPPORTED_JWT_ALGORITHMS[algorithm]) {
-      throw new Error(
-        `B2_OAUTH_ALLOWED_ALGORITHMS includes unsupported JWT algorithm ${algorithm}`,
-      );
-    }
-  }
-}
-
-function jwkMatchesHeader(jwk: JsonWebKey, algorithm: string, kid: string | undefined): boolean {
-  const key = jwk as JsonWebKey & { alg?: string; key_ops?: string[]; kid?: string; use?: string };
-  if (kid && key.kid !== kid) return false;
-  if (key.use && key.use !== "sig") return false;
-  if (key.key_ops && !key.key_ops.includes("verify")) return false;
-  if (key.alg && key.alg !== algorithm) return false;
-  return supportedJwtAlgorithm(algorithm).keyMatches(jwk);
-}
-
-async function verifyJwtWithJwk(
-  token: string,
-  algorithm: string,
-  jwk: JsonWebKey,
-): Promise<boolean> {
-  try {
-    const key = await importJWK(jwk as JWK, algorithm);
-    await compactVerify(token, key, { algorithms: [algorithm] });
-    return true;
-  } catch (error) {
-    if (error instanceof OAuthDependencyError || error instanceof OAuthError) throw error;
-    return false;
-  }
-}
-
 export class OAuthJwtVerifier implements OAuthTokenVerifier {
   private readonly config: OAuthJwtVerifierConfig;
   private readonly fetchImpl: FetchLike;
@@ -1304,6 +1002,31 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     logOAuthDependencyFailure(this.dependencyPolicy(), reason, status, attempt);
   }
 
+  private noteJwksDependencyFailure(error: OAuthDependencyError): OAuthDependencyError {
+    this.logDependencyFailure(error.reason, error.dependencyStatus);
+    return noteOAuthDependencyFailure(this.dependencyPolicy(), error);
+  }
+
+  private logKidResolutionMiss(
+    reason: "forced_refresh_cooldown" | "kid_not_in_jwks",
+    kid: string,
+    algorithm: string,
+  ): void {
+    const endpoint = new URL(this.jwksUri());
+    logger.warn(
+      {
+        dependency: "oauth_jwks",
+        reason,
+        endpointHost: endpoint.host,
+        endpointPath: endpoint.pathname,
+        kidHash: tokenLabel(kid),
+        algorithm,
+        cooldownMs: this.config.jwksRefreshCooldownMs,
+      },
+      "oauth.jwks.kid_unresolved",
+    );
+  }
+
   private async fetchJwksAttempt(): Promise<JwksDocument> {
     const uri = this.jwksUri();
     try {
@@ -1337,6 +1060,9 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
       return jwks;
     } catch (error) {
       if (error instanceof OAuthError || error instanceof OAuthDependencyError) throw error;
+      if (error instanceof InvalidJwksError) {
+        throw new OAuthDependencyError("OAuth authorization server unavailable", "invalid_jwks");
+      }
       const reason =
         error instanceof Error && /abort|timeout/i.test(`${error.name} ${error.message}`)
           ? "timeout"
@@ -1449,22 +1175,50 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     const initial = await this.jwks(false);
     const keys = this.candidateKeys(initial.jwks, algorithm, kid);
     for (const jwk of keys) {
-      if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
+      if (await this.verifyJwtCandidate(token, algorithm, jwk)) return true;
     }
     if (keys.length > 0) return false;
-    if (!initial.fromCache) return false;
+    if (!initial.fromCache) {
+      this.logKidResolutionMiss("kid_not_in_jwks", kid, algorithm);
+      return false;
+    }
     const nowMs = this.nowMs();
-    if (this.unresolvedKidCoolingDown(kid, algorithm, nowMs)) return false;
-    if (!this.forcedRefreshAllowed(nowMs)) return false;
+    if (this.unresolvedKidCoolingDown(kid, algorithm, nowMs)) {
+      this.logKidResolutionMiss("forced_refresh_cooldown", kid, algorithm);
+      return false;
+    }
+    if (!this.forcedRefreshAllowed(nowMs)) {
+      this.logKidResolutionMiss("forced_refresh_cooldown", kid, algorithm);
+      return false;
+    }
     const refreshed = await this.jwks(true);
     this.noteForcedRefresh(nowMs);
     const refreshedKeys = this.candidateKeys(refreshed.jwks, algorithm, kid);
     if (refreshedKeys.length > 1) return false;
     for (const jwk of refreshedKeys) {
-      if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
+      if (await this.verifyJwtCandidate(token, algorithm, jwk)) return true;
     }
+    this.logKidResolutionMiss("kid_not_in_jwks", kid, algorithm);
     this.rememberUnresolvedKid(kid, algorithm, nowMs);
     return false;
+  }
+
+  private async verifyJwtCandidate(
+    token: string,
+    algorithm: string,
+    jwk: JsonWebKey,
+  ): Promise<boolean> {
+    try {
+      return await verifyJwtWithJwk(token, algorithm, jwk);
+    } catch (error) {
+      if (error instanceof JwksKeyImportError) {
+        throw this.noteJwksDependencyFailure(
+          new OAuthDependencyError("OAuth authorization server unavailable", "invalid_jwks_key"),
+        );
+      }
+      if (error instanceof OAuthDependencyError) throw this.noteJwksDependencyFailure(error);
+      throw error;
+    }
   }
 }
 
@@ -1475,6 +1229,8 @@ export class OAuthBearerTokenVerifier implements OAuthTokenVerifier {
 
   constructor(options: OAuthBearerTokenVerifierOptions = {}) {
     this.config = options.config ?? loadOAuthResourceServerConfig();
+    // In dual mode this verifier is constructed only to fail fast on JWKS/JWT
+    // config errors; introspection remains the only runtime verifier below.
     this.jwtVerifier = hasJwtConfig(this.config)
       ? new OAuthJwtVerifier({ ...options, config: this.config })
       : null;
@@ -1575,7 +1331,10 @@ export function validatePreverifiedOAuthAuthInfo(
   requireMatch(extra.resource ?? authInfo.resource?.href, config.resource, "resource");
   assertTimeWindow({ exp: authInfo.expiresAt, nbf: extra.nbf }, nowSeconds());
   assertTokenType(extra, config.allowedTokenTypes);
-  assertTokenAlgorithm(extra, config.allowedAlgorithms);
+  assertTokenAlgorithm(
+    extra,
+    hasIntrospectionConfig(config) ? config.allowedAlgorithms : DEFAULT_ALLOWED_ALGORITHMS,
+  );
   assertDeploymentScope(authInfo.scopes);
   assertRequiredScopes(authInfo.scopes, config.requiredScopes);
   assertAllowedSubject(extra, issuer, config.allowedSubjects, "introspection");

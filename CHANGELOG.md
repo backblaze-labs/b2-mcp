@@ -28,7 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
-  other supported algorithms with `B2_OAUTH_ALLOWED_ALGORITHMS`.
+  other supported algorithms with `B2_OAUTH_ALLOWED_JWT_ALGORITHMS`, while
+  `B2_OAUTH_ALLOWED_ALGORITHMS` keeps its existing introspection `alg`-claim
+  semantics.
+- OAuth introspection now enforces `B2_OAUTH_REQUIRED_SCOPES` consistently with
+  JWKS and preverified-token validation.
 - Documented the exported OAuth config TypeScript surface change: token-cache
   fields now use `tokenCache*` names and `OAuthResourceServerConfig` models
   verifier-specific introspection or JWKS modes. The legacy

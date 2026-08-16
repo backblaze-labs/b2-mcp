@@ -930,6 +930,24 @@ describe("OAuthJwtVerifier", () => {
         jwtFor({ client_id: "wrong-claim-resource", aud: undefined, resource: config.audience }),
       ),
     ).rejects.toThrow(/audience\/resource/i);
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({
+          client_id: "audience-correct-resource-wrong",
+          aud: config.audience,
+          resource: "http://localhost:3000/other-resource",
+        }),
+      ),
+    ).rejects.toThrow(/audience\/resource/i);
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({
+          client_id: "resource-correct-audience-wrong",
+          aud: "http://localhost:3000/other-audience",
+          resource: config.resource,
+        }),
+      ),
+    ).rejects.toThrow(/audience\/resource/i);
   });
 
   it("applies bounded JWT clock skew to exp, nbf, and iat", async () => {
@@ -1106,6 +1124,24 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("reports malformed candidate JWKS keys as dependency failures", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const malformedKey = { ...rsaPublicJwk, n: undefined };
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksCircuitFailures: 5, jwksMaxRetries: 0 }),
+      fetch: vi.fn(async () => jwksResponse([malformedKey])) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toMatchObject({
+      reason: "invalid_jwks_key",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ dependency: "oauth_jwks", reason: "invalid_jwks_key" }),
+      "oauth.jwks.dependency_failed",
+    );
+  });
+
   it.each([
     ["invalid_jwks", async () => Response.json({ keys: "not-array" })],
     [
@@ -1189,7 +1225,7 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps a minimum JWKS cache TTL for no-store responses", async () => {
+  it("honors no-store JWKS responses instead of serving them from cache", async () => {
     const fetchMock = vi.fn(async () =>
       jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "no-store" } }),
     );
@@ -1202,7 +1238,69 @@ describe("OAuthJwtVerifier", () => {
     await verifier.verifyAccessToken(jwtFor({ client_id: "first-no-store" }));
     await verifier.verifyAccessToken(jwtFor({ client_id: "second-no-store" }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not use unmarked JWKS keys as signing keys", async () => {
+    const unmarkedKey = (({ use: _use, key_ops: _keyOps, alg: _alg, ...key }) => key)(rsaPublicJwk);
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse([unmarkedKey])) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toThrow(/signature/i);
+  });
+
+  it("logs unresolved kids that are absent from a freshly fetched JWKS", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse([rsaPublicJwk])) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-kid" }, { kid: "missing-key" })),
+    ).rejects.toThrow(/signature/i);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dependency: "oauth_jwks",
+        reason: "kid_not_in_jwks",
+        kidHash: expect.any(String),
+      }),
+      "oauth.jwks.kid_unresolved",
+    );
+  });
+
+  it("logs when JWKS forced refresh is suppressed by cooldown", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksRefreshCooldownMs: 30_000 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-refresh-cooldown" }));
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-one" }, { kid: "missing-one" })),
+    ).rejects.toThrow(/signature/i);
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-two" }, { kid: "missing-two" })),
+    ).rejects.toThrow(/signature/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dependency: "oauth_jwks",
+        reason: "forced_refresh_cooldown",
+        kidHash: expect.any(String),
+      }),
+      "oauth.jwks.kid_unresolved",
+    );
   });
 
   it("bounds JWKS refreshes for repeated unknown kid tokens", async () => {
@@ -1503,8 +1601,13 @@ describe("OAuth resource metadata", () => {
 
     expect(config.requiredScopes).toEqual(["b2:read", "custom:report"]);
     expect(config.allowedSubjects).toEqual(["user-123", "https://issuer.example/#user-456"]);
-    expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
-    expect(config.allowedJwtAlgorithms).toEqual(["RS256", "ES256"]);
+    expect("allowedAlgorithms" in config ? config.allowedAlgorithms : undefined).toEqual([
+      "RS256",
+      "ES256",
+    ]);
+    expect("allowedJwtAlgorithms" in config ? config.allowedJwtAlgorithms : undefined).toEqual([
+      "RS256",
+    ]);
     expect("introspectionTimeoutMs" in config && config.introspectionTimeoutMs).toBe(2500);
     expect(config.tokenCacheTtlSeconds).toBe(120);
     expect("jwksUri" in config ? config.jwksUri : undefined).toBeUndefined();
@@ -1556,12 +1659,47 @@ describe("OAuth resource metadata", () => {
     expect(
       "introspectionEndpoint" in config ? config.introspectionEndpoint : undefined,
     ).toBeUndefined();
-    expect(config.jwksUri).toBe("http://localhost:9000/oauth2/jwks");
-    expect(config.allowedAlgorithms).toEqual(["RS256", "ES256", "EdDSA"]);
-    expect(config.allowedJwtAlgorithms).toEqual(["RS256"]);
+    expect("jwksUri" in config ? config.jwksUri : undefined).toBe(
+      "http://localhost:9000/oauth2/jwks",
+    );
+    expect("allowedAlgorithms" in config ? config.allowedAlgorithms : undefined).toEqual([
+      "RS256",
+      "ES256",
+      "EdDSA",
+    ]);
+    expect("allowedJwtAlgorithms" in config ? config.allowedJwtAlgorithms : undefined).toEqual([
+      "RS256",
+    ]);
     expect("jwksCacheTtlSeconds" in config && config.jwksCacheTtlSeconds).toBe(45);
     expect("jwksCacheMinTtlSeconds" in config && config.jwksCacheMinTtlSeconds).toBe(15);
     expect("jwtClockSkewSeconds" in config && config.jwtClockSkewSeconds).toBe(30);
+  });
+
+  it("loads JWT algorithm policy separately from introspection algorithms", () => {
+    const config = loadOAuthResourceServerConfig({
+      B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+      B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+      B2_OAUTH_ISSUER: baseConfig.issuer,
+      B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+      B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+      B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+      B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+      B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+      B2_OAUTH_JWKS_URI: "http://localhost:9000/oauth2/jwks",
+      B2_OAUTH_RESOURCE: baseConfig.resource,
+      B2_OAUTH_AUDIENCE: baseConfig.audience,
+      B2_OAUTH_ALLOWED_ALGORITHMS: "RS256,ES256,EdDSA",
+      B2_OAUTH_ALLOWED_JWT_ALGORITHMS: "RS256",
+    });
+
+    expect("allowedAlgorithms" in config ? config.allowedAlgorithms : undefined).toEqual([
+      "RS256",
+      "ES256",
+      "EdDSA",
+    ]);
+    expect("allowedJwtAlgorithms" in config ? config.allowedJwtAlgorithms : undefined).toEqual([
+      "RS256",
+    ]);
   });
 
   it("rejects JWKS configuration with unsupported allowed algorithms", () => {
@@ -1575,7 +1713,7 @@ describe("OAuth resource metadata", () => {
         B2_OAUTH_JWKS_URI: "http://localhost:9000/oauth2/jwks",
         B2_OAUTH_RESOURCE: baseConfig.resource,
         B2_OAUTH_AUDIENCE: baseConfig.audience,
-        B2_OAUTH_ALLOWED_ALGORITHMS: "RS512",
+        B2_OAUTH_ALLOWED_JWT_ALGORITHMS: "RS512",
       }),
     ).toThrow(/unsupported JWT algorithm RS512/);
   });
@@ -1659,7 +1797,9 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
     });
 
-    expect(config.dangerouslyAllowUnauthenticatedIntrospection).toBe(true);
+    expect("introspectionEndpoint" in config ? config.introspectionEndpoint : undefined).toBe(
+      baseConfig.introspectionEndpoint,
+    );
   });
 
   it("returns an SDK bearer challenge for missing Authorization", async () => {

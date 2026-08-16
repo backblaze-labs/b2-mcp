@@ -121,9 +121,15 @@ configured, introspection remains authoritative so authorization-server
 revocation and JWT-shaped opaque tokens behave the same during rolling
 deploys. JWKS-only mode validates signatures and claims locally, caches and
 coalesces JWKS fetches, rate-limits forced key-refresh attempts, and cannot
-observe revocation before JWT expiry. A Cloudflare Access or OAuth Provider
-integration may run before the adapter only if it converts a verified identity
-into MCP `AuthInfo`. Never trust public identity headers from the internet.
+observe revocation before JWT expiry. `B2_OAUTH_ALLOWED_ALGORITHMS` remains the
+introspection `alg` allowlist; use `B2_OAUTH_ALLOWED_JWT_ALGORITHMS` to opt the
+local JWT verifier into `ES256` or `EdDSA`. Keep old and new signing keys
+overlapped in JWKS for at least `B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS`, because
+unknown-`kid` forced refresh is cooldown-limited and logged as
+`oauth.jwks.kid_unresolved` when suppressed. A Cloudflare Access or OAuth
+Provider integration may run before the adapter only if it converts a verified
+identity into MCP `AuthInfo`. Never trust public identity headers from the
+internet.
 
 ## Health Checks
 

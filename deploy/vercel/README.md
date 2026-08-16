@@ -120,21 +120,29 @@ configure introspection alongside JWKS when immediate revocation is required.
 JWKS verification uses the `jose` library to check the JWT signature against
 the issuer's published keys, caches the JWKS for
 `B2_OAUTH_JWKS_CACHE_TTL_SECONDS` with a minimum floor from
-`B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS`, coalesces concurrent fetches, uses a
-circuit breaker, and rate-limits forced refresh for normal key rotation.
+`B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS` unless the issuer sends `no-store`,
+coalesces concurrent fetches, uses a circuit breaker, and rate-limits forced
+refresh for normal key rotation. Keep old and new signing keys overlapped in
+the issuer JWKS for at least `B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS`; an unknown
+`kid` can otherwise be rejected for that bounded cooldown window, and the
+adapter logs `oauth.jwks.kid_unresolved` when refresh is suppressed.
 The adapter additionally checks:
 
-- active token response
+- active token response for introspection only
 - exact `iss`
 - exact `resource` and `aud` for introspection
-- JWT `aud` or `resource` binding to this deployment
+- JWT `aud` and `resource` binding when present; at least one must bind to this
+  deployment
 - `exp`, `nbf`, and JWT `iat` with bounded `B2_OAUTH_JWT_CLOCK_SKEW_SECONDS`
 - token type, when returned
 - JWT header `typ`, defaulting to RFC 9068 access-token types (`at+jwt`); an
-  issuer that omits `typ` or sends a different value needs
-  `B2_OAUTH_ALLOWED_JWT_TYPES` set to accept it
-- token signing algorithm from the JWT header or introspection `alg`,
-  `jwt_alg`, or `token_alg`, matched against `B2_OAUTH_ALLOWED_ALGORITHMS`
+  issuer that omits `typ` or sends a different value such as Azure AD or
+  Cognito `JWT`, or Keycloak `Bearer`, needs `B2_OAUTH_ALLOWED_JWT_TYPES` set
+  to accept it
+- introspection `alg`, `jwt_alg`, or `token_alg`, matched against
+  `B2_OAUTH_ALLOWED_ALGORITHMS`
+- JWT signing algorithm from the token header, matched against
+  `B2_OAUTH_ALLOWED_JWT_ALGORITHMS` (`RS256` by default)
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
 - a subject listed in `B2_OAUTH_ALLOWED_SUBJECTS`, when configured
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`

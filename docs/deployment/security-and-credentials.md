@@ -124,7 +124,13 @@ For authorization servers that issue signed JWT access tokens, set
 Configure both only when RFC 7662 introspection should remain authoritative for
 revocation and opaque-token compatibility. JWKS-only deployments fail closed on
 signature or claim mismatch and do not observe authorization-server revocation
-before JWT expiry.
+before JWT expiry. `B2_OAUTH_ALLOWED_ALGORITHMS` controls introspection
+`alg`-claim checks; `B2_OAUTH_ALLOWED_JWT_ALGORITHMS` separately controls
+local JWT signature algorithms and defaults to `RS256`. Keep old and new
+signing keys overlapped in the JWKS for at least
+`B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS`, because forced refresh for unknown `kid`
+values is intentionally cooldown-limited and emits `oauth.jwks.kid_unresolved`
+when suppressed.
 
 Use an expand-contract rollout when moving an existing deployment to JWKS-only
 verification: first deploy the new code with both introspection and JWKS

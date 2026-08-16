@@ -93,7 +93,10 @@ The adapter validates OAuth bearer tokens through
 opaque tokens through introspection and signed JWT access tokens through
 `B2_OAUTH_JWKS_URI` when JWKS-only mode is selected. If both are configured,
 introspection remains authoritative for revocation and JWT-shaped opaque-token
-compatibility. Server mode is single-tenant by default and requires one
+compatibility. `B2_OAUTH_ALLOWED_ALGORITHMS` remains the introspection
+`alg`-claim allowlist; use `B2_OAUTH_ALLOWED_JWT_ALGORITHMS` to opt the local
+JWT verifier into `ES256` or `EdDSA`. Server mode is single-tenant by default
+and requires one
 `B2_OAUTH_ALLOWED_SUBJECTS` value unless
 `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` is separately reviewed.
 
