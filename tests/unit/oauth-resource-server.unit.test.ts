@@ -778,6 +778,24 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("honors quoted max-age values from JWKS Cache-Control", async () => {
+    let now = 1000;
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": 'max-age="1"' } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksCacheMinTtlSeconds: 0 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => now,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "quoted-before-expiry" }));
+    now = 1002;
+    await verifier.verifyAccessToken(jwtFor({ client_id: "quoted-after-expiry" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects JWTs with invalid signatures", async () => {
     const verifier = new OAuthJwtVerifier({
       config: jwksOnlyConfig(),

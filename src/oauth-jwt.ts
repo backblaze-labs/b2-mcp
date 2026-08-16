@@ -121,7 +121,8 @@ export function jwksTtlSeconds(
   const floor = Math.min(fallbackSeconds, minimumSeconds);
   const cacheControl = response.headers.get("cache-control") ?? "";
   if (/(?:^|,)\s*no-store\s*(?:,|$)/i.test(cacheControl)) return 0;
-  const maxAge = /(?:^|,)\s*max-age=(\d+)\s*(?:,|$)/i.exec(cacheControl)?.[1];
+  const maxAgeMatch = /(?:^|,)\s*max-age\s*=\s*(?:"(\d+)"|(\d+))\s*(?:,|$)/i.exec(cacheControl);
+  const maxAge = maxAgeMatch?.[1] ?? maxAgeMatch?.[2];
   if (!maxAge) return fallbackSeconds;
   return Math.max(floor, Math.min(fallbackSeconds, Number(maxAge)));
 }
