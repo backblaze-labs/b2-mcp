@@ -677,6 +677,39 @@ describe("OAuthJwtVerifier", () => {
     ).rejects.toThrow(/audience\/resource/i);
   });
 
+  it("matches JWT aud and resource claims against their configured values only", async () => {
+    const config = jwksOnlyConfig({
+      audience: "http://localhost:3000/audience",
+      resource: "http://localhost:3000/resource",
+    });
+    const verifier = new OAuthJwtVerifier({
+      config,
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "audience-bound", aud: config.audience, resource: undefined }),
+      ),
+    ).resolves.toMatchObject({ clientId: "audience-bound" });
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "resource-bound", aud: undefined, resource: config.resource }),
+      ),
+    ).resolves.toMatchObject({ clientId: "resource-bound" });
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "wrong-claim-aud", aud: config.resource, resource: undefined }),
+      ),
+    ).rejects.toThrow(/audience\/resource/i);
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "wrong-claim-resource", aud: undefined, resource: config.audience }),
+      ),
+    ).rejects.toThrow(/audience\/resource/i);
+  });
+
   it("applies bounded JWT clock skew to exp, nbf, and iat", async () => {
     const verifier = new OAuthJwtVerifier({
       config: jwksOnlyConfig({ jwtClockSkewSeconds: 60 }),

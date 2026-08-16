@@ -479,10 +479,9 @@ function assertJwtDeploymentBinding(
   claims: Record<string, unknown>,
   config: OAuthResourceServerConfig,
 ): void {
-  const accepted = new Set([config.resource, config.audience]);
-  const bound = [...values(claims.aud), ...values(claims.resource)].some((value) =>
-    accepted.has(value),
-  );
+  const bound =
+    values(claims.aud).includes(config.audience) ||
+    values(claims.resource).includes(config.resource);
   if (!bound) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token audience/resource is not accepted");
   }
