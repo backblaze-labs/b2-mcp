@@ -16,22 +16,19 @@ import {
   LEGACY_PROTOCOL_VERSION,
   PROFILE_NAMES,
   capabilitiesForProfile,
-  confirmToolsFrom,
   contractSdkVersions,
   countPrefixes,
   destructiveConfirmToolsFromTools,
-  fixtureHash,
-  normalizeTool,
   renderProfileReference,
-  requiredFieldsByTool,
-  stable,
+  toolFixtureFromCollected,
+  type CollectedToolList,
   type ContractArtifact,
   type Era,
   type JsonObject,
   type NormalizedTool,
   type ProfileName,
-  type ToolContractPackageJson,
   type ToolFixture,
+  type ToolContractPackageJson,
 } from "../../src/tool-contract";
 
 const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
@@ -40,40 +37,6 @@ const biomeRunner = join(root, "scripts/run-biome.mjs");
 
 const profileNames = Object.keys(contract.profiles) as ProfileName[];
 const eras: Era[] = ["modern", "legacy"];
-
-interface RawToolPayload {
-  name: string;
-  description?: string;
-  inputSchema?: {
-    required?: string[];
-    properties?: Record<string, unknown>;
-    [key: string]: unknown;
-  };
-  outputSchema?: unknown;
-  annotations?: unknown;
-  _meta?: unknown;
-}
-
-interface CollectedToolList {
-  tools: RawToolPayload[];
-  list: { tools?: unknown; ttlMs?: number; cacheScope?: string; [key: string]: unknown };
-  protocolVersion: string;
-  discover?: {
-    supportedVersions?: string[];
-    capabilities?: unknown;
-    ttlMs?: number;
-    cacheScope?: string;
-    resultType?: string;
-  };
-}
-
-function numberValue(value: unknown, fallback: number): number {
-  return typeof value === "number" ? value : fallback;
-}
-
-function stringValue(value: unknown, fallback: string): string {
-  return typeof value === "string" ? value : fallback;
-}
 
 async function listenOnEphemeralPort(handle: HttpServerHandle): Promise<number> {
   await new Promise<void>((resolve) => handle.server.listen(0, "127.0.0.1", resolve));
@@ -129,50 +92,17 @@ async function collectToolsList(profile: ProfileName, era: Era): Promise<Collect
 
 async function collectFixture(profile: ProfileName, era: Era): Promise<ToolFixture> {
   const collected = await collectToolsList(profile, era);
-  const tools = collected.tools;
-  const names = tools.map((tool) => tool.name);
-  const fixture: ToolFixture = {
+  return toolFixtureFromCollected({
     contractVersion: contract.contractVersion,
     issue: contract.issue,
     profile,
     era,
-    protocolVersion: collected.protocolVersion,
     transport: "streamable-http",
     mcpRevision: contract.mcpRevision,
     sdk: contractSdkVersions(packageJson),
     capabilities: contract.profiles[profile].capabilities,
-    counts: countPrefixes(names),
-    names,
-    requiredFields: requiredFieldsByTool(tools),
-    confirmTools: confirmToolsFrom(tools),
-    tools: tools.map(normalizeTool),
-    hash: "",
-  };
-
-  if (era === "modern") {
-    const discover = collected.discover;
-    fixture.modern = {
-      toolsListCacheHint: {
-        ttlMs: numberValue(collected.list.ttlMs, -1),
-        cacheScope: stringValue(collected.list.cacheScope, ""),
-      },
-      discover: {
-        supportedVersions: discover?.supportedVersions ?? [],
-        capabilities: stable(discover?.capabilities ?? {}) as JsonObject,
-        ttlMs: numberValue(discover?.ttlMs, -1),
-        cacheScope: stringValue(discover?.cacheScope, ""),
-        resultType: stringValue(discover?.resultType, ""),
-      },
-    };
-  } else {
-    fixture.legacy = {
-      toolsListCacheHint: null,
-      discover: null,
-    };
-  }
-
-  fixture.hash = fixtureHash(fixture);
-  return fixture;
+    collected,
+  });
 }
 
 function fixtureFor(profile: ProfileName, era: Era): ToolFixture {

@@ -105,6 +105,44 @@ export interface ToolContractPackageJson {
   devDependencies: Record<string, string>;
 }
 
+export interface RawToolPayload {
+  name: string;
+  description?: string;
+  inputSchema?: {
+    required?: string[];
+    properties?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+  outputSchema?: unknown;
+  annotations?: unknown;
+  _meta?: unknown;
+}
+
+export interface CollectedToolList {
+  tools: RawToolPayload[];
+  list: { tools?: unknown; ttlMs?: number; cacheScope?: string; [key: string]: unknown };
+  protocolVersion: string;
+  discover?: {
+    supportedVersions?: string[];
+    capabilities?: unknown;
+    ttlMs?: number;
+    cacheScope?: string;
+    resultType?: string;
+  };
+}
+
+export interface ToolFixtureFromCollectedOptions {
+  contractVersion: number;
+  issue: number;
+  profile: ProfileName;
+  era: Era;
+  transport: string;
+  mcpRevision: string;
+  sdk: Record<string, string>;
+  capabilities: string[] | null;
+  collected: CollectedToolList;
+}
+
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
   full: "Complete tool superset for contract review and regression detection.",
   "phase1-default":
@@ -237,6 +275,75 @@ export function destructiveConfirmToolsFromTools(
 
 export function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {
   return sha256(JSON.stringify({ names: fixture.names, tools: fixture.tools }));
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === "number" ? value : fallback;
+}
+
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? [...value] : [];
+}
+
+export function toolFixtureFromCollected({
+  contractVersion,
+  issue,
+  profile,
+  era,
+  transport,
+  mcpRevision,
+  sdk,
+  capabilities,
+  collected,
+}: ToolFixtureFromCollectedOptions): ToolFixture {
+  const tools = [...collected.tools].sort((a, b) => a.name.localeCompare(b.name));
+  const names = tools.map((tool) => tool.name);
+  const fixture: ToolFixture = {
+    contractVersion,
+    issue,
+    profile,
+    era,
+    protocolVersion: collected.protocolVersion,
+    transport,
+    mcpRevision,
+    sdk,
+    capabilities,
+    counts: countPrefixes(names),
+    names,
+    requiredFields: requiredFieldsByTool(tools),
+    confirmTools: confirmToolsFrom(tools),
+    tools: tools.map(normalizeTool),
+    hash: "",
+  };
+
+  if (era === "modern") {
+    const discover = collected.discover;
+    fixture.modern = {
+      toolsListCacheHint: {
+        ttlMs: numberValue(collected.list.ttlMs, -1),
+        cacheScope: stringValue(collected.list.cacheScope, ""),
+      },
+      discover: {
+        supportedVersions: stringArrayValue(discover?.supportedVersions),
+        capabilities: stable(discover?.capabilities ?? {}) as JsonObject,
+        ttlMs: numberValue(discover?.ttlMs, -1),
+        cacheScope: stringValue(discover?.cacheScope, ""),
+        resultType: stringValue(discover?.resultType, ""),
+      },
+    };
+  } else {
+    fixture.legacy = {
+      toolsListCacheHint: null,
+      discover: null,
+    };
+  }
+
+  fixture.hash = fixtureHash(fixture);
+  return fixture;
 }
 
 export function renderProfileReference(contract: ContractArtifact): string {
