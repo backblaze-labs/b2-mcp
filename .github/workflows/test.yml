@@ -415,6 +415,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run typecheck
       - run: pnpm run build
+      - name: Seed deterministic Vercel leak canaries
+        run: node scripts/print-vercel-build-canaries.mjs >> "${GITHUB_ENV}"
       - run: pnpm run prepare:vercel-local-build
         env:
           VERCEL_TOKEN: ""

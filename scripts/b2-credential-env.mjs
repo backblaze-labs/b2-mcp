@@ -31,6 +31,10 @@ const vercelBuildSensitiveNamePatterns = [
 const vercelBuildForbiddenNamePatterns = (
   b2CredentialPolicy.vercelBuildForbiddenPatterns ?? []
 ).map((pattern) => new RegExp(pattern, "i"));
+export const vercelBuildKnownSecretCanaries = Object.freeze({
+  B2_APPLICATION_KEY: "b2-mcp-ci-canary-known-secret-value-issue-141-b2",
+  OAUTH_CLIENT_SECRET: "b2-mcp-ci-canary-known-secret-value-issue-141-oauth",
+});
 const SENSITIVE_LOG_FIELDS = new Set([
   "accountId",
   "account_id",
@@ -114,12 +118,22 @@ export function isVercelBuildForbiddenEnvName(name) {
   );
 }
 
+export function isVercelBuildKnownSecretCanary(name, value) {
+  const expected = vercelBuildKnownSecretCanaries[name.toUpperCase()];
+  return typeof value === "string" && expected === value;
+}
+
 export function vercelBuildSensitiveEnvNames(env = process.env) {
   return Object.keys(env).filter(isVercelBuildSensitiveEnvName).sort();
 }
 
 export function vercelBuildForbiddenEnvNames(env = process.env) {
-  return Object.keys(env).filter(isVercelBuildForbiddenEnvName).sort();
+  return Object.keys(env)
+    .filter(
+      (name) =>
+        isVercelBuildForbiddenEnvName(name) && !isVercelBuildKnownSecretCanary(name, env[name]),
+    )
+    .sort();
 }
 
 export function vercelBuildSensitiveEnvValues(env = process.env) {

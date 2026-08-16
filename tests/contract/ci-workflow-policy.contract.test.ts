@@ -223,6 +223,7 @@ describe("CI workflow policy", () => {
     expect(vercelBuildJob).toContain("name: Vercel build output scan");
     expect(vercelBuildJob).toContain("pnpm run typecheck");
     expect(vercelBuildJob).toContain("pnpm run build");
+    expect(vercelBuildJob).toContain("node scripts/print-vercel-build-canaries.mjs");
     expect(vercelBuildJob).toContain("pnpm run prepare:vercel-local-build");
     expect(vercelBuildJob).toContain("pnpm run build:vercel-local");
     expect(vercelBuildJob).not.toContain("pnpm dlx vercel");

@@ -63,16 +63,20 @@ describe("Vercel build env policy", () => {
   it("classifies sensitive and forbidden env names from one shared helper", async () => {
     const {
       isVercelBuildForbiddenEnvName,
+      isVercelBuildKnownSecretCanary,
       isVercelBuildSensitiveEnvName,
       sanitizedVercelBuildEnv,
       vercelBuildForbiddenEnvNames,
+      vercelBuildKnownSecretCanaries,
     } = (await import(
       pathToFileURL(join(__dirname, "../../scripts/b2-credential-env.mjs")).href
     )) as {
       isVercelBuildForbiddenEnvName: (name: string) => boolean;
+      isVercelBuildKnownSecretCanary: (name: string, value: string) => boolean;
       isVercelBuildSensitiveEnvName: (name: string) => boolean;
       sanitizedVercelBuildEnv: (env: Record<string, string>) => Record<string, string>;
       vercelBuildForbiddenEnvNames: (env: Record<string, string>) => string[];
+      vercelBuildKnownSecretCanaries: Record<string, string>;
     };
     const sourceEnv = {
       B2_APPLICATION_KEY: "b2-secret",
@@ -104,5 +108,19 @@ describe("Vercel build env policy", () => {
     });
     expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("OAUTH_CLIENT_SECRET");
     expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("NEXT_PUBLIC_MCP_URL");
+
+    const canaryEnv = {
+      ...vercelBuildKnownSecretCanaries,
+      PATH: "/usr/bin",
+    };
+    expect(isVercelBuildKnownSecretCanary("B2_APPLICATION_KEY", "real-secret")).toBe(false);
+    expect(
+      isVercelBuildKnownSecretCanary(
+        "B2_APPLICATION_KEY",
+        vercelBuildKnownSecretCanaries.B2_APPLICATION_KEY,
+      ),
+    ).toBe(true);
+    expect(vercelBuildForbiddenEnvNames(canaryEnv)).toEqual([]);
+    expect(sanitizedVercelBuildEnv(canaryEnv)).toMatchObject(canaryEnv);
   });
 });
