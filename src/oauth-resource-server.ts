@@ -1445,7 +1445,12 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     algorithm: string,
   ): Promise<boolean> {
     const kid = stringClaim(parsed.header.kid);
-    if (!kid) return false;
+    if (!kid) {
+      throw new OAuthError(
+        OAuthErrorCode.InvalidToken,
+        "JWT header is missing the kid required for JWKS verification",
+      );
+    }
     const initial = await this.jwks(false);
     const keys = this.candidateKeys(initial.jwks, algorithm, kid);
     if (keys.length > 1) return false;

@@ -133,6 +133,9 @@ The adapter additionally checks:
 - JWT header `typ`, defaulting to RFC 9068 access-token types (`at+jwt`); an
   issuer that omits `typ` or sends a different value needs
   `B2_OAUTH_ALLOWED_JWT_TYPES` set to accept it
+- a JWT header `kid` identifying the JWKS signing key; local JWT verification
+  rejects tokens without a `kid`, so the issuer must include one (common
+  providers do)
 - token signing algorithm from the JWT header or introspection `alg`,
   `jwt_alg`, or `token_alg`, matched against `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`

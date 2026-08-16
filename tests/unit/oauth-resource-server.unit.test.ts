@@ -1299,10 +1299,10 @@ describe("OAuthJwtVerifier", () => {
 
     await expect(
       verifier.verifyAccessToken(jwtFor({ client_id: "kid-less" }, { kid: undefined })),
-    ).rejects.toThrow(/signature/i);
+    ).rejects.toThrow(/kid/i);
     await expect(
       verifier.verifyAccessToken(jwtFor({ client_id: "numeric-kid" }, { kid: 123 })),
-    ).rejects.toThrow(/signature/i);
+    ).rejects.toThrow(/kid/i);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
