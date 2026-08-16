@@ -220,37 +220,34 @@ describe("Vercel adapter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("uses verified token claims instead of forged identity headers in principal mode", async () => {
+  it("rejects disallowed token claims despite forged identity headers", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
     process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({
       "https://issuer.example.com/#subject": "tenant_a",
     });
     process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-id";
     process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
-    const introspection = vi.fn().mockResolvedValue(introspectionResponse());
+    const introspection = vi
+      .fn()
+      .mockResolvedValue(introspectionResponse({ sub: "attacker-subject", scope: "b2:admin" }));
     vi.stubGlobal("fetch", introspection);
 
-    const listed = await rpcJson(
-      await vercelMcpFetch(
-        new Request("https://mcp.example.com/mcp", {
-          method: "POST",
-          headers: {
-            ...modernHeaders("tools/list"),
-            Authorization: "Bearer access-token",
-            "X-Principal": "attacker-subject",
-            "X-User": "attacker-user",
-          },
-          body: modernBody("tools/list"),
-        }),
-        { remoteAddress: "203.0.113.42" },
-      ),
-    );
-    const toolNames = new Set(
-      ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: {
+          ...modernHeaders("tools/list"),
+          Authorization: "Bearer access-token",
+          "X-Principal": "subject",
+          "X-User": "subject",
+        },
+        body: modernBody("tools/list"),
+      }),
+      { remoteAddress: "203.0.113.42" },
     );
 
-    expect(toolNames.has("b2_list_buckets")).toBe(true);
-    expect(toolNames.has("b2_create_bucket")).toBe(false);
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
     expect(introspection).toHaveBeenCalledTimes(1);
   });
 

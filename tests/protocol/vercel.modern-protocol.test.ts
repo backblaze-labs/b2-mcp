@@ -10,12 +10,12 @@ import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { closeVercelMcpHandlerForTests } from "../../deploy/vercel/adapter";
 import { invalidateAuthManagerCache, invalidateCapabilityCache } from "../../src/server";
 import {
-  MCP_REVISION,
   contractSdkVersions,
   toolFixtureFromCollected,
   type CollectedToolList,
-  type ToolFixture,
+  type ContractArtifact,
   type ToolContractPackageJson,
+  type ToolFixture,
 } from "../../src/tool-contract";
 import { readJson } from "../contract/support";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
@@ -28,37 +28,72 @@ import {
 } from "./support/vercel";
 
 const savedEnv = { ...process.env };
-const fullModernFixture = readJson<ToolFixture>("tests/fixtures/tool-contract/full.modern.json");
+const contract = readJson<ContractArtifact>("docs/tool-profile-contract.json");
+const fullModernFixture = readJson<ToolFixture>(contract.profiles.full.fixtures.modern);
 const packageJson = readJson<ToolContractPackageJson>("package.json");
 
-function collectVercelFixture(
+type VercelClient = Awaited<ReturnType<typeof connectVercelClient>>["client"];
+type VercelRequests = Awaited<ReturnType<typeof connectVercelClient>>["requests"];
+
+function collectVercelToolsList(
   listed: Record<string, unknown>,
   discover: Record<string, unknown>,
   protocolVersion: string,
-): ToolFixture {
-  return toolFixtureFromCollected({
-    contractVersion: fullModernFixture.contractVersion,
-    issue: fullModernFixture.issue,
-    profile: fullModernFixture.profile,
-    era: fullModernFixture.era,
-    transport: fullModernFixture.transport,
-    mcpRevision: MCP_REVISION,
-    sdk: contractSdkVersions(packageJson),
-    capabilities: fullModernFixture.capabilities,
-    collected: {
-      tools: Array.isArray(listed.tools) ? (listed.tools as CollectedToolList["tools"]) : [],
-      list: listed as CollectedToolList["list"],
-      discover: discover as CollectedToolList["discover"],
-      protocolVersion,
-    },
-  });
+): CollectedToolList {
+  return {
+    tools: Array.isArray(listed.tools) ? (listed.tools as CollectedToolList["tools"]) : [],
+    list: listed as CollectedToolList["list"],
+    discover: discover as CollectedToolList["discover"],
+    protocolVersion,
+  };
 }
 
-function expectVercelProfileToMatchFrozenFixture(actual: ToolFixture): void {
-  expect(actual).toEqual({
-    ...fullModernFixture,
-    mcpRevision: MCP_REVISION,
-  });
+async function collectModernVercelTools(client: VercelClient): Promise<{
+  discover: Record<string, unknown>;
+  listed: Record<string, unknown>;
+  collected: CollectedToolList;
+}> {
+  const discover = (client.getDiscoverResult() ?? (await client.discover())) as Record<
+    string,
+    unknown
+  >;
+  const listed = (await client.listTools(undefined, { cacheMode: "refresh" })) as Record<
+    string,
+    unknown
+  >;
+
+  return {
+    discover,
+    listed,
+    collected: collectVercelToolsList(
+      listed,
+      discover,
+      client.getNegotiatedProtocolVersion() ?? "",
+    ),
+  };
+}
+
+function expectVercelProfileToMatchFrozenFixture(collected: CollectedToolList): void {
+  expect(
+    toolFixtureFromCollected({
+      contractVersion: contract.contractVersion,
+      issue: contract.issue,
+      profile: "full",
+      era: "modern",
+      transport: fullModernFixture.transport,
+      mcpRevision: contract.mcpRevision,
+      sdk: contractSdkVersions(packageJson),
+      capabilities: contract.profiles.full.capabilities,
+      collected,
+    }),
+  ).toEqual(fullModernFixture);
+}
+
+function expectStatelessModernRequests(requests: VercelRequests): void {
+  expect(requests.every((record) => record.method === "POST")).toBe(true);
+  expect(requests.some((record) => record.headers["mcp-method"] === "server/discover")).toBe(true);
+  expect(requests.some((record) => record.headers["mcp-method"] === "tools/list")).toBe(true);
+  expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
 }
 
 beforeEach(async () => {
@@ -89,28 +124,34 @@ afterEach(async () => {
 });
 
 describe("Vercel adapter (MCP 2026-07-28)", () => {
-  it("serves discover, list, and representative calls without listen()", async () => {
-    const { client, requests } = await connectVercelClient("modern");
+  it("matches the frozen modern tool profile through Vercel", async () => {
+    const { client } = await connectVercelClient("modern");
     try {
       expect(client.getProtocolEra()).toBe("modern");
       expect(client.getNegotiatedProtocolVersion()).toBe(MODERN_PROTOCOL_VERSION);
 
-      const discover = client.getDiscoverResult() ?? (await client.discover());
+      const { discover, collected } = await collectModernVercelTools(client);
       expect(discover.supportedVersions).toContain(MODERN_PROTOCOL_VERSION);
       expect(discover.cacheScope).toBe("private");
+      expectVercelProfileToMatchFrozenFixture(collected);
+    } finally {
+      await closeClient(client);
+    }
+  });
 
-      const listed = await client.listTools(undefined, { cacheMode: "refresh" });
-      expectVercelProfileToMatchFrozenFixture(
-        collectVercelFixture(
-          listed as Record<string, unknown>,
-          discover as Record<string, unknown>,
-          client.getNegotiatedProtocolVersion() ?? "",
-        ),
-      );
-      const toolNames = listed.tools.map((tool) => tool.name);
-      expect(toolNames).toContain("b2_list_buckets");
-      expect(toolNames).toContain("s3_list_objects_v2");
+  it("uses stateless POST requests for modern discover and tools/list", async () => {
+    const { client, requests } = await connectVercelClient("modern");
+    try {
+      await collectModernVercelTools(client);
+      expectStatelessModernRequests(requests);
+    } finally {
+      await closeClient(client);
+    }
+  });
 
+  it("returns JSON text for B2 output and supports representative S3 calls", async () => {
+    const { client } = await connectVercelClient("modern");
+    try {
       const bucketName = "protocol-vercel-modern";
       expect(
         (
@@ -120,12 +161,14 @@ describe("Vercel adapter (MCP 2026-07-28)", () => {
           })
         ).isError,
       ).not.toBe(true);
+
       const b2Call = await client.callTool({ name: "b2_list_buckets", arguments: {} });
       expect(b2Call.isError).not.toBe(true);
       expect(b2Call.structuredContent).toBeDefined();
       expect(b2Call.content).toEqual([
         { type: "text", text: JSON.stringify(b2Call.structuredContent) },
       ]);
+
       expect(
         (
           await client.callTool({
@@ -134,14 +177,14 @@ describe("Vercel adapter (MCP 2026-07-28)", () => {
           })
         ).isError,
       ).not.toBe(true);
+    } finally {
+      await closeClient(client);
+    }
+  });
 
-      expect(requests.every((record) => record.method === "POST")).toBe(true);
-      expect(requests.some((record) => record.headers["mcp-method"] === "server/discover")).toBe(
-        true,
-      );
-      expect(requests.some((record) => record.headers["mcp-method"] === "tools/list")).toBe(true);
-      expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
-
+  it("returns schema-validation errors through the Vercel path", async () => {
+    const { client } = await connectVercelClient("modern");
+    try {
       const schemaFailure = await client.callTool({
         name: "b2_create_bucket",
         arguments: { bucketType: "allPrivate" },
