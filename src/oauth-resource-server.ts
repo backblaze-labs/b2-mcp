@@ -33,6 +33,7 @@ const DEFAULT_JWKS_CACHE_MIN_TTL_SECONDS = 30;
 const DEFAULT_JWKS_REFRESH_COOLDOWN_MS = 30_000;
 const DEFAULT_JWT_CLOCK_SKEW_SECONDS = 60;
 const DEFAULT_ALLOWED_JWT_TYPES = ["at+jwt", "application/at+jwt"];
+const JWKS_UNKNOWN_KID_CACHE_MAX_ENTRIES = 1000;
 
 type FetchLike = typeof fetch;
 type WebCryptoAlgorithm = { name: string; hash?: string; namedCurve?: string };
@@ -650,6 +651,20 @@ function cachedAuthInfo(key: string, nowMs: number): AuthInfo | null {
   return cloneAuthInfo(entry.authInfo);
 }
 
+function purgeExpiredUnknownKidEntries(nowMs: number): void {
+  for (const [key, expiresAtMs] of jwksUnknownKidCache) {
+    if (expiresAtMs <= nowMs) jwksUnknownKidCache.delete(key);
+  }
+}
+
+function trimUnknownKidCache(): void {
+  while (jwksUnknownKidCache.size >= JWKS_UNKNOWN_KID_CACHE_MAX_ENTRIES) {
+    const oldest = jwksUnknownKidCache.keys().next().value;
+    if (oldest === undefined) break;
+    jwksUnknownKidCache.delete(oldest);
+  }
+}
+
 function rememberAuthInfo(
   key: string,
   authInfo: AuthInfo,
@@ -682,6 +697,10 @@ export function resetOAuthVerifierCacheForTests(): void {
   jwksInFlight.clear();
   jwksUnknownKidCache.clear();
   jwksLastForcedRefreshMs.clear();
+}
+
+export function oauthVerifierCacheStatsForTests(): { jwksUnknownKidEntries: number } {
+  return { jwksUnknownKidEntries: jwksUnknownKidCache.size };
 }
 
 function hasIntrospectionConfig(
@@ -1409,10 +1428,12 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   }
 
   private rememberUnresolvedKid(kid: string, algorithm: string, nowMs: number): void {
-    jwksUnknownKidCache.set(
-      this.unknownKidCacheKey(kid, algorithm),
-      nowMs + this.config.jwksRefreshCooldownMs,
-    );
+    if (this.config.jwksRefreshCooldownMs <= 0) return;
+    purgeExpiredUnknownKidEntries(nowMs);
+    const key = this.unknownKidCacheKey(kid, algorithm);
+    jwksUnknownKidCache.delete(key);
+    trimUnknownKidCache();
+    jwksUnknownKidCache.set(key, nowMs + this.config.jwksRefreshCooldownMs);
   }
 
   private forcedRefreshAllowed(nowMs: number): boolean {

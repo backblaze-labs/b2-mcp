@@ -7,6 +7,7 @@ import {
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
   oauthMetadataOptions,
+  oauthVerifierCacheStatsForTests,
   protectedResourceMetadata,
   protectedResourceMetadataUrl,
   resetOAuthVerifierCacheForTests,
@@ -923,6 +924,32 @@ describe("OAuthJwtVerifier", () => {
     }
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("purges expired unknown kid cache entries before recording new misses", async () => {
+    let now = 1000;
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksRefreshCooldownMs: 1000 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => now,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-unknown-kid-cache" }));
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-one" }, { kid: "missing-one" })),
+    ).rejects.toThrow(/signature/i);
+    expect(oauthVerifierCacheStatsForTests().jwksUnknownKidEntries).toBe(1);
+
+    now = 1002;
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-two" }, { kid: "missing-two" })),
+    ).rejects.toThrow(/signature/i);
+
+    expect(oauthVerifierCacheStatsForTests().jwksUnknownKidEntries).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("does not force JWKS refreshes for bad signatures with a matching kid", async () => {
