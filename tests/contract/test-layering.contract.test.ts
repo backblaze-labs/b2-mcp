@@ -364,6 +364,8 @@ describe("test layer naming", () => {
   it("enforces the current global coverage floors", () => {
     const vitestConfig = readFileSync(join(root, "vitest.config.mts"), "utf8");
     const readme = readFileSync(join(root, "README.md"), "utf8");
+    const testingGuide = readFileSync(join(root, "docs/TESTING.md"), "utf8");
+    const ciWorkflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
 
     expect(vitestConfig).toMatch(
       /thresholds:\s*{\s*statements:\s*90\.5,\s*branches:\s*81\.8,\s*functions:\s*94\.6,\s*lines:\s*93\.8,?\s*}/,
@@ -374,6 +376,12 @@ describe("test layer naming", () => {
     expect(vitestConfig).toContain('"cobertura"');
     expect(readme).toContain(
       "coverage-S%2090.5%20%7C%20B%2081.8%20%7C%20F%2094.6%20%7C%20L%2093.8-brightgreen",
+    );
+    expect(testingGuide).toMatch(
+      /Global V8 coverage must remain at or above 90\.5% statements,\s*81\.8% branches,\s*94\.6% functions, and 93\.8% lines\./,
+    );
+    expect(ciWorkflow).toContain(
+      "Required: statements 90.5%, branches 81.8%, functions 94.6%, lines 93.8%.",
     );
   });
 
