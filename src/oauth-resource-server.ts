@@ -775,12 +775,19 @@ function configCacheKey(config: OAuthResourceServerConfig): string {
     allowedAlgorithms: config.allowedAlgorithms,
     allowedJwtTypes: config.allowedJwtTypes,
     allowedSubjects: config.allowedSubjects,
+    requiredScopes: config.requiredScopes,
     jwtClockSkewSeconds: "jwtClockSkewSeconds" in config ? config.jwtClockSkewSeconds : undefined,
   });
 }
 
-function cacheKey(config: OAuthResourceServerConfig, token: string): string {
-  return `${configCacheKey(config)}\0token:${tokenLabel(token)}`;
+type TokenCacheSource = "introspection" | "jwt";
+
+function cacheKey(
+  config: OAuthResourceServerConfig,
+  token: string,
+  source: TokenCacheSource,
+): string {
+  return `${configCacheKey(config)}\0source:${source}\0token:${tokenLabel(token)}`;
 }
 
 function cloneAuthInfo(authInfo: AuthInfo): AuthInfo {
@@ -902,7 +909,7 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const key = cacheKey(this.config, token);
+    const key = cacheKey(this.config, token, "introspection");
     const now = this.nowSeconds();
     const cached = cachedAuthInfo(key, now * 1000);
     if (cached) return cached;
@@ -1226,7 +1233,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const key = cacheKey(this.config, token);
+    const key = cacheKey(this.config, token, "jwt");
     const now = this.nowSeconds();
     const cached = cachedAuthInfo(key, now * 1000);
     if (cached) return cached;

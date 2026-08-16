@@ -233,6 +233,26 @@ describe("OAuthIntrospectionVerifier", () => {
     await expect(verifier.verifyAccessToken("access-token")).rejects.toThrow(/required/i);
   });
 
+  it("keys cached introspection results by required scopes policy", async () => {
+    const fetchMock = vi.fn(async () => Response.json(claims()));
+    const permissive = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, requiredScopes: [] },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const strict = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, requiredScopes: ["custom:report"] },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(permissive.verifyAccessToken("same-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+    await expect(strict.verifyAccessToken("same-token")).rejects.toThrow(/required/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["inactive", { active: false }, /inactive/i],
     ["expired", { exp: 999 }, /expired/i],
@@ -1156,6 +1176,52 @@ describe("OAuthJwtVerifier", () => {
       verifier.verifyAccessToken(jwtFor({ client_id: "kid-less" }, { kid: undefined })),
     ).rejects.toThrow(/signature/i);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not share verified token cache across verifier sources", async () => {
+    const config = { ...baseConfig, jwksUri: "http://localhost:9000/oauth2/jwks" };
+    const token = jwtFor({ client_id: "jwt-cache-source" });
+    const jwtFetch = vi.fn(async () => jwksResponse());
+    const introspectionFetch = vi.fn(async () => Response.json(claims({ active: false })));
+
+    await expect(
+      new OAuthJwtVerifier({
+        config,
+        fetch: jwtFetch as typeof fetch,
+        nowSeconds: () => 1000,
+      }).verifyAccessToken(token),
+    ).resolves.toMatchObject({ clientId: "jwt-cache-source" });
+    await expect(
+      new OAuthIntrospectionVerifier({
+        config,
+        fetch: introspectionFetch as typeof fetch,
+        nowSeconds: () => 1000,
+      }).verifyAccessToken(token),
+    ).rejects.toThrow(/inactive/i);
+    expect(jwtFetch).toHaveBeenCalledTimes(1);
+    expect(introspectionFetch).toHaveBeenCalledTimes(1);
+
+    resetOAuthVerifierCacheForTests();
+    const introspectionFirstFetch = vi.fn(async () =>
+      Response.json(claims({ client_id: "introspection-cache-source" })),
+    );
+    const jwtSecondFetch = vi.fn(async () => jwksResponse());
+    await expect(
+      new OAuthIntrospectionVerifier({
+        config,
+        fetch: introspectionFirstFetch as typeof fetch,
+        nowSeconds: () => 1000,
+      }).verifyAccessToken(token),
+    ).resolves.toMatchObject({ clientId: "introspection-cache-source" });
+    await expect(
+      new OAuthJwtVerifier({
+        config,
+        fetch: jwtSecondFetch as typeof fetch,
+        nowSeconds: () => 1000,
+      }).verifyAccessToken(token),
+    ).resolves.toMatchObject({ clientId: "jwt-cache-source" });
+    expect(introspectionFirstFetch).toHaveBeenCalledTimes(1);
+    expect(jwtSecondFetch).toHaveBeenCalledTimes(1);
   });
 
   it("authenticates JWKS-only deployments without introspection credentials", async () => {
