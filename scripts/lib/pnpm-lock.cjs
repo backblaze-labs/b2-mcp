@@ -218,6 +218,17 @@ function collectDirectProductionKeys(lock) {
   return direct;
 }
 
+function collectDirectDevelopmentKeys(lock) {
+  const importer = lock.importers?.["."] ?? {};
+  const direct = new Set();
+
+  for (const [name, entry] of Object.entries(importer.devDependencies ?? {})) {
+    direct.add(dependencySnapshotKey(name, entry?.version ?? entry, "importer devDependencies"));
+  }
+
+  return direct;
+}
+
 function assertObject(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`pnpm lock ${label} must be an object`);
@@ -250,6 +261,7 @@ function pnpmLockToPackageLock(lock, packageJson = {}) {
   validatePnpmLockShape(lock);
   const productionKeys = collectProductionKeys(lock);
   const directProductionKeys = collectDirectProductionKeys(lock);
+  const directDevelopmentKeys = collectDirectDevelopmentKeys(lock);
   const packageRecords = [];
 
   for (const [key, metadata] of Object.entries(lock.packages ?? {})) {
@@ -276,6 +288,8 @@ function pnpmLockToPackageLock(lock, packageJson = {}) {
       production: productionKeys.has(matchingSnapshotKey) || productionKeys.has(key),
       directProduction:
         directProductionKeys.has(matchingSnapshotKey) || directProductionKeys.has(key),
+      directDevelopment:
+        directDevelopmentKeys.has(matchingSnapshotKey) || directDevelopmentKeys.has(key),
     });
   }
 
@@ -331,6 +345,8 @@ function pnpmLockToPackageLock(lock, packageJson = {}) {
     records.sort((left, right) => {
       if (left.directProduction !== right.directProduction) return left.directProduction ? -1 : 1;
       if (left.production !== right.production) return left.production ? -1 : 1;
+      if (left.directDevelopment !== right.directDevelopment)
+        return left.directDevelopment ? -1 : 1;
       return left.version.localeCompare(right.version, undefined, { numeric: true });
     });
     for (const [index, record] of records.entries()) {
