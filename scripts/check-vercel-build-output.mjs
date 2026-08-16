@@ -47,7 +47,7 @@ const secretAssignmentPatterns = [
   {
     reason: "secret-shaped-assignment",
     pattern:
-      /\b(?:client[_-]?secret|authorization[_-]?token|bearer[_-]?token)\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+      /\b(?:client[_-]?secret|authorization(?:[_-]?token)?|bearer[_-]?token)\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
   },
   {
     reason: "bearer-token-literal",

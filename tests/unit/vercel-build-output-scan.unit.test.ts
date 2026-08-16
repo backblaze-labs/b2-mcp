@@ -234,6 +234,33 @@ describe("Vercel build output scanner", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
   });
 
+  it("rejects opaque Authorization literals", () => {
+    const opaqueAuthorization = "opaque-authorization-value-0123456789";
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.func/index.js",
+        [
+          `const authorization = "${opaqueAuthorization}";`,
+          `const headers = { "Authorization": "${opaqueAuthorization}" };`,
+          "",
+        ].join("\n"),
+      );
+    });
+
+    expectFinding(result, {
+      reason: "secret-shaped-assignment",
+      path: "functions/api/mcp.func/index.js",
+      line: 1,
+    });
+    expectFinding(result, {
+      reason: "secret-shaped-assignment",
+      path: "functions/api/mcp.func/index.js",
+      line: 2,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(opaqueAuthorization);
+  });
+
   it("rejects bearer token literals", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
