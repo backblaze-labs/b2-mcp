@@ -631,6 +631,18 @@ describe("OAuthJwtVerifier", () => {
     vi.restoreAllMocks();
   });
 
+  it("rejects insecure direct JWKS URI config without the local override", () => {
+    expect(
+      () =>
+        new OAuthJwtVerifier({
+          config: jwksOnlyConfig({
+            jwksUri: "http://issuer.example.com/oauth2/jwks",
+            dangerouslyAllowInsecureIssuerUrl: false,
+          }),
+        }),
+    ).toThrow(/B2_OAUTH_JWKS_URI must use https/);
+  });
+
   it("verifies signed JWT access tokens against the configured JWKS", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(init?.method).toBe("GET");

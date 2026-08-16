@@ -905,6 +905,11 @@ function requireJwtConfig(config: OAuthResourceServerConfig): OAuthJwtVerifierCo
   if (!hasJwtConfig(config)) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "OAuth JWKS URI is not configured");
   }
+  ensureHttpsOrLocalhost(
+    config.jwksUri,
+    "B2_OAUTH_JWKS_URI",
+    config.dangerouslyAllowInsecureIssuerUrl,
+  );
   return config;
 }
 
