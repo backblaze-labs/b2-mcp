@@ -54,6 +54,10 @@ const secretAssignmentPatterns = [
     pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/gi,
   },
   {
+    reason: "b2-application-key-literal",
+    pattern: /\bK005[A-Za-z0-9]{16,}\b/g,
+  },
+  {
     reason: "vercel-bypass-literal",
     pattern: /\bx-vercel-protection-bypass\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
   },

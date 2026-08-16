@@ -251,6 +251,23 @@ describe("Vercel build output scanner", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
   });
 
+  it("rejects bare B2 application key literals without seeded env", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.func/index.js",
+        `const leaked = "${plantedSecret}";\n`,
+      );
+    });
+
+    expectFinding(result, {
+      reason: "b2-application-key-literal",
+      path: "functions/api/mcp.func/index.js",
+      line: 1,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
+  });
+
   it("rejects Vercel bypass literals", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
