@@ -5,22 +5,22 @@
     "planningId": "P1-RUNTIME-02"
   },
   "reviewedBaseline": {
-    "date": "2026-08-14",
+    "date": "2026-08-16",
     "nodeVersions": ["22.3.0", "24", "26"],
     "primaryB2Transport": "@backblaze-labs/b2-sdk@0.2.0",
     "directProductionDependencyCount": 8,
     "totalProductionPackageCount": 47,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 366681,
-    "unpackedPackageBytes": 1646970,
+    "packedTarballBytes": 404695,
+    "unpackedPackageBytes": 1779844,
     "packedEntryCount": 232,
     "cleanConsumerInstallFootprintBytes": 28506726
   },
   "limits": {
     "directProductionDependencyCount": 8,
     "totalProductionPackageCount": 47,
-    "packedTarballBytes": 385000,
-    "unpackedPackageBytes": 1700000,
+    "packedTarballBytes": 410000,
+    "unpackedPackageBytes": 1800000,
     "packedEntryCount": 240,
     "cleanConsumerInstallFootprintBytes": 30000000
   },
