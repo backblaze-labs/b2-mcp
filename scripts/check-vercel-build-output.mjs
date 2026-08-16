@@ -42,19 +42,19 @@ const inventory = {
 
 const secretAssignmentPatterns = [
   {
-    pattern: /\b([A-Z][A-Z0-9_]{2,})\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+    pattern: /\b([A-Z][A-Z0-9_]{2,})\b["'`]?\s*[:=]\s*["'`][A-Za-z0-9._~+/=-]{16,}["'`]/gi,
   },
   {
-    pattern: /["']([A-Z][A-Z0-9_]{2,})["']\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+    pattern: /["'`]([A-Z][A-Z0-9_]{2,})["'`]\s*[:=]\s*["'`][A-Za-z0-9._~+/=-]{16,}["'`]/gi,
   },
   {
     pattern:
-      /\bprocess\.env(?:\.([A-Z][A-Z0-9_]{2,})|\[\s*["']([^"']+)["']\s*\])\s*=\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+      /\bprocess\.env(?:\.([A-Z][A-Z0-9_]{2,})|\[\s*["'`]([^"'`]+)["'`]\s*\])\s*=\s*["'`][A-Za-z0-9._~+/=-]{16,}["'`]/gi,
   },
   {
     reason: "secret-shaped-assignment",
     pattern:
-      /\b(?:client[_-]?secret|authorization(?:[_-]?token)?|bearer[_-]?token)\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+      /\b(?:client[_-]?secret|authorization(?:[_-]?token)?|bearer[_-]?token)\b["'`]?\s*[:=]\s*["'`][A-Za-z0-9._~+/=-]{16,}["'`]/gi,
   },
   {
     reason: "bearer-token-literal",
@@ -66,7 +66,7 @@ const secretAssignmentPatterns = [
   },
   {
     reason: "vercel-bypass-literal",
-    pattern: /\bx-vercel-protection-bypass\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+    pattern: /\bx-vercel-protection-bypass\b["'`]?\s*[:=]\s*["'`][A-Za-z0-9._~+/=-]{16,}["'`]/gi,
   },
   {
     reason: "client-public-env-marker",
@@ -74,7 +74,7 @@ const secretAssignmentPatterns = [
   },
 ];
 const b2ApplicationKeyPattern = /\bK005[A-Za-z0-9]{16,}\b/g;
-const highEntropyLiteralPattern = /(["'])([A-Za-z0-9._~+/=-]{24,})\1/g;
+const highEntropyLiteralPattern = /(["'`])([A-Za-z0-9._~+/=-]{24,})\1/g;
 const highEntropyPathTokenPattern = /[A-Za-z0-9._~+=-]{24,}/g;
 
 function toPosix(relativePath) {

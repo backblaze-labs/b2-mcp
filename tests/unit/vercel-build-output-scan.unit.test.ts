@@ -307,6 +307,33 @@ describe("Vercel build output scanner", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
   });
 
+  it("rejects backtick-delimited secret-shaped assignments", () => {
+    const backtickSecret = "opaque-backtick-secret-0123456789";
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.js.func/index.js",
+        [
+          `const OAUTH_CLIENT_SECRET = \`${backtickSecret}\`;`,
+          `const bypass = { "x-vercel-protection-bypass": \`${backtickSecret}\` };`,
+          "",
+        ].join("\n"),
+      );
+    });
+
+    expectFinding(result, {
+      reason: "secret-shaped-assignment",
+      path: "functions/api/mcp.js.func/index.js",
+      line: 1,
+    });
+    expectFinding(result, {
+      reason: "vercel-bypass-literal",
+      path: "functions/api/mcp.js.func/index.js",
+      line: 2,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(backtickSecret);
+  });
+
   it("rejects opaque Authorization literals", () => {
     const opaqueAuthorization = "opaque-authorization-value-0123456789";
     const result = scanFixture((outputDir) => {
