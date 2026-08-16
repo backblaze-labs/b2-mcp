@@ -109,8 +109,11 @@ separately reviewed deployment where the operator accepts that every allowed
 principal can access everything the shared B2 key can access.
 
 Token validation uses the authorization server's RFC 7662 introspection
-endpoint, so signature verification, signing algorithm policy, and revocation
-remain with the selected issuer. The adapter additionally checks:
+endpoint for opaque tokens, or local JWT verification when `B2_OAUTH_JWKS_URI`
+is configured. JWKS verification checks the JWT signature against the issuer's
+published keys, caches the JWKS for `B2_OAUTH_JWKS_CACHE_TTL_SECONDS`, and
+refreshes once on key-id misses or signature failure for normal key rotation.
+The adapter additionally checks:
 
 - active token response
 - exact `iss`
@@ -118,8 +121,8 @@ remain with the selected issuer. The adapter additionally checks:
 - exact `aud`
 - `exp` and `nbf`
 - token type, when returned
-- token signing algorithm from `alg`, `jwt_alg`, or `token_alg`, matched
-  against `B2_OAUTH_ALLOWED_ALGORITHMS`
+- token signing algorithm from the JWT header or introspection `alg`,
+  `jwt_alg`, or `token_alg`, matched against `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
 - a subject listed in `B2_OAUTH_ALLOWED_SUBJECTS`, when configured
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`
@@ -134,7 +137,9 @@ requires either `B2_OAUTH_INTROSPECTION_CLIENT_ID` plus
 `B2_OAUTH_INTROSPECTION_CLIENT_SECRET`, or
 `B2_OAUTH_INTROSPECTION_BEARER_TOKEN`. Only set
 `B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION=true` for a reviewed
-local or lab authorization server.
+local or lab authorization server. Introspection credentials and
+`B2_OAUTH_INTROSPECTION_ENDPOINT` are optional when only JWKS-backed JWT access
+tokens are accepted.
 
 Scope behavior is cumulative with B2 capabilities. `b2:read` exposes reviewed
 read/list/inspect tools, `b2:write` also exposes object and bucket mutations

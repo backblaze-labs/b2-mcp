@@ -8,6 +8,7 @@ import {
 } from "../../deploy/cloudflare-worker/adapter";
 import { deriveRateKey } from "../../src/http-fetch-handler";
 import { _getBucket, _resetRateLimiter } from "../../src/utils/rate-limiter";
+import { jwksResponse, signedJwt } from "../support/oauth-jwks";
 import { introspectionResponse } from "../support/oauth-introspection";
 
 const savedEnv = { ...process.env };
@@ -198,6 +199,33 @@ describe("Cloudflare Worker adapter", () => {
 
     expect(discover.result?.supportedVersions).toContain("2026-07-28");
     expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts locally verified JWT bearer tokens through the Worker entrypoint", async () => {
+    process.env = { ...savedEnv };
+    const env = {
+      ...cloudflareEnv(),
+      B2_OAUTH_INTROSPECTION_ENDPOINT: undefined,
+      B2_OAUTH_INTROSPECTION_CLIENT_ID: undefined,
+      B2_OAUTH_INTROSPECTION_CLIENT_SECRET: undefined,
+      B2_OAUTH_JWKS_URI: "https://issuer.example.com/oauth2/jwks",
+    };
+    const jwksFetch = vi.fn(async () => jwksResponse());
+    vi.stubGlobal("fetch", jwksFetch);
+
+    const discover = await rpcJson(
+      await cloudflareWorkerFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: { ...modernHeaders("server/discover"), Authorization: `Bearer ${signedJwt()}` },
+          body: modernBody("server/discover"),
+        }),
+        env,
+      ),
+    );
+
+    expect(discover.result?.supportedVersions).toContain("2026-07-28");
+    expect(jwksFetch).toHaveBeenCalledTimes(1);
   });
 
   it("rejects bearer tokens whose subject is outside the local allowlist", async () => {

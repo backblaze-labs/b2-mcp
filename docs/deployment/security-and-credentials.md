@@ -106,6 +106,7 @@ B2_OAUTH_ISSUER=https://issuer.example.com/
 B2_OAUTH_AUTHORIZATION_ENDPOINT=https://issuer.example.com/oauth2/authorize
 B2_OAUTH_TOKEN_ENDPOINT=https://issuer.example.com/oauth2/token
 B2_OAUTH_INTROSPECTION_ENDPOINT=https://issuer.example.com/oauth2/introspect
+# B2_OAUTH_JWKS_URI=https://issuer.example.com/.well-known/jwks.json
 B2_OAUTH_RESOURCE=https://mcp.example.com/mcp
 B2_OAUTH_AUDIENCE=https://mcp.example.com/mcp
 B2_OAUTH_ALLOWED_SUBJECTS=issuer-subject-for-this-single-tenant-deployment
@@ -116,6 +117,11 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 Store `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, and OAuth introspection
 credentials in the provider's encrypted secret mechanism, not in source, build
 logs, query strings, screenshots, or client configuration.
+
+For authorization servers that issue signed JWT access tokens, set
+`B2_OAUTH_JWKS_URI` to the issuer's JWKS URL. Then
+`B2_OAUTH_INTROSPECTION_ENDPOINT` and introspection credentials are optional
+unless opaque-token fallback is also required.
 
 ## Principal Mode
 

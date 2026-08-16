@@ -1,6 +1,7 @@
 import { OAuthError, OAuthErrorCode, type AuthInfo } from "@modelcontextprotocol/server";
 import {
   OAuthDependencyError,
+  OAuthJwtVerifier,
   OAuthIntrospectionVerifier,
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
@@ -11,6 +12,7 @@ import {
   validatePreverifiedOAuthAuthInfo,
 } from "../../src/oauth-resource-server";
 import { logger } from "../../src/utils/logger";
+import { jwtClaims, jwksResponse, rsaPublicJwk, signedJwt } from "../support/oauth-jwks";
 
 const baseConfig = {
   issuer: "http://localhost:9000/",
@@ -20,6 +22,7 @@ const baseConfig = {
   authorizationEndpoint: "http://localhost:9000/oauth2/authorize",
   tokenEndpoint: "http://localhost:9000/oauth2/token",
   introspectionEndpoint: "http://localhost:9000/oauth2/introspect",
+  jwksUri: undefined as string | undefined,
   introspectionClientId: "client",
   introspectionClientSecret: "secret",
   introspectionBearerToken: undefined as string | undefined,
@@ -38,6 +41,7 @@ const baseConfig = {
   introspectionCacheMaxEntries: 100,
   introspectionCacheTtlSeconds: 300,
   introspectionCacheSkewSeconds: 0,
+  jwksCacheTtlSeconds: 300,
 };
 
 function claims(overrides: Record<string, unknown> = {}) {
@@ -499,6 +503,121 @@ describe("OAuthIntrospectionVerifier", () => {
   });
 });
 
+function jwksOnlyConfig(overrides: Partial<typeof baseConfig> = {}) {
+  return {
+    ...baseConfig,
+    introspectionEndpoint: undefined,
+    jwksUri: "http://localhost:9000/oauth2/jwks",
+    introspectionClientId: undefined,
+    introspectionClientSecret: undefined,
+    ...overrides,
+  };
+}
+
+function jwtFor(
+  overrides: Record<string, unknown> = {},
+  headerOverrides: Record<string, unknown> = {},
+) {
+  return signedJwt(
+    jwtClaims({
+      iss: baseConfig.issuer,
+      aud: baseConfig.audience,
+      resource: baseConfig.resource,
+      exp: 2000,
+      scope: "b2:read",
+      client_id: "mcp-client",
+      sub: "user-123",
+      ...overrides,
+    }),
+    headerOverrides,
+  );
+}
+
+describe("OAuthJwtVerifier", () => {
+  beforeEach(() => {
+    resetOAuthVerifierCacheForTests();
+  });
+
+  it("verifies signed JWT access tokens against the configured JWKS", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.method).toBe("GET");
+      return jwksResponse();
+    });
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    const authInfo = await verifier.verifyAccessToken(jwtFor());
+
+    expect(authInfo).toMatchObject({
+      clientId: "mcp-client",
+      scopes: ["b2:read"],
+      expiresAt: 2000,
+      extra: {
+        iss: baseConfig.issuer,
+        sub: "user-123",
+        alg: "RS256",
+        aud: [baseConfig.audience],
+        resource: [baseConfig.resource],
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches JWKS responses and refreshes once for key rotation", async () => {
+    const rotatedKey = { ...rsaPublicJwk, kid: "rotated-key" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+      )
+      .mockResolvedValueOnce(jwksResponse([rotatedKey]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "first-client" }));
+    await verifier.verifyAccessToken(jwtFor({ client_id: "second-client" }));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await verifier.verifyAccessToken(
+      jwtFor({ client_id: "rotated-client" }, { kid: "rotated-key" }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects JWTs with invalid signatures", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const token = jwtFor();
+    const tampered = `${token.slice(0, -1)}${token.endsWith("a") ? "b" : "a"}`;
+
+    await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
+  });
+
+  it("authenticates JWKS-only deployments without introspection credentials", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse());
+    const auth = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: `Bearer ${jwtFor({ exp: 2_000_000_000 })}` },
+      }),
+      jwksOnlyConfig(),
+      { fetch: fetchMock as typeof fetch, nowSeconds: () => 1000 },
+    );
+
+    expect(auth).not.toBeInstanceOf(Response);
+    expect(auth).toMatchObject({ clientId: "mcp-client" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("OAuth bearer rejection responses", () => {
   it.each([
     ["decline", OAuthErrorCode.AccessDenied, "declined by user"],
@@ -584,11 +703,42 @@ describe("OAuth resource metadata", () => {
     expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
     expect(config.introspectionTimeoutMs).toBe(2500);
     expect(config.introspectionCacheTtlSeconds).toBe(120);
+    expect(config.jwksUri).toBeUndefined();
     expect(protectedResourceMetadata(config)).toMatchObject({
       resource: baseConfig.resource,
       authorization_servers: [baseConfig.issuer],
       scopes_supported: ["b2:read", "b2:write", "b2:admin", "custom:report"],
     });
+  });
+
+  it("loads JWKS-only static configuration without introspection credentials", () => {
+    const config = loadOAuthResourceServerConfig({
+      B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+      B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+      B2_OAUTH_ISSUER: baseConfig.issuer,
+      B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+      B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+      B2_OAUTH_JWKS_URI: "http://localhost:9000/oauth2/jwks",
+      B2_OAUTH_RESOURCE: baseConfig.resource,
+      B2_OAUTH_AUDIENCE: baseConfig.audience,
+      B2_OAUTH_JWKS_CACHE_TTL_SECONDS: "45",
+    });
+
+    expect(config.introspectionEndpoint).toBeUndefined();
+    expect(config.jwksUri).toBe("http://localhost:9000/oauth2/jwks");
+    expect(config.jwksCacheTtlSeconds).toBe(45);
+  });
+
+  it("requires either introspection or JWKS token verification", () => {
+    expect(() =>
+      loadOAuthResourceServerConfig({
+        B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+        B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+        B2_OAUTH_ISSUER: baseConfig.issuer,
+        B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+        B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+      }),
+    ).toThrow(/introspection.*jwks/i);
   });
 
   it("advertises the verified OAuth resource when it differs from the metadata URL", () => {
@@ -614,6 +764,15 @@ describe("OAuth resource metadata", () => {
     expect(options.resourceServerUrl.href).toBe(baseConfig.resource);
     expect(options.scopesSupported).toEqual(["b2:read", "b2:write", "b2:admin", "custom:tenant"]);
     expect(options.oauthMetadata.scopes_supported).toEqual(options.scopesSupported);
+  });
+
+  it("advertises JWKS metadata when local JWT verification is configured", () => {
+    const options = oauthMetadataOptions(jwksOnlyConfig());
+
+    expect(options.oauthMetadata).toMatchObject({
+      jwks_uri: "http://localhost:9000/oauth2/jwks",
+    });
+    expect(options.oauthMetadata.introspection_endpoint).toBeUndefined();
   });
 
   it("builds the protected-resource metadata URL from the configured public URL", () => {

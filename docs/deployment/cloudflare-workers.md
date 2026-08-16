@@ -15,8 +15,9 @@ clean deploy and smoke evidence exists.
 - Cloudflare Workers account and Wrangler.
 - A custom Worker domain such as `mcp.example.com`.
 - A non-master, least-privilege B2 application key.
-- OAuth issuer/introspection service, Cloudflare OAuth Provider, or Cloudflare
-  Access integration that yields verified standard MCP `AuthInfo`.
+- OAuth issuer with introspection, JWKS for signed JWT access tokens,
+  Cloudflare OAuth Provider, or Cloudflare Access integration that yields
+  verified standard MCP `AuthInfo`.
 - Review of current Worker CPU, memory, subrequest, stream, and bundle limits.
 
 ## Architecture
@@ -96,10 +97,11 @@ exact hostname. Cloudflare terminates TLS at the edge. Do not expose raw port
 
 ## Authentication
 
-The checked-in adapter validates OAuth bearer tokens by introspection. A
-Cloudflare Access or OAuth Provider integration may run before the adapter only
-if it converts a verified identity into MCP `AuthInfo`. Never trust public
-identity headers from the internet.
+The checked-in adapter validates OAuth bearer tokens by introspection for
+opaque tokens, or by local JWT signature verification when `B2_OAUTH_JWKS_URI`
+is configured. A Cloudflare Access or OAuth Provider integration may run before
+the adapter only if it converts a verified identity into MCP `AuthInfo`. Never
+trust public identity headers from the internet.
 
 ## Health Checks
 
