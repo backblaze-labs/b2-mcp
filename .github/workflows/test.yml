@@ -393,6 +393,47 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  vercel-build-output:
+    name: Vercel build output scan
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run build
+      - name: Seed deterministic Vercel leak canaries
+        run: node scripts/print-vercel-build-canaries.mjs >> "${GITHUB_ENV}"
+      - run: pnpm run prepare:vercel-local-build
+        env:
+          VERCEL_TOKEN: ""
+      - run: pnpm run build:vercel-local
+      - run: pnpm run check:vercel-build-output
+      - run: pnpm run audit:supply-chain:denylist --artifacts-dir .vercel/output
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload Vercel build scan reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: vercel-build-output-scan
+          path: |
+            reports/vercel-build-output/
+          if-no-files-found: error
+          retention-days: 7
+
   container-image:
     name: container image
     needs: runtime-policy
@@ -575,6 +616,7 @@ jobs:
       - runtime-engine-floor
       - production-dependency-audit
       - package-budget
+      - vercel-build-output
       - container-image
       - supply-chain-audit
       - codeql-workflow-security
@@ -602,6 +644,7 @@ jobs:
           | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
           | Package budget metrics | Uploaded as package-budget artifact |
           | Vercel adapter budget | Uploaded as vercel-bundle artifact path |
+          | Vercel build output | Real Vercel build plus leak scan |
           | Cloudflare Worker adapter budget | Uploaded as cloudflare-worker-bundle artifact path |
           | Container image | Docker build plus HTTP health/readiness smoke |
           | Required issue | backblaze-labs/b2-mcp#50 |
@@ -619,6 +662,7 @@ jobs:
       - runtime-engine-floor
       - production-dependency-audit
       - package-budget
+      - vercel-build-output
       - container-image
       - supply-chain-audit
       - codeql-workflow-security

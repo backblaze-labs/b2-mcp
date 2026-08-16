@@ -42,6 +42,9 @@ function registryLock(): unknown {
       "      peer-lib:",
       "        specifier: 4.0.0",
       "        version: 4.0.0(peer-dep@1.0.0)",
+      "      typescript:",
+      "        specifier: 6.0.3",
+      "        version: 6.0.3",
       "",
       "packages:",
       "",
@@ -58,6 +61,12 @@ function registryLock(): unknown {
       "    resolution: {integrity: sha512-peer}",
       "    peerDependencies: {peer-dep: 1.0.0}",
       "",
+      "  typescript@5.9.3:",
+      "    resolution: {integrity: sha512-typescript-five}",
+      "",
+      "  typescript@6.0.3:",
+      "    resolution: {integrity: sha512-typescript-six}",
+      "",
       "snapshots:",
       "",
       "  root-lib@1.0.0:",
@@ -68,7 +77,13 @@ function registryLock(): unknown {
       "",
       "  optional-lib@2.0.0: {}",
       "",
-      "  peer-lib@4.0.0(peer-dep@1.0.0): {}",
+      "  peer-lib@4.0.0(peer-dep@1.0.0):",
+      "    dependencies:",
+      "      typescript: 5.9.3",
+      "",
+      "  typescript@5.9.3: {}",
+      "",
+      "  typescript@6.0.3: {}",
       "",
     ].join("\n"),
   );
@@ -102,6 +117,10 @@ describe("pnpm lock adapter", () => {
     expect(converted.packages["node_modules/peer-lib"].peerDependencies).toEqual({
       "peer-dep": "1.0.0",
     });
+    expect(converted.packages["node_modules/typescript"].version).toBe("6.0.3");
+    expect(
+      converted.packages["node_modules/.pnpm/typescript@5.9.3/node_modules/typescript"].dev,
+    ).toBe(true);
   });
 
   it("fails closed for unsupported lockfile versions", () => {

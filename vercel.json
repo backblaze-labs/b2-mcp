@@ -4,13 +4,17 @@
   "fluid": true,
   "regions": ["iad1"],
   "installCommand": "corepack enable && pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm run build",
-  "functions": {
-    "api/*.ts": {
-      "runtime": "nodejs22.x",
-      "maxDuration": 60
+  "buildCommand": "pnpm run typecheck && pnpm run build",
+  "builds": [
+    {
+      "src": "api/*.js",
+      "use": "@vercel/node",
+      "config": {
+        "runtime": "nodejs24.x",
+        "maxDuration": 60
+      }
     }
-  },
+  ],
   "rewrites": [
     {
       "source": "/mcp",

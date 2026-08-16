@@ -6,9 +6,47 @@ allowBuilds:
   # wrangler depends on workerd's platform packages. Keep install scripts disabled;
   # the Worker smoke uses the downloaded optional binary package directly.
   workerd: false
+minimumReleaseAgeExclude:
+  - '@vercel/cervel@0.1.46'
+  - '@vercel/elysia@0.1.115'
+  - '@vercel/express@0.1.129'
+  - '@vercel/fastify@0.1.118'
+  - '@vercel/h3@0.1.124'
+  - '@vercel/hono@0.2.118'
+  - '@vercel/koa@0.1.98'
+  - '@vercel/nestjs@0.2.119'
+  - '@vercel/next@4.21.6'
+  - '@vercel/node@5.10.1'
+  - '@vercel/python@6.57.1'
+  - '@vercel/redwood@2.5.2'
+  - '@vercel/remix-builder@5.9.5'
+  - '@vercel/static-build@2.12.7'
+  - '@vercel/vc-native-darwin-arm64@59.1.3'
+  - '@vercel/vc-native-darwin-x64@59.1.3'
+  - '@vercel/vc-native-linux-arm64@59.1.3'
+  - '@vercel/vc-native-linux-x64@59.1.3'
+  - vercel@59.1.3
 overrides:
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1
   '@hono/node-server': 2.0.10
+  '@types/node': 22.3.0
+  '@vercel/backends>path-to-regexp': 8.4.0
+  '@vercel/express>path-to-regexp': 8.4.0
+  '@vercel/fun>path-to-regexp': 8.4.0
+  '@vercel/fun>tar': 7.5.21
+  '@vercel/hono>path-to-regexp': 8.4.0
+  '@vercel/node>path-to-regexp': 6.3.0
+  '@vercel/node>undici': 6.28.0
+  '@vercel/python-analysis>js-yaml': 4.3.1
+  '@vercel/python-analysis>minimatch': 10.2.3
+  '@vercel/python-analysis>smol-toml': 1.6.1
+  '@vercel/remix-builder>path-to-regexp': 6.3.0
+  '@vercel/rust>smol-toml': 1.6.1
+  '@vercel/static-config>ajv': 8.18.0
+  esbuild: 0.28.1
+  vercel>path-to-regexp: 8.4.0
+  vercel>smol-toml: 1.6.1
+  vercel>undici: 6.28.0
   'minimatch@3.1.5>brace-expansion': 1.1.18
   nanoid: 3.3.18
