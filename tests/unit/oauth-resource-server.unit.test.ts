@@ -705,6 +705,19 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects initial JWKS documents with duplicate compatible kid entries", async () => {
+    const duplicateKey = { ...rsaPublicJwk };
+    const fetchMock = vi.fn(async () => jwksResponse([rsaPublicJwk, duplicateKey]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toThrow(/signature/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("caches JWKS responses and refreshes once for key rotation", async () => {
     const rotatedKey = { ...rsaPublicJwk, kid: "rotated-key" };
     const fetchMock = vi

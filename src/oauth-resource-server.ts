@@ -1448,6 +1448,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     if (!kid) return false;
     const initial = await this.jwks(false);
     const keys = this.candidateKeys(initial.jwks, algorithm, kid);
+    if (keys.length > 1) return false;
     for (const jwk of keys) {
       if (await verifyJwtWithJwk(token, algorithm, jwk)) return true;
     }
