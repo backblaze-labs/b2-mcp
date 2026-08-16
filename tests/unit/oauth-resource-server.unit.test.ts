@@ -14,7 +14,16 @@ import {
   validateOAuthResourceServerConfiguration,
 } from "../../src/oauth-resource-server";
 import { logger } from "../../src/utils/logger";
-import { jwtClaims, jwksResponse, rsaPublicJwk, signedJwt } from "../support/oauth-jwks";
+import {
+  ecPublicJwk,
+  ed25519PublicJwk,
+  jwtClaims,
+  jwksResponse,
+  rsaPublicJwk,
+  signedEdDsaJwt,
+  signedEs256Jwt,
+  signedJwt,
+} from "../support/oauth-jwks";
 
 const baseConfig = {
   issuer: "http://localhost:9000/",
@@ -596,23 +605,38 @@ function jwksOnlyConfig(overrides: Partial<typeof baseConfig> = {}) {
   };
 }
 
+function standardJwtClaims(overrides: Record<string, unknown> = {}) {
+  return jwtClaims({
+    iss: baseConfig.issuer,
+    aud: baseConfig.audience,
+    resource: baseConfig.resource,
+    exp: 2000,
+    scope: "b2:read",
+    client_id: "mcp-client",
+    sub: "user-123",
+    ...overrides,
+  });
+}
+
 function jwtFor(
   overrides: Record<string, unknown> = {},
   headerOverrides: Record<string, unknown> = {},
 ) {
-  return signedJwt(
-    jwtClaims({
-      iss: baseConfig.issuer,
-      aud: baseConfig.audience,
-      resource: baseConfig.resource,
-      exp: 2000,
-      scope: "b2:read",
-      client_id: "mcp-client",
-      sub: "user-123",
-      ...overrides,
-    }),
-    headerOverrides,
-  );
+  return signedJwt(standardJwtClaims(overrides), headerOverrides);
+}
+
+function es256JwtFor(
+  overrides: Record<string, unknown> = {},
+  headerOverrides: Record<string, unknown> = {},
+) {
+  return signedEs256Jwt(standardJwtClaims(overrides), headerOverrides);
+}
+
+function eddsaJwtFor(
+  overrides: Record<string, unknown> = {},
+  headerOverrides: Record<string, unknown> = {},
+) {
+  return signedEdDsaJwt(standardJwtClaims(overrides), headerOverrides);
 }
 
 function tamperJwtSignature(token: string): string {
@@ -764,6 +788,60 @@ describe("OAuthJwtVerifier", () => {
     const tampered = tamperJwtSignature(token);
 
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
+  });
+
+  it("verifies ES256-signed JWT access tokens against the configured JWKS", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse([ecPublicJwk]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ allowedJwtAlgorithms: ["ES256"] }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    const authInfo = await verifier.verifyAccessToken(es256JwtFor());
+
+    expect(authInfo.extra?.alg).toBe("ES256");
+    expect(authInfo.scopes).toEqual(["b2:read"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects ES256 JWTs with an invalid signature", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ allowedJwtAlgorithms: ["ES256"] }),
+      fetch: vi.fn(async () => jwksResponse([ecPublicJwk])) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(tamperJwtSignature(es256JwtFor()))).rejects.toThrow(
+      /signature/i,
+    );
+  });
+
+  it("verifies EdDSA-signed JWT access tokens against the configured JWKS", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse([ed25519PublicJwk]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ allowedJwtAlgorithms: ["EdDSA"] }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    const authInfo = await verifier.verifyAccessToken(eddsaJwtFor());
+
+    expect(authInfo.extra?.alg).toBe("EdDSA");
+    expect(authInfo.scopes).toEqual(["b2:read"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects EdDSA JWTs with an invalid signature", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ allowedJwtAlgorithms: ["EdDSA"] }),
+      fetch: vi.fn(async () => jwksResponse([ed25519PublicJwk])) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(tamperJwtSignature(eddsaJwtFor()))).rejects.toThrow(
+      /signature/i,
+    );
   });
 
   it("defaults local JWT algorithm verification to RS256 only", async () => {

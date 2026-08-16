@@ -1,5 +1,11 @@
 /* cspell:disable */
-import { createPrivateKey, createSign, type JsonWebKey } from "node:crypto";
+import {
+  createPrivateKey,
+  createSign,
+  generateKeyPairSync,
+  sign as nodeSign,
+  type JsonWebKey,
+} from "node:crypto";
 import { introspectionClaims } from "./oauth-introspection";
 
 const rsaPrivateJwk = {
@@ -23,6 +29,24 @@ export const rsaPublicJwk = {
   e: rsaPrivateJwk.e,
   kid: rsaPrivateJwk.kid,
   alg: "RS256",
+  use: "sig",
+  key_ops: ["verify"],
+} satisfies JsonWebKey;
+
+const ecKeyPair = generateKeyPairSync("ec", { namedCurve: "P-256" });
+export const ecPublicJwk = {
+  ...(ecKeyPair.publicKey.export({ format: "jwk" }) as JsonWebKey),
+  kid: "test-ec-key",
+  alg: "ES256",
+  use: "sig",
+  key_ops: ["verify"],
+} satisfies JsonWebKey;
+
+const ed25519KeyPair = generateKeyPairSync("ed25519");
+export const ed25519PublicJwk = {
+  ...(ed25519KeyPair.publicKey.export({ format: "jwk" }) as JsonWebKey),
+  kid: "test-ed-key",
+  alg: "EdDSA",
   use: "sig",
   key_ops: ["verify"],
 } satisfies JsonWebKey;
@@ -55,6 +79,33 @@ export function signedJwt(
   const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
   const privateKey = createPrivateKey({ key: rsaPrivateJwk, format: "jwk" });
   const signature = createSign("RSA-SHA256").update(signingInput).end().sign(privateKey);
+  return `${signingInput}.${base64Url(signature)}`;
+}
+
+export function signedEs256Jwt(
+  claims: Record<string, unknown> = jwtClaims(),
+  headerOverrides: Record<string, unknown> = {},
+): string {
+  const header = { alg: "ES256", typ: "at+jwt", kid: ecPublicJwk.kid, ...headerOverrides };
+  const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
+  const signature = createSign("SHA256")
+    .update(signingInput)
+    .end()
+    .sign({ key: ecKeyPair.privateKey, dsaEncoding: "ieee-p1363" });
+  return `${signingInput}.${base64Url(signature)}`;
+}
+
+export function signedEdDsaJwt(
+  claims: Record<string, unknown> = jwtClaims(),
+  headerOverrides: Record<string, unknown> = {},
+): string {
+  const header = { alg: "EdDSA", typ: "at+jwt", kid: ed25519PublicJwk.kid, ...headerOverrides };
+  const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
+  const signature = nodeSign(
+    null,
+    new TextEncoder().encode(signingInput),
+    ed25519KeyPair.privateKey,
+  );
   return `${signingInput}.${base64Url(signature)}`;
 }
 

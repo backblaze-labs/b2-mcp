@@ -70,6 +70,7 @@ unreviewed
 
 # Test fixture tokens and identifier fragments
 dontMock
+eddsa
 ghijkl
 klass
 pathb
