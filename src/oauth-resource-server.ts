@@ -458,9 +458,10 @@ function assertAllowedSubject(
   claims: Record<string, unknown>,
   issuer: string,
   allowedSubjects: readonly string[],
+  source: VerifiedClaimsSource["source"],
 ): void {
   if (allowedSubjects.length === 0) return;
-  const subject = subjectClaim(claims);
+  const subject = source === "jwt" ? stringClaim(claims.sub) : subjectClaim(claims);
   if (!subject) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token subject is not accepted");
   }
@@ -518,7 +519,7 @@ function authInfoFromVerifiedClaims(
       : assertAllowedAlgorithm(verification.algorithm, config.allowedAlgorithms);
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
   assertDeploymentScope(scopes);
-  assertAllowedSubject(claims, issuer, config.allowedSubjects);
+  assertAllowedSubject(claims, issuer, config.allowedSubjects, verification.source);
   const clientId =
     stringClaim(claims.client_id) ??
     stringClaim(claims.azp) ??
@@ -1544,7 +1545,7 @@ export function validatePreverifiedOAuthAuthInfo(
   assertTokenAlgorithm(extra, config.allowedAlgorithms);
   assertDeploymentScope(authInfo.scopes);
   assertRequiredScopes(authInfo.scopes, config.requiredScopes);
-  assertAllowedSubject(extra, issuer, config.allowedSubjects);
+  assertAllowedSubject(extra, issuer, config.allowedSubjects, "introspection");
   return authInfo;
 }
 

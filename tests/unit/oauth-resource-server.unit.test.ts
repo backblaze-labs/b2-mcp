@@ -245,12 +245,19 @@ describe("OAuthIntrospectionVerifier", () => {
       vi.fn(async () => Response.json(claims({ sub: "tenant-a" }))),
       { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
     );
+    const acceptedAlias = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ sub: undefined, subject: "tenant-a" }))),
+      { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
+    );
     const rejected = verifierWithFetch(
       vi.fn(async () => Response.json(claims({ sub: "tenant-b" }))),
       { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
     );
 
     await expect(accepted.verifyAccessToken("access-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+    await expect(acceptedAlias.verifyAccessToken("alias-token")).resolves.toMatchObject({
       clientId: "mcp-client",
     });
     await expect(rejected.verifyAccessToken("other-token")).rejects.toThrow(/subject/i);
@@ -704,6 +711,25 @@ describe("OAuthJwtVerifier", () => {
     await expect(
       verifier.verifyAccessToken(jwtFor(claimOverrides, headerOverrides)),
     ).rejects.toThrow(message);
+  });
+
+  it("requires standard sub for JWT allowed-subject checks", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ allowedSubjects: [`${baseConfig.issuer}#user-123`] }),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "subject-ok" })),
+    ).resolves.toMatchObject({
+      clientId: "subject-ok",
+    });
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "subject-alias", sub: undefined, subject: "user-123" }),
+      ),
+    ).rejects.toThrow(/subject/i);
   });
 
   it("fails closed and logs when the JWKS endpoint is unavailable", async () => {
