@@ -84,6 +84,7 @@ const liveSuiteSources = [
   "tests/live/b2.integration.live.test.ts",
   "tests/live/request-shape.contract.live.test.ts",
   "tests/live/support/contract-buckets.ts",
+  "scripts/live-b2-janitor.mjs",
   "scripts/lib/live-b2-contract.cjs",
 ];
 
@@ -249,6 +250,7 @@ describe("live secret workflow policy", () => {
   it("fails the live run when per-run cleanup leaks resources", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = workflowJobBlock(text, "contract") ?? "";
+    const janitor = workflowText("scripts/live-b2-janitor.mjs");
     expect(text).not.toContain("abandoned-resource-janitor:");
     expect(text).not.toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
     expect(text).toContain("Clean current live B2 run resources");
@@ -257,6 +259,8 @@ describe("live secret workflow policy", () => {
       'node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}"',
     );
     expect(contractJob).not.toContain("--best-effort");
+    expect(janitor).not.toMatch(/\.(?:listKeys|deleteKey)\s*\(/);
+    expect(janitor).not.toContain("keys=");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
     expect(text).toContain('cron: "17 9 * * *"');
     expect(text).toMatch(
@@ -334,6 +338,12 @@ describe("live secret workflow policy", () => {
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
     expect(contractJob).toContain('B2_REQUIRE_LIVE_TESTS: "1"');
     expect(contractJob).toContain('B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"');
+    expect(contractJob).toContain(
+      "must set B2_REQUIRE_LIVE_TESTS=1 and B2_INTEGRATION_REQUIRE_CREDENTIALS=1 together",
+    );
+    expect(contractJob).not.toContain(
+      "B2_APPLICATION_KEY B2_LIVE_TEST_ACCOUNT_ID B2_REQUIRE_LIVE_TESTS B2_INTEGRATION_REQUIRE_CREDENTIALS B2_MCP_LIVE_RUN_PREFIX",
+    );
   });
 
   it("pins the expected tool profile and required test bucket for live smoke", () => {

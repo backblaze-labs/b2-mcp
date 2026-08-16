@@ -478,9 +478,10 @@ trusted scheduled paths; smoke also runs on successful deployment status events
 using the deployed SHA after checking that the deployment environment is approved
 from a repository or organization variable and the SHA is reachable from
 protected `main` or `ci-green`. Neither workflow runs on `pull_request`,
-because live credentials must not be exposed to PR-head code. Trusted runs set
-`B2_REQUIRE_LIVE_TESTS=1` and `B2_INTEGRATION_REQUIRE_CREDENTIALS=1` for
-Vitest live-suite selection. Smoke uses its own credential scheme and fails
+because live credentials must not be exposed to PR-head code. Trusted Vitest
+live-suite runs set `B2_REQUIRE_LIVE_TESTS=1` and
+`B2_INTEGRATION_REQUIRE_CREDENTIALS=1` together; the workflow validation step
+fails if either flag is not set to `1`. Smoke uses its own credential scheme and fails
 loudly through the `Validate live B2 smoke environment` steps and
 `B2_MCP_REQUIRE_SMOKE_BUCKET=1`. Missing credentials or required variables fail
 trusted live jobs; a skipped-only trusted run is not accepted as release

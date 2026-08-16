@@ -4,7 +4,7 @@ import {
   assertLiveB2Runnable,
   hasLiveB2Credentials,
   liveB2GuardState,
-  selectLiveB2Test,
+  assertAndSelectLiveB2Test,
 } from "../support/live-b2-test-guard";
 import credentialPolicy from "../../scripts/b2-credential-env.json";
 
@@ -26,7 +26,7 @@ describe("live B2 test guard", () => {
   it("fails loudly instead of selecting skip when required live credentials are absent", () => {
     const { skip, testApi } = fakeTestApi();
 
-    expect(() => selectLiveB2Test(testApi, { [LIVE_B2_REQUIRE_FLAG]: "1" })).toThrow(
+    expect(() => assertAndSelectLiveB2Test(testApi, { [LIVE_B2_REQUIRE_FLAG]: "1" })).toThrow(
       /B2_REQUIRE_LIVE_TESTS=1 requires live Backblaze B2 credentials/,
     );
     expect(skip).not.toHaveBeenCalled();
@@ -35,7 +35,7 @@ describe("live B2 test guard", () => {
   it("keeps local no-credential selection skipped when live tests are not required", () => {
     const { skip, testApi } = fakeTestApi();
 
-    const selected = selectLiveB2Test(testApi, {});
+    const selected = assertAndSelectLiveB2Test(testApi, {});
 
     expect(selected).toBe(skip);
   });
@@ -52,9 +52,9 @@ describe("live B2 test guard", () => {
   it("rejects unrecognized non-empty require flag values instead of skipping", () => {
     const { skip, testApi } = fakeTestApi();
 
-    expect(() => selectLiveB2Test(testApi, { [LIVE_B2_REQUIRE_FLAG]: "required" })).toThrow(
-      /B2_REQUIRE_LIVE_TESTS must be one of/,
-    );
+    expect(() =>
+      assertAndSelectLiveB2Test(testApi, { [LIVE_B2_REQUIRE_FLAG]: "required" }),
+    ).toThrow(/B2_REQUIRE_LIVE_TESTS must be one of/);
     expect(skip).not.toHaveBeenCalled();
   });
 

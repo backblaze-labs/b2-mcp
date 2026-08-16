@@ -1,23 +1,12 @@
 import { join } from "path";
 import { pathToFileURL } from "url";
-import type { CleanupStats } from "../support/live-b2-contract-types";
+import { readFileSync } from "fs";
 
 interface JanitorModule {
   assertExpectedLiveTestAccount(
     authManager: { getAuth(): Promise<{ accountId: string }> },
     expectedAccountId: string,
     options?: { log?: (message: string) => void },
-  ): Promise<void>;
-  cleanupKeys(
-    b2Client: {
-      listKeys(args: { maxKeyCount: number; startApplicationKeyId?: string }): Promise<{
-        keys?: Array<{ applicationKeyId: string; keyName: string }>;
-        nextApplicationKeyId?: string | null;
-      }>;
-      deleteKey(applicationKeyId: string): Promise<void>;
-    },
-    stats: CleanupStats,
-    options: { prefix: string; excludePrefixes?: string[]; dryRun?: boolean },
   ): Promise<void>;
   parseArgs(argv: string[]): {
     prefix: string;
@@ -31,17 +20,6 @@ async function loadJanitor(): Promise<JanitorModule> {
   return import(
     pathToFileURL(join(__dirname, "../../scripts/live-b2-janitor.mjs")).href
   ) as Promise<JanitorModule>;
-}
-
-function stats(): CleanupStats {
-  return {
-    buckets: 0,
-    objectVersions: 0,
-    multipartUploads: 0,
-    keys: 0,
-    errors: 0,
-    leakedBuckets: 0,
-  };
 }
 
 describe("live B2 janitor", () => {
@@ -62,81 +40,13 @@ describe("live B2 janitor", () => {
     ).resolves.toBeUndefined();
   });
 
-  it("deletes run-prefixed keys discovered after the first key page", async () => {
+  it("does not require key-management capabilities for cleanup", async () => {
     const janitor = await loadJanitor();
-    const deleted: string[] = [];
-    const cursors: Array<string | undefined> = [];
-    const b2Client = {
-      async listKeys(args: { maxKeyCount: number; startApplicationKeyId?: string }) {
-        cursors.push(args.startApplicationKeyId);
-        if (!args.startApplicationKeyId) {
-          return {
-            keys: [{ applicationKeyId: "other-key", keyName: "customer-key" }],
-            nextApplicationKeyId: "cursor-1",
-          };
-        }
-        return {
-          keys: [{ applicationKeyId: "run-key", keyName: "mcp-contract-123-key" }],
-          nextApplicationKeyId: null,
-        };
-      },
-      async deleteKey(applicationKeyId: string) {
-        deleted.push(applicationKeyId);
-      },
-    };
-    const cleanupStats = stats();
+    const source = readFileSync(join(__dirname, "../../scripts/live-b2-janitor.mjs"), "utf8");
 
-    await janitor.cleanupKeys(b2Client, cleanupStats, {
-      prefix: "mcp-contract-123",
-      excludePrefixes: [],
-      dryRun: false,
-    });
-
-    expect(cursors).toEqual([undefined, "cursor-1"]);
-    expect(deleted).toEqual(["run-key"]);
-    expect(cleanupStats.keys).toBe(1);
-    expect(cleanupStats.errors).toBe(0);
-  });
-
-  it("applies prefix boundaries and exclusions to key cleanup", async () => {
-    const janitor = await loadJanitor();
-    const deleted: string[] = [];
-    const b2Client = {
-      async listKeys() {
-        return {
-          keys: [
-            { applicationKeyId: "run-key", keyName: "mcp-contract-run1-restricted" },
-            { applicationKeyId: "nearby-key", keyName: "mcp-contract-run10-restricted" },
-            { applicationKeyId: "excluded-key", keyName: "mcp-contract-run2-restricted" },
-          ],
-          nextApplicationKeyId: null,
-        };
-      },
-      async deleteKey(applicationKeyId: string) {
-        deleted.push(applicationKeyId);
-      },
-    };
-    const cleanupStats = stats();
-
-    await janitor.cleanupKeys(b2Client, cleanupStats, {
-      prefix: "mcp-contract-",
-      excludePrefixes: ["mcp-contract-run2"],
-      dryRun: false,
-    });
-
-    expect(deleted).toEqual(["run-key", "nearby-key"]);
-    expect(cleanupStats.keys).toBe(2);
-    expect(cleanupStats.errors).toBe(0);
-
-    deleted.length = 0;
-    const scopedStats = stats();
-    await janitor.cleanupKeys(b2Client, scopedStats, {
-      prefix: "mcp-contract-run1",
-      excludePrefixes: [],
-      dryRun: false,
-    });
-    expect(deleted).toEqual(["run-key"]);
-    expect(scopedStats.keys).toBe(1);
+    expect("cleanupKeys" in janitor).toBe(false);
+    expect(source).not.toMatch(/\.(?:listKeys|deleteKey)\s*\(/);
+    expect(source).not.toContain("keys=");
   });
 
   it("parses best-effort cleanup mode separately from scheduled cleanup", async () => {

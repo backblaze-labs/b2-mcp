@@ -59,7 +59,7 @@ export function assertLiveB2Runnable(env: Env = process.env): void {
   );
 }
 
-export function selectLiveB2Test(testApi: TestApi, env: Env = process.env): TestCase {
+export function assertAndSelectLiveB2Test(testApi: TestApi, env: Env = process.env): TestCase {
   assertLiveB2Runnable(env);
   return hasLiveB2Credentials(env) ? testApi : testApi.skip;
 }
