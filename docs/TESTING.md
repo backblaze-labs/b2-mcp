@@ -69,9 +69,9 @@ The stable required PR check names are:
 - `slow/lifecycle`
 - `cross-platform minimum`
 
-Global V8 coverage must remain at or above 82% statements, 72% branches, 86%
-functions, and 86% lines. Raise these floors as coverage improves; lowering
-them requires explicit review and justification. Coverage collection is source
+Global V8 coverage must remain at or above 90.5% statements, 81.8% branches,
+94.6% functions, and 93.8% lines. Raise these floors as coverage improves;
+lowering them requires explicit review and justification. Coverage collection is source
 only: `src/**/*.ts`, excluding `dist/`, declarations, generated files, and test
 files. The current Phase 1 floor is a ratchet: when `coverage/coverage-summary.json`
 shows every global percentage at least two points above the floor for three
