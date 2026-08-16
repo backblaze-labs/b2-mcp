@@ -354,6 +354,16 @@ function numberClaim(value: unknown): number | undefined {
   return undefined;
 }
 
+function jwtNumericDateClaim(
+  claims: Record<string, unknown>,
+  claimName: "exp" | "nbf" | "iat",
+): number | undefined {
+  const value = claims[claimName];
+  if (value === undefined) return undefined;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  throw new OAuthError(OAuthErrorCode.InvalidToken, `Token ${claimName} is not accepted`);
+}
+
 function stringClaim(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
@@ -386,9 +396,9 @@ function assertJwtTimeWindow(
   now: number,
   clockSkewSeconds: number,
 ): number {
-  const exp = numberClaim(claims.exp);
-  const nbf = numberClaim(claims.nbf);
-  const iat = numberClaim(claims.iat);
+  const exp = jwtNumericDateClaim(claims, "exp");
+  const nbf = jwtNumericDateClaim(claims, "nbf");
+  const iat = jwtNumericDateClaim(claims, "iat");
   if (!exp || exp <= now - clockSkewSeconds) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token is expired");
   }

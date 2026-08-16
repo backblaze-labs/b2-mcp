@@ -728,6 +728,20 @@ describe("OAuthJwtVerifier", () => {
   });
 
   it.each([
+    ["exp", { exp: "2000" }, /exp/i],
+    ["nbf", { nbf: "invalid" }, /nbf/i],
+    ["iat", { iat: "1000" }, /iat/i],
+  ])("rejects malformed JWT NumericDate %s claims", async (_name, overrides, message) => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor(overrides))).rejects.toThrow(message);
+  });
+
+  it.each([
     ["wrong issuer", { iss: "http://localhost:9001/" }, {}, /issuer/i],
     ["issuer alias without iss", { iss: undefined, issuer: baseConfig.issuer }, {}, /issuer/i],
     ["missing scope", { scope: "profile" }, {}, /deployment scope/i],
