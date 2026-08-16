@@ -100,6 +100,29 @@ function legacyBody(method: string, params: Record<string, unknown> = {}, id = 2
   return JSON.stringify({ jsonrpc: "2.0", id, method, params });
 }
 
+function introspectionClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    active: true,
+    iss: "https://issuer.example.com/",
+    sub: "subject",
+    aud: ["https://mcp.example.com/mcp"],
+    resource: ["https://mcp.example.com/mcp"],
+    exp: Math.floor(Date.now() / 1000) + 600,
+    token_type: "bearer",
+    alg: "RS256",
+    scope: "b2:read",
+    client_id: "client",
+    ...overrides,
+  };
+}
+
+function introspectionResponse(overrides: Record<string, unknown> = {}): Response {
+  return new Response(JSON.stringify(introspectionClaims(overrides)), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 async function rpcJson(response: Response): Promise<Record<string, any>> {
   expect(response.status).toBe(200);
   const text = await response.text();
@@ -170,15 +193,23 @@ describe("Vercel adapter", () => {
   });
 
   it.each([
-    ["wrong path", "https://mcp.example.com/not-mcp", "POST", jsonHeaders()],
-    ["wrong method", "https://mcp.example.com/mcp", "PUT", jsonHeaders()],
+    ["wrong path", "https://mcp.example.com/not-mcp", "POST", jsonHeaders(), 404],
+    ["wrong method", "https://mcp.example.com/mcp", "PUT", jsonHeaders(), 405],
+    [
+      "wrong host",
+      "https://mcp.example.com/mcp",
+      "POST",
+      jsonHeaders({ host: "evil.example.com" }),
+      403,
+    ],
     [
       "wrong origin",
       "https://mcp.example.com/mcp",
       "POST",
       jsonHeaders({ Origin: "https://evil.example.com" }),
+      403,
     ],
-  ])("rejects %s before OAuth introspection", async (_name, url, method, headers) => {
+  ])("rejects %s before OAuth introspection", async (_name, url, method, headers, status) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -190,37 +221,86 @@ describe("Vercel adapter", () => {
       }),
     );
 
-    expect([403, 404, 405]).toContain(response.status);
+    expect(response.status).toBe(status);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("serves modern discovery and tools/list through the Vercel adapter", async () => {
-    const discover = await rpcJson(
-      await vercelMcpFetch(
-        new Request("https://mcp.example.com/mcp", {
-          method: "POST",
-          headers: modernHeaders("server/discover"),
-          body: modernBody("server/discover"),
-        }),
-        validAuthInfo,
-      ),
+  it("rejects malformed Authorization headers before OAuth introspection", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Basic access-token" }),
+        body: modernBody("tools/list"),
+      }),
     );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("ignores forged identity headers and uses verified token claims", async () => {
+    const introspection = vi.fn().mockResolvedValue(introspectionResponse());
+    vi.stubGlobal("fetch", introspection);
+
     const listed = await rpcJson(
       await vercelMcpFetch(
         new Request("https://mcp.example.com/mcp", {
           method: "POST",
-          headers: modernHeaders("tools/list"),
-          body: modernBody("tools/list", {}, 2),
+          headers: {
+            ...modernHeaders("tools/list"),
+            Authorization: "Bearer access-token",
+            "X-Principal": "attacker-subject",
+            "X-User": "attacker-user",
+          },
+          body: modernBody("tools/list"),
         }),
-        validAuthInfo,
+        { remoteAddress: "203.0.113.42" },
       ),
     );
     const toolNames = new Set(
       ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
     );
 
+    expect(toolNames.has("b2_list_buckets")).toBe(true);
+    expect(toolNames.has("b2_create_bucket")).toBe(false);
+    expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves modern discovery and tools/list through the Vercel adapter", async () => {
+    const discoverResponse = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("server/discover"),
+        body: modernBody("server/discover"),
+      }),
+      validAuthInfo,
+    );
+    const listedResponse = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("tools/list"),
+        body: modernBody("tools/list", {}, 2),
+      }),
+      validAuthInfo,
+    );
+    const discover = await rpcJson(discoverResponse);
+    const listed = await rpcJson(listedResponse);
+    const toolNames = new Set(
+      ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
+    );
+
+    expect(discoverResponse.headers.get("cache-control") ?? "").not.toMatch(/\bpublic\b/i);
+    expect(listedResponse.headers.get("cache-control") ?? "").not.toMatch(/\bpublic\b/i);
     expect(discover.result?.supportedVersions).toContain("2026-07-28");
     expect(discover.result?.capabilities?.tools).toBeDefined();
+    expect(discover.result?.ttlMs).toBe(30_000);
+    expect(discover.result?.cacheScope).toBe("private");
+    expect(listed.result?.ttlMs).toBe(30_000);
+    expect(listed.result?.cacheScope).toBe("private");
     expect(toolNames.has("b2_list_buckets")).toBe(true);
     expect(toolNames.has("b2_create_bucket")).toBe(false);
   });
