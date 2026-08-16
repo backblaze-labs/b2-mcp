@@ -8,6 +8,7 @@ import {
   vercelProtectedResourceMetadataFetch,
 } from "../../deploy/vercel/adapter";
 import { logger } from "../../src/utils/logger";
+import { introspectionResponse } from "../support/oauth-introspection";
 
 const savedEnv = { ...process.env };
 
@@ -170,15 +171,23 @@ describe("Vercel adapter", () => {
   });
 
   it.each([
-    ["wrong path", "https://mcp.example.com/not-mcp", "POST", jsonHeaders()],
-    ["wrong method", "https://mcp.example.com/mcp", "PUT", jsonHeaders()],
+    ["wrong path", "https://mcp.example.com/not-mcp", "POST", jsonHeaders(), 404],
+    ["wrong method", "https://mcp.example.com/mcp", "PUT", jsonHeaders(), 405],
+    [
+      "wrong host",
+      "https://mcp.example.com/mcp",
+      "POST",
+      jsonHeaders({ host: "evil.example.com" }),
+      403,
+    ],
     [
       "wrong origin",
       "https://mcp.example.com/mcp",
       "POST",
       jsonHeaders({ Origin: "https://evil.example.com" }),
+      403,
     ],
-  ])("rejects %s before OAuth introspection", async (_name, url, method, headers) => {
+  ])("rejects %s before OAuth introspection", async (_name, url, method, headers, status) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
@@ -190,37 +199,89 @@ describe("Vercel adapter", () => {
       }),
     );
 
-    expect([403, 404, 405]).toContain(response.status);
+    expect(response.status).toBe(status);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects malformed Authorization headers before OAuth introspection", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: jsonHeaders({ Authorization: "Basic access-token" }),
+        body: modernBody("tools/list"),
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects disallowed token claims despite forged identity headers", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "principal";
+    process.env.B2_PRINCIPAL_CREDENTIAL_MAP = JSON.stringify({
+      "https://issuer.example.com/#subject": "tenant_a",
+    });
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID = "tenant-id";
+    process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY = "tenant-secret";
+    const introspection = vi
+      .fn()
+      .mockResolvedValue(introspectionResponse({ sub: "attacker-subject", scope: "b2:admin" }));
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: {
+          ...modernHeaders("tools/list"),
+          Authorization: "Bearer access-token",
+          "X-Principal": "subject",
+          "X-User": "subject",
+        },
+        body: modernBody("tools/list"),
+      }),
+      { remoteAddress: "203.0.113.42" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
   it("serves modern discovery and tools/list through the Vercel adapter", async () => {
-    const discover = await rpcJson(
-      await vercelMcpFetch(
-        new Request("https://mcp.example.com/mcp", {
-          method: "POST",
-          headers: modernHeaders("server/discover"),
-          body: modernBody("server/discover"),
-        }),
-        validAuthInfo,
-      ),
+    const discoverResponse = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("server/discover"),
+        body: modernBody("server/discover"),
+      }),
+      validAuthInfo,
     );
-    const listed = await rpcJson(
-      await vercelMcpFetch(
-        new Request("https://mcp.example.com/mcp", {
-          method: "POST",
-          headers: modernHeaders("tools/list"),
-          body: modernBody("tools/list", {}, 2),
-        }),
-        validAuthInfo,
-      ),
+    const listedResponse = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: modernHeaders("tools/list"),
+        body: modernBody("tools/list", {}, 2),
+      }),
+      validAuthInfo,
     );
+    const discover = await rpcJson(discoverResponse);
+    const listed = await rpcJson(listedResponse);
     const toolNames = new Set(
       ((listed.result?.tools ?? []) as Array<{ name: string }>).map((tool) => tool.name),
     );
 
+    expect(discoverResponse.headers.get("cache-control")).toBeNull();
+    expect(listedResponse.headers.get("cache-control")).toBeNull();
     expect(discover.result?.supportedVersions).toContain("2026-07-28");
     expect(discover.result?.capabilities?.tools).toBeDefined();
+    expect(discover.result?.ttlMs).toBe(30_000);
+    expect(discover.result?.cacheScope).toBe("private");
+    expect(listed.result?.ttlMs).toBe(30_000);
+    expect(listed.result?.cacheScope).toBe("private");
     expect(toolNames.has("b2_list_buckets")).toBe(true);
     expect(toolNames.has("b2_create_bucket")).toBe(false);
   });

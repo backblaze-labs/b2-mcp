@@ -8,6 +8,7 @@ import {
 } from "../../deploy/cloudflare-worker/adapter";
 import { deriveRateKey } from "../../src/http-fetch-handler";
 import { _getBucket, _resetRateLimiter } from "../../src/utils/rate-limiter";
+import { introspectionResponse } from "../support/oauth-introspection";
 
 const savedEnv = { ...process.env };
 
@@ -78,29 +79,6 @@ function modernHeaders(method: string): Record<string, string> {
     "Mcp-Protocol-Version": "2026-07-28",
     "Mcp-Method": method,
   };
-}
-
-function introspectionClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    active: true,
-    iss: "https://issuer.example.com/",
-    sub: "subject",
-    aud: ["https://mcp.example.com/mcp"],
-    resource: ["https://mcp.example.com/mcp"],
-    exp: Math.floor(Date.now() / 1000) + 600,
-    token_type: "bearer",
-    alg: "RS256",
-    scope: "b2:read",
-    client_id: "client",
-    ...overrides,
-  };
-}
-
-function introspectionResponse(overrides: Record<string, unknown> = {}): Response {
-  return new Response(JSON.stringify(introspectionClaims(overrides)), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
 }
 
 async function rpcJson(response: Response): Promise<Record<string, any>> {
