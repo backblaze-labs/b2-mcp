@@ -10,7 +10,6 @@ import liveB2Contract from "./lib/live-b2-contract.cjs";
 
 const {
   CONTRACT_BUCKET_PREFIX,
-  CLEANUP_PAGINATION_GUARD_PAGES,
   bucketMatchesPrefix,
   cleanupContractBucketWithTools,
   createCleanupStats,
@@ -98,54 +97,6 @@ async function callTool(tools, name, args) {
   return tool.execute(args, {});
 }
 
-export async function cleanupKeys(b2Client, stats, options) {
-  let startApplicationKeyId;
-  for (let page = 0; page < CLEANUP_PAGINATION_GUARD_PAGES; page++) {
-    let listed;
-    try {
-      listed = await b2Client.listKeys({
-        maxKeyCount: 1000,
-        ...(startApplicationKeyId ? { startApplicationKeyId } : {}),
-      });
-    } catch (err) {
-      stats.errors++;
-      console.error(
-        `live-b2-janitor: key listing failed: ${redactDetail(err?.message ?? err, options.prefix)}`,
-      );
-      return;
-    }
-
-    for (const key of listed.keys ?? []) {
-      if (!bucketMatchesPrefix(key.keyName, options.prefix)) continue;
-      if (
-        (options.excludePrefixes ?? []).some((prefix) => bucketMatchesPrefix(key.keyName, prefix))
-      ) {
-        continue;
-      }
-      if (key.applicationKeyId === process.env.B2_APPLICATION_KEY_ID) continue;
-      stats.keys++;
-      console.log(`live-b2-janitor: deleting key fingerprint=${fingerprint(key.keyName)}`);
-      if (options.dryRun) continue;
-      try {
-        await b2Client.deleteKey(key.applicationKeyId);
-      } catch (err) {
-        stats.errors++;
-        console.error(
-          `live-b2-janitor: key cleanup failed key=${fingerprint(key.keyName)} ${redactDetail(
-            err?.message ?? err,
-            options.prefix,
-          )}`,
-        );
-      }
-    }
-
-    if (!listed.nextApplicationKeyId) return;
-    startApplicationKeyId = listed.nextApplicationKeyId;
-  }
-  stats.errors++;
-  console.error("live-b2-janitor: key cleanup exceeded pagination guard");
-}
-
 export async function assertExpectedLiveTestAccount(authManager, expectedAccountId, options) {
   if (!expectedAccountId) {
     throw new Error("B2_LIVE_TEST_ACCOUNT_ID is required before live B2 janitor deletion.");
@@ -228,10 +179,9 @@ async function main() {
       cleanupOptions,
     );
   }
-  await cleanupKeys(b2Client, stats, options);
 
   console.log(
-    `live-b2-janitor: summary buckets=${stats.buckets} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} keys=${stats.keys} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
+    `live-b2-janitor: summary buckets=${stats.buckets} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
   );
   if (stats.errors || stats.leakedBuckets) {
     const annotation = options.bestEffort ? "warning" : "error";

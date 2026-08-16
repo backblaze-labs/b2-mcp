@@ -106,6 +106,9 @@ jobs:
       matrix:
         node-version: [22.23.1, 24, 26]
     env:
+      # Trusted live contract runs require these together: the Vitest guard fails
+      # loudly on missing credentials, and fixture helpers enforce account scope.
+      B2_REQUIRE_LIVE_TESTS: "1"
       B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
       B2_MCP_LIVE_RUN_PREFIX: ${{ needs.guard.outputs.run-prefix }}-n${{ matrix.node-version }}
     steps:
@@ -136,18 +139,26 @@ jobs:
           echo "::add-mask::${B2_MCP_LIVE_RUN_PREFIX}"
           if [[ -n "${B2_LIVE_TEST_ACCOUNT_ID:-}" ]]; then echo "::add-mask::${B2_LIVE_TEST_ACCOUNT_ID}"; fi
           missing=0
-          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY B2_LIVE_TEST_ACCOUNT_ID B2_INTEGRATION_REQUIRE_CREDENTIALS B2_MCP_LIVE_RUN_PREFIX; do
+          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY B2_LIVE_TEST_ACCOUNT_ID B2_MCP_LIVE_RUN_PREFIX; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing required live-b2-contract variable or secret for ${name}"
               missing=1
             fi
           done
+          if [[ "${B2_REQUIRE_LIVE_TESTS:-}" != "1" || "${B2_INTEGRATION_REQUIRE_CREDENTIALS:-}" != "1" ]]; then
+            echo "::error::Trusted live-b2-contract runs must set B2_REQUIRE_LIVE_TESTS=1 and B2_INTEGRATION_REQUIRE_CREDENTIALS=1 together"
+            missing=1
+          fi
           if [[ "$missing" != 0 ]]; then exit "$missing"; fi
           node --input-type=module <<'NODE'
           import { B2AuthManager } from "./dist/auth.js";
           import { loadConfig } from "./dist/server.js";
+          import liveB2Capabilities from "./scripts/lib/live-b2-capabilities.cjs";
 
-          const requiredCapabilities = ["bypassGovernance", "deleteKeys", "listKeys", "writeKeys"];
+          const {
+            LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES: forbiddenCapabilities,
+            LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: requiredCapabilities,
+          } = liveB2Capabilities;
           const auth = await new B2AuthManager(loadConfig()).getAuth();
           if (auth.accountId !== process.env.B2_LIVE_TEST_ACCOUNT_ID) {
             throw new Error("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
@@ -160,6 +171,14 @@ jobs:
               `live B2 contract key is missing required capability: ${missingCapabilities.join(", ")}`,
             );
           }
+          const forbiddenGrantedCapabilities = forbiddenCapabilities.filter((capability) =>
+            auth.capabilities.includes(capability),
+          );
+          if (forbiddenGrantedCapabilities.length > 0) {
+            throw new Error(
+              `live B2 contract key grants forbidden capability: ${forbiddenGrantedCapabilities.join(", ")}`,
+            );
+          }
           NODE
       - name: Run live B2 contract and integration suites
         timeout-minutes: 12
@@ -168,7 +187,6 @@ jobs:
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
-          B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
         run: pnpm run test:live:b2
       - name: Clean current live B2 run resources
         if: always()

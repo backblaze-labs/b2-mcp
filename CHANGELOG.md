@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced the `ts-node` dev runner with exact-pinned `tsx@4.23.11` and
   explicitly denied `esbuild` install builds in `pnpm-workspace.yaml`.
 
+### Fixed
+- Made hosted live B2 test selection fail loudly with `B2_REQUIRE_LIVE_TESTS=1`
+  when credentials are missing, and documented the required live-test secrets
+  and key capabilities.
+
 ## [0.1.0] - 2026-08-07
 
 ### Added
