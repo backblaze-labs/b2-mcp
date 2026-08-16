@@ -106,6 +106,7 @@ B2_OAUTH_ISSUER=https://issuer.example.com/
 B2_OAUTH_AUTHORIZATION_ENDPOINT=https://issuer.example.com/oauth2/authorize
 B2_OAUTH_TOKEN_ENDPOINT=https://issuer.example.com/oauth2/token
 B2_OAUTH_INTROSPECTION_ENDPOINT=https://issuer.example.com/oauth2/introspect
+# B2_OAUTH_JWKS_URI=https://issuer.example.com/.well-known/jwks.json
 B2_OAUTH_RESOURCE=https://mcp.example.com/mcp
 B2_OAUTH_AUDIENCE=https://mcp.example.com/mcp
 B2_OAUTH_ALLOWED_SUBJECTS=issuer-subject-for-this-single-tenant-deployment
@@ -116,6 +117,21 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 Store `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, and OAuth introspection
 credentials in the provider's encrypted secret mechanism, not in source, build
 logs, query strings, screenshots, or client configuration.
+
+For authorization servers that issue signed JWT access tokens, set
+`B2_OAUTH_JWKS_URI` to the issuer's JWKS URL. Then
+`B2_OAUTH_INTROSPECTION_ENDPOINT` and introspection credentials are optional.
+Configure both only when RFC 7662 introspection should remain authoritative for
+revocation and opaque-token compatibility. JWKS-only deployments fail closed on
+signature or claim mismatch and do not observe authorization-server revocation
+before JWT expiry.
+
+Use an expand-contract rollout when moving an existing deployment to JWKS-only
+verification: first deploy the new code with both introspection and JWKS
+settings present, wait until older instances are drained, then remove
+introspection settings in a later deploy if opaque-token fallback is not
+required. Removing introspection settings during the code rollout can make older
+instances fail `/health`.
 
 ## Principal Mode
 

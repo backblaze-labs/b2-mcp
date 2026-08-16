@@ -8,6 +8,7 @@ import {
   vercelProtectedResourceMetadataFetch,
 } from "../../deploy/vercel/adapter";
 import { logger } from "../../src/utils/logger";
+import { jwksResponse, signedJwt } from "../support/oauth-jwks";
 import { introspectionResponse } from "../support/oauth-introspection";
 
 const savedEnv = { ...process.env };
@@ -218,6 +219,32 @@ describe("Vercel adapter", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts locally verified JWT bearer tokens through JWKS", async () => {
+    delete process.env.B2_OAUTH_INTROSPECTION_ENDPOINT;
+    delete process.env.B2_OAUTH_INTROSPECTION_CLIENT_ID;
+    delete process.env.B2_OAUTH_INTROSPECTION_CLIENT_SECRET;
+    process.env.B2_OAUTH_JWKS_URI = "https://issuer.example.com/oauth2/jwks";
+    const jwksFetch = vi.fn(async () => jwksResponse());
+    vi.stubGlobal("fetch", jwksFetch);
+
+    const discover = await rpcJson(
+      await vercelMcpFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: {
+            ...modernHeaders("server/discover"),
+            Authorization: `Bearer ${signedJwt()}`,
+          },
+          body: modernBody("server/discover"),
+        }),
+        { remoteAddress: "203.0.113.42" },
+      ),
+    );
+
+    expect(discover.result?.supportedVersions).toContain("2026-07-28");
+    expect(jwksFetch).toHaveBeenCalledTimes(1);
   });
 
   it("rejects disallowed token claims despite forged identity headers", async () => {

@@ -22,7 +22,7 @@ MCP client
   | HTTPS + OAuth bearer token
   v
 Vercel Node.js Function
-  | validates OAuth by authorization-server introspection
+  | validates OAuth by introspection or JWT/JWKS
   | rejects public B2 credential headers in server/principal mode
   v
 src/http-fetch-handler.ts
@@ -38,15 +38,15 @@ Backblaze B2 Native and S3-compatible APIs
 The MCP route is stateless. It does not use Redis, sticky routing, session
 storage, `initialize`, or `Mcp-Session-Id` for MCP `2026-07-28` requests. Each
 warm Vercel instance keeps its own process-local rate, concurrency,
-introspection, circuit-breaker, and capability caches. `B2_MAX_SESSIONS`,
+token-verification, circuit-breaker, and capability caches. `B2_MAX_SESSIONS`,
 `B2_MAX_SESSIONS_PER_KEY`, and `B2_MCP_RATE_LIMIT_*` are therefore per warm
 instance on Vercel, not deployment-wide ceilings and not deployment-wide abuse
-controls; effective capacity scales with the number of warm instances. The
-OAuth introspection cache and circuit breaker are also per instance and cold on
-cold start, so an authorization-server outage can still receive probes from
-each warm instance. Treat those values as defense-in-depth and size B2, the
-authorization server, and spend limits using Vercel Firewall, WAF, deployment
-protection, and provider-side quotas for global controls.
+controls; effective capacity scales with the number of warm instances. OAuth
+introspection and JWKS caches and circuit breakers are also per instance and
+cold on cold start, so an authorization-server outage can still receive probes
+from each warm instance. Treat those values as defense-in-depth and size B2,
+the authorization server, and spend limits using Vercel Firewall, WAF,
+deployment protection, and provider-side quotas for global controls.
 
 ## Deploy
 
@@ -64,7 +64,7 @@ line; CI fails if generated `.vercel/output` runtime configs do not match that
 pin. Change the region only after reviewing latency to your B2 account region;
 Vercel function region selection does not change B2 data residency.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_JWKS_URI,B2_OAUTH_JWKS_CACHE_TTL_SECONDS,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
 
 Set these in Vercel Project Settings, not in source:
 
@@ -84,7 +84,7 @@ Set these in Vercel Project Settings, not in source:
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
 | `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for the supported single-tenant `server` mode |
-| OAuth introspection credentials | Encrypted environment values; required unless the dangerous unauthenticated override is set |
+| OAuth verifier settings | Configure introspection credentials for opaque tokens, `B2_OAUTH_JWKS_URI` for JWT-only verification, or both when introspection should remain authoritative |
 | Rate/concurrency values | Explicit reviewed per-warm-instance values |
 
 Use `deploy/vercel/vercel.env.example` as a checklist. Do not set
@@ -109,32 +109,53 @@ separately reviewed deployment where the operator accepts that every allowed
 principal can access everything the shared B2 key can access.
 
 Token validation uses the authorization server's RFC 7662 introspection
-endpoint, so signature verification, signing algorithm policy, and revocation
-remain with the selected issuer. The adapter additionally checks:
+endpoint for opaque tokens, or local JWT verification when `B2_OAUTH_JWKS_URI`
+is configured without introspection. When both are configured, introspection is
+authoritative so authorization-server revocation, inactive-token responses, and
+JWT-shaped opaque tokens are handled consistently during rollout. JWKS-only
+mode validates signatures and claims locally but cannot observe server-side
+revocation before token expiry, so pair JWKS-only mode with short IdP
+access-token lifetimes (the revocation window equals the token lifetime), or
+configure introspection alongside JWKS when immediate revocation is required.
+JWKS verification uses the `jose` library to check the JWT signature against
+the issuer's published keys, caches the JWKS for
+`B2_OAUTH_JWKS_CACHE_TTL_SECONDS` with a minimum floor from
+`B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS`, coalesces concurrent fetches, uses a
+circuit breaker, and rate-limits forced refresh for normal key rotation.
+The adapter additionally checks:
 
 - active token response
 - exact `iss`
-- exact `resource`
-- exact `aud`
-- `exp` and `nbf`
+- exact `resource` and `aud` for introspection
+- JWT `aud` or `resource` binding to this deployment
+- `exp`, `nbf`, and JWT `iat` with bounded `B2_OAUTH_JWT_CLOCK_SKEW_SECONDS`
 - token type, when returned
-- token signing algorithm from `alg`, `jwt_alg`, or `token_alg`, matched
-  against `B2_OAUTH_ALLOWED_ALGORITHMS`
+- JWT header `typ`, defaulting to RFC 9068 access-token types (`at+jwt`); an
+  issuer that omits `typ` or sends a different value needs
+  `B2_OAUTH_ALLOWED_JWT_TYPES` set to accept it
+- token signing algorithm from the JWT header or introspection `alg`,
+  `jwt_alg`, or `token_alg`, matched against `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
 - a subject listed in `B2_OAUTH_ALLOWED_SUBJECTS`, when configured
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`
 
 Introspection calls are bounded by `B2_OAUTH_INTROSPECTION_TIMEOUT_MS`, retried
 within `B2_OAUTH_INTROSPECTION_RETRIES`, and fail closed through a small
-process-local circuit breaker. Successful active responses are cached by token
-hash for at most `B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS`, never beyond the
-token's `exp` minus `B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS`, with
-`B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES` bounding memory. Introspection
+process-local circuit breaker. Successful verified tokens are cached by token
+hash for at most `B2_OAUTH_TOKEN_CACHE_TTL_SECONDS`, never beyond the token's
+`exp` minus `B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS`, with
+`B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES` bounding memory. The older
+`B2_OAUTH_INTROSPECTION_CACHE_*` names remain accepted for compatibility.
+JWKS fetches use `B2_OAUTH_JWKS_TIMEOUT_MS`, `B2_OAUTH_JWKS_RETRIES`,
+`B2_OAUTH_JWKS_RETRY_DELAY_MS`, `B2_OAUTH_JWKS_CIRCUIT_*`, and
+`B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS`. Introspection
 requires either `B2_OAUTH_INTROSPECTION_CLIENT_ID` plus
 `B2_OAUTH_INTROSPECTION_CLIENT_SECRET`, or
 `B2_OAUTH_INTROSPECTION_BEARER_TOKEN`. Only set
 `B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION=true` for a reviewed
-local or lab authorization server.
+local or lab authorization server. Introspection credentials and
+`B2_OAUTH_INTROSPECTION_ENDPOINT` are optional when only JWKS-backed JWT access
+tokens are accepted.
 
 Scope behavior is cumulative with B2 capabilities. `b2:read` exposes reviewed
 read/list/inspect tools, `b2:write` also exposes object and bucket mutations
