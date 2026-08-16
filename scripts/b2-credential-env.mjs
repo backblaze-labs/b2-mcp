@@ -18,6 +18,19 @@ const exactLogSensitiveNames = new Set([
   ...(b2CredentialPolicy.logSensitiveExact ?? []).map((name) => name.toUpperCase()),
 ]);
 const credentialNamePatterns = b2CredentialPolicy.patterns.map((pattern) => new RegExp(pattern));
+const exactVercelBuildSensitiveNames = new Set([
+  ...exactLogSensitiveNames,
+  ...(b2CredentialPolicy.vercelBuildSensitiveExact ?? []).map((name) => name.toUpperCase()),
+]);
+const vercelBuildSensitiveNamePatterns = [
+  ...credentialNamePatterns,
+  ...(b2CredentialPolicy.vercelBuildSensitivePatterns ?? []).map(
+    (pattern) => new RegExp(pattern, "i"),
+  ),
+];
+const vercelBuildForbiddenNamePatterns = (
+  b2CredentialPolicy.vercelBuildForbiddenPatterns ?? []
+).map((pattern) => new RegExp(pattern, "i"));
 const SENSITIVE_LOG_FIELDS = new Set([
   "accountId",
   "account_id",
@@ -83,6 +96,47 @@ export function b2LogSensitiveEnvValues(env = process.env) {
     .map((name) => env[name])
     .filter((value) => typeof value === "string" && value.length > 0)
     .sort((a, b) => b.length - a.length);
+}
+
+export function isVercelBuildSensitiveEnvName(name) {
+  const upper = name.toUpperCase();
+  return (
+    exactVercelBuildSensitiveNames.has(upper) ||
+    vercelBuildSensitiveNamePatterns.some((pattern) => pattern.test(upper))
+  );
+}
+
+export function isVercelBuildForbiddenEnvName(name) {
+  const upper = name.toUpperCase();
+  return (
+    isVercelBuildSensitiveEnvName(upper) ||
+    vercelBuildForbiddenNamePatterns.some((pattern) => pattern.test(upper))
+  );
+}
+
+export function vercelBuildSensitiveEnvNames(env = process.env) {
+  return Object.keys(env).filter(isVercelBuildSensitiveEnvName).sort();
+}
+
+export function vercelBuildForbiddenEnvNames(env = process.env) {
+  return Object.keys(env).filter(isVercelBuildForbiddenEnvName).sort();
+}
+
+export function vercelBuildSensitiveEnvValues(env = process.env) {
+  return vercelBuildSensitiveEnvNames(env)
+    .map((name) => env[name])
+    .filter((value) => typeof value === "string" && value.length > 0)
+    .sort((a, b) => b.length - a.length);
+}
+
+export function sanitizedVercelBuildEnv(env = process.env) {
+  const sanitized = { ...env };
+  for (const name of vercelBuildForbiddenEnvNames(env)) {
+    delete sanitized[name];
+  }
+  sanitized.VERCEL_TELEMETRY_DISABLED = "1";
+  sanitized.VERCEL_TOKEN = "";
+  return sanitized;
 }
 
 export function redactB2CredentialValues(text, env = process.env) {

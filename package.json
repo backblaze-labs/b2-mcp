@@ -59,6 +59,7 @@
     "check:package-budget": "node scripts/check-package-budget.mjs",
     "check:vercel-bundle": "node scripts/check-vercel-bundle.mjs",
     "prepare:vercel-local-build": "node scripts/prepare-vercel-local-build.mjs",
+    "build:vercel-local": "node scripts/run-vercel-local-build.mjs",
     "check:vercel-build-output": "node scripts/check-vercel-build-output.mjs",
     "check:cloudflare-worker-bundle": "node scripts/check-cloudflare-worker-bundle.mjs",
     "audit:supply-chain": "pnpm run audit:supply-chain:denylist --packlist && node scripts/audit-supply-chain.mjs",
@@ -105,6 +106,7 @@
     "@toon-format/toon": "4.1.0",
     "@types/node": "22.3.0",
     "@types/opossum": "^8.1.9",
+    "@vercel/node": "5.10.1",
     "@vitest/coverage-v8": "^4.1.10",
     "cspell": "^10.0.1",
     "eslint": "9.39.1",
@@ -114,6 +116,7 @@
     "tsx": "4.23.11",
     "typescript": "~6.0.3",
     "typescript-eslint": "8.66.0",
+    "vercel": "59.1.3",
     "vitest": "^4.1.10",
     "wrangler": "4.123.0"
   },

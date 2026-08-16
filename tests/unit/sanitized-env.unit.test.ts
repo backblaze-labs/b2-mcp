@@ -58,3 +58,51 @@ describe("B2 log redaction", () => {
     expect(redacted).toContain("[REDACTED_B2_PRESIGNED_URL]");
   });
 });
+
+describe("Vercel build env policy", () => {
+  it("classifies sensitive and forbidden env names from one shared helper", async () => {
+    const {
+      isVercelBuildForbiddenEnvName,
+      isVercelBuildSensitiveEnvName,
+      sanitizedVercelBuildEnv,
+      vercelBuildForbiddenEnvNames,
+    } = (await import(
+      pathToFileURL(join(__dirname, "../../scripts/b2-credential-env.mjs")).href
+    )) as {
+      isVercelBuildForbiddenEnvName: (name: string) => boolean;
+      isVercelBuildSensitiveEnvName: (name: string) => boolean;
+      sanitizedVercelBuildEnv: (env: Record<string, string>) => Record<string, string>;
+      vercelBuildForbiddenEnvNames: (env: Record<string, string>) => string[];
+    };
+    const sourceEnv = {
+      B2_APPLICATION_KEY: "b2-secret",
+      LIVE_B2_APPLICATION_KEY: "live-b2-secret",
+      OAUTH_CLIENT_SECRET: "oauth-secret",
+      VERCEL_TOKEN: "vercel-token",
+      NEXT_PUBLIC_MCP_URL: "https://example.invalid",
+      B2_REGISTER_ALL_TOOLS: "true",
+      PATH: "/usr/bin",
+    };
+
+    expect(isVercelBuildSensitiveEnvName("LIVE_B2_APPLICATION_KEY")).toBe(true);
+    expect(isVercelBuildSensitiveEnvName("OAUTH_CLIENT_SECRET")).toBe(true);
+    expect(isVercelBuildSensitiveEnvName("VERCEL_TOKEN")).toBe(true);
+    expect(isVercelBuildSensitiveEnvName("NEXT_PUBLIC_MCP_URL")).toBe(false);
+    expect(isVercelBuildForbiddenEnvName("NEXT_PUBLIC_MCP_URL")).toBe(true);
+    expect(vercelBuildForbiddenEnvNames(sourceEnv)).toEqual([
+      "B2_APPLICATION_KEY",
+      "LIVE_B2_APPLICATION_KEY",
+      "NEXT_PUBLIC_MCP_URL",
+      "OAUTH_CLIENT_SECRET",
+      "VERCEL_TOKEN",
+    ]);
+    expect(sanitizedVercelBuildEnv(sourceEnv)).toMatchObject({
+      B2_REGISTER_ALL_TOOLS: "true",
+      PATH: "/usr/bin",
+      VERCEL_TELEMETRY_DISABLED: "1",
+      VERCEL_TOKEN: "",
+    });
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("OAUTH_CLIENT_SECRET");
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("NEXT_PUBLIC_MCP_URL");
+  });
+});

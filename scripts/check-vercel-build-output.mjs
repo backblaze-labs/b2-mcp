@@ -9,45 +9,45 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  isVercelBuildSensitiveEnvName,
+  vercelBuildSensitiveEnvValues,
+} from "./b2-credential-env.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const outputRoot = path.join(root, ".vercel", "output");
-const reportsDir = path.join(root, "reports", "vercel-build-output");
-const credentialPolicy = JSON.parse(
-  readFileSync(path.join(root, "scripts", "b2-credential-env.json"), "utf8"),
-);
+const outputRoot = process.env.B2_MCP_VERCEL_OUTPUT_DIR
+  ? path.resolve(process.env.B2_MCP_VERCEL_OUTPUT_DIR)
+  : path.join(root, ".vercel", "output");
+const reportsDir = process.env.B2_MCP_VERCEL_REPORTS_DIR
+  ? path.resolve(process.env.B2_MCP_VERCEL_REPORTS_DIR)
+  : path.join(root, "reports", "vercel-build-output");
+const ALLOWED_VERCEL_FUNCTION_RUNTIMES = new Set(["nodejs24.x"]);
 
 const findings = [];
 const inventory = {
   scannedFiles: 0,
   scannedBytes: 0,
   functions: [],
+  functionConfigs: [],
   staticFiles: [],
   sourceMaps: [],
 };
 
-const exactSensitiveNames = new Set(
-  [
-    ...(credentialPolicy.exact ?? []),
-    ...(credentialPolicy.logSensitiveExact ?? []),
-    "B2_OAUTH_INTROSPECTION_BEARER_TOKEN",
-    "B2_OAUTH_INTROSPECTION_CLIENT_SECRET",
-    "OAUTH_CLIENT_SECRET",
-    "VERCEL_TOKEN",
-  ].map((name) => name.toUpperCase()),
-);
-const sensitiveNamePatterns = [
-  ...(credentialPolicy.patterns ?? []).map((pattern) => new RegExp(pattern, "i")),
-  /^B2_OAUTH_.*(?:SECRET|TOKEN)$/i,
-  /^OAUTH_.*(?:SECRET|TOKEN)$/i,
-  /^VERCEL_.*(?:BYPASS|SECRET|TOKEN)$/i,
-];
-
 const secretAssignmentPatterns = [
+  {
+    pattern: /\b([A-Z][A-Z0-9_]{2,})\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+  },
+  {
+    pattern: /["']([A-Z][A-Z0-9_]{2,})["']\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+  },
+  {
+    pattern:
+      /\bprocess\.env(?:\.([A-Z][A-Z0-9_]{2,})|\[\s*["']([^"']+)["']\s*\])\s*=\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+  },
   {
     reason: "secret-shaped-assignment",
     pattern:
-      /\b(?:B2_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY|KEY)(?:_ID)?|B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)(?:_ID)?|B2_OAUTH_[A-Z0-9_]*(?:SECRET|TOKEN)|MCP_AUTHORIZATION|VERCEL_PROTECTION_BYPASS|OAUTH_[A-Z0-9_]*(?:SECRET|TOKEN)|client[_-]?secret|authorization[_-]?token|bearer[_-]?token)\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
+      /\b(?:client[_-]?secret|authorization[_-]?token|bearer[_-]?token)\b["']?\s*[:=]\s*["'][A-Za-z0-9._~+/=-]{16,}["']/gi,
   },
   {
     reason: "bearer-token-literal",
@@ -71,10 +71,11 @@ function lineForIndex(text, index) {
   return text.slice(0, index).split(/\r?\n/).length;
 }
 
-function record(relativePath, reason, line = null) {
-  const key = `${relativePath}:${reason}:${line ?? ""}`;
+function record(relativePath, reason, line = null, reasonPrefix = "") {
+  const fullReason = `${reasonPrefix}${reason}`;
+  const key = `${relativePath}:${fullReason}:${line ?? ""}`;
   if (findings.some((finding) => finding.key === key)) return;
-  findings.push({ key, path: relativePath, reason, line });
+  findings.push({ key, path: relativePath, reason: fullReason, line });
 }
 
 function walk(dir) {
@@ -89,20 +90,9 @@ function walk(dir) {
   return files;
 }
 
-function isSensitiveEnvName(name) {
-  const upper = name.toUpperCase();
-  return (
-    exactSensitiveNames.has(upper) || sensitiveNamePatterns.some((pattern) => pattern.test(name))
-  );
-}
-
 function knownSecretValues() {
-  return Object.entries(process.env)
-    .filter(
-      ([name, value]) =>
-        isSensitiveEnvName(name) && typeof value === "string" && value.trim().length >= 8,
-    )
-    .map(([, value]) => value)
+  return vercelBuildSensitiveEnvValues(process.env)
+    .filter((value) => value.trim().length >= 8)
     .sort((left, right) => right.length - left.length);
 }
 
@@ -121,8 +111,14 @@ function inspectJsonFile(relativePath, text) {
     return;
   }
 
-  if (!String(parsed.runtime ?? "").startsWith("nodejs")) {
-    record(relativePath, "non-node-vercel-runtime");
+  const runtime = String(parsed.runtime ?? "");
+  inventory.functionConfigs.push({
+    path: relativePath,
+    runtime,
+    hasEnvironment: Boolean(parsed.environment && Object.keys(parsed.environment).length > 0),
+  });
+  if (!ALLOWED_VERCEL_FUNCTION_RUNTIMES.has(runtime)) {
+    record(relativePath, "unexpected-vercel-runtime");
   }
   if (parsed.environment && Object.keys(parsed.environment).length > 0) {
     record(relativePath, "embedded-function-environment");
@@ -145,21 +141,30 @@ function inspectPackageJson(relativePath, text) {
   }
 }
 
-function inspectText(relativePath, text) {
+function inspectText(relativePath, text, reasonPrefix = "") {
   for (const value of knownSecretValues()) {
     const index = text.indexOf(value);
-    if (index !== -1) record(relativePath, "known-secret-env-value", lineForIndex(text, index));
+    if (index !== -1)
+      record(relativePath, "known-secret-env-value", lineForIndex(text, index), reasonPrefix);
   }
 
   for (const { reason, pattern } of secretAssignmentPatterns) {
     pattern.lastIndex = 0;
     for (const match of text.matchAll(pattern)) {
-      record(relativePath, reason, lineForIndex(text, match.index ?? 0));
+      if (reason) {
+        record(relativePath, reason, lineForIndex(text, match.index ?? 0), reasonPrefix);
+        continue;
+      }
+      const envName = match.slice(1).find((group) => typeof group === "string" && group.length > 0);
+      if (envName && isVercelBuildSensitiveEnvName(envName)) {
+        record(
+          relativePath,
+          "secret-shaped-assignment",
+          lineForIndex(text, match.index ?? 0),
+          reasonPrefix,
+        );
+      }
     }
-  }
-
-  if (relativePath.includes("node_modules/@modelcontextprotocol/sdk/")) {
-    record(relativePath, "runtime-mcp-sdk-v1-bundle");
   }
 
   inspectJsonFile(relativePath, text);
@@ -186,6 +191,7 @@ function writeReports() {
       `Status: ${findings.length === 0 ? "passed" : "failed"}`,
       `Scanned files: ${inventory.scannedFiles}`,
       `Function outputs: ${inventory.functions.length}`,
+      `Allowed function runtimes: ${[...ALLOWED_VERCEL_FUNCTION_RUNTIMES].join(", ")}`,
       `Static files: ${inventory.staticFiles.length}`,
       `Source maps: ${inventory.sourceMaps.length}`,
       "",
@@ -194,7 +200,7 @@ function writeReports() {
 }
 
 if (!existsSync(outputRoot)) {
-  console.error("::error::vercel-build-output: .vercel/output is missing; run vercel build first");
+  console.error(`::error::vercel-build-output: ${outputRoot} is missing; run vercel build first`);
   process.exit(2);
 }
 
@@ -216,12 +222,7 @@ for (const absolutePath of walk(outputRoot)) {
 
   const text = readFileSync(absolutePath, "utf8");
   if (relativePath.endsWith(".map")) {
-    const before = findings.length;
-    inspectText(relativePath, text);
-    for (const finding of findings.slice(before)) {
-      if (finding.path === relativePath)
-        finding.reason = `secret-bearing-source-map:${finding.reason}`;
-    }
+    inspectText(relativePath, text, "secret-bearing-source-map:");
   } else {
     inspectText(relativePath, text);
   }

@@ -221,14 +221,18 @@ describe("CI workflow policy", () => {
     expect(budgetJob).toContain("pnpm run check:package-budget");
     expect(budgetJob).toContain("reports/package-budget/");
     expect(vercelBuildJob).toContain("name: Vercel build output scan");
+    expect(vercelBuildJob).toContain("pnpm run typecheck");
+    expect(vercelBuildJob).toContain("pnpm run build");
     expect(vercelBuildJob).toContain("pnpm run prepare:vercel-local-build");
-    expect(vercelBuildJob).toContain("pnpm dlx vercel@59.1.3 build --yes");
+    expect(vercelBuildJob).toContain("pnpm run build:vercel-local");
+    expect(vercelBuildJob).not.toContain("pnpm dlx vercel");
     expect(vercelBuildJob).toContain("pnpm run check:vercel-build-output");
     expect(vercelBuildJob).toContain(
       "pnpm run audit:supply-chain:denylist --artifacts-dir .vercel/output",
     );
     expect(vercelBuildJob).toContain('VERCEL_TOKEN: ""');
     expect(vercelBuildJob).toContain("reports/vercel-build-output/");
+    expect(vercelBuildJob).not.toContain(".vercel/output/functions/**/.vc-config.json");
     expect(containerJob).toContain("name: container image");
     expect(containerJob).toContain(
       'node scripts/smoke-container-image.mjs --build --image "b2-mcp:${GITHUB_SHA}"',

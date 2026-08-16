@@ -213,7 +213,7 @@ describe("smoke script release contract", () => {
     expect(lockedInspector?.dev).toBe(true);
     expect(lockedInspector?.integrity).toMatch(/^sha512-/);
     expect(pnpmWorkspace).toContain("'@modelcontextprotocol/inspector': false");
-    expect(pnpmWorkspace).not.toContain("minimumReleaseAgeExclude");
+    expect(pnpmWorkspace).not.toContain("@modelcontextprotocol/inspector@");
     expect(inspectorSmoke.INSPECTOR_PACKAGE).toBe("@modelcontextprotocol/inspector");
     expect(inspectorSmoke.INSPECTOR_VERSION).toBe("2.1.0");
     expect(inspectorSmoke.pnpmExecArgs()).toEqual([
