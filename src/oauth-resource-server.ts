@@ -19,7 +19,8 @@ import { logger } from "./utils/logger.js";
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
 
 const DEFAULT_TOKEN_TYPES = ["bearer"];
-const DEFAULT_ALLOWED_ALGORITHMS = ["RS256"];
+const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256", "EdDSA"];
+const DEFAULT_ALLOWED_JWT_ALGORITHMS = ["RS256"];
 const DEFAULT_INTROSPECTION_TIMEOUT_MS = 3000;
 const DEFAULT_INTROSPECTION_RETRIES = 1;
 const DEFAULT_INTROSPECTION_RETRY_DELAY_MS = 50;
@@ -57,6 +58,7 @@ export interface OAuthResourceServerCommonConfig {
   allowedSubjects: string[];
   allowedTokenTypes: string[];
   allowedAlgorithms: string[];
+  allowedJwtAlgorithms: string[];
   allowedJwtTypes: string[];
   dangerouslyAllowInsecureIssuerUrl: boolean;
   dangerouslyAllowUnauthenticatedIntrospection: boolean;
@@ -75,7 +77,6 @@ export interface OAuthIntrospectionVerifierConfig extends OAuthResourceServerCom
   introspectionRetryDelayMs: number;
   introspectionCircuitFailures: number;
   introspectionCircuitOpenMs: number;
-  jwksUri?: string;
 }
 
 export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig {
@@ -89,16 +90,15 @@ export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig 
   jwksCircuitOpenMs: number;
   jwksRefreshCooldownMs: number;
   jwtClockSkewSeconds: number;
-  introspectionEndpoint?: string;
-  introspectionClientId?: string;
-  introspectionClientSecret?: string;
-  introspectionBearerToken?: string;
-  introspectionTimeoutMs?: number;
-  introspectionMaxRetries?: number;
-  introspectionRetryDelayMs?: number;
-  introspectionCircuitFailures?: number;
-  introspectionCircuitOpenMs?: number;
 }
+
+export type OAuthIntrospectionOnlyConfig = OAuthIntrospectionVerifierConfig & {
+  jwksUri?: undefined;
+};
+export type OAuthJwtOnlyConfig = OAuthJwtVerifierConfig & {
+  introspectionEndpoint?: undefined;
+};
+export type OAuthDualVerifierConfig = OAuthIntrospectionVerifierConfig & OAuthJwtVerifierConfig;
 
 type OAuthResourceServerLoadedConfig = OAuthResourceServerCommonConfig &
   Omit<
@@ -110,7 +110,10 @@ type OAuthResourceServerLoadedConfig = OAuthResourceServerCommonConfig &
     jwksUri?: string;
   };
 
-export type OAuthResourceServerConfig = OAuthIntrospectionVerifierConfig | OAuthJwtVerifierConfig;
+export type OAuthResourceServerConfig =
+  | OAuthIntrospectionOnlyConfig
+  | OAuthJwtOnlyConfig
+  | OAuthDualVerifierConfig;
 
 export type OAuthIntrospectionVerifierOptions =
   OAuthVerifierOptions<OAuthIntrospectionVerifierConfig>;
@@ -171,6 +174,7 @@ export function loadOAuthResourceServerConfig(
   const introspectionBearerToken = optionalEnv(env, "B2_OAUTH_INTROSPECTION_BEARER_TOKEN");
   const introspectionEndpoint = optionalEnv(env, "B2_OAUTH_INTROSPECTION_ENDPOINT");
   const jwksUri = optionalEnv(env, "B2_OAUTH_JWKS_URI");
+  const allowedAlgorithmsEnv = optionalEnv(env, "B2_OAUTH_ALLOWED_ALGORITHMS");
   if (!introspectionEndpoint && !jwksUri) {
     throw new Error(
       "B2_OAUTH_INTROSPECTION_ENDPOINT or B2_OAUTH_JWKS_URI is required for OAuth token verification",
@@ -210,7 +214,8 @@ export function loadOAuthResourceServerConfig(
     allowedTokenTypes: csv(env.B2_OAUTH_ALLOWED_TOKEN_TYPES, DEFAULT_TOKEN_TYPES).map((value) =>
       value.toLowerCase(),
     ),
-    allowedAlgorithms: csv(env.B2_OAUTH_ALLOWED_ALGORITHMS, DEFAULT_ALLOWED_ALGORITHMS),
+    allowedAlgorithms: csv(allowedAlgorithmsEnv, DEFAULT_ALLOWED_ALGORITHMS),
+    allowedJwtAlgorithms: csv(allowedAlgorithmsEnv, DEFAULT_ALLOWED_JWT_ALGORITHMS),
     allowedJwtTypes: csv(env.B2_OAUTH_ALLOWED_JWT_TYPES, DEFAULT_ALLOWED_JWT_TYPES).map((value) =>
       value.toLowerCase(),
     ),
@@ -334,7 +339,7 @@ export function loadOAuthResourceServerConfig(
   }
   if (config.jwksUri) {
     ensureHttpsOrLocalhost(config.jwksUri, "B2_OAUTH_JWKS_URI", dangerouslyAllowInsecureIssuerUrl);
-    assertSupportedJwtAlgorithms(config.allowedAlgorithms);
+    assertSupportedJwtAlgorithms(config.allowedJwtAlgorithms);
   }
   ensureHttpsOrLocalhost(config.publicUrl, "B2_MCP_PUBLIC_URL", dangerouslyAllowInsecureIssuerUrl);
   ensureHttpsOrLocalhost(config.resource, "B2_OAUTH_RESOURCE", dangerouslyAllowInsecureIssuerUrl);
@@ -537,7 +542,7 @@ function authInfoFromVerifiedClaims(
   const acceptedAlgorithm =
     verification.source === "introspection"
       ? assertTokenAlgorithm(claims, config.allowedAlgorithms)
-      : assertAllowedAlgorithm(verification.algorithm, config.allowedAlgorithms);
+      : assertAllowedAlgorithm(verification.algorithm, config.allowedJwtAlgorithms);
   const scopes = scopesFromClaim(claims.scope ?? claims.scp);
   assertDeploymentScope(scopes);
   assertRequiredScopes(scopes, config.requiredScopes);
@@ -763,16 +768,24 @@ function tokenLabel(token: string): string {
 }
 
 function configCacheKey(config: OAuthResourceServerConfig): string {
+  const introspectionEndpoint =
+    "introspectionEndpoint" in config ? config.introspectionEndpoint : undefined;
+  const jwksUri = "jwksUri" in config ? config.jwksUri : undefined;
+  const introspectionClientId =
+    "introspectionClientId" in config ? config.introspectionClientId : undefined;
+  const introspectionBearerToken =
+    "introspectionBearerToken" in config ? config.introspectionBearerToken : undefined;
   return JSON.stringify({
     issuer: config.issuer,
     resource: config.resource,
     audience: config.audience,
-    introspectionEndpoint: config.introspectionEndpoint ?? "",
-    jwksUri: config.jwksUri ?? "",
-    introspectionClientId: config.introspectionClientId ?? "",
-    introspectionAuth: config.introspectionBearerToken ? "bearer" : "client",
+    introspectionEndpoint: introspectionEndpoint ?? "",
+    jwksUri: jwksUri ?? "",
+    introspectionClientId: introspectionClientId ?? "",
+    introspectionAuth: introspectionBearerToken ? "bearer" : "client",
     allowedTokenTypes: config.allowedTokenTypes,
     allowedAlgorithms: config.allowedAlgorithms,
+    allowedJwtAlgorithms: config.allowedJwtAlgorithms,
     allowedJwtTypes: config.allowedJwtTypes,
     allowedSubjects: config.allowedSubjects,
     requiredScopes: config.requiredScopes,
@@ -864,14 +877,16 @@ function hasIntrospectionConfig(
   config: OAuthResourceServerConfig | OAuthResourceServerLoadedConfig,
 ): config is OAuthIntrospectionVerifierConfig {
   return (
-    typeof config.introspectionEndpoint === "string" && config.introspectionEndpoint.length > 0
+    "introspectionEndpoint" in config &&
+    typeof config.introspectionEndpoint === "string" &&
+    config.introspectionEndpoint.length > 0
   );
 }
 
 function hasJwtConfig(
   config: OAuthResourceServerConfig | OAuthResourceServerLoadedConfig,
 ): config is OAuthJwtVerifierConfig {
-  return typeof config.jwksUri === "string" && config.jwksUri.length > 0;
+  return "jwksUri" in config && typeof config.jwksUri === "string" && config.jwksUri.length > 0;
 }
 
 function requireIntrospectionConfig(
@@ -1098,10 +1113,11 @@ function assertJwtHeader(header: Record<string, unknown>, config: OAuthJwtVerifi
 }
 
 function jwksCacheKey(config: OAuthResourceServerConfig): string {
+  const jwksUri = "jwksUri" in config ? config.jwksUri : undefined;
   return JSON.stringify({
     issuer: config.issuer,
-    jwksUri: config.jwksUri ?? "",
-    allowedAlgorithms: config.allowedAlgorithms,
+    jwksUri: jwksUri ?? "",
+    allowedJwtAlgorithms: config.allowedJwtAlgorithms,
   });
 }
 
@@ -1225,7 +1241,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
 
   constructor(options: OAuthJwtVerifierOptions = {}) {
     this.config = requireJwtConfig(options.config ?? loadOAuthResourceServerConfig());
-    assertSupportedJwtAlgorithms(this.config.allowedAlgorithms);
+    assertSupportedJwtAlgorithms(this.config.allowedJwtAlgorithms);
     this.fetchImpl = options.fetch ?? fetch;
     this.nowSeconds = options.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
     this.signal = options.signal;
@@ -1240,7 +1256,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     try {
       const parsed = parseJwt(token);
       const algorithm = assertJwtHeader(parsed.header, this.config);
-      assertAllowedAlgorithm(algorithm, this.config.allowedAlgorithms);
+      assertAllowedAlgorithm(algorithm, this.config.allowedJwtAlgorithms);
       if (!(await this.verifySignature(parsed, algorithm))) {
         throw new OAuthError(OAuthErrorCode.InvalidToken, "JWT signature is not accepted");
       }
@@ -1513,12 +1529,15 @@ export function oauthMetadataOptions(
   config = loadOAuthResourceServerConfig(),
 ): AuthMetadataOptions {
   const scopesSupported = [...new Set([...B2_OAUTH_SCOPES, ...config.requiredScopes])];
+  const introspectionEndpoint =
+    "introspectionEndpoint" in config ? config.introspectionEndpoint : undefined;
+  const jwksUri = "jwksUri" in config ? config.jwksUri : undefined;
   const oauthMetadata: OAuthMetadata = {
     issuer: config.issuer,
     authorization_endpoint: config.authorizationEndpoint,
     token_endpoint: config.tokenEndpoint,
-    ...(config.introspectionEndpoint && { introspection_endpoint: config.introspectionEndpoint }),
-    ...(config.jwksUri && { jwks_uri: config.jwksUri }),
+    ...(introspectionEndpoint && { introspection_endpoint: introspectionEndpoint }),
+    ...(jwksUri && { jwks_uri: jwksUri }),
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     token_endpoint_auth_methods_supported: ["client_secret_basic", "private_key_jwt", "none"],

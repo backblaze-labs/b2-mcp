@@ -33,6 +33,7 @@ const baseConfig = {
   allowedSubjects: [] as string[],
   allowedTokenTypes: ["bearer"],
   allowedAlgorithms: ["RS256"],
+  allowedJwtAlgorithms: ["RS256"],
   allowedJwtTypes: ["at+jwt", "application/at+jwt"],
   dangerouslyAllowInsecureIssuerUrl: true,
   dangerouslyAllowUnauthenticatedIntrospection: false,
@@ -744,6 +745,23 @@ describe("OAuthJwtVerifier", () => {
     await expect(verifier.verifyAccessToken(tampered)).rejects.toThrow(/signature/i);
   });
 
+  it("defaults local JWT algorithm verification to RS256 only", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse());
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({
+        allowedAlgorithms: ["RS256", "ES256", "EdDSA"],
+        allowedJwtAlgorithms: ["RS256"],
+      }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor({}, { alg: "ES256" }))).rejects.toThrow(
+      /algorithm/i,
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("rejects non-canonical base64url JWT segments before fetching JWKS", async () => {
     const fetchMock = vi.fn(async () => jwksResponse());
     const verifier = new OAuthJwtVerifier({
@@ -1389,9 +1407,10 @@ describe("OAuth resource metadata", () => {
     expect(config.requiredScopes).toEqual(["b2:read", "custom:report"]);
     expect(config.allowedSubjects).toEqual(["user-123", "https://issuer.example/#user-456"]);
     expect(config.allowedAlgorithms).toEqual(["RS256", "ES256"]);
-    expect(config.introspectionTimeoutMs).toBe(2500);
+    expect(config.allowedJwtAlgorithms).toEqual(["RS256", "ES256"]);
+    expect("introspectionTimeoutMs" in config && config.introspectionTimeoutMs).toBe(2500);
     expect(config.tokenCacheTtlSeconds).toBe(120);
-    expect(config.jwksUri).toBeUndefined();
+    expect("jwksUri" in config ? config.jwksUri : undefined).toBeUndefined();
     expect(protectedResourceMetadata(config)).toMatchObject({
       resource: baseConfig.resource,
       authorization_servers: [baseConfig.issuer],
@@ -1437,8 +1456,12 @@ describe("OAuth resource metadata", () => {
       B2_OAUTH_JWT_CLOCK_SKEW_SECONDS: "30",
     });
 
-    expect(config.introspectionEndpoint).toBeUndefined();
+    expect(
+      "introspectionEndpoint" in config ? config.introspectionEndpoint : undefined,
+    ).toBeUndefined();
     expect(config.jwksUri).toBe("http://localhost:9000/oauth2/jwks");
+    expect(config.allowedAlgorithms).toEqual(["RS256", "ES256", "EdDSA"]);
+    expect(config.allowedJwtAlgorithms).toEqual(["RS256"]);
     expect("jwksCacheTtlSeconds" in config && config.jwksCacheTtlSeconds).toBe(45);
     expect("jwksCacheMinTtlSeconds" in config && config.jwksCacheMinTtlSeconds).toBe(15);
     expect("jwtClockSkewSeconds" in config && config.jwtClockSkewSeconds).toBe(30);
