@@ -31,10 +31,10 @@ The public routes are `/mcp`, `/health`,
 
 ## Setup
 
-Review `vercel.json`. It pins the Node.js Function runtime rather than the Edge
-runtime because this server uses the repository's Node-aware SDK, B2 SDK, AWS
-S3 compatibility path, Pino, timers, and shared HTTP code. Import the repository
-into Vercel and keep the project framework setting disabled.
+Review `vercel.json`. It uses the `@vercel/node` Function builder rather than
+the Edge runtime because this server uses the repository's Node-aware SDK, B2
+SDK, AWS S3 compatibility path, Pino, timers, and shared HTTP code. Import the
+repository into Vercel and keep the project framework setting disabled.
 
 Use [`../../deploy/vercel/README.md`](../../deploy/vercel/README.md) as the
 operator runbook for exact route and environment behavior.
@@ -161,7 +161,9 @@ Use the shared security contract first:
 - Repository baseline commit: `197d781`
 - Package version: `0.1.0`
 - MCP revision: 2026-07-28
-- Node runtime: Vercel `nodejs22.x`, repository-supported Node `22.23.1`
+- Node runtime: Vercel Node Functions built by `@vercel/node`; CI validates
+  the generated `.vercel/output` runtime configs and runs local tests on Node
+  `22.23.1`
 - Documentation owner: Gonza
 
 ## Official References

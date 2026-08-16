@@ -39,8 +39,12 @@ function fail(message) {
 
 const vercel = readJson("vercel.json");
 if (vercel.framework !== null) fail("vercel.json must keep framework null for the MCP endpoint");
-if (vercel.functions?.["api/*.ts"]?.runtime !== "nodejs22.x") {
-  fail("api/*.ts must use the reviewed nodejs22.x Vercel runtime");
+const apiBuild = vercel.builds?.find((build) => build?.src === "api/*.ts");
+if (apiBuild?.use !== "@vercel/node") {
+  fail("api/*.ts must use the reviewed @vercel/node function builder");
+}
+if (apiBuild?.config?.maxDuration !== 60) {
+  fail("api/*.ts must keep the reviewed 60 second Vercel function duration");
 }
 
 if (!existsSync(packageBudgetMetricsPath)) {
@@ -64,8 +68,8 @@ if (estimatedFunctionBundleBytes > VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES) {
 
 mkdirSync(reportDir, { recursive: true });
 const metrics = {
-  vercelRuntime: vercel.functions?.["api/*.ts"]?.runtime,
-  vercelMaxDuration: vercel.functions?.["api/*.ts"]?.maxDuration,
+  vercelBuilder: apiBuild.use,
+  vercelMaxDuration: apiBuild.config?.maxDuration,
   sourceBytes,
   productionInstallBytes,
   estimatedFunctionBundleBytes,

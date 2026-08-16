@@ -181,7 +181,11 @@ protected CI secret. The smoke workflow supports `headers`, `server`, and
 CI also runs Vercel adapter protocol parity through the modern `2026-07-28`
 suite and the separately named 2025-era fallback suite. The package-budget job
 writes a Vercel bundle estimate to `reports/vercel-bundle/` without requiring
-Production B2 secrets.
+Production B2 secrets. The `Vercel build output scan` job also runs a real
+token-free `vercel build`, writes scan evidence to
+`reports/vercel-build-output/`, and fails if the output contains static assets,
+dotenv files, secret-shaped values, `NEXT_PUBLIC_*` markers, or a runtime
+`@modelcontextprotocol/sdk` v1 bundle.
 
 ## Runtime limits
 

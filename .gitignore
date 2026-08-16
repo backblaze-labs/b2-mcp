@@ -31,6 +31,7 @@ deploy/customer-hosted/**/*.pem
 probe-output/
 .audit/
 .wrangler/
+.vercel/
 
 # Internal-only docs — never ship in a public/open-sourced repo
 docs/STRATEGY-*.md

@@ -56,15 +56,16 @@ describe("Vercel adapter policy", () => {
     const vercel = readJson<{
       fluid?: boolean;
       regions?: string[];
-      functions?: Record<string, { runtime?: string; maxDuration?: number }>;
+      builds?: { src?: string; use?: string; config?: { maxDuration?: number } }[];
       rewrites?: { source: string; destination: string }[];
     }>("vercel.json");
 
     expect(vercel.fluid).toBe(true);
     expect(vercel.regions).toEqual(["iad1"]);
-    expect(vercel.functions?.["api/*.ts"]).toMatchObject({
-      runtime: "nodejs22.x",
-      maxDuration: 60,
+    expect(vercel.builds).toContainEqual({
+      src: "api/*.ts",
+      use: "@vercel/node",
+      config: { maxDuration: 60 },
     });
     expect(vercel.rewrites).toEqual(
       expect.arrayContaining([
@@ -120,7 +121,7 @@ describe("Vercel adapter policy", () => {
     expect(bytes).toBeLessThanOrEqual(VERCEL_FUNCTION_SOURCE_BYTES_BUDGET);
   });
 
-  it("runs Vercel adapter parity and bundle-budget gates", () => {
+  it("runs Vercel adapter parity, budget, and build-output gates", () => {
     const pkg = readJson<{ scripts?: Record<string, string> }>("package.json");
     const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
     const modernParity = readFileSync(
@@ -140,9 +141,19 @@ describe("Vercel adapter policy", () => {
     expect(pkg.scripts?.["test:protocol"]).toContain("test:protocol:modern");
     expect(pkg.scripts?.["test:protocol"]).toContain("test:protocol:legacy");
     expect(pkg.scripts?.["check:vercel-bundle"]).toBe("node scripts/check-vercel-bundle.mjs");
+    expect(pkg.scripts?.["prepare:vercel-local-build"]).toBe(
+      "node scripts/prepare-vercel-local-build.mjs",
+    );
+    expect(pkg.scripts?.["check:vercel-build-output"]).toBe(
+      "node scripts/check-vercel-build-output.mjs",
+    );
     expect(workflow).toContain("pnpm run check:vercel-bundle");
+    expect(workflow).toContain("pnpm dlx vercel@59.1.3 build");
+    expect(workflow).toContain("pnpm run check:vercel-build-output");
     expect(workflow).toContain("reports/vercel-bundle/");
+    expect(workflow).toContain("reports/vercel-build-output/");
     expect(bundleCheck).toContain("VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES");
     expect(bundleCheck).toContain("reports/package-budget/metrics.json");
+    expect(bundleCheck).toContain("@vercel/node");
   });
 });

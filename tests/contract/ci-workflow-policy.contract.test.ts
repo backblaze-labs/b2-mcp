@@ -46,6 +46,7 @@ const requiredJobNames = [
   "runtime engine floor",
   "production dependency audit",
   "package budget",
+  "Vercel build output scan",
   "container image",
   "supply-chain audit",
   "CodeQL/workflow security",
@@ -127,6 +128,7 @@ describe("CI workflow policy", () => {
       "runtime-engine-floor",
       "production-dependency-audit",
       "package-budget",
+      "vercel-build-output",
       "container-image",
       "supply-chain-audit",
       "codeql-workflow-security",
@@ -177,6 +179,7 @@ describe("CI workflow policy", () => {
     const auditJob = workflowJob("production-dependency-audit-matrix");
     const auditAggregateJob = workflowJob("production-dependency-audit");
     const budgetJob = workflowJob("package-budget");
+    const vercelBuildJob = workflowJob("vercel-build-output");
     const containerJob = workflowJob("container-image");
     const slowJob = workflowJob("slow-lifecycle");
     const crossPlatformMatrixJob = workflowJob("cross-platform-minimum-matrix");
@@ -217,6 +220,15 @@ describe("CI workflow policy", () => {
     expect(auditAggregateJob).toContain("needs: production-dependency-audit-matrix");
     expect(budgetJob).toContain("pnpm run check:package-budget");
     expect(budgetJob).toContain("reports/package-budget/");
+    expect(vercelBuildJob).toContain("name: Vercel build output scan");
+    expect(vercelBuildJob).toContain("pnpm run prepare:vercel-local-build");
+    expect(vercelBuildJob).toContain("pnpm dlx vercel@59.1.3 build --yes");
+    expect(vercelBuildJob).toContain("pnpm run check:vercel-build-output");
+    expect(vercelBuildJob).toContain(
+      "pnpm run audit:supply-chain:denylist --artifacts-dir .vercel/output",
+    );
+    expect(vercelBuildJob).toContain('VERCEL_TOKEN: ""');
+    expect(vercelBuildJob).toContain("reports/vercel-build-output/");
     expect(containerJob).toContain("name: container image");
     expect(containerJob).toContain(
       'node scripts/smoke-container-image.mjs --build --image "b2-mcp:${GITHUB_SHA}"',
@@ -239,6 +251,7 @@ describe("CI workflow policy", () => {
     expect(summaryJob).toContain("Runtime engine floor | Node.js 22.3.0 package install smoke");
     expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
     expect(summaryJob).toContain("Vercel adapter budget | Uploaded as vercel-bundle artifact path");
+    expect(summaryJob).toContain("Vercel build output | Real Vercel build plus leak scan");
     expect(summaryJob).toContain("Container image | Docker build plus HTTP health/readiness smoke");
   });
 
