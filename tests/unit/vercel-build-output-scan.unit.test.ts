@@ -157,6 +157,17 @@ describe("Vercel build output scanner", () => {
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
   });
 
+  it("rejects malformed function config JSON", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(outputDir, "functions/api/mcp.func/.vc-config.json", "{not-json");
+    });
+
+    expectFinding(result, {
+      reason: "invalid-function-config-json",
+      path: "functions/api/mcp.func/.vc-config.json",
+    });
+  });
+
   it("rejects runtime MCP SDK v1 packages but allows v2 packages", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
@@ -200,6 +211,57 @@ describe("Vercel build output scanner", () => {
 
     expectFinding(result, {
       reason: "secret-shaped-assignment",
+      path: "functions/api/mcp.func/index.js",
+      line: 1,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
+  });
+
+  it("rejects generic secret-shaped assignments", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.func/index.js",
+        `const client_secret = "${plantedSecret}";\n`,
+      );
+    });
+
+    expectFinding(result, {
+      reason: "secret-shaped-assignment",
+      path: "functions/api/mcp.func/index.js",
+      line: 1,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
+  });
+
+  it("rejects bearer token literals", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.func/index.js",
+        `const authorization = "Bearer ${plantedSecret}";\n`,
+      );
+    });
+
+    expectFinding(result, {
+      reason: "bearer-token-literal",
+      path: "functions/api/mcp.func/index.js",
+      line: 1,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
+  });
+
+  it("rejects Vercel bypass literals", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.func/index.js",
+        `const headers = { "x-vercel-protection-bypass": "${plantedSecret}" };\n`,
+      );
+    });
+
+    expectFinding(result, {
+      reason: "vercel-bypass-literal",
       path: "functions/api/mcp.func/index.js",
       line: 1,
     });
