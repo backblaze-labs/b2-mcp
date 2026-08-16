@@ -1,5 +1,6 @@
 /* global process */
 
+import os from "node:os";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,25 @@ export const vercelBuildKnownSecretCanaries = Object.freeze({
   B2_APPLICATION_KEY: "b2-mcp-ci-canary-known-secret-value-issue-141-b2",
   OAUTH_CLIENT_SECRET: "b2-mcp-ci-canary-known-secret-value-issue-141-oauth",
 });
+const vercelBuildAllowedEnvNames = new Set(
+  [
+    "CI",
+    "FORCE_COLOR",
+    "NO_COLOR",
+    "NODE_OPTIONS",
+    "PATH",
+    "Path",
+    "RUNNER_TEMP",
+    "SHELL",
+    "SYSTEMROOT",
+    "SystemRoot",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "WINDIR",
+    "windir",
+  ].map((name) => name.toUpperCase()),
+);
 const SENSITIVE_LOG_FIELDS = new Set([
   "accountId",
   "account_id",
@@ -143,11 +163,20 @@ export function vercelBuildSensitiveEnvValues(env = process.env) {
     .sort((a, b) => b.length - a.length);
 }
 
-export function sanitizedVercelBuildEnv(env = process.env) {
-  const sanitized = { ...env };
-  for (const name of vercelBuildForbiddenEnvNames(env)) {
-    delete sanitized[name];
+export function sanitizedVercelBuildEnv(env = process.env, options = {}) {
+  const sanitized = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (
+      vercelBuildAllowedEnvNames.has(name.toUpperCase()) ||
+      isVercelBuildKnownSecretCanary(name, value)
+    ) {
+      sanitized[name] = value;
+    }
   }
+  const tempHome = options.homeDir ?? env.RUNNER_TEMP ?? env.TMPDIR ?? env.TMP ?? env.TEMP;
+  sanitized.HOME = tempHome || os.tmpdir();
+  sanitized.USERPROFILE = sanitized.HOME;
+  sanitized.CI = "true";
   sanitized.VERCEL_TELEMETRY_DISABLED = "1";
   sanitized.VERCEL_TOKEN = "";
   return sanitized;

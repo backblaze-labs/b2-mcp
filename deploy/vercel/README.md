@@ -51,14 +51,18 @@ protection, and provider-side quotas for global controls.
 ## Deploy
 
 Review `vercel.json` before creating the project. It disables framework
-detection, uses the locked `@vercel/node` Function builder for `api/*.ts`,
+detection, uses the locked `@vercel/node` Function builder for `api/*.js`,
 keeps Fluid Compute enabled, sets a bounded function duration, selects `iad1`,
-and rewrites `/mcp` to the API function. The package engine range remains
-`>=22.3.0` for consumers, so Vercel maps the deployment to its current
-supported Node major; CI treats the generated `.vercel/output` runtime
-`nodejs24.x` as the reviewed runtime and fails if Vercel changes it without a
-code review. Change the region only after reviewing latency to your B2 account
-region; Vercel function region selection does not change B2 data residency.
+and rewrites `/mcp` to the API function. The checked-in JavaScript API files are
+thin launchers; the `vercel-build` hook runs repository typecheck/build and
+compiles the typed Vercel adapter sources into `.vercel/build-runtime/` before
+`@vercel/node` traces functions. The package engine range remains `>=22.3.0`
+for consumers, while `vercel.json` explicitly pins the deployed Vercel Function
+runtime to the reviewed `nodejs24.x` line. This intentionally moves the Vercel
+deployment from the older Node 22 function runtime to the reviewed Node 24
+line; CI fails if generated `.vercel/output` runtime configs do not match that
+pin. Change the region only after reviewing latency to your B2 account region;
+Vercel function region selection does not change B2 data residency.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
 
@@ -188,6 +192,15 @@ writes a Vercel bundle estimate to `reports/vercel-bundle/` without requiring
 Production B2 secrets. The `Vercel build output scan` job runs
 `typecheck`, `build`, then a real token-free `vercel build` through the
 lockfile-backed `vercel@59.1.3` CLI and `@vercel/node@5.10.1` builder. It
+also rejects any Vercel builder TypeScript diagnostics before the generated
+artifact can be scanned as clean. The `vercel-build` hook performs the same
+typecheck/build gate on real Vercel deploys before the JavaScript launchers are
+traced.
+writes the child process a minimal non-secret environment only: process path
+variables, CI/color/temp knobs, `NODE_OPTIONS`, a temp `HOME`/`USERPROFILE`,
+disabled Vercel telemetry, an empty `VERCEL_TOKEN`, and deterministic scanner
+canaries. Generic caller tokens such as npm, GitHub Actions, AWS, Sentry, and
+Vercel credentials are not forwarded to the builder graph. The job
 writes sanitized scan evidence to `reports/vercel-build-output/` and fails if
 the output contains static assets, dotenv files, secret-shaped values,
 `NEXT_PUBLIC_*` markers, embedded function environment values, an unreviewed

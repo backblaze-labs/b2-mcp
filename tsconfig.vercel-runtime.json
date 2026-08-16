@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".vercel/build-runtime",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true
+  },
+  "include": ["src/**/*", "deploy/vercel/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests", ".vercel/output"]
+}

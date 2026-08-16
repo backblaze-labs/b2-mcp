@@ -13,6 +13,11 @@ import {
   isVercelBuildSensitiveEnvName,
   vercelBuildSensitiveEnvValues,
 } from "./b2-credential-env.mjs";
+import {
+  VERCEL_FUNCTION_RUNTIME,
+  VERCEL_REQUIRED_FUNCTION_CONFIGS,
+  VERCEL_REQUIRED_ROUTES,
+} from "./vercel-build-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = process.env.B2_MCP_VERCEL_OUTPUT_DIR
@@ -21,9 +26,11 @@ const outputRoot = process.env.B2_MCP_VERCEL_OUTPUT_DIR
 const reportsDir = process.env.B2_MCP_VERCEL_REPORTS_DIR
   ? path.resolve(process.env.B2_MCP_VERCEL_REPORTS_DIR)
   : path.join(root, "reports", "vercel-build-output");
-const ALLOWED_VERCEL_FUNCTION_RUNTIMES = new Set(["nodejs24.x"]);
+const ALLOWED_VERCEL_FUNCTION_RUNTIMES = new Set([VERCEL_FUNCTION_RUNTIME]);
 
 const findings = [];
+const discoveredFunctionConfigs = new Set();
+const discoveredRoutes = new Set();
 const inventory = {
   scannedFiles: 0,
   scannedBytes: 0,
@@ -66,6 +73,9 @@ const secretAssignmentPatterns = [
     pattern: /\bNEXT_PUBLIC_[A-Z0-9_]+\b/g,
   },
 ];
+const b2ApplicationKeyPattern = /\bK005[A-Za-z0-9]{16,}\b/g;
+const highEntropyLiteralPattern = /(["'])([A-Za-z0-9._~+/=-]{24,})\1/g;
+const highEntropyPathTokenPattern = /[A-Za-z0-9._~+=-]{24,}/g;
 
 function toPosix(relativePath) {
   return relativePath.split(path.sep).join("/");
@@ -75,11 +85,73 @@ function lineForIndex(text, index) {
   return text.slice(0, index).split(/\r?\n/).length;
 }
 
+function entropy(value) {
+  const counts = new Map();
+  for (const character of value) counts.set(character, (counts.get(character) ?? 0) + 1);
+  return [...counts.values()].reduce((sum, count) => {
+    const probability = count / value.length;
+    return sum - probability * Math.log2(probability);
+  }, 0);
+}
+
+function isHighEntropySecretLiteral(value) {
+  const normalized = String(value ?? "").replace(/=+$/, "");
+  if (normalized.length < 24) return false;
+  if (!/[0-9]/.test(normalized)) return false;
+  if (/^[a-f0-9]{32,}$/i.test(normalized)) return new Set(normalized.toLowerCase()).size >= 8;
+  if (!/^[A-Za-z0-9._~+/-]+$/.test(normalized)) return false;
+  return entropy(normalized) >= 3.75 && new Set(normalized).size >= 12;
+}
+
+function firstPartyPathSegment(text) {
+  return String(text ?? "").split(/[/\\]node_modules[/\\]/)[0];
+}
+
+function isDependencyOutputPath(relativePath) {
+  return relativePath.split(path.posix.sep).includes("node_modules");
+}
+
+function isFirstPartyFunctionCodePath(relativePath) {
+  return (
+    relativePath.startsWith("functions/") &&
+    !isDependencyOutputPath(relativePath) &&
+    /\.(?:c?js|mjs)$/.test(relativePath)
+  );
+}
+
+function secretPathTokens(text) {
+  const tokens = [];
+  for (const value of knownSecretValues()) {
+    if (value && text.includes(value)) tokens.push(value);
+  }
+  for (const match of text.matchAll(b2ApplicationKeyPattern)) tokens.push(match[0]);
+  for (const component of firstPartyPathSegment(text).split(/[\\/]/)) {
+    highEntropyPathTokenPattern.lastIndex = 0;
+    for (const match of component.matchAll(highEntropyPathTokenPattern)) {
+      const candidate = match[0].replace(/\.(?:func|js|json|map)$/i, "");
+      if (isHighEntropySecretLiteral(candidate)) tokens.push(match[0]);
+    }
+  }
+  return [...new Set(tokens)].sort((left, right) => right.length - left.length);
+}
+
+function redactSecrets(text) {
+  let redacted = String(text ?? "");
+  for (const token of secretPathTokens(redacted)) {
+    redacted = redacted.split(token).join("[REDACTED_SECRET]");
+  }
+  return redacted;
+}
+
+function publicPath(relativePath) {
+  return redactSecrets(relativePath);
+}
+
 function record(relativePath, reason, line = null, reasonPrefix = "") {
   const fullReason = `${reasonPrefix}${reason}`;
   const key = `${relativePath}:${fullReason}:${line ?? ""}`;
   if (findings.some((finding) => finding.key === key)) return;
-  findings.push({ key, path: relativePath, reason: fullReason, line });
+  findings.push({ key, path: publicPath(relativePath), reason: fullReason, line });
 }
 
 function walk(dir) {
@@ -88,6 +160,10 @@ function walk(dir) {
   for (const entry of entries) {
     const absolutePath = path.join(dir, entry);
     const stat = lstatSync(absolutePath);
+    if (stat.isSymbolicLink()) {
+      record(toPosix(path.relative(outputRoot, absolutePath)), "symlink-in-output");
+      continue;
+    }
     if (stat.isDirectory()) files.push(...walk(absolutePath));
     else if (stat.isFile()) files.push(absolutePath);
   }
@@ -117,7 +193,7 @@ function inspectJsonFile(relativePath, text) {
 
   const runtime = String(parsed.runtime ?? "");
   inventory.functionConfigs.push({
-    path: relativePath,
+    path: publicPath(relativePath),
     runtime,
     hasEnvironment: Boolean(parsed.environment && Object.keys(parsed.environment).length > 0),
   });
@@ -126,6 +202,22 @@ function inspectJsonFile(relativePath, text) {
   }
   if (parsed.environment && Object.keys(parsed.environment).length > 0) {
     record(relativePath, "embedded-function-environment");
+  }
+}
+
+function inspectOutputConfig(relativePath, text) {
+  if (relativePath !== "config.json") return;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    record(relativePath, "invalid-vercel-output-config-json");
+    return;
+  }
+  for (const route of parsed.routes ?? []) {
+    if (typeof route?.src === "string" && typeof route?.dest === "string") {
+      discoveredRoutes.add(`${route.src}\0${route.dest}`);
+    }
   }
 }
 
@@ -146,6 +238,10 @@ function inspectPackageJson(relativePath, text) {
 }
 
 function inspectText(relativePath, text, reasonPrefix = "") {
+  for (const token of secretPathTokens(relativePath)) {
+    if (token) record(relativePath, "secret-bearing-output-path", null, reasonPrefix);
+  }
+
   for (const value of knownSecretValues()) {
     const index = text.indexOf(value);
     if (index !== -1)
@@ -171,7 +267,34 @@ function inspectText(relativePath, text, reasonPrefix = "") {
     }
   }
 
+  if (isFirstPartyFunctionCodePath(relativePath)) {
+    highEntropyLiteralPattern.lastIndex = 0;
+    for (const match of text.matchAll(highEntropyLiteralPattern)) {
+      if (isHighEntropySecretLiteral(match[2])) {
+        record(
+          relativePath,
+          "high-entropy-secret-literal",
+          lineForIndex(text, match.index ?? 0),
+          reasonPrefix,
+        );
+      }
+    }
+  }
+
+  if (
+    text.includes("@modelcontextprotocol/sdk") &&
+    /["']?version["']?\s*[:=]\s*["']1\./.test(text)
+  ) {
+    record(
+      relativePath,
+      "runtime-mcp-sdk-v1-bundle",
+      lineForIndex(text, text.indexOf("@modelcontextprotocol/sdk")),
+      reasonPrefix,
+    );
+  }
+
   inspectJsonFile(relativePath, text);
+  inspectOutputConfig(relativePath, text);
   inspectPackageJson(relativePath, text);
 }
 
@@ -215,13 +338,14 @@ for (const absolutePath of walk(outputRoot)) {
   inventory.scannedBytes += stat.size;
 
   if (relativePath.startsWith("functions/") && relativePath.endsWith(".func/.vc-config.json")) {
-    inventory.functions.push(relativePath);
+    discoveredFunctionConfigs.add(relativePath);
+    inventory.functions.push(publicPath(relativePath));
   }
   if (relativePath.startsWith("static/")) {
-    inventory.staticFiles.push(relativePath);
+    inventory.staticFiles.push(publicPath(relativePath));
     record(relativePath, "client-static-asset");
   }
-  if (relativePath.endsWith(".map")) inventory.sourceMaps.push(relativePath);
+  if (relativePath.endsWith(".map")) inventory.sourceMaps.push(publicPath(relativePath));
   if (isEnvFile(relativePath)) record(relativePath, "dotenv-file-in-output");
 
   const text = readFileSync(absolutePath, "utf8");
@@ -234,6 +358,19 @@ for (const absolutePath of walk(outputRoot)) {
 
 if (inventory.functions.length === 0) {
   record("functions/", "missing-vercel-function-output");
+}
+for (const requiredConfig of VERCEL_REQUIRED_FUNCTION_CONFIGS) {
+  if (!discoveredFunctionConfigs.has(requiredConfig)) {
+    record(requiredConfig, "missing-required-vercel-function-output");
+  }
+}
+if (!existsSync(path.join(outputRoot, "config.json"))) {
+  record("config.json", "missing-vercel-output-config");
+}
+for (const route of VERCEL_REQUIRED_ROUTES) {
+  if (!discoveredRoutes.has(`${route.src}\0${route.dest}`)) {
+    record("config.json", `missing-required-vercel-route:${route.dest}`);
+  }
 }
 
 writeReports();

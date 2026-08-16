@@ -79,9 +79,14 @@ describe("Vercel build env policy", () => {
       vercelBuildKnownSecretCanaries: Record<string, string>;
     };
     const sourceEnv = {
+      ACTIONS_RUNTIME_TOKEN: "actions-token",
+      AWS_SECRET_ACCESS_KEY: "aws-secret",
       B2_APPLICATION_KEY: "b2-secret",
+      GITHUB_TOKEN: "github-token",
       LIVE_B2_APPLICATION_KEY: "live-b2-secret",
+      NPM_TOKEN: "npm-token",
       OAUTH_CLIENT_SECRET: "oauth-secret",
+      SENTRY_AUTH_TOKEN: "sentry-token",
       VERCEL_TOKEN: "vercel-token",
       NEXT_PUBLIC_MCP_URL: "https://example.invalid",
       B2_REGISTER_ALL_TOOLS: "true",
@@ -101,12 +106,19 @@ describe("Vercel build env policy", () => {
       "VERCEL_TOKEN",
     ]);
     expect(sanitizedVercelBuildEnv(sourceEnv)).toMatchObject({
-      B2_REGISTER_ALL_TOOLS: "true",
+      HOME: expect.any(String),
       PATH: "/usr/bin",
+      USERPROFILE: expect.any(String),
       VERCEL_TELEMETRY_DISABLED: "1",
       VERCEL_TOKEN: "",
     });
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("ACTIONS_RUNTIME_TOKEN");
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("AWS_SECRET_ACCESS_KEY");
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("B2_REGISTER_ALL_TOOLS");
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("GITHUB_TOKEN");
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("NPM_TOKEN");
     expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("OAUTH_CLIENT_SECRET");
+    expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("SENTRY_AUTH_TOKEN");
     expect(sanitizedVercelBuildEnv(sourceEnv)).not.toHaveProperty("NEXT_PUBLIC_MCP_URL");
 
     const canaryEnv = {
@@ -121,6 +133,10 @@ describe("Vercel build env policy", () => {
       ),
     ).toBe(true);
     expect(vercelBuildForbiddenEnvNames(canaryEnv)).toEqual([]);
-    expect(sanitizedVercelBuildEnv(canaryEnv)).toMatchObject(canaryEnv);
+    expect(sanitizedVercelBuildEnv(canaryEnv)).toMatchObject({
+      ...canaryEnv,
+      VERCEL_TELEMETRY_DISABLED: "1",
+      VERCEL_TOKEN: "",
+    });
   });
 });

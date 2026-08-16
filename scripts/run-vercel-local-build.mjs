@@ -27,13 +27,22 @@ const result = spawnSync(
   ["exec", "vercel", "build", "--yes", "--global-config", globalConfigDir, "--no-color"],
   {
     cwd: root,
-    env: sanitizedVercelBuildEnv(process.env),
-    stdio: "inherit",
+    env: sanitizedVercelBuildEnv(process.env, { homeDir: globalConfigDir }),
+    encoding: "utf8",
   },
 );
 
 if (result.error) {
   console.error(`::error::vercel-local-build: failed to start Vercel CLI: ${result.error.message}`);
+  process.exit(1);
+}
+
+if (result.stdout) process.stdout.write(result.stdout);
+if (result.stderr) process.stderr.write(result.stderr);
+
+const combinedOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+if (/\berror TS\d{4}:/i.test(combinedOutput)) {
+  console.error("::error::vercel-local-build: Vercel emitted TypeScript diagnostics");
   process.exit(1);
 }
 

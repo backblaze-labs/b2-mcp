@@ -2,6 +2,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  VERCEL_CLI_VERSION,
+  VERCEL_FUNCTION_ENTRYPOINT_GLOB,
+  VERCEL_FUNCTION_MAX_DURATION_SECONDS,
+  VERCEL_FUNCTION_RUNTIME,
+  VERCEL_NODE_BUILDER_VERSION,
+} from "./vercel-build-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const reportDir = path.join(root, "reports", "vercel-bundle");
@@ -10,8 +17,6 @@ const sourceRoots = ["api", "deploy/vercel", "src"];
 const sourceFiles = ["package.json", "pnpm-lock.yaml", "vercel.json"];
 const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
 const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 32_000_000;
-const VERCEL_CLI_VERSION = "59.1.3";
-const VERCEL_NODE_BUILDER_VERSION = "5.10.1";
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
@@ -48,12 +53,22 @@ if (vercel.installCommand !== "corepack enable && pnpm install --frozen-lockfile
 if (vercel.buildCommand !== "pnpm run typecheck && pnpm run build") {
   fail("vercel.json must keep the reviewed typecheck/build command");
 }
-const apiBuild = vercel.builds?.find((build) => build?.src === "api/*.ts");
-if (apiBuild?.use !== "@vercel/node") {
-  fail("api/*.ts must use the reviewed @vercel/node function builder");
+if (packageJson.scripts?.["vercel-build"] !== "node scripts/run-vercel-project-build.mjs") {
+  fail("package.json must keep the reviewed Vercel project build hook");
 }
-if (apiBuild?.config?.maxDuration !== 60) {
-  fail("api/*.ts must keep the reviewed 60 second Vercel function duration");
+const apiBuild = vercel.builds?.find((build) => build?.src === VERCEL_FUNCTION_ENTRYPOINT_GLOB);
+if (apiBuild?.use !== "@vercel/node") {
+  fail(`${VERCEL_FUNCTION_ENTRYPOINT_GLOB} must use the reviewed @vercel/node function builder`);
+}
+if (apiBuild?.config?.runtime !== VERCEL_FUNCTION_RUNTIME) {
+  fail(
+    `${VERCEL_FUNCTION_ENTRYPOINT_GLOB} must keep the reviewed ${VERCEL_FUNCTION_RUNTIME} Vercel function runtime`,
+  );
+}
+if (apiBuild?.config?.maxDuration !== VERCEL_FUNCTION_MAX_DURATION_SECONDS) {
+  fail(
+    `${VERCEL_FUNCTION_ENTRYPOINT_GLOB} must keep the reviewed ${VERCEL_FUNCTION_MAX_DURATION_SECONDS} second Vercel function duration`,
+  );
 }
 if (packageJson.devDependencies?.vercel !== VERCEL_CLI_VERSION) {
   fail(`vercel CLI must stay locked at ${VERCEL_CLI_VERSION}`);
@@ -86,6 +101,7 @@ const metrics = {
   vercelBuilder: apiBuild.use,
   vercelCliVersion: packageJson.devDependencies.vercel,
   vercelNodeBuilderVersion: packageJson.devDependencies["@vercel/node"],
+  vercelRuntime: apiBuild.config?.runtime,
   vercelMaxDuration: apiBuild.config?.maxDuration,
   sourceBytes,
   productionInstallBytes,

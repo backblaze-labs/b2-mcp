@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { vercelBuildForbiddenEnvNames } from "./b2-credential-env.mjs";
+import { VERCEL_RUNTIME_BUILD_DIR } from "./vercel-build-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const vercelDir = path.join(root, ".vercel");
@@ -20,6 +21,9 @@ if (presentSecretNames.length > 0) {
 }
 
 rmSync(path.join(vercelDir, "output"), { recursive: true, force: true });
+rmSync(path.join(root, VERCEL_RUNTIME_BUILD_DIR), { recursive: true, force: true });
+rmSync(path.join(vercelDir, "project-build-complete"), { force: true });
+rmSync(path.join(vercelDir, "project-build.lock"), { recursive: true, force: true });
 mkdirSync(vercelDir, { recursive: true });
 
 writeFileSync(

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { root } from "../contract/support";
@@ -7,6 +7,13 @@ import { root } from "../contract/support";
 const scannerPath = path.join(root, "scripts/check-vercel-build-output.mjs");
 const reviewedRuntime = "nodejs24.x";
 const plantedSecret = "K005abcdefghijklmnopqr";
+const mainFunctionConfigPath = "functions/api/mcp.js.func/.vc-config.json";
+const requiredFunctionConfigPaths = [
+  "functions/api/health.js.func/.vc-config.json",
+  mainFunctionConfigPath,
+  "functions/api/oauth-authorization-server.js.func/.vc-config.json",
+  "functions/api/oauth-protected-resource.js.func/.vc-config.json",
+];
 
 type Finding = {
   path: string;
@@ -35,12 +42,46 @@ function writeFile(base: string, relativePath: string, contents: string): void {
 function writeFunctionConfig(
   outputDir: string,
   config: Record<string, unknown> = { runtime: reviewedRuntime },
+  relativePath = mainFunctionConfigPath,
 ): void {
+  writeFile(outputDir, relativePath, `${JSON.stringify(config, null, 2)}\n`);
+}
+
+function writeOutputConfig(outputDir: string, routes = requiredRoutes()): void {
   writeFile(
     outputDir,
-    "functions/api/mcp.func/.vc-config.json",
-    `${JSON.stringify(config, null, 2)}\n`,
+    "config.json",
+    `${JSON.stringify({ version: 3, routes: [{ handle: "filesystem" }, ...routes] }, null, 2)}\n`,
   );
+}
+
+function requiredRoutes(): Array<{ src: string; dest: string; check: boolean }> {
+  return [
+    { src: "^/mcp$", dest: "/api/mcp", check: true },
+    { src: "^/health$", dest: "/api/health", check: true },
+    {
+      src: "^/\\.well-known/oauth-protected-resource/mcp$",
+      dest: "/api/oauth-protected-resource",
+      check: true,
+    },
+    {
+      src: "^/\\.well-known/oauth-protected-resource$",
+      dest: "/api/oauth-protected-resource",
+      check: true,
+    },
+    {
+      src: "^/\\.well-known/oauth-authorization-server$",
+      dest: "/api/oauth-authorization-server",
+      check: true,
+    },
+  ];
+}
+
+function writeRequiredOutput(outputDir: string): void {
+  writeOutputConfig(outputDir);
+  for (const configPath of requiredFunctionConfigPaths) {
+    writeFunctionConfig(outputDir, { runtime: reviewedRuntime }, configPath);
+  }
 }
 
 function scanFixture(
@@ -51,7 +92,7 @@ function scanFixture(
   const outputDir = path.join(tmpDir, "output");
   const reportsDir = path.join(tmpDir, "reports");
   mkdirSync(outputDir, { recursive: true });
-  writeFunctionConfig(outputDir);
+  writeRequiredOutput(outputDir);
   mutate(outputDir);
 
   const result = spawnSync(process.execPath, [scannerPath], {
@@ -100,22 +141,36 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/node_modules/@modelcontextprotocol/sdk/package.json",
+        "functions/api/mcp.js.func/node_modules/@modelcontextprotocol/sdk/package.json",
         `${JSON.stringify({ name: "@modelcontextprotocol/sdk", version: "2.0.0" })}\n`,
       );
     });
 
     expect(result.status).toBe(0);
     expect(result.findings).toEqual([]);
-    expect(result.inventory.scannedFiles).toBeGreaterThanOrEqual(2);
-    expect(result.inventory.functions).toEqual(["functions/api/mcp.func/.vc-config.json"]);
-    expect(result.inventory.functionConfigs).toEqual([
-      {
-        path: "functions/api/mcp.func/.vc-config.json",
+    expect(result.inventory.scannedFiles).toBeGreaterThanOrEqual(6);
+    expect(result.inventory.functions).toEqual(requiredFunctionConfigPaths);
+    expect(result.inventory.functionConfigs).toEqual(
+      requiredFunctionConfigPaths.map((configPath) => ({
+        path: configPath,
         runtime: reviewedRuntime,
         hasEnvironment: false,
-      },
-    ]);
+      })),
+    );
+  });
+
+  it("does not treat dependency package paths as generic entropy leaks", () => {
+    const dependencyLikeToken = "9f3c8b1d5e7a4c2f0b6d8e1a3c5f7b9d";
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.js.func/node_modules/.pnpm/@aws-sdk+s3-request-presigner@3.1103.0/node_modules/@aws-sdk/s3-request-presigner/dist-cjs/index.js",
+        `const checksumFixture = "${dependencyLikeToken}";\n`,
+      );
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.findings).toEqual([]);
   });
 
   it("rejects dotenv files in the output", () => {
@@ -130,14 +185,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         'const name = "NEXT_PUBLIC_B2_URL";\n',
       );
     });
 
     expectFinding(result, {
       reason: "client-public-env-marker",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
   });
@@ -152,19 +207,37 @@ describe("Vercel build output scanner", () => {
 
     expectFinding(result, {
       reason: "embedded-function-environment",
-      path: "functions/api/mcp.func/.vc-config.json",
+      path: "functions/api/mcp.js.func/.vc-config.json",
     });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
+  });
+
+  it("rejects and redacts secret-bearing output paths", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        `functions/api/${plantedSecret}.func/.vc-config.json`,
+        `${JSON.stringify({ runtime: reviewedRuntime })}\n`,
+      );
+    });
+
+    expectFinding(result, {
+      reason: "secret-bearing-output-path",
+      path: "functions/api/[REDACTED_SECRET].func/.vc-config.json",
+    });
+    expect(JSON.stringify(result.findings)).not.toContain(plantedSecret);
+    expect(JSON.stringify(result.inventory)).not.toContain(plantedSecret);
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
   });
 
   it("rejects malformed function config JSON", () => {
     const result = scanFixture((outputDir) => {
-      writeFile(outputDir, "functions/api/mcp.func/.vc-config.json", "{not-json");
+      writeFile(outputDir, "functions/api/mcp.js.func/.vc-config.json", "{not-json");
     });
 
     expectFinding(result, {
       reason: "invalid-function-config-json",
-      path: "functions/api/mcp.func/.vc-config.json",
+      path: "functions/api/mcp.js.func/.vc-config.json",
     });
   });
 
@@ -172,14 +245,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/node_modules/@modelcontextprotocol/sdk/package.json",
+        "functions/api/mcp.js.func/node_modules/@modelcontextprotocol/sdk/package.json",
         `${JSON.stringify({ name: "@modelcontextprotocol/sdk", version: "1.2.0" })}\n`,
       );
     });
 
     expectFinding(result, {
       reason: "runtime-mcp-sdk-v1-bundle",
-      path: "functions/api/mcp.func/node_modules/@modelcontextprotocol/sdk/package.json",
+      path: "functions/api/mcp.js.func/node_modules/@modelcontextprotocol/sdk/package.json",
     });
   });
 
@@ -187,14 +260,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         `const env = process.env;\nprocess.env["B2_APPLICATION_KEY"] = "${plantedSecret}";\n`,
       );
     });
 
     expectFinding(result, {
       reason: "secret-shaped-assignment",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 2,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
@@ -204,14 +277,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         `LIVE_B2_APPLICATION_KEY = "${plantedSecret}";\n`,
       );
     });
 
     expectFinding(result, {
       reason: "secret-shaped-assignment",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
@@ -221,14 +294,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         `const client_secret = "${plantedSecret}";\n`,
       );
     });
 
     expectFinding(result, {
       reason: "secret-shaped-assignment",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
@@ -239,7 +312,7 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         [
           `const authorization = "${opaqueAuthorization}";`,
           `const headers = { "Authorization": "${opaqueAuthorization}" };`,
@@ -250,12 +323,12 @@ describe("Vercel build output scanner", () => {
 
     expectFinding(result, {
       reason: "secret-shaped-assignment",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expectFinding(result, {
       reason: "secret-shaped-assignment",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 2,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(opaqueAuthorization);
@@ -265,14 +338,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         `const authorization = "Bearer ${plantedSecret}";\n`,
       );
     });
 
     expectFinding(result, {
       reason: "bearer-token-literal",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
@@ -282,31 +355,45 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         `const leaked = "${plantedSecret}";\n`,
       );
     });
 
     expectFinding(result, {
       reason: "b2-application-key-literal",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
+  });
+
+  it("rejects opaque high-entropy literals under minified identifiers", () => {
+    const opaqueSecret = "9f3c8b1d5e7a4c2f0b6d8e1a3c5f7b9d";
+    const result = scanFixture((outputDir) => {
+      writeFile(outputDir, "functions/api/mcp.js.func/index.js", `const a="${opaqueSecret}";\n`);
+    });
+
+    expectFinding(result, {
+      reason: "high-entropy-secret-literal",
+      path: "functions/api/mcp.js.func/index.js",
+      line: 1,
+    });
+    expect(`${result.stdout}${result.stderr}`).not.toContain(opaqueSecret);
   });
 
   it("rejects Vercel bypass literals", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js",
+        "functions/api/mcp.js.func/index.js",
         `const headers = { "x-vercel-protection-bypass": "${plantedSecret}" };\n`,
       );
     });
 
     expectFinding(result, {
       reason: "vercel-bypass-literal",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
@@ -317,7 +404,7 @@ describe("Vercel build output scanner", () => {
       (outputDir) => {
         writeFile(
           outputDir,
-          "functions/api/mcp.func/index.js",
+          "functions/api/mcp.js.func/index.js",
           `const leaked = "${plantedSecret}";\n`,
         );
       },
@@ -326,7 +413,7 @@ describe("Vercel build output scanner", () => {
 
     expectFinding(result, {
       reason: "known-secret-env-value",
-      path: "functions/api/mcp.func/index.js",
+      path: "functions/api/mcp.js.func/index.js",
       line: 1,
     });
     expect(`${result.stdout}${result.stderr}`).not.toContain(plantedSecret);
@@ -347,7 +434,64 @@ describe("Vercel build output scanner", () => {
 
     expectFinding(result, {
       reason: "unexpected-vercel-runtime",
-      path: "functions/api/mcp.func/.vc-config.json",
+      path: "functions/api/mcp.js.func/.vc-config.json",
+    });
+  });
+
+  it("rejects missing required function outputs", () => {
+    const result = scanFixture((outputDir) => {
+      rmSync(path.join(outputDir, "functions/api/mcp.js.func"), {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    expectFinding(result, {
+      reason: "missing-required-vercel-function-output",
+      path: "functions/api/mcp.js.func/.vc-config.json",
+    });
+  });
+
+  it("rejects missing required Vercel route bindings", () => {
+    const result = scanFixture((outputDir) => {
+      writeOutputConfig(
+        outputDir,
+        requiredRoutes().filter((route) => route.dest !== "/api/mcp"),
+      );
+    });
+
+    expectFinding(result, {
+      reason: "missing-required-vercel-route:/api/mcp",
+      path: "config.json",
+    });
+  });
+
+  it("rejects inlined SDK v1 bundle markers", () => {
+    const result = scanFixture((outputDir) => {
+      writeFile(
+        outputDir,
+        "functions/api/mcp.js.func/index.js",
+        'const pkg = { name: "@modelcontextprotocol/sdk", version: "1.2.0" };\n',
+      );
+    });
+
+    expectFinding(result, {
+      reason: "runtime-mcp-sdk-v1-bundle",
+      path: "functions/api/mcp.js.func/index.js",
+      line: 1,
+    });
+  });
+
+  it("rejects symlinks in Vercel output", () => {
+    const result = scanFixture((outputDir) => {
+      const target = path.join(outputDir, "secret.env");
+      writeFileSync(target, "B2_APPLICATION_KEY=not-scanned\n");
+      symlinkSync(target, path.join(outputDir, "functions/api/mcp.js.func/secret-link.js"));
+    });
+
+    expectFinding(result, {
+      reason: "symlink-in-output",
+      path: "functions/api/mcp.js.func/secret-link.js",
     });
   });
 
@@ -355,14 +499,14 @@ describe("Vercel build output scanner", () => {
     const result = scanFixture((outputDir) => {
       writeFile(
         outputDir,
-        "functions/api/mcp.func/index.js.map",
+        "functions/api/mcp.js.func/index.js.map",
         `${JSON.stringify({ sourcesContent: ['const marker = "NEXT_PUBLIC_B2_URL";'] })}\n`,
       );
     });
 
     expectFinding(result, {
       reason: "secret-bearing-source-map:client-public-env-marker",
-      path: "functions/api/mcp.func/index.js.map",
+      path: "functions/api/mcp.js.func/index.js.map",
       line: 1,
     });
   });

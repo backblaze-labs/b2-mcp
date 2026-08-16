@@ -58,6 +58,7 @@
     "check:runtime-policy": "node scripts/check-runtime-policy.mjs",
     "check:package-budget": "node scripts/check-package-budget.mjs",
     "check:vercel-bundle": "node scripts/check-vercel-bundle.mjs",
+    "vercel-build": "node scripts/run-vercel-project-build.mjs",
     "prepare:vercel-local-build": "node scripts/prepare-vercel-local-build.mjs",
     "build:vercel-local": "node scripts/run-vercel-local-build.mjs",
     "check:vercel-build-output": "node scripts/check-vercel-build-output.mjs",

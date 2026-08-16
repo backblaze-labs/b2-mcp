@@ -3,10 +3,10 @@ import { dirname, extname, join, resolve } from "path";
 import { readJson, root } from "./support";
 
 const VERCEL_FUNCTION_ENTRYPOINTS = [
-  "api/mcp.ts",
-  "api/health.ts",
-  "api/oauth-protected-resource.ts",
-  "api/oauth-authorization-server.ts",
+  "api/mcp.js",
+  "api/health.js",
+  "api/oauth-protected-resource.js",
+  "api/oauth-authorization-server.js",
 ];
 const VERCEL_FUNCTION_SOURCE_BYTES_BUDGET = 485_000;
 const VERCEL_FUNCTION_SOURCE_FILES_BUDGET = 55;
@@ -25,14 +25,14 @@ function resolveLocalImport(from: string, specifier: string): string | null {
 function collectLocalImportGraph(entrypoints: readonly string[]): Set<string> {
   const seen = new Set<string>();
   const importPattern =
-    /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?["']([^"']+)["']|import\(["']([^"']+)["']\)/g;
+    /(?:import|export)\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?["']([^"']+)["']|import\(["']([^"']+)["']\)|require\(["']([^"']+)["']\)/g;
   function visit(relativePath: string): void {
     const absolutePath = resolve(root, relativePath);
     if (seen.has(absolutePath)) return;
     seen.add(absolutePath);
     const source = readFileSync(absolutePath, "utf8");
     for (const match of source.matchAll(importPattern)) {
-      const resolved = resolveLocalImport(absolutePath, match[1] ?? match[2]);
+      const resolved = resolveLocalImport(absolutePath, match[1] ?? match[2] ?? match[3]);
       if (resolved) visit(resolved.slice(root.length + 1));
     }
   }
@@ -60,7 +60,11 @@ describe("Vercel adapter policy", () => {
       regions?: string[];
       installCommand?: string;
       buildCommand?: string;
-      builds?: { src?: string; use?: string; config?: { maxDuration?: number } }[];
+      builds?: {
+        src?: string;
+        use?: string;
+        config?: { runtime?: string; maxDuration?: number };
+      }[];
       rewrites?: { source: string; destination: string }[];
     }>("vercel.json");
 
@@ -69,9 +73,9 @@ describe("Vercel adapter policy", () => {
     expect(vercel.installCommand).toBe("corepack enable && pnpm install --frozen-lockfile");
     expect(vercel.buildCommand).toBe("pnpm run typecheck && pnpm run build");
     expect(vercel.builds).toContainEqual({
-      src: "api/*.ts",
+      src: "api/*.js",
       use: "@vercel/node",
-      config: { maxDuration: 60 },
+      config: { runtime: "nodejs24.x", maxDuration: 60 },
     });
     expect(vercel.rewrites).toEqual(
       expect.arrayContaining([
@@ -112,11 +116,13 @@ describe("Vercel adapter policy", () => {
     expect(envExample).toContain("B2_OAUTH_ALLOWED_SUBJECTS=");
   });
 
-  it("keeps Vercel TypeScript files in the typecheck-only project", () => {
+  it("keeps Vercel runtime sources in reviewed TypeScript projects", () => {
     const tsconfig = readFileSync(join(root, "tsconfig.typecheck.json"), "utf8");
+    const vercelTsconfig = readFileSync(join(root, "tsconfig.vercel-runtime.json"), "utf8");
 
-    expect(tsconfig).toContain('"api/**/*"');
     expect(tsconfig).toContain('"deploy/vercel/**/*"');
+    expect(vercelTsconfig).toContain('"src/**/*"');
+    expect(vercelTsconfig).toContain('"deploy/vercel/**/*.ts"');
   });
 
   it("keeps the Vercel function source graph within the reviewed budget", () => {
@@ -140,6 +146,7 @@ describe("Vercel adapter policy", () => {
     );
     const bundleCheck = readFileSync(join(root, "scripts/check-vercel-bundle.mjs"), "utf8");
     const outputScan = readFileSync(join(root, "scripts/check-vercel-build-output.mjs"), "utf8");
+    const buildPolicy = readFileSync(join(root, "scripts/vercel-build-policy.mjs"), "utf8");
 
     expect(modernParity).toContain('connectVercelClient("modern")');
     expect(modernParity).toContain("server/discover");
@@ -151,6 +158,7 @@ describe("Vercel adapter policy", () => {
     expect(pkg.scripts?.["prepare:vercel-local-build"]).toBe(
       "node scripts/prepare-vercel-local-build.mjs",
     );
+    expect(pkg.scripts?.["vercel-build"]).toBe("node scripts/run-vercel-project-build.mjs");
     expect(pkg.scripts?.["build:vercel-local"]).toBe("node scripts/run-vercel-local-build.mjs");
     expect(pkg.scripts?.["check:vercel-build-output"]).toBe(
       "node scripts/check-vercel-build-output.mjs",
@@ -165,10 +173,11 @@ describe("Vercel adapter policy", () => {
     expect(bundleCheck).toContain("VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES");
     expect(bundleCheck).toContain("VERCEL_CLI_VERSION");
     expect(bundleCheck).toContain("VERCEL_NODE_BUILDER_VERSION");
+    expect(bundleCheck).toContain("VERCEL_FUNCTION_RUNTIME");
     expect(bundleCheck).toContain("reports/package-budget/metrics.json");
     expect(bundleCheck).toContain("@vercel/node");
-    expect(outputScan).toContain('new Set(["nodejs24.x"])');
-    expect(outputScan).toContain("unexpected-vercel-runtime");
-    expect(outputScan).toContain("embedded-function-environment");
+    expect(outputScan).toContain("VERCEL_REQUIRED_FUNCTION_CONFIGS");
+    expect(outputScan).toContain("VERCEL_REQUIRED_ROUTES");
+    expect(buildPolicy).toContain('VERCEL_FUNCTION_RUNTIME = "nodejs24.x"');
   });
 });

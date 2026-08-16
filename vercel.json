@@ -7,9 +7,10 @@
   "buildCommand": "pnpm run typecheck && pnpm run build",
   "builds": [
     {
-      "src": "api/*.ts",
+      "src": "api/*.js",
       "use": "@vercel/node",
       "config": {
+        "runtime": "nodejs24.x",
         "maxDuration": 60
       }
     }
