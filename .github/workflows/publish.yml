@@ -63,6 +63,10 @@ jobs:
           persist-credentials: false
       - name: Verify release version and changelog
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           PUBLISH_TAG: ${{ inputs.tag }}
         run: node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
@@ -79,16 +83,55 @@ jobs:
             sleep "$attempt"
           done
       - run: pnpm install --frozen-lockfile
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
       - run: pnpm run verify
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
       - run: pnpm run typecheck
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
       - run: pnpm run build
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
       - run: pnpm run check:package-budget
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
       - run: pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
       - run: pnpm run audit:supply-chain
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
       - name: Run production audit and generate release SBOM
         id: sbom
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
         run: |
           set -euo pipefail
           mkdir -p "${GITHUB_WORKSPACE}/publish-package"
@@ -99,6 +142,10 @@ jobs:
       - name: Extract release notes
         id: notes
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           PUBLISH_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
@@ -112,6 +159,11 @@ jobs:
           echo "release_notes_sha256=${notes_sha256}" >> "$GITHUB_OUTPUT"
       - name: Build and scan publish tarball
         id: pack
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
         run: |
           set -euo pipefail
           mkdir -p publish-package
@@ -131,6 +183,10 @@ jobs:
           echo "tarball_integrity=$(node -e 'const fs = require("fs"); const [pack] = JSON.parse(fs.readFileSync("publish-package/npm-pack.json", "utf8")); process.stdout.write(pack.integrity || "");')" >> "$GITHUB_OUTPUT"
       - name: Dry-run npm publish from verified tarball
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           EXPECTED_TARBALL_NAME: ${{ steps.pack.outputs.tarball_name }}
         run: |
           set -euo pipefail
@@ -147,6 +203,11 @@ jobs:
             --tag "${npm_tag}"
       - name: Write artifact checksums
         id: checksums
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
         run: |
           set -euo pipefail
           cd publish-package
@@ -307,11 +368,19 @@ jobs:
       - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159
       - name: Smoke local Docker image
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
         run: node scripts/smoke-container-image.mjs --build --image "b2-mcp-release-smoke:${CHECKOUT_SHA}"
       - name: Publish signed multi-platform GHCR image
         id: image
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
           GHCR_TOKEN: ${{ github.token }}
           PUBLISH_TAG: ${{ inputs.tag }}
