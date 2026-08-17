@@ -15,8 +15,9 @@ clean deploy and smoke evidence exists.
 - Cloudflare Workers account and Wrangler.
 - A custom Worker domain such as `mcp.example.com`.
 - A non-master, least-privilege B2 application key.
-- OAuth issuer/introspection service, Cloudflare OAuth Provider, or Cloudflare
-  Access integration that yields verified standard MCP `AuthInfo`.
+- OAuth issuer with introspection, JWKS for signed JWT access tokens,
+  Cloudflare OAuth Provider, or Cloudflare Access integration that yields
+  verified standard MCP `AuthInfo`.
 - Review of current Worker CPU, memory, subrequest, stream, and bundle limits.
 
 ## Architecture
@@ -52,7 +53,9 @@ adapter unit tests, protocol tests, and `pnpm run check:cloudflare-worker-bundle
 
 ## Secrets
 
-Use Worker encrypted secrets for single-tenant server mode:
+Use Worker encrypted secrets for single-tenant server mode. Include
+introspection credentials only when `B2_OAUTH_INTROSPECTION_ENDPOINT` remains
+set in `wrangler.jsonc`:
 
 ```bash
 cd deploy/cloudflare-worker
@@ -65,6 +68,26 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 EOF
 chmod 600 "$WORKER_SECRETS_FILE"
 ```
+
+For a JWKS-only Worker, remove the introspection endpoint from `vars`, omit the
+introspection credential lines from the secrets file, and set the non-secret
+JWKS values in `wrangler.jsonc`:
+
+```jsonc
+"B2_OAUTH_JWKS_URI": "https://issuer.example.com/.well-known/jwks.json",
+"B2_OAUTH_JWKS_CACHE_TTL_SECONDS": "300",
+```
+
+That configuration passes `/health` without
+`B2_OAUTH_INTROSPECTION_CLIENT_ID` or
+`B2_OAUTH_INTROSPECTION_CLIENT_SECRET`. Configure both introspection and JWKS
+only when introspection should stay authoritative for revocation and
+JWT-shaped opaque-token compatibility.
+
+Signed-JWT tokens must carry a `kid` and a `typ` of `at+jwt`; set
+`B2_OAUTH_ALLOWED_JWT_TYPES` if the issuer uses a different value. Once
+`B2_OAUTH_JWKS_URI` is set, `B2_OAUTH_ALLOWED_ALGORITHMS` is enforced
+(`RS256` by default, plus `ES256` and `EdDSA` when listed).
 
 Do not store B2 credentials in ordinary Worker `vars`, source code, `.dev.vars`
 committed to git, shell history, or logs. Use `cloudflare.env.example` only as
@@ -96,10 +119,16 @@ exact hostname. Cloudflare terminates TLS at the edge. Do not expose raw port
 
 ## Authentication
 
-The checked-in adapter validates OAuth bearer tokens by introspection. A
-Cloudflare Access or OAuth Provider integration may run before the adapter only
-if it converts a verified identity into MCP `AuthInfo`. Never trust public
-identity headers from the internet.
+The checked-in adapter validates OAuth bearer tokens by introspection for
+opaque tokens, or by local JWT signature verification when `B2_OAUTH_JWKS_URI`
+is configured without introspection. When both verifier mechanisms are
+configured, introspection remains authoritative so authorization-server
+revocation and JWT-shaped opaque tokens behave the same during rolling
+deploys. JWKS-only mode validates signatures and claims locally, caches and
+coalesces JWKS fetches, rate-limits forced key-refresh attempts, and cannot
+observe revocation before JWT expiry. A Cloudflare Access or OAuth Provider
+integration may run before the adapter only if it converts a verified identity
+into MCP `AuthInfo`. Never trust public identity headers from the internet.
 
 ## Health Checks
 

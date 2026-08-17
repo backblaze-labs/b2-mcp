@@ -14,7 +14,8 @@ route or protocol implementation.
 - A Vercel project imported from this repository.
 - A custom hostname such as `mcp.example.com`.
 - A non-master, least-privilege B2 application key.
-- An OAuth authorization server with an introspection endpoint.
+- An OAuth authorization server with an introspection endpoint, a JWKS URI for
+  signed JWT access tokens, or both.
 - Node.js runtime support matching repository policy: `22.23.1`, `24`, or `26`.
 
 ## Architecture
@@ -88,9 +89,13 @@ deploy-button query defaults.
 ## Authentication
 
 The adapter validates OAuth bearer tokens through
-`src/oauth-resource-server.ts` before resolving B2 credentials. Server mode is
-single-tenant by default and requires one `B2_OAUTH_ALLOWED_SUBJECTS` value
-unless `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` is separately reviewed.
+`src/oauth-resource-server.ts` before resolving B2 credentials. It accepts
+opaque tokens through introspection and signed JWT access tokens through
+`B2_OAUTH_JWKS_URI` when JWKS-only mode is selected. If both are configured,
+introspection remains authoritative for revocation and JWT-shaped opaque-token
+compatibility. Server mode is single-tenant by default and requires one
+`B2_OAUTH_ALLOWED_SUBJECTS` value unless
+`B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` is separately reviewed.
 
 ## Health Checks
 
@@ -121,7 +126,7 @@ tokens.
 ## Scaling
 
 The MCP route is stateless. Warm Vercel instances have process-local rate
-limits, B2 capability caches, OAuth introspection caches, and concurrency
+limits, B2 capability caches, OAuth token-verification caches, and concurrency
 counters. Use Vercel Firewall, WAF, spend controls, and provider quotas for
 deployment-wide abuse controls.
 
