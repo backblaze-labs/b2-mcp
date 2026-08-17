@@ -770,6 +770,7 @@ describe("supply-chain audit policy", () => {
     expect(prepareJob).toContain("pnpm run typecheck");
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
+    expect(prepareJob).toContain("package-manager-cache: false");
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");
     expect(githubReleaseJob).not.toContain("id-token: write");
@@ -778,6 +779,7 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).toContain("id-token: write");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
+    expect(publishJob).toContain("package-manager-cache: false");
     expect(publishJob).not.toContain("contents: write");
     expect(publishJob).not.toContain("actions/checkout");
     expect(publishJob).not.toContain("pnpm install");
