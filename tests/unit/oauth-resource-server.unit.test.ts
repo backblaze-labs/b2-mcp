@@ -1320,6 +1320,31 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("isolates shared JWKS state by cache policy", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=300" } }),
+    );
+    const longTtlVerifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksCacheTtlSeconds: 300 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const shortTtlVerifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksCacheTtlSeconds: 1, jwksCacheMinTtlSeconds: 1 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1002,
+    });
+
+    await expect(
+      longTtlVerifier.verifyAccessToken(jwtFor({ client_id: "long-jwks-policy" })),
+    ).resolves.toMatchObject({ clientId: "long-jwks-policy" });
+    await expect(
+      shortTtlVerifier.verifyAccessToken(jwtFor({ client_id: "short-jwks-policy" })),
+    ).resolves.toMatchObject({ clientId: "short-jwks-policy" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps shared JWKS fetches alive when one caller aborts", async () => {
     vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     let resolveFetch: ((response: Response) => void) | undefined;

@@ -1131,12 +1131,19 @@ function assertJwtHeader(header: Record<string, unknown>, config: OAuthJwtVerifi
   return algorithm;
 }
 
-function jwksCacheKey(config: OAuthResourceServerConfig): string {
-  const jwksUri = "jwksUri" in config ? config.jwksUri : undefined;
+function jwksCacheKey(config: OAuthJwtVerifierConfig): string {
   return JSON.stringify({
     issuer: config.issuer,
-    jwksUri: jwksUri ?? "",
+    jwksUri: config.jwksUri,
     allowedJwtAlgorithms: config.allowedJwtAlgorithms,
+    jwksCacheTtlSeconds: config.jwksCacheTtlSeconds,
+    jwksCacheMinTtlSeconds: config.jwksCacheMinTtlSeconds,
+    jwksTimeoutMs: config.jwksTimeoutMs,
+    jwksMaxRetries: config.jwksMaxRetries,
+    jwksRetryDelayMs: config.jwksRetryDelayMs,
+    jwksCircuitFailures: config.jwksCircuitFailures,
+    jwksCircuitOpenMs: config.jwksCircuitOpenMs,
+    jwksRefreshCooldownMs: config.jwksRefreshCooldownMs,
   });
 }
 
