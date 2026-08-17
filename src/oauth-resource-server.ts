@@ -1207,6 +1207,10 @@ async function verifyJwtWithJwk(
 ): Promise<boolean> {
   try {
     const key = await importJWK(jwk as JWK, algorithm);
+    // Pin the algorithm on the verify call as defense in depth. The header alg is
+    // already allowlist-checked (assertAllowedAlgorithm) and the JWK bound to it
+    // (jwkMatchesHeader + importJWK), so this is intentionally redundant; keep it
+    // so a future change upstream cannot reintroduce algorithm confusion here.
     await compactVerify(token, key, { algorithms: [algorithm] });
     return true;
   } catch (error) {

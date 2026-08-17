@@ -995,6 +995,54 @@ describe("OAuthJwtVerifier", () => {
     ).rejects.toThrow(message);
   });
 
+  it("names the received type and override env var when the JWT typ is rejected", async () => {
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor({}, { typ: "id+jwt" }))).rejects.toThrow(
+      /id\+jwt.*B2_OAUTH_ALLOWED_JWT_TYPES/i,
+    );
+  });
+
+  it("rejects a kid-matching JWKS key marked for encryption use", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse([{ ...rsaPublicJwk, use: "enc" }]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toThrow(/signature/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a kid-matching JWKS key whose key_ops omits verify", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse([{ ...rsaPublicJwk, key_ops: ["encrypt"] }]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toThrow(/signature/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a kid-matching JWKS key whose alg differs from the token header", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse([{ ...rsaPublicJwk, alg: "ES256" }]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toThrow(/signature/i);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("requires standard sub for JWT allowed-subject checks", async () => {
     const verifier = new OAuthJwtVerifier({
       config: jwksOnlyConfig({ allowedSubjects: [`${baseConfig.issuer}#user-123`] }),
