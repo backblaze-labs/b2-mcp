@@ -567,7 +567,11 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
-    expect(publishWorkflow).toContain("ci-green");
+    expect(publishWorkflow).toContain("push:");
+    expect(publishWorkflow).toContain("tags:");
+    expect(publishWorkflow).toContain("PUBLISH_TAG: ${{ github.ref_name }}");
+    expect(publishWorkflow).not.toContain("workflow_dispatch:");
+    expect(publishWorkflow).not.toContain("inputs.tag");
     expect(publishWorkflow).toContain("node scripts/verify-release-input.mjs --tag");
     expect(publishWorkflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",

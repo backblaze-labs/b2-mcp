@@ -4,11 +4,16 @@ import { createRequire } from "module";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
-const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey } = nodeRequire(
-  "../../scripts/lib/workflow-yaml.cjs",
-) as {
+const {
+  workflowJobBlock,
+  workflowJobBlocks,
+  yamlBlockForKey,
+  yamlMappingForKey,
+  yamlValuesForKey,
+} = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
   workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
+  yamlBlockForKey: (text: string, key: string) => string | null;
   yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
   yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
 };
@@ -73,6 +78,26 @@ describe("CI workflow policy", () => {
       "group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}",
     );
     expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
+  });
+
+  it("keeps package publishing on trusted release tag pushes", () => {
+    const trigger = yamlBlockForKey(publish, "on") ?? "";
+    const publishTagAssignments = publish.match(/^\s+PUBLISH_TAG:\s*(.+)$/gm) ?? [];
+
+    expect(trigger).toContain("push:");
+    expect(trigger).toContain("tags:");
+    expect(trigger).toContain('"v*.*.*"');
+    expect(trigger).toContain('"v*.*.*-*"');
+    expect(trigger).not.toContain("workflow_dispatch:");
+    expect(publish).not.toContain("inputs.tag");
+    expect(publishTagAssignments.length).toBeGreaterThan(0);
+    expect(publishTagAssignments).toEqual(
+      publishTagAssignments.map((line) =>
+        line.replace(/PUBLISH_TAG:\s*.+$/, "PUBLISH_TAG: ${{ github.ref_name }}"),
+      ),
+    );
+    expect(publish).toContain("node scripts/resolve-publish-ref.mjs");
+    expect(publish).toContain("node scripts/verify-release-input.mjs --tag");
   });
 
   it("keeps Quality Keeper pull_request execution unprivileged", () => {
