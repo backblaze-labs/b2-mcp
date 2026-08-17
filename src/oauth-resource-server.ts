@@ -158,6 +158,12 @@ function ensureHttpsOrLocalhost(rawUrl: string, label: string, allowInsecure: bo
   }
 }
 
+function ensureFiniteNonNegative(value: number, label: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} must be a finite non-negative number`);
+  }
+}
+
 export function loadOAuthResourceServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): OAuthResourceServerConfig {
@@ -913,6 +919,7 @@ function requireJwtConfig(config: OAuthResourceServerConfig): OAuthJwtVerifierCo
     "B2_OAUTH_JWKS_URI",
     config.dangerouslyAllowInsecureIssuerUrl,
   );
+  ensureFiniteNonNegative(config.jwtClockSkewSeconds, "B2_OAUTH_JWT_CLOCK_SKEW_SECONDS");
   return config;
 }
 

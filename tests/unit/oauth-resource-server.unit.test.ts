@@ -709,6 +709,18 @@ describe("OAuthJwtVerifier", () => {
     ).toThrow(/unsupported JWT algorithm/i);
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    "rejects invalid direct JWT clock skew config value %s",
+    (jwtClockSkewSeconds) => {
+      expect(
+        () =>
+          new OAuthJwtVerifier({
+            config: jwksOnlyConfig({ jwtClockSkewSeconds }),
+          }),
+      ).toThrow(/B2_OAUTH_JWT_CLOCK_SKEW_SECONDS must be a finite non-negative number/);
+    },
+  );
+
   it("fails closed when the JWKS endpoint answers with an HTTP redirect", async () => {
     const fetchMock = vi.fn(
       async () =>
