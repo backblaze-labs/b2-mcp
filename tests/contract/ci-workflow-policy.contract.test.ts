@@ -35,17 +35,6 @@ const branchProtection = JSON.parse(
   };
   allow_force_pushes?: boolean;
 };
-const releaseTagRuleset = JSON.parse(
-  readFileSync(join(root, ".github/rulesets/release-tags.json"), "utf8"),
-) as {
-  name?: string;
-  target?: string;
-  enforcement?: string;
-  conditions?: { ref_name?: { include?: string[]; exclude?: string[] } };
-  rules?: Array<{ type?: string }>;
-  bypass_actors?: Array<{ actor_id?: number; actor_type?: string; bypass_mode?: string }>;
-};
-const rulesetDocs = readFileSync(join(root, ".github/rulesets/README.md"), "utf8");
 const workflowPaths = [
   ".github/workflows/test.yml",
   ".github/workflows/contract.yml",
@@ -91,53 +80,24 @@ describe("CI workflow policy", () => {
     expect(ci).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");
   });
 
-  it("keeps package publishing tag-push-only with tag-derived release inputs", () => {
+  it("keeps package publishing on protected default-branch dispatch", () => {
     const trigger = yamlBlockForKey(publish, "on") ?? "";
     const publishTagAssignments = publish.match(/^\s+PUBLISH_TAG:\s*(.+)$/gm) ?? [];
 
-    expect(trigger).toContain("push:");
-    expect(trigger).toContain("tags:");
-    expect(trigger).toContain('- "v*.*.*"');
-    expect(trigger).toContain('- "v*.*.*-*"');
-    expect(trigger).not.toContain("workflow_dispatch:");
-    expect(trigger).not.toContain("inputs:");
-    expect(publish).not.toContain("inputs.tag");
+    expect(trigger).toContain("workflow_dispatch:");
+    expect(trigger).toContain("inputs:");
+    expect(trigger).toContain("tag:");
+    expect(trigger).not.toContain("push:");
+    expect(trigger).not.toContain("tags:");
+    expect(publish).not.toContain("github.ref_name");
     expect(publishTagAssignments.length).toBeGreaterThan(0);
     expect(publishTagAssignments).toEqual(
       publishTagAssignments.map((line) =>
-        line.replace(/PUBLISH_TAG:\s*.+$/, "PUBLISH_TAG: ${{ github.ref_name }}"),
+        line.replace(/PUBLISH_TAG:\s*.+$/, "PUBLISH_TAG: ${{ inputs.tag }}"),
       ),
     );
-  });
-
-  it("documents and enforces the release tag ruleset required by tag-push publishing", () => {
-    expect(releaseTagRuleset).toMatchObject({
-      name: "release-tags",
-      target: "tag",
-      enforcement: "active",
-    });
-    expect(releaseTagRuleset.conditions?.ref_name?.include).toEqual([
-      "refs/tags/v*.*.*",
-      "refs/tags/v*.*.*-*",
-    ]);
-    expect(releaseTagRuleset.conditions?.ref_name?.exclude).toEqual([]);
-    expect(releaseTagRuleset.rules?.map((rule) => rule.type).sort()).toEqual([
-      "creation",
-      "deletion",
-      "update",
-    ]);
-    expect(releaseTagRuleset.bypass_actors).toEqual([
-      {
-        actor_id: 5,
-        actor_type: "RepositoryRole",
-        bypass_mode: "always",
-      },
-    ]);
-    expect(releaseTagRuleset.bypass_actors).not.toContainEqual(
-      expect.objectContaining({ actor_id: 4, actor_type: "RepositoryRole" }),
-    );
-    expect(rulesetDocs).toContain("Do not grant this bypass to the");
-    expect(rulesetDocs).toContain("general repository write role");
+    expect(publish).toContain("node scripts/resolve-publish-ref.mjs");
+    expect(publish).toContain("node scripts/verify-release-input.mjs --tag");
   });
 
   it("keeps Quality Keeper pull_request execution unprivileged", () => {

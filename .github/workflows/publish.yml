@@ -1,10 +1,12 @@
 name: Publish Package
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
-      - "v*.*.*-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example v1.2.3
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -47,7 +49,7 @@ jobs:
       - name: Resolve protected release ref
         id: ref
         env:
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
           PUBLISH_REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
           node scripts/resolve-publish-ref.mjs \
@@ -65,7 +67,7 @@ jobs:
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
         run: node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
         run: |
@@ -144,7 +146,7 @@ jobs:
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p publish-package
@@ -381,7 +383,7 @@ jobs:
           ACTIONS_RUNTIME_URL: ""
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
           GHCR_TOKEN: ${{ github.token }}
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
           REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
         run: node scripts/publish-container-image.mjs
 
@@ -461,7 +463,7 @@ jobs:
           EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
           EXPECTED_CHECKSUMS_NAME: ${{ needs.prepare.outputs.checksums-name }}
           EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           release_flags=(
