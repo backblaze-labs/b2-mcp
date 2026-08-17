@@ -35,6 +35,7 @@ overrides:
   '@vercel/express>path-to-regexp': 8.4.0
   '@vercel/fun>path-to-regexp': 8.4.0
   '@vercel/fun>tar': 7.5.21
+  '@vercel/fun>@tootallnate/once': 2.0.1
   '@vercel/hono>path-to-regexp': 8.4.0
   '@vercel/node>path-to-regexp': 6.3.0
   '@vercel/node>undici': 6.28.0
