@@ -790,6 +790,9 @@ function configCacheKey(config: OAuthResourceServerConfig): string {
     allowedSubjects: config.allowedSubjects,
     requiredScopes: config.requiredScopes,
     jwtClockSkewSeconds: "jwtClockSkewSeconds" in config ? config.jwtClockSkewSeconds : undefined,
+    tokenCacheMaxEntries: config.tokenCacheMaxEntries,
+    tokenCacheTtlSeconds: config.tokenCacheTtlSeconds,
+    tokenCacheSkewSeconds: config.tokenCacheSkewSeconds,
   });
 }
 

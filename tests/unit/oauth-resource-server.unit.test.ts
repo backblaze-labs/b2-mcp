@@ -528,6 +528,30 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keys cached introspection results by token cache policy", async () => {
+    const looseFetch = vi.fn(async () => Response.json(claims({ client_id: "loose-cache" })));
+    const strictFetch = vi.fn(async () => Response.json(claims({ client_id: "strict-cache" })));
+    const loose = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, tokenCacheMaxEntries: 100, tokenCacheTtlSeconds: 300 },
+      fetch: looseFetch as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const strict = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, tokenCacheMaxEntries: 0, tokenCacheTtlSeconds: 1 },
+      fetch: strictFetch as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(loose.verifyAccessToken("same-token")).resolves.toMatchObject({
+      clientId: "loose-cache",
+    });
+    await expect(strict.verifyAccessToken("same-token")).resolves.toMatchObject({
+      clientId: "strict-cache",
+    });
+    expect(looseFetch).toHaveBeenCalledTimes(1);
+    expect(strictFetch).toHaveBeenCalledTimes(1);
+  });
+
   it("keys cached introspection results by token type policy", async () => {
     const fetchMock = vi.fn(async () => Response.json(claims({ token_type: "mac" })));
     const permissive = new OAuthIntrospectionVerifier({
