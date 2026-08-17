@@ -32,6 +32,13 @@ const semver = nodeRequire("semver") as {
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const releaseTagRuleset = JSON.parse(
+    readFileSync(join(root, ".github/rulesets/release-tags.json"), "utf8"),
+  ) as {
+    enforcement?: string;
+    target?: string;
+  };
+  const releaseTagRulesetDocs = readFileSync(join(root, ".github/rulesets/README.md"), "utf8");
   const rawPnpmLock = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8")) as {
     importers?: Record<
       string,
@@ -567,7 +574,8 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
-    expect(publishWorkflow).toContain("ci-green");
+    expect(releaseTagRuleset).toMatchObject({ enforcement: "active", target: "tag" });
+    expect(releaseTagRulesetDocs).toContain("ci-green");
     expect(publishWorkflow).toContain("node scripts/verify-release-input.mjs --tag");
     expect(publishWorkflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
