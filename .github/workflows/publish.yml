@@ -63,6 +63,10 @@ jobs:
           persist-credentials: false
       - name: Verify release version and changelog
         env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
           PUBLISH_TAG: ${{ inputs.tag }}
         run: node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
