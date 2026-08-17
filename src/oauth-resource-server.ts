@@ -1174,7 +1174,9 @@ const SUPPORTED_JWT_ALGORITHMS: Record<string, JwtAlgorithmDescriptor> = {
 };
 
 function supportedJwtAlgorithm(algorithm: string): JwtAlgorithmDescriptor {
-  const descriptor = SUPPORTED_JWT_ALGORITHMS[algorithm];
+  const descriptor = Object.prototype.hasOwnProperty.call(SUPPORTED_JWT_ALGORITHMS, algorithm)
+    ? SUPPORTED_JWT_ALGORITHMS[algorithm]
+    : undefined;
   if (!descriptor) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not supported");
   }
@@ -1186,7 +1188,7 @@ function assertSupportedJwtAlgorithms(allowedAlgorithms: readonly string[]): voi
     throw new Error("B2_OAUTH_ALLOWED_ALGORITHMS must include at least one JWT algorithm");
   }
   for (const algorithm of allowedAlgorithms) {
-    if (!SUPPORTED_JWT_ALGORITHMS[algorithm]) {
+    if (!Object.prototype.hasOwnProperty.call(SUPPORTED_JWT_ALGORITHMS, algorithm)) {
       throw new Error(
         `B2_OAUTH_ALLOWED_ALGORITHMS includes unsupported JWT algorithm ${algorithm}`,
       );
@@ -1317,9 +1319,19 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
       const response = await this.fetchImpl(uri, {
         method: "GET",
         headers: { Accept: "application/json" },
-        redirect: "error",
+        // "manual", not "error": Cloudflare Workers (workerd) reject redirect:"error"
+        // at init time. Any redirect is rejected explicitly below, so a JWKS endpoint
+        // still cannot be substituted via a 3xx on either runtime.
+        redirect: "manual",
         signal: this.jwksSignal(),
       });
+      if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+        throw new OAuthDependencyError(
+          "OAuth authorization server unavailable",
+          "jwks_redirect",
+          response.status || undefined,
+        );
+      }
       if (!response.ok) {
         throw new OAuthDependencyError(
           "OAuth authorization server unavailable",
@@ -1375,6 +1387,10 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     if (!this.signal) return request;
     if (this.signal.aborted) {
       this.logDependencyFailure("request_aborted");
+      // The caller is already gone and will not attach a handler. Keep the shared
+      // fetch promise handled so a later rejection cannot surface as an unhandled
+      // rejection and crash the process (fail-closed must stay a 503, not a crash).
+      void request.catch(() => {});
       return Promise.reject(
         new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"),
       );

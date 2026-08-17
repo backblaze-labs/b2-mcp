@@ -700,10 +700,82 @@ describe("OAuthJwtVerifier", () => {
     ).toThrow(/must include at least one JWT algorithm/);
   });
 
+  it("rejects a prototype-inherited algorithm name in the allowlist", () => {
+    expect(
+      () =>
+        new OAuthJwtVerifier({
+          config: jwksOnlyConfig({ allowedJwtAlgorithms: ["constructor"] }),
+        }),
+    ).toThrow(/unsupported JWT algorithm/i);
+  });
+
+  it("fails closed when the JWKS endpoint answers with an HTTP redirect", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://evil.example.com/jwks" },
+        }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toBeInstanceOf(OAuthDependencyError);
+  });
+
+  it("fails closed on an opaque-redirect JWKS response from an edge runtime", async () => {
+    const opaque = {
+      type: "opaqueredirect",
+      status: 0,
+      ok: false,
+      headers: new Headers(),
+      json: async () => ({}),
+    } as unknown as Response;
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: (async () => opaque) as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken(jwtFor())).rejects.toBeInstanceOf(OAuthDependencyError);
+  });
+
+  it("does not leak an unhandled rejection when a pre-aborted request races a failing JWKS fetch", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: (async () => {
+        throw new Error("boom");
+      }) as typeof fetch,
+      nowSeconds: () => 1000,
+      signal: controller.signal,
+    });
+
+    const rejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      rejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await expect(verifier.verifyAccessToken(jwtFor())).rejects.toBeInstanceOf(
+        OAuthDependencyError,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+
+    expect(rejections).toHaveLength(0);
+  });
+
   it("verifies signed JWT access tokens against the configured JWKS", async () => {
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       expect(init?.method).toBe("GET");
-      expect(init?.redirect).toBe("error");
+      expect(init?.redirect).toBe("manual");
       return jwksResponse();
     });
     const verifier = new OAuthJwtVerifier({

@@ -11,16 +11,16 @@
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 404695,
-    "unpackedPackageBytes": 1779844,
+    "packedTarballBytes": 415420,
+    "unpackedPackageBytes": 1838886,
     "packedEntryCount": 232,
-    "cleanConsumerInstallFootprintBytes": 28506726
+    "cleanConsumerInstallFootprintBytes": 28945892
   },
   "limits": {
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
-    "packedTarballBytes": 415000,
-    "unpackedPackageBytes": 1840000,
+    "packedTarballBytes": 417000,
+    "unpackedPackageBytes": 1845000,
     "packedEntryCount": 240,
     "cleanConsumerInstallFootprintBytes": 30000000
   },
@@ -65,7 +65,7 @@
     },
     "jose": {
       "purpose": "JOSE (JWKS/JWT) verification for the OAuth resource server local access-token path; performs JWK import and JWS signature verification for RS256/ES256/EdDSA.",
-      "policy": "Exact-pinned and asymmetric algorithms only. Already resolved transitively through @modelcontextprotocol/server, so the direct dependency dedupes and adds no new install footprint. jose itself has no runtime dependencies.",
+      "policy": "Exact-pinned and asymmetric algorithms only. jose is a new production dependency: it was previously present only in the dev tree (via the @modelcontextprotocol/client devDependency), so a production install did not include it before. It adds exactly one package to the production closure (jose has no runtime dependencies of its own), which is why the reviewed total production package count moved to 48.",
       "version": "6.2.8",
       "resolved": "https://registry.npmjs.org/jose/-/jose-6.2.8.tgz",
       "integrity": "sha512-Bsdjwm3Qsd/P0jR+BHDe3LytDfY7WBq2HmCCLIwuVRHMuEC9ae7/R474GIUdF1NgCyZjzVo/A9DOiOBtXq8ZoQ=="

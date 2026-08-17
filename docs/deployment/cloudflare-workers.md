@@ -84,6 +84,11 @@ That configuration passes `/health` without
 only when introspection should stay authoritative for revocation and
 JWT-shaped opaque-token compatibility.
 
+Signed-JWT tokens must carry a `kid` and a `typ` of `at+jwt`; set
+`B2_OAUTH_ALLOWED_JWT_TYPES` if the issuer uses a different value. Once
+`B2_OAUTH_JWKS_URI` is set, `B2_OAUTH_ALLOWED_ALGORITHMS` is enforced
+(`RS256` by default, plus `ES256` and `EdDSA` when listed).
+
 Do not store B2 credentials in ordinary Worker `vars`, source code, `.dev.vars`
 committed to git, shell history, or logs. Use `cloudflare.env.example` only as
 a checklist. For multi-tenant use, put credentials behind a reviewed secret

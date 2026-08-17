@@ -126,6 +126,15 @@ revocation and opaque-token compatibility. JWKS-only deployments fail closed on
 signature or claim mismatch and do not observe authorization-server revocation
 before JWT expiry.
 
+Signed-JWT verification requires each token to carry a `kid` selecting a JWKS
+key and a `typ` of `at+jwt` (RFC 9068); an issuer that omits `typ` or sends a
+different value needs `B2_OAUTH_ALLOWED_JWT_TYPES` set to accept it, and a token
+without a `kid` is rejected. Setting `B2_OAUTH_JWKS_URI` also makes
+`B2_OAUTH_ALLOWED_ALGORITHMS` enforced (default `RS256`, plus `ES256` and
+`EdDSA` when listed), a variable introspection never validated before, so a
+value outside that set now fails closed at boot. Narrow it deliberately during a
+dual-mode rollout.
+
 Use an expand-contract rollout when moving an existing deployment to JWKS-only
 verification: first deploy the new code with both introspection and JWKS
 settings present, wait until older instances are drained, then remove
