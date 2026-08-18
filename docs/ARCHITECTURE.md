@@ -40,9 +40,12 @@ functional buckets. Every tool belongs to exactly one of three categories:
    leaders, largest files, and unfinished uploads, where no SDK exposes the
    requested aggregate operation as a primitive.
 
-Availability is orthogonal to backing. Durable-secret-producing tools remain
-registered as non-secret unavailable stubs until a reviewed secret sink exists,
-but they still keep their Native B2 SDK backing category.
+Availability is orthogonal to backing. Durable-secret-producing tools are
+sink-backed: on stdio the default file sink makes `b2_create_key` and
+`b2_create_group_member` available (and `b2_reserve_trial_create_account` only in
+explicit inline mode), while HTTP/serverless defaults to `off` and keeps them as
+non-secret unavailable stubs until a reviewed sink is configured. Either way they
+keep their Native B2 SDK backing category.
 
 ## Runtime Dependency Budget
 

@@ -29,33 +29,18 @@ Destructive actions are gated, durable B2 secrets stay out of the model's contex
 
 ## Quick start
 
-**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys) (a non-master key is all you need). Use Node.js 22.23.1 or a later patched 22 LTS release for local/deployed 22.x hosts; the package engine remains `>=22.3.0` for consumer compatibility, while CI runs the full toolchain on Node.js 22.23.1, 24, and 26.
+**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime (22.23.1+, or 24 / 26) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys). A non-master key is all you need. The package engine floor is `>=22.3.0`; CI runs on Node.js 22.23.1, 24, and 26.
 
-The canonical package name is `@backblaze-labs/b2-mcp` and the canonical
-binary is `b2-mcp`. The transition binary alias `b2-mcp-server` is kept only
-for existing local configs. Until the first `0.1.0` npm publish is visible on
-npm, do not use an `npx @backblaze-labs/b2-mcp` quick start. For now, run from
-a source checkout:
+The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary is `b2-mcp` (`b2-mcp-server` is a transition alias). The fastest setup runs it with `npx`, no clone or build.
 
-**1. Build from source:**
-
-```bash
-git clone https://github.com/backblaze-labs/b2-mcp.git b2-mcp
-cd b2-mcp
-corepack enable pnpm
-corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
-pnpm install --frozen-lockfile
-pnpm run build          # produces dist/ — required before first run
-```
-
-**2. Connect Claude Desktop** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Connect Claude Desktop** by editing `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "backblaze-b2": {
-      "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@backblaze-labs/b2-mcp"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-application-key-id",
         "B2_APPLICATION_KEY": "your-application-key-secret"
@@ -65,14 +50,27 @@ pnpm run build          # produces dist/ — required before first run
 }
 ```
 
-Replace the path with where you put the folder, then restart Claude Desktop — the B2 tools appear.
-To persist local stdio logs from clients that do not expose child-process
-stderr, add `"B2_LOG_FILE": "/absolute/path/to/b2-mcp.log"` to the same `env`
-block.
+Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from clients that do not expose child-process stderr, add `"B2_LOG_FILE": "/absolute/path/to/b2-mcp.log"` to the same `env` block.
 
-> **One non-master application key covers normal storage work** — B2 native, S3, and key management. SDK-backed Partner/Groups tools require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on an account authorized for the Partner API. B2's S3 endpoint rejects master keys, which is why the application key remains the primary credential. See [Configuration](#configuration) for the full list.
+> **One non-master application key covers normal storage work:** B2 native, S3, and key management. SDK-backed Partner/Groups tools require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on an account authorized for the Partner API. B2's S3 endpoint rejects master keys, which is why the application key remains the primary credential. See [Configuration](#configuration) for the full list.
 
-> **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP) — plus a compatibility matrix.
+> **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP), plus a compatibility matrix.
+
+<details>
+<summary><b>Run from a source checkout instead</b></summary>
+
+```bash
+git clone https://github.com/backblaze-labs/b2-mcp.git b2-mcp
+cd b2-mcp
+corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+pnpm install --frozen-lockfile
+pnpm run build          # produces dist/, required before first run
+```
+
+Then set `"command": "node"` and `"args": ["/ABSOLUTE/PATH/TO/b2-mcp/dist/index.js"]` (or use the installed `b2-mcp` binary) in the config above.
+
+</details>
 
 **Then just ask:**
 
@@ -272,12 +270,10 @@ Options:
 Examples:
 
 ```bash
-node dist/index.js --transport stdio
-node dist/index.js http --port 3000
+b2-mcp --transport stdio             # or: npx -y @backblaze-labs/b2-mcp --transport stdio
+b2-mcp http --port 3000
+node dist/index.js http --port 3000  # equivalent from a source checkout
 ```
-
-After the package is published and installed, use `b2-mcp` in place of
-`node dist/index.js`.
 
 ---
 

@@ -159,15 +159,14 @@ describe("release scripts", () => {
     });
   });
 
-  it("includes the issue 64 release automation entry in v0.1.0 notes", () => {
-    const result = spawnSync(
-      process.execPath,
-      ["scripts/extract-release-notes.mjs", "--version", "0.1.0"],
-      { cwd: root, encoding: "utf8" },
-    );
+  it("includes the issue 64 release automation entry in the unreleased notes", () => {
+    const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
+    const unreleased = changelog
+      .split(/^## \[/m)
+      .find((section) => section.startsWith("Unreleased]"));
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain("issue #64 release verification");
+    expect(unreleased).toBeDefined();
+    expect(unreleased).toContain("issue #64 release verification");
   });
 
   it("derives safe npm dist-tags for stable and prerelease versions", () => {
