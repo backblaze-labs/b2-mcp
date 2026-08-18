@@ -193,10 +193,6 @@ class SharedRetryBudgetTransport implements HttpTransport {
   }
 }
 
-export function createMcpRetryBudgetTransport(inner: HttpTransport): HttpTransport {
-  return new RequestSignalTransport(new SharedRetryBudgetTransport(inner));
-}
-
 function lockUrlGuard(client: ManagedSdkClient, auth: AuthorizeAccountResponse): void {
   client.urlGuard?.setAllowedSuffixes(deriveAllowedSuffixes(auth.apiInfo.storageApi));
 }
@@ -226,7 +222,7 @@ export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
     // Partner B2Config instances carry master credentials in applicationKey*.
     masterKeyId: config.applicationKeyId,
     masterKey: config.applicationKey,
-    transport: createMcpRetryBudgetTransport(
+    transport: createMcpHttpTransport(
       new FetchTransport({
         userAgent: buildUserAgent(config),
         urlGuard,

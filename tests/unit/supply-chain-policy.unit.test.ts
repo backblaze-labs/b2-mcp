@@ -93,22 +93,29 @@ describe("supply-chain audit policy", () => {
   type LockPackageWithMetadata = LockPackage & { integrity: string; version: string };
   const lock = readPackageManagerLock(root) as { packages: Record<string, LockPackage> };
 
-  it("requires documented review for a fresh Backblaze SDK release-age exception", () => {
+  it("keeps the fresh Backblaze SDK release-age exception time-bounded", () => {
     const sdkVersion = packageJson.dependencies["@backblaze-labs/b2-sdk"];
     const excludedPackage = `@backblaze-labs/b2-sdk@${sdkVersion}`;
     const rootExcludes = pnpmWorkspace.minimumReleaseAgeExclude ?? [];
     const customerHostedExcludes = customerHostedPnpmWorkspace.minimumReleaseAgeExclude ?? [];
+    const exceptionExpiresAt = "2026-08-19T09:00:00.000Z";
 
-    expect(rootExcludes.includes(excludedPackage)).toBe(
-      customerHostedExcludes.includes(excludedPackage),
-    );
-    if (!rootExcludes.includes(excludedPackage)) return;
+    expect(rootExcludes).toContain(excludedPackage);
+    expect(customerHostedExcludes).toContain(excludedPackage);
+    expect(rootExcludes.filter((entry) => entry.startsWith("@backblaze-labs/b2-sdk@"))).toEqual([
+      excludedPackage,
+    ]);
+    expect(
+      customerHostedExcludes.filter((entry) => entry.startsWith("@backblaze-labs/b2-sdk@")),
+    ).toEqual([excludedPackage]);
+    expect(Date.now()).toBeLessThan(Date.parse(exceptionExpiresAt));
 
     const lockEntry = rawPnpmLock.packages?.[excludedPackage];
     const integrity = lockEntry?.resolution?.integrity;
 
     expect(integrity).toBeTruthy();
     expect(sdkAdoptionContract).toContain(excludedPackage);
+    expect(sdkAdoptionContract).toContain(exceptionExpiresAt);
     expect(sdkAdoptionContract).toContain("SLSA v1 attestation");
     expect(sdkAdoptionContract).toContain(String(integrity));
     expect(sdkAdoptionContract).toContain(

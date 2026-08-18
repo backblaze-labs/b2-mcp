@@ -806,11 +806,13 @@ function b2NotFound(message: string): Error {
   return Object.assign(new Error(message), { status: 404, code: "not_found" });
 }
 
-function partnerGroupsCoordinates(auth: PartnerAuthorizeResponse): {
+interface PartnerGroupsCoordinates {
   groupsApiUrl: string;
   authToken: PartnerAuthorizeResponse["authorizationToken"];
   adminAccountId: PartnerAuthorizeResponse["accountId"];
-} {
+}
+
+function partnerGroupsCoordinates(auth: PartnerAuthorizeResponse): PartnerGroupsCoordinates {
   const groupsApiUrl = auth.apiInfo.groupsApi?.groupsApiUrl;
   if (!groupsApiUrl) {
     throw new B2PartnerAuthorizationError(
@@ -1114,9 +1116,9 @@ export class B2Client {
     return cloneJsonResponse(
       await this.withPartnerCircuit(
         { retryOnUnauthorized: true },
-        (client, auth, requestOptions) => {
+        (client, auth, coordinates, requestOptions) => {
           validatePartnerAdminAccount(auth, options.adminAccountId);
-          const { groupsApiUrl, authToken, adminAccountId } = partnerGroupsCoordinates(auth);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
           return client.raw.listGroups(
             groupsApiUrl,
             authToken,
@@ -1143,9 +1145,9 @@ export class B2Client {
     return cloneJsonResponse(
       await this.withPartnerCircuit(
         { retryOnUnauthorized: true },
-        (client, auth, requestOptions) => {
+        (client, auth, coordinates, requestOptions) => {
           validatePartnerAdminAccount(auth, options.adminAccountId);
-          const { groupsApiUrl, authToken, adminAccountId } = partnerGroupsCoordinates(auth);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
           return client.raw.listGroupMembers(
             groupsApiUrl,
             authToken,
@@ -1170,9 +1172,9 @@ export class B2Client {
     return cloneJsonResponse(
       await this.withPartnerCircuit(
         { retryOnUnauthorized: false },
-        (client, auth, requestOptions) => {
+        (client, auth, coordinates, requestOptions) => {
           validatePartnerAdminAccount(auth, options.adminAccountId);
-          const { groupsApiUrl, authToken, adminAccountId } = partnerGroupsCoordinates(auth);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
           return client.raw.ejectGroupMember(
             groupsApiUrl,
             authToken,
@@ -1218,20 +1220,26 @@ export class B2Client {
       return raceWithCallerAbort(this.partnerInflightAuth, callerSignal);
     }
 
-    this.partnerInflightAuth = runWithMcpRequestSignal(undefined, () =>
-      client.authorize().finally(() => {
-        this.partnerInflightAuth = null;
-      }),
-    );
+    let authorizePromise: Promise<PartnerAuthorizeResponse>;
+    authorizePromise = runWithMcpRequestSignal(undefined, () => client.authorize())
+      .then(
+        (auth) => {
+          this.partnerAuthTime = Date.now();
+          return auth;
+        },
+        (err) => {
+          this.partnerAuthTime = null;
+          throw err;
+        },
+      )
+      .finally(() => {
+        if (this.partnerInflightAuth === authorizePromise) {
+          this.partnerInflightAuth = null;
+        }
+      });
+    this.partnerInflightAuth = authorizePromise;
 
-    try {
-      const auth = await raceWithCallerAbort(this.partnerInflightAuth, callerSignal);
-      this.partnerAuthTime = Date.now();
-      return auth;
-    } catch (err) {
-      this.partnerAuthTime = null;
-      throw err;
-    }
+    return raceWithCallerAbort(authorizePromise, callerSignal);
   }
 
   private syncPartnerAuthFromSdk(client: SdkPartnerClient, previousToken: string): void {
@@ -1245,6 +1253,7 @@ export class B2Client {
     operation: (
       client: SdkPartnerClient,
       auth: PartnerAuthorizeResponse,
+      coordinates: PartnerGroupsCoordinates,
       options?: PartnerRawRequestOptions,
     ) => Promise<T>,
   ): Promise<T> {
@@ -1253,20 +1262,20 @@ export class B2Client {
       const client = this.getPartnerClient();
       const auth = await this.getPartnerAuth(client);
       const requestOptions = signal ? { signal } : undefined;
+      const runAuthorized = (authorized: PartnerAuthorizeResponse) => {
+        const coordinates = partnerGroupsCoordinates(authorized);
+        return operation(client, authorized, coordinates, requestOptions);
+      };
       try {
-        const result = await runWithMcpRequestSignal(signal, () =>
-          operation(client, auth, requestOptions),
-        );
+        const result = await runWithMcpRequestSignal(signal, () => runAuthorized(auth));
         this.syncPartnerAuthFromSdk(client, String(auth.authorizationToken));
         return result;
       } catch (err) {
         if (!isUnauthorized(err)) throw err;
         this.clearPartnerAuth(client);
-        const refreshedAuth = await this.getPartnerAuth(client);
         if (!options.retryOnUnauthorized) throw err;
-        return runWithMcpRequestSignal(signal, () =>
-          operation(client, refreshedAuth, requestOptions),
-        );
+        const refreshedAuth = await this.getPartnerAuth(client);
+        return runWithMcpRequestSignal(signal, () => runAuthorized(refreshedAuth));
       }
     });
   }

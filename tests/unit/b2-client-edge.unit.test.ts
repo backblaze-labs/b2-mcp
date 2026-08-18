@@ -245,6 +245,57 @@ describe("B2Client native edge branches", () => {
     expect(listTokens).toEqual(["partner-token-1", "partner-token-2"]);
   });
 
+  it("refreshes stale cached Partner authorization before sending a mutation", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    let authorizeCount = 0;
+    const ejectTokens: string[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCount += 1;
+        return new StaticHttpResponse(
+          200,
+          partnerAuthorizeResponse(`partner-token-${authorizeCount}`),
+        );
+      }
+      if (endpoint === "b2_list_groups") {
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          groups: [],
+          nextGroupId: null,
+        });
+      }
+      if (endpoint === "b2_eject_group_member") {
+        ejectTokens.push(new Headers(request.headers).get("Authorization") ?? "");
+        return new StaticHttpResponse(200, {
+          accountId: "member-account-1",
+          email: "member@example.com",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    const client = clientWithTransport(transport);
+
+    await expect(client.listGroups({ adminAccountId: "test-account-123" })).resolves.toMatchObject({
+      groups: [],
+    });
+    await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000 + 1);
+    await expect(
+      client.ejectGroupMember({
+        adminAccountId: "test-account-123",
+        groupId: "123",
+        memberAccountId: "member-account-1",
+      }),
+    ).resolves.toMatchObject({ accountId: "member-account-1" });
+
+    expect(authorizeCount).toBe(2);
+    expect(ejectTokens).toEqual(["partner-token-2"]);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toHaveLength(1);
+  });
+
   it("rejects Partner calls when authorize omits the Groups endpoint", async () => {
     const auth = partnerAuthorizeResponse();
     auth.apiInfo.groupsApi.groupsApiUrl = "";
@@ -268,13 +319,22 @@ describe("B2Client native edge branches", () => {
     expect(raw.listGroups).not.toHaveBeenCalled();
   });
 
-  it("returns a caller abort while Partner authorization continues independently", async () => {
+  it("keeps a successful Partner authorization after the starting caller aborts", async () => {
     const controller = new AbortController();
     controller.abort(new Error("caller stopped"));
+    let authorizeCount = 0;
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
       if (endpoint === "b2_authorize_account") {
+        authorizeCount += 1;
         return new StaticHttpResponse(200, partnerAuthorizeResponse());
+      }
+      if (endpoint === "b2_list_groups") {
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          groups: [],
+          nextGroupId: null,
+        });
       }
       return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
     });
@@ -288,6 +348,11 @@ describe("B2Client native edge branches", () => {
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account"),
     ).toHaveLength(1);
+
+    await expect(client.listGroups({ adminAccountId: "test-account-123" })).resolves.toMatchObject({
+      groups: [],
+    });
+    expect(authorizeCount).toBe(1);
   });
 
   it("aborts a caller waiting on in-flight Partner authorization", async () => {
@@ -373,7 +438,7 @@ describe("B2Client native edge branches", () => {
     expect(listCount).toBe(2);
   });
 
-  it("refreshes Partner auth after a mutation 401 without replaying the mutation", async () => {
+  it("invalidates Partner auth after a mutation 401 without reauthorizing or replaying", async () => {
     let authorizeCount = 0;
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
@@ -401,12 +466,64 @@ describe("B2Client native edge branches", () => {
         groupId: "123",
         memberAccountId: "member-account-1",
       }),
-    ).rejects.toMatchObject({ status: 401 });
+    ).rejects.toMatchObject({ status: 401, code: "expired_auth_token" });
 
-    expect(authorizeCount).toBe(2);
+    expect(authorizeCount).toBe(1);
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toHaveLength(1);
+  });
+
+  it("authorizes before the next Partner mutation after a mutation 401", async () => {
+    let authorizeCount = 0;
+    let ejectCount = 0;
+    const ejectTokens: string[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCount += 1;
+        return new StaticHttpResponse(
+          200,
+          partnerAuthorizeResponse(`partner-token-${authorizeCount}`),
+        );
+      }
+      if (endpoint === "b2_eject_group_member") {
+        ejectCount += 1;
+        ejectTokens.push(new Headers(request.headers).get("Authorization") ?? "");
+        if (ejectCount === 1) {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "expired_auth_token",
+            message: "expired",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          accountId: "member-account-1",
+          email: "member@example.com",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    const client = clientWithTransport(transport);
+
+    await expect(
+      client.ejectGroupMember({
+        adminAccountId: "test-account-123",
+        groupId: "123",
+        memberAccountId: "member-account-1",
+      }),
+    ).rejects.toMatchObject({ status: 401, code: "expired_auth_token" });
+    await expect(
+      client.ejectGroupMember({
+        adminAccountId: "test-account-123",
+        groupId: "123",
+        memberAccountId: "member-account-1",
+      }),
+    ).resolves.toMatchObject({ accountId: "member-account-1" });
+
+    expect(authorizeCount).toBe(2);
+    expect(ejectTokens).toEqual(["partner-token-1", "partner-token-2"]);
+    expect(ejectCount).toBe(2);
   });
 
   it("shares one in-flight Partner authorization for concurrent cold reads", async () => {
@@ -502,5 +619,47 @@ describe("B2Client native edge branches", () => {
     const error = await result;
     expect(String(error)).toMatch(/retry budget exhausted/i);
     expect(listCount).toBe(1);
+  });
+
+  it("limits default Partner authorize retries with the shared retry budget", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    _resetRetryBudget();
+    for (let i = 0; i < 100; i++) _consumeRetryToken();
+    expect(_consumeRetryToken()).toBe(false);
+
+    let authorizeCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const endpoint = url.pathname.split("/").pop();
+      if (endpoint === "b2_authorize_account") {
+        authorizeCount += 1;
+        return new Response(JSON.stringify({ status: 500, code: "server_error", message: "bad" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ status: 500, code: "unexpected", message: endpoint }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    const result = client.listGroups({ adminAccountId: "test-account-123" }).then(
+      () => {
+        throw new Error("Expected Partner authorize to fail");
+      },
+      (err: unknown) => err,
+    );
+    await vi.waitFor(() => expect(authorizeCount).toBe(1));
+    while (_consumeRetryToken()) {
+      // Drain any tokens that refill while the first authorize request fails.
+    }
+    await vi.runAllTimersAsync();
+
+    const error = await result;
+    expect(String(error)).toMatch(/retry budget exhausted/i);
+    expect(authorizeCount).toBe(1);
   });
 });

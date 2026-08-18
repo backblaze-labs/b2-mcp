@@ -8,7 +8,7 @@ import {
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import type { ReadableStream } from "node:stream/web";
 import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
-import { createMcpHttpTransport, createMcpRetryBudgetTransport } from "../../src/auth";
+import { createMcpHttpTransport } from "../../src/auth";
 import { setB2PartnerClientFactoryForTests } from "../../src/b2/client";
 import { B2Config } from "../../src/utils/types";
 
@@ -111,7 +111,7 @@ export function installSdkTransport(
       new SdkPartnerClient({
         masterKeyId: config.applicationKeyId,
         masterKey: config.applicationKey,
-        transport: createMcpRetryBudgetTransport(transport),
+        transport: createMcpHttpTransport(transport, retry),
         retry,
         realm: "http://127.0.0.1",
         allowCustomAuthorizeRealm: true,
