@@ -25,6 +25,7 @@ const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 
 export const secretSinkFileOpsForTests = {
   closeSync: fs.closeSync,
+  ftruncateSync: fs.ftruncateSync,
   fsyncSync: fs.fsyncSync,
   unlinkSync: fs.unlinkSync,
 };
@@ -73,10 +74,32 @@ interface SecretSinkClaim {
   parent: string;
 }
 
+interface LockIdentity {
+  dev: number;
+  ino: number;
+  mtimeMs: number;
+  pid: number | null;
+  size: number;
+  token: string | null;
+}
+
 interface LockCleanupContext {
   tool: string;
   secretSink: { type: "file"; path: string };
   lockPath: string;
+}
+
+class SecretSinkCommitAmbiguousError extends Error {
+  readonly code = "secret_sink_commit_ambiguous";
+  readonly status = 500;
+
+  constructor(
+    message: string,
+    readonly cause: unknown,
+  ) {
+    super(message);
+    this.name = "SecretSinkCommitAmbiguousError";
+  }
 }
 
 function parseSecretSinkMode(raw: string | undefined, transport: "stdio" | "http"): SecretSinkMode {
@@ -269,10 +292,22 @@ export function appendSecretSinkRecord(
     } catch (err) {
       operationError = err;
       try {
-        fs.ftruncateSync(fd, originalSize);
+        secretSinkFileOpsForTests.ftruncateSync(fd, originalSize);
         secretSinkFileOpsForTests.fsyncSync(fd);
-      } catch {
-        // Best-effort rollback only; the caller still receives the original sink failure.
+      } catch (rollbackErr) {
+        operationError = new SecretSinkCommitAmbiguousError(
+          `${SECRET_SINK_FILE_ENV} write failed and rollback could not be confirmed`,
+          rollbackErr,
+        );
+        logger.fatal(
+          {
+            err,
+            rollbackErr,
+            tool,
+            secretSink: { type: "file", path: sink.filePath },
+          },
+          "secret_sink.rollback_failed_after_write_error",
+        );
       }
     } finally {
       try {
@@ -488,6 +523,17 @@ function writeLockFile(fd: number, payload: unknown): void {
   secretSinkFileOpsForTests.fsyncSync(fd);
 }
 
+function lockPayload(tool: string, status: string, extra: Record<string, unknown> = {}) {
+  return {
+    ts: isoTimestampSeconds(),
+    tool,
+    pid: process.pid,
+    token: randomUUID(),
+    status,
+    ...extra,
+  };
+}
+
 function claimOpenFlags(): number {
   return (
     fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW
@@ -547,7 +593,7 @@ function processIsAlive(pid: number): boolean {
   }
 }
 
-function readAppendLockPid(lockPath: string): number | null {
+function readLockPayload(lockPath: string): Record<string, unknown> | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(lockPath, "utf8"));
@@ -555,38 +601,109 @@ function readAppendLockPid(lockPath: string): number | null {
     return null;
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const pid = (parsed as { pid?: unknown }).pid;
-  return Number.isInteger(pid) && Number(pid) > 0 ? Number(pid) : null;
+  return parsed as Record<string, unknown>;
 }
 
-function appendLockIsStale(lockPath: string): boolean {
-  const pid = readAppendLockPid(lockPath);
-  if (pid !== null && pid !== process.pid && !processIsAlive(pid)) return true;
-  const stats = fs.statSync(lockPath);
-  return Date.now() - stats.mtimeMs > STALE_APPEND_LOCK_MS;
+function readLockIdentity(lockPath: string): LockIdentity | null {
+  let stats: fs.Stats;
+  try {
+    stats = fs.statSync(lockPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  const payload = readLockPayload(lockPath);
+  const pid = payload?.pid;
+  const token = payload?.token;
+  return {
+    dev: stats.dev,
+    ino: stats.ino,
+    mtimeMs: stats.mtimeMs,
+    pid: Number.isInteger(pid) && Number(pid) > 0 ? Number(pid) : null,
+    size: stats.size,
+    token: typeof token === "string" ? token : null,
+  };
+}
+
+function lockIdentitiesMatch(left: LockIdentity, right: LockIdentity): boolean {
+  if (left.token !== null || right.token !== null) {
+    return left.token !== null && left.token === right.token && left.pid === right.pid;
+  }
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size;
+}
+
+function lockIdentityIsStale(identity: LockIdentity): boolean {
+  if (identity.pid !== null) {
+    return identity.pid !== process.pid && !processIsAlive(identity.pid);
+  }
+  return Date.now() - identity.mtimeMs > STALE_APPEND_LOCK_MS;
+}
+
+function reclaimStaleLockFile(lockPath: string, parent: string): boolean {
+  const identity = readLockIdentity(lockPath);
+  if (!identity || !lockIdentityIsStale(identity)) return false;
+  const current = readLockIdentity(lockPath);
+  if (!current || !lockIdentitiesMatch(identity, current) || !lockIdentityIsStale(current)) {
+    return false;
+  }
+  secretSinkFileOpsForTests.unlinkSync(lockPath);
+  fsyncParentDirectory(parent);
+  return true;
+}
+
+function acquireReclaimLock(
+  lockPath: string,
+  parent: string,
+  tool: string,
+): SecretSinkClaim | null {
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    try {
+      createExclusiveLockFile(
+        reclaimLockPath(lockPath),
+        lockPayload(tool, "reclaiming_append_lock"),
+      );
+      fsyncParentDirectory(parent);
+      return { lockPath: reclaimLockPath(lockPath), parent };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+        logger.warn(
+          { err, tool, lockPath: reclaimLockPath(lockPath) },
+          "secret_sink.reclaim_lock_failed",
+        );
+        return null;
+      }
+      try {
+        if (reclaimStaleLockFile(reclaimLockPath(lockPath), parent)) {
+          logger.warn(
+            { tool, lockPath: reclaimLockPath(lockPath) },
+            "secret_sink.stale_reclaim_lock_reclaimed",
+          );
+          continue;
+        }
+      } catch (reclaimErr) {
+        logger.warn(
+          { err: reclaimErr, tool, lockPath: reclaimLockPath(lockPath) },
+          "secret_sink.reclaim_lock_cleanup_failed",
+        );
+        return null;
+      }
+      if (Date.now() >= deadline) return null;
+      sleepSync(20);
+    }
+  }
+}
+
+function reclaimLockPath(lockPath: string): string {
+  return `${lockPath}.reclaim`;
 }
 
 function reclaimStaleAppendLock(lockPath: string, parent: string, tool: string): boolean {
-  const reclaimLock = { lockPath: `${lockPath}.reclaim`, parent };
-  try {
-    createExclusiveLockFile(reclaimLock.lockPath, {
-      ts: isoTimestampSeconds(),
-      tool,
-      pid: process.pid,
-      status: "reclaiming_append_lock",
-    });
-    fsyncParentDirectory(parent);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
-      logger.warn({ err, tool, lockPath: reclaimLock.lockPath }, "secret_sink.reclaim_lock_failed");
-    }
-    return false;
-  }
+  const reclaimLock = acquireReclaimLock(lockPath, parent, tool);
+  if (!reclaimLock) return false;
 
   try {
-    if (!appendLockIsStale(lockPath)) return false;
-    secretSinkFileOpsForTests.unlinkSync(lockPath);
-    fsyncParentDirectory(parent);
+    if (!reclaimStaleLockFile(lockPath, parent)) return false;
     logger.warn({ tool, lockPath }, "secret_sink.stale_append_lock_reclaimed");
     return true;
   } catch (err) {
@@ -606,12 +723,7 @@ function acquireLedgerAppendLock(filePath: string, parent: string, tool: string)
   const deadline = Date.now() + 30_000;
   for (;;) {
     try {
-      createExclusiveLockFile(lockPath, {
-        ts: isoTimestampSeconds(),
-        tool,
-        pid: process.pid,
-        status: "appending",
-      });
+      createExclusiveLockFile(lockPath, lockPayload(tool, "appending"));
       fsyncParentDirectory(parent);
       return { lockPath, parent };
     } catch (err) {
@@ -637,10 +749,8 @@ function acquireSecretSinkClaim(
   const lockPath = pendingClaimPath(sink, idempotency);
   try {
     createExclusiveLockFile(lockPath, {
-      ts: isoTimestampSeconds(),
-      tool,
+      ...lockPayload(tool, "pending"),
       idempotency,
-      status: "pending",
     });
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "EEXIST") {
@@ -707,6 +817,16 @@ function recoveryClearedProviderSideEffect(recovery: unknown): boolean {
   return status === "deleted" || status === "ejected_group_members";
 }
 
+function isSecretSinkCommitAmbiguous(err: unknown): boolean {
+  return (
+    err instanceof SecretSinkCommitAmbiguousError ||
+    (!!err &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code?: unknown }).code === "secret_sink_commit_ambiguous")
+  );
+}
+
 type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
 
 export interface DurableSecretResponseOptions<T> {
@@ -760,6 +880,24 @@ export async function executeDurableSecretOperation<T>({
   try {
     pointer = appendSecretSinkRecord(secretSink, toolName, result, idempotency);
   } catch (err) {
+    if (isSecretSinkCommitAmbiguous(err)) {
+      logger.fatal(
+        {
+          err,
+          tool: toolName,
+          secretSink: { type: "file", path: secretSink.filePath },
+          minted: diagnostics?.(result) ?? {},
+          recovery: { status: "pending_reconciliation" },
+        },
+        "secret_sink.write_failed_with_ambiguous_commit",
+      );
+      throw {
+        status: 500,
+        code: "secret_sink_commit_ambiguous",
+        message:
+          "B2 created a durable credential, but the configured file secret sink could not confirm whether rollback removed the record. The secret was not returned in MCP output. The idempotency claim remains pending for operator reconciliation.",
+      };
+    }
     let recovery: unknown = { status: "not_configured" };
     try {
       recovery = (await recoverAfterSinkFailure?.(result, err)) ?? recovery;

@@ -163,6 +163,45 @@ describe("credential providers", () => {
     expect(resolved.capabilityCacheKey).not.toBe(resolved.cacheKey);
   });
 
+  it("scopes header compatibility caller fingerprints to verified authInfo", () => {
+    const provider = new HttpHeaderCredentialProvider();
+    const alice = provider.resolve({
+      req: {
+        headers: {
+          "x-b2-key-id": "header-id",
+          "x-b2-key": "header-secret",
+        },
+        auth: {
+          token: "verified",
+          clientId: "client-a",
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: "alice" },
+        },
+      } as any,
+    });
+    const bob = provider.resolve({
+      req: {
+        headers: {
+          "x-b2-key-id": "header-id",
+          "x-b2-key": "header-secret",
+        },
+        auth: {
+          token: "verified",
+          clientId: "client-b",
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: "bob" },
+        },
+      } as any,
+    });
+
+    expect(alice.config.credentialFingerprint).toBe(bob.config.credentialFingerprint);
+    expect(alice.cacheKey).not.toBe(bob.cacheKey);
+    expect(alice.config.callerFingerprint).not.toBe(bob.config.callerFingerprint);
+    expect(alice.cacheKey).not.toContain("alice");
+    expect(alice.cacheKey).not.toContain("header-secret");
+    expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
+  });
+
   it("does not preflight the HTTP file secret sink during per-request resolution", () => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-http-secret-sink-hot-path-"));
     const file = join(dir, "nested", "secrets.jsonl");

@@ -113,6 +113,11 @@ export function verificationFingerprintConfig(
   );
 }
 
+function authInfoScope(authInfo: AuthInfo | undefined): string | null {
+  const principal = rateLimitPrincipalFromAuthInfo(authInfo);
+  return principal ? `verified-principal:${credentialFingerprint(principal)}` : null;
+}
+
 function capabilityCacheKeyForConfig(prefix: string, config: B2Config): string {
   return `${prefix}:${verificationFingerprintConfig(config)}`;
 }
@@ -305,7 +310,10 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
     }
     const config = configFromMaterial(headerMaterial(context.req.headers), httpConfigOptions());
-    const cacheKey = `credential:${config.credentialFingerprint}`;
+    const authScope = authInfoScope(context.req.auth);
+    const cacheKey = authScope
+      ? `credential-principal:${config.credentialFingerprint}:${authScope}`
+      : `credential:${config.credentialFingerprint}`;
     config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
     return {
       config,

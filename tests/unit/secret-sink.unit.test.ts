@@ -203,16 +203,18 @@ describe("secret sink file writer", () => {
     ).toThrow(/owned by the current user/);
   });
 
-  it("tightens permissive existing files to owner-only permissions", () => {
+  it("rejects permissive existing files without chmodding them", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
     writeFileSync(file, "", { mode: 0o666 });
     chmodSync(file, 0o666);
 
-    appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {});
+    expect(() =>
+      appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {}),
+    ).toThrow(/must not be readable or writable/);
 
     expect(existsSync(file)).toBe(true);
-    expect(mode(file)).toBe(0o600);
+    expect(mode(file)).toBe(0o666);
   });
 
   it("rejects existing group/other-writable parents without chmodding them", () => {
@@ -334,6 +336,33 @@ describe("secret sink file writer", () => {
 
     expect(pointer.recordId).toEqual(expect.any(String));
     expect(existsSync(appendLock)).toBe(false);
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("stale_append_lock_reclaimed");
+  });
+
+  it("reclaims a stale reclaim lock before removing a stale append lock", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const appendLock = `${file}.append.lock`;
+    const reclaimLock = `${appendLock}.reclaim`;
+    writeFileSync(file, "", { mode: 0o600 });
+    writeFileSync(appendLock, `${JSON.stringify({ status: "appending" })}\n`, { mode: 0o600 });
+    writeFileSync(
+      reclaimLock,
+      `${JSON.stringify({ pid: 987654321, token: "stale-reclaim", status: "reclaiming_append_lock" })}\n`,
+      { mode: 0o600 },
+    );
+    const stale = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(appendLock, stale, stale);
+
+    const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKey: "B2_MCP_CANARY_SECRET_stale_reclaim_lock",
+    });
+
+    expect(pointer.recordId).toEqual(expect.any(String));
+    expect(existsSync(appendLock)).toBe(false);
+    expect(existsSync(reclaimLock)).toBe(false);
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("stale_reclaim_lock_reclaimed");
     expect(JSON.stringify(warnSpy.mock.calls)).toContain("stale_append_lock_reclaimed");
   });
 
@@ -758,5 +787,57 @@ describe("secret sink file writer", () => {
     });
     expect(recoverSpy).not.toHaveBeenCalled();
     expect(JSON.stringify(warnSpy.mock.calls)).toContain("secret_sink.claim_cleanup_failed");
+  });
+
+  it("keeps the pending claim when rollback after write failure is unconfirmed", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const recoverSpy = vi.fn();
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const secret = "B2_MCP_CANARY_SECRET_ambiguous_rollback";
+    const fsync = secretSinkFileOpsForTests.fsyncSync;
+    let recordFsyncFailed = false;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      if (!recordFsyncFailed && existsSync(file) && readFileSync(file, "utf8").includes(secret)) {
+        recordFsyncFailed = true;
+        throw new Error("simulated record fsync failure");
+      }
+      return fsync(fd);
+    });
+    vi.spyOn(secretSinkFileOpsForTests, "ftruncateSync").mockImplementation(() => {
+      throw new Error("simulated rollback failure");
+    });
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "ambiguous-rollback",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "ambiguous-rollback", capabilities: ["listBuckets"] },
+    });
+
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => ({
+          applicationKeyId: "key-id",
+          applicationKey: secret,
+        }),
+        projectRedacted: (created: Record<string, unknown>, pointer) => ({
+          ...created,
+          applicationKey: "[redacted]",
+          secretSink: pointer,
+        }),
+        projectInline: (created: Record<string, unknown>, warning: string) => ({
+          ...created,
+          warning,
+        }),
+        recoverAfterSinkFailure: recoverSpy,
+      }),
+    ).rejects.toMatchObject({ code: "secret_sink_commit_ambiguous" });
+
+    expect(recoverSpy).not.toHaveBeenCalled();
+    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("pending_reconciliation");
   });
 });

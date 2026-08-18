@@ -57,7 +57,7 @@ function normalizeExistingAppendFile(
   }
 
   if ((stats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
-    if (options.tightenExistingPermissions !== false) {
+    if (options.tightenExistingPermissions === true) {
       fchmodSync(fd, mode);
       stats = fstatSync(fd);
     }

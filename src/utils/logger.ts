@@ -85,6 +85,7 @@ function createFileStream(logFile: string): ManagedDestination {
   const fd = openSecureAppendFile(logFile, {
     envVarName: "B2_LOG_FILE",
     mode: LOG_FILE_MODE,
+    tightenExistingPermissions: true,
   });
   try {
     return createPinoDestination({
