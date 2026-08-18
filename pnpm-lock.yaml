@@ -101,6 +101,9 @@ importers:
       eslint-plugin-tsdoc:
         specifier: 0.5.2
         version: 0.5.2(eslint@9.39.1(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      miniflare:
+        specifier: 5.20260811.1-alpha
+        version: 5.20260811.1-alpha
       semver:
         specifier: 7.8.5
         version: 7.8.5

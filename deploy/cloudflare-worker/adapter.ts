@@ -15,15 +15,31 @@ import { sanitizeForMcpOutput, sanitizeText } from "../../src/utils/secret-sanit
 
 const ALLOW_HEADER_MODE_FLAG = "B2_CLOUDFLARE_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_SHARED_SERVER_CREDENTIAL_FLAG = "B2_CLOUDFLARE_ALLOW_SHARED_SERVER_CREDENTIAL";
+const WORKER_SMOKE_FLAG = "B2_CLOUDFLARE_WORKER_SMOKE";
+const WORKER_SMOKE_JWKS_SERVICE_BINDING = "B2_CLOUDFLARE_WORKER_SMOKE_JWKS_SERVICE";
+const workerSmokeJwksWarnings = new Set<string>();
 
 export type CloudflareWorkerEnv = Record<string, unknown>;
 
 export interface CloudflareMcpFetchContext extends ServerlessMcpFetchContext {}
 
+interface CloudflareFetchBinding {
+  fetch(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response>;
+}
+
 function envBindingToString(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return undefined;
+}
+
+function isCloudflareFetchBinding(value: unknown): value is CloudflareFetchBinding {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "fetch" in value &&
+    typeof (value as { fetch?: unknown }).fetch === "function"
+  );
 }
 
 export function installCloudflareEnvironment(env: CloudflareWorkerEnv): void {
@@ -42,6 +58,63 @@ function requestWithHostHeader(request: Request): Request {
   const headers = new Headers(request.headers);
   headers.set("host", new URL(request.url).host);
   return new Request(request, { headers });
+}
+
+function warnWorkerSmokeJwksOnce(reason: string, fields: Record<string, unknown> = {}): void {
+  if (workerSmokeJwksWarnings.has(reason)) return;
+  workerSmokeJwksWarnings.add(reason);
+  cloudflareWarn(
+    {
+      binding: WORKER_SMOKE_JWKS_SERVICE_BINDING,
+      reason,
+      ...fields,
+    },
+    "cloudflare_worker.oauth.test_jwks_service_binding_inactive",
+  );
+}
+
+function cloudflareWorkerSmokeOAuthFetch(env: CloudflareWorkerEnv): typeof fetch | undefined {
+  const jwksService = env[WORKER_SMOKE_JWKS_SERVICE_BINDING];
+  if (jwksService === undefined) return undefined;
+  if (process.env[WORKER_SMOKE_FLAG] !== "true") {
+    warnWorkerSmokeJwksOnce("smoke_flag_disabled", { flag: WORKER_SMOKE_FLAG });
+    return undefined;
+  }
+  if (!isCloudflareFetchBinding(jwksService)) {
+    warnWorkerSmokeJwksOnce("invalid_service_binding");
+    return undefined;
+  }
+
+  const jwksUri = process.env.B2_OAUTH_JWKS_URI;
+  if (!jwksUri) {
+    warnWorkerSmokeJwksOnce("missing_jwks_uri");
+    return undefined;
+  }
+
+  let expectedJwksUrl: URL;
+  try {
+    expectedJwksUrl = new URL(jwksUri);
+  } catch {
+    warnWorkerSmokeJwksOnce("invalid_jwks_uri");
+    return undefined;
+  }
+
+  // Test-only seam for the workerd JWKS smoke: this is intentionally gated by
+  // B2_CLOUDFLARE_WORKER_SMOKE and is not a supported operator service binding.
+  return (input, init) => {
+    const request = new Request(input, init);
+    const requestUrl = new URL(request.url);
+    if (requestUrl.href === expectedJwksUrl.href) {
+      return jwksService.fetch(request);
+    }
+    warnWorkerSmokeJwksOnce("jwks_url_mismatch", {
+      expectedEndpointHost: expectedJwksUrl.host,
+      expectedEndpointPath: expectedJwksUrl.pathname,
+      requestEndpointHost: requestUrl.host,
+      requestEndpointPath: requestUrl.pathname,
+    });
+    return fetch(request);
+  };
 }
 
 function validateCloudflareWorkerCredentialMode(): void {
@@ -80,12 +153,6 @@ export function validateCloudflareWorkerStaticConfiguration(): OAuthResourceServ
   return oauthConfig;
 }
 
-function isCloudflareMcpFetchContext(
-  input: AuthInfo | CloudflareMcpFetchContext,
-): input is CloudflareMcpFetchContext {
-  return "authInfo" in input || "remoteAddress" in input || !("token" in input);
-}
-
 function cloudflareClientAddress(context: CloudflareMcpFetchContext): string {
   return context.remoteAddress?.trim() || "unknown";
 }
@@ -119,10 +186,7 @@ export async function cloudflareMcpFetch(
   input?: AuthInfo | CloudflareMcpFetchContext,
 ): Promise<Response> {
   const normalizedRequest = requestWithHostHeader(request);
-  return runtime.mcpFetch(
-    normalizedRequest,
-    normalizeServerlessMcpContext(input, isCloudflareMcpFetchContext),
-  );
+  return runtime.mcpFetch(normalizedRequest, normalizeServerlessMcpContext(input));
 }
 
 export async function cloudflareHealthFetch(request: Request): Promise<Response> {
@@ -146,7 +210,10 @@ export async function cloudflareWorkerFetch(
   const normalizedRequest = requestWithHostHeader(request);
   const url = new URL(normalizedRequest.url);
   if (url.pathname === "/mcp" || url.pathname === "/api/mcp") {
-    return cloudflareMcpFetch(normalizedRequest, context);
+    return cloudflareMcpFetch(normalizedRequest, {
+      ...context,
+      oauthFetch: cloudflareWorkerSmokeOAuthFetch(env),
+    });
   }
   if (url.pathname === "/health") return cloudflareHealthFetch(normalizedRequest);
   if (

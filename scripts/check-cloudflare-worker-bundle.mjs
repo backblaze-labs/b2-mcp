@@ -16,6 +16,11 @@ import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { gzipSync } from "zlib";
+import {
+  WORKER_SMOKE_PUBLIC_URL,
+  runMiniflareJwksSmoke,
+  workerJwksSmokeVars,
+} from "./lib/cloudflare-worker-jwks-smoke.mjs";
 
 const require = createRequire(import.meta.url);
 const {
@@ -72,26 +77,31 @@ function freePort() {
   });
 }
 
-function workerSmokeVars(port) {
-  const publicUrl = `https://mcp.example.com/mcp`;
+function workerBaseSmokeVars(allowedHosts) {
   return {
     B2_HTTP_CREDENTIAL_MODE: "server",
     B2_APPLICATION_KEY_ID: "worker-smoke-key-id",
     B2_APPLICATION_KEY: "worker-smoke-application-key",
-    B2_ALLOWED_HOSTS: `127.0.0.1:${port},127.0.0.1,localhost,mcp.example.com`,
+    B2_ALLOWED_HOSTS: allowedHosts,
     B2_DESTRUCTIVE_POLICY: "block",
     B2_REGISTER_ALL_TOOLS: "false",
     B2_ALLOW_LOCAL_FILES: "false",
-    B2_MCP_PUBLIC_URL: publicUrl,
+    B2_MCP_PUBLIC_URL: WORKER_SMOKE_PUBLIC_URL,
     B2_OAUTH_ISSUER: "https://issuer.example.com/",
     B2_OAUTH_AUTHORIZATION_ENDPOINT: "https://issuer.example.com/oauth2/authorize",
     B2_OAUTH_TOKEN_ENDPOINT: "https://issuer.example.com/oauth2/token",
+    B2_OAUTH_RESOURCE: WORKER_SMOKE_PUBLIC_URL,
+    B2_OAUTH_AUDIENCE: WORKER_SMOKE_PUBLIC_URL,
+    B2_OAUTH_ALLOWED_SUBJECTS: "worker-smoke-subject",
+  };
+}
+
+function workerSmokeVars(port) {
+  return {
+    ...workerBaseSmokeVars(`127.0.0.1:${port},127.0.0.1,localhost,mcp.example.com`),
     B2_OAUTH_INTROSPECTION_ENDPOINT: "https://issuer.example.com/oauth2/introspect",
     B2_OAUTH_INTROSPECTION_CLIENT_ID: "worker-smoke-client",
     B2_OAUTH_INTROSPECTION_CLIENT_SECRET: "worker-smoke-secret",
-    B2_OAUTH_RESOURCE: publicUrl,
-    B2_OAUTH_AUDIENCE: publicUrl,
-    B2_OAUTH_ALLOWED_SUBJECTS: "worker-smoke-subject",
   };
 }
 
@@ -133,24 +143,26 @@ function stripAnsi(text) {
 
 function runWranglerDryRun(config) {
   const workspace = mkdtempSync(path.join(os.tmpdir(), "b2-mcp-worker-dry-run-"));
-  const outdir = path.join(workspace, "out");
-  const configPath = writeWorkerRuntimeConfig(config, workspace, 8787);
-  const args = [
-    "exec",
-    "wrangler",
-    "deploy",
-    "--config",
-    configPath,
-    "--dry-run",
-    "--outdir",
-    outdir,
-    "--metafile",
-    path.join(outdir, "bundle-meta.json"),
-    "--containers-rollout=none",
-    "--keep-vars",
-  ];
-
+  let failureMessage;
+  let workspaceTransferred = false;
   try {
+    const outdir = path.join(workspace, "out");
+    const configPath = writeWorkerRuntimeConfig(config, workspace, 8787);
+    const args = [
+      "exec",
+      "wrangler",
+      "deploy",
+      "--config",
+      configPath,
+      "--dry-run",
+      "--outdir",
+      outdir,
+      "--metafile",
+      path.join(outdir, "bundle-meta.json"),
+      "--containers-rollout=none",
+      "--keep-vars",
+    ];
+
     const result = spawnSync("pnpm", args, {
       cwd: root,
       env: wranglerEnv(process.env),
@@ -159,14 +171,15 @@ function runWranglerDryRun(config) {
     });
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
     if (result.status !== 0) {
-      fail(`wrangler deploy --dry-run failed\n${output.trim()}`);
+      throw new Error(`wrangler deploy --dry-run failed\n${output.trim()}`);
     }
 
-    if (!existsSync(outdir)) fail("wrangler deploy --dry-run did not create an output directory");
+    if (!existsSync(outdir))
+      throw new Error("wrangler deploy --dry-run did not create an output directory");
     const files = collectFiles(outdir).sort();
-    if (files.length === 0) fail("wrangler deploy --dry-run emitted no bundle files");
+    if (files.length === 0) throw new Error("wrangler deploy --dry-run emitted no bundle files");
     const workerScript = files.find((file) => path.basename(file) === "worker.js");
-    if (!workerScript) fail("wrangler deploy --dry-run did not emit worker.js");
+    if (!workerScript) throw new Error("wrangler deploy --dry-run did not emit worker.js");
 
     const emittedFiles = files.map((file) => ({
       path: path.relative(outdir, file),
@@ -179,16 +192,23 @@ function runWranglerDryRun(config) {
       .split(/\r?\n/)
       .find((line) => stripAnsi(line).includes("Total Upload"));
 
+    workspaceTransferred = true;
     return {
       emittedFiles,
       emittedTotalBytes,
+      outdir,
       uploadLine: uploadLine ? stripAnsi(uploadLine).trim() : undefined,
+      workerScript,
       workerScriptBytes,
       workerScriptGzipBytes,
+      workspace,
     };
+  } catch (error) {
+    failureMessage = error instanceof Error ? error.message : String(error);
   } finally {
-    rmSync(workspace, { recursive: true, force: true });
+    if (!workspaceTransferred) rmSync(workspace, { recursive: true, force: true });
   }
+  fail(failureMessage ?? "wrangler deploy --dry-run failed");
 }
 
 async function runWranglerStartupSmoke(config) {
@@ -285,64 +305,88 @@ if (sourceBytes > WORKER_SOURCE_GRAPH_BYTES_BUDGET) {
 }
 
 const dryRun = runWranglerDryRun(wranglerConfig);
-if (dryRun.emittedFiles.length > WORKER_EMITTED_FILES_BUDGET) {
-  fail(
-    `emitted bundle file count exceeded budget: ${dryRun.emittedFiles.length} > ${WORKER_EMITTED_FILES_BUDGET}`,
-  );
-}
-if (dryRun.emittedTotalBytes > WORKER_EMITTED_TOTAL_BYTES_BUDGET) {
-  fail(
-    `emitted bundle bytes exceeded budget: ${dryRun.emittedTotalBytes} > ${WORKER_EMITTED_TOTAL_BYTES_BUDGET}`,
-  );
-}
-if (dryRun.workerScriptBytes > WORKER_UPLOAD_SCRIPT_BYTES_BUDGET) {
-  fail(
-    `Worker upload script bytes exceeded budget: ${dryRun.workerScriptBytes} > ${WORKER_UPLOAD_SCRIPT_BYTES_BUDGET}`,
-  );
-}
-if (dryRun.workerScriptGzipBytes > WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET) {
-  fail(
-    `Worker upload gzip bytes exceeded budget: ${dryRun.workerScriptGzipBytes} > ${WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET}`,
-  );
-}
+try {
+  if (dryRun.emittedFiles.length > WORKER_EMITTED_FILES_BUDGET) {
+    fail(
+      `emitted bundle file count exceeded budget: ${dryRun.emittedFiles.length} > ${WORKER_EMITTED_FILES_BUDGET}`,
+    );
+  }
+  if (dryRun.emittedTotalBytes > WORKER_EMITTED_TOTAL_BYTES_BUDGET) {
+    fail(
+      `emitted bundle bytes exceeded budget: ${dryRun.emittedTotalBytes} > ${WORKER_EMITTED_TOTAL_BYTES_BUDGET}`,
+    );
+  }
+  if (dryRun.workerScriptBytes > WORKER_UPLOAD_SCRIPT_BYTES_BUDGET) {
+    fail(
+      `Worker upload script bytes exceeded budget: ${dryRun.workerScriptBytes} > ${WORKER_UPLOAD_SCRIPT_BYTES_BUDGET}`,
+    );
+  }
+  if (dryRun.workerScriptGzipBytes > WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET) {
+    fail(
+      `Worker upload gzip bytes exceeded budget: ${dryRun.workerScriptGzipBytes} > ${WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET}`,
+    );
+  }
 
-const smoke = await runWranglerStartupSmoke(wranglerConfig);
+  const smoke = await runWranglerStartupSmoke(wranglerConfig);
+  let jwksSmoke;
+  try {
+    jwksSmoke = await runMiniflareJwksSmoke(
+      wranglerConfig,
+      dryRun.workerScript,
+      workerJwksSmokeVars(workerBaseSmokeVars("mcp.example.com,127.0.0.1,localhost")),
+      WORKER_SMOKE_TIMEOUT_MS,
+    );
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+  const dryRunMetrics = {
+    emittedFiles: dryRun.emittedFiles,
+    emittedTotalBytes: dryRun.emittedTotalBytes,
+    uploadLine: dryRun.uploadLine,
+    workerScriptBytes: dryRun.workerScriptBytes,
+    workerScriptGzipBytes: dryRun.workerScriptGzipBytes,
+  };
 
-mkdirSync(reportDir, { recursive: true });
-const metrics = {
-  ...compatibility,
-  wranglerDryRun: dryRun,
-  sourceGraphFiles: files.size,
-  sourceGraphBytes: sourceBytes,
-  workerRuntimeSmoke: smoke,
-  limits: {
-    emittedFiles: WORKER_EMITTED_FILES_BUDGET,
-    emittedTotalBytes: WORKER_EMITTED_TOTAL_BYTES_BUDGET,
-    sourceGraphFiles: WORKER_SOURCE_GRAPH_FILES_BUDGET,
-    sourceGraphBytes: WORKER_SOURCE_GRAPH_BYTES_BUDGET,
-    workerScriptBytes: WORKER_UPLOAD_SCRIPT_BYTES_BUDGET,
-    workerScriptGzipBytes: WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET,
-  },
-};
-writeFileSync(path.join(reportDir, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
-writeFileSync(
-  path.join(reportDir, "summary.md"),
-  [
-    "# Cloudflare Worker Bundle Budget",
-    "",
-    "| Metric | Current | Budget |",
-    "| --- | ---: | ---: |",
-    `| Emitted bundle files | ${dryRun.emittedFiles.length} | ${WORKER_EMITTED_FILES_BUDGET} |`,
-    `| Emitted bundle bytes | ${dryRun.emittedTotalBytes} | ${WORKER_EMITTED_TOTAL_BYTES_BUDGET} |`,
-    `| Worker upload script bytes | ${dryRun.workerScriptBytes} | ${WORKER_UPLOAD_SCRIPT_BYTES_BUDGET} |`,
-    `| Worker upload gzip bytes | ${dryRun.workerScriptGzipBytes} | ${WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET} |`,
-    `| Source graph files | ${files.size} | ${WORKER_SOURCE_GRAPH_FILES_BUDGET} |`,
-    `| Source graph bytes | ${sourceBytes} | ${WORKER_SOURCE_GRAPH_BYTES_BUDGET} |`,
-    `| Runtime smoke /health | ${smoke.healthStatus} | 200 |`,
-    "",
-  ].join("\n"),
-);
+  mkdirSync(reportDir, { recursive: true });
+  const metrics = {
+    ...compatibility,
+    wranglerDryRun: dryRunMetrics,
+    sourceGraphFiles: files.size,
+    sourceGraphBytes: sourceBytes,
+    workerRuntimeSmoke: smoke,
+    workerJwksRuntimeSmoke: jwksSmoke,
+    limits: {
+      emittedFiles: WORKER_EMITTED_FILES_BUDGET,
+      emittedTotalBytes: WORKER_EMITTED_TOTAL_BYTES_BUDGET,
+      sourceGraphFiles: WORKER_SOURCE_GRAPH_FILES_BUDGET,
+      sourceGraphBytes: WORKER_SOURCE_GRAPH_BYTES_BUDGET,
+      workerScriptBytes: WORKER_UPLOAD_SCRIPT_BYTES_BUDGET,
+      workerScriptGzipBytes: WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET,
+    },
+  };
+  writeFileSync(path.join(reportDir, "metrics.json"), `${JSON.stringify(metrics, null, 2)}\n`);
+  writeFileSync(
+    path.join(reportDir, "summary.md"),
+    [
+      "# Cloudflare Worker Bundle Budget",
+      "",
+      "| Metric | Current | Budget |",
+      "| --- | ---: | ---: |",
+      `| Emitted bundle files | ${dryRun.emittedFiles.length} | ${WORKER_EMITTED_FILES_BUDGET} |`,
+      `| Emitted bundle bytes | ${dryRun.emittedTotalBytes} | ${WORKER_EMITTED_TOTAL_BYTES_BUDGET} |`,
+      `| Worker upload script bytes | ${dryRun.workerScriptBytes} | ${WORKER_UPLOAD_SCRIPT_BYTES_BUDGET} |`,
+      `| Worker upload gzip bytes | ${dryRun.workerScriptGzipBytes} | ${WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET} |`,
+      `| Source graph files | ${files.size} | ${WORKER_SOURCE_GRAPH_FILES_BUDGET} |`,
+      `| Source graph bytes | ${sourceBytes} | ${WORKER_SOURCE_GRAPH_BYTES_BUDGET} |`,
+      `| Runtime smoke /health | ${smoke.healthStatus} | 200 |`,
+      `| Runtime smoke JWKS /mcp | ${jwksSmoke.jwksHits} JWKS fetch, ${jwksSmoke.mcpStatus} response | 1 fetch, 401 response |`,
+      "",
+    ].join("\n"),
+  );
 
-console.log(
-  `cloudflare-worker-bundle: ${dryRun.workerScriptBytes} upload bytes, ${dryRun.workerScriptGzipBytes} gzip bytes, and workerd health smoke passed`,
-);
+  console.log(
+    `cloudflare-worker-bundle: ${dryRun.workerScriptBytes} upload bytes, ${dryRun.workerScriptGzipBytes} gzip bytes, workerd health smoke passed, and JWKS smoke reached ${jwksSmoke.jwksHits} mock fetch`,
+  );
+} finally {
+  rmSync(dryRun.workspace, { recursive: true, force: true });
+}

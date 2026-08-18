@@ -24,13 +24,17 @@ import { readCappedBodyBytes } from "./utils/http-body-limit.js";
 
 export interface ServerlessMcpFetchContext {
   authInfo?: AuthInfo | null;
+  oauthFetch?: typeof fetch;
   remoteAddress?: string;
 }
 
 export interface NormalizedServerlessMcpFetchContext {
   authInfo: AuthInfo | null;
+  oauthFetch?: typeof fetch;
   remoteAddress?: string;
 }
+
+const SERVERLESS_MCP_CONTEXT_KEYS = ["authInfo", "oauthFetch", "remoteAddress"] as const;
 
 export type ServerlessWarnLogger = (fields: Record<string, unknown>, message: string) => void;
 
@@ -80,14 +84,21 @@ export function normalizeServerlessMcpContext<Context extends ServerlessMcpFetch
   isContext?: (input: AuthInfo | Context) => input is Context,
 ): NormalizedServerlessMcpFetchContext {
   if (!input) return { authInfo: null };
-  if (isContext?.(input) ?? ("authInfo" in input || "remoteAddress" in input)) {
+  if (isContext?.(input) ?? isServerlessMcpFetchContext(input)) {
     const context = input as Context;
     return {
       authInfo: context.authInfo ?? null,
+      oauthFetch: context.oauthFetch,
       remoteAddress: context.remoteAddress,
     };
   }
   return { authInfo: input as AuthInfo };
+}
+
+export function isServerlessMcpFetchContext(
+  input: AuthInfo | ServerlessMcpFetchContext,
+): input is ServerlessMcpFetchContext {
+  return SERVERLESS_MCP_CONTEXT_KEYS.some((key) => key in input) || !("token" in input);
 }
 
 export function serverlessMcpPreflight(request: Request): Response | null {
@@ -240,7 +251,9 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
     const prepared = await runWithAdmissionLimit(request, context, async () => {
       const boundedRequest = await requestWithCappedBody(request);
       if (boundedRequest instanceof Response) return boundedRequest;
-      const auth = await authenticateOAuthRequest(boundedRequest, oauthConfig);
+      const auth = await authenticateOAuthRequest(boundedRequest, oauthConfig, {
+        fetch: context.oauthFetch,
+      });
       if (auth instanceof Response) return auth;
       return { auth, boundedRequest };
     });
