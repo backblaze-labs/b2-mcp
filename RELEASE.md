@@ -154,10 +154,12 @@ exists. For the first public package only:
    existing versioned image whose recorded revision differs from the verified
    checkout SHA.
 4. To re-run publishing for an existing tag after a transient external failure,
-   use the `Publish Package` workflow's `workflow_dispatch` input with the
-   existing `vX.Y.Z` tag. Do not delete, force-move, or re-push the tag.
-   Creating or editing a GitHub Release is not a publish trigger; the workflow
-   creates or updates the GitHub Release only after npm and GHCR succeed.
+   use the unprivileged `Release Tag Request` workflow's `workflow_dispatch`
+   input with the existing `vX.Y.Z` tag. Its successful completion starts
+   `Publish Package` from the default branch. Do not delete, force-move, or
+   re-push the tag. Creating or editing a GitHub Release is not a publish
+   trigger; the workflow creates or updates the GitHub Release only after npm
+   and GHCR succeed.
 5. If GHCR has the version/release tags but the retry fails because the digest is
    unsigned or missing trusted attestations, delete that specific GHCR package
    version and rerun the same tag:

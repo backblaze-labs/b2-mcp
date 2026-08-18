@@ -1,12 +1,19 @@
 name: Release Tag Request
 
-# This workflow is intentionally unprivileged. A pushed v* tag only creates a
-# workflow_run signal; Publish Package runs from the default-branch workflow and
-# validates the tag against protected refs before publishing.
+# This workflow is intentionally unprivileged. A pushed or manually requested
+# v* tag only creates a workflow_run signal plus a tag artifact; Publish Package
+# runs from the default-branch workflow and validates the tag against protected
+# refs before publishing.
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z[-prerelease] tag to publish or re-run"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,10 +24,25 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Record release tag request
+        env:
+          REQUEST_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
-            echo "::error::Release tag requests must come from v* tags; got ${GITHUB_REF}"
+          REQUEST_TAG="${REQUEST_TAG#refs/tags/}"
+          if [[ ! "${REQUEST_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag requests must use a vX.Y.Z[-prerelease] tag; got ${REQUEST_TAG}"
             exit 1
           fi
-          echo "Release publish requested for ${GITHUB_REF_NAME}"
+          if ! git ls-remote --exit-code "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "refs/tags/${REQUEST_TAG}" >/dev/null; then
+            echo "::error::Release tag refs/tags/${REQUEST_TAG} does not exist"
+            exit 1
+          fi
+          mkdir -p release-request
+          printf '%s\n' "${REQUEST_TAG}" > release-request/tag.txt
+          echo "Release publish requested for ${REQUEST_TAG}"
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: release-tag-request
+          path: release-request/tag.txt
+          if-no-files-found: error

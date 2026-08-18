@@ -817,14 +817,18 @@ describe("supply-chain audit policy", () => {
     const publishJob = publishJobBlock("publish");
     const publishOnBlock = yamlBlockForKey(publishWorkflow, "on") ?? "";
     const publishWorkflowRunBlock = yamlBlockForKey(publishOnBlock, "workflow_run") ?? "";
-    const publishDispatchBlock = yamlBlockForKey(publishOnBlock, "workflow_dispatch") ?? "";
     const releaseTagOnBlock = yamlBlockForKey(releaseTagWorkflow, "on") ?? "";
     const releaseTagPushBlock = yamlBlockForKey(releaseTagOnBlock, "push") ?? "";
+    const releaseTagDispatchBlock = yamlBlockForKey(releaseTagOnBlock, "workflow_dispatch") ?? "";
     const releaseTagPushTags = yamlValuesForKey(releaseTagPushBlock, "tags");
 
     expect(
       releaseTagPushTags.some((value) => Array.isArray(value) && valuesEqual(value, ["v*"])),
     ).toBe(true);
+    expect(releaseTagDispatchBlock).toContain("tag:");
+    expect(releaseTagWorkflow).toContain("REQUEST_TAG:");
+    expect(releaseTagWorkflow).toContain("actions/upload-artifact@");
+    expect(releaseTagWorkflow).toContain("release-tag-request");
     expect(releaseTagWorkflow).toContain("permissions:\n  contents: read");
     expect(releaseTagWorkflow).not.toContain("id-token: write");
     expect(releaseTagWorkflow).not.toContain("actions/checkout");
@@ -833,11 +837,16 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflowRunBlock).toContain("Release Tag Request");
     expect(yamlBlockForKey(publishOnBlock, "release")).toBeNull();
     expect(yamlBlockForKey(publishOnBlock, "push")).toBeNull();
-    expect(publishDispatchBlock).toContain("tag:");
-    expect(publishWorkflow).toContain("inputs.tag");
-    expect(publishWorkflow).toContain("github.event.workflow_run.head_branch");
+    expect(yamlBlockForKey(publishOnBlock, "workflow_dispatch")).toBeNull();
+    expect(publishWorkflow).not.toContain("inputs.tag");
+    expect(publishWorkflow).not.toContain("github.event.workflow_run.head_branch");
     expect(publishWorkflow).not.toContain("${{ github.event.release.tag_name }}");
     expect(prepareJob).not.toContain("id-token: write");
+    expect(prepareJob).toContain("actions/download-artifact@");
+    expect(prepareJob).toContain("github.event.workflow_run.id");
+    expect(prepareJob).toContain("release-request/tag.txt");
+    expect(prepareJob).toContain("steps.request.outputs.tag");
+    expect(publishWorkflow).toContain("needs.prepare.outputs.publish-tag");
     expect(prepareJob).toContain("ref: refs/heads/ci-green");
     expect(prepareJob).toContain("--wait-for-ci-green-timeout-ms 1200000");
     expect(prepareJob).toContain("--wait-for-ci-green-interval-ms");
