@@ -203,6 +203,16 @@ describe("logger destination", () => {
     }
   });
 
+  it("rejects stdout-backed log paths", () => {
+    if (process.platform === "win32" || !existsSync("/dev/stdout")) return;
+
+    const result = runProbe(logInfoSource, { B2_LOG_FILE: "/dev/stdout" });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("B2_LOG_FILE");
+  });
+
   it("rejects FIFO log paths without blocking startup", () => {
     if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-fifo-log-"));
