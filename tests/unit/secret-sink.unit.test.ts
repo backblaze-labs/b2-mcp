@@ -841,6 +841,77 @@ describe("secret sink file writer", () => {
     expect(JSON.stringify(warnSpy.mock.calls)).toContain("secret_sink.claim_cleanup_failed");
   });
 
+  it("returns a stable failure when committed idempotency metadata cannot be stored", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const recoverSpy = vi.fn();
+    const rename = secretSinkFileOpsForTests.renameSync;
+    vi.spyOn(secretSinkFileOpsForTests, "renameSync").mockImplementation((oldPath, newPath) => {
+      if (String(newPath).endsWith(".committed.json")) {
+        throw new Error("simulated committed marker rename failure");
+      }
+      return rename(oldPath, newPath);
+    });
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const secret = "B2_MCP_CANARY_SECRET_replay_metadata";
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "replay-metadata-failure",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "replay-metadata-failure", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+    const options = {
+      secretSink: { mode: "file" as const, filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      projectRedacted: (created: Record<string, unknown>, pointer: unknown) => ({
+        ...created,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (created: Record<string, unknown>, warning: string) => ({
+        ...created,
+        warning,
+      }),
+      recoverAfterSinkFailure: recoverSpy,
+    };
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          return {
+            applicationKeyId: "key-id",
+            applicationKey: secret,
+          };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "secret_sink_replay_unavailable" });
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          return {
+            applicationKeyId: "key-id-duplicate",
+            applicationKey: "B2_MCP_CANARY_SECRET_duplicate",
+          };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    expect(createCalls).toBe(1);
+    expect(recoverSpy).not.toHaveBeenCalled();
+    expect(readFileSync(file, "utf8")).toContain(secret);
+    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
+      "secret_sink.idempotency_claim_retained_after_index_failure",
+    );
+  });
+
   it("keeps the pending claim when rollback after write failure is unconfirmed", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const recoverSpy = vi.fn();

@@ -30,6 +30,7 @@ export const secretSinkFileOpsForTests = {
   ftruncateSync: fs.ftruncateSync,
   fsyncSync: fs.fsyncSync,
   unlinkSync: fs.unlinkSync,
+  renameSync: fs.renameSync,
 };
 
 let inlineWarningEmitted = false;
@@ -625,7 +626,7 @@ function writeCommittedIdempotencyRecord(
   const tempPath = `${recordPath}.${randomUUID()}.tmp`;
   try {
     createExclusiveLockFile(tempPath, record);
-    fs.renameSync(tempPath, recordPath);
+    secretSinkFileOpsForTests.renameSync(tempPath, recordPath);
     fsyncParentDirectory(parent);
   } catch (err) {
     try {
@@ -1124,10 +1125,8 @@ export async function executeDurableSecretOperation<T>({
         "B2 created a durable credential, but the configured file secret sink failed before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status, then rotate or revoke the created resource.",
     };
   }
-  let idempotencyIndexed = false;
   try {
     appendSecretSinkIdempotencyIndex(secretSink, toolName, pointer, result, idempotency);
-    idempotencyIndexed = true;
   } catch (err) {
     logger.fatal(
       {
@@ -1138,14 +1137,6 @@ export async function executeDurableSecretOperation<T>({
       },
       "secret_sink.idempotency_index_write_failed",
     );
-  }
-  if (idempotencyIndexed) {
-    releaseSecretSinkClaimBestEffort(claim, {
-      tool: toolName,
-      secretSink: { type: "file", path: secretSink.filePath },
-      lockPath: claim.lockPath,
-    });
-  } else {
     logger.fatal(
       {
         tool: toolName,
@@ -1154,6 +1145,17 @@ export async function executeDurableSecretOperation<T>({
       },
       "secret_sink.idempotency_claim_retained_after_index_failure",
     );
+    throw {
+      status: 500,
+      code: "secret_sink_replay_unavailable",
+      message:
+        "B2 created a durable credential and stored it in the file secret sink, but replay metadata could not be committed. The secret was not returned in MCP output. The idempotency claim remains pending for operator reconciliation.",
+    };
   }
+  releaseSecretSinkClaimBestEffort(claim, {
+    tool: toolName,
+    secretSink: { type: "file", path: secretSink.filePath },
+    lockPath: claim.lockPath,
+  });
   return toolJson(projectRedacted(result, pointer));
 }
