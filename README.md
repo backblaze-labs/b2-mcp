@@ -163,10 +163,20 @@ b2-mcp emits one structured JSON log object per line. Logs default to stderr so
 the stdio transport's stdout channel stays reserved for MCP protocol frames.
 
 Set `B2_LOG_FILE=/absolute/path/to/b2-mcp.log` to append those same redacted JSON
-lines to a file instead of stderr. The file is created when it does not exist;
-its parent directory must already exist and be writable. A bad path fails at
-startup with a clear `B2_LOG_FILE is not writable` error. File logging does not
-mirror to stderr by default.
+lines to a file instead of stderr. The path must be absolute. The file is created
+with owner-only permissions when it does not exist; its parent directory must
+already exist and be writable. Existing log files must be regular files, must
+not be symlinks, and must not be readable or writable by group or other users. A
+bad path fails at startup with a clear `B2_LOG_FILE` error. Runtime write
+failures are reported to stderr.
+
+File logging does not mirror to stderr by default. Because `B2_LOG_FILE` is an
+append-only file sink with no built-in rotation or retention, use
+operator-managed rotation before enabling it for a long-running process. Do not
+enable it on an internet-facing HTTP transport unless the host has a size and
+retention policy. For external `logrotate`, use `copytruncate`; rename-based
+rotation requires a process restart because the server keeps the opened file
+descriptor.
 
 ---
 

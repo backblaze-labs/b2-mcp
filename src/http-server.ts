@@ -10,7 +10,7 @@
 import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
-import { logger } from "./utils/logger.js";
+import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import {
   nodeRequestToWeb,
   resumeUnreadRequest,
@@ -134,6 +134,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
 }
 
 export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
+  initLogging();
   const port = options.port ?? getPort();
   const handle = buildHttpServer();
   const { server: httpServer, sessions, drain } = handle;
@@ -168,11 +169,13 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
         drainTimer = null;
       }
       logger.info("server.closed");
+      flushLogsSync();
       process.exit(0);
     });
     drainTimer = setTimeout(() => {
       removeLifecycleHandlers();
       logger.error("server.drainTimeout");
+      flushLogsSync();
       process.exit(1);
     }, SHUTDOWN_DRAIN_MS).unref();
   }
@@ -203,7 +206,10 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
 
 if (require.main === module) {
   startHttp().catch((err) => {
-    logger.fatal({ err: err instanceof Error ? err.message : String(err) }, "server.fatal");
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`b2-mcp: ${message}\n`);
+    logger.fatal({ err: message }, "server.fatal");
+    flushLogsSync();
     process.exit(1);
   });
 }

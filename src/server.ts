@@ -18,7 +18,7 @@ import {
   runWithResultSerializationOptions,
 } from "./utils/result-serializer.js";
 import { VERSION } from "./version.js";
-import { logger } from "./utils/logger.js";
+import { flushLogsSync, logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { B2ReportClient } from "./b2/report-client.js";
@@ -90,6 +90,7 @@ export function loadConfig(): B2Config {
     } else {
       process.stderr.write(`b2-mcp: ${err.message}\n`);
     }
+    flushLogsSync();
     process.exit(1);
   }
 }

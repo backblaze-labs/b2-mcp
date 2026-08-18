@@ -69,8 +69,10 @@ env:     B2_LOG_FILE=/absolute/path/to/b2-mcp.log
 
 `B2_LOG_FILE` appends redacted structured JSON logs to that file instead of
 stderr. This is useful for stdio clients that hide child-process stderr. The
-file is created if it does not exist; the parent directory must already exist
-and be writable. Logs are never written to stdout.
+path must be absolute. The file is created with owner-only permissions if it
+does not exist; the parent directory must already exist and be writable. Use
+operator-managed rotation with `copytruncate` for long-running local processes.
+Logs are never written to stdout.
 
 ### Claude Desktop
 
