@@ -89,7 +89,7 @@ function toPosix(filePath) {
 }
 
 function parseFrontmatter(text, filePath) {
-  const match = text.match(/^---\n([\s\S]*?)\n---\n/);
+  const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
   if (!match) fail(`${filePath}: missing YAML frontmatter`);
 
   const values = new Map();

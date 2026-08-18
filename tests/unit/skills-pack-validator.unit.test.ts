@@ -38,6 +38,21 @@ function runValidator(fixtureRoot: string) {
 }
 
 describe("skills pack validator", () => {
+  it("accepts CRLF line endings in skill frontmatter", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(/\n/g, "\r\n");
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).toBe(0);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when a bundled skill directory contains an undeclared file", () => {
     const fixtureRoot = copyValidatorFixture();
     try {
