@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added a bundled Phase 1 B2 skills pack with manifest-backed package-surface
+  validation for backup/restore, least-privilege keys, Object Lock,
+  lifecycle/cost hygiene, migration, and incident response playbooks.
 - Added `B2_OAUTH_JWKS_URI` local JWT access-token verification (using the
   `jose` library for JWK import and JWS signature verification) against cached
   JWKS with bounded refresh, made `B2_OAUTH_INTROSPECTION_ENDPOINT` optional
@@ -366,7 +369,7 @@ Object operations now run on the S3-compatible API: `s3_put_object`,
 
 ### Verification
 - Gate: `npm run build` + `npm run typecheck` (compiles src **and** tests via
-  `tsconfig.typecheck.json`) + `npm test` (unit) + skills `validate_pack.py`. The
+  `tsconfig.typecheck.json`) + `npm test` (unit) + skills validation. The
   runtime tool count is asserted at **36 (17 `b2_`, 19 `s3_`, 0 `bz_`)** in
   `tests/unit/tools-schema.test.ts`.
 - B2's S3 endpoint **rejects master keys** — a non-master application key is

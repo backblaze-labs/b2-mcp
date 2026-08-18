@@ -20,3 +20,6 @@ Dockerfile @goanpeca
 package.json @goanpeca
 pnpm-lock.yaml @goanpeca
 package-budget.json @goanpeca @sophiecarreras
+
+# Bundled skills are model-facing instructions and require explicit review.
+skills/ @goanpeca @sophiecarreras
