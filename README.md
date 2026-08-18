@@ -80,9 +80,11 @@ block.
 
 Local stdio runs can create application keys through the sink-backed tools; the
 new key secret is written to `~/.b2-mcp/secrets.jsonl` by default and is not
-shown in the MCP response. For hosted HTTP deployments, create and rotate keys
-outside the MCP flow unless you have deliberately configured a reviewed secret
-sink.
+shown in the MCP response on POSIX platforms. Windows currently rejects file
+sink paths because this implementation does not enforce owner-only ACLs there,
+so use `B2_SECRET_SINK=off` or explicit local `inline` mode on Windows. For
+hosted HTTP deployments, create and rotate keys outside the MCP flow unless you
+have deliberately configured a reviewed secret sink.
 
 ## B2 Skills pack
 
@@ -353,12 +355,15 @@ Durable-secret-producing operations split their result: the one-time
 `applicationKey` is written to the configured sink, while MCP output returns
 redacted metadata plus a `secretSink` pointer. Each request must include an
 `idempotencyKey`; retrying the same key with identical input returns the
-original sink pointer without creating a second credential or account. Stdio
-defaults to `file` at `~/.b2-mcp/secrets.jsonl`. HTTP/serverless defaults to
-`off`; enabling `file` there requires both `B2_ALLOW_LOCAL_FILES=true` and an
-explicit `B2_SECRET_SINK_FILE`. `B2_SECRET_SINK=inline` is an unsafe explicit
-opt-in that returns the secret into MCP output with a warning; HTTP/serverless
-also requires `B2_ALLOW_INLINE_SECRETS=true`. File sink records use stable JSONL
+original sink pointer without creating a second credential or account. On POSIX
+platforms, stdio defaults to `file` at `~/.b2-mcp/secrets.jsonl`. Windows
+rejects file sink paths because owner-only ACLs are not enforced by this
+implementation; configure `B2_SECRET_SINK=off` or explicit local `inline` mode
+there. HTTP/serverless defaults to `off`; enabling `file` there requires both
+`B2_ALLOW_LOCAL_FILES=true` and an explicit `B2_SECRET_SINK_FILE`.
+`B2_SECRET_SINK=inline` is an unsafe explicit opt-in that returns the secret
+into MCP output with a warning; HTTP/serverless also requires
+`B2_ALLOW_INLINE_SECRETS=true`. File sink records use stable JSONL
 metadata fields (`ts`, `tool`, `recordId`) plus idempotency metadata and a
 `result` payload. The file has no built-in rotation or pruning, so operators
 must rotate, prune, vault, or delete it under the same credential-retention

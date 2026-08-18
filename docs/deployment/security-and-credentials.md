@@ -127,7 +127,9 @@ credentials in the provider's encrypted secret mechanism, not in source, build
 logs, query strings, screenshots, or client configuration.
 
 `B2_SECRET_SINK=file` writes newly created application key secrets to a
-plaintext append-only JSONL file. Each record has stable metadata fields
+plaintext append-only JSONL file on POSIX platforms. Windows file sink paths are
+rejected because this implementation does not enforce owner-only ACLs there.
+Each record has stable metadata fields
 (`ts`, `tool`, `recordId`) and stores the provider payload under `result`.
 Treat that file as a credential store: protect it with owner-only permissions,
 rotate or revoke keys after use, and rotate, prune, delete, or vault old records

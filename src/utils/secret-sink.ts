@@ -21,6 +21,7 @@ export const INLINE_SECRET_WARNING =
 const SECRET_SINK_FILE_ENV = "B2_SECRET_SINK_FILE";
 const SECRET_SINK_PARENT_MODE = 0o700;
 const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
+const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 
 export const secretSinkFileOpsForTests = {
   fsyncSync: fs.fsyncSync,
@@ -247,15 +248,14 @@ export function appendSecretSinkRecord(
 ): SecretSinkPointer {
   const recordId = randomUUID();
   const record = secretLedgerRecord(tool, recordId, result, idempotency);
-  const fileExisted = fs.existsSync(sink.filePath);
-  const { parent, created: parentCreated } = ensureSecretSinkParent(sink.filePath);
+  const { parent } = ensureSecretSinkParent(sink.filePath);
   const appendLock = acquireLedgerAppendLock(sink.filePath, parent, tool);
   try {
     const fd = openSecureAppendFile(sink.filePath, {
       envVarName: SECRET_SINK_FILE_ENV,
       mode: SECURE_APPEND_FILE_MODE,
     });
-    if (parentCreated || !fileExisted) fsyncParentDirectory(parent);
+    fsyncParentDirectory(parent);
     const originalSize = fs.fstatSync(fd).size;
     try {
       writeAll(fd, `${JSON.stringify(record)}\n`);
@@ -448,6 +448,47 @@ function createExclusiveLockFile(lockPath: string, payload: unknown): void {
   }
 }
 
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function readAppendLockPid(lockPath: string): number | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const pid = (parsed as { pid?: unknown }).pid;
+  return Number.isInteger(pid) && Number(pid) > 0 ? Number(pid) : null;
+}
+
+function appendLockIsStale(lockPath: string): boolean {
+  const pid = readAppendLockPid(lockPath);
+  if (pid !== null && pid !== process.pid && !processIsAlive(pid)) return true;
+  const stats = fs.statSync(lockPath);
+  return Date.now() - stats.mtimeMs > STALE_APPEND_LOCK_MS;
+}
+
+function reclaimStaleAppendLock(lockPath: string, parent: string, tool: string): boolean {
+  try {
+    if (!appendLockIsStale(lockPath)) return false;
+    secretSinkFileOpsForTests.unlinkSync(lockPath);
+    fsyncParentDirectory(parent);
+    logger.warn({ tool, lockPath }, "secret_sink.stale_append_lock_reclaimed");
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return true;
+    return false;
+  }
+}
+
 function acquireLedgerAppendLock(filePath: string, parent: string, tool: string): SecretSinkClaim {
   const lockPath = `${filePath}.append.lock`;
   const deadline = Date.now() + 30_000;
@@ -456,6 +497,7 @@ function acquireLedgerAppendLock(filePath: string, parent: string, tool: string)
       createExclusiveLockFile(lockPath, {
         ts: isoTimestampSeconds(),
         tool,
+        pid: process.pid,
         status: "appending",
       });
       fsyncParentDirectory(parent);
@@ -464,6 +506,7 @@ function acquireLedgerAppendLock(filePath: string, parent: string, tool: string)
       if ((err as NodeJS.ErrnoException).code !== "EEXIST" || Date.now() >= deadline) {
         throw err;
       }
+      if (reclaimStaleAppendLock(lockPath, parent, tool)) continue;
       sleepSync(20);
     }
   }

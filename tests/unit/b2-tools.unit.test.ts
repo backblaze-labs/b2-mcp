@@ -59,7 +59,7 @@ function failSecretRecordFsyncOnce(): void {
   let calls = 0;
   vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
     calls++;
-    if (calls === 5) throw new Error("simulated sink fsync failure");
+    if (calls === 6) throw new Error("simulated sink fsync failure");
     return fsync(fd);
   });
 }
@@ -1821,6 +1821,7 @@ describe("Partner API tools", () => {
     expect(rawResult.content[0].text).toContain("secret_sink_write_failed");
     expect(rawResult.content[0].text).not.toContain("K005");
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("K005");
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("member-sink-failure@example.com");
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
     expect(
       transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
@@ -1850,6 +1851,7 @@ describe("Partner API tools", () => {
     expect(rawResult.content[0].text).toContain("secret_sink_write_failed");
     expect(rawResult.content[0].text).not.toContain("K005");
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("K005");
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("trial-sink-failure@example.com");
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("quarantine_required");
   });
 

@@ -9,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -261,6 +262,19 @@ describe("secret sink file writer", () => {
     expect(fsyncSpy).toHaveBeenCalled();
   });
 
+  it("fsyncs the parent directory before every append commit", () => {
+    const fsyncSpy = vi.spyOn(secretSinkFileOpsForTests, "fsyncSync");
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    writeFileSync(file, "", { mode: 0o600 });
+
+    appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKey: "B2_MCP_CANARY_SECRET_parent_fsync",
+    });
+
+    expect(fsyncSpy.mock.calls.length).toBeGreaterThanOrEqual(4);
+  });
+
   it("rolls back a ledger line when fsync fails before returning a pointer", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
@@ -269,7 +283,7 @@ describe("secret sink file writer", () => {
     let calls = 0;
     vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
       calls++;
-      if (calls === 3) throw new Error("simulated fsync failure");
+      if (calls === 4) throw new Error("simulated fsync failure");
       return fsync(fd);
     });
 
@@ -280,6 +294,25 @@ describe("secret sink file writer", () => {
     ).toThrow(/simulated fsync failure/);
 
     expect(readFileSync(file, "utf8")).toBe("");
+  });
+
+  it("reclaims a stale append lock without touching pending idempotency claims", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const appendLock = `${file}.append.lock`;
+    writeFileSync(file, "", { mode: 0o600 });
+    writeFileSync(appendLock, `${JSON.stringify({ status: "appending" })}\n`, { mode: 0o600 });
+    const stale = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(appendLock, stale, stale);
+
+    const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKey: "B2_MCP_CANARY_SECRET_stale_lock",
+    });
+
+    expect(pointer.recordId).toEqual(expect.any(String));
+    expect(existsSync(appendLock)).toBe(false);
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("stale_append_lock_reclaimed");
   });
 
   it("holds an exclusive pending claim before provider creation", async () => {

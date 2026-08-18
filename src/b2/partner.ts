@@ -35,9 +35,6 @@ function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[
     accountIds: response
       .map((result) => ("accountId" in result ? result.accountId : undefined))
       .filter((value): value is string => typeof value === "string"),
-    emails: response
-      .map((result) => ("email" in result ? result.email : undefined))
-      .filter((value): value is string => typeof value === "string"),
   };
 }
 
@@ -342,7 +339,6 @@ export function registerPartnerTools(
               status: "quarantine_required",
               accountIds: created.map((result) => result.accountId),
               applicationKeyIds: created.map((result) => result.applicationKeyId),
-              emails: created.map((result) => result.email),
             }),
           });
         } catch (err) {
