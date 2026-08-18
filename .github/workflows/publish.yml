@@ -110,8 +110,14 @@ jobs:
           PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
           node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # Private repo: authenticate this manual fetch without persisting creds.
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
           for attempt in 1 2 3; do
             if git fetch --prune --no-tags origin '+refs/heads/main:refs/remotes/origin/main'; then
               exit 0
