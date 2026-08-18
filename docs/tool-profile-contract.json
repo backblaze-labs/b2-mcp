@@ -172,6 +172,7 @@
       },
       "confirmTools": [
         "b2_create_group_member",
+        "b2_create_key",
         "b2_delete_bucket",
         "b2_delete_key",
         "b2_eject_group_member",
@@ -188,6 +189,7 @@
       ],
       "destructiveConfirmTools": [
         "b2_create_group_member",
+        "b2_create_key",
         "b2_delete_bucket",
         "b2_delete_key",
         "b2_eject_group_member",
@@ -202,7 +204,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "90ba10efd1b6508636a205834f4bc998192947a358a53fe60d99f2ecb5619ed2",
+      "hash": "45f6e12aa197b20434fe620b2315bad52b47fe76be751da3b4b731e1e87ce3c5",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -316,6 +318,7 @@
       },
       "confirmTools": [
         "b2_create_group_member",
+        "b2_create_key",
         "b2_delete_bucket",
         "b2_delete_key",
         "b2_reserve_trial_create_account",
@@ -331,6 +334,7 @@
       ],
       "destructiveConfirmTools": [
         "b2_create_group_member",
+        "b2_create_key",
         "b2_delete_bucket",
         "b2_delete_key",
         "b2_reserve_trial_create_account",
@@ -344,7 +348,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "71d6a7fb3f5934f04e87a273c0da982219639f84493871c8ac96ab80e4e1b3c1",
+      "hash": "a27ecaaa36a7da83dd1b1ded962984672723ec66a9b7d4ee732853e028af0b51",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -414,9 +418,17 @@
         "s3_list_objects_v2": ["bucket"],
         "s3_list_parts": ["bucket", "key", "uploadId"]
       },
-      "confirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
-      "destructiveConfirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
-      "hash": "22950327bf8834a5b424c37c5bb392360a41c480a280b4ea25ad669701661486",
+      "confirmTools": [
+        "b2_create_group_member",
+        "b2_create_key",
+        "b2_reserve_trial_create_account"
+      ],
+      "destructiveConfirmTools": [
+        "b2_create_group_member",
+        "b2_create_key",
+        "b2_reserve_trial_create_account"
+      ],
+      "hash": "dfe90525c0cbf68712fccb6c52470b3d35b969ef3ccba93a97414a4bbef46d03",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"

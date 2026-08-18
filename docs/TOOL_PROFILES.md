@@ -8,15 +8,15 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `90ba10efd1b6` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `71d6a7fb3f59` |
-| `read-only` | 20 | 11 | 9 | 0 | `22950327bf88` |
+| `full` | 40 | 21 | 19 | 0 | `45f6e12aa197` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `a27ecaaa36a7` |
+| `read-only` | 20 | 11 | 9 | 0 | `dfe90525c0cb` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `90ba10efd1b6508636a205834f4bc998192947a358a53fe60d99f2ecb5619ed2`
+Profile hash: `45f6e12aa197b20434fe620b2315bad52b47fe76be751da3b4b731e1e87ce3c5`
 
 ### Capability Input
 
@@ -78,7 +78,7 @@ Profile hash: `90ba10efd1b6508636a205834f4bc998192947a358a53fe60d99f2ecb5619ed2`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `71d6a7fb3f5934f04e87a273c0da982219639f84493871c8ac96ab80e4e1b3c1`
+Profile hash: `a27ecaaa36a7da83dd1b1ded962984672723ec66a9b7d4ee732853e028af0b51`
 
 ### Capability Input
 
@@ -149,7 +149,7 @@ Profile hash: `71d6a7fb3f5934f04e87a273c0da982219639f84493871c8ac96ab80e4e1b3c1`
 
 Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
 
-Profile hash: `22950327bf8834a5b424c37c5bb392360a41c480a280b4ea25ad669701661486`
+Profile hash: `dfe90525c0cbf68712fccb6c52470b3d35b969ef3ccba93a97414a4bbef46d03`
 
 ### Capability Input
 

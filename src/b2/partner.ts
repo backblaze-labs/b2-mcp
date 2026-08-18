@@ -1,24 +1,43 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { toolJson, toolError, toolJsonInlineDurableSecret } from "../utils/errors.js";
+import { toolJson, toolError } from "../utils/errors.js";
 import type { B2AuthManager } from "../auth.js";
 import type { B2Client } from "./client.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
-  appendSecretSinkRecord,
-  INLINE_SECRET_WARNING,
+  respondWithDurableSecret,
+  type SecretSinkPointer,
 } from "../utils/secret-sink.js";
 
 const REGION_VALUES = ["us-east", "us-west", "ca-east", "eu-central"] as const;
 
 type SecretBearingPartnerResult = { readonly applicationKey: string };
 
-function redactedPartnerResults<T extends SecretBearingPartnerResult>(
-  response: readonly T[],
-): Array<Omit<T, "applicationKey"> & { applicationKey: string }> {
+function redactedPartnerResults<T extends SecretBearingPartnerResult>(response: readonly T[]): T[] {
   return response.map((result) => ({ ...result, applicationKey: APPLICATION_KEY_REDACTED }));
+}
+
+function activeSecretSink(
+  config: B2Config,
+): Extract<B2Config["secretSink"], { mode: "file" | "inline" }> {
+  return config.secretSink as Extract<B2Config["secretSink"], { mode: "file" | "inline" }>;
+}
+
+function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[]) {
+  return {
+    resultCount: response.length,
+    applicationKeyIds: response
+      .map((result) => ("applicationKeyId" in result ? result.applicationKeyId : undefined))
+      .filter((value): value is string => typeof value === "string"),
+    accountIds: response
+      .map((result) => ("accountId" in result ? result.accountId : undefined))
+      .filter((value): value is string => typeof value === "string"),
+    emails: response
+      .map((result) => ("email" in result ? result.email : undefined))
+      .filter((value): value is string => typeof value === "string"),
+  };
 }
 
 /**
@@ -110,15 +129,6 @@ export function registerPartnerTools(
       },
       async (args) => {
         try {
-          const secretSink = config.secretSink;
-          if (!secretSink || secretSink.mode === "off") {
-            return toolError({
-              status: 410,
-              code: "tool_unavailable",
-              message:
-                "b2_create_group_member is unavailable because it produces durable credential material and no out-of-band secret sink is configured.",
-            });
-          }
           const gate = checkDestructive("b2_create_group_member", args, config);
           if (!gate.ok) return toolError(new Error(gate.message));
 
@@ -129,12 +139,17 @@ export function registerPartnerTools(
             ...(args.region !== undefined ? { region: args.region } : {}),
           });
 
-          if (secretSink.mode === "inline") {
-            return toolJsonInlineDurableSecret({ results: result, warning: INLINE_SECRET_WARNING });
-          }
-
-          const pointer = appendSecretSinkRecord(secretSink, "b2_create_group_member", result);
-          return toolJson({ results: redactedPartnerResults(result), secretSink: pointer });
+          return respondWithDurableSecret({
+            secretSink: activeSecretSink(config),
+            toolName: "b2_create_group_member",
+            result,
+            projectRedacted: (created, pointer: SecretSinkPointer) => ({
+              results: redactedPartnerResults(created),
+              secretSink: pointer,
+            }),
+            projectInline: (created, warning) => ({ results: created, warning }),
+            diagnostics: partnerSecretDiagnostics,
+          });
         } catch (err) {
           return toolError(err);
         }
@@ -259,15 +274,6 @@ export function registerPartnerTools(
       },
       async (args) => {
         try {
-          const secretSink = config.secretSink;
-          if (!secretSink || secretSink.mode === "off") {
-            return toolError({
-              status: 410,
-              code: "tool_unavailable",
-              message:
-                "b2_reserve_trial_create_account is unavailable because it produces durable credential material and no out-of-band secret sink is configured.",
-            });
-          }
           const gate = checkDestructive("b2_reserve_trial_create_account", args, config);
           if (!gate.ok) return toolError(new Error(gate.message));
 
@@ -279,16 +285,17 @@ export function registerPartnerTools(
           };
           const result = await client.reserveTrialCreateAccount(request);
 
-          if (secretSink.mode === "inline") {
-            return toolJsonInlineDurableSecret({ results: result, warning: INLINE_SECRET_WARNING });
-          }
-
-          const pointer = appendSecretSinkRecord(
-            secretSink,
-            "b2_reserve_trial_create_account",
+          return respondWithDurableSecret({
+            secretSink: activeSecretSink(config),
+            toolName: "b2_reserve_trial_create_account",
             result,
-          );
-          return toolJson({ results: redactedPartnerResults(result), secretSink: pointer });
+            projectRedacted: (created, pointer: SecretSinkPointer) => ({
+              results: redactedPartnerResults(created),
+              secretSink: pointer,
+            }),
+            projectInline: (created, warning) => ({ results: created, warning }),
+            diagnostics: partnerSecretDiagnostics,
+          });
         } catch (err) {
           return toolError(err);
         }

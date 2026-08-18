@@ -7,7 +7,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
@@ -109,6 +109,9 @@ afterEach(() => {
   setWebhookDnsLookupForTests(null);
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
+  delete process.env.B2_ALLOW_KEY_MGMT_GRANTS;
+  delete process.env.B2_ALLOW_UNSCOPED_KEYS;
+  delete process.env.B2_MAX_KEY_DURATION_SECONDS;
 });
 
 describe("B2Client S3 version guard", () => {
@@ -612,6 +615,15 @@ describe("b2_delete_bucket", () => {
 });
 
 describe("durable-secret-producing tools", () => {
+  async function useRecordingNativeSimulator() {
+    invalidateAuthManagerCache();
+    const simulatorTransport = sim.transport();
+    const transport = new RecordingTransport((request) => simulatorTransport.send(request));
+    installSdkTransport(transport);
+    seed = await seedClient();
+    return transport;
+  }
+
   it("keeps stale tool names callable as non-secret unavailable stubs", async () => {
     const tools = getRegisteredTools(server) ?? {};
     for (const name of [
@@ -637,11 +649,12 @@ describe("durable-secret-producing tools", () => {
 
     const rawResult = await callTool(server, "b2_create_key", {
       keyName: "ci-uploader",
-      capabilities: ["listBuckets", "writeFiles"],
+      capabilities: ["listBuckets"],
+      confirm: true,
     });
     const result = parseResult(rawResult);
     const ledger = readSecretLedger(secretFile);
-    const secret = ledger.applicationKey;
+    const secret = ledger.result.applicationKey;
 
     expect(result.keyName).toBe("ci-uploader");
     expect(result.applicationKey).toBe("[redacted]");
@@ -653,8 +666,10 @@ describe("durable-secret-producing tools", () => {
     expect(ledger).toMatchObject({
       tool: "b2_create_key",
       recordId: result.secretSink.recordId,
-      keyName: "ci-uploader",
-      capabilities: ["listBuckets", "writeFiles"],
+      result: {
+        keyName: "ci-uploader",
+        capabilities: ["listBuckets"],
+      },
     });
     expect(typeof secret).toBe("string");
     expect(secret).not.toBe("[redacted]");
@@ -672,6 +687,7 @@ describe("durable-secret-producing tools", () => {
     const rawResult = await callTool(server, "b2_create_key", {
       keyName: "inline-key",
       capabilities: ["listBuckets"],
+      confirm: true,
     });
     const result = parseResult(rawResult);
 
@@ -680,6 +696,102 @@ describe("durable-secret-producing tools", () => {
     expect(result.applicationKey).not.toBe("[redacted]");
     expect(result.warning).toContain("B2_SECRET_SINK=inline");
     expect(rawResult.content[0].text).toContain(result.applicationKey);
+  });
+
+  it("rejects key-management grants before calling b2_create_key", async () => {
+    const transport = await useRecordingNativeSimulator();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: tempSecretFile() },
+    });
+
+    const result = await callTool(server, "b2_create_key", {
+      keyName: "backdoor",
+      capabilities: ["listKeys", "writeKeys", "deleteKeys"],
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("B2_ALLOW_KEY_MGMT_GRANTS");
+    expect(transport.requests.some((request) => b2EndpointName(request) === "b2_create_key")).toBe(
+      false,
+    );
+  });
+
+  it("rejects unscoped write/delete grants before calling b2_create_key", async () => {
+    const transport = await useRecordingNativeSimulator();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: tempSecretFile() },
+    });
+
+    const result = await callTool(server, "b2_create_key", {
+      keyName: "unscoped-writer",
+      capabilities: ["writeFiles"],
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("B2_ALLOW_UNSCOPED_KEYS");
+    expect(transport.requests.some((request) => b2EndpointName(request) === "b2_create_key")).toBe(
+      false,
+    );
+  });
+
+  it("enforces B2_MAX_KEY_DURATION_SECONDS before calling b2_create_key", async () => {
+    const transport = await useRecordingNativeSimulator();
+    process.env.B2_MAX_KEY_DURATION_SECONDS = "3600";
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: tempSecretFile() },
+    });
+
+    const missingDuration = await callTool(server, "b2_create_key", {
+      keyName: "non-expiring",
+      capabilities: ["listBuckets"],
+      confirm: true,
+    });
+    const tooLong = await callTool(server, "b2_create_key", {
+      keyName: "too-long",
+      capabilities: ["listBuckets"],
+      validDurationInSeconds: 7200,
+      confirm: true,
+    });
+
+    expect(missingDuration.isError).toBe(true);
+    expect(missingDuration.content[0].text).toContain("validDurationInSeconds");
+    expect(tooLong.isError).toBe(true);
+    expect(tooLong.content[0].text).toContain("B2_MAX_KEY_DURATION_SECONDS");
+    expect(transport.requests.some((request) => b2EndpointName(request) === "b2_create_key")).toBe(
+      false,
+    );
+  });
+
+  it("returns the one-time key secret if the file sink fails after B2 creates it", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-broken-secret-sink-"));
+    const target = join(dir, "target.jsonl");
+    const link = join(dir, "secrets.jsonl");
+    writeFileSync(target, "", { mode: 0o600 });
+    symlinkSync(target, link);
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: link },
+    });
+
+    const rawResult = await callTool(server, "b2_create_key", {
+      keyName: "break-glass",
+      capabilities: ["listBuckets"],
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+
+    expect(result.applicationKey).toEqual(expect.any(String));
+    expect(result.applicationKey).not.toBe("[redacted]");
+    expect(result.warning).toContain("break-glass recovery");
+    expect(rawResult.content[0].text).toContain(result.applicationKey);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(result.applicationKey);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("secret_sink.write_failed");
   });
 });
 
@@ -1422,7 +1534,7 @@ describe("Partner API tools", () => {
     });
     const result = parseResult(rawResult);
     const ledger = readSecretLedger(secretFile);
-    const secret = ledger.results[0].applicationKey;
+    const secret = ledger.result[0].applicationKey;
     const request = transport.requests.find(
       (request) => b2EndpointName(request) === "b2_create_group_member",
     );
@@ -1457,7 +1569,7 @@ describe("Partner API tools", () => {
     });
     const result = parseResult(rawResult);
     const ledger = readSecretLedger(secretFile);
-    const secret = ledger.results[0].applicationKey;
+    const secret = ledger.result[0].applicationKey;
     const request = transport.requests.find(
       (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
     );
@@ -1474,6 +1586,82 @@ describe("Partner API tools", () => {
     expect(secret).toEqual(expect.any(String));
     expect(secret).not.toBe("[redacted]");
     expect(JSON.stringify(rawResult)).not.toContain(secret);
+  });
+
+  it("creates group members in inline mode with the raw secret and warning", async () => {
+    const { adminAccountId, partnerSeed } = await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "inline" },
+    });
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "inline-member@example.com",
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const secret = result.results[0].applicationKey;
+
+    expect(secret).toEqual(expect.any(String));
+    expect(secret).not.toBe("[redacted]");
+    expect(result.warning).toContain("B2_SECRET_SINK=inline");
+    expect(rawResult.content[0].text).toContain(secret);
+  });
+
+  it("reserves trial accounts in inline mode with the raw secret and warning", async () => {
+    await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "inline" },
+    });
+
+    const rawResult = await callTool(server, "b2_reserve_trial_create_account", {
+      email: "trial-inline@example.com",
+      term: 7,
+      storage: 1,
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const secret = result.results[0].applicationKey;
+
+    expect(secret).toEqual(expect.any(String));
+    expect(secret).not.toBe("[redacted]");
+    expect(result.warning).toContain("B2_SECRET_SINK=inline");
+    expect(rawResult.content[0].text).toContain(secret);
+  });
+
+  it("returns the one-time Partner secret if the file sink fails after account creation", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-broken-partner-sink-"));
+    const target = join(dir, "target.jsonl");
+    const link = join(dir, "secrets.jsonl");
+    writeFileSync(target, "", { mode: 0o600 });
+    symlinkSync(target, link);
+    await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: link },
+    });
+
+    const rawResult = await callTool(server, "b2_reserve_trial_create_account", {
+      email: "trial-break-glass@example.com",
+      term: 7,
+      storage: 1,
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const secret = result.results[0].applicationKey;
+
+    expect(secret).toEqual(expect.any(String));
+    expect(secret).not.toBe("[redacted]");
+    expect(result.warning).toContain("break-glass recovery");
+    expect(rawResult.content[0].text).toContain(secret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
   });
 
   it.each([

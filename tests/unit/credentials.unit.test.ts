@@ -11,6 +11,9 @@ import {
   validateHttpCredentialConfiguration,
   verificationFingerprintConfig,
 } from "../../src/credentials";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const savedEnv = process.env;
 
@@ -26,6 +29,8 @@ beforeEach(() => {
   delete process.env.B2_MCP_OUTPUT_FORMAT;
   delete process.env.B2_SECRET_SINK;
   delete process.env.B2_SECRET_SINK_FILE;
+  delete process.env.B2_ALLOW_LOCAL_FILES;
+  delete process.env.B2_ALLOW_INLINE_SECRETS;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
@@ -148,6 +153,27 @@ describe("credential providers", () => {
     expect(resolved.cacheKey).not.toContain("header-id");
     expect(resolved.cacheKey).not.toContain("header-secret");
     expect(resolved.capabilityCacheKey).not.toBe(resolved.cacheKey);
+  });
+
+  it("does not preflight the HTTP file secret sink during per-request resolution", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-http-secret-sink-hot-path-"));
+    const file = join(dir, "nested", "secrets.jsonl");
+    process.env.B2_SECRET_SINK = "file";
+    process.env.B2_ALLOW_LOCAL_FILES = "true";
+    process.env.B2_SECRET_SINK_FILE = file;
+
+    const resolved = new HttpHeaderCredentialProvider().resolve({
+      req: {
+        headers: {
+          "x-b2-key-id": "header-id",
+          "x-b2-key": "header-secret",
+        },
+      } as any,
+    });
+
+    expect(resolved.config.secretSink).toEqual({ mode: "file", filePath: file });
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(join(dir, "nested"))).toBe(false);
   });
 
   it("rejects partial optional header credentials", () => {

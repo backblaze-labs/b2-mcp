@@ -3,16 +3,88 @@ import { z } from "zod";
 import { B2Client, type FullApplicationKeyResult, type ListKeysOptions } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { ALL_CAPABILITIES, B2Config } from "../utils/types.js";
-import { toolJson, toolError, toolJsonInlineDurableSecret } from "../utils/errors.js";
+import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
-  appendSecretSinkRecord,
-  INLINE_SECRET_WARNING,
+  respondWithDurableSecret,
+  type SecretSinkPointer,
 } from "../utils/secret-sink.js";
 
 function redactedCreatedKey(result: FullApplicationKeyResult): FullApplicationKeyResult {
   return { ...result, applicationKey: APPLICATION_KEY_REDACTED };
+}
+
+const KEY_MANAGEMENT_CAPABILITIES = new Set(["listKeys", "writeKeys", "deleteKeys"]);
+
+function allowsEnvOverride(name: string): boolean {
+  return process.env[name] === "true";
+}
+
+function parseMaxKeyDurationSeconds(): number | null {
+  const raw = process.env.B2_MAX_KEY_DURATION_SECONDS;
+  if (raw === undefined || raw.trim() === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw {
+      status: 500,
+      code: "invalid_key_policy_config",
+      message: "B2_MAX_KEY_DURATION_SECONDS must be a positive integer when set.",
+    };
+  }
+  return parsed;
+}
+
+function validateCreateKeyPolicy(args: {
+  capabilities: string[];
+  bucketIds?: string[];
+  validDurationInSeconds?: number;
+}): void {
+  const keyManagementGrants = args.capabilities.filter((capability) =>
+    KEY_MANAGEMENT_CAPABILITIES.has(capability),
+  );
+  if (keyManagementGrants.length && !allowsEnvOverride("B2_ALLOW_KEY_MGMT_GRANTS")) {
+    throw {
+      status: 403,
+      code: "key_policy_violation",
+      message:
+        "b2_create_key refuses to mint keys with listKeys, writeKeys, or deleteKeys unless B2_ALLOW_KEY_MGMT_GRANTS=true is set.",
+    };
+  }
+
+  const writeOrDeleteGrants = args.capabilities.filter(
+    (capability) => capability.startsWith("write") || capability.startsWith("delete"),
+  );
+  if (
+    writeOrDeleteGrants.length &&
+    (!args.bucketIds || args.bucketIds.length === 0) &&
+    !allowsEnvOverride("B2_ALLOW_UNSCOPED_KEYS")
+  ) {
+    throw {
+      status: 403,
+      code: "key_policy_violation",
+      message:
+        "b2_create_key refuses to mint unscoped keys with write/delete capabilities unless B2_ALLOW_UNSCOPED_KEYS=true is set.",
+    };
+  }
+
+  const maxDuration = parseMaxKeyDurationSeconds();
+  if (maxDuration === null) return;
+  if (args.validDurationInSeconds === undefined) {
+    throw {
+      status: 403,
+      code: "key_policy_violation",
+      message:
+        "b2_create_key requires validDurationInSeconds when B2_MAX_KEY_DURATION_SECONDS is set.",
+    };
+  }
+  if (args.validDurationInSeconds > maxDuration) {
+    throw {
+      status: 403,
+      code: "key_policy_violation",
+      message: `b2_create_key validDurationInSeconds exceeds B2_MAX_KEY_DURATION_SECONDS (${maxDuration}).`,
+    };
+  }
 }
 
 export function registerKeyTools(
@@ -48,19 +120,23 @@ export function registerKeyTools(
             .string()
             .optional()
             .describe("Optional file-name prefix restriction for file capabilities."),
+          confirm: z
+            .boolean()
+            .optional()
+            .describe(
+              "Confirm this durable credential creation. Required when the server destructive policy is 'confirm' (the default).",
+            ),
         },
       },
       async (args) => {
         try {
-          const secretSink = config.secretSink;
-          if (!secretSink || secretSink.mode === "off") {
-            return toolError({
-              status: 410,
-              code: "tool_unavailable",
-              message:
-                "b2_create_key is unavailable because it produces durable credential material and no out-of-band secret sink is configured.",
-            });
-          }
+          const secretSink = config.secretSink as Extract<
+            B2Config["secretSink"],
+            { mode: "file" | "inline" }
+          >;
+          const gate = checkDestructive("b2_create_key", args, config);
+          if (!gate.ok) return toolError(new Error(gate.message));
+          validateCreateKeyPolicy(args);
           const result = await client.createKey({
             keyName: args.keyName,
             capabilities: args.capabilities,
@@ -71,12 +147,21 @@ export function registerKeyTools(
             ...(args.namePrefix !== undefined ? { namePrefix: args.namePrefix } : {}),
           });
 
-          if (secretSink.mode === "inline") {
-            return toolJsonInlineDurableSecret({ ...result, warning: INLINE_SECRET_WARNING });
-          }
-
-          const pointer = appendSecretSinkRecord(secretSink, "b2_create_key", result);
-          return toolJson({ ...redactedCreatedKey(result), secretSink: pointer });
+          return respondWithDurableSecret({
+            secretSink,
+            toolName: "b2_create_key",
+            result,
+            projectRedacted: (created, pointer: SecretSinkPointer) => ({
+              ...redactedCreatedKey(created),
+              secretSink: pointer,
+            }),
+            projectInline: (created, warning) => ({ ...created, warning }),
+            diagnostics: (created) => ({
+              applicationKeyId: created.applicationKeyId,
+              keyName: created.keyName,
+              accountId: created.accountId,
+            }),
+          });
         } catch (err) {
           return toolError(err);
         }

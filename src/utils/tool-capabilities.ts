@@ -157,8 +157,10 @@ export const DURABLE_SECRET_PRODUCING_TOOLS = new Set<string>([
  */
 export const PARTNER_TOOLS = new Set<string>([
   "b2_list_groups",
+  "b2_create_group_member",
   "b2_eject_group_member",
   "b2_list_group_members",
+  "b2_reserve_trial_create_account",
 ]);
 
 export type OAuthToolScopePolicy = "read" | "write" | "admin";

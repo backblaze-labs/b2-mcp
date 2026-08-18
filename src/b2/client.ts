@@ -403,9 +403,7 @@ function cloneJsonField<T>(value: T): T {
 function cloneSecretBearingPartnerResponse<T extends { readonly applicationKey: string }>(
   response: readonly T[],
 ): T[] {
-  return response.map((result) =>
-    cloneJsonResponse({ ...result, applicationKey: result.applicationKey } as T),
-  );
+  return response.map((result) => cloneJsonResponse({ ...result } as T));
 }
 
 function toServerSideEncryptionResult(

@@ -189,7 +189,10 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     destructivePolicy: resolveDestructivePolicy(options.transport),
     outputFormat: resolveOutputFormat(),
     transport: options.transport,
-    secretSink: resolveSecretSinkConfig({ transport: options.transport }),
+    secretSink: resolveSecretSinkConfig({
+      transport: options.transport,
+      preflight: options.transport === "stdio",
+    }),
   };
   config.credentialFingerprint = fingerprintConfig(config);
   return config;
@@ -503,7 +506,7 @@ export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
   resolveOutputFormat();
-  resolveSecretSinkConfig({ transport: "http" });
+  resolveSecretSinkConfig({ transport: "http", preflight: true });
   provider.validateConfiguration?.();
 }
 

@@ -1,15 +1,10 @@
-import {
-  chmodSync,
-  closeSync,
-  lstatSync,
-  mkdirSync,
-  statSync,
-  writeSync,
-  type Stats,
-} from "node:fs";
+import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { logger } from "./logger.js";
+import { toolJson, toolJsonInlineDurableSecret } from "./errors.js";
+import type { StructuredToolResult } from "./result-serializer.js";
 import type { SecretSinkConfig, SecretSinkMode } from "./types.js";
 import {
   GROUP_OR_OTHER_PERMISSIONS,
@@ -22,9 +17,16 @@ export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.json
 export const APPLICATION_KEY_REDACTED = "[redacted]";
 export const INLINE_SECRET_WARNING =
   "B2_SECRET_SINK=inline: this application key secret was returned into the model context and may be logged or retained by the client. Rotate it after use.";
+export const SINK_WRITE_FAILED_INLINE_WARNING =
+  "B2_SECRET_SINK=file failed after the provider created a durable credential, so this one-time secret is returned in this MCP response as a break-glass recovery path. Store it securely, then rotate or revoke it after use.";
 
 const SECRET_SINK_FILE_ENV = "B2_SECRET_SINK_FILE";
 const SECRET_SINK_PARENT_MODE = 0o700;
+const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
+
+export const secretSinkFileOpsForTests = {
+  fsyncSync: fs.fsyncSync,
+};
 
 let inlineWarningEmitted = false;
 
@@ -41,6 +43,11 @@ export interface SecretSinkPointer {
   recordId: string;
 }
 
+interface SecretSinkParentState {
+  parent: string;
+  created: boolean;
+}
+
 function parseSecretSinkMode(raw: string | undefined, transport: "stdio" | "http"): SecretSinkMode {
   if (raw === undefined || raw.trim() === "") return transport === "stdio" ? "file" : "off";
   const normalized = raw.trim().toLowerCase();
@@ -48,32 +55,42 @@ function parseSecretSinkMode(raw: string | undefined, transport: "stdio" | "http
   throw new Error('Invalid B2_SECRET_SINK. Expected "file", "inline", or "off".');
 }
 
-function ensureSecretSinkParent(filePath: string): void {
+function currentUid(): number | undefined {
+  return typeof process.getuid === "function" ? process.getuid() : undefined;
+}
+
+function ensureSecretSinkParent(filePath: string): SecretSinkParentState {
   const parent = dirname(filePath);
-  mkdirSync(parent, { recursive: true, mode: SECRET_SINK_PARENT_MODE });
-  const parentStats = lstatSync(parent);
+  const existedBefore = fs.existsSync(parent);
+  fs.mkdirSync(parent, { recursive: true, mode: SECRET_SINK_PARENT_MODE });
+  const parentStats = fs.lstatSync(parent);
   if (!parentStats.isDirectory()) {
     throw new Error(`${SECRET_SINK_FILE_ENV} parent must be a directory: ${parent}`);
   }
   if (parentStats.isSymbolicLink()) {
     throw new Error(`${SECRET_SINK_FILE_ENV} parent must not be a symlink: ${parent}`);
   }
-  chmodSync(parent, SECRET_SINK_PARENT_MODE);
-  const normalized = statSync(parent);
-  if ((normalized.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
+  const uid = currentUid();
+  if (uid !== undefined && parentStats.uid !== uid) {
+    throw new Error(`${SECRET_SINK_FILE_ENV} parent must be owned by the current user: ${parent}`);
+  }
+  if ((parentStats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
     throw new Error(
       `${SECRET_SINK_FILE_ENV} parent must not be readable or writable by group or other users: ${parent}`,
     );
   }
+  return { parent, created: !existedBefore };
 }
 
 function preflightSecretSinkFile(filePath: string): void {
-  ensureSecretSinkParent(filePath);
+  const fileExisted = fs.existsSync(filePath);
+  const { parent, created } = ensureSecretSinkParent(filePath);
   const fd = openSecureAppendFile(filePath, {
     envVarName: SECRET_SINK_FILE_ENV,
     mode: SECURE_APPEND_FILE_MODE,
   });
-  closeSync(fd);
+  fs.closeSync(fd);
+  if (created || !fileExisted) fsyncParentDirectory(parent);
 }
 
 function defaultFileUnavailableReason(filePath: string, err: unknown): string {
@@ -112,6 +129,11 @@ export function resolveSecretSinkConfig(options: ResolveSecretSinkOptions): Secr
 
   if (mode === "off") return { mode: "off" };
   if (mode === "inline") {
+    if (transport === "http" && env[HTTP_INLINE_OPT_IN_ENV] !== "true") {
+      throw new Error(
+        `B2_SECRET_SINK=inline on HTTP/serverless requires ${HTTP_INLINE_OPT_IN_ENV}=true.`,
+      );
+    }
     emitInlineSecretSinkWarningOnce();
     return { mode: "inline" };
   }
@@ -151,18 +173,28 @@ function secretLedgerRecord(
   recordId: string,
   result: unknown,
 ): Record<string, unknown> {
-  const base = { ts: isoTimestampSeconds(), tool, recordId };
-  if (Array.isArray(result)) return { ...base, results: result };
-  if (result && typeof result === "object") {
-    return { ...base, ...(result as Record<string, unknown>) };
-  }
-  return { ...base, result };
+  return { ts: isoTimestampSeconds(), tool, recordId, result };
 }
 
 function writeAll(fd: number, line: string): void {
+  const buffer = new TextEncoder().encode(line);
   let offset = 0;
-  while (offset < line.length) {
-    offset += writeSync(fd, line.slice(offset), undefined, "utf8");
+  while (offset < buffer.length) {
+    const written = fs.writeSync(fd, buffer, offset, buffer.length - offset);
+    if (written <= 0) {
+      throw new Error(`${SECRET_SINK_FILE_ENV} write made no progress`);
+    }
+    offset += written;
+  }
+}
+
+function fsyncParentDirectory(parent: string): void {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(parent, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
+    secretSinkFileOpsForTests.fsyncSync(fd);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
@@ -173,19 +205,60 @@ export function appendSecretSinkRecord(
 ): SecretSinkPointer {
   const recordId = randomUUID();
   const record = secretLedgerRecord(tool, recordId, result);
-  ensureSecretSinkParent(sink.filePath);
+  const fileExisted = fs.existsSync(sink.filePath);
+  const { parent, created: parentCreated } = ensureSecretSinkParent(sink.filePath);
   const fd = openSecureAppendFile(sink.filePath, {
     envVarName: SECRET_SINK_FILE_ENV,
     mode: SECURE_APPEND_FILE_MODE,
   });
   try {
     writeAll(fd, `${JSON.stringify(record)}\n`);
+    secretSinkFileOpsForTests.fsyncSync(fd);
   } finally {
-    closeSync(fd);
+    fs.closeSync(fd);
   }
+  if (parentCreated || !fileExisted) fsyncParentDirectory(parent);
   return { type: "file", path: sink.filePath, recordId };
 }
 
-export function fileModeStats(filePath: string): Stats {
-  return statSync(filePath);
+type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
+
+export interface DurableSecretResponseOptions<T> {
+  secretSink: ActiveSecretSink;
+  toolName: string;
+  result: T;
+  projectRedacted: (result: T, pointer: SecretSinkPointer) => unknown;
+  projectInline: (result: T, warning: string) => unknown;
+  diagnostics?: (result: T) => Record<string, unknown>;
+}
+
+export function respondWithDurableSecret<T>({
+  secretSink,
+  toolName,
+  result,
+  projectRedacted,
+  projectInline,
+  diagnostics,
+}: DurableSecretResponseOptions<T>): StructuredToolResult {
+  if (secretSink.mode === "inline") {
+    return toolJsonInlineDurableSecret(projectInline(result, INLINE_SECRET_WARNING));
+  }
+
+  try {
+    const pointer = appendSecretSinkRecord(secretSink, toolName, result);
+    return toolJson(projectRedacted(result, pointer));
+  } catch (err) {
+    logger.fatal(
+      {
+        err,
+        tool: toolName,
+        secretSink: { type: "file", path: secretSink.filePath },
+        minted: diagnostics?.(result) ?? {},
+      },
+      "secret_sink.write_failed_after_provider_create",
+    );
+    return toolJsonInlineDurableSecret(
+      projectInline(result, `${SINK_WRITE_FAILED_INLINE_WARNING} ${INLINE_SECRET_WARNING}`),
+    );
+  }
 }

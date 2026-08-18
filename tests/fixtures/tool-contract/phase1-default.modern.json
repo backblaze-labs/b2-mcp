@@ -112,6 +112,7 @@
   },
   "confirmTools": [
     "b2_create_group_member",
+    "b2_create_key",
     "b2_delete_bucket",
     "b2_delete_key",
     "b2_reserve_trial_create_account",
@@ -288,12 +289,17 @@
       "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {},
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1881,5 +1887,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "71d6a7fb3f5934f04e87a273c0da982219639f84493871c8ac96ab80e4e1b3c1"
+  "hash": "a27ecaaa36a7da83dd1b1ded962984672723ec66a9b7d4ee732853e028af0b51"
 }

@@ -62,7 +62,7 @@
     "s3_list_objects_v2": ["bucket"],
     "s3_list_parts": ["bucket", "key", "uploadId"]
   },
-  "confirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
+  "confirmTools": ["b2_create_group_member", "b2_create_key", "b2_reserve_trial_create_account"],
   "tools": [
     {
       "name": "b2_authorize_account",
@@ -104,12 +104,17 @@
       "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {},
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -705,5 +710,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "22950327bf8834a5b424c37c5bb392360a41c480a280b4ea25ad669701661486"
+  "hash": "dfe90525c0cbf68712fccb6c52470b3d35b969ef3ccba93a97414a4bbef46d03"
 }

@@ -18,6 +18,7 @@ import {
   INLINE_SECRET_WARNING,
   resetSecretSinkWarningForTests,
   resolveSecretSinkConfig,
+  secretSinkFileOpsForTests,
 } from "../../src/utils/secret-sink";
 
 function tempDir(): string {
@@ -74,12 +75,22 @@ describe("secret sink configuration", () => {
     ).toEqual({ mode: "inline" });
     resolveSecretSinkConfig({
       transport: "http",
-      env: { B2_SECRET_SINK: "inline" },
+      env: { B2_SECRET_SINK: "inline", B2_ALLOW_INLINE_SECRETS: "true" },
       preflight: false,
     });
 
     expect(writeSpy).toHaveBeenCalledTimes(1);
     expect(String(writeSpy.mock.calls[0]?.[0])).toContain(INLINE_SECRET_WARNING);
+  });
+
+  it("requires a dedicated HTTP opt-in for inline secrets", () => {
+    expect(() =>
+      resolveSecretSinkConfig({
+        transport: "http",
+        env: { B2_SECRET_SINK: "inline" },
+        preflight: false,
+      }),
+    ).toThrow(/B2_ALLOW_INLINE_SECRETS=true/);
   });
 
   it("falls back to off when the stdio default file cannot be opened", () => {
@@ -123,6 +134,12 @@ describe("secret sink file writer", () => {
     expect(record).toMatchObject({
       tool: "b2_create_key",
       recordId: pointer.recordId,
+      result: {
+        keyName: "ci-uploader",
+        applicationKey: "B2_MCP_CANARY_SECRET_file_sink",
+      },
+    });
+    expect(record.result).toMatchObject({
       keyName: "ci-uploader",
       applicationKey: "B2_MCP_CANARY_SECRET_file_sink",
     });
@@ -165,15 +182,51 @@ describe("secret sink file writer", () => {
     expect(mode(file)).toBe(0o600);
   });
 
-  it("tightens group/other-writable parent directories after creation hardening", () => {
+  it("rejects existing group/other-writable parents without chmodding them", () => {
     const dir = tempDir();
     const parent = join(dir, "open");
     mkdirSync(parent, { mode: 0o777 });
     chmodSync(parent, 0o777);
     const file = join(parent, "secrets.jsonl");
 
-    appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {});
+    expect(() =>
+      appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {}),
+    ).toThrow(/parent must not be readable or writable/);
 
-    expect(mode(parent)).toBe(0o700);
+    expect(mode(parent)).toBe(0o777);
+  });
+
+  it("keeps provider payload under a collision-resistant result envelope", () => {
+    const dir = tempDir();
+    const file = join(dir, "nested", "secrets.jsonl");
+    const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      ts: "provider-ts",
+      tool: "provider-tool",
+      recordId: "provider-record",
+      applicationKey: "B2_MCP_CANARY_SECRET_collision",
+    });
+
+    const record = JSON.parse(readFileSync(file, "utf8").trim());
+    expect(record.tool).toBe("b2_create_key");
+    expect(record.recordId).toBe(pointer.recordId);
+    expect(record.result).toMatchObject({
+      ts: "provider-ts",
+      tool: "provider-tool",
+      recordId: "provider-record",
+      applicationKey: "B2_MCP_CANARY_SECRET_collision",
+    });
+  });
+
+  it("calls fsync before returning a pointer", () => {
+    const fsyncSpy = vi.spyOn(secretSinkFileOpsForTests, "fsyncSync");
+    const dir = tempDir();
+    const file = join(dir, "nested", "secrets.jsonl");
+
+    const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKey: "B2_MCP_CANARY_SECRET_fsync",
+    });
+
+    expect(pointer.recordId).toEqual(expect.any(String));
+    expect(fsyncSpy).toHaveBeenCalled();
   });
 });

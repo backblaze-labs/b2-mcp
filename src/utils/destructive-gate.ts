@@ -46,6 +46,7 @@ const DETECTORS: Record<string, Detector> = {
     "abort a multipart upload, discarding uploaded parts (irreversible)",
   b2_delete_key: () =>
     "permanently delete an application key (anything using it loses access immediately)",
+  b2_create_key: () => "create a durable application key credential",
   b2_eject_group_member: () =>
     "eject a Group member (locks them out; the account cannot be re-added via API)",
   // Account provisioning is irreversible and has billing impact: eject does not
