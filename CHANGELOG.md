@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with owner-only file handling and SIGHUP reopen support for external rotation.
 
 ### Changed
+- Bumped `@backblaze-labs/b2-sdk` to exact-pinned `0.3.0` and moved
+  Partner/Groups read/eject/list tooling onto the SDK `/partner` operations;
+  durable-secret Partner create/reserve tool names remain unavailable stubs.
 - Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
   other supported algorithms with `B2_OAUTH_ALLOWED_ALGORITHMS`.
 - Documented the exported OAuth config TypeScript surface change: token-cache

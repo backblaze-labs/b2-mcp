@@ -12,7 +12,7 @@ current with code, CI, and GitHub release metadata.
 | [`CLIENTS.md`](CLIENTS.md)                             | Gonza              | MCP client configuration contract for stdio and Streamable HTTP         | #66                          |
 | [`DEPLOY.md`](DEPLOY.md)                               | Gonza              | Hosted deployment matrix and provider guide index                       | #65, #66, #106, #121         |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md)                   | Gonza              | Runtime architecture and integration-boundary decisions                 | #71                          |
-| [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) | Gonza              | Official B2 SDK adoption and tool parity matrix                         | #71                          |
+| [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) | Gonza              | Official B2 SDK adoption and native/S3/Partner tool parity matrix       | #71, #132                    |
 | [`TYPESCRIPT_7_MIGRATION.md`](TYPESCRIPT_7_MIGRATION.md) | Gonza              | TypeScript 7 native compiler migration decision and trigger              | #114                         |
 | [`V1_SCOPE.md`](V1_SCOPE.md)                           | Gonza              | Phase 1 product, runtime, release, SDK, and protocol decision record    | #55, #71, #106               |
 | [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)                 | Gonza              | Tool-profile contract policy and fixture requirements                   | #49, #59                     |

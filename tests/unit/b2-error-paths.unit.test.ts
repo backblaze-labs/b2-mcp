@@ -18,6 +18,27 @@ import {
 
 let server: McpServer;
 
+const partnerTestConfig = {
+  ...testConfig,
+  masterKeyId: "master-key-id",
+  masterKey: "master-key",
+};
+
+function partnerAuthorizeResponse() {
+  return {
+    accountId: "test-account-123",
+    authorizationToken: "partner-token-xyz",
+    apiInfo: {
+      groupsApi: {
+        capabilities: ["all"],
+        groupsApiUrl: "http://127.0.0.1/partner",
+        infoType: "groupsApi",
+      },
+    },
+    applicationKeyExpirationTimestamp: null,
+  };
+}
+
 beforeEach(() => {
   invalidateAuthManagerCache();
   installSdkTransport(
@@ -93,14 +114,21 @@ describe("B2 tool error paths (catch blocks)", () => {
   it.each(["b2_list_groups", "b2_eject_group_member", "b2_list_group_members"])(
     "%s returns a structured Partner API error",
     async (tool) => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
-        new Response(JSON.stringify({ status: 400, code: "bad_request", message: "bad" }), {
-          status: 400,
-          headers: { "X-Bz-Request-Id": "req-native-error" },
+      installSdkTransport(
+        new RecordingTransport((request) => {
+          if (b2EndpointName(request) === "b2_authorize_account") {
+            return new StaticHttpResponse(200, partnerAuthorizeResponse());
+          }
+          return new StaticHttpResponse(
+            400,
+            { status: 400, code: "bad_request", message: "bad" },
+            { "X-Bz-Request-Id": "req-native-error" },
+          );
         }),
       );
+      server = createServer(partnerTestConfig);
       const result = await callTool(server, tool, {
-        adminAccountId: "a",
+        adminAccountId: "test-account-123",
         groupId: "g",
         memberAccountId: "m",
         confirm: true,

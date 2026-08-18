@@ -18,10 +18,9 @@ The approved implementation order is:
 
 1. public high-level `@backblaze-labs/b2-sdk` facade;
 2. documented `@backblaze-labs/b2-sdk/raw` API;
-3. documented `@backblaze-labs/b2-sdk/s3` helper;
-4. composition of public SDK operations;
-5. a linked upstream SDK gap with an explicit v0.1 disposition for non-S3
-   native gaps.
+3. documented `@backblaze-labs/b2-sdk/partner` API;
+4. documented `@backblaze-labs/b2-sdk/s3` helper;
+5. composition of public SDK operations.
 
 No runtime code may import SDK private modules, package-internal files, or
 unpublished branches.
@@ -44,6 +43,9 @@ entries without npm registry provenance and integrity, and AWS runtime imports
 outside `src/s3/aws-sdk-adapter.ts`. The AWS adapter is the permanent
 repository-owned S3 data-plane boundary for `s3_*` object, multipart, bucket,
 lifecycle, and presigned URL operations against B2's S3-compatible endpoint.
+Partner/Groups tools use the SDK `/partner` boundary and remain gated by master
+key/Partner entitlement plus the no-durable-secret policy for account-creation
+flows.
 
 New runtime dependencies must not exist solely for Node.js 18/20, browser, Bun,
 Deno, stream, abort, retry, or HTTP-client compatibility. Prefer Node.js 22+

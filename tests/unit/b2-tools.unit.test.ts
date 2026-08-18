@@ -5,6 +5,7 @@ import {
   LegalHoldValue,
   RetentionMode,
 } from "@backblaze-labs/b2-sdk";
+import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
@@ -26,17 +27,25 @@ let sim: B2Simulator;
 let seed: SdkB2Client;
 let server: McpServer;
 
+const partnerTestConfig = {
+  ...testConfig,
+  masterKeyId: "master-key-id",
+  masterKey: "master-key",
+};
+
+const sdkTestRetry = {
+  maxRetries: 0,
+  initialRetryDelayMs: 1,
+  maxRetryDelayMs: 1,
+  requestTimeoutMs: 30_000,
+};
+
 async function seedClient(): Promise<SdkB2Client> {
   const client = new SdkB2Client({
     applicationKeyId: testConfig.applicationKeyId,
     applicationKey: testConfig.applicationKey,
     transport: sim.transport(),
-    retry: {
-      maxRetries: 0,
-      initialRetryDelayMs: 1,
-      maxRetryDelayMs: 1,
-      requestTimeoutMs: 30_000,
-    },
+    retry: sdkTestRetry,
   });
   await client.authorize();
   return client;
@@ -48,6 +57,30 @@ async function createBucket(
   options: Record<string, unknown> = {},
 ) {
   return seed.createBucket({ bucketName: name, bucketType, ...options } as never);
+}
+
+async function usePartnerSimulator() {
+  invalidateAuthManagerCache();
+  sim = new B2Simulator({
+    minimumPartSize: 1000,
+    recommendedPartSize: 1000,
+    partnerAuthorize: true,
+  });
+  const simulatorTransport = sim.transport();
+  const transport = new RecordingTransport((request) => simulatorTransport.send(request));
+  installSdkTransport(transport);
+  seed = await seedClient();
+  server = createServer(partnerTestConfig);
+  const partnerSeed = new SdkPartnerClient({
+    masterKeyId: "master-key-id",
+    masterKey: "master-key",
+    transport,
+    retry: sdkTestRetry,
+    realm: "http://127.0.0.1",
+    allowCustomAuthorizeRealm: true,
+  });
+  const partnerAuth = await partnerSeed.authorize();
+  return { adminAccountId: String(partnerAuth.accountId), transport, partnerSeed };
 }
 
 beforeEach(async () => {
@@ -1210,109 +1243,143 @@ describe("object lock tools", () => {
 });
 
 describe("Partner API tools", () => {
-  function mockPartnerFetch(response: unknown) {
-    return vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify(response), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-  }
-
-  it("lists groups through the Partner API adapter", async () => {
-    const fetchSpy = mockPartnerFetch({
-      groups: [{ groupId: "254", groupName: "engineering" }],
-      nextGroupId: null,
-    });
+  it("lists groups through SDK Partner operations", async () => {
+    const { adminAccountId, transport } = await usePartnerSimulator();
     const tools = getRegisteredTools(server) ?? {};
     expect(tools.b2_list_groups.description).not.toMatch(/Unavailable compatibility stub/);
 
     const result = parseResult(
       await callTool(server, "b2_list_groups", {
-        adminAccountId: "test-account-123",
-        groupName: "engineering",
-        startGroupId: 10,
-        maxGroupCount: 25,
+        adminAccountId,
+        maxGroupCount: 2,
       }),
     );
-    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+    const request = transport.requests.find(
+      (request) => b2EndpointName(request) === "b2_list_groups",
+    );
+    if (!request) throw new Error("Expected SDK b2_list_groups request");
+    const url = new URL(request.url);
 
-    expect(result.groups[0].groupName).toBe("engineering");
-    expect(url.pathname).toBe("/b2api/v3/b2_list_groups");
-    expect(url.searchParams.get("adminAccountId")).toBe("test-account-123");
-    expect(url.searchParams.get("groupName")).toBe("engineering");
-    expect(url.searchParams.get("startGroupId")).toBe("10");
-    expect(url.searchParams.get("maxGroupCount")).toBe("25");
-    expect((fetchSpy.mock.calls[0][1] as RequestInit).method).toBe("GET");
+    expect(result.accountId).toBe(adminAccountId);
+    expect(result.groups).toHaveLength(2);
+    expect(result.nextGroupId).toBeTruthy();
+    expect(url.searchParams.get("adminAccountId")).toBe(adminAccountId);
+    expect(url.searchParams.get("maxGroupCount")).toBe("2");
+    expect(request.method).toBe("GET");
   });
 
-  it("lists group members through the Partner API adapter", async () => {
-    const fetchSpy = mockPartnerFetch({
-      members: [{ accountId: "member-account-xyz", email: "member@example.com" }],
-      nextEmail: null,
-    });
+  it("lists group members through SDK Partner operations", async () => {
+    const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
 
     const result = parseResult(
       await callTool(server, "b2_list_group_members", {
-        adminAccountId: "test-account-123",
-        groupId: "254",
+        adminAccountId,
+        groupId: group.groupId,
         startEmail: "a@example.com",
         maxMemberCount: 50,
       }),
     );
-    const url = new URL(String(fetchSpy.mock.calls[0][0]));
+    const request = transport.requests.find(
+      (request) => b2EndpointName(request) === "b2_list_group_members",
+    );
+    if (!request) throw new Error("Expected SDK b2_list_group_members request");
+    const url = new URL(request.url);
 
-    expect(result.members[0].email).toBe("member@example.com");
-    expect(url.pathname).toBe("/b2api/v3/b2_list_group_members");
-    expect(url.searchParams.get("adminAccountId")).toBe("test-account-123");
-    expect(url.searchParams.get("groupId")).toBe("254");
+    expect(result[0].groupId).toBe(group.groupId);
+    expect(result[0].groupMembers).toEqual([]);
+    expect(url.searchParams.get("adminAccountId")).toBe(adminAccountId);
+    expect(url.searchParams.get("groupId")).toBe(group.groupId);
     expect(url.searchParams.get("startEmail")).toBe("a@example.com");
     expect(url.searchParams.get("maxMemberCount")).toBe("50");
-    expect((fetchSpy.mock.calls[0][1] as RequestInit).method).toBe("GET");
+    expect(request.method).toBe("GET");
   });
 
-  it("ejects a group member through the Partner API adapter when confirmed", async () => {
-    const fetchSpy = mockPartnerFetch({
-      accountId: "member-account-xyz",
-      ejected: true,
+  it("ejects a group member through SDK Partner operations when confirmed", async () => {
+    const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
+    const created = await partnerSeed.createGroupMember({
+      groupId: group.groupId,
+      memberEmail: "member@example.com",
     });
+    const member = created[0]?.groupMember;
+    if (!member) throw new Error("Expected simulator group member");
 
     const result = parseResult(
       await callTool(server, "b2_eject_group_member", {
-        adminAccountId: "test-account-123",
-        groupId: "254",
-        memberAccountId: "member-account-xyz",
+        adminAccountId,
+        groupId: group.groupId,
+        memberAccountId: member.accountId,
         email: "new@example.com",
         confirm: true,
       }),
     );
-    const init = fetchSpy.mock.calls[0][1] as RequestInit;
-    const body = JSON.parse(String(init.body));
-
-    expect(result.ejected).toBe(true);
-    expect(new URL(String(fetchSpy.mock.calls[0][0])).pathname).toBe(
-      "/b2api/v3/b2_eject_group_member",
+    const request = transport.requests.find(
+      (request) => b2EndpointName(request) === "b2_eject_group_member",
     );
-    expect(init.method).toBe("POST");
+    if (!request) throw new Error("Expected SDK b2_eject_group_member request");
+    const body = requestJson(request);
+
+    expect(result.accountId).toBe(member.accountId);
+    expect(result.email).toBe("new@example.com");
+    expect(request.method).toBe("POST");
     expect(body).toMatchObject({
-      adminAccountId: "test-account-123",
-      groupId: "254",
-      memberAccountId: "member-account-xyz",
+      adminAccountId,
+      groupId: group.groupId,
+      memberAccountId: member.accountId,
       email: "new@example.com",
     });
   });
 
+  it.each([
+    ["b2_list_groups", "b2_list_groups", {}],
+    ["b2_list_group_members", "b2_list_group_members", { groupId: "123" }],
+    [
+      "b2_eject_group_member",
+      "b2_eject_group_member",
+      { groupId: "123", memberAccountId: "member-account-xyz", confirm: true },
+    ],
+  ])(
+    "rejects mismatched adminAccountId for %s before the Partner raw request",
+    async (tool, endpoint, args) => {
+      const { adminAccountId, transport } = await usePartnerSimulator();
+      const before = transport.requests.filter(
+        (request) => b2EndpointName(request) === endpoint,
+      ).length;
+
+      const result = await callTool(server, tool, {
+        ...args,
+        adminAccountId: `${adminAccountId}-other`,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("adminAccountId");
+      expect(
+        transport.requests.filter((request) => b2EndpointName(request) === endpoint),
+      ).toHaveLength(before);
+    },
+  );
+
   it("blocks unconfirmed group member ejection before the API call", async () => {
-    const fetchSpy = mockPartnerFetch({ ejected: true });
+    const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
 
     const result = await callTool(server, "b2_eject_group_member", {
-      adminAccountId: "test-account-123",
-      groupId: "254",
+      adminAccountId,
+      groupId: group.groupId,
       memberAccountId: "member-account-xyz",
     });
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Confirmation required");
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toEqual([]);
   });
 });

@@ -18,18 +18,39 @@ import type {
   UpdateBucketRequest,
   UnfinishedLargeFile,
 } from "@backblaze-labs/b2-sdk";
-import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
-import { B2AuthManager } from "../auth.js";
-import { withCircuit } from "../utils/circuit-breaker.js";
+import {
+  accountId,
+  applicationKeyId,
+  B2PartnerAuthorizationError,
+  bucketId,
+  fileId,
+  groupId,
+  largeFileId,
+} from "@backblaze-labs/b2-sdk";
+import type {
+  EjectGroupMemberResponse,
+  ListGroupMembersResponse,
+  ListGroupsResponse,
+  PartnerAuthorizeResponse,
+  PartnerRawRequestOptions,
+} from "@backblaze-labs/b2-sdk/partner";
+import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
+import { B2AuthManager, createDefaultPartnerClient } from "../auth.js";
+import {
+  withCircuit,
+  withPartnerCircuit as withPartnerApiCircuit,
+} from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import type {
+  B2Config,
   B2AuthResponse,
   B2S3FileVersionBinding,
   B2S3FileVersionResolution,
   B2S3VersionTarget,
 } from "../utils/types.js";
 import { forEachBounded } from "../utils/concurrency.js";
-import { buildUserAgent } from "../utils/user-agent.js";
+import { isTestRuntime } from "../utils/runtime.js";
+import { abortError } from "../utils/named-error.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
 export type BucketTypeFilter = BucketType | "all";
@@ -296,6 +317,45 @@ export interface ListPartsResult {
   nextPartNumber?: number | null;
 }
 
+export interface PartnerListGroupsOptions {
+  adminAccountId: string;
+  groupName?: string;
+  startGroupId?: number;
+  maxGroupCount?: number;
+}
+
+export interface PartnerListGroupMembersOptions {
+  adminAccountId: string;
+  groupId: string;
+  startEmail?: string;
+  maxMemberCount?: number;
+}
+
+export interface PartnerEjectGroupMemberOptions {
+  adminAccountId: string;
+  groupId: string;
+  memberAccountId: string;
+  email?: string | null;
+}
+
+type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
+
+// Token lifetime is 24h but we refresh after 23h to be safe.
+const PARTNER_TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
+
+let partnerClientFactoryForTests: PartnerClientFactory | null = null;
+
+export function setB2PartnerClientFactoryForTests(factory: PartnerClientFactory | null): void {
+  if (!isTestRuntime()) {
+    throw new Error("Partner SDK client factory override is only available in tests.");
+  }
+  partnerClientFactoryForTests = factory;
+}
+
+function defaultPartnerClientFactory(config: B2Config): SdkPartnerClient {
+  return createDefaultPartnerClient(config);
+}
+
 function cloneJsonResponse<T>(value: T): T {
   // SDK simulator responses can contain shared object references that the MCP
   // sanitizer would otherwise mark as circular. B2 API payloads are JSON-only,
@@ -540,7 +600,7 @@ function toBucketFilters(auth: B2AuthResponse, options: BucketFilters): ListBuck
     accountId: accountId(auth.accountId),
     bucketId: maybeBucketId(options.bucketId),
     bucketName: options.bucketName,
-    // The native B2 API accepts the "all" wildcard, but SDK 0.2.0's type only
+    // The native B2 API accepts the "all" wildcard, but the SDK type only
     // models concrete bucket types. Keep the compatibility cast isolated here.
     bucketTypes: requestedTypes?.length
       ? (requestedTypes as unknown as ListBucketsRequest["bucketTypes"])
@@ -570,7 +630,7 @@ function normalizeLifecycleRule(rule: LifecycleRuleInput): SdkLifecycleRule {
     daysFromHidingToDeleting: rule.daysFromHidingToDeleting ?? null,
     daysFromUploadingToHiding: rule.daysFromUploadingToHiding ?? null,
   };
-  // The native API accepts this field for large-file cleanup. SDK 0.2.0's
+  // The native API accepts this field for large-file cleanup. The SDK
   // LifecycleRule type omits it, so keep the wire-compatible extension local to
   // the adapter instead of leaking it through tool handlers.
   if (rule.daysFromStartingToCancelingUnfinishedLargeFiles !== undefined) {
@@ -705,6 +765,8 @@ function normalizeEventNotificationRule(
     suspensionReason: rule.suspensionReason ?? "",
     targetConfiguration: {
       ...rule.targetConfiguration,
+      targetType: rule.targetConfiguration
+        .targetType as SdkEventNotificationRule["targetConfiguration"]["targetType"],
       customHeaders: normalizeCustomHeaders(rule.targetConfiguration.customHeaders),
     },
   };
@@ -744,67 +806,70 @@ function b2NotFound(message: string): Error {
   return Object.assign(new Error(message), { status: 404, code: "not_found" });
 }
 
-export interface NativeCallOptions {
-  method?: "GET" | "POST";
-  useDownloadUrl?: boolean;
-  apiPath?: string;
-  params?: Record<string, unknown>;
+interface PartnerGroupsCoordinates {
+  groupsApiUrl: string;
+  authToken: PartnerAuthorizeResponse["authorizationToken"];
+  adminAccountId: PartnerAuthorizeResponse["accountId"];
 }
 
-function appendQueryParams(url: URL, params: Record<string, unknown> | undefined): void {
-  if (!params) return;
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item !== undefined && item !== null) url.searchParams.append(key, String(item));
-      }
-    } else {
-      url.searchParams.set(key, String(value));
-    }
+function partnerGroupsCoordinates(auth: PartnerAuthorizeResponse): PartnerGroupsCoordinates {
+  const groupsApiUrl = auth.apiInfo.groupsApi?.groupsApiUrl;
+  if (!groupsApiUrl) {
+    throw new B2PartnerAuthorizationError(
+      "Partner API is not available; authorization did not return apiInfo.groupsApi.",
+    );
   }
+  return {
+    groupsApiUrl,
+    authToken: auth.authorizationToken,
+    adminAccountId: auth.accountId,
+  };
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
-
-function responseRequestId(headers: Headers): string | undefined {
-  return (
-    headers.get("x-bz-request-id") ??
-    headers.get("x-amz-request-id") ??
-    headers.get("x-request-id") ??
-    undefined
+function validatePartnerAdminAccount(
+  auth: PartnerAuthorizeResponse,
+  requestedAdminAccountId: string,
+): void {
+  if (String(auth.accountId) === requestedAdminAccountId) return;
+  throw new B2PartnerAuthorizationError(
+    "Partner adminAccountId must match the authorized Partner account.",
   );
 }
 
-class NativeB2HttpError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly requestId?: string;
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? abortError();
+}
 
-  constructor(status: number, body: unknown, headers: Headers) {
-    const data =
-      body && typeof body === "object" && !Array.isArray(body)
-        ? (body as Record<string, unknown>)
-        : {};
-    const code = typeof data.code === "string" && data.code ? data.code : "unknown_error";
-    const message =
-      typeof data.message === "string" && data.message
-        ? data.message
-        : `B2 API request failed with HTTP ${status}`;
-    super(message);
-    this.name = "NativeB2HttpError";
-    this.status = status;
-    this.code = code;
-    this.requestId = responseRequestId(headers);
-  }
+function raceWithCallerAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      promise.catch(() => undefined);
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      },
+    );
+  });
 }
 
 /**
@@ -812,34 +877,11 @@ class NativeB2HttpError extends Error {
  * class instead of constructing SDK clients or raw credential details.
  */
 export class B2Client {
+  private partnerClient: SdkPartnerClient | null = null;
+  private partnerAuthTime: number | null = null;
+  private partnerInflightAuth: Promise<PartnerAuthorizeResponse> | null = null;
+
   constructor(private readonly auth: B2AuthManager) {}
-
-  async call<T>(path: string, data?: unknown, options: NativeCallOptions = {}): Promise<T> {
-    return this.withNativeCircuit(async (_client, auth) => {
-      const baseUrl = options.useDownloadUrl ? auth.downloadUrl : auth.apiUrl;
-      assertB2ApiUrl(baseUrl);
-      const apiPath = options.apiPath ?? "b2api/v2";
-      const url = new URL(`${baseUrl.replace(/\/$/, "")}/${apiPath}/${path}`);
-      appendQueryParams(url, options.params);
-
-      const method = options.method ?? (data !== undefined ? "POST" : "GET");
-      const headers: Record<string, string> = {
-        Authorization: auth.authorizationToken,
-        "User-Agent": buildUserAgent(this.auth.getConfig()),
-      };
-      if (data !== undefined) headers["Content-Type"] = "application/json";
-
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: data === undefined ? undefined : JSON.stringify(data),
-        signal: currentMcpRequestSignal(),
-      });
-      const body = await readResponseBody(response);
-      if (!response.ok) throw new NativeB2HttpError(response.status, body, response.headers);
-      return body as T;
-    });
-  }
 
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
     const result = await this.withNativeCircuit((client, auth) =>
@@ -1068,6 +1110,174 @@ export class B2Client {
       parts: result.parts.map(toPartInfoResult),
       nextPartNumber: result.nextPartNumber,
     };
+  }
+
+  async listGroups(options: PartnerListGroupsOptions): Promise<ListGroupsResponse> {
+    return cloneJsonResponse(
+      await this.withPartnerCircuit(
+        { retryOnUnauthorized: true },
+        (client, auth, coordinates, requestOptions) => {
+          validatePartnerAdminAccount(auth, options.adminAccountId);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+          return client.raw.listGroups(
+            groupsApiUrl,
+            authToken,
+            {
+              adminAccountId,
+              ...(options.groupName !== undefined ? { groupName: options.groupName } : {}),
+              ...(options.startGroupId !== undefined
+                ? { startGroupId: groupId(String(options.startGroupId)) }
+                : {}),
+              ...(options.maxGroupCount !== undefined
+                ? { maxGroupCount: options.maxGroupCount }
+                : {}),
+            },
+            requestOptions,
+          );
+        },
+      ),
+    );
+  }
+
+  async listGroupMembers(
+    options: PartnerListGroupMembersOptions,
+  ): Promise<ListGroupMembersResponse> {
+    return cloneJsonResponse(
+      await this.withPartnerCircuit(
+        { retryOnUnauthorized: true },
+        (client, auth, coordinates, requestOptions) => {
+          validatePartnerAdminAccount(auth, options.adminAccountId);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+          return client.raw.listGroupMembers(
+            groupsApiUrl,
+            authToken,
+            {
+              adminAccountId,
+              groupId: groupId(options.groupId),
+              ...(options.startEmail !== undefined ? { startEmail: options.startEmail } : {}),
+              ...(options.maxMemberCount !== undefined
+                ? { maxMemberCount: options.maxMemberCount }
+                : {}),
+            },
+            requestOptions,
+          );
+        },
+      ),
+    );
+  }
+
+  async ejectGroupMember(
+    options: PartnerEjectGroupMemberOptions,
+  ): Promise<EjectGroupMemberResponse> {
+    return cloneJsonResponse(
+      await this.withPartnerCircuit(
+        { retryOnUnauthorized: false },
+        (client, auth, coordinates, requestOptions) => {
+          validatePartnerAdminAccount(auth, options.adminAccountId);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+          return client.raw.ejectGroupMember(
+            groupsApiUrl,
+            authToken,
+            {
+              adminAccountId,
+              groupId: groupId(options.groupId),
+              memberAccountId: accountId(options.memberAccountId),
+              ...(options.email !== undefined ? { email: options.email } : {}),
+            },
+            requestOptions,
+          );
+        },
+      ),
+    );
+  }
+
+  private getPartnerClient(): SdkPartnerClient {
+    this.partnerClient ??= (partnerClientFactoryForTests ?? defaultPartnerClientFactory)(
+      this.auth.getConfig(),
+    );
+    return this.partnerClient;
+  }
+
+  private partnerAuthIsValid(client: SdkPartnerClient): boolean {
+    return (
+      client.partnerAccountInfo.getAuth() !== null &&
+      this.partnerAuthTime !== null &&
+      Date.now() - this.partnerAuthTime < PARTNER_TOKEN_TTL_MS
+    );
+  }
+
+  private clearPartnerAuth(client: SdkPartnerClient): void {
+    this.partnerAuthTime = null;
+    client.partnerAccountInfo.clear();
+  }
+
+  private async getPartnerAuth(client: SdkPartnerClient): Promise<PartnerAuthorizeResponse> {
+    if (this.partnerAuthIsValid(client)) return client.partnerAccountInfo.getAuth()!;
+    this.clearPartnerAuth(client);
+
+    const callerSignal = currentMcpRequestSignal();
+    if (this.partnerInflightAuth) {
+      return raceWithCallerAbort(this.partnerInflightAuth, callerSignal);
+    }
+
+    let authorizePromise: Promise<PartnerAuthorizeResponse>;
+    authorizePromise = runWithMcpRequestSignal(undefined, () => client.authorize())
+      .then(
+        (auth) => {
+          this.partnerAuthTime = Date.now();
+          return auth;
+        },
+        (err) => {
+          this.partnerAuthTime = null;
+          throw err;
+        },
+      )
+      .finally(() => {
+        if (this.partnerInflightAuth === authorizePromise) {
+          this.partnerInflightAuth = null;
+        }
+      });
+    this.partnerInflightAuth = authorizePromise;
+
+    return raceWithCallerAbort(authorizePromise, callerSignal);
+  }
+
+  private syncPartnerAuthFromSdk(client: SdkPartnerClient, previousToken: string): void {
+    const current = client.partnerAccountInfo.getAuth();
+    if (!current || String(current.authorizationToken) === previousToken) return;
+    this.partnerAuthTime = Date.now();
+  }
+
+  private async withPartnerCircuit<T>(
+    options: { retryOnUnauthorized: boolean },
+    operation: (
+      client: SdkPartnerClient,
+      auth: PartnerAuthorizeResponse,
+      coordinates: PartnerGroupsCoordinates,
+      options?: PartnerRawRequestOptions,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return withPartnerApiCircuit(async () => {
+      const signal = currentMcpRequestSignal();
+      const client = this.getPartnerClient();
+      const auth = await this.getPartnerAuth(client);
+      const requestOptions = signal ? { signal } : undefined;
+      const runAuthorized = (authorized: PartnerAuthorizeResponse) => {
+        const coordinates = partnerGroupsCoordinates(authorized);
+        return operation(client, authorized, coordinates, requestOptions);
+      };
+      try {
+        const result = await runWithMcpRequestSignal(signal, () => runAuthorized(auth));
+        this.syncPartnerAuthFromSdk(client, String(auth.authorizationToken));
+        return result;
+      } catch (err) {
+        if (!isUnauthorized(err)) throw err;
+        this.clearPartnerAuth(client);
+        if (!options.retryOnUnauthorized) throw err;
+        const refreshedAuth = await this.getPartnerAuth(client);
+        return runWithMcpRequestSignal(signal, () => runAuthorized(refreshedAuth));
+      }
+    });
   }
 
   private async withNativeCircuit<T>(

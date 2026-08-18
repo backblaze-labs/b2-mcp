@@ -1,4 +1,4 @@
-// Temporary TypeScript-resolution shim for @backblaze-labs/b2-sdk@0.2.0.
+// Temporary TypeScript-resolution shim for @backblaze-labs/b2-sdk subpaths.
 // The package ships declarations for ./s3 and ./simulator under dist/, but this
 // repository still builds as CommonJS with classic package resolution, which
 // does not follow the package "exports" map to those subpath .d.ts files. Issue
@@ -68,6 +68,10 @@ declare module "@backblaze-labs/b2-sdk/simulator" {
     recommendedPartSize?: number;
     strictAuth?: boolean;
     authTokenTtlMs?: number;
+    partnerAuthorize?: boolean;
+    partnerApiEnabled?: boolean;
+    partnerAccountHasValidPhone?: boolean;
+    partnerAccountInGoodStanding?: boolean;
   }
 
   export class B2Simulator {
