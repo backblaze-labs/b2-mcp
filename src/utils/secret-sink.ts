@@ -24,6 +24,7 @@ const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 
 export const secretSinkFileOpsForTests = {
+  closeSync: fs.closeSync,
   fsyncSync: fs.fsyncSync,
   unlinkSync: fs.unlinkSync,
 };
@@ -258,20 +259,41 @@ export function appendSecretSinkRecord(
     });
     fsyncParentDirectory(parent);
     const originalSize = fs.fstatSync(fd).size;
+    let committed = false;
+    let operationError: unknown;
+    let closeError: unknown;
     try {
       writeAll(fd, `${JSON.stringify(record)}\n`);
       secretSinkFileOpsForTests.fsyncSync(fd);
+      committed = true;
     } catch (err) {
+      operationError = err;
       try {
         fs.ftruncateSync(fd, originalSize);
         secretSinkFileOpsForTests.fsyncSync(fd);
       } catch {
         // Best-effort rollback only; the caller still receives the original sink failure.
       }
-      throw err;
     } finally {
-      fs.closeSync(fd);
+      try {
+        secretSinkFileOpsForTests.closeSync(fd);
+      } catch (err) {
+        closeError = err;
+        if (committed) {
+          logger.warn(
+            { err, tool, secretSink: { type: "file", path: sink.filePath } },
+            "secret_sink.close_failed_after_commit",
+          );
+        } else if (operationError !== undefined) {
+          logger.warn(
+            { err, tool, secretSink: { type: "file", path: sink.filePath } },
+            "secret_sink.close_failed_before_commit",
+          );
+        }
+      }
     }
+    if (operationError !== undefined) throw operationError;
+    if (closeError !== undefined && !committed) throw closeError;
   } finally {
     releaseSecretSinkClaimBestEffort(appendLock, {
       tool,
@@ -545,6 +567,22 @@ function appendLockIsStale(lockPath: string): boolean {
 }
 
 function reclaimStaleAppendLock(lockPath: string, parent: string, tool: string): boolean {
+  const reclaimLock = { lockPath: `${lockPath}.reclaim`, parent };
+  try {
+    createExclusiveLockFile(reclaimLock.lockPath, {
+      ts: isoTimestampSeconds(),
+      tool,
+      pid: process.pid,
+      status: "reclaiming_append_lock",
+    });
+    fsyncParentDirectory(parent);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EEXIST") {
+      logger.warn({ err, tool, lockPath: reclaimLock.lockPath }, "secret_sink.reclaim_lock_failed");
+    }
+    return false;
+  }
+
   try {
     if (!appendLockIsStale(lockPath)) return false;
     secretSinkFileOpsForTests.unlinkSync(lockPath);
@@ -554,6 +592,12 @@ function reclaimStaleAppendLock(lockPath: string, parent: string, tool: string):
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return true;
     return false;
+  } finally {
+    releaseSecretSinkClaimBestEffort(reclaimLock, {
+      tool,
+      secretSink: { type: "file", path: lockPath },
+      lockPath: reclaimLock.lockPath,
+    });
   }
 }
 

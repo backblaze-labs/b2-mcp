@@ -297,6 +297,27 @@ describe("secret sink file writer", () => {
     expect(readFileSync(file, "utf8")).toBe("");
   });
 
+  it("returns a committed pointer when close fails after fsync", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const close = secretSinkFileOpsForTests.closeSync;
+    let closeCalls = 0;
+    vi.spyOn(secretSinkFileOpsForTests, "closeSync").mockImplementation((fd) => {
+      closeCalls++;
+      if (closeCalls === 1) throw new Error("simulated close failure");
+      return close(fd);
+    });
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+
+    const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKey: "B2_MCP_CANARY_SECRET_close_after_commit",
+    });
+
+    expect(pointer.recordId).toEqual(expect.any(String));
+    expect(readFileSync(file, "utf8")).toContain(pointer.recordId);
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("close_failed_after_commit");
+  });
+
   it("reclaims a stale append lock without touching pending idempotency claims", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const dir = tempDir();
