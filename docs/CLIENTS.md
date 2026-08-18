@@ -61,6 +61,22 @@ args:    --transport stdio
 env:     B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
 ```
 
+Optional local log file:
+
+```
+env:     B2_LOG_FILE=/absolute/path/to/b2-mcp.log
+```
+
+`B2_LOG_FILE` appends redacted structured JSON logs to that file instead of
+stderr. This is useful for stdio clients that hide child-process stderr. The
+path must be absolute. The file is created with owner-only permissions if it
+does not exist; the parent directory must already exist and be writable. Use
+operator-managed rename/create rotation for long-running local processes, then
+send `SIGHUP` to the b2-mcp process so it reopens the active file.
+Logs are never written to stdout. `B2_LOG_FILE` is POSIX-only for now; on
+Windows it fails at startup because owner-only ACLs are not enforced by this
+implementation.
+
 ### Claude Desktop
 
 `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) / `%APPDATA%\Claude\claude_desktop_config.json` (Windows):

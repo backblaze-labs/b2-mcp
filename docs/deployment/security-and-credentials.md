@@ -35,6 +35,8 @@ version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
     retry. Under `allow`, both elicitation and the confirm gate are skipped.
 12. Never log B2 credentials, bearer tokens, presigned URLs, authorization
     responses, or provider deployment-bypass tokens.
+    If `B2_LOG_FILE` is set, structured logs move off stderr/stdout and provider
+    log capture will not see them unless a log agent tails that file directly.
 13. Create, rotate, revoke, and tear down B2 keys outside the MCP tool flow
     until a reviewed out-of-band secret sink exists.
 14. Configure protected live deployment smokes with a GitHub Environment so

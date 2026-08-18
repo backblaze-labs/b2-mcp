@@ -55,6 +55,9 @@ pnpm run build          # produces dist/ — required before first run
 ```
 
 Replace the path with where you put the folder, then restart Claude Desktop — the B2 tools appear.
+To persist local stdio logs from clients that do not expose child-process
+stderr, add `"B2_LOG_FILE": "/absolute/path/to/b2-mcp.log"` to the same `env`
+block.
 
 > **One non-master application key covers everything active** — B2 native, S3, and key management. The Partner/Groups tool names are currently unavailable SDK-gap stubs; configuring `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` does not activate them until the upstream SDK support lands. B2's S3 endpoint rejects master keys, which is why the application key is the primary credential. See [Configuration](#configuration) for the full list.
 
@@ -133,6 +136,7 @@ the healthcheck probes the same port the server binds.
 | `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                               |
 | `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
+| `B2_LOG_FILE`                                                 | —                     | stderr                | Optional path for redacted structured JSON logs. When set, the file replaces stderr; stdout is never used for logs          |
 | `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy alias retained for compatibility; S3 tools use the authorized `B2_APPLICATION_KEY_*` credential scope                |
 | `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments  |
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
@@ -150,6 +154,33 @@ the healthcheck probes the same port the server binds.
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size. Cache identity is secret-bound; log labels are non-secret fingerprints   |
 
 A ready-to-copy [`.env.example`](.env.example) lists these. HTTP-only file-access vars (`B2_ALLOW_LOCAL_FILES`, `B2_FILE_ROOT`) are covered in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+
+---
+
+## Logging
+
+b2-mcp emits one structured JSON log object per line. Logs default to stderr so
+the stdio transport's stdout channel stays reserved for MCP protocol frames.
+
+Set `B2_LOG_FILE=/absolute/path/to/b2-mcp.log` to append those same redacted JSON
+lines to a file instead of stderr. The path must be absolute. The file is created
+with owner-only permissions when it does not exist; its parent directory must
+already exist and be writable. Existing log files must be regular files, must
+not be symlinks or hard links, and must be owned by the current user. Owned
+pre-existing files are tightened to owner-only permissions at startup. A bad
+path fails at startup with a clear `B2_LOG_FILE` error. Runtime write failures
+are reported to stderr, and subsequent structured log lines fall back to stderr.
+`B2_LOG_FILE` is currently supported only on POSIX platforms; Windows startup
+fails clearly because this implementation does not enforce owner-only ACLs.
+
+File logging does not mirror to stderr by default. Because `B2_LOG_FILE` is an
+append-only file sink with no built-in rotation or retention, use
+operator-managed rotation before enabling it for a long-running process. Do not
+enable it on an internet-facing HTTP transport unless the host has a size and
+retention policy and a log shipper tails the file directly. For external
+`logrotate`, use rename/create rotation and send `SIGHUP` to the b2-mcp process
+after rotation so the file destination is reopened. Copytruncate is not
+recommended.
 
 ---
 

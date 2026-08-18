@@ -69,6 +69,8 @@ region, deployed commit, and result.
 
 Use Render logs only after confirming redaction. Do not log B2 credentials,
 OAuth tokens, or presigned URLs.
+Leave `B2_LOG_FILE` unset unless an attached log agent tails that file into the
+same retention path; when set, b2-mcp stops writing structured logs to stderr.
 
 ## Scaling
 

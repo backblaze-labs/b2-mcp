@@ -25,12 +25,13 @@
 import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import * as serverModule from "./server.js";
 import { CredentialResolutionError } from "./credentials.js";
-import { logger } from "./utils/logger.js";
+import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import { VERSION } from "./version.js";
 import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { PortUsageError } from "./utils/config.js";
 
 export async function startStdio(): Promise<void> {
+  initLogging();
   const config = serverModule.loadConfig();
   // Right-size the surface to the key's capabilities (null → full surface).
   let capabilities: string[] | null;
@@ -87,11 +88,13 @@ if (require.main === module) {
   runCli().catch((err) => {
     if (err instanceof CliUsageError || err instanceof PortUsageError) {
       process.stderr.write(`b2-mcp: ${err.message}\n\n${helpText()}\n`);
+      flushLogsSync();
       process.exit(2);
     }
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`b2-mcp: ${message}\n`);
     logger.fatal({ err: message }, "server.fatal");
+    flushLogsSync();
     process.exit(1);
   });
 }

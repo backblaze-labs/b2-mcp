@@ -71,6 +71,8 @@ docs/deployment/security-and-credentials.md.
 
 Ship stdout/stderr to CloudWatch Logs. Configure retention and redaction review
 before production. Do not log B2 credentials, bearer tokens, or presigned URLs.
+Leave `B2_LOG_FILE` unset unless a sidecar or host agent tails that file into
+CloudWatch; when set, b2-mcp stops writing structured logs to stderr.
 
 ## Scaling
 
