@@ -71,7 +71,8 @@ env:     B2_LOG_FILE=/absolute/path/to/b2-mcp.log
 stderr. This is useful for stdio clients that hide child-process stderr. The
 path must be absolute. The file is created with owner-only permissions if it
 does not exist; the parent directory must already exist and be writable. Use
-operator-managed rotation with `copytruncate` for long-running local processes.
+operator-managed rename/create rotation for long-running local processes, then
+send `SIGHUP` to the b2-mcp process so it reopens the active file.
 Logs are never written to stdout.
 
 ### Claude Desktop

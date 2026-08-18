@@ -2,8 +2,10 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -37,6 +39,20 @@ const rootImportSource = `
 import "./src/index";
 
 console.log("imported");
+`;
+
+const httpShutdownSource = `
+import { startHttp } from "./src/http-server";
+
+startHttp({ port: 0 })
+  .then(() => {
+    process.kill(process.pid, "SIGTERM");
+    setTimeout(() => process.exit(3), 5_000);
+  })
+  .catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
 `;
 
 function probeEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -91,10 +107,12 @@ const loggerEnvKeys = ["B2_LOG_FILE", "LOG_LEVEL", "NODE_ENV"] as const;
 async function withFreshLogger<T>(
   env: NodeJS.ProcessEnv,
   run: (loggerModule: LoggerModule) => T | Promise<T>,
+  beforeImport?: () => void | Promise<void>,
 ): Promise<T> {
   const previousEnv = new Map<(typeof loggerEnvKeys)[number], string | undefined>(
     loggerEnvKeys.map((key) => [key, process.env[key]]),
   );
+  const sighupListeners = new Set(process.listeners("SIGHUP"));
 
   vi.resetModules();
   delete process.env.B2_LOG_FILE;
@@ -103,9 +121,15 @@ async function withFreshLogger<T>(
   Object.assign(process.env, env);
 
   try {
+    await beforeImport?.();
     const loggerModule = await import("../../src/utils/logger");
     return await run(loggerModule);
   } finally {
+    for (const listener of process.listeners("SIGHUP")) {
+      if (!sighupListeners.has(listener)) {
+        process.off("SIGHUP", listener as NodeJS.SignalsListener);
+      }
+    }
     for (const [key, value] of previousEnv) {
       if (value === undefined) {
         delete process.env[key];
@@ -176,6 +200,94 @@ describe("logger destination", () => {
     }
   });
 
+  it("configures file destinations for asynchronous request-path writes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-async-coverage-"));
+    const logFile = join(dir, "server.log");
+    const fakeDestination = {
+      flush: vi.fn((cb?: (err?: Error) => void) => cb?.()),
+      flushSync: vi.fn(),
+      on: vi.fn(() => fakeDestination),
+      write: vi.fn(() => true),
+    };
+    const fakePino = Object.assign(
+      vi.fn(
+        (
+          _options: unknown,
+          destination: {
+            flush?: (cb?: (err?: Error) => void) => void;
+            write: (line: string) => void;
+          },
+        ) => ({
+          flush: (cb?: (err?: Error) => void) => {
+            destination.flush?.(cb);
+          },
+          info: (message: string) => {
+            destination.write(`${message}\n`);
+          },
+        }),
+      ),
+      {
+        destination: vi.fn(() => fakeDestination),
+      },
+    );
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ initLogging, logger }) => {
+          initLogging();
+          logger.info({ applicationKey: "logger-secret-value" }, "logger.async");
+          await flushPinoLogger(logger);
+        },
+        () => {
+          vi.doMock("pino", () => ({ default: fakePino }));
+        },
+      );
+
+      expect(fakePino.destination).toHaveBeenCalledWith(
+        expect.objectContaining({
+          minLength: expect.any(Number),
+          periodicFlush: expect.any(Number),
+          sync: false,
+        }),
+      );
+    } finally {
+      vi.doUnmock("pino");
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reopens B2_LOG_FILE on SIGHUP after rename rotation", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-rotate-"));
+    const logFile = join(dir, "server.log");
+    const rotatedLogFile = join(dir, "server.log.1");
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ flushLogsSync, initLogging, logger }) => {
+          initLogging();
+          logger.info("logger.before-rotate");
+          flushLogsSync();
+
+          renameSync(logFile, rotatedLogFile);
+          process.emit("SIGHUP", "SIGHUP");
+
+          logger.info("logger.after-rotate");
+          flushLogsSync();
+        },
+      );
+
+      expect(readFileSync(rotatedLogFile, "utf8")).toContain("logger.before-rotate");
+      const activeLog = readFileSync(logFile, "utf8");
+      expect(activeLog).toContain("logger.after-rotate");
+      expect(activeLog).not.toContain("logger.before-rotate");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps stderr as the initialized default without B2_LOG_FILE", async () => {
     const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
@@ -208,14 +320,23 @@ describe("logger destination", () => {
     const logFile = join(dir, "server.log");
 
     try {
-      writeFileSync(logFile, "", { mode: 0o600 });
-      chmodSync(logFile, 0o644);
+      if (existsSync("/dev/null")) {
+        await expect(
+          withFreshLogger({ B2_LOG_FILE: "/dev/null" }, async ({ initLogging }) => {
+            initLogging();
+          }),
+        ).rejects.toThrow("B2_LOG_FILE must point to a regular file");
+      }
 
+      const hardLinkTarget = join(dir, "hardlink-target.log");
+      const hardLinkPath = join(dir, "hardlink.log");
+      writeFileSync(hardLinkTarget, "", { mode: 0o600 });
+      linkSync(hardLinkTarget, hardLinkPath);
       await expect(
-        withFreshLogger({ B2_LOG_FILE: logFile }, async ({ initLogging }) => {
+        withFreshLogger({ B2_LOG_FILE: hardLinkPath }, async ({ initLogging }) => {
           initLogging();
         }),
-      ).rejects.toThrow("B2_LOG_FILE must not be readable or writable by group or other users");
+      ).rejects.toThrow("B2_LOG_FILE must not be a hard link");
 
       const symlinkPath = join(dir, "symlink.log");
       symlinkSync(logFile, symlinkPath);
@@ -232,6 +353,197 @@ describe("logger destination", () => {
         }),
       ).rejects.toThrow("B2_LOG_FILE is not writable");
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails clearly when the pino file destination cannot be created", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-pino-destination-fail-"));
+    const logFile = join(dir, "server.log");
+    const fakePino = vi.fn((_options: unknown, destination: { write: (line: string) => void }) => ({
+      info: (message: string) => {
+        destination.write(`${message}\n`);
+      },
+    }));
+
+    try {
+      await expect(
+        withFreshLogger(
+          { B2_LOG_FILE: logFile },
+          async ({ initLogging }) => {
+            initLogging();
+          },
+          () => {
+            vi.doMock("pino", () => ({ default: fakePino }));
+          },
+        ),
+      ).rejects.toThrow("pino destination is unavailable");
+    } finally {
+      vi.doUnmock("pino");
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("tightens permissions on owned pre-existing log files", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-permissive-log-coverage-"));
+    const logFile = join(dir, "server.log");
+
+    try {
+      writeFileSync(logFile, "", { mode: 0o600 });
+      chmodSync(logFile, 0o644);
+
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ flushLogsSync, initLogging, logger }) => {
+          initLogging();
+          logger.info("logger.chmod");
+          flushLogsSync();
+        },
+      );
+
+      expect(statSync(logFile).mode & 0o077).toBe(0);
+      expect(readFileSync(logFile, "utf8")).toContain("logger.chmod");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to stderr after a file destination write error", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-log-fallback-"));
+    const logFile = join(dir, "server.log");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let errorListener: ((err: Error) => void) | undefined;
+    const fakeDestination = {
+      flush: vi.fn((cb?: (err?: Error) => void) => cb?.()),
+      flushSync: vi.fn(),
+      on: vi.fn((event: "error", listener: (err: Error) => void) => {
+        if (event === "error") errorListener = listener;
+        return fakeDestination;
+      }),
+      write: vi.fn(() => {
+        errorListener?.(new Error("disk full"));
+        return true;
+      }),
+    };
+    const fakePino = Object.assign(
+      vi.fn(
+        (
+          _options: unknown,
+          destination: { flush?: () => void; write: (line: string) => void },
+        ) => ({
+          flush: (cb?: (err?: Error) => void) => {
+            destination.flush?.();
+            cb?.();
+          },
+          info: (message: string) => {
+            destination.write(`${JSON.stringify({ level: "info", msg: message })}\n`);
+          },
+        }),
+      ),
+      {
+        destination: vi.fn(() => fakeDestination),
+      },
+    );
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ initLogging, logger }) => {
+          initLogging();
+          logger.info("logger.first");
+          logger.info("logger.second");
+        },
+        () => {
+          vi.doMock("pino", () => ({ default: fakePino }));
+        },
+      );
+
+      const stderrOutput = stderrWrite.mock.calls.map(([line]) => String(line)).join("");
+      expect(stderrOutput).toContain("B2_LOG_FILE write failed");
+      expect(stderrOutput).toContain("falling back to stderr");
+      expect(stderrOutput).toContain("logger.second");
+    } finally {
+      vi.doUnmock("pino");
+      stderrWrite.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to stderr when a file destination write throws", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-log-throw-fallback-"));
+    const logFile = join(dir, "server.log");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const fakeDestination = {
+      flush: vi.fn((cb?: (err?: Error) => void) => cb?.()),
+      flushSync: vi.fn(),
+      on: vi.fn(() => fakeDestination),
+      write: vi.fn(() => {
+        throw new Error("write boom");
+      }),
+    };
+    const fakePino = Object.assign(
+      vi.fn((_options: unknown, destination: { write: (line: string) => void }) => ({
+        info: (message: string) => {
+          destination.write(`${JSON.stringify({ level: "info", msg: message })}\n`);
+        },
+      })),
+      {
+        destination: vi.fn(() => fakeDestination),
+      },
+    );
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ initLogging, logger }) => {
+          initLogging();
+          logger.info("logger.throw");
+        },
+        () => {
+          vi.doMock("pino", () => ({ default: fakePino }));
+        },
+      );
+
+      const stderrOutput = stderrWrite.mock.calls.map(([line]) => String(line)).join("");
+      expect(stderrOutput).toContain("B2_LOG_FILE write failed");
+      expect(stderrOutput).toContain("logger.throw");
+    } finally {
+      vi.doUnmock("pino");
+      stderrWrite.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to stderr when SIGHUP reopen fails", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-log-reopen-fallback-"));
+    const logFile = join(dir, "server.log");
+    const rotatedLogFile = join(dir, "server.log.1");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ flushLogsSync, initLogging, logger }) => {
+          initLogging();
+          logger.info("logger.before-failed-reopen");
+          flushLogsSync();
+
+          renameSync(logFile, rotatedLogFile);
+          symlinkSync(rotatedLogFile, logFile);
+          process.emit("SIGHUP", "SIGHUP");
+
+          logger.info("logger.after-failed-reopen");
+        },
+      );
+
+      const stderrOutput = stderrWrite.mock.calls.map(([line]) => String(line)).join("");
+      expect(stderrOutput).toContain("B2_LOG_FILE reopen failed");
+      expect(stderrOutput).toContain("falling back to stderr");
+      expect(stderrOutput).toContain("logger.after-failed-reopen");
+    } finally {
+      stderrWrite.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -313,7 +625,7 @@ describe("logger destination", () => {
     expect(result.stderr).toContain("B2_LOG_FILE must be an absolute path");
   });
 
-  it("rejects permissive existing log files", () => {
+  it("tightens permissive existing log files", () => {
     if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-permissive-log-"));
     const logFile = join(dir, "server.log");
@@ -324,11 +636,11 @@ describe("logger destination", () => {
 
       const result = runProbe(logInfoSource, { B2_LOG_FILE: logFile });
 
-      expect(result.status).toBe(1);
+      expect(result.status).toBe(0);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toContain(
-        "B2_LOG_FILE must not be readable or writable by group or other users",
-      );
+      expect(result.stderr).toBe("");
+      expect(statSync(logFile).mode & 0o077).toBe(0);
+      expect(readFileSync(logFile, "utf8")).toContain("logger.probe");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -383,6 +695,26 @@ describe("logger destination", () => {
     }
   });
 
+  it("rejects hard-linked log files", () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-hardlink-log-"));
+    const target = join(dir, "target.log");
+    const logFile = join(dir, "server.log");
+
+    try {
+      writeFileSync(target, "", { mode: 0o600 });
+      linkSync(target, logFile);
+
+      const result = runProbe(logInfoSource, { B2_LOG_FILE: logFile });
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("B2_LOG_FILE must not be a hard link");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("writes fatal entry-point logs before process.exit without an explicit flush", async () => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-fatal-log-"));
     const logFile = join(dir, "server.log");
@@ -403,6 +735,37 @@ describe("logger destination", () => {
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes clean HTTP shutdown logs before process.exit without an explicit flush", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-shutdown-log-"));
+    const logFile = join(dir, "server.log");
+
+    try {
+      const result = runProbe(httpShutdownSource, { B2_LOG_FILE: logFile });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("");
+
+      const messages = readFileSync(logFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line).msg);
+      expect(messages).toContain("server.shutdown");
+      expect(messages).toContain("server.closed");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prints help and version even when B2_LOG_FILE is invalid", () => {
+    for (const args of [["--help"], ["--version"]]) {
+      const result = runEntrypoint(args, { B2_LOG_FILE: "relative-b2-mcp.log" });
+
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).not.toBe("");
     }
   });
 });

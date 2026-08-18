@@ -166,17 +166,19 @@ Set `B2_LOG_FILE=/absolute/path/to/b2-mcp.log` to append those same redacted JSO
 lines to a file instead of stderr. The path must be absolute. The file is created
 with owner-only permissions when it does not exist; its parent directory must
 already exist and be writable. Existing log files must be regular files, must
-not be symlinks, and must not be readable or writable by group or other users. A
-bad path fails at startup with a clear `B2_LOG_FILE` error. Runtime write
-failures are reported to stderr.
+not be symlinks or hard links, and must be owned by the current user. Owned
+pre-existing files are tightened to owner-only permissions at startup. A bad
+path fails at startup with a clear `B2_LOG_FILE` error. Runtime write failures
+are reported to stderr, and subsequent structured log lines fall back to stderr.
 
 File logging does not mirror to stderr by default. Because `B2_LOG_FILE` is an
 append-only file sink with no built-in rotation or retention, use
 operator-managed rotation before enabling it for a long-running process. Do not
 enable it on an internet-facing HTTP transport unless the host has a size and
-retention policy. For external `logrotate`, use `copytruncate`; rename-based
-rotation requires a process restart because the server keeps the opened file
-descriptor.
+retention policy and a log shipper tails the file directly. For external
+`logrotate`, use rename/create rotation and send `SIGHUP` to the b2-mcp process
+after rotation so the file destination is reopened. Copytruncate is not
+recommended.
 
 ---
 

@@ -70,6 +70,8 @@ deployed commit, and result.
 
 Use `fly logs` and external log sinks after redaction review. Do not log B2
 credentials, OAuth tokens, or presigned URLs.
+Leave `B2_LOG_FILE` unset unless a log shipper tails that file into the same
+retention path; when set, b2-mcp stops writing structured logs to stderr.
 
 ## Scaling
 

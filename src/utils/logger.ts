@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, openSync } from "node:fs";
+import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import pino, { type DestinationStream } from "pino";
 import { VERSION } from "../version.js";
@@ -7,6 +7,9 @@ import { LOGGER_SECRET_REDACTION_PATHS, SECRET_SANITIZER_REDACTION } from "./sec
 const isTest = process.env.NODE_ENV === "test";
 const LOG_FILE_MODE = 0o600;
 const GROUP_OR_OTHER_PERMISSIONS = 0o077;
+const LOG_FILE_MIN_LENGTH = 4096;
+const LOG_FILE_PERIODIC_FLUSH_MS = 1000;
+const LOG_FILE_FAILURE_REPORT_INTERVAL_MS = 60_000;
 
 const options = {
   level: process.env.LOG_LEVEL ?? (isTest ? "silent" : "info"),
@@ -24,19 +27,33 @@ type ManagedDestination = DestinationStream & {
   flush?: (cb?: (err?: Error) => void) => void;
   flushSync?: () => void;
   on?: (event: "error", listener: (err: Error) => void) => ManagedDestination;
+  off?: (event: "error", listener: (err: Error) => void) => ManagedDestination;
+  removeListener?: (event: "error", listener: (err: Error) => void) => ManagedDestination;
+  destroy?: () => void;
 };
 
 type PinoDestinationOptions = {
   dest: number | string;
   sync: boolean;
+  minLength?: number;
+  mode?: number;
+  periodicFlush?: number;
 };
 
-let activeDestination: ManagedDestination = {
+type RotatableFileDestination = ManagedDestination & {
+  reopenForRotation: () => void;
+};
+
+const stderrDestination: ManagedDestination = {
   write: (line) => process.stderr.write(line),
   flush: (cb) => cb?.(),
   flushSync: () => undefined,
 };
+
+let activeDestination: ManagedDestination = stderrDestination;
+let activeFileDestination: RotatableFileDestination | undefined;
 let loggingInitialized = false;
+let sighupHandler: (() => void) | undefined;
 
 const destinationProxy: ManagedDestination = {
   write: (line) => activeDestination.write(line),
@@ -74,6 +91,35 @@ function failLogFile(message: string): never {
   throw new Error(message);
 }
 
+function currentUid(): number | undefined {
+  return typeof process.getuid === "function" ? process.getuid() : undefined;
+}
+
+function normalizeExistingLogFile(logFile: string, fd: number): void {
+  let stats = fstatSync(fd);
+  if (!stats.isFile()) {
+    failLogFile(`B2_LOG_FILE must point to a regular file: ${logFile}`);
+  }
+  if (stats.nlink > 1) {
+    failLogFile(`B2_LOG_FILE must not be a hard link: ${logFile}`);
+  }
+
+  const uid = currentUid();
+  if (uid !== undefined && stats.uid !== uid) {
+    failLogFile(`B2_LOG_FILE must be owned by the current user: ${logFile}`);
+  }
+
+  if ((stats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
+    fchmodSync(fd, LOG_FILE_MODE);
+    stats = fstatSync(fd);
+    if ((stats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
+      failLogFile(
+        `B2_LOG_FILE must not be readable or writable by group or other users: ${logFile}`,
+      );
+    }
+  }
+}
+
 function openLogFile(logFile: string): number {
   if (!isAbsolute(logFile)) {
     failLogFile(`B2_LOG_FILE must be an absolute path: ${logFile}`);
@@ -90,15 +136,7 @@ function openLogFile(logFile: string): number {
         constants.O_NONBLOCK,
       LOG_FILE_MODE,
     );
-    const stats = fstatSync(fd);
-    if (!stats.isFile()) {
-      failLogFile(`B2_LOG_FILE must point to a regular file: ${logFile}`);
-    }
-    if ((stats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
-      failLogFile(
-        `B2_LOG_FILE must not be readable or writable by group or other users: ${logFile}`,
-      );
-    }
+    normalizeExistingLogFile(logFile, fd);
     return fd;
   } catch (err) {
     if (fd !== undefined) closeSync(fd);
@@ -112,23 +150,129 @@ function openLogFile(logFile: string): number {
   }
 }
 
-function fileDestination(logFile: string): ManagedDestination {
+function createFileStream(logFile: string): ManagedDestination {
   const fd = openLogFile(logFile);
-  let destination: ManagedDestination;
   try {
-    destination = createPinoDestination({ dest: fd, sync: true });
+    return createPinoDestination({
+      dest: fd,
+      mode: LOG_FILE_MODE,
+      minLength: LOG_FILE_MIN_LENGTH,
+      periodicFlush: LOG_FILE_PERIODIC_FLUSH_MS,
+      sync: false,
+    });
   } catch (err) {
     closeSync(fd);
     throw err;
   }
+}
 
-  let writeFailureReported = false;
-  destination.on?.("error", (err) => {
-    if (writeFailureReported) return;
-    writeFailureReported = true;
-    process.stderr.write(`b2-mcp: B2_LOG_FILE write failed for ${logFile}: ${errorDetail(err)}\n`);
-  });
-  return destination;
+function destroyFileStream(destination: ManagedDestination): void {
+  try {
+    destination.destroy?.call(destination);
+  } catch (err) {
+    process.stderr.write(`b2-mcp: log destination close failed: ${errorDetail(err)}\n`);
+  }
+}
+
+function fileDestination(logFile: string): RotatableFileDestination {
+  let destination = createFileStream(logFile);
+  let fallbackError: Error | undefined;
+  let lastFailureReportAt = 0;
+
+  const reportFailure = (err: Error, operation: string): void => {
+    fallbackError = err;
+    const now = Date.now();
+    if (
+      lastFailureReportAt === 0 ||
+      now - lastFailureReportAt >= LOG_FILE_FAILURE_REPORT_INTERVAL_MS
+    ) {
+      lastFailureReportAt = now;
+      process.stderr.write(
+        `b2-mcp: B2_LOG_FILE ${operation} failed for ${logFile}: ${errorDetail(err)}; falling back to stderr\n`,
+      );
+    }
+  };
+
+  const attachErrorHandler = (stream: ManagedDestination): ((err: Error) => void) => {
+    const listener = (err: Error) => {
+      reportFailure(err, "write");
+    };
+    stream.on?.("error", listener);
+    return listener;
+  };
+
+  const detachErrorHandler = (stream: ManagedDestination, listener: (err: Error) => void): void => {
+    if (typeof stream.off === "function") {
+      stream.off("error", listener);
+      return;
+    }
+    stream.removeListener?.("error", listener);
+  };
+
+  let errorListener = attachErrorHandler(destination);
+
+  const managedDestination: RotatableFileDestination = {
+    write: (line) => {
+      if (fallbackError) {
+        reportFailure(fallbackError, "write");
+        return stderrDestination.write(line);
+      }
+      try {
+        return destination.write(line);
+      } catch (err) {
+        const failure = err instanceof Error ? err : new Error(String(err));
+        reportFailure(failure, "write");
+        return stderrDestination.write(line);
+      }
+    },
+    flush: (cb) => {
+      if (fallbackError) {
+        cb?.();
+        return;
+      }
+      if (typeof destination.flush === "function") {
+        destination.flush.call(destination, cb);
+        return;
+      }
+      cb?.();
+    },
+    flushSync: () => {
+      if (fallbackError) return;
+      try {
+        destination.flushSync?.call(destination);
+      } catch (err) {
+        const failure = err instanceof Error ? err : new Error(String(err));
+        reportFailure(failure, "flush");
+      }
+    },
+    reopenForRotation: () => {
+      try {
+        destination.flushSync?.call(destination);
+        const nextDestination = createFileStream(logFile);
+        const previousDestination = destination;
+        const previousErrorListener = errorListener;
+        destination = nextDestination;
+        fallbackError = undefined;
+        lastFailureReportAt = 0;
+        errorListener = attachErrorHandler(destination);
+        detachErrorHandler(previousDestination, previousErrorListener);
+        destroyFileStream(previousDestination);
+      } catch (err) {
+        const failure = err instanceof Error ? err : new Error(String(err));
+        reportFailure(failure, "reopen");
+      }
+    },
+  };
+
+  return managedDestination;
+}
+
+function installSighupHandler(): void {
+  if (sighupHandler) return;
+  sighupHandler = () => {
+    activeFileDestination?.reopenForRotation();
+  };
+  process.on("SIGHUP", sighupHandler);
 }
 
 /**
@@ -139,7 +283,9 @@ export function initLogging(env: NodeJS.ProcessEnv = process.env): void {
   if (loggingInitialized) return;
   const logFile = env.B2_LOG_FILE;
   if (logFile) {
-    activeDestination = fileDestination(logFile);
+    activeFileDestination = fileDestination(logFile);
+    activeDestination = activeFileDestination;
+    installSighupHandler();
   }
   loggingInitialized = true;
 }
