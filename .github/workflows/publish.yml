@@ -81,11 +81,13 @@ jobs:
           PUBLISH_REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Private repo: authenticate manual git remote reads (ls-remote/fetch)
-          # without persisting checkout credentials.
-          git config --global "http.${GITHUB_SERVER_URL}/.extraheader" \
-            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
+          # Private repo: authenticate the resolver's manual git remote reads
+          # (ls-remote/fetch) via scoped GIT_CONFIG_* env so no git config leaks
+          # into the next checkout (a leaked auth header returns HTTP 400).
           PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
+          GIT_CONFIG_COUNT=1 \
+          GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader" \
+          GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')" \
           node scripts/resolve-publish-ref.mjs \
             --tag "${PUBLISH_TAG}" \
             --remote "${PUBLISH_REMOTE}" \
