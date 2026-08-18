@@ -5,6 +5,12 @@ import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
 
+function runGit(cwd: string, args: string[]): string {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
+  return result.stdout.trim();
+}
+
 function withFixture(run: (fixtureRoot: string) => void): void {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-release-scripts-"));
   try {
@@ -108,6 +114,47 @@ describe("release scripts", () => {
       expect(changelog).toContain(
         "[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.2.0",
       );
+    });
+  });
+
+  it("runs the pnpm version changelog lifecycle with install scripts disabled", () => {
+    withFixture((fixtureRoot) => {
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      writeFileSync(
+        packagePath,
+        JSON.stringify(
+          {
+            ...pkg,
+            scripts: {
+              version: `node ${join(root, "scripts/cut-changelog.mjs")} && git add CHANGELOG.md`,
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      writeFileSync(join(fixtureRoot, ".npmrc"), "ignore-scripts=true\n");
+      runGit(fixtureRoot, ["init", "-b", "main"]);
+      runGit(fixtureRoot, ["config", "user.email", "release@example.com"]);
+      runGit(fixtureRoot, ["config", "user.name", "Release Test"]);
+      runGit(fixtureRoot, ["add", "."]);
+      runGit(fixtureRoot, ["commit", "-m", "initial"]);
+
+      const result = spawnSync(
+        "pnpm",
+        ["version", "patch", "--no-git-tag-version", "--no-commit-hooks"],
+        { cwd: fixtureRoot, env: scriptEnv(fixtureRoot), encoding: "utf8" },
+      );
+      const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
+      const bumpedPackage = JSON.parse(readFileSync(packagePath, "utf8"));
+      const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.1.1]");
+      expect(bumpedPackage.version).toBe("0.1.1");
+      expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
+      expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
     });
   });
 
