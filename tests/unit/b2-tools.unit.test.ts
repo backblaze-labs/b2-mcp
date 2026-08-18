@@ -54,6 +54,16 @@ function readSecretLedger(file: string): any {
   return JSON.parse(lines[lines.length - 1]);
 }
 
+function failSecretRecordFsyncOnce(): void {
+  const fsync = secretSinkFileOpsForTests.fsyncSync;
+  let calls = 0;
+  vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+    calls++;
+    if (calls === 3) throw new Error("simulated sink fsync failure");
+    return fsync(fd);
+  });
+}
+
 async function seedClient(): Promise<SdkB2Client> {
   const client = new SdkB2Client({
     applicationKeyId: testConfig.applicationKeyId,
@@ -837,9 +847,7 @@ describe("durable-secret-producing tools", () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
     writeFileSync(secretFile, "", { mode: 0o600 });
-    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
-      throw new Error("simulated sink fsync failure");
-    });
+    failSecretRecordFsyncOnce();
     const transport = await useRecordingNativeSimulator();
     server = createServer({
       ...testConfig,
@@ -1742,9 +1750,7 @@ describe("Partner API tools", () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
     writeFileSync(secretFile, "", { mode: 0o600 });
-    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
-      throw new Error("simulated sink fsync failure");
-    });
+    failSecretRecordFsyncOnce();
     const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
     server = createServer({
       ...partnerTestConfig,
@@ -1776,9 +1782,7 @@ describe("Partner API tools", () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
     writeFileSync(secretFile, "", { mode: 0o600 });
-    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
-      throw new Error("simulated sink fsync failure");
-    });
+    failSecretRecordFsyncOnce();
     await usePartnerSimulator();
     server = createServer({
       ...partnerTestConfig,

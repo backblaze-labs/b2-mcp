@@ -151,6 +151,19 @@ describe("tool annotation policy", () => {
     }
   });
 
+  it("does not advertise durable-secret creators as idempotent", () => {
+    for (const name of [
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
+    ]) {
+      expect(annotationsForTool(name)).toMatchObject({
+        destructiveHint: true,
+        idempotentHint: false,
+      });
+    }
+  });
+
   it("keeps presign minting idempotent, destructive only for the gated PutObject minter", () => {
     // s3_get_presigned_url is gated (a PutObject URL mints overwrite/create bearer
     // capability); s3_presign_upload_part is not gated. Both are idempotent: the

@@ -64,6 +64,11 @@ interface ExistingSecretSinkRecord {
   result: unknown;
 }
 
+interface SecretSinkClaim {
+  lockPath: string;
+  parent: string;
+}
+
 function parseSecretSinkMode(raw: string | undefined, transport: "stdio" | "http"): SecretSinkMode {
   if (raw === undefined || raw.trim() === "") return transport === "stdio" ? "file" : "off";
   const normalized = raw.trim().toLowerCase();
@@ -309,7 +314,6 @@ function readMatchingSecretSinkRecord(
   tool: string,
   idempotency: DurableSecretIdempotency,
 ): ExistingSecretSinkRecord | null {
-  preflightSecretSinkFile(sink.filePath);
   const lines = fs
     .readFileSync(sink.filePath, "utf8")
     .split("\n")
@@ -332,6 +336,96 @@ function readMatchingSecretSinkRecord(
     };
   }
   return null;
+}
+
+function pendingClaimPath(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  idempotency: DurableSecretIdempotency,
+): string {
+  return `${sink.filePath}.${idempotency.fingerprint}.pending`;
+}
+
+function pendingClaimError(lockPath: string): never {
+  throw {
+    status: 409,
+    code: "idempotency_key_pending",
+    message: `A durable-secret request with this idempotencyKey is already pending or has an unknown provider-side outcome. Reconcile or remove the pending claim after investigation: ${lockPath}`,
+  };
+}
+
+function writePendingClaim(fd: number, tool: string, idempotency: DurableSecretIdempotency): void {
+  writeAll(
+    fd,
+    `${JSON.stringify({
+      ts: isoTimestampSeconds(),
+      tool,
+      idempotency,
+      status: "pending",
+    })}\n`,
+  );
+  secretSinkFileOpsForTests.fsyncSync(fd);
+}
+
+function claimOpenFlags(): number {
+  return (
+    fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW
+  );
+}
+
+function acquireSecretSinkClaim(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  tool: string,
+  idempotency: DurableSecretIdempotency,
+): SecretSinkClaim | ExistingSecretSinkRecord {
+  preflightSecretSinkFile(sink.filePath);
+  const existing = readMatchingSecretSinkRecord(sink, tool, idempotency);
+  if (existing) return existing;
+
+  const { parent } = ensureSecretSinkParent(sink.filePath);
+  const lockPath = pendingClaimPath(sink, idempotency);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(lockPath, claimOpenFlags(), 0o600);
+    writePendingClaim(fd, tool, idempotency);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      const racedExisting = readMatchingSecretSinkRecord(sink, tool, idempotency);
+      if (racedExisting) return racedExisting;
+      pendingClaimError(lockPath);
+    }
+    throw err;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  fsyncParentDirectory(parent);
+
+  const racedExisting = readMatchingSecretSinkRecord(sink, tool, idempotency);
+  if (racedExisting) {
+    releaseSecretSinkClaim({ lockPath, parent });
+    return racedExisting;
+  }
+  return { lockPath, parent };
+}
+
+function releaseSecretSinkClaim(claim: SecretSinkClaim): void {
+  try {
+    fs.unlinkSync(claim.lockPath);
+    fsyncParentDirectory(claim.parent);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+}
+
+function createErrorHasKnownProviderRejection(err: unknown): boolean {
+  if (!err || typeof err !== "object" || !("status" in err)) return false;
+  const status = (err as { status?: unknown }).status;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
+function recoveryClearedProviderSideEffect(recovery: unknown): boolean {
+  if (!recovery || typeof recovery !== "object" || !("status" in recovery)) return false;
+  const status = (recovery as { status?: unknown }).status;
+  return status === "deleted" || status === "ejected_group_members";
 }
 
 type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
@@ -367,12 +461,19 @@ export async function executeDurableSecretOperation<T>({
     return toolJsonInlineDurableSecret(projectInline(result, INLINE_SECRET_WARNING));
   }
 
-  const existing = readMatchingSecretSinkRecord(secretSink, toolName, idempotency);
-  if (existing) return toolJson(projectRedacted(existing.result as T, existing.pointer));
+  const claim = acquireSecretSinkClaim(secretSink, toolName, idempotency);
+  if ("pointer" in claim) return toolJson(projectRedacted(claim.result as T, claim.pointer));
 
-  const result = await create();
+  let result: T;
+  try {
+    result = await create();
+  } catch (err) {
+    if (createErrorHasKnownProviderRejection(err)) releaseSecretSinkClaim(claim);
+    throw err;
+  }
   try {
     const pointer = appendSecretSinkRecord(secretSink, toolName, result, idempotency);
+    releaseSecretSinkClaim(claim);
     return toolJson(projectRedacted(result, pointer));
   } catch (err) {
     let recovery: unknown = { status: "not_configured" };
@@ -394,6 +495,7 @@ export async function executeDurableSecretOperation<T>({
       },
       "secret_sink.write_failed_after_provider_create",
     );
+    if (recoveryClearedProviderSideEffect(recovery)) releaseSecretSinkClaim(claim);
     throw {
       status: 500,
       code: "secret_sink_write_failed",

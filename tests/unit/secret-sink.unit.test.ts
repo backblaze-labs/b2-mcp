@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -15,6 +16,8 @@ import { join } from "node:path";
 import {
   appendSecretSinkRecord,
   DEFAULT_SECRET_SINK_PATH,
+  durableSecretIdempotency,
+  executeDurableSecretOperation,
   INLINE_SECRET_WARNING,
   resetSecretSinkWarningForTests,
   resolveSecretSinkConfig,
@@ -27,6 +30,16 @@ function tempDir(): string {
 
 function mode(path: string): number {
   return lstatSync(path).mode & 0o777;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 describe("secret sink configuration", () => {
@@ -262,5 +275,114 @@ describe("secret sink file writer", () => {
     ).toThrow(/simulated fsync failure/);
 
     expect(readFileSync(file, "utf8")).toBe("");
+  });
+
+  it("holds an exclusive pending claim before provider creation", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const started = deferred<void>();
+    const created = deferred<Record<string, unknown>>();
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "claim-before-create",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "claim-before-create", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+    const options = {
+      secretSink: { mode: "file" as const, filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      projectRedacted: (result: Record<string, unknown>, pointer: unknown) => ({
+        ...result,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (result: Record<string, unknown>, warning: string) => ({
+        ...result,
+        warning,
+      }),
+    };
+
+    const first = executeDurableSecretOperation({
+      ...options,
+      create: () => {
+        createCalls++;
+        started.resolve();
+        return created.promise;
+      },
+    });
+    await started.promise;
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    created.resolve({
+      applicationKeyId: "key-id",
+      applicationKey: "B2_MCP_CANARY_SECRET_claim",
+    });
+    const result = await first;
+
+    expect(createCalls).toBe(1);
+    expect(result.structuredContent).toMatchObject({
+      applicationKey: "[redacted]",
+      secretSink: { type: "file", path: file },
+    });
+  });
+
+  it("leaves an ambiguous provider outcome pending instead of retrying creation", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "provider-timeout",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "provider-timeout", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+    const options = {
+      secretSink: { mode: "file" as const, filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      projectRedacted: (result: Record<string, unknown>, pointer: unknown) => ({
+        ...result,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (result: Record<string, unknown>, warning: string) => ({
+        ...result,
+        warning,
+      }),
+    };
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          throw new Error("connection reset after provider call");
+        },
+      }),
+    ).rejects.toThrow(/connection reset/);
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    expect(createCalls).toBe(1);
+    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
   });
 });

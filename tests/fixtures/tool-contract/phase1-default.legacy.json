@@ -299,7 +299,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "idempotentHint": true,
+        "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
       }
@@ -1874,5 +1874,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "a27ecaaa36a7da83dd1b1ded962984672723ec66a9b7d4ee732853e028af0b51"
+  "hash": "69e5ecbb1a8cadb95d5928d10813bfe7c869938b3821543cb85100064005c850"
 }

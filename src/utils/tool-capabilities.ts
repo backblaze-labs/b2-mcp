@@ -84,6 +84,7 @@ export const NON_READ_ONLY_TOOL_NAMES = new Set([
 ]);
 
 export const NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES = new Set([
+  "b2_create_key",
   "b2_create_group_member",
   "b2_reserve_trial_create_account",
   // Versionless S3 deletes can create additional delete markers on each retry.
