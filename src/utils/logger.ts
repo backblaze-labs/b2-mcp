@@ -91,6 +91,14 @@ function failLogFile(message: string): never {
   throw new Error(message);
 }
 
+function assertLogFilePlatformSupported(logFile: string): void {
+  if (process.platform === "win32") {
+    failLogFile(
+      `B2_LOG_FILE is not supported on Windows because owner-only file permissions cannot be enforced: ${logFile}`,
+    );
+  }
+}
+
 function currentUid(): number | undefined {
   return typeof process.getuid === "function" ? process.getuid() : undefined;
 }
@@ -121,6 +129,7 @@ function normalizeExistingLogFile(logFile: string, fd: number): void {
 }
 
 function openLogFile(logFile: string): number {
+  assertLogFilePlatformSupported(logFile);
   if (!isAbsolute(logFile)) {
     failLogFile(`B2_LOG_FILE must be an absolute path: ${logFile}`);
   }

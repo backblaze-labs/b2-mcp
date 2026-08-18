@@ -170,6 +170,8 @@ not be symlinks or hard links, and must be owned by the current user. Owned
 pre-existing files are tightened to owner-only permissions at startup. A bad
 path fails at startup with a clear `B2_LOG_FILE` error. Runtime write failures
 are reported to stderr, and subsequent structured log lines fall back to stderr.
+`B2_LOG_FILE` is currently supported only on POSIX platforms; Windows startup
+fails clearly because this implementation does not enforce owner-only ACLs.
 
 File logging does not mirror to stderr by default. Because `B2_LOG_FILE` is an
 append-only file sink with no built-in rotation or retention, use

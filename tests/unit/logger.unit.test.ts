@@ -104,6 +104,20 @@ type LoggerModule = typeof import("../../src/utils/logger");
 
 const loggerEnvKeys = ["B2_LOG_FILE", "LOG_LEVEL", "NODE_ENV"] as const;
 
+async function withProcessPlatform<T>(
+  platform: NodeJS.Platform | "win32",
+  run: () => T | Promise<T>,
+): Promise<T> {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (!descriptor) throw new Error("process.platform descriptor is unavailable");
+  Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(process, "platform", descriptor);
+  }
+}
+
 async function withFreshLogger<T>(
   env: NodeJS.ProcessEnv,
   run: (loggerModule: LoggerModule) => T | Promise<T>,
@@ -173,6 +187,7 @@ describe("logger destination", () => {
   });
 
   it("initializes file logging with redaction and owner-only permissions", async () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-file-coverage-"));
     const logFile = join(dir, "server.log");
 
@@ -187,9 +202,7 @@ describe("logger destination", () => {
       );
 
       expect(existsSync(logFile)).toBe(true);
-      if (process.platform !== "win32") {
-        expect(statSync(logFile).mode & 0o077).toBe(0);
-      }
+      expect(statSync(logFile).mode & 0o077).toBe(0);
 
       const line = parseLogLine(readFileSync(logFile, "utf8"));
       expect(line.msg).toBe("logger.coverage");
@@ -201,6 +214,7 @@ describe("logger destination", () => {
   });
 
   it("configures file destinations for asynchronous request-path writes", async () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-async-coverage-"));
     const logFile = join(dir, "server.log");
     const fakeDestination = {
@@ -257,6 +271,24 @@ describe("logger destination", () => {
     }
   });
 
+  it("rejects file logging on Windows where owner-only permissions are not enforced", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-windows-log-"));
+    const logFile = join(dir, "server.log");
+
+    try {
+      await expect(
+        withProcessPlatform("win32", () =>
+          withFreshLogger({ B2_LOG_FILE: logFile }, async ({ initLogging }) => {
+            initLogging();
+          }),
+        ),
+      ).rejects.toThrow("B2_LOG_FILE is not supported on Windows");
+      expect(existsSync(logFile)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reopens B2_LOG_FILE on SIGHUP after rename rotation", async () => {
     if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-rotate-"));
@@ -309,13 +341,14 @@ describe("logger destination", () => {
   });
 
   it("rejects invalid file destinations during explicit initialization", async () => {
+    if (process.platform === "win32") return;
+
     await expect(
       withFreshLogger({ B2_LOG_FILE: "relative-b2-mcp.log" }, async ({ initLogging }) => {
         initLogging();
       }),
     ).rejects.toThrow("B2_LOG_FILE must be an absolute path");
 
-    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-invalid-log-coverage-"));
     const logFile = join(dir, "server.log");
 
@@ -358,6 +391,7 @@ describe("logger destination", () => {
   });
 
   it("fails clearly when the pino file destination cannot be created", async () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-pino-destination-fail-"));
     const logFile = join(dir, "server.log");
     const fakePino = vi.fn((_options: unknown, destination: { write: (line: string) => void }) => ({
@@ -410,6 +444,7 @@ describe("logger destination", () => {
   });
 
   it("falls back to stderr after a file destination write error", async () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-log-fallback-"));
     const logFile = join(dir, "server.log");
     const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -471,6 +506,7 @@ describe("logger destination", () => {
   });
 
   it("falls back to stderr when a file destination write throws", async () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-log-throw-fallback-"));
     const logFile = join(dir, "server.log");
     const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -565,6 +601,7 @@ describe("logger destination", () => {
   });
 
   it("writes redacted JSON logs to B2_LOG_FILE instead of stderr", () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-file-"));
     const logFile = join(dir, "server.log");
 
@@ -575,9 +612,7 @@ describe("logger destination", () => {
       expect(result.stdout).toBe("");
       expect(result.stderr).toBe("");
       expect(existsSync(logFile)).toBe(true);
-      if (process.platform !== "win32") {
-        expect(statSync(logFile).mode & 0o077).toBe(0);
-      }
+      expect(statSync(logFile).mode & 0o077).toBe(0);
 
       const line = parseLogLine(readFileSync(logFile, "utf8"));
       expect(line.msg).toBe("logger.probe");
@@ -603,6 +638,7 @@ describe("logger destination", () => {
   });
 
   it("fails fast from the entry point when B2_LOG_FILE is not writable", () => {
+    if (process.platform === "win32") return;
     const logFile = mkdtempSync(join(tmpdir(), "b2-mcp-bad-log-path-"));
 
     try {
@@ -618,6 +654,7 @@ describe("logger destination", () => {
   });
 
   it("rejects relative B2_LOG_FILE paths", () => {
+    if (process.platform === "win32") return;
     const result = runProbe(logInfoSource, { B2_LOG_FILE: "relative-b2-mcp.log" });
 
     expect(result.status).toBe(1);
@@ -716,6 +753,7 @@ describe("logger destination", () => {
   });
 
   it("writes fatal entry-point logs before process.exit without an explicit flush", async () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-fatal-log-"));
     const logFile = join(dir, "server.log");
     const blocker = http.createServer();
@@ -739,6 +777,7 @@ describe("logger destination", () => {
   });
 
   it("writes clean HTTP shutdown logs before process.exit without an explicit flush", () => {
+    if (process.platform === "win32") return;
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-shutdown-log-"));
     const logFile = join(dir, "server.log");
 

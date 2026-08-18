@@ -25,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the supported customer-hosted container reference deployment to the
   published npm package with bounded logs, pinned runtime/proxy images, and
   package/build-context secret exclusion policy.
-- Added `B2_LOG_FILE` for redacted structured JSON file logging, with
-  owner-only file handling and SIGHUP reopen support for external rotation.
+- Added POSIX `B2_LOG_FILE` support for redacted structured JSON file logging,
+  with owner-only file handling and SIGHUP reopen support for external rotation.
 
 ### Changed
 - Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
