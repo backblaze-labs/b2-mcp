@@ -19,9 +19,16 @@ hash covers the sorted tool names and normalized tool definitions, including
 model-visible schema and parameter descriptions.
 The artifact and fixtures also identify the resolved MCP SDK packages and
 `@backblaze-labs/b2-sdk` version used to produce the snapshot.
+Every tool belongs to exactly one backing category: Native B2 SDK
+(`@backblaze-labs/b2-sdk`) for B2 operations with no S3 equivalent, AWS S3 SDK
+(`@aws-sdk/client-s3`) for the S3-compatible data plane, or neither SDK for
+repository-owned MCP analytics that no SDK exposes as a primitive.
+The machine-readable contract publishes this as `backingCategories`,
+`toolBacking`, and per-profile `backingCounts`.
 Partner/Groups read/eject/list handlers are SDK-backed native B2 operations in
 the full profile; Partner operations that produce durable secrets remain
 non-secret unavailable compatibility stubs until a reviewed sink exists.
+Availability is a per-tool annotation, not a separate profile bucket.
 
 The public contract defines:
 

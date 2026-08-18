@@ -12,12 +12,16 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools.
 
-**40 tools, split by what they do:**
+**40 tools, assigned by backing category:**
 
-- **Control plane (14 active, native B2 API)** — buckets, key listing/deletion, Object Lock, event notifications, and SDK-backed Partner/Groups read/eject operations. _(The S3 API has no equivalent for these.)_
-- **Data plane (19, compatibility `s3_*` names)** — object upload/download/copy/list/delete, multipart, bucket reachability, lifecycle, and presigned URL paths through the AWS S3 SDK configured for B2's S3-compatible endpoint.
-- **Insights (4, read-only)** — storage growth, egress leaders, largest files, abandoned uploads — answered from B2's daily usage reports and live listings.
-- **Unavailable compatibility stubs (3, native B2 API in the full surface)** — durable-secret-producing tool names return a non-secret unavailable error until an out-of-band secret sink exists.
+- **Native B2 SDK (`@backblaze-labs/b2-sdk`) (17)** — B2 control-plane operations the S3 API has no equivalent for: buckets, application keys, Object Lock, event notifications, and Partner/Groups operations.
+- **AWS S3 SDK (`@aws-sdk/client-s3`) (19)** — the S3-compatible data plane: object upload/download/copy/list/delete, multipart, bucket reachability, lifecycle, and presigned URL paths.
+- **Neither SDK (custom MCP code) (4)** — repository-owned analytics over B2 reports and bounded live listings: storage growth, egress leaders, largest files, and abandoned uploads.
+
+Availability is a per-tool annotation, separate from those backing categories:
+37 tools are available in the full surface, and 3 durable-secret-producing B2
+names remain non-secret unavailable stubs until an out-of-band secret sink
+exists.
 
 Destructive actions are gated, durable B2 secrets never enter the model's context, and the tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
@@ -269,62 +273,71 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 21 native (`b2_*`) + 19 data-plane (`s3_*`).** 37 tools are active in the full surface; 3 native names are unavailable durable-secret compatibility stubs for stale cached `tools/list` clients. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Buckets, key listing/deletion, Object Lock, notifications, insights, and Partner/Groups read/eject operations stay native. Fourteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: 37 tools are available in the full surface, while `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are durable-secret-producing compatibility stubs for stale cached `tools/list` clients. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Fourteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
 
 <details>
-<summary><b>Control plane — native B2 API (11 storage/admin + 3 Partner/Groups active)</b></summary>
+<summary><b>Category 1 — Native B2 SDK (17)</b></summary>
 
-| Tool                                 | Description                                                        |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| `b2_authorize_account`               | Verify credentials and return account info                         |
-| `b2_list_buckets`                    | List buckets (optional filters)                                    |
-| `b2_create_bucket`                   | Create a bucket                                                    |
-| `b2_delete_bucket`                   | Delete an empty bucket                                             |
-| `b2_update_bucket`                   | Update type, CORS, lifecycle, encryption, replication, Object Lock |
-| `b2_get_bucket_notification_rules`   | Get webhook notification rules                                     |
-| `b2_set_bucket_notification_rules`   | Set webhook notification rules                                     |
-| `b2_list_keys`                       | List application keys                                              |
-| `b2_delete_key`                      | Delete an application key                                          |
-| `b2_update_file_legal_hold`          | Set/clear legal hold on an object                                  |
-| `b2_update_file_retention`           | Set/clear retention on an object                                   |
-| **Partner API** _(needs master key)_ |                                                                    |
-| `b2_list_groups`                     | List partner groups through the official B2 SDK                    |
-| `b2_eject_group_member`              | Remove a member from a partner group through the official B2 SDK   |
-| `b2_list_group_members`              | List group members through the official B2 SDK                     |
+| Tool                               | Availability                          | Description                                                        |
+| ---------------------------------- | ------------------------------------- | ------------------------------------------------------------------ |
+| `b2_authorize_account`             | Available                             | Verify credentials and return account info                         |
+| `b2_list_buckets`                  | Available                             | List buckets (optional filters)                                    |
+| `b2_create_bucket`                 | Available                             | Create a bucket                                                    |
+| `b2_delete_bucket`                 | Available                             | Delete an empty bucket                                             |
+| `b2_update_bucket`                 | Available                             | Update type, CORS, lifecycle, encryption, replication, Object Lock |
+| `b2_get_bucket_notification_rules` | Available                             | Get webhook notification rules                                     |
+| `b2_set_bucket_notification_rules` | Available                             | Set webhook notification rules                                     |
+| `b2_list_keys`                     | Available                             | List application keys                                              |
+| `b2_delete_key`                    | Available                             | Delete an application key                                          |
+| `b2_create_key`                    | Unavailable (durable-secret)          | Create an application key; unavailable until a reviewed secret sink exists |
+| `b2_update_file_legal_hold`        | Available                             | Set/clear legal hold on an object                                  |
+| `b2_update_file_retention`         | Available                             | Set/clear retention on an object                                   |
+| `b2_list_groups`                   | Available with Partner API credential | List partner groups through the official B2 SDK                    |
+| `b2_eject_group_member`            | Available with Partner API credential | Remove a member from a partner group through the official B2 SDK   |
+| `b2_list_group_members`            | Available with Partner API credential | List group members through the official B2 SDK                     |
+| `b2_create_group_member`           | Unavailable (durable-secret)          | Create a Partner group member; unavailable until a reviewed secret sink exists |
+| `b2_reserve_trial_create_account`  | Unavailable (durable-secret)          | Reserve a trial account; unavailable until a reviewed secret sink exists |
 
 </details>
 
-Durable-secret-producing operations are registered only as compatibility stubs in Phase 1 because there is no configured out-of-band secret sink. Calls to `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` return a structured non-secret unavailable error. The SDK-backed Partner/Groups read/eject tools remain available only when a distinct master key is configured and the account is authorized for the Partner API. A future sink-backed profile may expose secret-producing operations only if the one-time secret is written out of band and MCP output returns only a reference, key ID, scope, expiry, and non-secret metadata.
+Durable-secret-producing operations are registered only as compatibility stubs
+in Phase 1 because there is no configured out-of-band secret sink. Calls to the
+three unavailable rows above return a structured non-secret unavailable error.
+The SDK-backed Partner/Groups read/eject/list tools remain available only when a
+distinct master key is configured and the account is authorized for the Partner
+API. A future sink-backed profile may expose secret-producing operations only if
+the one-time secret is written out of band and MCP output returns only a
+reference, key ID, scope, expiry, and non-secret metadata.
 
 <details>
-<summary><b>Data plane — S3-compatible API (19)</b></summary>
+<summary><b>Category 2 — AWS S3 SDK (19)</b></summary>
 
-| Tool                                                                                     | Description                                                                                      |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `s3_put_object` / `s3_get_object`                                                        | Inline upload / download of small (≤1 MiB) control-plane objects; bulk data uses a presigned URL |
-| `s3_delete_object` / `s3_delete_objects`                                                 | Delete one / bulk-delete objects                                                                 |
-| `s3_head_object`                                                                         | Object metadata                                                                                  |
-| `s3_copy_object`                                                                         | Server-side copy; `acl` is a no-op compatibility hint because B2 access follows bucket policy    |
-| `s3_list_objects_v2` / `s3_list_object_versions`                                         | List objects / versions                                                                          |
-| `s3_create_multipart_upload` / `s3_presign_upload_part` / `s3_complete_multipart_upload` | Multipart upload flow (large files); parts use short-lived presigned bearer URLs                 |
-| `s3_abort_multipart_upload` / `s3_list_parts` / `s3_list_multipart_uploads`              | Manage multipart uploads                                                                         |
-| `s3_upload_part_copy`                                                                    | Server-side copy of a part                                                                       |
-| `s3_get_presigned_url`                                                                   | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
-| `s3_head_bucket`                                                                         | Check bucket exists/reachable on the S3 endpoint                                                 |
-| `s3_get_bucket_location`                                                                 | Bucket region / location constraint                                                              |
-| `s3_put_bucket_lifecycle`                                                                | Lifecycle rules incl. `AbortIncompleteMultipartUpload`                                           |
+| Tool                                                                                     | Availability | Description                                                                                      |
+| ---------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| `s3_put_object` / `s3_get_object`                                                        | Available    | Inline upload / download of small (<=1 MiB) control-plane objects; bulk data uses a presigned URL |
+| `s3_delete_object` / `s3_delete_objects`                                                 | Available    | Delete one / bulk-delete objects                                                                 |
+| `s3_head_object`                                                                         | Available    | Object metadata                                                                                  |
+| `s3_copy_object`                                                                         | Available    | Server-side copy; `acl` is a no-op compatibility hint because B2 access follows bucket policy    |
+| `s3_list_objects_v2` / `s3_list_object_versions`                                         | Available    | List objects / versions                                                                          |
+| `s3_create_multipart_upload` / `s3_presign_upload_part` / `s3_complete_multipart_upload` | Available    | Multipart upload flow (large files); parts use short-lived presigned bearer URLs                 |
+| `s3_abort_multipart_upload` / `s3_list_parts` / `s3_list_multipart_uploads`              | Available    | Manage multipart uploads                                                                         |
+| `s3_upload_part_copy`                                                                    | Available    | Server-side copy of a part                                                                       |
+| `s3_get_presigned_url`                                                                   | Available    | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
+| `s3_head_bucket`                                                                         | Available    | Check bucket exists/reachable on the S3 endpoint                                                 |
+| `s3_get_bucket_location`                                                                 | Available    | Bucket region / location constraint                                                              |
+| `s3_put_bucket_lifecycle`                                                                | Available    | Lifecycle rules incl. `AbortIncompleteMultipartUpload`                                           |
 
 </details>
 
 <details>
-<summary><b>Insights — read-only storage activity (4)</b></summary>
+<summary><b>Category 3 — Neither SDK, custom MCP analytics (4)</b></summary>
 
-| Tool                    | Description                                                                                         |
-| ----------------------- | --------------------------------------------------------------------------------------------------- |
-| `b2_usage_growth`       | Rank accounts by stored-data growth between two dates (daily usage reports; requires Usage Reports) |
-| `b2_egress_leaders`     | Top egress by account or bucket over a period (daily usage reports; requires Usage Reports)         |
-| `b2_largest_files`      | A bucket's largest objects via live listing (bounded scan)                                          |
-| `b2_unfinished_uploads` | Abandoned multipart uploads silently consuming storage (bounded live listing)                       |
+| Tool                    | Availability | Description                                                                                         |
+| ----------------------- | ------------ | --------------------------------------------------------------------------------------------------- |
+| `b2_usage_growth`       | Available    | Rank accounts by stored-data growth between two dates (daily usage reports; requires Usage Reports) |
+| `b2_egress_leaders`     | Available    | Top egress by account or bucket over a period (daily usage reports; requires Usage Reports)         |
+| `b2_largest_files`      | Available    | A bucket's largest objects via live listing (bounded scan)                                          |
+| `b2_unfinished_uploads` | Available    | Abandoned multipart uploads silently consuming storage (bounded live listing)                       |
 
 Scope follows the caller's key — a partner key sees its sub-accounts; a customer key sees only itself. The usage-report tools feature-detect the `b2-reports-<accountId>` bucket and return a clear "not enabled" message when Usage Reports aren't enabled on the account.
 

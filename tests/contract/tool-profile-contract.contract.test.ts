@@ -15,6 +15,10 @@ import {
   CONTRACT_TEST_CONFIG,
   LEGACY_PROTOCOL_VERSION,
   PROFILE_NAMES,
+  TOOL_BACKING_BY_NAME,
+  TOOL_BACKING_CATEGORIES,
+  backingCategoryCounts,
+  backingCategoryMapForNames,
   capabilitiesForProfile,
   contractSdkVersions,
   countPrefixes,
@@ -430,6 +434,30 @@ describe("MCP advertised capability contract", () => {
     const fixture = fixtureFor(profile, "legacy");
     expect(fixture.legacy).toEqual({ toolsListCacheHint: null, discover: null });
     expect(fixture.protocolVersion).toBe(LEGACY_PROTOCOL_VERSION);
+  });
+});
+
+describe("Tool backing category contract", () => {
+  it("exports category definitions and assigns every full-profile tool exactly once", () => {
+    const fullNames = contract.profiles.full.names;
+    const sourceToolNames = Object.keys(TOOL_BACKING_BY_NAME).sort();
+    const invalidCategories = Object.entries(TOOL_BACKING_BY_NAME)
+      .filter(([, category]) => !(category in TOOL_BACKING_CATEGORIES))
+      .map(([toolName, category]) => `${toolName}:${category}`);
+
+    expect(invalidCategories).toEqual([]);
+    expect(sourceToolNames).toEqual([...fullNames].sort());
+    expect(contract.backingCategories).toEqual(TOOL_BACKING_CATEGORIES);
+    expect(contract.toolBacking).toEqual(backingCategoryMapForNames(fullNames));
+  });
+
+  it.each(profileNames)("%s backing counts match profile membership", (profile) => {
+    const backingCounts = contract.profiles[profile].backingCounts;
+
+    expect(backingCounts).toEqual(backingCategoryCounts(contract.profiles[profile].names));
+    expect(Object.values(backingCounts).reduce((sum, count) => sum + count, 0)).toBe(
+      contract.profiles[profile].counts.total,
+    );
   });
 });
 

@@ -64,9 +64,17 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 **Capability-aware registration.** When `createServer` is given a `capabilities` array (the entry points fetch it via `fetchCapabilities`), it wraps `server.tool` so only tools the key can use are registered — the surface auto-right-sizes to the credential (a read-only key drops every write/delete/admin tool; full ~9,719 tokens → read-only ~2,867). The map is `src/utils/tool-capabilities.ts` (any-of semantics; unmapped tools always register; Partner tools register only with a distinct master key). When `capabilities` is `null`/omitted — all unit tests, or `B2_REGISTER_ALL_TOOLS=true` — the full surface registers, so there's no behavior change. The key decides what's _possible_; the destructive gate decides what's _permitted_.
 
-### Two API surfaces, two client types
+### Three backing categories, two client types
 
-The surface is split by plane: **control plane = native B2 semantics, data plane = compatibility `s3_*` tool contracts.**
+The public tool surface is described by backing category, with availability
+recorded per tool instead of as a separate bucket:
+
+- **Native B2 SDK** (`@backblaze-labs/b2-sdk`) — B2 control-plane operations the S3 API has no equivalent for, including buckets, application keys, Object Lock, event notifications, and Partner/Groups operations.
+- **AWS S3 SDK** (`@aws-sdk/client-s3`) — the S3-compatible data plane behind every `s3_*` tool.
+- **Neither SDK** — repository-owned MCP analytics (`b2_usage_growth`, `b2_egress_leaders`, `b2_largest_files`, `b2_unfinished_uploads`) built from B2 reports and bounded live listings because no SDK exposes those aggregates as primitives.
+
+Durable-secret-producing tools stay in the Native B2 SDK category even when
+their current availability is a non-secret compatibility stub.
 
 **B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, and native bucket/key/Object Lock/notification/Partner operations. `B2Client` owns the shared auth/circuit wrapper and native lookups used by S3 safety guards, such as version-ID ownership checks and delete-marker metadata synthesis.
 
@@ -88,8 +96,8 @@ Object data movement runs through the **`s3_*` data-plane tools**. Inline object
 
 ### Tool naming conventions
 
-- `b2_*` — B2 native **control-plane** tools (buckets, application keys, Object Lock, notifications), plus SDK-backed Partner API group/trial tools
-- `s3_*` — compatibility **data-plane** tools; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary
+- `b2_*` — B2-native names. Most are Native B2 SDK control-plane tools; the four analytics names are the custom MCP category.
+- `s3_*` — compatibility data-plane names; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary.
 
 ### Retry logic (`src/utils/retry.ts`)
 

@@ -10,6 +10,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { TOOL_BACKING_CATEGORIES, backingCategoryCounts } from "../../src/tool-contract";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 import { readJson } from "./support";
 
@@ -58,9 +59,14 @@ describe("README tool-surface drift", () => {
     const total = toolNames.length;
     const native = toolNames.filter((n) => n.startsWith("b2_")).length;
     const s3 = toolNames.filter((n) => n.startsWith("s3_")).length;
-    expect(readme).toContain(`**${total} tools, split by what they do:**`);
+    const backingCounts = backingCategoryCounts(toolNames);
+
+    expect(readme).toContain(`**${total} tools, assigned by backing category:**`);
     expect(readme).toContain(
-      `**${total} total — ${native} native (\`b2_*\`) + ${s3} data-plane (\`s3_*\`).**`,
+      `**${total} total — ${backingCounts.nativeB2Sdk} ${TOOL_BACKING_CATEGORIES.nativeB2Sdk.label} + ${backingCounts.awsS3Sdk} ${TOOL_BACKING_CATEGORIES.awsS3Sdk.label} + ${backingCounts.customMcp} ${TOOL_BACKING_CATEGORIES.customMcp.label}/custom MCP tools.**`,
+    );
+    expect(readme).toContain(
+      `Prefix counts remain ${native} native \`b2_*\` names + ${s3} data-plane \`s3_*\` names.`,
     );
   });
 });
