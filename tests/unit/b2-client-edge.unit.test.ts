@@ -1,6 +1,9 @@
+import type { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2AuthManager } from "../../src/auth";
-import { B2Client } from "../../src/b2/client";
+import { B2Client, setB2PartnerClientFactoryForTests } from "../../src/b2/client";
+import { runWithMcpRequestSignal } from "../../src/request-context";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
+import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import { testConfig } from "../support/deterministic-fakes";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
@@ -19,14 +22,18 @@ function authResponseWithToken(token: string) {
   };
 }
 
-function partnerAuthorizeResponse() {
+function partnerAuthorizeResponse(
+  authorizationToken = "partner-token-xyz",
+  accountId = "test-account-123",
+  groupsApiUrl = "http://127.0.0.1/partner",
+) {
   return {
-    accountId: "test-account-123",
-    authorizationToken: "partner-token-xyz",
+    accountId,
+    authorizationToken,
     apiInfo: {
       groupsApi: {
         capabilities: ["all"],
-        groupsApiUrl: "http://127.0.0.1/partner",
+        groupsApiUrl,
         infoType: "groupsApi",
       },
     },
@@ -62,6 +69,8 @@ describe("B2Client native edge branches", () => {
     circuitBreaker.close();
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    _resetRetryBudget();
     setB2SdkClientFactoryForTests(null);
   });
 
@@ -198,105 +207,300 @@ describe("B2Client native edge branches", () => {
     });
   });
 
-  it("sends durable-secret Partner group member creation through the SDK raw binding", async () => {
+  it("refreshes stale cached Partner authorization before sending another read", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    let authorizeCount = 0;
+    const listTokens: string[] = [];
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
       if (endpoint === "b2_authorize_account") {
-        return new StaticHttpResponse(200, partnerAuthorizeResponse());
+        authorizeCount += 1;
+        return new StaticHttpResponse(
+          200,
+          partnerAuthorizeResponse(`partner-token-${authorizeCount}`),
+        );
       }
-      if (endpoint === "b2_create_group_member") {
-        return new StaticHttpResponse(200, [
-          {
-            applicationKeyId: "member-key-id",
-            applicationKey: "member-secret-key",
-            groupMember: {
-              accountId: "member-account-1",
-              email: "member@example.com",
-              groupId: "123",
-              groupName: "Example Group",
-              region: "us-west",
-              s3Endpoint: "s3.us-west-004.backblazeb2.com",
-            },
-          },
-        ]);
+      if (endpoint === "b2_list_groups") {
+        listTokens.push(new Headers(request.headers).get("Authorization") ?? "");
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          groups: [],
+          nextGroupId: null,
+        });
       }
       return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
     });
     const client = clientWithTransport(transport);
 
-    await expect(
-      client.createGroupMember({
-        adminAccountId: "admin-account-1",
-        groupId: "123",
-        memberEmail: "member@example.com",
-        region: "us-west",
-      }),
-    ).resolves.toMatchObject([
-      {
-        applicationKeyId: "member-key-id",
-        groupMember: { accountId: "member-account-1" },
-      },
-    ]);
-
-    const request = transport.requests.find(
-      (candidate) => b2EndpointName(candidate) === "b2_create_group_member",
-    );
-    if (!request) throw new Error("Expected SDK b2_create_group_member request");
-    expect(request.method).toBe("POST");
-    expect(requestJson(request)).toMatchObject({
-      adminAccountId: "admin-account-1",
-      groupId: "123",
-      memberEmail: "member@example.com",
-      region: "us-west",
+    await expect(client.listGroups({ adminAccountId: "test-account-123" })).resolves.toMatchObject({
+      groups: [],
     });
+    await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000 + 1);
+    await expect(client.listGroups({ adminAccountId: "test-account-123" })).resolves.toMatchObject({
+      groups: [],
+    });
+
+    expect(authorizeCount).toBe(2);
+    expect(listTokens).toEqual(["partner-token-1", "partner-token-2"]);
   });
 
-  it("sends durable-secret Partner reserve trial creation through the SDK raw binding", async () => {
+  it("rejects Partner calls when authorize omits the Groups endpoint", async () => {
+    const auth = partnerAuthorizeResponse();
+    auth.apiInfo.groupsApi.groupsApiUrl = "";
+    const raw = { listGroups: vi.fn() };
+    setB2PartnerClientFactoryForTests(
+      () =>
+        ({
+          authorize: vi.fn(async () => auth),
+          partnerAccountInfo: {
+            clear: vi.fn(),
+            getAuth: vi.fn(() => null),
+          },
+          raw,
+        }) as unknown as SdkPartnerClient,
+    );
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    await expect(client.listGroups({ adminAccountId: "test-account-123" })).rejects.toThrow(
+      /Partner API is not available/,
+    );
+    expect(raw.listGroups).not.toHaveBeenCalled();
+  });
+
+  it("returns a caller abort while Partner authorization continues independently", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("caller stopped"));
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
       if (endpoint === "b2_authorize_account") {
         return new StaticHttpResponse(200, partnerAuthorizeResponse());
-      }
-      if (endpoint === "b2_reserve_trial_create_account") {
-        return new StaticHttpResponse(200, [
-          {
-            accountId: "trial-account-1",
-            applicationKeyId: "trial-key-id",
-            applicationKey: "trial-secret-key",
-            s3Endpoint: "s3.us-west-004.backblazeb2.com",
-            startDate: "2026-01-01",
-            endDate: "2026-01-31",
-            email: "trial@example.com",
-            bucketName: "trial-bucket",
-            bucketId: "bucket-trial-1",
-          },
-        ]);
       }
       return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
     });
     const client = clientWithTransport(transport);
 
     await expect(
-      client.reserveTrialCreateAccount({
-        email: "trial@example.com",
-        region: "us-west",
-        term: 30,
-        storage: 10,
-      }),
-    ).resolves.toMatchObject([{ accountId: "trial-account-1", applicationKeyId: "trial-key-id" }]);
+      runWithMcpRequestSignal(controller.signal, () =>
+        client.listGroups({ adminAccountId: "test-account-123" }),
+      ),
+    ).rejects.toThrow("caller stopped");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account"),
+    ).toHaveLength(1);
+  });
 
-    const request = transport.requests.find(
-      (candidate) => b2EndpointName(candidate) === "b2_reserve_trial_create_account",
-    );
-    if (!request) throw new Error("Expected SDK b2_reserve_trial_create_account request");
-    expect(request.method).toBe("POST");
-    expect(requestJson(request)).toEqual([
-      {
-        email: "trial@example.com",
-        region: "us-west",
-        term: 30,
-        storage: 10,
+  it("aborts a caller waiting on in-flight Partner authorization", async () => {
+    const controller = new AbortController();
+    let releaseAuthorize: (() => void) | undefined;
+    const authorizeGate = new Promise<void>((resolve) => {
+      releaseAuthorize = resolve;
+    });
+    const transport = new RecordingTransport(async (request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        await authorizeGate;
+        return new StaticHttpResponse(200, partnerAuthorizeResponse());
+      }
+      if (endpoint === "b2_list_groups") {
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          groups: [],
+          nextGroupId: null,
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    const client = clientWithTransport(transport);
+
+    const result = runWithMcpRequestSignal(controller.signal, () =>
+      client.listGroups({ adminAccountId: "test-account-123" }),
+    ).then(
+      () => {
+        throw new Error("Expected Partner list_groups to abort");
       },
-    ]);
+      (err: unknown) => err,
+    );
+
+    await vi.waitFor(() =>
+      expect(
+        transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account"),
+      ).toHaveLength(1),
+    );
+    controller.abort(new Error("caller aborted in flight"));
+
+    const error = await result;
+    expect(error).toMatchObject({ message: "caller aborted in flight" });
+    releaseAuthorize?.();
+  });
+
+  it("reauthorizes and retries a Partner read once after expired auth", async () => {
+    let authorizeCount = 0;
+    let listCount = 0;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCount += 1;
+        return new StaticHttpResponse(
+          200,
+          partnerAuthorizeResponse(`partner-token-${authorizeCount}`),
+        );
+      }
+      if (endpoint === "b2_list_groups") {
+        listCount += 1;
+        if (listCount === 1) {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "expired_auth_token",
+            message: "expired",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          groups: [],
+          nextGroupId: null,
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    const client = clientWithTransport(transport);
+
+    await expect(client.listGroups({ adminAccountId: "test-account-123" })).resolves.toMatchObject({
+      groups: [],
+    });
+
+    expect(authorizeCount).toBe(2);
+    expect(listCount).toBe(2);
+  });
+
+  it("refreshes Partner auth after a mutation 401 without replaying the mutation", async () => {
+    let authorizeCount = 0;
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCount += 1;
+        return new StaticHttpResponse(
+          200,
+          partnerAuthorizeResponse(`partner-token-${authorizeCount}`),
+        );
+      }
+      if (endpoint === "b2_eject_group_member") {
+        return new StaticHttpResponse(401, {
+          status: 401,
+          code: "expired_auth_token",
+          message: "expired",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    const client = clientWithTransport(transport);
+
+    await expect(
+      client.ejectGroupMember({
+        adminAccountId: "test-account-123",
+        groupId: "123",
+        memberAccountId: "member-account-1",
+      }),
+    ).rejects.toMatchObject({ status: 401 });
+
+    expect(authorizeCount).toBe(2);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toHaveLength(1);
+  });
+
+  it("shares one in-flight Partner authorization for concurrent cold reads", async () => {
+    let releaseAuthorize: (() => void) | undefined;
+    const authorizeGate = new Promise<void>((resolve) => {
+      releaseAuthorize = resolve;
+    });
+    const transport = new RecordingTransport(async (request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        await authorizeGate;
+        return new StaticHttpResponse(200, partnerAuthorizeResponse());
+      }
+      if (endpoint === "b2_list_groups") {
+        return new StaticHttpResponse(200, {
+          accountId: "test-account-123",
+          groups: [],
+          nextGroupId: null,
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    const client = clientWithTransport(transport);
+
+    const first = client.listGroups({ adminAccountId: "test-account-123" });
+    const second = client.listGroups({ adminAccountId: "test-account-123" });
+
+    await vi.waitFor(() =>
+      expect(
+        transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account"),
+      ).toHaveLength(1),
+    );
+    releaseAuthorize?.();
+
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_groups"),
+    ).toHaveLength(2);
+  });
+
+  it("limits default Partner SDK retries with the shared retry budget", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    _resetRetryBudget();
+    for (let i = 0; i < 100; i++) _consumeRetryToken();
+    expect(_consumeRetryToken()).toBe(false);
+
+    let listCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const endpoint = url.pathname.split("/").pop();
+      if (endpoint === "b2_authorize_account") {
+        return new Response(
+          JSON.stringify(
+            partnerAuthorizeResponse(
+              "partner-token-1",
+              "test-account-123",
+              "https://partner.backblaze.com",
+            ),
+          ),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+      if (endpoint === "b2_list_groups") {
+        listCount += 1;
+        return new Response(JSON.stringify({ status: 500, code: "server_error", message: "bad" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ status: 500, code: "unexpected", message: endpoint }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new B2Client(new B2AuthManager(testConfig));
+
+    const result = client.listGroups({ adminAccountId: "test-account-123" }).then(
+      () => {
+        throw new Error("Expected Partner list_groups to fail");
+      },
+      (err: unknown) => err,
+    );
+    await vi.waitFor(() => expect(listCount).toBe(1));
+    while (_consumeRetryToken()) {
+      // Drain any tokens that refill while the request reaches its first failure.
+    }
+    await vi.runAllTimersAsync();
+
+    const error = await result;
+    expect(String(error)).toMatch(/retry budget exhausted/i);
+    expect(listCount).toBe(1);
   });
 });

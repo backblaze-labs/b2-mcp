@@ -128,7 +128,7 @@ describe("B2 tool error paths (catch blocks)", () => {
       );
       server = createServer(partnerTestConfig);
       const result = await callTool(server, tool, {
-        adminAccountId: "a",
+        adminAccountId: "test-account-123",
         groupId: "g",
         memberAccountId: "m",
         confirm: true,

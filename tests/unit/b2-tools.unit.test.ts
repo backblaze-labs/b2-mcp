@@ -1335,6 +1335,35 @@ describe("Partner API tools", () => {
     });
   });
 
+  it.each([
+    ["b2_list_groups", "b2_list_groups", {}],
+    ["b2_list_group_members", "b2_list_group_members", { groupId: "123" }],
+    [
+      "b2_eject_group_member",
+      "b2_eject_group_member",
+      { groupId: "123", memberAccountId: "member-account-xyz", confirm: true },
+    ],
+  ])(
+    "rejects mismatched adminAccountId for %s before the Partner raw request",
+    async (tool, endpoint, args) => {
+      const { adminAccountId, transport } = await usePartnerSimulator();
+      const before = transport.requests.filter(
+        (request) => b2EndpointName(request) === endpoint,
+      ).length;
+
+      const result = await callTool(server, tool, {
+        ...args,
+        adminAccountId: `${adminAccountId}-other`,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("adminAccountId");
+      expect(
+        transport.requests.filter((request) => b2EndpointName(request) === endpoint),
+      ).toHaveLength(before);
+    },
+  );
+
   it("blocks unconfirmed group member ejection before the API call", async () => {
     const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
     const groups = await partnerSeed.listGroups({ pageSize: 1 });

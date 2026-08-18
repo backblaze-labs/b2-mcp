@@ -1,8 +1,10 @@
 import {
   CIRCUIT_TIMEOUT_MS,
   withCircuit,
+  withPartnerCircuit,
   withReportCircuit,
   circuitBreaker,
+  partnerCircuitBreaker,
   reportCircuitBreaker,
   isClientError,
 } from "../../src/utils/circuit-breaker";
@@ -24,6 +26,7 @@ describe("circuit-breaker", () => {
   afterEach(() => {
     // Force the breaker back to a clean closed state between tests.
     circuitBreaker.close();
+    partnerCircuitBreaker.close();
     reportCircuitBreaker.close();
   });
 
@@ -113,6 +116,19 @@ describe("circuit-breaker", () => {
 
     await expect(withReportCircuit(async () => 1)).rejects.toThrow(/breaker/i);
     await expect(withCircuit(async () => 42)).resolves.toBe(42);
+  });
+
+  it("keeps Partner failures isolated from the native breaker", async () => {
+    partnerCircuitBreaker.open();
+
+    await expect(withPartnerCircuit(async () => 1)).rejects.toThrow(/breaker/i);
+    await expect(withCircuit(async () => 42)).resolves.toBe(42);
+
+    partnerCircuitBreaker.close();
+    circuitBreaker.open();
+
+    await expect(withCircuit(async () => 1)).rejects.toThrow(/breaker/i);
+    await expect(withPartnerCircuit(async () => 42)).resolves.toBe(42);
   });
 
   it("keeps native and report breakers closed after repeated caller aborts", async () => {

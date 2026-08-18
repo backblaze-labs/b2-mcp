@@ -10,6 +10,7 @@ import {
   type HttpTransport,
   type RetryOptions,
 } from "@backblaze-labs/b2-sdk";
+import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
@@ -20,7 +21,7 @@ import { isTestRuntime } from "./utils/runtime.js";
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
 
-const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
+export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   maxRetries: 3,
   initialRetryDelayMs: 1000,
   maxRetryDelayMs: 4000,
@@ -81,7 +82,11 @@ function configuredSdkClientFactoryForTests(): SdkClientFactory | null {
 }
 
 class RequestSignalTransport implements HttpTransport {
-  constructor(private readonly inner: HttpTransport) {}
+  readonly urlGuard: UrlGuard | undefined;
+
+  constructor(private readonly inner: HttpTransport) {
+    this.urlGuard = transportUrlGuard(inner);
+  }
 
   async send(request: HttpRequest): Promise<HttpResponse> {
     const signal = request.signal ?? currentMcpRequestSignal() ?? new AbortController().signal;
@@ -95,6 +100,11 @@ class RequestSignalTransport implements HttpTransport {
       throw err;
     }
   }
+}
+
+function transportUrlGuard(transport: HttpTransport): UrlGuard | undefined {
+  const candidate = transport as { urlGuard?: unknown };
+  return candidate.urlGuard instanceof UrlGuard ? candidate.urlGuard : undefined;
 }
 
 export function createMcpHttpTransport(
@@ -142,9 +152,12 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
 }
 
 class SharedRetryBudgetTransport implements HttpTransport {
+  readonly urlGuard: UrlGuard | undefined;
   private readonly attemptsBySignal = new WeakMap<AbortSignal, Map<string, number>>();
 
-  constructor(private readonly inner: HttpTransport) {}
+  constructor(private readonly inner: HttpTransport) {
+    this.urlGuard = transportUrlGuard(inner);
+  }
 
   async send(request: HttpRequest): Promise<HttpResponse> {
     const next = this.nextAttempt(request);
@@ -180,6 +193,10 @@ class SharedRetryBudgetTransport implements HttpTransport {
   }
 }
 
+export function createMcpRetryBudgetTransport(inner: HttpTransport): HttpTransport {
+  return new RequestSignalTransport(new SharedRetryBudgetTransport(inner));
+}
+
 function lockUrlGuard(client: ManagedSdkClient, auth: AuthorizeAccountResponse): void {
   client.urlGuard?.setAllowedSuffixes(deriveAllowedSuffixes(auth.apiInfo.storageApi));
 }
@@ -201,6 +218,22 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
     client,
     urlGuard,
   };
+}
+
+export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
+  const urlGuard = new UrlGuard();
+  return new SdkPartnerClient({
+    // Partner B2Config instances carry master credentials in applicationKey*.
+    masterKeyId: config.applicationKeyId,
+    masterKey: config.applicationKey,
+    transport: createMcpRetryBudgetTransport(
+      new FetchTransport({
+        userAgent: buildUserAgent(config),
+        urlGuard,
+      }),
+    ),
+    retry: SDK_RETRY_OPTIONS,
+  });
 }
 
 function abortReason(signal: AbortSignal): unknown {

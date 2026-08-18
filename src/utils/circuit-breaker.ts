@@ -54,6 +54,7 @@ let longBreaker: CircuitBreakerInstance | null = null;
 let reportBreaker: CircuitBreakerInstance | null = null;
 let s3Breaker: CircuitBreakerInstance | null = null;
 let s3LongBreaker: CircuitBreakerInstance | null = null;
+let partnerBreaker: CircuitBreakerInstance | null = null;
 
 function createBreaker(
   name: string,
@@ -155,6 +156,22 @@ function s3TransferBreaker(): CircuitBreakerInstance {
   return s3LongBreaker;
 }
 
+/**
+ * Separate breaker for the Partner/Groups control plane.
+ *
+ * Partner endpoints are a distinct failure domain from the native B2
+ * bucket/key/Object Lock control plane, so a Partner incident must not open the
+ * native breaker operators use for storage administration.
+ */
+function partnerApiBreaker(): CircuitBreakerInstance {
+  partnerBreaker ??= createBreaker("b2-partner-api", CIRCUIT_TIMEOUT_MS, {
+    open: "circuit.partner.open",
+    halfOpen: "circuit.partner.halfOpen",
+    close: "circuit.partner.close",
+  });
+  return partnerBreaker;
+}
+
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   const maybeUnref = (timer as { unref?: unknown }).unref;
   if (typeof maybeUnref === "function") maybeUnref.call(timer);
@@ -233,6 +250,15 @@ export async function withS3LongCircuit<T>(fn: () => Promise<T>): Promise<T> {
   return s3TransferBreaker().fire(fn as () => Promise<unknown>) as Promise<T>;
 }
 
+/**
+ * Run Partner API calls through their isolated control-plane breaker.
+ *
+ * @returns The callback result after the Partner circuit allows execution.
+ */
+export async function withPartnerCircuit<T>(fn: () => Promise<T>): Promise<T> {
+  return partnerApiBreaker().fire(() => withDeadlineSignal(CIRCUIT_TIMEOUT_MS, fn)) as Promise<T>;
+}
+
 function breakerProxy(get: () => CircuitBreakerInstance): CircuitBreakerInstance {
   return new Proxy({} as CircuitBreakerInstance, {
     get(_target, property) {
@@ -248,3 +274,4 @@ export const transferCircuitBreaker = breakerProxy(transferBreaker);
 export const reportCircuitBreaker = breakerProxy(usageReportBreaker);
 export const s3CircuitBreaker = breakerProxy(s3ApiBreaker);
 export const s3TransferCircuitBreaker = breakerProxy(s3TransferBreaker);
+export const partnerCircuitBreaker = breakerProxy(partnerApiBreaker);

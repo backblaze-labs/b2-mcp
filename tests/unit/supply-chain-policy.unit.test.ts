@@ -51,7 +51,15 @@ describe("supply-chain audit policy", () => {
   };
   const pnpmWorkspace = parseYaml(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8")) as {
     allowBuilds?: Record<string, boolean>;
+    minimumReleaseAgeExclude?: string[];
   };
+  const customerHostedPnpmWorkspace = parseYaml(
+    readFileSync(join(root, "deploy/customer-hosted/pnpm-workspace.yaml"), "utf8"),
+  ) as {
+    allowBuilds?: Record<string, boolean>;
+    minimumReleaseAgeExclude?: string[];
+  };
+  const sdkAdoptionContract = readFileSync(join(root, "docs/SDK_ADOPTION_CONTRACT.md"), "utf8");
   const workflowDirectory = join(root, ".github/workflows");
   const allWorkflows = readdirSync(workflowDirectory)
     .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
@@ -84,6 +92,30 @@ describe("supply-chain audit policy", () => {
   };
   type LockPackageWithMetadata = LockPackage & { integrity: string; version: string };
   const lock = readPackageManagerLock(root) as { packages: Record<string, LockPackage> };
+
+  it("requires documented review for a fresh Backblaze SDK release-age exception", () => {
+    const sdkVersion = packageJson.dependencies["@backblaze-labs/b2-sdk"];
+    const excludedPackage = `@backblaze-labs/b2-sdk@${sdkVersion}`;
+    const rootExcludes = pnpmWorkspace.minimumReleaseAgeExclude ?? [];
+    const customerHostedExcludes = customerHostedPnpmWorkspace.minimumReleaseAgeExclude ?? [];
+
+    expect(rootExcludes.includes(excludedPackage)).toBe(
+      customerHostedExcludes.includes(excludedPackage),
+    );
+    if (!rootExcludes.includes(excludedPackage)) return;
+
+    const lockEntry = rawPnpmLock.packages?.[excludedPackage];
+    const integrity = lockEntry?.resolution?.integrity;
+
+    expect(integrity).toBeTruthy();
+    expect(sdkAdoptionContract).toContain(excludedPackage);
+    expect(sdkAdoptionContract).toContain("SLSA v1 attestation");
+    expect(sdkAdoptionContract).toContain(String(integrity));
+    expect(sdkAdoptionContract).toContain(
+      "npm diff --diff=@backblaze-labs/b2-sdk@0.2.0 --diff=@backblaze-labs/b2-sdk@0.3.0 --diff-name-only",
+    );
+    expect(sdkAdoptionContract).toContain("lifecycle script");
+  });
 
   function requirePolicyFixturePackage(path: string, purpose: string): LockPackageWithMetadata {
     const pkg = lock.packages[path];

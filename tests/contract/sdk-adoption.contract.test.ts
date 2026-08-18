@@ -202,11 +202,12 @@ describe("SDK adoption contract", () => {
       "partner",
       "PartnerRawClient.reserveTrialCreateAccount",
     );
+    expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
     expect(b2Client).toContain("client.raw.listGroups");
-    expect(b2Client).toContain("client.raw.createGroupMember");
     expect(b2Client).toContain("client.raw.ejectGroupMember");
     expect(b2Client).toContain("client.raw.listGroupMembers");
-    expect(b2Client).toContain("client.raw.reserveTrialCreateAccount");
+    expect(b2Client).not.toContain("client.raw.createGroupMember");
+    expect(b2Client).not.toContain("client.raw.reserveTrialCreateAccount");
     expect(partner).toContain("client.listGroups");
     expect(partner).toContain("client.ejectGroupMember");
     expect(partner).toContain("client.listGroupMembers");
