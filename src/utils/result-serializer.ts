@@ -90,6 +90,21 @@ export function serializeStructuredToolResult(
   };
 }
 
+export function serializeUnsanitizedStructuredToolResult(
+  data: unknown,
+  format: McpOutputFormat = currentMcpOutputFormat(),
+): StructuredToolResult {
+  const json = JSON.stringify(data);
+  if (json === undefined) {
+    throw new TypeError("MCP structured tool output must be JSON-compatible");
+  }
+  const structuredContent = JSON.parse(json) as JsonCompatible;
+  return {
+    content: [{ type: "text", text: serializeStructuredText(structuredContent, json, format) }],
+    structuredContent,
+  };
+}
+
 function serializeStructuredText(
   value: JsonCompatible,
   jsonText: string,

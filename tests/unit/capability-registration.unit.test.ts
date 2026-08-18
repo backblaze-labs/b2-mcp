@@ -50,10 +50,11 @@ describe("isToolEnabled", () => {
     expect(isToolEnabled("b2_authorize_account", new Set())).toBe(true);
   });
 
-  it("always excludes durable-secret-producing tools", () => {
+  it("leaves durable-secret-producing availability to secret-sink registration", () => {
+    expect(isToolEnabled("b2_create_key", new Set(["writeKeys"]))).toBe(true);
+    expect(isToolEnabled("b2_create_key", new Set(["listKeys"]))).toBe(false);
     for (const tool of DURABLE_SECRET_PRODUCING_TOOLS) {
-      expect(isToolEnabled(tool, null)).toBe(false);
-      expect(isToolEnabled(tool, new Set(Object.values(TOOL_CAPABILITIES).flat()))).toBe(false);
+      expect(isToolEnabled(tool, null)).toBe(true);
     }
   });
 

@@ -37,8 +37,11 @@ version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
     responses, or provider deployment-bypass tokens.
     If `B2_LOG_FILE` is set, structured logs move off stderr/stdout and provider
     log capture will not see them unless a log agent tails that file directly.
-13. Create, rotate, revoke, and tear down B2 keys outside the MCP tool flow
-    until a reviewed out-of-band secret sink exists.
+13. Keep `B2_SECRET_SINK=off` on hosted HTTP/serverless deployments unless a
+    reviewed operator-accessible file sink is explicitly configured with
+    `B2_ALLOW_LOCAL_FILES=true` and `B2_SECRET_SINK_FILE`. Local stdio may use
+    the default file sink for create/rotate flows because the operator owns the
+    machine and can read the ledger out of band.
 14. Configure protected live deployment smokes with a GitHub Environment so
     live B2 credentials are never exposed to untrusted fork or PR code.
 15. Process-local rate limits and caches are not global across replicas,
@@ -102,6 +105,7 @@ B2_ALLOWED_HOSTS=mcp.example.com
 B2_DESTRUCTIVE_POLICY=block
 B2_REGISTER_ALL_TOOLS=false
 B2_ALLOW_LOCAL_FILES=false
+B2_SECRET_SINK=off
 B2_MCP_OUTPUT_FORMAT=json
 B2_MCP_PUBLIC_URL=https://mcp.example.com/mcp
 B2_OAUTH_ISSUER=https://issuer.example.com/
@@ -119,6 +123,16 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 Store `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, and OAuth introspection
 credentials in the provider's encrypted secret mechanism, not in source, build
 logs, query strings, screenshots, or client configuration.
+
+`B2_SECRET_SINK=file` writes newly created application key secrets to a
+plaintext append-only JSONL file. Treat that file as a credential store: protect
+it with owner-only permissions, rotate or revoke keys after use, and delete or
+vault old records under the same policy used for `B2_APPLICATION_KEY`. For local
+stdio this is no more exposed than the B2 credentials already present on the
+same machine. For hosted HTTP, do not enable it unless the path is on an
+operator-accessible isolated volume with documented retention and access
+controls. Never use `B2_SECRET_SINK=inline` on hosted deployments; it returns
+the new key secret into MCP output and may be logged or retained by clients.
 
 For authorization servers that issue signed JWT access tokens, set
 `B2_OAUTH_JWKS_URI` to the issuer's JWKS URL. Then

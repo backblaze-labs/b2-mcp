@@ -24,9 +24,12 @@ beforeEach(() => {
   delete process.env.B2_MASTER_KEY_ID;
   delete process.env.B2_MASTER_KEY;
   delete process.env.B2_MCP_OUTPUT_FORMAT;
+  delete process.env.B2_SECRET_SINK;
+  delete process.env.B2_SECRET_SINK_FILE;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
+  process.env.B2_SECRET_SINK = "off";
 });
 
 afterEach(() => {

@@ -1,10 +1,19 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { B2Client, type ListKeysOptions } from "./client.js";
+import { B2Client, type FullApplicationKeyResult, type ListKeysOptions } from "./client.js";
 import { B2AuthManager } from "../auth.js";
-import { B2Config } from "../utils/types.js";
-import { toolJson, toolError } from "../utils/errors.js";
+import { ALL_CAPABILITIES, B2Config } from "../utils/types.js";
+import { toolJson, toolError, toolJsonInlineDurableSecret } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
+import {
+  APPLICATION_KEY_REDACTED,
+  appendSecretSinkRecord,
+  INLINE_SECRET_WARNING,
+} from "../utils/secret-sink.js";
+
+function redactedCreatedKey(result: FullApplicationKeyResult): FullApplicationKeyResult {
+  return { ...result, applicationKey: APPLICATION_KEY_REDACTED };
+}
 
 export function registerKeyTools(
   server: ToolRegistrar,
@@ -12,11 +21,68 @@ export function registerKeyTools(
   auth: B2AuthManager,
   config: B2Config,
 ): void {
-  // Phase 1 deliberately does not register the real b2_create_key handler here.
-  // B2 returns the new application key secret once, and this server has no
-  // out-of-band secret sink. createServer registers a non-secret compatibility
-  // stub for stale tools/list clients. Re-enable only with a sink-backed
-  // contract that returns non-secret metadata.
+  // ── b2_create_key ─────────────────────────────────────────────────────────
+  if (config.secretSink?.mode === "file" || config.secretSink?.mode === "inline") {
+    server.registerTool(
+      "b2_create_key",
+      {
+        description:
+          "Create a B2 application key. In file sink mode, the one-time key secret is written to the configured out-of-band secret sink and the MCP response contains only redacted metadata plus a secretSink pointer. In inline mode, the secret is returned with an explicit warning.",
+        inputSchema: {
+          keyName: z.string().min(1).describe("Human-readable name for the new key."),
+          capabilities: z
+            .array(z.enum(ALL_CAPABILITIES))
+            .min(1)
+            .describe("B2 capabilities to grant to the new key."),
+          bucketIds: z
+            .array(z.string())
+            .optional()
+            .describe("Optional bucket restrictions. Omit for account-wide access."),
+          validDurationInSeconds: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Optional key lifetime in seconds. Omit for no expiration."),
+          namePrefix: z
+            .string()
+            .optional()
+            .describe("Optional file-name prefix restriction for file capabilities."),
+        },
+      },
+      async (args) => {
+        try {
+          const secretSink = config.secretSink;
+          if (!secretSink || secretSink.mode === "off") {
+            return toolError({
+              status: 410,
+              code: "tool_unavailable",
+              message:
+                "b2_create_key is unavailable because it produces durable credential material and no out-of-band secret sink is configured.",
+            });
+          }
+          const result = await client.createKey({
+            keyName: args.keyName,
+            capabilities: args.capabilities,
+            ...(args.bucketIds !== undefined ? { bucketIds: args.bucketIds } : {}),
+            ...(args.validDurationInSeconds !== undefined
+              ? { validDurationInSeconds: args.validDurationInSeconds }
+              : {}),
+            ...(args.namePrefix !== undefined ? { namePrefix: args.namePrefix } : {}),
+          });
+
+          if (secretSink.mode === "inline") {
+            return toolJsonInlineDurableSecret({ ...result, warning: INLINE_SECRET_WARNING });
+          }
+
+          const pointer = appendSecretSinkRecord(secretSink, "b2_create_key", result);
+          return toolJson({ ...redactedCreatedKey(result), secretSink: pointer });
+        } catch (err) {
+          return toolError(err);
+        }
+      },
+    );
+  }
 
   // ── b2_list_keys ──────────────────────────────────────────────────────────
   server.registerTool(

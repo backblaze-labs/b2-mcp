@@ -16,7 +16,11 @@ import {
   resumeUnreadRequest,
   writeWebResponse,
 } from "./utils/node-web-bridge.js";
-import { configFromHttpHeaders, type AuthenticatedIncomingMessage } from "./credentials.js";
+import {
+  configFromHttpHeaders,
+  validateHttpCredentialConfiguration,
+  type AuthenticatedIncomingMessage,
+} from "./credentials.js";
 import {
   createB2McpFetchHandler,
   createInFlightLimiter,
@@ -135,6 +139,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
 
 export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
   initLogging();
+  validateHttpCredentialConfiguration();
   const port = options.port ?? getPort();
   const handle = buildHttpServer();
   const { server: httpServer, sessions, drain } = handle;

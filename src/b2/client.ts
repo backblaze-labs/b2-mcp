@@ -7,8 +7,11 @@ import type {
   EncryptionSetting as SdkEncryptionSetting,
   BucketInfo,
   BucketId,
+  Capability,
+  CreateKeyOptions as SdkCreateKeyOptions,
   EventNotificationRule as SdkEventNotificationRule,
   FileVersion,
+  FullApplicationKey,
   GetBucketNotificationRulesResponse,
   ListBucketsRequest,
   LifecycleRule as SdkLifecycleRule,
@@ -29,10 +32,15 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import type {
   EjectGroupMemberResponse,
+  CreateGroupMemberResponse,
   ListGroupMembersResponse,
   ListGroupsResponse,
   PartnerAuthorizeResponse,
   PartnerRawRequestOptions,
+  Region,
+  ReserveTrialCreateAccountRequest,
+  ReserveTrialCreateAccountRequestEntry,
+  ReserveTrialCreateAccountResponse,
 } from "@backblaze-labs/b2-sdk/partner";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2AuthManager, createDefaultPartnerClient } from "../auth.js";
@@ -223,6 +231,18 @@ export interface ApplicationKeyResult {
   options: string[];
 }
 
+export interface FullApplicationKeyResult extends ApplicationKeyResult {
+  applicationKey: string;
+}
+
+export interface CreateKeyOptions {
+  keyName: string;
+  capabilities: string[];
+  validDurationInSeconds?: number;
+  bucketIds?: string[] | null;
+  namePrefix?: string;
+}
+
 export interface ListKeysResult {
   keys: ApplicationKeyResult[];
   nextApplicationKeyId?: string | null;
@@ -338,6 +358,17 @@ export interface PartnerEjectGroupMemberOptions {
   email?: string | null;
 }
 
+export interface PartnerCreateGroupMemberOptions {
+  adminAccountId: string;
+  groupId: string;
+  memberEmail: string;
+  region?: Region | null;
+}
+
+export type PartnerReserveTrialCreateAccountOptions =
+  | ReserveTrialCreateAccountRequestEntry
+  | ReserveTrialCreateAccountRequest;
+
 type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
 
 // Token lifetime is 24h but we refresh after 23h to be safe.
@@ -367,6 +398,14 @@ function cloneJsonResponse<T>(value: T): T {
 function cloneJsonField<T>(value: T): T {
   if (value === undefined || value === null) return value;
   return cloneJsonResponse(value);
+}
+
+function cloneSecretBearingPartnerResponse<T extends { readonly applicationKey: string }>(
+  response: readonly T[],
+): T[] {
+  return response.map((result) =>
+    cloneJsonResponse({ ...result, applicationKey: result.applicationKey } as T),
+  );
 }
 
 function toServerSideEncryptionResult(
@@ -504,6 +543,27 @@ function toApplicationKeyResult(value: ApplicationKey): ApplicationKeyResult {
     bucketId: value.bucketId == null ? null : String(value.bucketId),
     namePrefix: value.namePrefix,
     options: [...value.options],
+  };
+}
+
+function toFullApplicationKeyResult(value: FullApplicationKey): FullApplicationKeyResult {
+  return {
+    ...toApplicationKeyResult(value),
+    applicationKey: value.applicationKey,
+  };
+}
+
+function normalizeCreateKeyOptions(options: CreateKeyOptions): SdkCreateKeyOptions {
+  return {
+    keyName: options.keyName,
+    capabilities: options.capabilities as Capability[],
+    ...(options.validDurationInSeconds !== undefined
+      ? { validDurationInSeconds: options.validDurationInSeconds }
+      : {}),
+    ...(options.bucketIds !== undefined
+      ? { bucketIds: options.bucketIds?.map(bucketId) ?? null }
+      : {}),
+    ...(options.namePrefix !== undefined ? { namePrefix: options.namePrefix } : {}),
   };
 }
 
@@ -939,6 +999,14 @@ export class B2Client {
     );
   }
 
+  async createKey(options: CreateKeyOptions): Promise<FullApplicationKeyResult> {
+    return toFullApplicationKeyResult(
+      await this.withNativeCircuit((client) =>
+        client.createKey(normalizeCreateKeyOptions(options)),
+      ),
+    );
+  }
+
   async listKeys(options: ListKeysOptions): Promise<ListKeysResult> {
     const result = await this.withNativeCircuit((client) =>
       client.listKeys({
@@ -1166,6 +1234,31 @@ export class B2Client {
     );
   }
 
+  async createGroupMember(
+    options: PartnerCreateGroupMemberOptions,
+  ): Promise<CreateGroupMemberResponse> {
+    return cloneSecretBearingPartnerResponse(
+      await this.withPartnerCircuit(
+        { retryOnUnauthorized: false },
+        (client, auth, coordinates, requestOptions) => {
+          validatePartnerAdminAccount(auth, options.adminAccountId);
+          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+          return client.raw.createGroupMember(
+            groupsApiUrl,
+            authToken,
+            {
+              adminAccountId,
+              groupId: groupId(options.groupId),
+              memberEmail: options.memberEmail,
+              ...(options.region !== undefined ? { region: options.region } : {}),
+            },
+            requestOptions,
+          );
+        },
+      ),
+    );
+  }
+
   async ejectGroupMember(
     options: PartnerEjectGroupMemberOptions,
   ): Promise<EjectGroupMemberResponse> {
@@ -1184,6 +1277,25 @@ export class B2Client {
               memberAccountId: accountId(options.memberAccountId),
               ...(options.email !== undefined ? { email: options.email } : {}),
             },
+            requestOptions,
+          );
+        },
+      ),
+    );
+  }
+
+  async reserveTrialCreateAccount(
+    request: PartnerReserveTrialCreateAccountOptions,
+  ): Promise<ReserveTrialCreateAccountResponse> {
+    return cloneSecretBearingPartnerResponse(
+      await this.withPartnerCircuit(
+        { retryOnUnauthorized: false },
+        (client, _auth, coordinates, requestOptions) => {
+          const { groupsApiUrl, authToken } = coordinates;
+          return client.raw.reserveTrialCreateAccount(
+            groupsApiUrl,
+            authToken,
+            request,
             requestOptions,
           );
         },

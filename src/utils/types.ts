@@ -5,6 +5,13 @@ import type { McpOutputFormat } from "./result-serializer.js";
 export type DestructivePolicy = "allow" | "confirm" | "block";
 export type { McpOutputFormat };
 
+export type SecretSinkMode = "file" | "inline" | "off";
+
+export type SecretSinkConfig =
+  | { mode: "file"; filePath: string }
+  | { mode: "inline" }
+  | { mode: "off"; unavailableReason?: string };
+
 export interface B2Config {
   /**
    * The application key — the workhorse credential. Used for the B2 native API,
@@ -52,6 +59,11 @@ export interface B2Config {
   outputFormat?: McpOutputFormat;
   /** Which transport launched this server — surfaced in the outbound User-Agent. */
   transport?: "stdio" | "http";
+  /**
+   * Out-of-band destination for durable one-time B2 application key secrets.
+   * Undefined preserves the historical non-secret compatibility stubs.
+   */
+  secretSink?: SecretSinkConfig;
   /** Non-secret SHA-256-derived fingerprint used for logs, metrics, and caches. */
   credentialFingerprint?: string;
 }

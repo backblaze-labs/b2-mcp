@@ -1,12 +1,11 @@
-import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { closeSync } from "node:fs";
 import pino, { type DestinationStream } from "pino";
 import { VERSION } from "../version.js";
 import { LOGGER_SECRET_REDACTION_PATHS, SECRET_SANITIZER_REDACTION } from "./secret-sanitizer.js";
+import { openSecureAppendFile, secureAppendFileErrorDetail } from "./secure-append-file.js";
 
 const isTest = process.env.NODE_ENV === "test";
 const LOG_FILE_MODE = 0o600;
-const GROUP_OR_OTHER_PERMISSIONS = 0o077;
 const LOG_FILE_MIN_LENGTH = 4096;
 const LOG_FILE_PERIODIC_FLUSH_MS = 1000;
 const LOG_FILE_FAILURE_REPORT_INTERVAL_MS = 60_000;
@@ -78,90 +77,15 @@ function createPinoDestination(destOptions: PinoDestinationOptions): ManagedDest
   return (destination as (destOptions: PinoDestinationOptions) => ManagedDestination)(destOptions);
 }
 
-function hasCode(err: unknown, code: string): boolean {
-  return err instanceof Error && "code" in err && typeof err.code === "string" && err.code === code;
-}
-
 function errorDetail(err: unknown): string {
-  if (!(err instanceof Error)) return String(err);
-  const code = "code" in err && typeof err.code === "string" ? `${err.code}: ` : "";
-  return `${code}${err.message}`;
-}
-
-function failLogFile(message: string): never {
-  throw new Error(message);
-}
-
-function assertLogFilePlatformSupported(logFile: string): void {
-  if (process.platform === "win32") {
-    failLogFile(
-      `B2_LOG_FILE is not supported on Windows because owner-only file permissions cannot be enforced: ${logFile}`,
-    );
-  }
-}
-
-function currentUid(): number | undefined {
-  return typeof process.getuid === "function" ? process.getuid() : undefined;
-}
-
-function normalizeExistingLogFile(logFile: string, fd: number): void {
-  let stats = fstatSync(fd);
-  if (!stats.isFile()) {
-    failLogFile(`B2_LOG_FILE must point to a regular file: ${logFile}`);
-  }
-  if (stats.nlink > 1) {
-    failLogFile(`B2_LOG_FILE must not be a hard link: ${logFile}`);
-  }
-
-  const uid = currentUid();
-  if (uid !== undefined && stats.uid !== uid) {
-    failLogFile(`B2_LOG_FILE must be owned by the current user: ${logFile}`);
-  }
-
-  if ((stats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
-    fchmodSync(fd, LOG_FILE_MODE);
-    stats = fstatSync(fd);
-    if ((stats.mode & GROUP_OR_OTHER_PERMISSIONS) !== 0) {
-      failLogFile(
-        `B2_LOG_FILE must not be readable or writable by group or other users: ${logFile}`,
-      );
-    }
-  }
-}
-
-function openLogFile(logFile: string): number {
-  assertLogFilePlatformSupported(logFile);
-  if (!isAbsolute(logFile)) {
-    failLogFile(`B2_LOG_FILE must be an absolute path: ${logFile}`);
-  }
-
-  let fd: number | undefined;
-  try {
-    fd = openSync(
-      logFile,
-      constants.O_CREAT |
-        constants.O_APPEND |
-        constants.O_WRONLY |
-        constants.O_NOFOLLOW |
-        constants.O_NONBLOCK,
-      LOG_FILE_MODE,
-    );
-    normalizeExistingLogFile(logFile, fd);
-    return fd;
-  } catch (err) {
-    if (fd !== undefined) closeSync(fd);
-    if (err instanceof Error && err.message.startsWith("B2_LOG_FILE ")) {
-      throw err;
-    }
-    if (hasCode(err, "ELOOP")) {
-      failLogFile(`B2_LOG_FILE must not be a symlink: ${logFile}`);
-    }
-    failLogFile(`B2_LOG_FILE is not writable: ${logFile} (${errorDetail(err)})`);
-  }
+  return secureAppendFileErrorDetail(err);
 }
 
 function createFileStream(logFile: string): ManagedDestination {
-  const fd = openLogFile(logFile);
+  const fd = openSecureAppendFile(logFile, {
+    envVarName: "B2_LOG_FILE",
+    mode: LOG_FILE_MODE,
+  });
   try {
     return createPinoDestination({
       dest: fd,

@@ -265,7 +265,7 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -285,7 +285,7 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {},
@@ -511,7 +511,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1868,5 +1868,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83"
+  "hash": "71d6a7fb3f5934f04e87a273c0da982219639f84493871c8ac96ab80e4e1b3c1"
 }

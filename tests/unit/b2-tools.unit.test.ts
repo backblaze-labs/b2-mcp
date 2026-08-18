@@ -7,11 +7,15 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { B2AuthManager } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { logger } from "../../src/utils/logger";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import {
@@ -39,6 +43,15 @@ const sdkTestRetry = {
   maxRetryDelayMs: 1,
   requestTimeoutMs: 30_000,
 };
+
+function tempSecretFile(): string {
+  return join(mkdtempSync(join(tmpdir(), "b2-mcp-tool-secret-sink-")), "secrets.jsonl");
+}
+
+function readSecretLedger(file: string): any {
+  const lines = readFileSync(file, "utf8").trim().split("\n");
+  return JSON.parse(lines[lines.length - 1]);
+}
 
 async function seedClient(): Promise<SdkB2Client> {
   const client = new SdkB2Client({
@@ -612,6 +625,61 @@ describe("durable-secret-producing tools", () => {
       expect(result.content[0].text).toContain("tool_unavailable");
       expect(result.content[0].text).not.toContain("mock-token-xyz");
     }
+  });
+
+  it("creates keys in file mode without returning the key secret to MCP output or logs", async () => {
+    const logSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    const rawResult = await callTool(server, "b2_create_key", {
+      keyName: "ci-uploader",
+      capabilities: ["listBuckets", "writeFiles"],
+    });
+    const result = parseResult(rawResult);
+    const ledger = readSecretLedger(secretFile);
+    const secret = ledger.applicationKey;
+
+    expect(result.keyName).toBe("ci-uploader");
+    expect(result.applicationKey).toBe("[redacted]");
+    expect(result.secretSink).toMatchObject({
+      type: "file",
+      path: secretFile,
+      recordId: ledger.recordId,
+    });
+    expect(ledger).toMatchObject({
+      tool: "b2_create_key",
+      recordId: result.secretSink.recordId,
+      keyName: "ci-uploader",
+      capabilities: ["listBuckets", "writeFiles"],
+    });
+    expect(typeof secret).toBe("string");
+    expect(secret).not.toBe("[redacted]");
+    expect(JSON.stringify(rawResult)).not.toContain(secret);
+    expect(JSON.stringify(logSpy.mock.calls)).not.toContain(secret);
+    expect(statSync(secretFile).mode & 0o777).toBe(0o600);
+  });
+
+  it("returns a created key secret only in explicit inline mode", async () => {
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "inline" },
+    });
+
+    const rawResult = await callTool(server, "b2_create_key", {
+      keyName: "inline-key",
+      capabilities: ["listBuckets"],
+    });
+    const result = parseResult(rawResult);
+
+    expect(result.keyName).toBe("inline-key");
+    expect(result.applicationKey).toEqual(expect.any(String));
+    expect(result.applicationKey).not.toBe("[redacted]");
+    expect(result.warning).toContain("B2_SECRET_SINK=inline");
+    expect(rawResult.content[0].text).toContain(result.applicationKey);
   });
 });
 
@@ -1333,6 +1401,79 @@ describe("Partner API tools", () => {
       memberAccountId: member.accountId,
       email: "new@example.com",
     });
+  });
+
+  it("creates group members in file mode with only a secretSink pointer in MCP output", async () => {
+    const secretFile = tempSecretFile();
+    const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "sink-member@example.com",
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const ledger = readSecretLedger(secretFile);
+    const secret = ledger.results[0].applicationKey;
+    const request = transport.requests.find(
+      (request) => b2EndpointName(request) === "b2_create_group_member",
+    );
+
+    expect(request?.method).toBe("POST");
+    expect(result.secretSink).toMatchObject({
+      type: "file",
+      path: secretFile,
+      recordId: ledger.recordId,
+    });
+    expect(result.results[0].applicationKey).toBe("[redacted]");
+    expect(result.results[0].groupMember.email).toBe("sink-member@example.com");
+    expect(ledger.tool).toBe("b2_create_group_member");
+    expect(secret).toEqual(expect.any(String));
+    expect(secret).not.toBe("[redacted]");
+    expect(JSON.stringify(rawResult)).not.toContain(secret);
+  });
+
+  it("reserves trial accounts in file mode with only a secretSink pointer in MCP output", async () => {
+    const secretFile = tempSecretFile();
+    const { transport } = await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    const rawResult = await callTool(server, "b2_reserve_trial_create_account", {
+      email: "trial-sink@example.com",
+      term: 7,
+      storage: 1,
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const ledger = readSecretLedger(secretFile);
+    const secret = ledger.results[0].applicationKey;
+    const request = transport.requests.find(
+      (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+    );
+
+    expect(request?.method).toBe("POST");
+    expect(result.secretSink).toMatchObject({
+      type: "file",
+      path: secretFile,
+      recordId: ledger.recordId,
+    });
+    expect(result.results[0].applicationKey).toBe("[redacted]");
+    expect(result.results[0].email).toBe("trial-sink@example.com");
+    expect(ledger.tool).toBe("b2_reserve_trial_create_account");
+    expect(secret).toEqual(expect.any(String));
+    expect(secret).not.toBe("[redacted]");
+    expect(JSON.stringify(rawResult)).not.toContain(secret);
   });
 
   it.each([

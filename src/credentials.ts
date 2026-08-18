@@ -4,6 +4,7 @@ import type { AuthInfo } from "@modelcontextprotocol/server";
 import { logger } from "./utils/logger.js";
 import { B2Config, DestructivePolicy } from "./utils/types.js";
 import { parseMcpOutputFormat, preflightMcpOutputFormat } from "./utils/result-serializer.js";
+import { resolveSecretSinkConfig } from "./utils/secret-sink.js";
 
 const DEFAULT_REGION = "us-west-004";
 
@@ -188,6 +189,7 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     destructivePolicy: resolveDestructivePolicy(options.transport),
     outputFormat: resolveOutputFormat(),
     transport: options.transport,
+    secretSink: resolveSecretSinkConfig({ transport: options.transport }),
   };
   config.credentialFingerprint = fingerprintConfig(config);
   return config;
@@ -501,6 +503,7 @@ export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
   resolveOutputFormat();
+  resolveSecretSinkConfig({ transport: "http" });
   provider.validateConfiguration?.();
 }
 

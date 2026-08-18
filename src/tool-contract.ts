@@ -211,11 +211,11 @@ export interface ToolFixtureFromCollectedOptions {
 }
 
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
-  full: "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers remain availability-annotated stubs.",
+  full: "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
   "phase1-default":
-    "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed only as unavailable stubs.",
+    "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.",
   "read-only":
-    "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs.",
+    "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.",
 };
 
 export const PROFILE_NAMES = Object.keys(PROFILE_CAPABILITIES) as ProfileName[];

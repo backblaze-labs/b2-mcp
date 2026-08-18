@@ -7,6 +7,10 @@
  */
 
 // We need to control process.env and mock process.exit to test loadConfig
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 const mockExit = vi.spyOn(process, "exit").mockImplementation((() => {
   throw new Error("process.exit called");
 }) as any);
@@ -23,6 +27,7 @@ afterAll(() => {
 const originalEnv = process.env;
 beforeEach(() => {
   process.env = { ...originalEnv };
+  process.env.B2_SECRET_SINK = "off";
 });
 afterEach(() => {
   process.env = originalEnv;
@@ -82,6 +87,16 @@ describe("loadConfig — valid env vars", () => {
     process.env.B2_REGION = "eu-central-003";
     const config = await loadConfig();
     expect(config.region).toBe("eu-central-003");
+  });
+
+  it("resolves explicit stdio file secret sink paths", async () => {
+    const secretFile = join(mkdtempSync(join(tmpdir(), "b2-mcp-config-secret-sink-")), "s.jsonl");
+    process.env.B2_SECRET_SINK = "file";
+    process.env.B2_SECRET_SINK_FILE = secretFile;
+
+    const config = await loadConfig();
+
+    expect(config.secretSink).toEqual({ mode: "file", filePath: secretFile });
   });
 
   it("defaults appKeyId to applicationKeyId when B2_APP_KEY_ID is not set", async () => {
