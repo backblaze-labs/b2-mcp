@@ -94,8 +94,9 @@ Load the pack in supported clients:
 
 - **Claude Code:** put each `skills/b2-*/` directory under `~/.claude/skills/`
   or the client-supported project skills directory, then restart the session.
-- **Claude.ai / Claude Desktop with Skills:** open **Settings -> Capabilities ->
-  Skills** and import the `skills/b2-*/` directories from this checkout.
+- **Claude.ai / Claude Desktop with Skills:** create ZIP archives for the desired
+  `skills/b2-*/` directories, with each `SKILL.md` at the ZIP root, then open
+  **Settings -> Capabilities -> Skills** and upload those ZIP files.
 - **Other MCP clients with Markdown skills:** register each `skills/b2-*/SKILL.md`
   file or containing directory according to that client's skills documentation.
 
