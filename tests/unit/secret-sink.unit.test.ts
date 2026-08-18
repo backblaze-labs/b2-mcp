@@ -246,4 +246,21 @@ describe("secret sink file writer", () => {
     expect(pointer.recordId).toEqual(expect.any(String));
     expect(fsyncSpy).toHaveBeenCalled();
   });
+
+  it("rolls back a ledger line when fsync fails before returning a pointer", () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    writeFileSync(file, "", { mode: 0o600 });
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
+      throw new Error("simulated fsync failure");
+    });
+
+    expect(() =>
+      appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+        applicationKey: "B2_MCP_CANARY_SECRET_failed_fsync",
+      }),
+    ).toThrow(/simulated fsync failure/);
+
+    expect(readFileSync(file, "utf8")).toBe("");
+  });
 });

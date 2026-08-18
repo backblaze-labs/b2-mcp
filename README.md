@@ -351,16 +351,18 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 Durable-secret-producing operations split their result: the one-time
 `applicationKey` is written to the configured sink, while MCP output returns
-redacted metadata plus a `secretSink` pointer. Stdio defaults to `file` at
-`~/.b2-mcp/secrets.jsonl`. HTTP/serverless defaults to `off`; enabling `file`
-there requires both `B2_ALLOW_LOCAL_FILES=true` and an explicit
-`B2_SECRET_SINK_FILE`. `B2_SECRET_SINK=inline` is an unsafe explicit opt-in
-that returns the secret into MCP output with a warning; HTTP/serverless also
-requires `B2_ALLOW_INLINE_SECRETS=true`. File sink records use stable JSONL
-metadata fields (`ts`, `tool`, `recordId`) plus a `result` payload. The file has
-no built-in rotation or pruning, so operators must rotate, prune, vault, or
-delete it under the same credential-retention policy used for live B2 keys. The
-SDK-backed
+redacted metadata plus a `secretSink` pointer. Each request must include an
+`idempotencyKey`; retrying the same key with identical input returns the
+original sink pointer without creating a second credential or account. Stdio
+defaults to `file` at `~/.b2-mcp/secrets.jsonl`. HTTP/serverless defaults to
+`off`; enabling `file` there requires both `B2_ALLOW_LOCAL_FILES=true` and an
+explicit `B2_SECRET_SINK_FILE`. `B2_SECRET_SINK=inline` is an unsafe explicit
+opt-in that returns the secret into MCP output with a warning; HTTP/serverless
+also requires `B2_ALLOW_INLINE_SECRETS=true`. File sink records use stable JSONL
+metadata fields (`ts`, `tool`, `recordId`) plus idempotency metadata and a
+`result` payload. The file has no built-in rotation or pruning, so operators
+must rotate, prune, vault, or delete it under the same credential-retention
+policy used for live B2 keys. The SDK-backed
 Partner/Groups tools remain available only when a distinct master key is
 configured and the account is authorized for the Partner API.
 

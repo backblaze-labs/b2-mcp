@@ -7,7 +7,8 @@ import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
-  respondWithDurableSecret,
+  durableSecretIdempotency,
+  executeDurableSecretOperation,
   type SecretSinkPointer,
 } from "../utils/secret-sink.js";
 
@@ -87,6 +88,10 @@ function validateCreateKeyPolicy(args: {
   }
 }
 
+function callerFingerprint(config: B2Config): string {
+  return config.credentialFingerprint ?? config.applicationKeyId;
+}
+
 export function registerKeyTools(
   server: ToolRegistrar,
   client: B2Client,
@@ -120,6 +125,12 @@ export function registerKeyTools(
             .string()
             .optional()
             .describe("Optional file-name prefix restriction for file capabilities."),
+          idempotencyKey: z
+            .string()
+            .min(1)
+            .describe(
+              "Caller-generated idempotency key. Reuse the same value only when retrying the identical durable-key creation request.",
+            ),
           confirm: z
             .boolean()
             .optional()
@@ -137,7 +148,7 @@ export function registerKeyTools(
           const gate = checkDestructive("b2_create_key", args, config);
           if (!gate.ok) return toolError(new Error(gate.message));
           validateCreateKeyPolicy(args);
-          const result = await client.createKey({
+          const createRequest = {
             keyName: args.keyName,
             capabilities: args.capabilities,
             ...(args.bucketIds !== undefined ? { bucketIds: args.bucketIds } : {}),
@@ -145,12 +156,18 @@ export function registerKeyTools(
               ? { validDurationInSeconds: args.validDurationInSeconds }
               : {}),
             ...(args.namePrefix !== undefined ? { namePrefix: args.namePrefix } : {}),
-          });
+          };
 
-          return respondWithDurableSecret({
+          return await executeDurableSecretOperation({
             secretSink,
             toolName: "b2_create_key",
-            result,
+            idempotency: durableSecretIdempotency({
+              toolName: "b2_create_key",
+              idempotencyKey: args.idempotencyKey,
+              callerFingerprint: callerFingerprint(config),
+              normalizedInput: createRequest,
+            }),
+            create: () => client.createKey(createRequest),
             projectRedacted: (created, pointer: SecretSinkPointer) => ({
               ...redactedCreatedKey(created),
               secretSink: pointer,
@@ -161,6 +178,10 @@ export function registerKeyTools(
               keyName: created.keyName,
               accountId: created.accountId,
             }),
+            recoverAfterSinkFailure: async (created) => {
+              await client.deleteKey(created.applicationKeyId);
+              return { status: "deleted", applicationKeyId: created.applicationKeyId };
+            },
           });
         } catch (err) {
           return toolError(err);

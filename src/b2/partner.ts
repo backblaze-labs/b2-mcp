@@ -7,7 +7,8 @@ import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
-  respondWithDurableSecret,
+  durableSecretIdempotency,
+  executeDurableSecretOperation,
   type SecretSinkPointer,
 } from "../utils/secret-sink.js";
 
@@ -38,6 +39,10 @@ function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[
       .map((result) => ("email" in result ? result.email : undefined))
       .filter((value): value is string => typeof value === "string"),
   };
+}
+
+function callerFingerprint(config: B2Config): string {
+  return config.credentialFingerprint ?? config.applicationKeyId;
 }
 
 /**
@@ -119,6 +124,12 @@ export function registerPartnerTools(
             .nullable()
             .optional()
             .describe("Optional data region for the new account."),
+          idempotencyKey: z
+            .string()
+            .min(1)
+            .describe(
+              "Caller-generated idempotency key. Reuse the same value only when retrying the identical group-member creation request.",
+            ),
           confirm: z
             .boolean()
             .optional()
@@ -132,23 +143,44 @@ export function registerPartnerTools(
           const gate = checkDestructive("b2_create_group_member", args, config);
           if (!gate.ok) return toolError(new Error(gate.message));
 
-          const result = await client.createGroupMember({
+          const request = {
             adminAccountId: args.adminAccountId,
             groupId: args.groupId,
             memberEmail: args.memberEmail,
             ...(args.region !== undefined ? { region: args.region } : {}),
-          });
+          };
 
-          return respondWithDurableSecret({
+          return await executeDurableSecretOperation({
             secretSink: activeSecretSink(config),
             toolName: "b2_create_group_member",
-            result,
+            idempotency: durableSecretIdempotency({
+              toolName: "b2_create_group_member",
+              idempotencyKey: args.idempotencyKey,
+              callerFingerprint: callerFingerprint(config),
+              normalizedInput: request,
+            }),
+            create: () => client.createGroupMember(request),
             projectRedacted: (created, pointer: SecretSinkPointer) => ({
               results: redactedPartnerResults(created),
               secretSink: pointer,
             }),
             projectInline: (created, warning) => ({ results: created, warning }),
             diagnostics: partnerSecretDiagnostics,
+            recoverAfterSinkFailure: async (created) => {
+              const accountIds: string[] = [];
+              for (const result of created) {
+                const accountId =
+                  "accountId" in result.groupMember ? String(result.groupMember.accountId) : "";
+                if (!accountId) continue;
+                accountIds.push(accountId);
+                await client.ejectGroupMember({
+                  adminAccountId: args.adminAccountId,
+                  groupId: args.groupId,
+                  memberAccountId: accountId,
+                });
+              }
+              return { status: "ejected_group_members", accountIds };
+            },
           });
         } catch (err) {
           return toolError(err);
@@ -264,6 +296,12 @@ export function registerPartnerTools(
             .describe("Optional data region for the new account."),
           term: z.number().int().min(7).max(30).describe("Trial duration in days (7-30)."),
           storage: z.number().int().min(1).max(50).describe("Trial storage amount in TB (1-50)."),
+          idempotencyKey: z
+            .string()
+            .min(1)
+            .describe(
+              "Caller-generated idempotency key. Reuse the same value only when retrying the identical reserve-trial account creation request.",
+            ),
           confirm: z
             .boolean()
             .optional()
@@ -283,18 +321,29 @@ export function registerPartnerTools(
             storage: args.storage,
             ...(args.region !== undefined ? { region: args.region } : {}),
           };
-          const result = await client.reserveTrialCreateAccount(request);
 
-          return respondWithDurableSecret({
+          return await executeDurableSecretOperation({
             secretSink: activeSecretSink(config),
             toolName: "b2_reserve_trial_create_account",
-            result,
+            idempotency: durableSecretIdempotency({
+              toolName: "b2_reserve_trial_create_account",
+              idempotencyKey: args.idempotencyKey,
+              callerFingerprint: callerFingerprint(config),
+              normalizedInput: request,
+            }),
+            create: () => client.reserveTrialCreateAccount(request),
             projectRedacted: (created, pointer: SecretSinkPointer) => ({
               results: redactedPartnerResults(created),
               secretSink: pointer,
             }),
             projectInline: (created, warning) => ({ results: created, warning }),
             diagnostics: partnerSecretDiagnostics,
+            recoverAfterSinkFailure: (created) => ({
+              status: "quarantine_required",
+              accountIds: created.map((result) => result.accountId),
+              applicationKeyIds: created.map((result) => result.applicationKeyId),
+              emails: created.map((result) => result.email),
+            }),
           });
         } catch (err) {
           return toolError(err);

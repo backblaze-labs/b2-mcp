@@ -7,7 +7,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
@@ -16,6 +16,7 @@ import { B2AuthManager } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { logger } from "../../src/utils/logger";
+import { secretSinkFileOpsForTests } from "../../src/utils/secret-sink";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import {
@@ -650,6 +651,7 @@ describe("durable-secret-producing tools", () => {
     const rawResult = await callTool(server, "b2_create_key", {
       keyName: "ci-uploader",
       capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-ci-uploader",
       confirm: true,
     });
     const result = parseResult(rawResult);
@@ -678,6 +680,65 @@ describe("durable-secret-producing tools", () => {
     expect(statSync(secretFile).mode & 0o777).toBe(0o600);
   });
 
+  it("reuses the existing file-sink pointer for b2_create_key idempotency retries", async () => {
+    const transport = await useRecordingNativeSimulator();
+    const secretFile = tempSecretFile();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const args = {
+      keyName: "ci-retry",
+      capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-retry",
+      confirm: true,
+    };
+
+    const first = parseResult(await callTool(server, "b2_create_key", args));
+    const createRequestsAfterFirst = transport.requests.filter(
+      (request) => b2EndpointName(request) === "b2_create_key",
+    ).length;
+    const second = parseResult(await callTool(server, "b2_create_key", args));
+
+    expect(second.secretSink).toEqual(first.secretSink);
+    expect(second.applicationKey).toBe("[redacted]");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_create_key"),
+    ).toHaveLength(createRequestsAfterFirst);
+    expect(readFileSync(secretFile, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("rejects idempotency key reuse with different b2_create_key input", async () => {
+    const transport = await useRecordingNativeSimulator();
+    const secretFile = tempSecretFile();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    await callTool(server, "b2_create_key", {
+      keyName: "ci-retry-a",
+      capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-conflict",
+      confirm: true,
+    });
+    const createRequestsAfterFirst = transport.requests.filter(
+      (request) => b2EndpointName(request) === "b2_create_key",
+    ).length;
+    const conflict = await callTool(server, "b2_create_key", {
+      keyName: "ci-retry-b",
+      capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-conflict",
+      confirm: true,
+    });
+
+    expect(conflict.isError).toBe(true);
+    expect(conflict.content[0].text).toContain("idempotency_key_conflict");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_create_key"),
+    ).toHaveLength(createRequestsAfterFirst);
+  });
+
   it("returns a created key secret only in explicit inline mode", async () => {
     server = createServer({
       ...testConfig,
@@ -687,6 +748,7 @@ describe("durable-secret-producing tools", () => {
     const rawResult = await callTool(server, "b2_create_key", {
       keyName: "inline-key",
       capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-inline",
       confirm: true,
     });
     const result = parseResult(rawResult);
@@ -708,6 +770,7 @@ describe("durable-secret-producing tools", () => {
     const result = await callTool(server, "b2_create_key", {
       keyName: "backdoor",
       capabilities: ["listKeys", "writeKeys", "deleteKeys"],
+      idempotencyKey: "create-key-backdoor",
       confirm: true,
     });
 
@@ -728,6 +791,7 @@ describe("durable-secret-producing tools", () => {
     const result = await callTool(server, "b2_create_key", {
       keyName: "unscoped-writer",
       capabilities: ["writeFiles"],
+      idempotencyKey: "create-key-unscoped",
       confirm: true,
     });
 
@@ -749,12 +813,14 @@ describe("durable-secret-producing tools", () => {
     const missingDuration = await callTool(server, "b2_create_key", {
       keyName: "non-expiring",
       capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-non-expiring",
       confirm: true,
     });
     const tooLong = await callTool(server, "b2_create_key", {
       keyName: "too-long",
       capabilities: ["listBuckets"],
       validDurationInSeconds: 7200,
+      idempotencyKey: "create-key-too-long",
       confirm: true,
     });
 
@@ -767,31 +833,33 @@ describe("durable-secret-producing tools", () => {
     );
   });
 
-  it("returns the one-time key secret if the file sink fails after B2 creates it", async () => {
+  it("returns only a sanitized error if the file sink fails after B2 creates a key", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
-    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-broken-secret-sink-"));
-    const target = join(dir, "target.jsonl");
-    const link = join(dir, "secrets.jsonl");
-    writeFileSync(target, "", { mode: 0o600 });
-    symlinkSync(target, link);
+    const secretFile = tempSecretFile();
+    writeFileSync(secretFile, "", { mode: 0o600 });
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
+      throw new Error("simulated sink fsync failure");
+    });
+    const transport = await useRecordingNativeSimulator();
     server = createServer({
       ...testConfig,
-      secretSink: { mode: "file", filePath: link },
+      secretSink: { mode: "file", filePath: secretFile },
     });
 
     const rawResult = await callTool(server, "b2_create_key", {
-      keyName: "break-glass",
+      keyName: "sink-failure",
       capabilities: ["listBuckets"],
+      idempotencyKey: "create-key-sink-failure",
       confirm: true,
     });
-    const result = parseResult(rawResult);
 
-    expect(result.applicationKey).toEqual(expect.any(String));
-    expect(result.applicationKey).not.toBe("[redacted]");
-    expect(result.warning).toContain("break-glass recovery");
-    expect(rawResult.content[0].text).toContain(result.applicationKey);
-    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(result.applicationKey);
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_write_failed");
+    expect(rawResult.content[0].text).not.toContain("K005");
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("secret_sink.write_failed");
+    expect(transport.requests.some((request) => b2EndpointName(request) === "b2_delete_key")).toBe(
+      true,
+    );
   });
 });
 
@@ -1530,6 +1598,7 @@ describe("Partner API tools", () => {
       adminAccountId,
       groupId: group.groupId,
       memberEmail: "sink-member@example.com",
+      idempotencyKey: "create-group-member-sink",
       confirm: true,
     });
     const result = parseResult(rawResult);
@@ -1565,6 +1634,7 @@ describe("Partner API tools", () => {
       email: "trial-sink@example.com",
       term: 7,
       storage: 1,
+      idempotencyKey: "reserve-trial-sink",
       confirm: true,
     });
     const result = parseResult(rawResult);
@@ -1588,6 +1658,37 @@ describe("Partner API tools", () => {
     expect(JSON.stringify(rawResult)).not.toContain(secret);
   });
 
+  it("reuses the existing file-sink pointer for Partner idempotency retries", async () => {
+    const secretFile = tempSecretFile();
+    const { transport } = await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const args = {
+      email: "trial-retry@example.com",
+      term: 7,
+      storage: 1,
+      idempotencyKey: "reserve-trial-retry",
+      confirm: true,
+    };
+
+    const first = parseResult(await callTool(server, "b2_reserve_trial_create_account", args));
+    const createRequestsAfterFirst = transport.requests.filter(
+      (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+    ).length;
+    const second = parseResult(await callTool(server, "b2_reserve_trial_create_account", args));
+
+    expect(second.secretSink).toEqual(first.secretSink);
+    expect(second.results[0].applicationKey).toBe("[redacted]");
+    expect(
+      transport.requests.filter(
+        (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+      ),
+    ).toHaveLength(createRequestsAfterFirst);
+    expect(readFileSync(secretFile, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
   it("creates group members in inline mode with the raw secret and warning", async () => {
     const { adminAccountId, partnerSeed } = await usePartnerSimulator();
     server = createServer({
@@ -1602,6 +1703,7 @@ describe("Partner API tools", () => {
       adminAccountId,
       groupId: group.groupId,
       memberEmail: "inline-member@example.com",
+      idempotencyKey: "create-group-member-inline",
       confirm: true,
     });
     const result = parseResult(rawResult);
@@ -1624,6 +1726,7 @@ describe("Partner API tools", () => {
       email: "trial-inline@example.com",
       term: 7,
       storage: 1,
+      idempotencyKey: "reserve-trial-inline",
       confirm: true,
     });
     const result = parseResult(rawResult);
@@ -1635,33 +1738,66 @@ describe("Partner API tools", () => {
     expect(rawResult.content[0].text).toContain(secret);
   });
 
-  it("returns the one-time Partner secret if the file sink fails after account creation", async () => {
+  it("ejects a created group member if the file sink fails after account creation", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
-    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-broken-partner-sink-"));
-    const target = join(dir, "target.jsonl");
-    const link = join(dir, "secrets.jsonl");
-    writeFileSync(target, "", { mode: 0o600 });
-    symlinkSync(target, link);
+    const secretFile = tempSecretFile();
+    writeFileSync(secretFile, "", { mode: 0o600 });
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
+      throw new Error("simulated sink fsync failure");
+    });
+    const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "member-sink-failure@example.com",
+      idempotencyKey: "create-group-member-sink-failure",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_write_failed");
+    expect(rawResult.content[0].text).not.toContain("K005");
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("K005");
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+    expect(
+      transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toBe(true);
+  });
+
+  it("returns only a sanitized error if the file sink fails after Partner account creation", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    writeFileSync(secretFile, "", { mode: 0o600 });
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
+      throw new Error("simulated sink fsync failure");
+    });
     await usePartnerSimulator();
     server = createServer({
       ...partnerTestConfig,
-      secretSink: { mode: "file", filePath: link },
+      secretSink: { mode: "file", filePath: secretFile },
     });
 
     const rawResult = await callTool(server, "b2_reserve_trial_create_account", {
-      email: "trial-break-glass@example.com",
+      email: "trial-sink-failure@example.com",
       term: 7,
       storage: 1,
+      idempotencyKey: "reserve-trial-sink-failure",
       confirm: true,
     });
-    const result = parseResult(rawResult);
-    const secret = result.results[0].applicationKey;
 
-    expect(secret).toEqual(expect.any(String));
-    expect(secret).not.toBe("[redacted]");
-    expect(result.warning).toContain("break-glass recovery");
-    expect(rawResult.content[0].text).toContain(secret);
-    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_write_failed");
+    expect(rawResult.content[0].text).not.toContain("K005");
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("K005");
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("quarantine_required");
   });
 
   it.each([

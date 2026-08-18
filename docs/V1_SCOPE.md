@@ -397,10 +397,11 @@ contract before it can be enabled:
   response must not claim that the sink write succeeded.
 - For `b2_create_key`, `b2_create_group_member`, and
   `b2_reserve_trial_create_account`, sink failure after provider-side creation
-  uses a break-glass inline response that preserves the one-time secret for the
-  caller instead of orphaning an unrecoverable credential or account. The
-  response warning instructs the operator to store the secret securely and then
-  rotate or revoke it after use.
+  returns only a sanitized MCP error. `b2_create_key` attempts to delete the
+  created key, `b2_create_group_member` attempts to eject the created member
+  from the group, and reserve-trial account creation records a secret-free
+  quarantine-required telemetry entry with account and key identifiers so an
+  operator can locate and rotate or revoke the orphaned resource out of band.
 - Restart-after-side-effect tests must cover request crash, timeout, duplicate
   retry, sink outage, compensation success, and compensation failure.
 

@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { logger } from "./logger.js";
@@ -17,8 +17,6 @@ export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.json
 export const APPLICATION_KEY_REDACTED = "[redacted]";
 export const INLINE_SECRET_WARNING =
   "B2_SECRET_SINK=inline: this application key secret was returned into the model context and may be logged or retained by the client. Rotate it after use.";
-export const SINK_WRITE_FAILED_INLINE_WARNING =
-  "B2_SECRET_SINK=file failed after the provider created a durable credential, so this one-time secret is returned in this MCP response as a break-glass recovery path. Store it securely, then rotate or revoke it after use.";
 
 const SECRET_SINK_FILE_ENV = "B2_SECRET_SINK_FILE";
 const SECRET_SINK_PARENT_MODE = 0o700;
@@ -43,9 +41,27 @@ export interface SecretSinkPointer {
   recordId: string;
 }
 
+export interface DurableSecretIdempotency {
+  key: string;
+  fingerprint: string;
+}
+
 interface SecretSinkParentState {
   parent: string;
   created: boolean;
+}
+
+interface SecretLedgerRecord {
+  ts: string;
+  tool: string;
+  recordId: string;
+  result: unknown;
+  idempotency?: DurableSecretIdempotency;
+}
+
+interface ExistingSecretSinkRecord {
+  pointer: SecretSinkPointer;
+  result: unknown;
 }
 
 function parseSecretSinkMode(raw: string | undefined, transport: "stdio" | "http"): SecretSinkMode {
@@ -173,8 +189,15 @@ function secretLedgerRecord(
   tool: string,
   recordId: string,
   result: unknown,
-): Record<string, unknown> {
-  return { ts: isoTimestampSeconds(), tool, recordId, result };
+  idempotency?: DurableSecretIdempotency,
+): SecretLedgerRecord {
+  return {
+    ts: isoTimestampSeconds(),
+    tool,
+    recordId,
+    ...(idempotency ? { idempotency } : {}),
+    result,
+  };
 }
 
 function writeAll(fd: number, line: string): void {
@@ -203,23 +226,112 @@ export function appendSecretSinkRecord(
   sink: Extract<SecretSinkConfig, { mode: "file" }>,
   tool: string,
   result: unknown,
+  idempotency?: DurableSecretIdempotency,
 ): SecretSinkPointer {
   const recordId = randomUUID();
-  const record = secretLedgerRecord(tool, recordId, result);
+  const record = secretLedgerRecord(tool, recordId, result, idempotency);
   const fileExisted = fs.existsSync(sink.filePath);
   const { parent, created: parentCreated } = ensureSecretSinkParent(sink.filePath);
   const fd = openSecureAppendFile(sink.filePath, {
     envVarName: SECRET_SINK_FILE_ENV,
     mode: SECURE_APPEND_FILE_MODE,
   });
+  const originalSize = fs.fstatSync(fd).size;
   try {
     writeAll(fd, `${JSON.stringify(record)}\n`);
     secretSinkFileOpsForTests.fsyncSync(fd);
+  } catch (err) {
+    try {
+      fs.ftruncateSync(fd, originalSize);
+      secretSinkFileOpsForTests.fsyncSync(fd);
+    } catch {
+      // Best-effort rollback only; the caller still receives the original sink failure.
+    }
+    throw err;
   } finally {
     fs.closeSync(fd);
   }
   if (parentCreated || !fileExisted) fsyncParentDirectory(parent);
   return { type: "file", path: sink.filePath, recordId };
+}
+
+function sortedJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedJson);
+  if (!value || typeof value !== "object") return value;
+  const sorted: Record<string, unknown> = {};
+  for (const key of Object.keys(value).sort()) {
+    const child = (value as Record<string, unknown>)[key];
+    if (child !== undefined) sorted[key] = sortedJson(child);
+  }
+  return sorted;
+}
+
+export function durableSecretIdempotency(input: {
+  toolName: string;
+  idempotencyKey: string;
+  callerFingerprint: string;
+  normalizedInput: unknown;
+}): DurableSecretIdempotency {
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify(
+        sortedJson({
+          toolName: input.toolName,
+          idempotencyKey: input.idempotencyKey,
+          callerFingerprint: input.callerFingerprint,
+          normalizedInput: input.normalizedInput,
+        }),
+      ),
+    )
+    .digest("hex");
+  return { key: input.idempotencyKey, fingerprint };
+}
+
+function parseLedgerLine(line: string, lineNumber: number): SecretLedgerRecord {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    throw new Error(`${SECRET_SINK_FILE_ENV} contains invalid JSON at line ${lineNumber}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${SECRET_SINK_FILE_ENV} contains a non-object record at line ${lineNumber}`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.tool !== "string" || typeof record.recordId !== "string") {
+    throw new Error(`${SECRET_SINK_FILE_ENV} contains an invalid record at line ${lineNumber}`);
+  }
+  return record as unknown as SecretLedgerRecord;
+}
+
+function readMatchingSecretSinkRecord(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  tool: string,
+  idempotency: DurableSecretIdempotency,
+): ExistingSecretSinkRecord | null {
+  preflightSecretSinkFile(sink.filePath);
+  const lines = fs
+    .readFileSync(sink.filePath, "utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const record = parseLedgerLine(lines[index], index + 1);
+    if (record.tool !== tool || record.idempotency?.key !== idempotency.key) continue;
+    if (record.idempotency.fingerprint !== idempotency.fingerprint) {
+      throw {
+        status: 409,
+        code: "idempotency_key_conflict",
+        message:
+          "The supplied idempotencyKey was already used for a different durable-secret request.",
+      };
+    }
+    return {
+      pointer: { type: "file", path: sink.filePath, recordId: record.recordId },
+      result: record.result,
+    };
+  }
+  return null;
 }
 
 type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
@@ -228,38 +340,65 @@ export interface DurableSecretResponseOptions<T> {
   secretSink: ActiveSecretSink;
   toolName: string;
   result: T;
+  idempotency: DurableSecretIdempotency;
   projectRedacted: (result: T, pointer: SecretSinkPointer) => unknown;
   projectInline: (result: T, warning: string) => unknown;
   diagnostics?: (result: T) => Record<string, unknown>;
+  recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
 }
 
-export function respondWithDurableSecret<T>({
+export interface DurableSecretOperationOptions<T>
+  extends Omit<DurableSecretResponseOptions<T>, "result"> {
+  create: () => Promise<T>;
+}
+
+export async function executeDurableSecretOperation<T>({
   secretSink,
   toolName,
-  result,
+  idempotency,
+  create,
   projectRedacted,
   projectInline,
   diagnostics,
-}: DurableSecretResponseOptions<T>): StructuredToolResult {
+  recoverAfterSinkFailure,
+}: DurableSecretOperationOptions<T>): Promise<StructuredToolResult> {
   if (secretSink.mode === "inline") {
+    const result = await create();
     return toolJsonInlineDurableSecret(projectInline(result, INLINE_SECRET_WARNING));
   }
 
+  const existing = readMatchingSecretSinkRecord(secretSink, toolName, idempotency);
+  if (existing) return toolJson(projectRedacted(existing.result as T, existing.pointer));
+
+  const result = await create();
   try {
-    const pointer = appendSecretSinkRecord(secretSink, toolName, result);
+    const pointer = appendSecretSinkRecord(secretSink, toolName, result, idempotency);
     return toolJson(projectRedacted(result, pointer));
   } catch (err) {
+    let recovery: unknown = { status: "not_configured" };
+    try {
+      recovery = (await recoverAfterSinkFailure?.(result, err)) ?? recovery;
+    } catch (recoveryErr) {
+      recovery = {
+        status: "failed",
+        error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+      };
+    }
     logger.fatal(
       {
         err,
         tool: toolName,
         secretSink: { type: "file", path: secretSink.filePath },
         minted: diagnostics?.(result) ?? {},
+        recovery,
       },
       "secret_sink.write_failed_after_provider_create",
     );
-    return toolJsonInlineDurableSecret(
-      projectInline(result, `${SINK_WRITE_FAILED_INLINE_WARNING} ${INLINE_SECRET_WARNING}`),
-    );
+    throw {
+      status: 500,
+      code: "secret_sink_write_failed",
+      message:
+        "B2 created a durable credential, but the configured file secret sink failed before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status, then rotate or revoke the created resource.",
+    };
   }
 }
