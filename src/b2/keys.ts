@@ -39,6 +39,7 @@ function parseMaxKeyDurationSeconds(): number | null {
 function validateCreateKeyPolicy(args: {
   capabilities: string[];
   bucketIds?: string[];
+  bucketId?: string;
   validDurationInSeconds?: number;
 }): void {
   const keyManagementGrants = args.capabilities.filter((capability) =>
@@ -59,6 +60,7 @@ function validateCreateKeyPolicy(args: {
   if (
     writeOrDeleteGrants.length &&
     (!args.bucketIds || args.bucketIds.length === 0) &&
+    !args.bucketId &&
     !allowsEnvOverride("B2_ALLOW_UNSCOPED_KEYS")
   ) {
     throw {
@@ -92,6 +94,22 @@ function callerFingerprint(config: B2Config): string {
   return config.callerFingerprint ?? config.credentialFingerprint ?? config.applicationKeyId;
 }
 
+function normalizeCreateKeyBucketScope(args: { bucketId?: string; bucketIds?: string[] }): {
+  bucketId?: string;
+  bucketIds?: string[];
+} {
+  if (args.bucketId !== undefined && args.bucketIds !== undefined) {
+    throw {
+      status: 400,
+      code: "invalid_bucket_scope",
+      message: "b2_create_key accepts either bucketId or bucketIds, not both.",
+    };
+  }
+  if (args.bucketId !== undefined) return { bucketId: args.bucketId };
+  if (args.bucketIds !== undefined) return { bucketIds: args.bucketIds };
+  return {};
+}
+
 export function registerKeyTools(
   server: ToolRegistrar,
   client: B2Client,
@@ -115,6 +133,12 @@ export function registerKeyTools(
             .array(z.string())
             .optional()
             .describe("Optional bucket restrictions. Omit for account-wide access."),
+          bucketId: z
+            .string()
+            .optional()
+            .describe(
+              "Deprecated single-bucket restriction. Use bucketIds for new integrations; do not provide both.",
+            ),
           validDurationInSeconds: z
             .number()
             .int()
@@ -147,11 +171,12 @@ export function registerKeyTools(
           >;
           const gate = checkDestructive("b2_create_key", args, config);
           if (!gate.ok) return toolError(new Error(gate.message));
+          const bucketScope = normalizeCreateKeyBucketScope(args);
           validateCreateKeyPolicy(args);
           const createRequest = {
             keyName: args.keyName,
             capabilities: args.capabilities,
-            ...(args.bucketIds !== undefined ? { bucketIds: args.bucketIds } : {}),
+            ...bucketScope,
             ...(args.validDurationInSeconds !== undefined
               ? { validDurationInSeconds: args.validDurationInSeconds }
               : {}),

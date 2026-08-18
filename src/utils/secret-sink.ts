@@ -499,17 +499,25 @@ function acquireSecretSinkClaim(
     }
     throw err;
   }
-  fsyncParentDirectory(parent);
-
-  const racedExisting = readMatchingSecretSinkRecord(sink, tool, idempotency);
-  if (racedExisting) {
-    releaseSecretSinkClaimBestEffort(
-      { lockPath, parent },
-      { tool, secretSink: { type: "file", path: sink.filePath }, lockPath },
-    );
+  const claim = { lockPath, parent };
+  try {
+    fsyncParentDirectory(parent);
+    const racedExisting = readMatchingSecretSinkRecord(sink, tool, idempotency);
+    if (!racedExisting) return claim;
+    releaseSecretSinkClaimBestEffort(claim, {
+      tool,
+      secretSink: { type: "file", path: sink.filePath },
+      lockPath,
+    });
     return racedExisting;
+  } catch (err) {
+    releaseSecretSinkClaimBestEffort(claim, {
+      tool,
+      secretSink: { type: "file", path: sink.filePath },
+      lockPath,
+    });
+    throw err;
   }
-  return { lockPath, parent };
 }
 
 function releaseSecretSinkClaim(claim: SecretSinkClaim): void {

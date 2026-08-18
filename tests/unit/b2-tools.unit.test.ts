@@ -718,6 +718,55 @@ describe("durable-secret-producing tools", () => {
     expect(readFileSync(secretFile, "utf8").trim().split("\n")).toHaveLength(1);
   });
 
+  it("preserves deprecated single-bucket b2_create_key scope", async () => {
+    const transport = await useRecordingNativeSimulator();
+    const secretFile = tempSecretFile();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    const result = parseResult(
+      await callTool(server, "b2_create_key", {
+        keyName: "single-bucket-writer",
+        capabilities: ["writeFiles"],
+        bucketId: "bucket-1",
+        idempotencyKey: "create-key-single-bucket",
+        confirm: true,
+      }),
+    );
+    const request = transport.requests.find(
+      (candidate) => b2EndpointName(candidate) === "b2_create_key",
+    );
+
+    expect(result.bucketId).toBe("bucket-1");
+    expect(result.secretSink).toMatchObject({ type: "file", path: secretFile });
+    expect(requestJson(request!)).toMatchObject({ bucketIds: ["bucket-1"] });
+  });
+
+  it("rejects ambiguous b2_create_key bucket scope before calling B2", async () => {
+    const transport = await useRecordingNativeSimulator();
+    server = createServer({
+      ...testConfig,
+      secretSink: { mode: "file", filePath: tempSecretFile() },
+    });
+
+    const result = await callTool(server, "b2_create_key", {
+      keyName: "ambiguous-scope",
+      capabilities: ["writeFiles"],
+      bucketId: "bucket-1",
+      bucketIds: ["bucket-2"],
+      idempotencyKey: "create-key-ambiguous-scope",
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("invalid_bucket_scope");
+    expect(transport.requests.some((request) => b2EndpointName(request) === "b2_create_key")).toBe(
+      false,
+    );
+  });
+
   it("rejects idempotency key reuse with different b2_create_key input", async () => {
     const transport = await useRecordingNativeSimulator();
     const secretFile = tempSecretFile();

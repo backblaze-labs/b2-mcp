@@ -456,6 +456,51 @@ describe("secret sink file writer", () => {
     expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
   });
 
+  it("releases the pending claim when pre-provider claim durability fails", async () => {
+    const fsync = secretSinkFileOpsForTests.fsyncSync;
+    let calls = 0;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      calls++;
+      if (calls === 3) throw new Error("simulated claim directory fsync failure");
+      return fsync(fd);
+    });
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "pre-provider-claim-failure",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "pre-provider-claim-failure", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_unreached" };
+        },
+        projectRedacted: (result: Record<string, unknown>, pointer: unknown) => ({
+          ...result,
+          applicationKey: "[redacted]",
+          secretSink: pointer,
+        }),
+        projectInline: (result: Record<string, unknown>, warning: string) => ({
+          ...result,
+          warning,
+        }),
+      }),
+    ).rejects.toThrow(/claim directory fsync/);
+
+    expect(createCalls).toBe(0);
+    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("claim_cleanup_failed");
+  });
+
   it("does not compensate a committed credential when claim cleanup fails", async () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const recoverSpy = vi.fn();

@@ -240,6 +240,7 @@ export interface CreateKeyOptions {
   capabilities: string[];
   validDurationInSeconds?: number;
   bucketIds?: string[] | null;
+  bucketId?: string;
   namePrefix?: string;
 }
 
@@ -552,17 +553,21 @@ function toFullApplicationKeyResult(value: FullApplicationKey): FullApplicationK
 }
 
 function normalizeCreateKeyOptions(options: CreateKeyOptions): SdkCreateKeyOptions {
-  return {
+  const base = {
     keyName: options.keyName,
     capabilities: options.capabilities as Capability[],
     ...(options.validDurationInSeconds !== undefined
       ? { validDurationInSeconds: options.validDurationInSeconds }
       : {}),
-    ...(options.bucketIds !== undefined
-      ? { bucketIds: options.bucketIds?.map(bucketId) ?? null }
-      : {}),
     ...(options.namePrefix !== undefined ? { namePrefix: options.namePrefix } : {}),
   };
+  if (options.bucketId !== undefined) {
+    return { ...base, bucketId: bucketId(options.bucketId) };
+  }
+  if (options.bucketIds !== undefined) {
+    return { ...base, bucketIds: options.bucketIds?.map(bucketId) ?? null };
+  }
+  return base;
 }
 
 function toFileVersionResult(value: FileVersion): FileVersionResult {
