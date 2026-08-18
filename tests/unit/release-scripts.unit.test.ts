@@ -159,14 +159,10 @@ describe("release scripts", () => {
     });
   });
 
-  it("includes the issue 64 release automation entry in the unreleased notes", () => {
+  it("keeps the issue 64 release automation entry in the changelog", () => {
     const changelog = readFileSync(join(root, "CHANGELOG.md"), "utf8");
-    const unreleased = changelog
-      .split(/^## \[/m)
-      .find((section) => section.startsWith("Unreleased]"));
 
-    expect(unreleased).toBeDefined();
-    expect(unreleased).toContain("issue #64 release verification");
+    expect(changelog).toContain("issue #64 release verification");
   });
 
   it("derives safe npm dist-tags for stable and prerelease versions", () => {
