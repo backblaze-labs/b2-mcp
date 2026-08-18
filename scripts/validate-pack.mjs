@@ -27,7 +27,7 @@ const byteRouteVerbRe =
   /\b(?:route|send|sent|move|transfer|flow|stream|pass|enter|reach|upload|download|relay|forward|copy|fetch|read|store|dump|print)\b/i;
 const byteRouteVerbGlobalRe = new RegExp(byteRouteVerbRe.source, "gi");
 const byteNegationRe = /\b(?:must\s+not|never|do\s+not|don't|no)\b/i;
-const modelOrServerDestRe = /\b(?:model|chat|mcp\s+server|server)\b/i;
+const modelOrServerDestRe = /\b(?:model|chat|mcp(?:\s+server)?|server)\b/i;
 const directToB2Re =
   /\bdirect(?:ly)?\b[\s\S]{0,140}\b(?:client|workload|worker)\b[\s\S]{0,140}\bb2\b|\b(?:client|workload|worker)\b[\s\S]{0,140}\bdirect(?:ly)?\b[\s\S]{0,140}\bb2\b/i;
 const negatedDirectToB2Re =
