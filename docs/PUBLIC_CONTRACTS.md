@@ -10,6 +10,7 @@ current with code, CI, and GitHub release metadata.
 | ------------------------------------------------------ | ------------------ | ----------------------------------------------------------------------- | ---------------------------- |
 | [`../README.md`](../README.md)                         | Gonza              | Product overview, quick start, tool taxonomy, local development commands | Ongoing                      |
 | [`CLIENTS.md`](CLIENTS.md)                             | Gonza              | MCP client configuration contract for stdio and Streamable HTTP         | #66                          |
+| [`AUTHENTICATION.md`](AUTHENTICATION.md)               | Gonza              | Caller authentication, OAuth resource-server behavior, and B2 credential custody | #66                          |
 | [`DEPLOY.md`](DEPLOY.md)                               | Gonza              | Hosted deployment matrix and provider guide index                       | #65, #66, #106, #121         |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md)                   | Gonza              | Runtime architecture and integration-boundary decisions                 | #71                          |
 | [`SDK_ADOPTION_CONTRACT.md`](SDK_ADOPTION_CONTRACT.md) | Gonza              | Official B2 SDK adoption and Native B2 SDK/AWS S3 SDK/custom tool parity matrix | #71, #132                    |

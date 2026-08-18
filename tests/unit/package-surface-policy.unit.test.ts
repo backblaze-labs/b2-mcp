@@ -119,6 +119,7 @@ describe("package surface policy", () => {
     expect(files).toContain("deploy/customer-hosted/nginx.conf");
     expect(files).toContain("deploy/customer-hosted/pnpm-lock.yaml");
     expect(files).toContain("deploy/customer-hosted/pnpm-workspace.yaml");
+    expect(files).toContain("docs/AUTHENTICATION.md");
     expect(files).toContain("docs/CLIENTS.md");
     expect(files).toContain("docs/DEPLOY.md");
     expect(files).toContain("docs/tool-profile-contract.json");

@@ -32,6 +32,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
           bin: { "b2-mcp": "dist/index.js", "b2-mcp-server": "dist/index.js" },
           files: [
             "dist/**/*",
+            "docs/AUTHENTICATION.md",
             "docs/CLIENTS.md",
             "docs/DEPLOY.md",
             "docs/tool-profile-contract.json",

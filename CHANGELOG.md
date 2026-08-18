@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Added `docs/AUTHENTICATION.md` plus public-claim drift coverage for OAuth
+  resource-server behavior, B2 credential custody, CLI/env references, package
+  naming, and support-policy claims.
 - Added a bundled Phase 1 B2 skills pack with manifest-backed package-surface
   validation for backup/restore, least-privilege keys, Object Lock,
   lifecycle/cost hygiene, migration, and incident response playbooks.

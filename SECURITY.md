@@ -5,8 +5,14 @@ Gonza (`@goanpeca`) and Sophie / Quality Keeper (QK) (`@sophiecarreras`).
 
 ## Supported Versions
 
-The latest minor version on `main` is supported. Earlier releases are not
-patched in place — upgrade to the latest version to receive fixes.
+The latest minor release line on `main` is supported. Earlier releases are not
+patched in place; upgrade to the latest supported version to receive fixes. The
+first public supported package line is `0.1.x` after `v0.1.0` is published.
+Before that publish, source checkouts from `main` receive review and fixes but
+there is no supported installable npm version.
+
+The package and release support policy is maintained in
+[`RELEASE.md`](RELEASE.md#package-and-release-support-policy).
 
 ## Reporting a Vulnerability
 

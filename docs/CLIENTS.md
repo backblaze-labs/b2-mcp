@@ -7,10 +7,11 @@ This server speaks the Model Context Protocol over **two transports**:
 
 > **The one thing that matters:** every stdio client runs the same command. For
 > a source checkout, use `node /ABSOLUTE/PATH/TO/b2-mcp/dist/index.js`; for the
-> installed package, use `b2-mcp --transport stdio`. Only the **config file
-> location** and the **wrapper key name** differ per client. If a client's
-> config format has changed since this was written, its own MCP docs are
-> authoritative; the invocation below is what you're wiring up.
+> installed package after the first npm publish, use
+> `b2-mcp --transport stdio`. Only the **config file location** and the
+> **wrapper key name** differ per client. If a client's config format has
+> changed since this was written, its own MCP docs are authoritative; the
+> invocation below is what you're wiring up.
 
 ## Compatibility at a glance
 
@@ -32,7 +33,9 @@ This server speaks the Model Context Protocol over **two transports**:
 ```bash
 git clone https://github.com/backblaze-labs/b2-mcp.git b2-mcp
 cd b2-mcp
-pnpm install
+corepack enable pnpm
+corepack prepare 'pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a' --activate
+pnpm install --frozen-lockfile
 pnpm run build      # produces dist/ -- required for the source stdio command below
 ```
 
@@ -40,6 +43,9 @@ You also need a Backblaze B2 **Application Key** (key ID + secret). A single non
 
 The canonical npm package binary is `b2-mcp`; `b2-mcp-server` remains a
 transition alias for existing stdio configurations.
+The first `0.1.0` npm publish has not happened yet as of 2026-08-18, so this
+guide does not advertise `npx @backblaze-labs/b2-mcp` as an active setup path.
+Use the source checkout command until the package is visible on npm.
 
 ---
 

@@ -92,6 +92,25 @@ Before publishing `v0.1.0`:
     only the `CI` workflow's `mark-green` job may force-push it after all
     required `main` checks pass, and humans must not push it directly.
 
+## Package And Release Support Policy
+
+The supported npm package name is `@backblaze-labs/b2-mcp`. The supported
+container image name is `ghcr.io/backblaze-labs/b2-mcp`. Published package
+versions and GHCR image tags are immutable release artifacts; do not overwrite
+or force-move them.
+
+Only the latest minor release line on `main` receives fixes. Earlier releases
+are not patched in place; when a release is unsafe or broken, deprecate the
+affected npm version with a direct replacement and publish a higher fixed
+version from the protected tag-driven workflow. Security handling follows
+[`SECURITY.md`](SECURITY.md), but the package support answer is still "upgrade
+to the latest supported release."
+
+The canonical installable binary is `b2-mcp`. `b2-mcp-server` is a transition
+alias for existing local configurations and must not be the primary command in
+new examples. Do not advertise `npx @backblaze-labs/b2-mcp` until npm confirms
+the package is published and installable.
+
 ## First Package Bootstrap
 
 npm trusted publishing cannot be configured until `@backblaze-labs/b2-mcp`

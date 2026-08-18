@@ -141,6 +141,7 @@
     "deploy/customer-hosted/nginx.conf",
     "deploy/customer-hosted/pnpm-lock.yaml",
     "deploy/customer-hosted/pnpm-workspace.yaml",
+    "docs/AUTHENTICATION.md",
     "docs/CLIENTS.md",
     "docs/DEPLOY.md",
     "docs/deployment/*.md",

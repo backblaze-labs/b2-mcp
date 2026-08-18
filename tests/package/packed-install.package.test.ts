@@ -243,6 +243,7 @@ describe("packed package", () => {
             "deploy/customer-hosted/Dockerfile",
             "deploy/customer-hosted/docker-compose.yml",
             "deploy/customer-hosted/nginx.conf",
+            "docs/AUTHENTICATION.md",
             "docs/CLIENTS.md",
             "docs/DEPLOY.md",
             "README.md",
