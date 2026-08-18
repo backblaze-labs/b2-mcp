@@ -15,7 +15,7 @@ description: Plan and run B2 backup and restore workflows with presigned or mult
 
 - Object data MUST move directly between the client or workload runner and B2 using presigned URLs, multipart upload URLs, or an external B2/S3 client.
 - MUST NOT route object data through the model or MCP server. Use MCP only for bucket discovery, metadata checks, presigned URL creation, manifest planning, and bounded status.
-- Inline object helpers are only acceptable for small, non-sensitive manifests or sidecars under the server inline limit; never use them for bulk backup or restore bytes.
+- Manifest and sidecar bytes use the same out-of-band direct path as backup data. MCP may track names, checksums, and status only; do not send manifest or sidecar contents through chat or server inline helpers.
 
 ## Safety gates
 

@@ -26,7 +26,6 @@ const byteSubjectRe =
 const byteRouteVerbRe =
   /\b(?:route|send|sent|move|transfer|flow|stream|pass|enter|reach|upload|download|relay|forward|copy|fetch|read|store|dump|print)\b/i;
 const byteRouteVerbGlobalRe = new RegExp(byteRouteVerbRe.source, "gi");
-const byteNegationRe = /\b(?:must\s+not|never|do\s+not|don't|no)\b/i;
 const directRouteNegationRe =
   /(?:^|[\s([{"'`])(?:must\s+not|never|do\s+not|don't|no)\s+(?:ever\s+|directly\s+)?$/i;
 const modelOrServerDestRe = /\b(?:model|chat|mcp(?:\s+server)?|server)\b/i;
@@ -37,7 +36,7 @@ const negatedDirectToB2Re =
 const confirmationGateRe =
   /\b(?:pause|stop|ask|require|requires|requiring)\b[\s\S]{0,160}\b(?:explicit\s+)?(?:confirmation|approval)\b|\b(?:explicit\s+)?(?:confirmation|approval)\b[\s\S]{0,160}\b(?:pause|stop|ask|require|requires|requiring)\b/i;
 const gateWeakeningRe =
-  /\b(?:do\s+not|don't|never)\b[\s\S]{0,90}\b(?:pause|confirm|confirmation|approval|ask|require)\b|\b(?:without|skip|omit|bypass(?:ing)?)\s+(?:the\s+)?(?:pause|confirm|confirmation|approval)\b|\bno\s+(?:explicit\s+)?(?:approval|confirmation)\s+(?:needed|required)?\b|\b(?:approval|confirmation)\b[\s\S]{0,80}\b(?:not\s+required|not\s+needed|unnecessary|optional)\b|\b(?:for\s+all\s+other|otherwise|non-production|nonproduction)\b[\s\S]{0,120}\b(?:no|without|skip|omit|bypass|optional|unnecessary)\b[\s\S]{0,60}\b(?:approval|confirmation|confirm|pause)\b|\b(?:only|just)\b[\s\S]{0,40}\b(?:production|prod|public|external|matching|listed|selected)\b[\s\S]{0,80}\b(?:approval|confirmation|confirm|pause)\b/i;
+  /\b(?:do\s+not|don't|never)\b[\s\S]{0,90}\b(?:pause|confirm|confirmation|approval|ask|require)\b|\b(?:without|skip|omit|bypass(?:ing)?)\s+(?:the\s+)?(?:explicit\s+)?(?:pause|confirm|confirmation|approval)\b|\bno\s+(?:explicit\s+)?(?:approval|confirmation)\s+(?:needed|required)?\b|\b(?:approval|confirmation)\b[\s\S]{0,80}\b(?:not\s+required|not\s+needed|unnecessary|optional|can\s+be\s+(?:skipped|omitted|bypassed))\b|\b(?:for\s+all\s+other|otherwise|non-production|nonproduction)\b[\s\S]{0,120}\b(?:no|without|skip|omit|bypass|optional|unnecessary)\b[\s\S]{0,60}\b(?:approval|confirmation|confirm|pause)\b|\b(?:only|just)\b[\s\S]{0,40}\b(?:production|prod|public|external|matching|listed|selected)\b[\s\S]{0,80}\b(?:approval|confirmation|confirm|pause)\b/i;
 const secretPathParts = new Set([
   ".env",
   ".env.local",
@@ -84,6 +83,14 @@ function sorted(values) {
 
 function difference(left, right) {
   return new Set([...left].filter((item) => !right.has(item)));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function mentionsTool(text, tool) {
+  return new RegExp(`\\b${escapeRegExp(tool)}\\b`).test(text);
 }
 
 function toPosix(filePath) {
@@ -423,7 +430,12 @@ function allowsObjectDataToModelOrServer(unit) {
 }
 
 function requiresDirectObjectDataToB2(unit) {
-  return byteSubjectRe.test(unit) && directToB2Re.test(unit) && !negatedDirectToB2Re.test(unit);
+  return (
+    byteSubjectRe.test(unit) &&
+    directToB2Re.test(unit) &&
+    routeMatches(unit).length > 0 &&
+    !negatedDirectToB2Re.test(unit)
+  );
 }
 
 function weakensConfirmationGate(unit) {
@@ -509,7 +521,7 @@ function validateSkill(root, skillPath, expectedName, allTools, destructiveTools
   for (const tool of sorted(
     new Set([...declaredTools].filter((name) => destructiveTools.has(name))),
   )) {
-    const matchingUnits = safetyUnits.filter((unit) => unit.includes(tool));
+    const matchingUnits = safetyUnits.filter((unit) => mentionsTool(unit, tool));
     if (matchingUnits.length === 0) {
       fail(`${skillPath}: Safety gates must mention destructive tool ${tool}`);
     }
@@ -517,7 +529,7 @@ function validateSkill(root, skillPath, expectedName, allTools, destructiveTools
     if (weakenedUnit) {
       fail(`${skillPath}: Safety gate for ${tool} must not weaken or bypass approval`);
     }
-    if (allProseUnits.some((unit) => unit.includes(tool) && weakensConfirmationGate(unit))) {
+    if (allProseUnits.some((unit) => mentionsTool(unit, tool) && weakensConfirmationGate(unit))) {
       fail(`${skillPath}: Skill prose for ${tool} must not weaken or bypass approval`);
     }
     if (!matchingUnits.some((unit) => requiresConfirmationGate(unit))) {

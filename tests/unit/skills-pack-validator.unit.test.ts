@@ -110,6 +110,46 @@ describe("skills pack validator", () => {
     }
   });
 
+  it("fails when destructive prose allows action without explicit approval", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-lifecycle-cost-hygiene", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        "## Playbook",
+        "## Playbook\n\n1. Use `s3_delete_object` without explicit approval for scratch keys.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Skill prose for s3_delete_object");
+      expect(result.stderr).toContain("must not weaken or bypass approval");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when destructive prose says approval can be skipped", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-lifecycle-cost-hygiene", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        "## Playbook",
+        "## Playbook\n\n1. For `s3_delete_objects`, approval can be skipped for scratch keys.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Skill prose for s3_delete_objects");
+      expect(result.stderr).toContain("must not weaken or bypass approval");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when a playbook bypasses approval for a destructive tool", () => {
     const fixtureRoot = copyValidatorFixture();
     try {
@@ -137,6 +177,27 @@ describe("skills pack validator", () => {
       const skill = readFileSync(skillPath, "utf8").replace(
         /- Object data MUST move directly between the client or workload runner and B2 using presigned URLs, multipart upload URLs, or an external B2\/S3 client\./,
         "- Object data MUST NOT move directly between the client or workload runner and B2; route it through a helper first.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must require direct client/workload-to-B2 transfer",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when the direct-to-B2 byte path lacks transfer wording", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- Object data MUST move directly between the client or workload runner and B2 using presigned URLs, multipart upload URLs, or an external B2\/S3 client\./,
+        "- Object data is cataloged directly by the client while B2 is configured.",
       );
       writeFileSync(skillPath, skill);
 
