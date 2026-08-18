@@ -39,6 +39,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_CALL_CHECKOUT_SHA: ${{ inputs['checkout-sha'] || '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           should_run=true
@@ -69,6 +70,9 @@ jobs:
               git init --quiet /tmp/live-ref-check
               cd /tmp/live-ref-check
               git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+              GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0="http.${GITHUB_SERVER_URL}/.extraheader" \
+              GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')" \
               git fetch --no-tags origin '+refs/heads/ci-green:refs/remotes/origin/ci-green'
               if ! git cat-file -e "${WORKFLOW_CALL_CHECKOUT_SHA}^{commit}"; then
                 echo "::error::workflow_call checkout-sha is not reachable from ci-green."
