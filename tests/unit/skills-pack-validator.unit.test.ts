@@ -110,7 +110,28 @@ describe("skills pack validator", () => {
 
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(
-        "Byte path must forbid object bytes from entering the model/chat/MCP server",
+        "Byte path must not allow object bytes into the model/chat/MCP server",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when negation follows an allowed object-byte route", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- MUST NOT route object data through the model or MCP server\. Use MCP only for bucket discovery, metadata checks, presigned URL creation, manifest planning, and bounded status\./,
+        "- Object data may route through the MCP server; do not log it.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must not allow object bytes into the model/chat/MCP server",
       );
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });

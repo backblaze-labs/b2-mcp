@@ -38,7 +38,10 @@ BYTE_SUBJECT_RE = re.compile(
     r"\b(?:object\s+(?:data|bytes|contents?|bodies|payloads?)|bulk\s+object\s+bytes)\b",
     re.I,
 )
-BYTE_ROUTE_VERB_RE = re.compile(r"\b(?:route|send|move|transfer|flow|stream|pass)\b", re.I)
+BYTE_ROUTE_VERB_RE = re.compile(
+    r"\b(?:route|send|move|transfer|flow|stream|pass|enter|reach)\b",
+    re.I,
+)
 BYTE_NEGATION_RE = re.compile(r"\b(?:must\s+not|never|do\s+not|don't|no)\b", re.I)
 MODEL_OR_SERVER_DEST_RE = re.compile(r"\b(?:model|chat|mcp\s+server|server)\b", re.I)
 DIRECT_TO_B2_RE = re.compile(
@@ -272,10 +275,29 @@ def sentence_units(section: str) -> list[str]:
 
 
 def forbids_object_data_to_model_or_server(unit: str) -> bool:
-    return all(
-        pattern.search(unit)
-        for pattern in (BYTE_SUBJECT_RE, BYTE_ROUTE_VERB_RE, BYTE_NEGATION_RE, MODEL_OR_SERVER_DEST_RE)
-    )
+    for clause in re.split(r"[;]\s*", unit):
+        route_match = BYTE_ROUTE_VERB_RE.search(clause)
+        dest_match = MODEL_OR_SERVER_DEST_RE.search(clause)
+        negation_match = BYTE_NEGATION_RE.search(clause)
+        if not (route_match and dest_match and negation_match and BYTE_SUBJECT_RE.search(clause)):
+            continue
+        if negation_match.start() < route_match.start() and negation_match.start() < dest_match.start():
+            return True
+    return False
+
+
+def allows_object_data_to_model_or_server(unit: str) -> bool:
+    for clause in re.split(r"[;]\s*", unit):
+        route_match = BYTE_ROUTE_VERB_RE.search(clause)
+        if not (
+            route_match
+            and BYTE_SUBJECT_RE.search(clause)
+            and MODEL_OR_SERVER_DEST_RE.search(clause)
+        ):
+            continue
+        if not BYTE_NEGATION_RE.search(clause[: route_match.start()]):
+            return True
+    return False
 
 
 def requires_direct_object_data_to_b2(unit: str) -> bool:
@@ -327,6 +349,8 @@ def validate_skill(
     byte_units = sentence_units(byte_path)
     if not any(BYTE_SUBJECT_RE.search(unit) for unit in byte_units):
         fail(f"{path}: Byte path must discuss object data/bytes")
+    if any(allows_object_data_to_model_or_server(unit) for unit in byte_units):
+        fail(f"{path}: Byte path must not allow object bytes into the model/chat/MCP server")
     if not any(forbids_object_data_to_model_or_server(unit) for unit in byte_units):
         fail(f"{path}: Byte path must forbid object bytes from entering the model/chat/MCP server")
     if not any(requires_direct_object_data_to_b2(unit) for unit in byte_units):
