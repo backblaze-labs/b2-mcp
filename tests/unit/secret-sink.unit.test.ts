@@ -109,6 +109,16 @@ describe("secret sink configuration", () => {
     ).toThrow(/B2_ALLOW_INLINE_SECRETS=true/);
   });
 
+  it("rejects invalid secret sink modes", () => {
+    expect(() =>
+      resolveSecretSinkConfig({
+        transport: "stdio",
+        env: { B2_SECRET_SINK: "stdout" },
+        preflight: false,
+      }),
+    ).toThrow(/Invalid B2_SECRET_SINK/);
+  });
+
   it("falls back to off when the stdio default file cannot be opened", () => {
     const dir = tempDir();
     const target = join(dir, "target.jsonl");
@@ -142,6 +152,21 @@ describe("secret sink configuration", () => {
 
     expect(resolved.mode).toBe("off");
     expect(resolved).toHaveProperty("unavailableReason", expect.stringContaining(link));
+  });
+
+  it("throws a configured file error when an explicit sink path cannot open", () => {
+    const dir = tempDir();
+    const target = join(dir, "target.jsonl");
+    const link = join(dir, "secrets.jsonl");
+    writeFileSync(target, "", { mode: 0o600 });
+    symlinkSync(target, link);
+
+    expect(() =>
+      resolveSecretSinkConfig({
+        transport: "stdio",
+        env: { B2_SECRET_SINK: "file", B2_SECRET_SINK_FILE: link },
+      }),
+    ).toThrow(/B2_SECRET_SINK=file could not open/);
   });
 });
 
@@ -229,6 +254,22 @@ describe("secret sink file writer", () => {
     ).toThrow(/parent must not be readable or writable/);
 
     expect(mode(parent)).toBe(0o777);
+  });
+
+  it("rejects a symlinked parent directory", () => {
+    const dir = tempDir();
+    const targetParent = join(dir, "target-parent");
+    const linkParent = join(dir, "link-parent");
+    mkdirSync(targetParent, { mode: 0o700 });
+    symlinkSync(targetParent, linkParent);
+
+    expect(() =>
+      appendSecretSinkRecord(
+        { mode: "file", filePath: join(linkParent, "secrets.jsonl") },
+        "b2_create_key",
+        {},
+      ),
+    ).toThrow(/parent must be a directory|parent must not be a symlink/);
   });
 
   it("keeps provider payload under a collision-resistant result envelope", () => {
@@ -332,6 +373,25 @@ describe("secret sink file writer", () => {
 
     const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
       applicationKey: "B2_MCP_CANARY_SECRET_stale_lock",
+    });
+
+    expect(pointer.recordId).toEqual(expect.any(String));
+    expect(existsSync(appendLock)).toBe(false);
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("stale_append_lock_reclaimed");
+  });
+
+  it("reclaims a stale append lock with malformed owner metadata", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const appendLock = `${file}.append.lock`;
+    writeFileSync(file, "", { mode: 0o600 });
+    writeFileSync(appendLock, "not-json\n", { mode: 0o600 });
+    const stale = new Date(Date.now() - 10 * 60 * 1000);
+    utimesSync(appendLock, stale, stale);
+
+    const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKey: "B2_MCP_CANARY_SECRET_malformed_stale_lock",
     });
 
     expect(pointer.recordId).toEqual(expect.any(String));
@@ -471,6 +531,40 @@ describe("secret sink file writer", () => {
     ).rejects.toThrow(/contains an invalid record/);
   });
 
+  it("rejects malformed JSON and non-object ledger records", async () => {
+    for (const [suffix, line, message] of [
+      ["json", "not-json\n", /contains invalid JSON/],
+      ["array", "[]\n", /contains a non-object record/],
+    ] as const) {
+      const dir = tempDir();
+      const file = join(dir, `secrets-${suffix}.jsonl`);
+      writeFileSync(file, line, { mode: 0o600 });
+      const idempotency = durableSecretIdempotency({
+        toolName: "b2_create_key",
+        idempotencyKey: `malformed-${suffix}`,
+        callerFingerprint: "credential-fingerprint",
+        normalizedInput: { keyName: `malformed-${suffix}`, capabilities: ["listBuckets"] },
+      });
+
+      await expect(
+        executeDurableSecretOperation({
+          secretSink: { mode: "file", filePath: file },
+          toolName: "b2_create_key",
+          idempotency,
+          create: async () => ({ applicationKey: "B2_MCP_CANARY_SECRET_unreached" }),
+          projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+            ...created,
+            secretSink: sinkPointer,
+          }),
+          projectInline: (created: Record<string, unknown>, warning: string) => ({
+            ...created,
+            warning,
+          }),
+        }),
+      ).rejects.toThrow(message);
+    }
+  });
+
   it("holds an exclusive pending claim before provider creation", async () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
@@ -581,6 +675,122 @@ describe("secret sink file writer", () => {
     const index = readFileSync(`${file}.idempotency.jsonl`, "utf8");
     expect(index).toContain("ledger-rotated");
     expect(index).not.toContain("B2_MCP_CANARY_SECRET_indexed");
+  });
+
+  it("reuses legacy idempotency records from the bounded ledger tail", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "legacy-tail",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "legacy-tail", capabilities: ["listBuckets"] },
+    });
+    const legacy = {
+      ts: "2026-08-18T12:00:00Z",
+      tool: "b2_create_key",
+      recordId: "legacy-tail-record",
+      idempotency,
+      result: { applicationKeyId: "key-id", applicationKey: "B2_MCP_CANARY_SECRET_legacy_tail" },
+    };
+    const padding = {
+      ts: "2026-08-18T11:59:00Z",
+      tool: "b2_create_key",
+      recordId: "padding-record",
+      result: { note: "x".repeat(1024 * 1024) },
+    };
+    writeFileSync(file, `${JSON.stringify(padding)}\n${JSON.stringify(legacy)}\n`, {
+      mode: 0o600,
+    });
+    let createCalls = 0;
+
+    const result = await executeDurableSecretOperation({
+      secretSink: { mode: "file", filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      create: async () => {
+        createCalls++;
+        return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+      },
+      projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+        ...created,
+        applicationKey: "[redacted]",
+        secretSink: sinkPointer,
+      }),
+      projectInline: (created: Record<string, unknown>, warning: string) => ({
+        ...created,
+        warning,
+      }),
+    });
+
+    expect(createCalls).toBe(0);
+    expect(result.structuredContent).toMatchObject({
+      applicationKeyId: "key-id",
+      applicationKey: "[redacted]",
+      secretSink: { type: "file", path: file, recordId: "legacy-tail-record" },
+    });
+  });
+
+  it("uses a committed marker that races after pending claim creation", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "raced-commit",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "raced-commit", capabilities: ["listBuckets"] },
+    });
+    const pointer = { type: "file" as const, path: file, recordId: "raced-record" };
+    const markerPath = `${file}.${idempotency.claimFingerprint}.committed.json`;
+    const fsync = secretSinkFileOpsForTests.fsyncSync;
+    let markerWritten = false;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      const result = fsync(fd);
+      if (!markerWritten && existsSync(`${file}.${idempotency.claimFingerprint}.pending`)) {
+        markerWritten = true;
+        writeFileSync(
+          markerPath,
+          JSON.stringify({
+            ts: "2026-08-18T12:00:00Z",
+            tool: "b2_create_key",
+            recordId: pointer.recordId,
+            idempotency,
+            result: { applicationKeyId: "key-id", applicationKey: "[redacted]" },
+            pointer,
+          }),
+          { mode: 0o600 },
+        );
+      }
+      return result;
+    });
+    let createCalls = 0;
+
+    const result = await executeDurableSecretOperation({
+      secretSink: { mode: "file", filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      create: async () => {
+        createCalls++;
+        return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+      },
+      projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+        ...created,
+        applicationKey: "[redacted]",
+        secretSink: sinkPointer,
+      }),
+      projectInline: (created: Record<string, unknown>, warning: string) => ({
+        ...created,
+        warning,
+      }),
+    });
+
+    expect(createCalls).toBe(0);
+    expect(result.structuredContent).toMatchObject({
+      applicationKeyId: "key-id",
+      applicationKey: "[redacted]",
+      secretSink: pointer,
+    });
+    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
   });
 
   it("rejects conflicting input on the same pending idempotency claim", async () => {
@@ -695,6 +905,38 @@ describe("secret sink file writer", () => {
 
     expect(createCalls).toBe(1);
     expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+  });
+
+  it("releases the pending claim after a known provider rejection", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "known-provider-rejection",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "known-provider-rejection", capabilities: ["listBuckets"] },
+    });
+
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => {
+          throw { status: 403, code: "access_denied" };
+        },
+        projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+          ...created,
+          secretSink: sinkPointer,
+        }),
+        projectInline: (created: Record<string, unknown>, warning: string) => ({
+          ...created,
+          warning,
+        }),
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+
+    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
   });
 
   it("keeps the pending claim after an HTTP 408 provider timeout", async () => {
@@ -839,6 +1081,47 @@ describe("secret sink file writer", () => {
     });
     expect(recoverSpy).not.toHaveBeenCalled();
     expect(JSON.stringify(warnSpy.mock.calls)).toContain("secret_sink.claim_cleanup_failed");
+  });
+
+  it("treats malformed pending claim metadata as pending", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "malformed-pending",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "malformed-pending", capabilities: ["listBuckets"] },
+    });
+    writeFileSync(
+      `${file}.${idempotency.claimFingerprint}.pending`,
+      `${JSON.stringify({
+        idempotency: { key: idempotency.key, claimFingerprint: idempotency.claimFingerprint },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    let createCalls = 0;
+
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+        },
+        projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+          ...created,
+          secretSink: sinkPointer,
+        }),
+        projectInline: (created: Record<string, unknown>, warning: string) => ({
+          ...created,
+          warning,
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    expect(createCalls).toBe(0);
   });
 
   it("returns a stable failure when committed idempotency metadata cannot be stored", async () => {
