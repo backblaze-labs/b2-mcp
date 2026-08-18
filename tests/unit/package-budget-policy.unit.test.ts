@@ -525,7 +525,8 @@ describe("package budget policy gate", () => {
     const packageBudgetStep = publishWorkflow.indexOf("- run: pnpm run check:package-budget");
     const packStep = publishWorkflow.indexOf("- name: Build and scan publish tarball");
 
-    expect(pkg.scripts.prepublishOnly).toBeUndefined();
+    expect(pkg.scripts.prepublishOnly).toContain("pnpm run build");
+    expect(pkg.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(packageBudgetStep).toBeGreaterThan(-1);
     expect(packageBudgetStep).toBeLessThan(packStep);
   });

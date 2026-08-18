@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with owner-only file handling and SIGHUP reopen support for external rotation.
 
 ### Changed
+- Adopted tag-driven release publishing for issue #187: `pnpm version` now
+  promotes the changelog before `git push --follow-tags` starts the protected
+  publish workflow from trusted `ci-green` resolver code, while keeping the
+  existing SBOM, live-contract, package-budget, GHCR, manual publish guard, and
+  `ci-green` gates.
 - Bumped `@backblaze-labs/b2-sdk` to exact-pinned `0.3.0` and moved
   Partner/Groups read/eject/list tooling onto the SDK `/partner` operations;
   durable-secret Partner create/reserve tool names remain unavailable stubs.

@@ -21,6 +21,13 @@ const nodeRequire = createRequire(__filename);
 const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
 };
+const { valuesEqual, yamlBlockForKey, yamlValuesForKey } = nodeRequire(
+  "../../scripts/lib/workflow-yaml.cjs",
+) as {
+  valuesEqual: (actual: unknown[], expected: unknown[]) => boolean;
+  yamlBlockForKey: (text: string, key: string) => string | null;
+  yamlValuesForKey: (text: string, key: string) => unknown[];
+};
 const { parseYaml, readPackageManagerLock } = nodeRequire("../../scripts/lib/pnpm-lock.cjs") as {
   parseYaml: (text: string) => unknown;
   readPackageManagerLock: (root: string) => unknown;
@@ -32,6 +39,7 @@ const semver = nodeRequire("semver") as {
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const releaseTagWorkflow = readFileSync(join(root, ".github/workflows/release-tag.yml"), "utf8");
   const rawPnpmLock = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8")) as {
     importers?: Record<
       string,
@@ -600,9 +608,13 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts["release:sbom"]).toBe(
       "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     );
+    expect(packageJson.scripts.version).toBe(
+      "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
+    );
+    expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
+    expect(packageJson.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
-    expect(packageJson.scripts.prepublishOnly).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
@@ -803,16 +815,44 @@ describe("supply-chain audit policy", () => {
     const githubReleaseJob = publishJobBlock("github-release");
     const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
+    const publishOnBlock = yamlBlockForKey(publishWorkflow, "on") ?? "";
+    const publishWorkflowRunBlock = yamlBlockForKey(publishOnBlock, "workflow_run") ?? "";
+    const releaseTagOnBlock = yamlBlockForKey(releaseTagWorkflow, "on") ?? "";
+    const releaseTagPushBlock = yamlBlockForKey(releaseTagOnBlock, "push") ?? "";
+    const releaseTagDispatchBlock = yamlBlockForKey(releaseTagOnBlock, "workflow_dispatch") ?? "";
+    const releaseTagPushTags = yamlValuesForKey(releaseTagPushBlock, "tags");
 
-    expect(publishWorkflow).toContain("release:");
-    expect(publishWorkflow).toContain("types: [published]");
-    expect(publishWorkflow).not.toContain("push:");
-    expect(publishWorkflow).not.toContain("tags:");
-    expect(publishWorkflow).not.toContain("workflow_dispatch");
+    expect(
+      releaseTagPushTags.some((value) => Array.isArray(value) && valuesEqual(value, ["v*"])),
+    ).toBe(true);
+    expect(releaseTagDispatchBlock).toContain("tag:");
+    expect(releaseTagWorkflow).toContain("REQUEST_TAG:");
+    expect(releaseTagWorkflow).toContain("actions/upload-artifact@");
+    expect(releaseTagWorkflow).toContain("release-tag-request");
+    expect(releaseTagWorkflow).toContain("permissions:\n  contents: read");
+    expect(releaseTagWorkflow).not.toContain("id-token: write");
+    expect(releaseTagWorkflow).not.toContain("actions/checkout");
+    expect(releaseTagWorkflow).not.toContain("npm publish");
+    expect(releaseTagWorkflow).not.toContain("GHCR_TOKEN");
+    expect(publishWorkflow).toContain("zizmor: ignore[dangerous-triggers]");
+    expect(publishWorkflow).toContain("tag artifact");
+    expect(publishWorkflow).toContain("validates protected refs");
+    expect(publishWorkflowRunBlock).toContain("Release Tag Request");
+    expect(yamlBlockForKey(publishOnBlock, "release")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "push")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "workflow_dispatch")).toBeNull();
     expect(publishWorkflow).not.toContain("inputs.tag");
-    expect(publishWorkflow).not.toContain("${{ github.ref_name }}");
-    expect(publishWorkflow).toContain("${{ github.event.release.tag_name }}");
+    expect(publishWorkflow).not.toContain("github.event.workflow_run.head_branch");
+    expect(publishWorkflow).not.toContain("${{ github.event.release.tag_name }}");
     expect(prepareJob).not.toContain("id-token: write");
+    expect(prepareJob).toContain("actions/download-artifact@");
+    expect(prepareJob).toContain("github.event.workflow_run.id");
+    expect(prepareJob).toContain("release-request/tag.txt");
+    expect(prepareJob).toContain("steps.request.outputs.tag");
+    expect(publishWorkflow).toContain("needs.prepare.outputs.publish-tag");
+    expect(prepareJob).toContain("ref: refs/heads/ci-green");
+    expect(prepareJob).toContain("--wait-for-ci-green-timeout-ms 1200000");
+    expect(prepareJob).toContain("--wait-for-ci-green-interval-ms");
     expect(prepareJob).toContain("pnpm run verify");
     expect(prepareJob).not.toContain("actions/setup-python");
     expect(prepareJob).toContain("pnpm run typecheck");

@@ -228,7 +228,8 @@ function escapeRegex(value) {
 }
 
 function trustArgs(githubServerUrl, githubRepository) {
-  const identity = `^${escapeRegex(githubServerUrl.replace(/\/$/, ""))}/${escapeRegex(githubRepository)}/\\.github/workflows/publish\\.yml@refs/tags/v`;
+  const workflow = `${escapeRegex(githubServerUrl.replace(/\/$/, ""))}/${escapeRegex(githubRepository)}/\\.github/workflows/publish\\.yml`;
+  const identity = `^${workflow}@refs/heads/main$`;
   return [
     "--certificate-identity-regexp",
     identity,
