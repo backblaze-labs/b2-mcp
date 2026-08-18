@@ -84,7 +84,158 @@ function parseLogLine(text: string): Record<string, unknown> {
   return JSON.parse(line as string);
 }
 
+type LoggerModule = typeof import("../../src/utils/logger");
+
+const loggerEnvKeys = ["B2_LOG_FILE", "LOG_LEVEL", "NODE_ENV"] as const;
+
+async function withFreshLogger<T>(
+  env: NodeJS.ProcessEnv,
+  run: (loggerModule: LoggerModule) => T | Promise<T>,
+): Promise<T> {
+  const previousEnv = new Map<(typeof loggerEnvKeys)[number], string | undefined>(
+    loggerEnvKeys.map((key) => [key, process.env[key]]),
+  );
+
+  vi.resetModules();
+  delete process.env.B2_LOG_FILE;
+  process.env.LOG_LEVEL = "info";
+  process.env.NODE_ENV = "test";
+  Object.assign(process.env, env);
+
+  try {
+    const loggerModule = await import("../../src/utils/logger");
+    return await run(loggerModule);
+  } finally {
+    for (const [key, value] of previousEnv) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    vi.resetModules();
+  }
+}
+
+function flushPinoLogger(logger: LoggerModule["logger"]): Promise<void> {
+  const flush = (logger as { flush?: (cb?: (err?: Error) => void) => void }).flush;
+  if (typeof flush !== "function") return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    flush.call(logger, (err) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 describe("logger destination", () => {
+  it("does not create B2_LOG_FILE before explicit initialization", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-import-coverage-"));
+    const logFile = join(dir, "server.log");
+
+    try {
+      await withFreshLogger({ B2_LOG_FILE: logFile }, async ({ logger }) => {
+        expect(logger).toBeTruthy();
+      });
+
+      expect(existsSync(logFile)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("initializes file logging with redaction and owner-only permissions", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-file-coverage-"));
+    const logFile = join(dir, "server.log");
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ flushLogsSync, initLogging, logger }) => {
+          initLogging();
+          logger.info({ applicationKey: "logger-secret-value" }, "logger.coverage");
+          flushLogsSync();
+        },
+      );
+
+      expect(existsSync(logFile)).toBe(true);
+      if (process.platform !== "win32") {
+        expect(statSync(logFile).mode & 0o077).toBe(0);
+      }
+
+      const line = parseLogLine(readFileSync(logFile, "utf8"));
+      expect(line.msg).toBe("logger.coverage");
+      expect(line.applicationKey).toBe("[redacted]");
+      expect(JSON.stringify(line)).not.toContain("logger-secret-value");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps stderr as the initialized default without B2_LOG_FILE", async () => {
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      await withFreshLogger({}, async ({ flushLogsSync, initLogging, logger }) => {
+        initLogging();
+        logger.info({ applicationKey: "logger-secret-value" }, "logger.stderr");
+        await flushPinoLogger(logger);
+        flushLogsSync();
+      });
+
+      const output = stderrWrite.mock.calls.map(([line]) => String(line)).join("");
+      const parsed = parseLogLine(output);
+      expect(parsed.msg).toBe("logger.stderr");
+      expect(parsed.applicationKey).toBe("[redacted]");
+    } finally {
+      stderrWrite.mockRestore();
+    }
+  });
+
+  it("rejects invalid file destinations during explicit initialization", async () => {
+    await expect(
+      withFreshLogger({ B2_LOG_FILE: "relative-b2-mcp.log" }, async ({ initLogging }) => {
+        initLogging();
+      }),
+    ).rejects.toThrow("B2_LOG_FILE must be an absolute path");
+
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-invalid-log-coverage-"));
+    const logFile = join(dir, "server.log");
+
+    try {
+      writeFileSync(logFile, "", { mode: 0o600 });
+      chmodSync(logFile, 0o644);
+
+      await expect(
+        withFreshLogger({ B2_LOG_FILE: logFile }, async ({ initLogging }) => {
+          initLogging();
+        }),
+      ).rejects.toThrow("B2_LOG_FILE must not be readable or writable by group or other users");
+
+      const symlinkPath = join(dir, "symlink.log");
+      symlinkSync(logFile, symlinkPath);
+      await expect(
+        withFreshLogger({ B2_LOG_FILE: symlinkPath }, async ({ initLogging }) => {
+          initLogging();
+        }),
+      ).rejects.toThrow("B2_LOG_FILE must not be a symlink");
+
+      const missingParentPath = join(dir, "missing", "server.log");
+      await expect(
+        withFreshLogger({ B2_LOG_FILE: missingParentPath }, async ({ initLogging }) => {
+          initLogging();
+        }),
+      ).rejects.toThrow("B2_LOG_FILE is not writable");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not validate or create B2_LOG_FILE when the package root is imported", () => {
     const dir = mkdtempSync(join(tmpdir(), "b2-mcp-logger-import-"));
     const logFile = join(dir, "server.log");
