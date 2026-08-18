@@ -336,6 +336,36 @@ function sentenceUnits(section) {
   );
 }
 
+function proseUnits(text) {
+  const units = [];
+  let current = [];
+  const flush = () => {
+    if (current.length > 0) {
+      units.push(current.join(" "));
+      current = [];
+    }
+  };
+
+  for (const line of text.split(/\r?\n/)) {
+    const stripped = line.trim();
+    if (!stripped || stripped === "---" || stripped.startsWith("##")) {
+      flush();
+      continue;
+    }
+    const listItem = stripped.match(/^(?:[-*]|\d+[.)])\s+(?<body>.+)$/u);
+    if (listItem) {
+      flush();
+      current = [listItem.groups.body.trim()];
+      continue;
+    }
+    if (current.length > 0) current.push(stripped);
+    else current = [stripped];
+  }
+  flush();
+
+  return units;
+}
+
 function clauses(unit) {
   return unit.split(/[;]\s*/).filter((clause) => clause.trim());
 }
@@ -415,6 +445,16 @@ function validateSkill(root, skillPath, expectedName, allTools, destructiveTools
   if (!byteUnits.some((unit) => requiresDirectObjectDataToB2(unit))) {
     fail(`${skillPath}: Byte path must require direct client/workload-to-B2 transfer`);
   }
+  const allProseUnits = proseUnits(text);
+  const allProseSentenceUnits = allProseUnits.flatMap((unit) =>
+    unit
+      .split(/(?<=[.!?])\s+/u)
+      .filter((part) => part.trim())
+      .map((part) => part.trim()),
+  );
+  if (allProseSentenceUnits.some((unit) => allowsObjectDataToModelOrServer(unit))) {
+    fail(`${skillPath}: Skill prose must not allow object bytes into the model/chat/MCP server`);
+  }
 
   const declaredTools = new Set(sections.get("Tools used").match(toolRe) ?? []);
   const mentionedTools = new Set(text.match(toolRe) ?? []);
@@ -448,6 +488,9 @@ function validateSkill(root, skillPath, expectedName, allTools, destructiveTools
     const weakenedUnit = matchingUnits.find((unit) => weakensConfirmationGate(unit));
     if (weakenedUnit) {
       fail(`${skillPath}: Safety gate for ${tool} must not weaken or bypass approval`);
+    }
+    if (allProseUnits.some((unit) => unit.includes(tool) && weakensConfirmationGate(unit))) {
+      fail(`${skillPath}: Skill prose for ${tool} must not weaken or bypass approval`);
     }
     if (!matchingUnits.some((unit) => requiresConfirmationGate(unit))) {
       fail(
