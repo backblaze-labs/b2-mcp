@@ -814,6 +814,8 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("${{ github.event.release.tag_name }}");
     expect(prepareJob).not.toContain("id-token: write");
     expect(prepareJob).toContain("pnpm run verify");
+    expect(prepareJob).toContain("actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1");
+    expect(prepareJob).toContain("python-version: '3.12'");
     expect(prepareJob).toContain("pnpm run typecheck");
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");

@@ -38,10 +38,13 @@ description: Plan source-to-B2 or B2-to-B2 migrations with inventory, direct byt
 
 ## Playbook
 
-1. Capture scope: source, destination bucket and prefix, object count, estimated bytes, metadata preservation, Object Lock requirements, encryption expectations, and cutover deadline.
-2. Verify destination reachability with `b2_list_buckets` and `s3_head_bucket`. List existing destination keys with `s3_list_objects_v2` to identify collisions before any write URL is minted.
-3. Choose transfer mode. Use `s3_copy_object` for applicable B2/S3-compatible server-side copy paths. Use `s3_get_presigned_url` for simple direct uploads and multipart tools for large objects.
-4. Require confirmation before write-capable presigned URL batches. Keep URLs short-lived and hand them only to the migration worker that will PUT directly to B2.
-5. Validate by sampling and summarizing `s3_head_object` metadata, object counts, sizes, checksums where available, and application-level probes. Do not read object bodies into the model.
-6. Plan cutover in phases: initial sync, delta sync, freeze, final validation, application switch, read-only observation, rollback window, and deferred cleanup.
-7. Close with a migration report: transferred count, skipped count, failed keys, validation method, cutover status, and cleanup tasks that still require a separate approval.
+1. Capture scope: source, destination bucket and prefix, object count, estimated bytes, metadata preservation, Object Lock requirements, encryption expectations, cutover deadline, and explicit collision/overwrite policy. Default to fail-on-collision.
+2. Create a durable migration manifest outside chat with source key, destination key, size, checksum if available, metadata, copy or upload mode, status, retry count, continuation cursor, multipart upload ID, completed parts, and validation checkpoint.
+3. Verify destination reachability with `b2_list_buckets` and `s3_head_bucket`. List existing destination keys with `s3_list_objects_v2` before any write URL is minted; use pages of at most 1,000 keys, persist continuation tokens, and show at most 50 sampled rows in chat.
+4. Choose transfer mode. Use `s3_copy_object` for applicable B2/S3-compatible server-side copy paths. Use `s3_get_presigned_url` for simple direct uploads and multipart tools for large objects, persisting upload IDs, part numbers, ETags, and completed-part checkpoints.
+5. Bound retry behavior in the migration worker: exponential backoff with jitter, a declared retry limit per object, and a stop condition that writes failed keys to the manifest instead of looping indefinitely.
+6. Require confirmation before write-capable presigned URL batches. Keep URLs short-lived and hand them only to the migration worker that will PUT directly to B2.
+7. Resume after restart from the manifest: skip validated objects, continue incomplete multipart uploads from saved state, retry failed objects within the approved limit, and never overwrite destination keys outside the approved collision policy.
+8. Validate by sampling and summarizing `s3_head_object` metadata, object counts, sizes, checksums where available, and application-level probes. Do not read object bodies into the model.
+9. Plan cutover in phases: initial sync, delta sync, freeze, final validation, completed-manifest checkpoint, application switch, read-only observation, rollback window, and deferred cleanup. Cutover only proceeds from a completed validation checkpoint.
+10. Close with a migration report: transferred count, skipped count, failed keys, validation method, manifest location, cutover status, and cleanup tasks that still require a separate approval.

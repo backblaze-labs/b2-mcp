@@ -81,7 +81,10 @@ Each skill keeps bulk object bytes off the model and MCP server, uses
 presigned/direct transfer paths for data movement, and pauses before destructive
 or irreversible steps that are also gated by `B2_DESTRUCTIVE_POLICY`.
 
-Validate the pack locally:
+Validate the pack locally. The validator is a structural guard for the declared
+pack, tool references, byte-path rules, and per-tool destructive gates; it is not
+a content-safety proof, so `skills/**` changes require CODEOWNERS review before
+publish.
 
 ```bash
 pnpm run validate:skills

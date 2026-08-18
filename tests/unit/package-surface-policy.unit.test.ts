@@ -93,6 +93,9 @@ describe("package surface policy", () => {
   const toolContract = readJson<{
     profiles: Record<string, { fixtures: Record<string, string> }>;
   }>("docs/tool-profile-contract.json");
+  const skillsPack = readJson<{
+    packageFiles: string[];
+  }>("skills/pack.json");
   const readme = readFileSync(join(root, "README.md"), "utf8");
 
   it("keeps repo-only policy files out of the published npm package", () => {
@@ -119,8 +122,13 @@ describe("package surface policy", () => {
     expect(files).toContain("docs/CLIENTS.md");
     expect(files).toContain("docs/DEPLOY.md");
     expect(files).toContain("docs/tool-profile-contract.json");
-    expect(files).toContain("skills/b2-backup-restore/SKILL.md");
-    expect(files).toContain("skills/b2-incident-response/SKILL.md");
+    expect(pkg.files.filter((file) => file.startsWith("skills/"))).toEqual(skillsPack.packageFiles);
+    for (const skillPath of skillsPack.packageFiles) {
+      expect(files).toContain(skillPath);
+    }
+    expect(files.filter((file) => file.startsWith("skills/")).sort()).toEqual(
+      [...skillsPack.packageFiles].sort(),
+    );
     for (const fixturePath of Object.values(toolContract.profiles).flatMap((profile) =>
       Object.values(profile.fixtures),
     )) {

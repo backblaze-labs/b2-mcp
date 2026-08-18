@@ -44,7 +44,9 @@ description: Audit B2 storage growth, stale versions, unfinished uploads, egress
 
 1. Define the cost question: storage growth, old versions, hidden files, abandoned multipart uploads, egress, large objects, or lifecycle coverage.
 2. Use `b2_usage_growth`, `b2_largest_files`, `b2_egress_leaders`, and `b2_unfinished_uploads` to build an evidence-first summary. Use `s3_list_objects_v2`, `s3_list_object_versions`, and `s3_list_multipart_uploads` for targeted follow-up.
-3. Group findings by bucket, prefix, owner, age, object count, and estimated bytes. Separate live data, noncurrent versions, hide markers, unfinished uploads, and report-derived egress.
-4. Propose lifecycle rules only after checking retention and recovery requirements. For deletion policies, state the exact rule, prefix filter, age threshold, expected effect, and rollback limitation before `s3_put_bucket_lifecycle` or `b2_update_bucket`.
-5. For one-time cleanup, produce a dry-run style target list and require explicit confirmation before aborting multipart uploads or deleting objects.
-6. Close with a cost hygiene report: estimated bytes affected, rules proposed or applied, destructive operations skipped or completed, validation queries, and next review date.
+3. For listings, request pages of at most 1,000 keys or versions, persist continuation tokens, stop chat output after 50 sampled rows or 10 pages, and write full inventories to an external manifest or report.
+4. Group findings by bucket, prefix, owner, age, object count, and estimated bytes. Separate live data, noncurrent versions, hide markers, unfinished uploads, and report-derived egress.
+5. Propose lifecycle rules only after checking retention and recovery requirements. For deletion policies, state the exact rule, prefix filter, age threshold, expected effect, and rollback limitation before `s3_put_bucket_lifecycle` or `b2_update_bucket`.
+6. For one-time cleanup, produce a dry-run style target manifest with cursor, object/version ID, action, batch number, status, and retry count. Batch `s3_delete_objects` at 1,000 objects or fewer, abort multipart uploads in bounded batches of 100 or fewer, and checkpoint after every batch.
+7. Require explicit confirmation before each destructive cleanup batch and resume only from the last checkpoint. Stop on the first unexpected retention, legal hold, or version mismatch.
+8. Close with a cost hygiene report: estimated bytes affected, rules proposed or applied, destructive operations skipped or completed, validation queries, checkpoint location, and next review date.

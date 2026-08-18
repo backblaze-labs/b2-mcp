@@ -12,15 +12,16 @@ The PR gate must not require real B2 credentials. The complete local
 no-credential gate is:
 
 ```bash
+python --version  # Python 3.12 is required for skills-pack validation.
 pnpm install --frozen-lockfile
 pnpm run verify
 ```
 
 `pnpm run verify` runs typecheck, build, Biome lint, doc-comment lint, local
-Markdown link validation, the Biome-supported format check, spelling,
-and listener diagnostics across the fast non-live layers. Coverage, slow
-lifecycle, and packed-package installation evidence stay in distinct scripts and
-CI jobs so their failures do not mask each other.
+Markdown link validation, bundled skills-pack validation, the Biome-supported
+format check, spelling, and listener diagnostics across the fast non-live
+layers. Coverage, slow lifecycle, and packed-package installation evidence stay
+in distinct scripts and CI jobs so their failures do not mask each other.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |

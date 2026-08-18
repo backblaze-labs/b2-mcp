@@ -232,6 +232,9 @@ describe("packed package", () => {
         });
         const [pack] = JSON.parse(packOutput) as PackResult[];
         const packedPaths = pack.files.map((file) => file.path).sort();
+        const skillsPack = JSON.parse(readFileSync(join(root, "skills/pack.json"), "utf8")) as {
+          packageFiles: string[];
+        };
 
         expect(packedPaths).toEqual(
           expect.arrayContaining([
@@ -243,9 +246,11 @@ describe("packed package", () => {
             "docs/CLIENTS.md",
             "docs/DEPLOY.md",
             "README.md",
-            "skills/b2-backup-restore/SKILL.md",
-            "skills/b2-incident-response/SKILL.md",
+            ...skillsPack.packageFiles,
           ]),
+        );
+        expect(packedPaths.filter((path) => path.startsWith("skills/")).sort()).toEqual(
+          [...skillsPack.packageFiles].sort(),
         );
 
         const tarball = join(packDir, pack.filename);

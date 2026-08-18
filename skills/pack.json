@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "name": "backblaze-b2-skills",
+  "description": "Phase 1 Backblaze B2 skills pack for safe MCP tool sequencing.",
+  "issue": {
+    "number": 105,
+    "url": "https://github.com/backblaze-labs/b2-mcp/issues/105"
+  },
+  "skills": [
+    {
+      "name": "b2-backup-restore",
+      "path": "b2-backup-restore/SKILL.md"
+    },
+    {
+      "name": "b2-incident-response",
+      "path": "b2-incident-response/SKILL.md"
+    },
+    {
+      "name": "b2-least-privilege-keys",
+      "path": "b2-least-privilege-keys/SKILL.md"
+    },
+    {
+      "name": "b2-lifecycle-cost-hygiene",
+      "path": "b2-lifecycle-cost-hygiene/SKILL.md"
+    },
+    {
+      "name": "b2-migration",
+      "path": "b2-migration/SKILL.md"
+    },
+    {
+      "name": "b2-object-lock",
+      "path": "b2-object-lock/SKILL.md"
+    }
+  ],
+  "packageFiles": [
+    "skills/pack.json",
+    "skills/b2-backup-restore/SKILL.md",
+    "skills/b2-incident-response/SKILL.md",
+    "skills/b2-least-privilege-keys/SKILL.md",
+    "skills/b2-lifecycle-cost-hygiene/SKILL.md",
+    "skills/b2-migration/SKILL.md",
+    "skills/b2-object-lock/SKILL.md"
+  ]
+}

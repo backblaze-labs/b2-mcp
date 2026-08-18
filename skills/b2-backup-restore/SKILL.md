@@ -22,7 +22,7 @@ description: Plan and run B2 backup and restore workflows with presigned or mult
 - Pause and ask for explicit confirmation before minting a write-capable bearer URL with `s3_get_presigned_url` using `operation: "PutObject"`.
 - Pause and ask for explicit confirmation before aborting incomplete multipart state with `s3_abort_multipart_upload`; uploaded parts are discarded.
 - Pause and ask for explicit confirmation before overwrite, retention change, lifecycle deletion, or any cleanup step that uses a server-gated destructive tool. Re-invoke the identical call only after the user approves the target and intent.
-- Treat restored data as sensitive. Do not print object contents; write restores to user-approved paths or provide direct B2 download URLs.
+- Treat restored data and presigned URLs as sensitive bearer material. Do not print object contents or presigned download URLs into chat; hand URLs only to the out-of-band restore client or worker.
 
 ## Tools used
 
@@ -39,10 +39,13 @@ description: Plan and run B2 backup and restore workflows with presigned or mult
 
 ## Playbook
 
-1. Confirm the bucket, prefix, retention target, restore point objective, and restore time objective. Verify the destination bucket with `b2_list_buckets` and `s3_head_bucket`.
-2. Build a manifest outside the model context: object keys, sizes, checksums if available, content type, encryption expectation, retention expectation, and source path. Keep secrets and file contents out of chat.
-3. For small controlled writes, mint a short-lived PutObject URL with `s3_get_presigned_url` only after the safety gate. For large objects, create multipart state with `s3_create_multipart_upload`, mint part URLs with `s3_presign_upload_part`, have the client upload parts directly to B2, then finish with `s3_complete_multipart_upload`.
-4. Verify each uploaded object with `s3_head_object` and, when useful, `s3_list_objects_v2` over the prefix. Compare size, ETag or checksum metadata, retention metadata, and expected key count.
-5. For restore, list the restore prefix with `s3_list_objects_v2`, inspect targets with `s3_head_object`, then mint short-lived GetObject URLs with `s3_get_presigned_url`. The client downloads directly from B2.
-6. If multipart work is abandoned, inspect with `s3_list_parts` and pause for confirmation before `s3_abort_multipart_upload`.
-7. Close with a concise backup or restore report: bucket, prefix, object count, total planned bytes, completed objects, skipped objects, verification method, and any follow-up manual checks.
+1. Confirm the bucket, prefix, retention target, restore point objective, restore time objective, and collision policy. Default to no overwrite unless the user explicitly approves the affected keys.
+2. Build a durable manifest outside chat: object keys, sizes, checksums if available, content type, encryption expectation, retention expectation, source path, desired destination key, status, retry count, and last successful checkpoint. Keep secrets and file contents out of chat.
+3. For listings, request pages of at most 1,000 keys, persist continuation tokens to the manifest, stop chat output after 50 sampled rows, and write full inventories to the external manifest or report.
+4. For small controlled writes, mint a short-lived PutObject URL with `s3_get_presigned_url` only after the safety gate. For large objects, persist multipart upload ID, part numbers, ETags, and completed-part checkpoints after each part before `s3_complete_multipart_upload`.
+5. Use bounded retries with exponential backoff and jitter from the client or worker. Stop and report after the approved retry limit instead of restarting the whole backup from chat.
+6. Resume after restart from the manifest: skip verified completed objects, continue incomplete multipart uploads from the saved upload ID and part list, and never overwrite a completed destination key unless the collision policy says to.
+7. Verify each uploaded object with `s3_head_object` and, when useful, `s3_list_objects_v2` over the prefix. Compare size, ETag or checksum metadata, retention metadata, and expected key count before marking the manifest checkpoint complete.
+8. For restore, list the restore prefix with `s3_list_objects_v2`, inspect targets with `s3_head_object`, then mint short-lived GetObject URLs with `s3_get_presigned_url` only for the out-of-band restore worker. The client downloads directly from B2.
+9. If multipart work is abandoned, inspect with `s3_list_parts`, write the current state to the manifest, and pause for confirmation before `s3_abort_multipart_upload`.
+10. Close with a concise backup or restore report: bucket, prefix, object count, total planned bytes, completed objects, skipped objects, retry failures, checkpoint file location, verification method, and any follow-up manual checks.

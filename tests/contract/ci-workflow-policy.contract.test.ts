@@ -14,6 +14,7 @@ const { workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey
 };
 
 const pnpmSetupAction = "pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86";
+const pythonSetupAction = "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1";
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   packageManager?: string;
   scripts?: Record<string, string>;
@@ -161,6 +162,8 @@ describe("CI workflow policy", () => {
   it("runs the same local verify entry point in the primary quality job", () => {
     const qualityJob = workflowJob("format-lint-typecheck");
     expect(qualityJob).toContain("node-version: 22.23.1");
+    expect(qualityJob).toContain(pythonSetupAction);
+    expect(qualityJob).toContain("python-version: '3.12'");
     expect(qualityJob).toContain("pnpm run verify");
     expect(packageJson.scripts?.verify).not.toContain("pnpm run test:coverage");
     expect(qualityJob).not.toContain("pnpm run test:coverage");

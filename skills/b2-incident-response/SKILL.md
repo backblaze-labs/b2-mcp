@@ -46,9 +46,9 @@ description: Triage suspected B2 exposure, credential misuse, accidental deletio
 
 1. Start with containment scope: suspected credential, bucket, prefix, time window, affected application, and whether production access must remain available.
 2. Inventory buckets and keys with `b2_list_buckets` and `b2_list_keys`. Identify public buckets, broad keys, non-expiring keys, and keys with write/delete capability.
-3. Inspect evidence without reading object bodies: use `b2_egress_leaders`, `b2_usage_growth`, `s3_list_objects_v2`, `s3_list_object_versions`, `s3_head_object`, and notification rules from `b2_get_bucket_notification_rules`.
+3. Inspect evidence without reading object bodies: use `b2_egress_leaders`, `b2_usage_growth`, `s3_list_objects_v2`, `s3_list_object_versions`, `s3_head_object`, and notification rules from `b2_get_bucket_notification_rules`. Use listing pages of at most 1,000 keys or versions, persist continuation tokens in the incident record, and show at most 50 sampled rows in chat.
 4. Prioritize non-destructive containment: remove leaked credentials from workloads, rotate outside the model into a trusted secret sink, tighten application config, and preserve logs.
 5. For emergency key deletion, require confirmation of key ID, owner, blast radius, replacement credential, and rollback. Then use `b2_delete_key`.
 6. For bucket or Object Lock changes, require confirmation of exact target, current state, intended new state, and evidence impact before `b2_update_bucket`, `b2_update_file_retention`, or `b2_update_file_legal_hold`.
-7. Defer cleanup deletes until after evidence capture and restore planning. Use `s3_delete_object` or `s3_delete_objects` only after a separate destructive confirmation.
+7. Defer cleanup deletes until after evidence capture and restore planning. Use `s3_delete_object` or `s3_delete_objects` only after a separate destructive confirmation, with `s3_delete_objects` batches of 1,000 objects or fewer and a checkpointed target manifest.
 8. Close with an incident record: timeline, suspected entry point, affected buckets and prefixes, containment completed, destructive actions taken or skipped, restore path, and follow-up hardening.
