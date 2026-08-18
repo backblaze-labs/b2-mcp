@@ -4,6 +4,8 @@ coverage/
 reports/
 *.log
 *.tsbuildinfo
+# Built package tarballs from `npm pack` / `pnpm pack`
+*.tgz
 .DS_Store
 .env
 .env.local
