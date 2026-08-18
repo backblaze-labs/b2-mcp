@@ -430,11 +430,12 @@ function allowsObjectDataToModelOrServer(unit) {
 }
 
 function requiresDirectObjectDataToB2(unit) {
-  return (
-    byteSubjectRe.test(unit) &&
-    directToB2Re.test(unit) &&
-    routeMatches(unit).length > 0 &&
-    !negatedDirectToB2Re.test(unit)
+  return clauses(unit).some(
+    (clause) =>
+      byteSubjectRe.test(clause) &&
+      directToB2Re.test(clause) &&
+      routeMatches(clause).length > 0 &&
+      !negatedDirectToB2Re.test(clause),
   );
 }
 

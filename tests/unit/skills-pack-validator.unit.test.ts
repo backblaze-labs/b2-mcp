@@ -212,6 +212,27 @@ describe("skills pack validator", () => {
     }
   });
 
+  it("fails when direct-to-B2 transfer wording is in another clause", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- Object data MUST move directly between the client or workload runner and B2 using presigned URLs, multipart upload URLs, or an external B2\/S3 client\./,
+        "- Object data is cataloged directly by the client while B2 is configured; send a status report to the operator.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must require direct client/workload-to-B2 transfer",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when unrelated model guidance masks object-byte routing", () => {
     const fixtureRoot = copyValidatorFixture();
     try {
