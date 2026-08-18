@@ -61,6 +61,17 @@ args:    --transport stdio
 env:     B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY
 ```
 
+Optional local log file:
+
+```
+env:     B2_LOG_FILE=/absolute/path/to/b2-mcp.log
+```
+
+`B2_LOG_FILE` appends redacted structured JSON logs to that file instead of
+stderr. This is useful for stdio clients that hide child-process stderr. The
+file is created if it does not exist; the parent directory must already exist
+and be writable. Logs are never written to stdout.
+
 ### Claude Desktop
 
 `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) / `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
