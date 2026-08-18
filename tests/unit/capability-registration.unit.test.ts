@@ -50,10 +50,11 @@ describe("isToolEnabled", () => {
     expect(isToolEnabled("b2_authorize_account", new Set())).toBe(true);
   });
 
-  it("always excludes durable-secret-producing tools", () => {
+  it("leaves durable-secret-producing availability to secret-sink registration", () => {
+    expect(isToolEnabled("b2_create_key", new Set(["writeKeys"]))).toBe(true);
+    expect(isToolEnabled("b2_create_key", new Set(["listKeys"]))).toBe(false);
     for (const tool of DURABLE_SECRET_PRODUCING_TOOLS) {
-      expect(isToolEnabled(tool, null)).toBe(false);
-      expect(isToolEnabled(tool, new Set(Object.values(TOOL_CAPABILITIES).flat()))).toBe(false);
+      expect(isToolEnabled(tool, null)).toBe(true);
     }
   });
 
@@ -116,6 +117,17 @@ describe("capability-aware registration", () => {
       expect(names).toContain(t);
     }
     expect(names.length).toBeLessThan(40);
+  });
+
+  it("keeps file-mode durable-secret names callable when filters omit handlers", () => {
+    const names = toolNames(["listBuckets", "listFiles", "readFiles", "listKeys"], {
+      ...baseConfig,
+      secretSink: { mode: "file", filePath: "/tmp/b2-mcp-test-secrets.jsonl" },
+    } as B2Config);
+
+    expect(names).toContain("b2_create_key");
+    expect(names).toContain("b2_create_group_member");
+    expect(names).toContain("b2_reserve_trial_create_account");
   });
 
   it("write-but-no-delete key keeps writes, drops deletes", () => {

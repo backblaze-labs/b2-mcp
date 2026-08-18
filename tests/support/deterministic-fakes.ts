@@ -63,6 +63,10 @@ export class ToolHarness implements ToolRegistrar {
     this.tools.set(name, cb as ToolCallback);
   }
 
+  hasTool(name: string): boolean {
+    return this.tools.has(name);
+  }
+
   async call(name: string, args: Record<string, unknown> = {}) {
     const tool = this.tools.get(name);
     if (!tool) throw new Error(`Tool not registered in fake harness: ${name}`);

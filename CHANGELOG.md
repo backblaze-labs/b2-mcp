@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   package/build-context secret exclusion policy.
 - Added POSIX `B2_LOG_FILE` support for redacted structured JSON file logging,
   with owner-only file handling and SIGHUP reopen support for external rotation.
+- Added `B2_SECRET_SINK=file` for durable-secret-producing tools, defaulting to
+  an owner-only local JSONL ledger on stdio while HTTP/serverless remains
+  fail-closed unless an explicit sink path is configured.
 
 ### Changed
 - Adopted tag-driven release publishing for issue #187: `pnpm version` now
@@ -42,7 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ci-green` gates.
 - Bumped `@backblaze-labs/b2-sdk` to exact-pinned `0.3.0` and moved
   Partner/Groups read/eject/list tooling onto the SDK `/partner` operations;
-  durable-secret Partner create/reserve tool names remain unavailable stubs.
+  durable-secret create/reserve tools now run when the reviewed secret sink is
+  active and remain unavailable stubs when `B2_SECRET_SINK=off`.
+- Restored the transport-independent `b2_create_key` lockdown: key-management
+  grants and unscoped write/delete keys are refused by default, optional
+  `B2_MAX_KEY_DURATION_SECONDS` caps lifetime, and HTTP inline secret responses
+  require the dedicated `B2_ALLOW_INLINE_SECRETS=true` opt-in.
 - Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
   other supported algorithms with `B2_OAUTH_ALLOWED_ALGORITHMS`.
 - Documented the exported OAuth config TypeScript surface change: token-cache

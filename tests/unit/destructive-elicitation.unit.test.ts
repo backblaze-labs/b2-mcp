@@ -45,6 +45,7 @@ const EMPTY_ELICITATION: ClientCapabilities = { elicitation: {} };
 const URL_ONLY_ELICITATION: ClientCapabilities = { elicitation: { url: {} } };
 const DESTRUCTIVE_ARGS: Record<string, Record<string, unknown>> = {
   b2_create_group_member: { memberEmail: "member@example.com" },
+  b2_create_key: { keyName: "ci-uploader", capabilities: ["listBuckets"] },
   b2_delete_bucket: { bucketId: "bucket-id" },
   b2_delete_key: { applicationKeyId: "key-id" },
   b2_eject_group_member: {
@@ -91,6 +92,7 @@ const DESTRUCTIVE_ARGS: Record<string, Record<string, unknown>> = {
 };
 const EXPECTED_PROMPT_SNIPPETS: Record<string, string[]> = {
   b2_create_group_member: ["Member email: member@example.com."],
+  b2_create_key: ["Application key name: ci-uploader."],
   b2_delete_bucket: ["Bucket ID: bucket-id."],
   b2_delete_key: ["Application key ID: key-id."],
   b2_eject_group_member: [

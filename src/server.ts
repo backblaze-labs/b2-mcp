@@ -9,7 +9,7 @@ import {
 } from "./mcp.js";
 export { getRegisteredTools } from "./mcp.js";
 import { z } from "zod";
-import { B2Config } from "./utils/types.js";
+import type { B2Config, SecretSinkConfig } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
 import { isSanitizedMcpResponse, parseErrorText, toolError } from "./utils/errors.js";
 import {
@@ -97,8 +97,17 @@ export function loadConfig(): B2Config {
 
 function registerDurableSecretCompatibilityStubs(
   registrar: ToolRegistrar,
+  secretSink: SecretSinkConfig | undefined,
   shouldRegister = (_name: string) => true,
 ): void {
+  const unavailableMessage = (name: string) => {
+    if (secretSink?.mode === "file" && name === "b2_reserve_trial_create_account") {
+      return `${name} is unavailable in file secret sink mode because Reserve Trial account creation has no provider-side recovery path after a sink write failure. Use B2_SECRET_SINK=inline for explicit local use or create trial accounts outside MCP.`;
+    }
+    return secretSink?.mode === "off" && secretSink.unavailableReason
+      ? `${name} is unavailable because ${secretSink.unavailableReason}`
+      : `${name} is unavailable because it produces durable credential material and no out-of-band secret sink is configured.`;
+  };
   for (const name of DURABLE_SECRET_PRODUCING_TOOLS) {
     if (!shouldRegister(name)) continue;
     const inputSchema: z.ZodRawShape = isDestructiveTool(name)
@@ -108,7 +117,7 @@ function registerDurableSecretCompatibilityStubs(
       name,
       {
         description:
-          "Compatibility stub for a durable-secret-producing B2 operation that is unavailable until an out-of-band secret sink is configured.",
+          "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
         inputSchema,
         force: true,
       },
@@ -116,7 +125,7 @@ function registerDurableSecretCompatibilityStubs(
         toolError({
           status: 410,
           code: "tool_unavailable",
-          message: `${name} is unavailable because it produces durable credential material and no out-of-band secret sink is configured.`,
+          message: unavailableMessage(name),
         }),
     );
   }
@@ -207,13 +216,14 @@ export function createServer(
     },
   );
 
-  // Capability-aware registration: durable-secret-producing tools always fail
-  // closed, and when capabilities are supplied, a tool is only registered if
-  // the key can use it. Tools not in the capability map (b2_authorize_account,
-  // Partner tools) are allowed through here; Partner tools are additionally
-  // gated on a master key below. null/undefined remains the explicit
-  // full-surface path, while an empty array is fail-closed rather than
-  // "unknown".
+  // Capability-aware registration: when capabilities are supplied, a tool is
+  // only registered if the key can use it. Tools not in the capability map
+  // (b2_authorize_account, Partner tools) are allowed through here; Partner
+  // tools are additionally gated on a master key below. Durable-secret
+  // producers register as real handlers only when a reviewed secret sink is
+  // active; otherwise createServer adds non-secret compatibility stubs. null /
+  // undefined remains the explicit full-surface path, while an empty array is
+  // fail-closed rather than "unknown".
   const filterActive = Array.isArray(capabilities);
   const capsSet = filterActive ? new Set(capabilities) : null;
   const oauthAllowsRead = oauthScopesAllowOperation(oauthScopes, "read");
@@ -298,13 +308,22 @@ export function createServer(
   // Phase 2 is live per-bucket S3 listing.
   registerInsightTools(registrar, b2Client, auth, reportClient);
 
-  // Rolling deploy compatibility: clients can cache an older tools/list that
-  // included durable-secret-producing tools. Keep those names callable, but
-  // return a stable non-secret unavailable error instead of reintroducing the
-  // old secret-producing handlers.
-  registerDurableSecretCompatibilityStubs(registrar, (name) =>
-    isToolAllowedByOAuthScopes(name, oauthScopes),
-  );
+  // Rolling deploy compatibility: clients can cache tools/list entries for
+  // durable-secret-producing tools. In off mode keep those names callable with
+  // a stable non-secret unavailable error. File mode keeps filtered durable
+  // secret tool names callable as non-secret unavailable errors; Reserve Trial
+  // is always stubbed because the provider has no post-create recovery action.
+  if (config.secretSink?.mode === "file") {
+    registerDurableSecretCompatibilityStubs(
+      registrar,
+      config.secretSink,
+      (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
+    );
+  } else if (config.secretSink?.mode !== "inline") {
+    registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>
+      isToolAllowedByOAuthScopes(name, oauthScopes),
+    );
+  }
 
   const toolCount = registrar.commit();
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");

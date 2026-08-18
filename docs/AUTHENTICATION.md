@@ -200,11 +200,12 @@ access token; it does not trust client metadata as authorization to use B2.
 
 ## Durable Secrets And Presigned URLs
 
-Default MCP tools must not return durable B2 secrets. `b2_create_key`,
-`b2_create_group_member`, and `b2_reserve_trial_create_account` are registered
-only as non-secret unavailable compatibility stubs until a reviewed
-out-of-band secret sink exists. Issue #186 will revise this invariant when a
-sink-backed profile lands.
+Default MCP tools must not return durable B2 secrets. `b2_create_key` and
+`b2_create_group_member` run only when a reviewed out-of-band secret sink or
+explicit inline mode is configured. `b2_reserve_trial_create_account` remains a
+non-secret unavailable compatibility stub in file mode because Reserve Trial has
+no provider-side recovery path after account creation; it requires explicit
+inline mode.
 
 Presigned S3 URLs are different. `s3_get_presigned_url` and
 `s3_presign_upload_part` may return short-lived bearer URLs with operation and

@@ -8,15 +8,15 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 40 | 21 | 19 | 0 | `e36dab8c8dd7` |
-| `phase1-default` | 37 | 18 | 19 | 0 | `1603c83f8e75` |
-| `read-only` | 20 | 11 | 9 | 0 | `4d56be08d66d` |
+| `full` | 40 | 21 | 19 | 0 | `0514a29fe155` |
+| `phase1-default` | 37 | 18 | 19 | 0 | `69e5ecbb1a8c` |
+| `read-only` | 20 | 11 | 9 | 0 | `d65932946c67` |
 
 ## `full`
 
-Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers remain availability-annotated stubs.
+Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221`
+Profile hash: `0514a29fe155fd62b718351a65d7e41a079638cfbc7981241f89cfc6f93e8c94`
 
 ### Capability Input
 
@@ -76,9 +76,9 @@ Profile hash: `e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221`
 
 ## `phase1-default`
 
-Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed only as unavailable stubs.
+Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
+Profile hash: `69e5ecbb1a8cadb95d5928d10813bfe7c869938b3821543cb85100064005c850`
 
 ### Capability Input
 
@@ -147,9 +147,9 @@ Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
 
 ## `read-only`
 
-Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs.
+Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
 
-Profile hash: `4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2`
+Profile hash: `d65932946c674eb65cf25e45fed06235e5f899def2f3234dee1abd29caa1737d`
 
 ### Capability Input
 

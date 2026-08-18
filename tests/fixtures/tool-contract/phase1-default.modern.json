@@ -112,6 +112,7 @@
   },
   "confirmTools": [
     "b2_create_group_member",
+    "b2_create_key",
     "b2_delete_bucket",
     "b2_delete_key",
     "b2_reserve_trial_create_account",
@@ -265,7 +266,7 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -285,14 +286,19 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {},
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -511,7 +517,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1881,5 +1887,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83"
+  "hash": "69e5ecbb1a8cadb95d5928d10813bfe7c869938b3821543cb85100064005c850"
 }

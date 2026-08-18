@@ -5,7 +5,11 @@ import {
   sanitizeProviderRequestId,
   sanitizeText,
 } from "./secret-sanitizer.js";
-import { serializeStructuredToolResult, type StructuredToolResult } from "./result-serializer.js";
+import {
+  serializeStructuredToolResult,
+  serializeUnsanitizedStructuredToolResult,
+  type StructuredToolResult,
+} from "./result-serializer.js";
 
 const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
 
@@ -228,4 +232,14 @@ export function toolSuccess(text: string): { content: Array<{ type: "text"; text
  */
 export function toolJson(data: unknown): StructuredToolResult {
   return markSanitizedMcpResponse(serializeStructuredToolResult(data, currentSanitizerOptions()));
+}
+
+/**
+ * Return an intentionally unsanitized JSON response for the explicit
+ * B2_SECRET_SINK=inline escape hatch. Do not use for ordinary tool output.
+ *
+ * @returns The structured MCP JSON response with deliberate inline secrets.
+ */
+export function toolJsonInlineDurableSecret(data: unknown): StructuredToolResult {
+  return markSanitizedMcpResponse(serializeUnsanitizedStructuredToolResult(data));
 }

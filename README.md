@@ -19,11 +19,11 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaz
 - **Neither SDK (custom MCP code) (4)** — repository-owned analytics over B2 reports and bounded live listings: storage growth, egress leaders, largest files, and abandoned uploads.
 
 Availability is a per-tool annotation, separate from those backing categories:
-37 tools are available in the full surface, and 3 durable-secret-producing B2
-names remain non-secret unavailable stubs until an out-of-band secret sink
-exists.
+durable-secret-producing tools are sink-backed for local stdio runs and remain
+non-secret unavailable stubs on HTTP/serverless unless an explicit sink is
+configured.
 
-Destructive actions are gated, durable B2 secrets never enter the model's context, and the tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
+Destructive actions are gated, durable B2 secrets stay out of the model's context in the default/file/off modes, and the unsafe `B2_SECRET_SINK=inline` escape hatch is explicit. The tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
 ---
 
@@ -78,7 +78,13 @@ block.
 
 > _"List the buckets this key can access."_ · _"Upload `./data.csv` to `reports/may-2026.csv`."_ · _"Give me a 1-hour download link for `backups/latest.tar.gz`."_ · _"List files under `logs/2026/`."_
 
-Create and rotate application keys outside the MCP workflow, such as in the Backblaze console or CLI, until a reviewed secret sink is available.
+Local stdio runs can create application keys through the sink-backed tools; the
+new key secret is written to `~/.b2-mcp/secrets.jsonl` by default and is not
+shown in the MCP response on POSIX platforms. Windows currently rejects file
+sink paths because this implementation does not enforce owner-only ACLs there,
+so use `B2_SECRET_SINK=off` or explicit local `inline` mode on Windows. For
+hosted HTTP deployments, create and rotate keys outside the MCP flow unless you
+have deliberately configured a reviewed secret sink.
 
 ## B2 Skills pack
 
@@ -184,6 +190,9 @@ the healthcheck probes the same port the server binds.
 | `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
 | `B2_LOG_FILE`                                                 | —                     | stderr                | Optional path for redacted structured JSON logs. When set, the file replaces stderr; stdout is never used for logs          |
+| `B2_SECRET_SINK`                                              | —                     | stdio: `file`; HTTP: `off` | Durable-secret output mode: `file`, `inline`, or `off`. File mode supports `b2_create_key` and `b2_create_group_member`; `b2_reserve_trial_create_account` requires explicit inline mode because it has no file-mode recovery path |
+| `B2_SECRET_SINK_FILE`                                         | `file` override       | `~/.b2-mcp/secrets.jsonl` on stdio | Append-only plaintext JSONL credential ledger for file sink mode. HTTP/serverless file mode requires this explicit absolute path and `B2_ALLOW_LOCAL_FILES=true` |
+| `B2_ALLOW_INLINE_SECRETS`                                     | HTTP inline only      | `false`               | Dedicated HTTP/serverless opt-in required before `B2_SECRET_SINK=inline` can return durable secrets in MCP responses       |
 | `B2_APP_KEY_ID` / `B2_APP_KEY`                                | —                     | _deprecated_          | Legacy alias retained for compatibility; S3 tools use the authorized `B2_APPLICATION_KEY_*` credential scope                |
 | `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments  |
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
@@ -195,6 +204,9 @@ the healthcheck probes the same port the server binds.
 | ---------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `B2_DESTRUCTIVE_POLICY`                                          | stdio: `confirm`; HTTP: `block` | Gate on destructive tools: `confirm` requires MCP form elicitation approval on compatible 2026 clients, or `confirm: true` when elicitation is unavailable/disabled; `block` refuses before elicitation; `allow` skips both gates |
 | `B2_DESTRUCTIVE_ELICITATION`                                     | `on`               | Set to `off`, `false`, or `0` to disable MCP form elicitation and rely only on `B2_DESTRUCTIVE_POLICY`                    |
+| `B2_MAX_KEY_DURATION_SECONDS`                                    | —                  | Optional maximum for `b2_create_key`; when set, non-expiring keys and longer durations are refused before any B2 create call |
+| `B2_ALLOW_KEY_MGMT_GRANTS`                                       | `false`            | Explicitly allow `b2_create_key` to mint keys with `listKeys`, `writeKeys`, or `deleteKeys`                              |
+| `B2_ALLOW_UNSCOPED_KEYS`                                         | `false`            | Explicitly allow `b2_create_key` to mint unscoped keys with write/delete capabilities                                    |
 | `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS`                        | _none_             | HTTP transport: Host/Origin allowlists (DNS-rebinding protection) — **set these for any internet-facing HTTP deployment** |
 | `B2_HTTP_REQUEST_TIMEOUT_MS` / `B2_HTTP_HEADERS_TIMEOUT_MS`       | `30000` / `10000`  | Standalone Node HTTP transport request timeout and headers timeout                                                        |
 | `B2_TRUST_PROXY_HEADERS`                                         | `false`            | HTTP transport: trust `X-Forwarded-For` / `X-Real-IP` for unauthenticated admission keys only behind a trusted proxy       |
@@ -312,7 +324,7 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: 37 tools are available in the full surface, while `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are durable-secret-producing compatibility stubs for stale cached `tools/list` clients. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fourteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
+**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: `b2_create_key` and `b2_create_group_member` are available when `B2_SECRET_SINK=file` or `inline`; `b2_reserve_trial_create_account` is available only with explicit `inline` mode because Reserve Trial has no provider-side recovery path after a file sink write failure. These names are non-secret compatibility stubs when unavailable. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), durable key creation (`b2_create_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
 
 <details>
 <summary><b>Category 1 — Native B2 SDK (17)</b></summary>
@@ -328,25 +340,39 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 | `b2_set_bucket_notification_rules` | Available                             | Set webhook notification rules                                     |
 | `b2_list_keys`                     | Available                             | List application keys                                              |
 | `b2_delete_key`                    | Available                             | Delete an application key                                          |
-| `b2_create_key`                    | Unavailable (durable-secret)          | Create an application key; unavailable until a reviewed secret sink exists |
+| `b2_create_key`                    | Sink-backed; HTTP default stub        | Create an application key; file mode writes the one-time secret out of band |
 | `b2_update_file_legal_hold`        | Available                             | Set/clear legal hold on an object                                  |
 | `b2_update_file_retention`         | Available                             | Set/clear retention on an object                                   |
 | `b2_list_groups`                   | Available with Partner API credential | List partner groups through the official B2 SDK                    |
 | `b2_eject_group_member`            | Available with Partner API credential | Remove a member from a partner group through the official B2 SDK   |
 | `b2_list_group_members`            | Available with Partner API credential | List group members through the official B2 SDK                     |
-| `b2_create_group_member`           | Unavailable (durable-secret)          | Create a Partner group member; unavailable until a reviewed secret sink exists |
-| `b2_reserve_trial_create_account`  | Unavailable (durable-secret)          | Reserve a trial account; unavailable until a reviewed secret sink exists |
+| `b2_create_group_member`           | Sink-backed with Partner credential   | Create a Partner group member; file mode writes the one-time secret out of band |
+| `b2_reserve_trial_create_account`  | Inline only with Partner credential   | Reserve a trial account; file mode is unavailable because no provider-side recovery exists |
 
 </details>
 
-Durable-secret-producing operations are registered only as compatibility stubs
-in Phase 1 because there is no configured out-of-band secret sink. Calls to the
-three unavailable rows above return a structured non-secret unavailable error.
-The SDK-backed Partner/Groups read/eject/list tools remain available only when a
-distinct master key is configured and the account is authorized for the Partner
-API. A future sink-backed profile may expose secret-producing operations only if
-the one-time secret is written out of band and MCP output returns only a
-reference, key ID, scope, expiry, and non-secret metadata.
+Durable-secret-producing operations split their result: the one-time
+`applicationKey` is written to the configured sink, while MCP output returns
+redacted metadata plus a `secretSink` pointer. Each request must include an
+`idempotencyKey`; retrying the same key with identical input returns the
+original sink pointer without creating a second credential or account. On POSIX
+platforms, stdio defaults to `file` at `~/.b2-mcp/secrets.jsonl`. Windows
+rejects file sink paths because owner-only ACLs are not enforced by this
+implementation; configure `B2_SECRET_SINK=off` or explicit local `inline` mode
+there. HTTP/serverless defaults to `off`; enabling `file` there requires both
+`B2_ALLOW_LOCAL_FILES=true` and an explicit `B2_SECRET_SINK_FILE`.
+`B2_SECRET_SINK=inline` is an unsafe explicit opt-in that returns the secret
+into MCP output with a warning; HTTP/serverless also requires
+`B2_ALLOW_INLINE_SECRETS=true`. File sink records use stable JSONL
+metadata fields (`ts`, `tool`, `recordId`) plus idempotency metadata and a
+`result` payload. File mode also writes non-secret sidecar idempotency markers,
+plus `<B2_SECRET_SINK_FILE>.idempotency.jsonl` as an audit trail, so retry
+history survives when the plaintext ledger is rotated or vaulted. The ledger has
+no built-in rotation or pruning, so operators must rotate, prune, vault, or
+delete it under the same credential-retention policy used for live B2 keys while
+retaining the sidecars for the deployment's retry window. The SDK-backed
+Partner/Groups tools remain available only when a distinct master key is
+configured and the account is authorized for the Partner API.
 
 <details>
 <summary><b>Category 2 — AWS S3 SDK (19)</b></summary>
@@ -386,7 +412,7 @@ Scope follows the caller's key — a partner key sees its sub-accounts; a custom
 
 ## Security & self-hosting
 
-Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), MCP form elicitation for destructive tools on clients that advertise it for the 2026 protocol, durable-secret-producing tool exclusion until a secret sink exists, central recursive response sanitization, explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
+Built-in safeguards (on by default): destructive-action gating (`B2_DESTRUCTIVE_POLICY`), MCP form elicitation for destructive tools on clients that advertise it for the 2026 protocol, sink-backed durable-secret creation for local stdio with hosted HTTP fail-closed defaults, central recursive response sanitization, explicit credential-provider modes, capability-aware tool registration that fails closed, rate limiting, and a values-redacted audit log (non-secret credential fingerprints only — never secrets, values, or file contents). The server never phones home.
 
 Destructive actions have two layers. `B2_DESTRUCTIVE_POLICY=block` is the hard refusal and remains the required wall for internet-facing or untrusted-client HTTP deployments. Under `confirm`, capable 2026 MCP clients are asked for form elicitation first; clients without compatible elicitation, or servers with `B2_DESTRUCTIVE_ELICITATION=off`, fall back to the existing `confirm: true` retry. Under `allow`, both the confirm gate and elicitation are skipped for trusted single-user sessions. Elicitation responses are relayed by the MCP client, so they are useful human-in-the-loop friction but not an independent security boundary against a malicious or compromised internet-facing client.
 
@@ -409,7 +435,7 @@ Running it safely:
   [`Railway`](docs/deployment/railway.md),
   [`Fly.io`](docs/deployment/fly-io.md), and
   [`shared security`](docs/deployment/security-and-credentials.md).
-- **Use a least-privilege key** — create and rotate scoped B2 application keys outside the MCP tool flow; a non-master key is correct for normal storage operations.
+- **Use a least-privilege key** — a non-master key is correct for normal storage operations. Local stdio can create scoped keys through the file sink; hosted HTTP deployments should create and rotate keys outside the MCP tool flow unless the file sink has been explicitly configured and reviewed. `b2_create_key` refuses key-management grants, unscoped write/delete grants, and over-long or non-expiring keys unless the corresponding policy override is set.
 - **Presigned URLs are different from durable secrets** — `s3_get_presigned_url` and `s3_presign_upload_part` return short-lived bearer capabilities with `expiresIn` / `expiresAt`. Treat the URL as sensitive until expiry, but it is not a long-lived B2 application key.
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
 - **Exposing HTTP → choose a credential mode.** Unset mode remains `headers` for one-release compatibility with existing header clients; B2 credential headers must be present on every MCP request. Set `B2_HTTP_CREDENTIAL_MODE=server` to keep one B2 credential in the server process/customer secret manager, or `principal` to map verified MCP `authInfo` to customer-held credentials.

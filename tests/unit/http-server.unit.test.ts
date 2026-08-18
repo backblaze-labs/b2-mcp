@@ -16,7 +16,10 @@ import {
   startHttp,
 } from "../../src/http-server";
 import { createB2McpFetchHandler } from "../../src/http-fetch-handler";
-import type { AuthenticatedIncomingMessage } from "../../src/credentials";
+import {
+  validateHttpCredentialConfiguration,
+  type AuthenticatedIncomingMessage,
+} from "../../src/credentials";
 import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import { logger } from "../../src/utils/logger";
@@ -66,6 +69,9 @@ describe("configFromHeaders", () => {
   beforeEach(() => {
     delete process.env.B2_REGION;
     delete process.env.B2_MCP_OUTPUT_FORMAT;
+    delete process.env.B2_SECRET_SINK;
+    delete process.env.B2_SECRET_SINK_FILE;
+    delete process.env.B2_ALLOW_LOCAL_FILES;
   });
   afterAll(() => {
     process.env = baseEnv;
@@ -84,6 +90,13 @@ describe("configFromHeaders", () => {
   it("rejects conflicting duplicate credential header values", () => {
     const req = { headers: { "x-b2-key-id": ["a", "b"], "x-b2-key": "secret" } };
     expect(() => configFromHeaders(req)).toThrow(/conflicting/i);
+  });
+
+  it("refuses HTTP file secret sink configuration without explicit local-file opt-in", () => {
+    process.env.B2_SECRET_SINK = "file";
+    process.env.B2_SECRET_SINK_FILE = "/tmp/b2-mcp-secrets.jsonl";
+
+    expect(() => validateHttpCredentialConfiguration()).toThrow(/B2_ALLOW_LOCAL_FILES=true/);
   });
 
   it("falls back to primary key when app key headers are absent", () => {

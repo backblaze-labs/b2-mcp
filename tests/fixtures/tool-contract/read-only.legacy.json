@@ -62,7 +62,7 @@
     "s3_list_objects_v2": ["bucket"],
     "s3_list_parts": ["bucket", "key", "uploadId"]
   },
-  "confirmTools": ["b2_create_group_member", "b2_reserve_trial_create_account"],
+  "confirmTools": ["b2_create_group_member", "b2_create_key", "b2_reserve_trial_create_account"],
   "tools": [
     {
       "name": "b2_authorize_account",
@@ -81,7 +81,7 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -101,14 +101,19 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {},
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -277,7 +282,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -692,5 +697,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2"
+  "hash": "d65932946c674eb65cf25e45fed06235e5f899def2f3234dee1abd29caa1737d"
 }

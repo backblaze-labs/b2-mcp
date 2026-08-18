@@ -37,8 +37,13 @@ version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
     responses, or provider deployment-bypass tokens.
     If `B2_LOG_FILE` is set, structured logs move off stderr/stdout and provider
     log capture will not see them unless a log agent tails that file directly.
-13. Create, rotate, revoke, and tear down B2 keys outside the MCP tool flow
-    until a reviewed out-of-band secret sink exists.
+13. Keep `B2_SECRET_SINK=off` on hosted HTTP/serverless deployments unless a
+    reviewed operator-accessible file sink is explicitly configured with
+    `B2_ALLOW_LOCAL_FILES=true` and `B2_SECRET_SINK_FILE`. Local stdio may use
+    the default file sink for create/rotate flows because the operator owns the
+    machine and can read the ledger out of band. HTTP inline mode additionally
+    requires `B2_ALLOW_INLINE_SECRETS=true`; do not enable it outside a reviewed
+    break-glass deployment.
 14. Configure protected live deployment smokes with a GitHub Environment so
     live B2 credentials are never exposed to untrusted fork or PR code.
 15. Process-local rate limits and caches are not global across replicas,
@@ -102,6 +107,7 @@ B2_ALLOWED_HOSTS=mcp.example.com
 B2_DESTRUCTIVE_POLICY=block
 B2_REGISTER_ALL_TOOLS=false
 B2_ALLOW_LOCAL_FILES=false
+B2_SECRET_SINK=off
 B2_MCP_OUTPUT_FORMAT=json
 B2_MCP_PUBLIC_URL=https://mcp.example.com/mcp
 B2_OAUTH_ISSUER=https://issuer.example.com/
@@ -119,6 +125,35 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 Store `B2_APPLICATION_KEY_ID`, `B2_APPLICATION_KEY`, and OAuth introspection
 credentials in the provider's encrypted secret mechanism, not in source, build
 logs, query strings, screenshots, or client configuration.
+
+`B2_SECRET_SINK=file` writes newly created application key secrets to a
+plaintext append-only JSONL file on POSIX platforms. Windows file sink paths are
+rejected because this implementation does not enforce owner-only ACLs there.
+Each record has stable metadata fields (`ts`, `tool`, `recordId`) and stores the
+provider payload under `result`. File mode also writes non-secret sidecar
+idempotency markers, plus `<B2_SECRET_SINK_FILE>.idempotency.jsonl` as an audit
+trail; retain those sidecars for the deployment's retry window when rotating,
+pruning, deleting, or vaulting the plaintext ledger. Treat the ledger as a
+credential store: protect it with owner-only permissions, rotate or revoke keys
+after use, and rotate, prune, delete, or vault old records under the same policy
+used for `B2_APPLICATION_KEY`.
+The server does not impose a built-in size cap or retention window in 0.1.0, so
+operators must monitor and manage the ledger before it becomes an unbounded
+plaintext secret store. For
+local stdio this is no more exposed than the B2 credentials already present on
+the same machine. For hosted HTTP, do not enable it unless the path is on an
+operator-accessible isolated volume with documented retention and access
+controls. Never use `B2_SECRET_SINK=inline` on hosted deployments without both
+`B2_SECRET_SINK=inline` and `B2_ALLOW_INLINE_SECRETS=true`; inline returns the
+new key secret into MCP output and may be logged or retained by clients.
+
+`b2_create_key` has a transport-independent lockdown before any provider create
+call. By default it refuses key-management grants
+(`listKeys`/`writeKeys`/`deleteKeys`) and unscoped keys with write/delete
+capabilities. Set `B2_ALLOW_KEY_MGMT_GRANTS=true` or
+`B2_ALLOW_UNSCOPED_KEYS=true` only for reviewed administration sessions.
+`B2_MAX_KEY_DURATION_SECONDS`, when set, also rejects non-expiring keys and
+durations above the configured maximum.
 
 For authorization servers that issue signed JWT access tokens, set
 `B2_OAUTH_JWKS_URI` to the issuer's JWKS URL. Then

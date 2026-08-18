@@ -9,8 +9,12 @@ import {
   HttpServerCredentialProvider,
   StdioEnvCredentialProvider,
   validateHttpCredentialConfiguration,
+  validateHttpStartupConfiguration,
   verificationFingerprintConfig,
 } from "../../src/credentials";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const savedEnv = process.env;
 
@@ -24,9 +28,14 @@ beforeEach(() => {
   delete process.env.B2_MASTER_KEY_ID;
   delete process.env.B2_MASTER_KEY;
   delete process.env.B2_MCP_OUTPUT_FORMAT;
+  delete process.env.B2_SECRET_SINK;
+  delete process.env.B2_SECRET_SINK_FILE;
+  delete process.env.B2_ALLOW_LOCAL_FILES;
+  delete process.env.B2_ALLOW_INLINE_SECRETS;
   delete process.env.B2_PRINCIPAL_CREDENTIAL_MAP;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY_ID;
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
+  process.env.B2_SECRET_SINK = "off";
 });
 
 afterEach(() => {
@@ -92,6 +101,13 @@ describe("credential providers", () => {
     expect(caught).toMatchObject({ code: "invalid_output_format" });
   });
 
+  it("allows HTTP startup without server-mode credentials for readiness reporting", () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+
+    expect(() => validateHttpStartupConfiguration()).not.toThrow();
+    expect(() => validateHttpCredentialConfiguration()).toThrow(CredentialResolutionError);
+  });
+
   it("rejects TOON mode during HTTP readiness when the encoder preflight fails", async () => {
     process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
     process.env.B2_MCP_OUTPUT_FORMAT = "toon";
@@ -145,6 +161,66 @@ describe("credential providers", () => {
     expect(resolved.cacheKey).not.toContain("header-id");
     expect(resolved.cacheKey).not.toContain("header-secret");
     expect(resolved.capabilityCacheKey).not.toBe(resolved.cacheKey);
+  });
+
+  it("scopes header compatibility caller fingerprints to verified authInfo", () => {
+    const provider = new HttpHeaderCredentialProvider();
+    const alice = provider.resolve({
+      req: {
+        headers: {
+          "x-b2-key-id": "header-id",
+          "x-b2-key": "header-secret",
+        },
+        auth: {
+          token: "verified",
+          clientId: "client-a",
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: "alice" },
+        },
+      } as any,
+    });
+    const bob = provider.resolve({
+      req: {
+        headers: {
+          "x-b2-key-id": "header-id",
+          "x-b2-key": "header-secret",
+        },
+        auth: {
+          token: "verified",
+          clientId: "client-b",
+          scopes: ["b2:read"],
+          extra: { iss: "https://issuer.example", sub: "bob" },
+        },
+      } as any,
+    });
+
+    expect(alice.config.credentialFingerprint).toBe(bob.config.credentialFingerprint);
+    expect(alice.cacheKey).not.toBe(bob.cacheKey);
+    expect(alice.config.callerFingerprint).not.toBe(bob.config.callerFingerprint);
+    expect(alice.cacheKey).not.toContain("alice");
+    expect(alice.cacheKey).not.toContain("header-secret");
+    expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
+  });
+
+  it("does not preflight the HTTP file secret sink during per-request resolution", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-http-secret-sink-hot-path-"));
+    const file = join(dir, "nested", "secrets.jsonl");
+    process.env.B2_SECRET_SINK = "file";
+    process.env.B2_ALLOW_LOCAL_FILES = "true";
+    process.env.B2_SECRET_SINK_FILE = file;
+
+    const resolved = new HttpHeaderCredentialProvider().resolve({
+      req: {
+        headers: {
+          "x-b2-key-id": "header-id",
+          "x-b2-key": "header-secret",
+        },
+      } as any,
+    });
+
+    expect(resolved.config.secretSink).toEqual({ mode: "file", filePath: file });
+    expect(existsSync(file)).toBe(false);
+    expect(existsSync(join(dir, "nested"))).toBe(false);
   });
 
   it("rejects partial optional header credentials", () => {
@@ -205,6 +281,8 @@ describe("credential providers", () => {
     expect(bob.cacheKey).toMatch(/^server-principal:[a-f0-9]{16}$/);
     expect(alice.cacheKey).not.toBe(bob.cacheKey);
     expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
+    expect(alice.config.credentialFingerprint).toBe(bob.config.credentialFingerprint);
+    expect(alice.config.callerFingerprint).not.toBe(bob.config.callerFingerprint);
     expect(alice.cacheKey).not.toContain("alice");
     expect(alice.cacheKey).not.toContain("server-secret");
   });
@@ -223,6 +301,7 @@ describe("credential providers", () => {
     expect(resolved.principal).toBe("alice");
     expect(resolved.cacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
     expect(resolved.capabilityCacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
+    expect(resolved.config.callerFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("alice");
     expect(resolved.cacheKey).not.toContain("tenant-id");
   });

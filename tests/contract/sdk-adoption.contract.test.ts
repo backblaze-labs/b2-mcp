@@ -202,19 +202,17 @@ describe("SDK adoption contract", () => {
       "partner",
       "PartnerRawClient.reserveTrialCreateAccount",
     );
-    expect(rows.get("b2_create_group_member")?.path).toContain("unavailable compatibility stub");
-    expect(rows.get("b2_reserve_trial_create_account")?.path).toContain(
-      "unavailable compatibility stub",
-    );
     expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
     expect(b2Client).toContain("client.raw.listGroups");
+    expect(b2Client).toContain("client.raw.createGroupMember");
     expect(b2Client).toContain("client.raw.ejectGroupMember");
     expect(b2Client).toContain("client.raw.listGroupMembers");
-    expect(b2Client).not.toContain("client.raw.createGroupMember");
-    expect(b2Client).not.toContain("client.raw.reserveTrialCreateAccount");
+    expect(b2Client).toContain("client.raw.reserveTrialCreateAccount");
     expect(partner).toContain("client.listGroups");
+    expect(partner).toContain("client.createGroupMember");
     expect(partner).toContain("client.ejectGroupMember");
     expect(partner).toContain("client.listGroupMembers");
+    expect(partner).toContain("client.reserveTrialCreateAccount");
     expect(partner).not.toContain("client.call(");
     expect(b2Client).not.toContain("async call<");
 

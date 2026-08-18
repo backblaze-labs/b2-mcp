@@ -22,6 +22,7 @@ describe("destructive-gate", () => {
         "s3_delete_objects",
         "s3_get_presigned_url",
         "b2_delete_key",
+        "b2_create_key",
         "s3_abort_multipart_upload",
         "b2_eject_group_member",
         "b2_update_bucket",
@@ -38,7 +39,7 @@ describe("destructive-gate", () => {
     });
 
     it("does not flag read/safe tools", () => {
-      for (const t of ["b2_list_buckets", "s3_head_object", "s3_put_object", "b2_create_key"]) {
+      for (const t of ["b2_list_buckets", "s3_head_object", "s3_put_object"]) {
         expect(isDestructiveTool(t)).toBe(false);
       }
     });

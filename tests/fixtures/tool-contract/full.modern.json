@@ -104,6 +104,7 @@
   },
   "confirmTools": [
     "b2_create_group_member",
+    "b2_create_key",
     "b2_delete_bucket",
     "b2_delete_key",
     "b2_eject_group_member",
@@ -258,7 +259,7 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -278,14 +279,19 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "properties": {},
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -617,7 +623,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "665dac708dc06602103120171a2aca7178bc92cd66af4d20d05d29a66c658dc2",
+      "descriptionSha256": "1c67787ac9b46eb966bd4815b7c8a284e9202ad70ab581f781e719dbcb0a801b",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1987,5 +1993,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221"
+  "hash": "0514a29fe155fd62b718351a65d7e41a079638cfbc7981241f89cfc6f93e8c94"
 }

@@ -392,17 +392,15 @@ contract before it can be enabled:
   idempotency key must return the same non-secret sink reference and must not
   create a second credential or account.
 - If B2 creates the secret but the sink write fails, the tool must emit a stable
-  non-secret sink-write-failed error class, increment a redacted sink-write
-  failure metric, and log only the correlation ID, idempotency key fingerprint,
-  tool name, principal, target identifier, and non-secret created-resource ID.
-- For `b2_create_key`, sink failure must revoke the created key. If revocation
-  fails, the key must be marked quarantined in the operator-visible recovery
-  ledger and a redacted compensation-failed metric must be incremented.
-- For `b2_create_group_member` and `b2_reserve_trial_create_account`, sink
-  failure must either revoke/eject the created account or place it in an
-  operator-visible quarantine state that prevents use until the operator
-  recovers or revokes it. The MCP response must be a failure, not a success with
-  a missing secret.
+  secret-free critical telemetry record with the tool name, sink pointer
+  context, target identifier, and non-secret created-resource ID. The MCP
+  response must not claim that the sink write succeeded.
+- For `b2_create_key` and `b2_create_group_member`, sink failure after
+  provider-side creation returns only a sanitized MCP error. `b2_create_key`
+  attempts to delete the created key, and `b2_create_group_member` attempts to
+  eject the created member from the group. `b2_reserve_trial_create_account`
+  remains unavailable in file mode because Reserve Trial has no provider-side
+  recovery path after account creation.
 - Restart-after-side-effect tests must cover request crash, timeout, duplicate
   retry, sink outage, compensation success, and compensation failure.
 

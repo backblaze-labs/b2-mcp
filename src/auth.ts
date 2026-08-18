@@ -30,17 +30,20 @@ export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
 
 const NO_REPLAY_RETRY_OPTIONS: Partial<RetryOptions> = { maxRetries: 0 };
 
-const NON_IDEMPOTENT_NATIVE_ENDPOINTS = new Set([
+const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
   "b2_cancel_large_file",
   "b2_copy_file",
   "b2_copy_part",
+  "b2_create_group_member",
   "b2_create_bucket",
   "b2_create_key",
   "b2_delete_bucket",
   "b2_delete_file_version",
   "b2_delete_key",
+  "b2_eject_group_member",
   "b2_finish_large_file",
   "b2_hide_file",
+  "b2_reserve_trial_create_account",
   "b2_set_bucket_notification_rules",
   "b2_start_large_file",
   "b2_update_bucket",
@@ -130,7 +133,7 @@ function b2ApiEndpointName(rawUrl: string): string | undefined {
 
 function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
   const endpoint = b2ApiEndpointName(request.url);
-  if (!endpoint || !NON_IDEMPOTENT_NATIVE_ENDPOINTS.has(endpoint)) return request;
+  if (!endpoint || !NON_IDEMPOTENT_B2_API_ENDPOINTS.has(endpoint)) return request;
   return {
     ...request,
     retry: {

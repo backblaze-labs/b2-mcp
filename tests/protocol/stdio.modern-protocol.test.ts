@@ -4,6 +4,9 @@
  */
 
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { invalidateCapabilityCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
@@ -17,6 +20,13 @@ vi.mock("@modelcontextprotocol/server/stdio", () => ({
 }));
 
 import { startStdio } from "../../src/index";
+
+function setTempSecretSinkFile(): void {
+  process.env.B2_SECRET_SINK_FILE = join(
+    mkdtempSync(join(tmpdir(), "b2-mcp-stdio-secret-sink-")),
+    "secrets.jsonl",
+  );
+}
 
 describe("startStdio", () => {
   const saved = { ...process.env };
@@ -32,6 +42,7 @@ describe("startStdio", () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
     process.env.B2_REGISTER_ALL_TOOLS = "true";
+    setTempSecretSinkFile();
 
     await expect(startStdio()).resolves.toBeUndefined();
     expect(serveStdio).toHaveBeenCalledTimes(1);
@@ -41,6 +52,7 @@ describe("startStdio", () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
     delete process.env.B2_REGISTER_ALL_TOOLS;
+    setTempSecretSinkFile();
     installSdkTransport(
       new RecordingTransport(
         () =>
@@ -60,6 +72,7 @@ describe("startStdio", () => {
     process.env.B2_APPLICATION_KEY_ID = "test-key-id";
     process.env.B2_APPLICATION_KEY = "test-key-secret";
     delete process.env.B2_REGISTER_ALL_TOOLS;
+    setTempSecretSinkFile();
     installSdkTransport(
       new RecordingTransport(
         () =>

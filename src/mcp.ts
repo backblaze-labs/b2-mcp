@@ -33,6 +33,7 @@ export interface ToolRegistrar {
     config: ToolRegistrationConfig,
     cb: ToolCallback<TArgs>,
   ): void;
+  hasTool(name: string): boolean;
 }
 
 interface PendingTool {
@@ -94,6 +95,10 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
       annotations,
       callback,
     });
+  }
+
+  hasTool(name: string): boolean {
+    return this.records[name] !== undefined;
   }
 
   commit(): number {

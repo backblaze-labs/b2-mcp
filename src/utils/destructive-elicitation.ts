@@ -85,6 +85,7 @@ const PROMPT_FIELDS = [
   ["File ID", "fileId"],
   ["File name", "fileName"],
   ["Application key ID", "applicationKeyId"],
+  ["Application key name", "keyName"],
   ["Admin account ID", "adminAccountId"],
   ["Group ID", "groupId"],
   ["Member account ID", "memberAccountId"],
