@@ -21,6 +21,13 @@ const nodeRequire = createRequire(__filename);
 const { workflowJobBlock } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
   workflowJobBlock: (text: string, jobName: string) => string | null;
 };
+const { valuesEqual, yamlBlockForKey, yamlValuesForKey } = nodeRequire(
+  "../../scripts/lib/workflow-yaml.cjs",
+) as {
+  valuesEqual: (actual: unknown[], expected: unknown[]) => boolean;
+  yamlBlockForKey: (text: string, key: string) => string | null;
+  yamlValuesForKey: (text: string, key: string) => unknown[];
+};
 const { parseYaml, readPackageManagerLock } = nodeRequire("../../scripts/lib/pnpm-lock.cjs") as {
   parseYaml: (text: string) => unknown;
   readPackageManagerLock: (root: string) => unknown;
@@ -32,6 +39,7 @@ const semver = nodeRequire("semver") as {
 describe("supply-chain audit policy", () => {
   const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
+  const releaseTagWorkflow = readFileSync(join(root, ".github/workflows/release-tag.yml"), "utf8");
   const rawPnpmLock = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8")) as {
     importers?: Record<
       string,
@@ -603,9 +611,10 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts.version).toBe(
       "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
     );
+    expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
+    expect(packageJson.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
-    expect(packageJson.scripts.prepublishOnly).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
     expect(publishWorkflow).toContain("environment: npm-publish");
@@ -806,15 +815,32 @@ describe("supply-chain audit policy", () => {
     const githubReleaseJob = publishJobBlock("github-release");
     const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
+    const publishOnBlock = yamlBlockForKey(publishWorkflow, "on") ?? "";
+    const publishWorkflowRunBlock = yamlBlockForKey(publishOnBlock, "workflow_run") ?? "";
+    const publishDispatchBlock = yamlBlockForKey(publishOnBlock, "workflow_dispatch") ?? "";
+    const releaseTagOnBlock = yamlBlockForKey(releaseTagWorkflow, "on") ?? "";
+    const releaseTagPushBlock = yamlBlockForKey(releaseTagOnBlock, "push") ?? "";
+    const releaseTagPushTags = yamlValuesForKey(releaseTagPushBlock, "tags");
 
-    expect(publishWorkflow).toMatch(/^ {2}push:\n {4}tags:\n {6}- "v\*"$/m);
-    expect(publishWorkflow).not.toMatch(/^ {2}release:/m);
-    expect(publishWorkflow).not.toMatch(/^ {2}workflow_dispatch:/m);
-    expect(publishWorkflow).not.toContain("inputs.tag");
-    expect(publishWorkflow).toContain("${{ github.ref_name }}");
+    expect(
+      releaseTagPushTags.some((value) => Array.isArray(value) && valuesEqual(value, ["v*"])),
+    ).toBe(true);
+    expect(releaseTagWorkflow).toContain("permissions:\n  contents: read");
+    expect(releaseTagWorkflow).not.toContain("id-token: write");
+    expect(releaseTagWorkflow).not.toContain("actions/checkout");
+    expect(releaseTagWorkflow).not.toContain("npm publish");
+    expect(releaseTagWorkflow).not.toContain("GHCR_TOKEN");
+    expect(publishWorkflowRunBlock).toContain("Release Tag Request");
+    expect(yamlBlockForKey(publishOnBlock, "release")).toBeNull();
+    expect(yamlBlockForKey(publishOnBlock, "push")).toBeNull();
+    expect(publishDispatchBlock).toContain("tag:");
+    expect(publishWorkflow).toContain("inputs.tag");
+    expect(publishWorkflow).toContain("github.event.workflow_run.head_branch");
     expect(publishWorkflow).not.toContain("${{ github.event.release.tag_name }}");
     expect(prepareJob).not.toContain("id-token: write");
-    expect(prepareJob).toContain("--wait-for-ci-green-timeout-ms");
+    expect(prepareJob).toContain("ref: refs/heads/ci-green");
+    expect(prepareJob).toContain("--wait-for-ci-green-timeout-ms 1200000");
+    expect(prepareJob).toContain("--wait-for-ci-green-interval-ms");
     expect(prepareJob).toContain("pnpm run verify");
     expect(prepareJob).not.toContain("actions/setup-python");
     expect(prepareJob).toContain("pnpm run typecheck");

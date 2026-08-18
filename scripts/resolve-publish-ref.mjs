@@ -6,10 +6,11 @@ import { spawnSync } from "node:child_process";
 
 function usage() {
   return [
-    "Usage: node scripts/resolve-publish-ref.mjs --tag <vX.Y.Z[-prerelease]> --remote <url> [--output <path>] [--wait-for-ci-green-timeout-ms <ms>]",
+    "Usage: node scripts/resolve-publish-ref.mjs --tag <vX.Y.Z[-prerelease]> --remote <url> [--output <path>] [--wait-for-ci-green-timeout-ms <ms>] [--wait-for-ci-green-interval-ms <ms>]",
     "",
-    "Validates that the requested release tag is reachable from refs/heads/ci-green and",
-    "writes checkout_sha=<sha> to the GitHub Actions output file when provided.",
+    "Validates that the requested release tag is reachable from refs/heads/ci-green.",
+    "During a nonzero wait, the tag must at least be reachable from refs/heads/main.",
+    "Writes checkout_sha=<sha> to the GitHub Actions output file when provided.",
   ].join("\n");
 }
 
@@ -83,6 +84,10 @@ function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function runGit(args, { cwd = process.cwd(), timeout = 30_000, retries = 3 } = {}) {
   let lastResult;
   for (let attempt = 1; attempt <= retries; attempt += 1) {
@@ -130,35 +135,64 @@ function lsRemoteTagCommit(remote, tag) {
   return refs.get(peeledRef) ?? refs.get(tagRef) ?? "";
 }
 
-function fetchReleaseRefs(remote, tag) {
+function initReleaseRefsWorkDir() {
   const workDir = mkdtempSync(path.join(tmpdir(), "b2-mcp-publish-ref-"));
-  try {
-    runGit(["init", "-b", "verify"], { cwd: workDir });
-    runGit(
-      [
-        "fetch",
-        "--no-tags",
-        remote,
-        "+refs/heads/ci-green:refs/remotes/origin/ci-green",
-        `+refs/tags/${tag}:refs/tags/${tag}`,
-      ],
-      { cwd: workDir, timeout: 120_000 },
-    );
-    const tagSha = runGit(["rev-parse", `refs/tags/${tag}^{}`], { cwd: workDir }).stdout.trim();
-    const ciGreenSha = runGit(["rev-parse", "refs/remotes/origin/ci-green"], {
+  runGit(["init", "-b", "verify"], { cwd: workDir });
+  return workDir;
+}
+
+function fetchReleaseRefs(remote, tag, workDir) {
+  runGit(
+    [
+      "fetch",
+      "--no-tags",
+      remote,
+      "+refs/heads/main:refs/remotes/origin/main",
+      "+refs/heads/ci-green:refs/remotes/origin/ci-green",
+      `+refs/tags/${tag}:refs/tags/${tag}`,
+    ],
+    { cwd: workDir, timeout: 120_000 },
+  );
+  const tagSha = runGit(["rev-parse", `refs/tags/${tag}^{}`], { cwd: workDir }).stdout.trim();
+  const mainSha = runGit(["rev-parse", "refs/remotes/origin/main"], {
+    cwd: workDir,
+  }).stdout.trim();
+  const ciGreenSha = runGit(["rev-parse", "refs/remotes/origin/ci-green"], {
+    cwd: workDir,
+  }).stdout.trim();
+  const ciGreenAncestor = spawnSync(
+    "git",
+    ["merge-base", "--is-ancestor", tagSha, "refs/remotes/origin/ci-green"],
+    {
       cwd: workDir,
-    }).stdout.trim();
-    const ancestor = spawnSync(
-      "git",
-      ["merge-base", "--is-ancestor", tagSha, "refs/remotes/origin/ci-green"],
-      {
-        cwd: workDir,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: 30_000,
-      },
-    );
-    return { tagSha, ciGreenSha, isAncestor: ancestor.status === 0 };
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    },
+  );
+  const mainAncestor = spawnSync(
+    "git",
+    ["merge-base", "--is-ancestor", tagSha, "refs/remotes/origin/main"],
+    {
+      cwd: workDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    },
+  );
+  return {
+    tagSha,
+    mainSha,
+    ciGreenSha,
+    isCiGreenAncestor: ciGreenAncestor.status === 0,
+    isMainAncestor: mainAncestor.status === 0,
+  };
+}
+
+function withReleaseRefsWorkDir(run) {
+  const workDir = initReleaseRefsWorkDir();
+  try {
+    return run(workDir);
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -174,32 +208,83 @@ function failUnreachable(tag, tagSha, ciGreenSha, waited) {
   process.exit(1);
 }
 
-function waitForReachableTag(options, tagSha) {
-  const startedAt = Date.now();
-  const deadline = startedAt + options.waitForCiGreenTimeoutMs;
+function failUntrustedPendingTag(tag, tagSha, mainSha, ciGreenSha) {
+  console.error(
+    `::error::refs/tags/${tag} is not reachable from refs/heads/main or refs/heads/ci-green`,
+  );
+  console.error(`main_sha=${mainSha}`);
+  console.error(`ci_green_sha=${ciGreenSha}`);
+  console.error(`tag_sha=${tagSha}`);
+  process.exit(1);
+}
+
+function sleepUntilNextPoll(deadline, intervalMs, message) {
+  if (Date.now() >= deadline) return false;
+  const sleepMs = Math.min(intervalMs, Math.max(0, deadline - Date.now()));
+  console.warn(`${message}; waiting ${Math.ceil(sleepMs / 1000)}s before retrying`);
+  sleep(sleepMs);
+  return true;
+}
+
+function sleepAfterRetryableError(options, deadline, context, error) {
+  if (options.waitForCiGreenTimeoutMs <= 0) throw error;
+  if (
+    !sleepUntilNextPoll(
+      deadline,
+      options.waitForCiGreenIntervalMs,
+      `::warning::publish-ref: retryable ${context} failure: ${errorMessage(error)}`,
+    )
+  ) {
+    console.error(
+      `::error::Timed out waiting for refs/tags/${options.tag} to reach refs/heads/ci-green`,
+    );
+    console.error(`::error::last retryable ${context} failure: ${errorMessage(error)}`);
+    process.exit(1);
+  }
+}
+
+function resolveInitialTagSha(options, deadline) {
+  for (;;) {
+    try {
+      const tagSha = lsRemoteTagCommit(options.remote, options.tag);
+      if (!tagSha) {
+        console.error(`::error::refs/tags/${options.tag} is missing`);
+        process.exit(1);
+      }
+      return tagSha;
+    } catch (error) {
+      sleepAfterRetryableError(options, deadline, "tag lookup", error);
+    }
+  }
+}
+
+function waitForReachableTag(options, tagSha, workDir, deadline) {
   let lastCiGreenSha = "";
 
   for (;;) {
-    const ciGreenSha = lsRemote(options.remote, "refs/heads/ci-green");
+    let ciGreenSha = "";
+    let currentTagSha = "";
+    try {
+      ciGreenSha = lsRemote(options.remote, "refs/heads/ci-green");
+      currentTagSha = lsRemoteTagCommit(options.remote, options.tag);
+    } catch (error) {
+      sleepAfterRetryableError(options, deadline, "remote ref lookup", error);
+      continue;
+    }
+
     if (!ciGreenSha) {
       if (Date.now() >= deadline) {
         console.error("::error::refs/heads/ci-green is missing");
         process.exit(1);
       }
-      const sleepMs = Math.min(
+      sleepUntilNextPoll(
+        deadline,
         options.waitForCiGreenIntervalMs,
-        Math.max(0, deadline - Date.now()),
+        "::warning::publish-ref: refs/heads/ci-green is missing",
       );
-      console.warn(
-        `publish-ref: refs/heads/ci-green is missing; waiting ${Math.ceil(
-          sleepMs / 1000,
-        )}s before retrying`,
-      );
-      sleep(sleepMs);
       continue;
     }
 
-    const currentTagSha = lsRemoteTagCommit(options.remote, options.tag);
     if (!currentTagSha) {
       console.error(`::error::refs/tags/${options.tag} is missing`);
       process.exit(1);
@@ -209,25 +294,33 @@ function waitForReachableTag(options, tagSha) {
       process.exit(1);
     }
 
-    const fetched = fetchReleaseRefs(options.remote, options.tag);
+    let fetched;
+    try {
+      fetched = fetchReleaseRefs(options.remote, options.tag, workDir);
+    } catch (error) {
+      sleepAfterRetryableError(options, deadline, "remote ref verification", error);
+      continue;
+    }
+
     if (fetched.tagSha !== tagSha) {
       console.error(`::error::refs/tags/${options.tag} changed while resolving release tag`);
       process.exit(1);
     }
-    if (fetched.isAncestor) return fetched;
+    if (fetched.isCiGreenAncestor) return fetched;
+    if (!fetched.isMainAncestor) {
+      failUntrustedPendingTag(options.tag, tagSha, fetched.mainSha, fetched.ciGreenSha);
+    }
 
     lastCiGreenSha = fetched.ciGreenSha || ciGreenSha;
     if (Date.now() >= deadline) {
       failUnreachable(options.tag, tagSha, lastCiGreenSha, options.waitForCiGreenTimeoutMs > 0);
     }
 
-    const sleepMs = Math.min(options.waitForCiGreenIntervalMs, Math.max(0, deadline - Date.now()));
-    console.warn(
-      `publish-ref: refs/tags/${options.tag} is not yet reachable from ci-green ${lastCiGreenSha}; waiting ${Math.ceil(
-        sleepMs / 1000,
-      )}s before retrying`,
+    sleepUntilNextPoll(
+      deadline,
+      options.waitForCiGreenIntervalMs,
+      `::warning::publish-ref: refs/tags/${options.tag} is not yet reachable from ci-green ${lastCiGreenSha}`,
     );
-    sleep(sleepMs);
   }
 }
 
@@ -246,14 +339,11 @@ if (!publishTagPattern.test(options.tag)) {
   process.exit(1);
 }
 
-const tagSha = lsRemoteTagCommit(options.remote, options.tag);
-
-if (!tagSha) {
-  console.error(`::error::refs/tags/${options.tag} is missing`);
-  process.exit(1);
-}
-
-const fetched = waitForReachableTag(options, tagSha);
+const deadline = Date.now() + options.waitForCiGreenTimeoutMs;
+const tagSha = resolveInitialTagSha(options, deadline);
+const fetched = withReleaseRefsWorkDir((workDir) =>
+  waitForReachableTag(options, tagSha, workDir, deadline),
+);
 
 if (options.output) appendFileSync(options.output, `checkout_sha=${tagSha}\n`);
 console.log(

@@ -1,0 +1,26 @@
+name: Release Tag Request
+
+# This workflow is intentionally unprivileged. A pushed v* tag only creates a
+# workflow_run signal; Publish Package runs from the default-branch workflow and
+# validates the tag against protected refs before publishing.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Record release tag request
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            echo "::error::Release tag requests must come from v* tags; got ${GITHUB_REF}"
+            exit 1
+          fi
+          echo "Release publish requested for ${GITHUB_REF_NAME}"

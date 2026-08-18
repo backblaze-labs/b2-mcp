@@ -45,6 +45,7 @@ async function main() {
     );
   }
 
+  // Use UTC so release dates are stable across local workstations and CI reruns.
   const date = new Date().toISOString().slice(0, 10);
   const before = text.slice(0, unreleasedMatch.index);
   const promoted = unreleasedBody ? `${unreleasedBody}\n\n` : "";
@@ -59,6 +60,8 @@ async function main() {
   if (/^\[Unreleased\]:.*$/m.test(text)) {
     text = text.replace(/^\[Unreleased\]:.*$/m, `${unreleasedLink}\n${versionLink}`);
   } else {
+    // The inherited changelog has reference-less historical headings. Seed link
+    // references from this release forward without inventing links for old tags.
     text = `${text.replace(/\s*$/, "")}\n\n${unreleasedLink}\n${versionLink}\n`;
   }
 

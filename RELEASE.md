@@ -76,14 +76,21 @@ Before publishing `v0.1.0`:
    a release-blocking follow-up once the upstream package exists.
 12. Push the release commit and `v*` tag, then publish only from the canonical
     repository through the protected `.github/workflows/publish.yml` workflow.
-    Do not publish from a developer workstation. The publish workflow must prove
-    the `v*` tag is reachable from `ci-green`, build explicitly, enforce the
-    runtime package budget, scan the generated packlist and tarball, generate
-    and verify a CycloneDX production SBOM artifact, call the protected live B2
-    contract workflow as a pre-release gate, verify the tarball SHA-256, publish
-    the already-scanned tarball with lifecycle scripts disabled, publish and
-    verify the GHCR image, and attach the SBOM to the GitHub Release only after
-    npm publish and GHCR publishing succeed.
+    Do not publish from a developer workstation. The tag push first runs the
+    unprivileged `Release Tag Request` workflow; `Publish Package` then runs
+    from the default-branch workflow, checks out trusted resolver code from
+    `ci-green`, and must prove the `v*` tag is reachable from `ci-green`, build
+    explicitly, enforce the runtime package budget, scan the generated packlist
+    and tarball, generate and verify a CycloneDX production SBOM artifact, call
+    the protected live B2 contract workflow as a pre-release gate, verify the
+    tarball SHA-256, publish the already-scanned tarball with lifecycle scripts
+    disabled, publish and verify the GHCR image, and attach the SBOM to the
+    GitHub Release only after npm publish and GHCR publishing succeed.
+13. Confirm the release tag ruleset only allows release owners to create
+    `v*` tags and does not allow force-updating or deleting release tags.
+14. Confirm `refs/heads/ci-green` is treated as an owned protected marker:
+    only the `CI` workflow's `mark-green` job may force-push it after all
+    required `main` checks pass, and humans must not push it directly.
 
 ## First Package Bootstrap
 
@@ -119,18 +126,23 @@ exists. For the first public package only:
 
 1. Start from a clean, up-to-date `main`, confirm the intended release content
    is under `[Unreleased]`, and run the deterministic local gate listed above.
-2. Run `pnpm version patch`, `pnpm version minor`, or `pnpm version major`. The
-   package `version` lifecycle promotes `[Unreleased]` into a dated
+2. Confirm release tags will be signed with `git config --get tag.gpgSign`, then
+   run `pnpm version patch`, `pnpm version minor`, or `pnpm version major`. If
+   `tag.gpgSign` is not enabled in the release checkout, pass
+   `--sign-git-tag` to that `pnpm version` command instead. The package
+   `version` lifecycle promotes `[Unreleased]` into a dated
    `## [x.y.z] - YYYY-MM-DD` changelog section, stages `CHANGELOG.md`, creates
    the version commit, and creates the matching `vX.Y.Z` tag.
+   Release tags are signed.
 3. Push the release commit and tag:
 
    ```bash
    git push --follow-tags
    ```
 
-   The tag push starts `Publish Package`. The workflow waits until the tag is
-   reachable from the protected `ci-green` marker, then verifies
+   The tag push starts `Release Tag Request`, and its successful completion
+   starts `Publish Package` from the default branch. The publish workflow waits
+   until the tag is reachable from the protected `ci-green` marker, then verifies
    tag/package/changelog consistency, runs `pnpm run verify`, requires live
    contract success, builds one tarball, runs an npm dry-run publish, records
    checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
@@ -141,7 +153,12 @@ exists. For the first public package only:
    signature plus provenance and SBOM attestations, and it must not overwrite an
    existing versioned image whose recorded revision differs from the verified
    checkout SHA.
-4. If GHCR has the version/release tags but the retry fails because the digest is
+4. To re-run publishing for an existing tag after a transient external failure,
+   use the `Publish Package` workflow's `workflow_dispatch` input with the
+   existing `vX.Y.Z` tag. Do not delete, force-move, or re-push the tag.
+   Creating or editing a GitHub Release is not a publish trigger; the workflow
+   creates or updates the GitHub Release only after npm and GHCR succeed.
+5. If GHCR has the version/release tags but the retry fails because the digest is
    unsigned or missing trusted attestations, delete that specific GHCR package
    version and rerun the same tag:
 

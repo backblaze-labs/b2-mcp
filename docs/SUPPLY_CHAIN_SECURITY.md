@@ -186,8 +186,12 @@ The only repository workflow allowed to publish npm packages is
 
 - runs only in the canonical `backblaze-labs/b2-mcp` repository;
 - pins every marketplace action to a reviewed commit SHA;
-- accepts only a `vMAJOR.MINOR.PATCH[-prerelease]` tag and checks it out only
-  after proving it is reachable from the current `ci-green` history;
+- starts from a successful unprivileged `Release Tag Request` workflow for
+  `vMAJOR.MINOR.PATCH[-prerelease]` tag pushes or from an explicit manual
+  dispatch for an existing tag;
+- checks out the resolver from the trusted `ci-green` marker before running
+  repository scripts, and checks out the tag only after proving it is reachable
+  from the current `ci-green` history;
 - verifies tag/package/changelog consistency, then runs
   `pnpm install --frozen-lockfile` with lifecycle scripts still disabled and
   `pnpm run verify`;
@@ -201,7 +205,9 @@ The only repository workflow allowed to publish npm packages is
   environment approval;
 - runs the protected live B2 contract suite once on the exact publish ref before
   the npm publish job can start;
-- requires a protected `npm-publish` environment only for the final publish job;
+- requires a protected `npm-publish` environment for npm publishing and a
+  protected `ghcr-publish` environment for container publishing, so tag push
+  alone cannot publish release artifacts;
 - verifies the tarball SHA-256 and npm `dist.integrity` before publishing;
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
@@ -221,10 +227,12 @@ The only repository workflow allowed to publish npm packages is
 - treats an already-published version tag as idempotent only after verifying the
   existing digest's prior cosign signature from this release workflow and
   checking the signed index contains BuildKit provenance and SBOM attestation
-  manifests for each required platform, so the workflow does not sign a digest
-  based only on caller-controlled OCI annotations; if a first publish dies after
-  pushing tags but before signing, delete the unsigned GHCR package version
-  documented in `RELEASE.md` and rerun the same tag;
+  manifests for each required platform; tag-push and manual rerun paths both use
+  the protected `main` workflow identity after the same tag-to-`ci-green`
+  validation, so the workflow does not sign a digest based only on
+  caller-controlled OCI annotations; if a first publish dies after pushing tags
+  but before signing, delete the unsigned GHCR package version documented in
+  `RELEASE.md` and rerun the same tag;
 - verifies the pushed version tag through an anonymous manifest inspection before
   the GitHub Release job can run, so a private first-publish GHCR package fails
   the workflow until an owner sets the package visibility to Public and reruns
@@ -236,7 +244,9 @@ The only repository workflow allowed to publish npm packages is
   `npm publish <tarball> --provenance --access public --ignore-scripts`.
 
 Do not publish from a developer workstation or from a workflow that has not
-first proved the release tag is reachable from `ci-green`.
+first proved the release tag is reachable from `ci-green`. Treat
+`refs/heads/ci-green` as an owned protected marker: only the `CI` workflow's
+green-marker job may advance it after required `main` checks pass.
 
 ## Container Base Image Pinning
 

@@ -1,14 +1,21 @@
 name: Publish Package
 
-# Tag-driven release. Release owners cut a version with
-# `pnpm version <patch|minor|major>` and push the resulting commit and `v*` tag
-# with `git push --follow-tags`. The tag push starts this workflow; the prepare
-# job waits until that tag is reachable from the protected `ci-green` marker
-# before building or publishing anything.
+# Tag-driven release. Release owners cut a version with `pnpm version
+# <patch|minor|major>` and push the resulting commit and `v*` tag with
+# `git push --follow-tags`. The unprivileged Release Tag Request workflow
+# receives the tag push; this privileged workflow then runs from the default
+# branch through workflow_run, checks out trusted resolver code from `ci-green`,
+# and only then checks out the validated tag.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows: ["Release Tag Request"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z[-prerelease] tag to publish or re-run"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,9 +26,10 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.repository == 'backblaze-labs/b2-mcp'
+    if: github.repository == 'backblaze-labs/b2-mcp' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # This must exceed the ci-green wait below plus verify/build/pack/SBOM time.
+    timeout-minutes: 60
     outputs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
       tarball-name: ${{ steps.pack.outputs.tarball_name }}
@@ -37,6 +45,7 @@ jobs:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
+          ref: refs/heads/ci-green
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
@@ -51,13 +60,14 @@ jobs:
       - name: Resolve ci-green protected release ref
         id: ref
         env:
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
           PUBLISH_REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
+          PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
           node scripts/resolve-publish-ref.mjs \
             --tag "${PUBLISH_TAG}" \
             --remote "${PUBLISH_REMOTE}" \
-            --wait-for-ci-green-timeout-ms 2700000 \
+            --wait-for-ci-green-timeout-ms 1200000 \
             --wait-for-ci-green-interval-ms 30000
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -71,8 +81,10 @@ jobs:
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
-          PUBLISH_TAG: ${{ github.ref_name }}
-        run: node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
+          PUBLISH_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
+        run: |
+          PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
+          node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
         run: |
           set -euo pipefail
@@ -150,9 +162,10 @@ jobs:
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
         run: |
           set -euo pipefail
+          PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
           mkdir -p publish-package
           version="${PUBLISH_TAG#v}"
           node scripts/extract-release-notes.mjs \
@@ -387,9 +400,11 @@ jobs:
           ACTIONS_RUNTIME_URL: ""
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
           GHCR_TOKEN: ${{ github.token }}
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
           REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
-        run: node scripts/publish-container-image.mjs
+        run: |
+          export PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
+          node scripts/publish-container-image.mjs
 
   github-release:
     needs: [prepare, publish, container-image]
@@ -467,9 +482,10 @@ jobs:
           EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
           EXPECTED_CHECKSUMS_NAME: ${{ needs.prepare.outputs.checksums-name }}
           EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
-          PUBLISH_TAG: ${{ github.ref_name }}
+          PUBLISH_TAG: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || inputs.tag }}
         run: |
           set -euo pipefail
+          PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
           release_flags=(
             --repo "${GITHUB_REPOSITORY}"
             --notes-file "publish-package/${EXPECTED_RELEASE_NOTES_NAME}"

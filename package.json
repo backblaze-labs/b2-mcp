@@ -70,6 +70,7 @@
     "release:notes": "node scripts/extract-release-notes.mjs",
     "release:sbom": "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     "version": "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
+    "prepublishOnly": "pnpm run build && node scripts/verify-release-input.mjs --tag \"v$(node -p 'require(\"./package.json\").version')\"",
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",
     "lint": "node scripts/run-biome.mjs lint src tests scripts",
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts --write",

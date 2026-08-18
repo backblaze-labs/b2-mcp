@@ -497,5 +497,5 @@ workflow through `workflow_call` before npm publish. The caller passes only the
 reviewed checkout SHA. The called workflow's jobs bind `live-b2-contract` and
 resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and `B2_LIVE_TEST_ACCOUNT_ID` there;
 those values must not be duplicated or forwarded from repository or
-`npm-publish` secrets. `release.published` is not a pre-release gate and is not
-used for live contract evidence.
+`npm-publish` secrets. GitHub Release publication events are not pre-release
+gates and are not used for live contract evidence.

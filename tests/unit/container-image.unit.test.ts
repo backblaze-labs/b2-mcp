@@ -114,6 +114,8 @@ describe("container image policy", () => {
     expect(publishScript).toContain("DOCKER_CONFIG");
     expect(publishScript).toContain("cosign");
     expect(publishScript).toContain("signDigest");
+    expect(publishScript).toContain("refs/heads/main");
+    expect(publishScript).not.toContain("refs/tags/v.*|refs/heads/main");
     expect(publishScript.indexOf("signDigest(registryImage, digest);")).toBeLessThan(
       publishScript.indexOf("verifyAnonymousManifestPull(versionRef);"),
     );
