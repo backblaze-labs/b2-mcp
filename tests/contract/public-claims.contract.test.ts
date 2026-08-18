@@ -105,14 +105,12 @@ describe("public support and authentication claims", () => {
     expect(release).toContain("The canonical installable binary is `b2-mcp`");
   });
 
-  it("does not present the unpublished npm package as an active quick start", () => {
+  it("presents npx as the documented quick start for the package", () => {
     expect([readme, clients].join("\n")).not.toContain("as of 2026-08-18");
-    for (const line of [readme, clients, release]
-      .join("\n")
-      .split(/\r?\n/)
-      .filter((candidate) => candidate.includes("npx @backblaze-labs/b2-mcp"))) {
-      expect(line).toMatch(/do not use|does not advertise|Do not advertise/);
-    }
+    expect(readme).toContain('"command": "npx"');
+    expect(readme).toContain("npx -y @backblaze-labs/b2-mcp");
+    expect(clients).toContain('"command": "npx"');
+    expect(clients).toContain("@backblaze-labs/b2-mcp");
   });
 
   it("keeps CONTRIBUTING pnpm run references backed by package scripts", () => {

@@ -55,11 +55,17 @@ Out of scope:
 
 ## MCP Secret Output Policy
 
-Default MCP tools must not return durable B2 secrets. Operations that create
-one-time application-key material, including `b2_create_key`,
-`b2_create_group_member`, and `b2_reserve_trial_create_account`, are registered
-only as non-secret unavailable compatibility stubs until a reviewed out-of-band
-secret sink exists. Tool responses, structured logs, thrown errors, snapshots,
+Default MCP tools must not return durable B2 secrets into the model context.
+Operations that mint one-time application-key material (`b2_create_key`,
+`b2_create_group_member`, `b2_reserve_trial_create_account`) split the result:
+the secret goes to a configured out-of-band sink and MCP output returns only
+redacted metadata plus a `secretSink` pointer. On stdio the default sink is a
+local owner-only file, so `b2_create_key` and `b2_create_group_member` run by
+default there; `b2_reserve_trial_create_account` requires `B2_SECRET_SINK=inline`
+because it has no file-mode recovery path. HTTP/serverless defaults to `off`,
+keeping all three as non-secret unavailable compatibility stubs until a reviewed
+sink is configured; `inline` is an explicit unsafe opt-in that returns the secret
+with a warning. Tool responses, structured logs, thrown errors, snapshots,
 and CI artifacts are covered by a central sanitizer that redacts known B2
 credential, authorization-token, upload token, notification signing-secret, and
 secret-header fields.
