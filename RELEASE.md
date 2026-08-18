@@ -143,20 +143,40 @@ exists. For the first public package only:
 
 ## Normal Release
 
-1. Start from a clean, up-to-date `main`, confirm the intended release content
-   is under `[Unreleased]`, and run the deterministic local gate listed above.
-2. Confirm release tags will be signed with `git config --get tag.gpgSign`, then
-   run `pnpm version patch`, `pnpm version minor`, or `pnpm version major`. If
-   `tag.gpgSign` is not enabled in the release checkout, pass
-   `--sign-git-tag` to that `pnpm version` command instead. The package
-   `version` lifecycle promotes `[Unreleased]` into a dated
-   `## [x.y.z] - YYYY-MM-DD` changelog section, stages `CHANGELOG.md`, creates
-   the version commit, and creates the matching `vX.Y.Z` tag.
-   Release tags are signed.
-3. Push the release commit and tag:
+1. Start from a clean, up-to-date `main` and confirm the intended release content
+   is under `[Unreleased]` in `CHANGELOG.md`. That section must be non-empty; the
+   publish workflow rejects a release whose changelog section is empty. Run the
+   deterministic local gate listed above.
+2. Bump the version and promote the changelog. `.npmrc` sets `ignore-scripts=true`
+   (a supply-chain control that blocks dependency and project lifecycle scripts),
+   so the `version` lifecycle hook does not run on its own. Bump the version, then
+   promote the changelog explicitly with `scripts/cut-changelog.mjs`:
 
    ```bash
-   git push --follow-tags
+   npm version patch --no-git-tag-version   # or: minor, major
+   node scripts/cut-changelog.mjs
+   ```
+
+   `npm version ... --no-git-tag-version` updates only `package.json` (no commit,
+   no tag). `scripts/cut-changelog.mjs` reads that bumped version, rewrites
+   `## [Unreleased]` into a dated `## [x.y.z] - YYYY-MM-DD` section, leaves a fresh
+   empty `[Unreleased]`, and updates the changelog compare links.
+3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
+   should report `true`, or pass `-s` to `git tag`):
+
+   ```bash
+   git commit -am "chore: release x.y.z"
+   git tag -s vX.Y.Z -m vX.Y.Z
+   ```
+4. Push the commit to `main` and let main CI finish before pushing the tag. The
+   publish workflow gates on a protected `ci-green` marker, so the tag's commit
+   must pass CI on `main` first; pushing the tag before main is green stalls the
+   publish on the `ci-green` step.
+
+   ```bash
+   git push origin main
+   # wait for main CI to pass, then:
+   git push origin vX.Y.Z
    ```
 
    The tag push starts `Release Tag Request`, and its successful completion
@@ -172,14 +192,14 @@ exists. For the first public package only:
    signature plus provenance and SBOM attestations, and it must not overwrite an
    existing versioned image whose recorded revision differs from the verified
    checkout SHA.
-4. To re-run publishing for an existing tag after a transient external failure,
+5. To re-run publishing for an existing tag after a transient external failure,
    use the unprivileged `Release Tag Request` workflow's `workflow_dispatch`
    input with the existing `vX.Y.Z` tag. Its successful completion starts
    `Publish Package` from the default branch. Do not delete, force-move, or
    re-push the tag. Creating or editing a GitHub Release is not a publish
    trigger; the workflow creates or updates the GitHub Release only after npm
    and GHCR succeed.
-5. If GHCR has the version/release tags but the retry fails because the digest is
+6. If GHCR has the version/release tags but the retry fails because the digest is
    unsigned or missing trusted attestations, delete that specific GHCR package
    version and rerun the same tag:
 
@@ -195,10 +215,12 @@ exists. For the first public package only:
 
 ## Prerelease
 
-Use npm semver prerelease tags such as `v0.2.0-rc.1`. Publish from the same
-`pnpm version prerelease --preid rc` and `git push --follow-tags` flow. Validate
-install commands against the prerelease tag before advertising the release
-candidate outside the release issue.
+Use npm semver prerelease tags such as `v0.2.0-rc.1`. Follow the same Normal
+Release flow with a prerelease bump: `npm version prerelease --preid rc
+--no-git-tag-version`, then `node scripts/cut-changelog.mjs`, commit, sign the
+`vX.Y.Z-rc.N` tag, and push the commit before the tag. Validate install commands
+against the prerelease tag before advertising the release candidate outside the
+release issue.
 
 ## Rollback
 
