@@ -765,6 +765,14 @@ describe("supply-chain audit policy", () => {
     const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
 
+    expect(publishWorkflow).toContain("release:");
+    expect(publishWorkflow).toContain("types: [published]");
+    expect(publishWorkflow).not.toContain("push:");
+    expect(publishWorkflow).not.toContain("tags:");
+    expect(publishWorkflow).not.toContain("workflow_dispatch");
+    expect(publishWorkflow).not.toContain("inputs.tag");
+    expect(publishWorkflow).not.toContain("${{ github.ref_name }}");
+    expect(publishWorkflow).toContain("${{ github.event.release.tag_name }}");
     expect(prepareJob).not.toContain("id-token: write");
     expect(prepareJob).toContain("pnpm run verify");
     expect(prepareJob).toContain("pnpm run typecheck");
