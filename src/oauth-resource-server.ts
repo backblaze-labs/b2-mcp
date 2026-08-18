@@ -18,6 +18,50 @@ import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
 
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
+export const OAUTH_ENVIRONMENT_VARIABLES = {
+  allowedAlgorithms: "B2_OAUTH_ALLOWED_ALGORITHMS",
+  allowedJwtTypes: "B2_OAUTH_ALLOWED_JWT_TYPES",
+  allowedSubjects: "B2_OAUTH_ALLOWED_SUBJECTS",
+  allowedTokenTypes: "B2_OAUTH_ALLOWED_TOKEN_TYPES",
+  audience: "B2_OAUTH_AUDIENCE",
+  authorizationEndpoint: "B2_OAUTH_AUTHORIZATION_ENDPOINT",
+  dangerouslyAllowInsecureIssuerUrl: "B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL",
+  dangerouslyAllowUnauthenticatedIntrospection:
+    "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION",
+  introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN",
+  introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES",
+  introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS",
+  introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS",
+  introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES",
+  introspectionCircuitOpenMs: "B2_OAUTH_INTROSPECTION_CIRCUIT_OPEN_MS",
+  introspectionClientId: "B2_OAUTH_INTROSPECTION_CLIENT_ID",
+  introspectionClientSecret: "B2_OAUTH_INTROSPECTION_CLIENT_SECRET",
+  introspectionEndpoint: "B2_OAUTH_INTROSPECTION_ENDPOINT",
+  introspectionRetries: "B2_OAUTH_INTROSPECTION_RETRIES",
+  introspectionRetryDelayMs: "B2_OAUTH_INTROSPECTION_RETRY_DELAY_MS",
+  introspectionTimeoutMs: "B2_OAUTH_INTROSPECTION_TIMEOUT_MS",
+  issuer: "B2_OAUTH_ISSUER",
+  jwksCacheMinTtlSeconds: "B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS",
+  jwksCacheTtlSeconds: "B2_OAUTH_JWKS_CACHE_TTL_SECONDS",
+  jwksCircuitFailures: "B2_OAUTH_JWKS_CIRCUIT_FAILURES",
+  jwksCircuitOpenMs: "B2_OAUTH_JWKS_CIRCUIT_OPEN_MS",
+  jwksRefreshCooldownMs: "B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS",
+  jwksRetries: "B2_OAUTH_JWKS_RETRIES",
+  jwksRetryDelayMs: "B2_OAUTH_JWKS_RETRY_DELAY_MS",
+  jwksTimeoutMs: "B2_OAUTH_JWKS_TIMEOUT_MS",
+  jwksUri: "B2_OAUTH_JWKS_URI",
+  jwtClockSkewSeconds: "B2_OAUTH_JWT_CLOCK_SKEW_SECONDS",
+  publicUrl: "B2_MCP_PUBLIC_URL",
+  requiredScopes: "B2_OAUTH_REQUIRED_SCOPES",
+  resource: "B2_OAUTH_RESOURCE",
+  serviceDocumentationUrl: "B2_MCP_SERVICE_DOCUMENTATION_URL",
+  tokenCacheMaxEntries: "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES",
+  tokenCacheSkewSeconds: "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS",
+  tokenCacheTtlSeconds: "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS",
+  tokenEndpoint: "B2_OAUTH_TOKEN_ENDPOINT",
+} as const;
+
+const OAUTH_ENV = OAUTH_ENVIRONMENT_VARIABLES;
 
 const DEFAULT_TOKEN_TYPES = ["bearer"];
 const DEFAULT_ALLOWED_ALGORITHMS = ["RS256", "ES256", "EdDSA"];
@@ -168,19 +212,19 @@ export function loadOAuthResourceServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): OAuthResourceServerConfig {
   const dangerouslyAllowInsecureIssuerUrl =
-    env.B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL === "true";
+    env[OAUTH_ENV.dangerouslyAllowInsecureIssuerUrl] === "true";
   const dangerouslyAllowUnauthenticatedIntrospection =
-    env.B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION === "true";
-  const publicUrl = (env.B2_MCP_PUBLIC_URL ?? env.B2_OAUTH_RESOURCE ?? "").trim();
+    env[OAUTH_ENV.dangerouslyAllowUnauthenticatedIntrospection] === "true";
+  const publicUrl = (env[OAUTH_ENV.publicUrl] ?? env[OAUTH_ENV.resource] ?? "").trim();
   if (!publicUrl)
     throw new Error("B2_MCP_PUBLIC_URL or B2_OAUTH_RESOURCE is required for OAuth metadata");
 
-  const introspectionClientId = optionalEnv(env, "B2_OAUTH_INTROSPECTION_CLIENT_ID");
-  const introspectionClientSecret = optionalEnv(env, "B2_OAUTH_INTROSPECTION_CLIENT_SECRET");
-  const introspectionBearerToken = optionalEnv(env, "B2_OAUTH_INTROSPECTION_BEARER_TOKEN");
-  const introspectionEndpoint = optionalEnv(env, "B2_OAUTH_INTROSPECTION_ENDPOINT");
-  const jwksUri = optionalEnv(env, "B2_OAUTH_JWKS_URI");
-  const allowedAlgorithmsEnv = optionalEnv(env, "B2_OAUTH_ALLOWED_ALGORITHMS");
+  const introspectionClientId = optionalEnv(env, OAUTH_ENV.introspectionClientId);
+  const introspectionClientSecret = optionalEnv(env, OAUTH_ENV.introspectionClientSecret);
+  const introspectionBearerToken = optionalEnv(env, OAUTH_ENV.introspectionBearerToken);
+  const introspectionEndpoint = optionalEnv(env, OAUTH_ENV.introspectionEndpoint);
+  const jwksUri = optionalEnv(env, OAUTH_ENV.jwksUri);
+  const allowedAlgorithmsEnv = optionalEnv(env, OAUTH_ENV.allowedAlgorithms);
   if (!introspectionEndpoint && !jwksUri) {
     throw new Error(
       "B2_OAUTH_INTROSPECTION_ENDPOINT or B2_OAUTH_JWKS_URI is required for OAuth token verification",
@@ -203,123 +247,123 @@ export function loadOAuthResourceServerConfig(
   }
 
   const config = {
-    issuer: requiredEnv(env, "B2_OAUTH_ISSUER"),
-    resource: (env.B2_OAUTH_RESOURCE ?? publicUrl).trim(),
-    audience: (env.B2_OAUTH_AUDIENCE ?? env.B2_OAUTH_RESOURCE ?? publicUrl).trim(),
+    issuer: requiredEnv(env, OAUTH_ENV.issuer),
+    resource: (env[OAUTH_ENV.resource] ?? publicUrl).trim(),
+    audience: (env[OAUTH_ENV.audience] ?? env[OAUTH_ENV.resource] ?? publicUrl).trim(),
     publicUrl,
-    authorizationEndpoint: requiredEnv(env, "B2_OAUTH_AUTHORIZATION_ENDPOINT"),
-    tokenEndpoint: requiredEnv(env, "B2_OAUTH_TOKEN_ENDPOINT"),
+    authorizationEndpoint: requiredEnv(env, OAUTH_ENV.authorizationEndpoint),
+    tokenEndpoint: requiredEnv(env, OAUTH_ENV.tokenEndpoint),
     introspectionEndpoint,
     jwksUri,
     introspectionClientId,
     introspectionClientSecret,
     introspectionBearerToken,
-    serviceDocumentationUrl: optionalEnv(env, "B2_MCP_SERVICE_DOCUMENTATION_URL"),
-    requiredScopes: csv(env.B2_OAUTH_REQUIRED_SCOPES),
-    allowedSubjects: csv(env.B2_OAUTH_ALLOWED_SUBJECTS),
-    allowedTokenTypes: csv(env.B2_OAUTH_ALLOWED_TOKEN_TYPES, DEFAULT_TOKEN_TYPES).map((value) =>
+    serviceDocumentationUrl: optionalEnv(env, OAUTH_ENV.serviceDocumentationUrl),
+    requiredScopes: csv(env[OAUTH_ENV.requiredScopes]),
+    allowedSubjects: csv(env[OAUTH_ENV.allowedSubjects]),
+    allowedTokenTypes: csv(env[OAUTH_ENV.allowedTokenTypes], DEFAULT_TOKEN_TYPES).map((value) =>
       value.toLowerCase(),
     ),
     allowedAlgorithms: csv(allowedAlgorithmsEnv, DEFAULT_ALLOWED_ALGORITHMS),
     allowedJwtAlgorithms: csv(allowedAlgorithmsEnv, DEFAULT_ALLOWED_JWT_ALGORITHMS),
-    allowedJwtTypes: csv(env.B2_OAUTH_ALLOWED_JWT_TYPES, DEFAULT_ALLOWED_JWT_TYPES).map((value) =>
+    allowedJwtTypes: csv(env[OAUTH_ENV.allowedJwtTypes], DEFAULT_ALLOWED_JWT_TYPES).map((value) =>
       value.toLowerCase(),
     ),
     dangerouslyAllowInsecureIssuerUrl,
     dangerouslyAllowUnauthenticatedIntrospection,
     tokenCacheMaxEntries: intEnv(
       env,
-      "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES",
-      intEnv(env, "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES", DEFAULT_TOKEN_CACHE_MAX_ENTRIES, 1),
+      OAUTH_ENV.tokenCacheMaxEntries,
+      intEnv(env, OAUTH_ENV.introspectionCacheMaxEntries, DEFAULT_TOKEN_CACHE_MAX_ENTRIES, 1),
       1,
     ),
     tokenCacheTtlSeconds: intEnv(
       env,
-      "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS",
-      intEnv(env, "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS", DEFAULT_TOKEN_CACHE_TTL_SECONDS, 1),
+      OAUTH_ENV.tokenCacheTtlSeconds,
+      intEnv(env, OAUTH_ENV.introspectionCacheTtlSeconds, DEFAULT_TOKEN_CACHE_TTL_SECONDS, 1),
       1,
     ),
     tokenCacheSkewSeconds: intEnv(
       env,
-      "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS",
-      intEnv(env, "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS", DEFAULT_TOKEN_CACHE_SKEW_SECONDS),
+      OAUTH_ENV.tokenCacheSkewSeconds,
+      intEnv(env, OAUTH_ENV.introspectionCacheSkewSeconds, DEFAULT_TOKEN_CACHE_SKEW_SECONDS),
     ),
     introspectionTimeoutMs: intEnv(
       env,
-      "B2_OAUTH_INTROSPECTION_TIMEOUT_MS",
+      OAUTH_ENV.introspectionTimeoutMs,
       DEFAULT_INTROSPECTION_TIMEOUT_MS,
       1,
     ),
     introspectionMaxRetries: intEnv(
       env,
-      "B2_OAUTH_INTROSPECTION_RETRIES",
+      OAUTH_ENV.introspectionRetries,
       DEFAULT_INTROSPECTION_RETRIES,
       0,
     ),
     introspectionRetryDelayMs: intEnv(
       env,
-      "B2_OAUTH_INTROSPECTION_RETRY_DELAY_MS",
+      OAUTH_ENV.introspectionRetryDelayMs,
       DEFAULT_INTROSPECTION_RETRY_DELAY_MS,
       0,
     ),
     introspectionCircuitFailures: intEnv(
       env,
-      "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES",
+      OAUTH_ENV.introspectionCircuitFailures,
       DEFAULT_INTROSPECTION_CIRCUIT_FAILURES,
       1,
     ),
     introspectionCircuitOpenMs: intEnv(
       env,
-      "B2_OAUTH_INTROSPECTION_CIRCUIT_OPEN_MS",
+      OAUTH_ENV.introspectionCircuitOpenMs,
       DEFAULT_INTROSPECTION_CIRCUIT_OPEN_MS,
       1,
     ),
     jwksCacheTtlSeconds: intEnv(
       env,
-      "B2_OAUTH_JWKS_CACHE_TTL_SECONDS",
+      OAUTH_ENV.jwksCacheTtlSeconds,
       DEFAULT_JWKS_CACHE_TTL_SECONDS,
       1,
     ),
     jwksCacheMinTtlSeconds: intEnv(
       env,
-      "B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS",
+      OAUTH_ENV.jwksCacheMinTtlSeconds,
       DEFAULT_JWKS_CACHE_MIN_TTL_SECONDS,
       1,
     ),
     jwksTimeoutMs: intEnv(
       env,
-      "B2_OAUTH_JWKS_TIMEOUT_MS",
-      intEnv(env, "B2_OAUTH_INTROSPECTION_TIMEOUT_MS", DEFAULT_INTROSPECTION_TIMEOUT_MS, 1),
+      OAUTH_ENV.jwksTimeoutMs,
+      intEnv(env, OAUTH_ENV.introspectionTimeoutMs, DEFAULT_INTROSPECTION_TIMEOUT_MS, 1),
       1,
     ),
-    jwksMaxRetries: intEnv(env, "B2_OAUTH_JWKS_RETRIES", DEFAULT_INTROSPECTION_RETRIES, 0),
+    jwksMaxRetries: intEnv(env, OAUTH_ENV.jwksRetries, DEFAULT_INTROSPECTION_RETRIES, 0),
     jwksRetryDelayMs: intEnv(
       env,
-      "B2_OAUTH_JWKS_RETRY_DELAY_MS",
+      OAUTH_ENV.jwksRetryDelayMs,
       DEFAULT_INTROSPECTION_RETRY_DELAY_MS,
       0,
     ),
     jwksCircuitFailures: intEnv(
       env,
-      "B2_OAUTH_JWKS_CIRCUIT_FAILURES",
+      OAUTH_ENV.jwksCircuitFailures,
       DEFAULT_INTROSPECTION_CIRCUIT_FAILURES,
       1,
     ),
     jwksCircuitOpenMs: intEnv(
       env,
-      "B2_OAUTH_JWKS_CIRCUIT_OPEN_MS",
+      OAUTH_ENV.jwksCircuitOpenMs,
       DEFAULT_INTROSPECTION_CIRCUIT_OPEN_MS,
       1,
     ),
     jwksRefreshCooldownMs: intEnv(
       env,
-      "B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS",
+      OAUTH_ENV.jwksRefreshCooldownMs,
       DEFAULT_JWKS_REFRESH_COOLDOWN_MS,
       1,
     ),
     jwtClockSkewSeconds: intEnv(
       env,
-      "B2_OAUTH_JWT_CLOCK_SKEW_SECONDS",
+      OAUTH_ENV.jwtClockSkewSeconds,
       DEFAULT_JWT_CLOCK_SKEW_SECONDS,
       0,
     ),
@@ -553,12 +597,16 @@ function authInfoFromVerifiedClaims(
   assertDeploymentScope(scopes);
   assertRequiredScopes(scopes, config.requiredScopes);
   assertAllowedSubject(claims, issuer, config.allowedSubjects, verification.source);
-  const clientId =
-    stringClaim(claims.client_id) ??
-    stringClaim(claims.azp) ??
-    stringClaim(claims.sub) ??
-    "unknown-client";
   const subject = stringClaim(claims.sub);
+  const subjectAlias =
+    verification.source === "introspection" && !subject ? stringClaim(claims.subject) : undefined;
+  const principalAlias =
+    verification.source === "introspection" && !subject && !subjectAlias
+      ? stringClaim(claims.principal)
+      : undefined;
+  const verifiedSubject = subject ?? subjectAlias ?? principalAlias;
+  const clientId =
+    stringClaim(claims.client_id) ?? stringClaim(claims.azp) ?? verifiedSubject ?? "unknown-client";
   return {
     token: `verified:${tokenLabel(token)}`,
     clientId,
@@ -568,6 +616,8 @@ function authInfoFromVerifiedClaims(
     extra: {
       iss: issuer,
       ...(subject && { sub: subject }),
+      ...(subjectAlias && { subject: subjectAlias }),
+      ...(principalAlias && { principal: principalAlias }),
       ...(acceptedAlgorithm && { alg: acceptedAlgorithm }),
       aud: values(claims.aud),
       resource: values(claims.resource),

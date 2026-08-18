@@ -22,6 +22,9 @@ pnpm test             # typecheck, then fast unit suite
 pnpm run verify       # fast no-credential quality gate
 pnpm run lint         # Biome lint for src/, tests/, and scripts/
 pnpm run format:check # checks Biome-supported formatting
+pnpm run lint:docs    # Markdown policy and secret-scan lockdown for docs
+pnpm run lint:links   # local Markdown link validation
+pnpm run spell        # cspell with the central .cspell/project-words.txt dictionary
 ```
 
 For the version/build-pinned conda bootstrap:
@@ -48,6 +51,39 @@ Test files must follow the layer suffix convention documented in
 `*.contract.test.ts`, `*.modern-protocol.test.ts`, `*.legacy-protocol.test.ts`,
 `*.slow.test.ts`, `*.package.test.ts`, `*.integration.live.test.ts`, or
 `*.contract.live.test.ts`.
+
+## Verification layers
+
+Use the smallest layer that covers the risk, then run the aggregate gate before
+opening a PR when practical:
+
+| Layer | Command | What it proves |
+| --- | --- | --- |
+| Typecheck | `pnpm run typecheck` | Source and tests compile against the Node 22.3 engine-floor types. |
+| Unit | `pnpm run test:unit` | Fast isolated behavior for handlers, config, adapters, sanitizer, CLI, and utilities. |
+| Contract | `pnpm run test:contract` | Public docs, package surface, tool profiles, workflow policy, schema drift, and support claims stay synchronized. |
+| Protocol modern | `pnpm run test:protocol:modern` | MCP `2026-07-28` HTTP and stdio behavior, including stateless POST serving. |
+| Protocol legacy | `pnpm run test:protocol:legacy` | Explicit SDK v2 stateless compatibility for supported 2025-era clients. |
+| Protocol all | `pnpm run test:protocol` | Build plus both protocol layers. |
+| Package | `pnpm run test:package` | Packed artifact install, exports, bins, and smoke behavior as a consumer sees them. |
+| Slow | `pnpm run test:slow` | Higher-cost deterministic lifecycle and compiled-output checks. |
+| Coverage | `pnpm run test:coverage` | Source-covering deterministic suites and coverage floors. |
+| Diagnostics | `pnpm run test:diagnostics` | Open-handle and MaxListeners cleanup evidence. |
+| Docs lint | `pnpm run lint:docs` | Markdown-policy lockdown and local checkout credential detection. |
+| Link lint | `pnpm run lint:links` | Local Markdown links resolve inside the repository. |
+| Spell | `pnpm run spell` | Spelling with the central project dictionary. |
+| Skills | `pnpm run validate:skills` | Bundled skill pack structure, tool references, and byte-path rules. |
+| Package budget | `pnpm run check:package-budget` | Runtime dependencies, npm provenance, package footprint, and SDK/AWS adapter boundaries. |
+| Supply chain | `pnpm run audit:supply-chain` | Denylist, lifecycle-script, lockfile, and npm advisory policy. |
+| Production audit | `pnpm run audit:production` | npm production advisory gate for published runtime dependencies. |
+| Client smoke | `pnpm run smoke:client` | Built artifact can serve a no-credential MCP client smoke. |
+| Inspector smoke | `pnpm run smoke:inspector` | Locked MCP Inspector CLI can inspect the built stdio server. |
+
+`pnpm run verify` is the fast no-credential CI-style gate: typecheck, build,
+lint, docs lint, link lint, skill validation, format check, spelling, and
+diagnostics. It intentionally does not run live B2 tests or the full package,
+protocol, coverage, slow, and supply-chain layers; add those when your change
+touches the corresponding contract.
 
 ## Pull requests
 

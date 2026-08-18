@@ -287,8 +287,16 @@ describe("OAuthIntrospectionVerifier", () => {
       vi.fn(async () => Response.json(claims({ sub: "tenant-a" }))),
       { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
     );
-    const acceptedAlias = verifierWithFetch(
-      vi.fn(async () => Response.json(claims({ sub: undefined, subject: "tenant-a" }))),
+    const acceptedSubjectAlias = verifierWithFetch(
+      vi.fn(async () =>
+        Response.json(claims({ client_id: undefined, sub: undefined, subject: "tenant-a" })),
+      ),
+      { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
+    );
+    const acceptedPrincipalAlias = verifierWithFetch(
+      vi.fn(async () =>
+        Response.json(claims({ client_id: undefined, sub: undefined, principal: "tenant-a" })),
+      ),
       { allowedSubjects: [`${baseConfig.issuer}#tenant-a`] },
     );
     const rejected = verifierWithFetch(
@@ -299,8 +307,15 @@ describe("OAuthIntrospectionVerifier", () => {
     await expect(accepted.verifyAccessToken("access-token")).resolves.toMatchObject({
       clientId: "mcp-client",
     });
-    await expect(acceptedAlias.verifyAccessToken("alias-token")).resolves.toMatchObject({
-      clientId: "mcp-client",
+    await expect(acceptedSubjectAlias.verifyAccessToken("subject-token")).resolves.toMatchObject({
+      clientId: "tenant-a",
+      extra: { subject: "tenant-a" },
+    });
+    await expect(
+      acceptedPrincipalAlias.verifyAccessToken("principal-token"),
+    ).resolves.toMatchObject({
+      clientId: "tenant-a",
+      extra: { principal: "tenant-a" },
     });
     await expect(rejected.verifyAccessToken("other-token")).rejects.toThrow(/subject/i);
   });
