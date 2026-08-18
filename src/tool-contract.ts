@@ -144,11 +144,11 @@ export interface ToolFixtureFromCollectedOptions {
 }
 
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
-  full: "Complete tool superset for contract review and regression detection.",
+  full: "Complete tool superset for contract review and regression detection: 17 Native B2 SDK tools, 19 AWS S3 SDK tools, and 4 custom MCP analytics; 3 Native B2 SDK durable-secret producers are unavailable stubs.",
   "phase1-default":
-    "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, durable-secret producers exposed only as unavailable compatibility stubs.",
+    "Default customer-hosted Phase 1 profile: 14 Native B2 SDK names (including 3 durable-secret stubs), 19 AWS S3 SDK tools, and 4 custom MCP analytics; no distinct Partner/master credential.",
   "read-only":
-    "Deterministic read/list profile for safe production use and contract tests; b2_create_key, b2_create_group_member, and b2_reserve_trial_create_account remain present only as unavailable 410 compatibility stubs.",
+    "Deterministic read/list profile for safe production use and contract tests: 7 Native B2 SDK names (including 3 durable-secret stubs), 9 AWS S3 SDK tools, and 4 custom MCP analytics.",
 };
 
 export const PROFILE_NAMES = Object.keys(PROFILE_CAPABILITIES) as ProfileName[];

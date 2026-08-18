@@ -128,6 +128,13 @@ The product contract is Backblaze B2 through MCP, not S3 as a standalone product
 surface. Existing `s3_*` names remain compatibility names for the public data
 plane, implemented through the AWS S3 SDK against B2's S3-compatible endpoint.
 
+The public tool catalog assigns every tool to exactly one backing category:
+Native B2 SDK (`@backblaze-labs/b2-sdk`) for B2 operations with no S3
+equivalent, AWS S3 SDK (`@aws-sdk/client-s3`) for the S3-compatible data plane,
+or neither SDK for repository-owned MCP analytics. Availability is a per-tool
+annotation; durable-secret-producing compatibility stubs are not a separate
+backing bucket.
+
 ## Decision Levels
 
 This record freezes the Phase 1 product scope, package decision, release line,
@@ -154,11 +161,11 @@ beyond its parent named profile.
 
 The profile count table below is the canonical numeric source in this document:
 
-| Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                   |
-| ---------------- | ----------- | ------ | ------ | ------ | ----------------------------------------------------------------------------------------- |
-| `full`           | 40          | 21     | 19     | 0      | Complete tool superset; 3 `b2_*` names are unavailable compatibility stubs.               |
-| `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted user profile for `v0.1.0` plus 3 unavailable compatibility stubs. |
-| `read-only`      | 20          | 11     | 9      | 0      | Deterministic read-only profile plus 3 unavailable compatibility stubs.                   |
+| Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                  |
+| ---------------- | ----------- | ------ | ------ | ------ | ---------------------------------------------------------------------------------------- |
+| `full`           | 40          | 21     | 19     | 0      | Complete surface: 17 Native B2 SDK, 19 AWS S3 SDK, 4 custom MCP; 3 unavailable stubs.   |
+| `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted profile; Partner read/eject/list omitted; 3 unavailable stubs.  |
+| `read-only`      | 20          | 11     | 9      | 0      | Deterministic read/list profile; narrowed backing categories; 3 unavailable stubs.      |
 
 The enumerated tool lists below are the canonical membership snapshot for this
 decision. The implementation source is the tool registration modules plus
@@ -174,8 +181,9 @@ detection. It is not the default user profile.
 
 Three `b2_*` names in `full` are unavailable compatibility stubs: the durable
 secret-producing names `b2_create_key`, `b2_create_group_member`, and
-`b2_reserve_trial_create_account`. Partner/Groups read/eject/list tools are
-SDK-backed native B2 operations in the full profile.
+`b2_reserve_trial_create_account`. That is an availability annotation; all
+three remain in the Native B2 SDK backing category. Partner/Groups read/eject/list
+tools are SDK-backed native B2 operations in the full profile.
 
 `b2_*` tools in `full`:
 
@@ -240,7 +248,7 @@ operations through the Partner API:
 The durable-secret-producing names `b2_create_key`, `b2_create_group_member`,
 and `b2_reserve_trial_create_account` are included only as unavailable
 compatibility stubs. Their real handlers are excluded because they produce
-durable credential material.
+durable credential material, but their backing category remains Native B2 SDK.
 
 `b2_*` tools in `phase1-default`:
 
@@ -521,8 +529,9 @@ an unknown outcome.
 
 The tool contract reference must classify retry behavior for each mutating tool
 individually. The minimum Phase 1 set is the target-authorized default-profile
-tools listed above plus unavailable durable-secret-producing compatibility stubs
-or any future sink-backed durable-secret-producing tools.
+tools listed above plus any durable-secret-producing tools annotated as
+unavailable compatibility stubs or any future sink-backed durable-secret-producing
+tools.
 
 Structured logs for every mutating call must include a non-secret correlation
 ID, principal or credential fingerprint, tool name, target identifier,
@@ -620,8 +629,8 @@ The Phase 1 tool contract must satisfy these requirements directly:
   `read-only`; test credential-resolved subsets separately with derived profile
   identifiers, derived counts, ordered tool lists, and hashes.
 - Verify no default profile includes a durable-secret-producing handler; any
-  durable-secret-producing name present in the profile must be an unavailable
-  compatibility stub.
+  durable-secret-producing name present in the profile must be annotated as an
+  unavailable compatibility stub inside its backing category.
 - Verify per-operation authorization for `s3_get_presigned_url`, including the
   `read-only` prohibition on `PutObject` URLs.
 - Verify target-scoped authorization for destructive and protection-weakening

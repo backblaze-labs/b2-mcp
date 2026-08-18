@@ -115,6 +115,28 @@ The contract freeze must apply these rules:
   response casing, pagination fields, and profile hashes unless a separate
   contract-version decision explicitly approves drift.
 
+## Public Tool Backing Taxonomy
+
+Documentation and customer-facing tool catalogs assign every tool to exactly
+one backing category:
+
+1. Native B2 SDK (`@backblaze-labs/b2-sdk`) for B2 control-plane operations the
+   S3 API has no equivalent for. This includes bucket, key, Object Lock,
+   notification, and Partner/Groups operations, even when a durable-secret
+   producer is currently exposed only as an unavailable compatibility stub.
+2. AWS S3 SDK (`@aws-sdk/client-s3`) for the S3-compatible data plane. These are
+   the retained `s3_*` names implemented through the repository-owned AWS peer
+   adapter and configured through the B2 SDK `/s3` helper.
+3. Neither SDK for repository-owned MCP analytics. These tools may compose
+   SDK-level reads and listings, but the requested operations, such as storage
+   growth, egress ranking, largest-file discovery, and unfinished-upload
+   analysis, are custom MCP behavior because no SDK exposes them as primitives.
+
+Availability is orthogonal to backing. The current unavailable rows are
+durable-secret-producing Native B2 SDK operations blocked by the no-durable-secret
+policy until an approved out-of-band sink exists; they are not a fourth backing
+category.
+
 ## Remaining SDK Context
 
 - S3-only helper coverage:
@@ -176,7 +198,8 @@ Each retained row has exactly one reviewed implementation class:
 - `partner`: documented `@backblaze-labs/b2-sdk/partner`.
 - `s3`: documented `@backblaze-labs/b2-sdk/s3` helper plus the permanent
   repository-owned AWS S3 peer adapter.
-- `compose`: composition of public SDK operations.
+- `compose`: repository-owned MCP behavior composed from public SDK operations;
+  for the analytics rows this maps to the neither-SDK backing category.
 - `defer`: intentional v0.1 deferral or contract change.
 
 | Tool                               | Class          | Reviewed SDK path                                                                                                                           | v0.1 disposition and semantic contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

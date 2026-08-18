@@ -14,7 +14,7 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 ## `full`
 
-Complete tool superset for contract review and regression detection.
+Complete tool superset for contract review and regression detection: 17 Native B2 SDK tools, 19 AWS S3 SDK tools, and 4 custom MCP analytics; 3 Native B2 SDK durable-secret producers are unavailable stubs.
 
 Profile hash: `e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221`
 
@@ -70,7 +70,7 @@ Profile hash: `e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221`
 
 ## `phase1-default`
 
-Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, durable-secret producers exposed only as unavailable compatibility stubs.
+Default customer-hosted Phase 1 profile: 14 Native B2 SDK names (including 3 durable-secret stubs), 19 AWS S3 SDK tools, and 4 custom MCP analytics; no distinct Partner/master credential.
 
 Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
 
@@ -135,7 +135,7 @@ Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
 
 ## `read-only`
 
-Deterministic read/list profile for safe production use and contract tests; b2_create_key, b2_create_group_member, and b2_reserve_trial_create_account remain present only as unavailable 410 compatibility stubs.
+Deterministic read/list profile for safe production use and contract tests: 7 Native B2 SDK names (including 3 durable-secret stubs), 9 AWS S3 SDK tools, and 4 custom MCP analytics.
 
 Profile hash: `4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2`
 

@@ -58,9 +58,21 @@ describe("README tool-surface drift", () => {
     const total = toolNames.length;
     const native = toolNames.filter((n) => n.startsWith("b2_")).length;
     const s3 = toolNames.filter((n) => n.startsWith("s3_")).length;
-    expect(readme).toContain(`**${total} tools, split by what they do:**`);
+    const customMcpTools = [
+      "b2_egress_leaders",
+      "b2_largest_files",
+      "b2_unfinished_uploads",
+      "b2_usage_growth",
+    ];
+    const nativeB2Sdk = native - customMcpTools.length;
+
+    expect(customMcpTools.every((name) => toolNames.includes(name))).toBe(true);
+    expect(readme).toContain(`**${total} tools, assigned by backing category:**`);
     expect(readme).toContain(
-      `**${total} total — ${native} native (\`b2_*\`) + ${s3} data-plane (\`s3_*\`).**`,
+      `**${total} total — ${nativeB2Sdk} Native B2 SDK + ${s3} AWS S3 SDK + ${customMcpTools.length} custom MCP tools.**`,
+    );
+    expect(readme).toContain(
+      `Prefix counts remain ${native} native \`b2_*\` names + ${s3} data-plane \`s3_*\` names.`,
     );
   });
 });
