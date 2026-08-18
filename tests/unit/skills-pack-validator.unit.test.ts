@@ -4,7 +4,7 @@ import { join } from "path";
 import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
-const python = process.env.PYTHON ?? "python";
+const validator = join(root, "scripts", "validate-pack.mjs");
 
 function copyValidatorFixture(): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), "b2-mcp-skills-pack-"));
@@ -30,7 +30,7 @@ function copyValidatorFixture(): string {
 }
 
 function runValidator(fixtureRoot: string) {
-  return spawnSync(python, [join(root, "scripts", "validate_pack.py"), "--root", fixtureRoot], {
+  return spawnSync(process.execPath, [validator, "--root", fixtureRoot], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, NO_COLOR: "1" },
@@ -70,6 +70,26 @@ describe("skills pack validator", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("Safety gate for s3_abort_multipart_upload");
       expect(result.stderr).toContain("same bullet or sentence");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when a destructive safety gate contains a bypass clause", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-lifecycle-cost-hygiene", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- Pause and ask for explicit confirmation before using `s3_delete_object` or `s3_delete_objects`; deletion is irreversible unless a retained version remains\./,
+        "- Pause and ask for explicit confirmation before using `s3_delete_object` or `s3_delete_objects` on production keys; for all other object deletes, no approval needed.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Safety gate for s3_delete_object");
+      expect(result.stderr).toContain("must not weaken or bypass approval");
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
@@ -154,6 +174,90 @@ describe("skills pack validator", () => {
       expect(result.stderr).toContain(
         "Byte path must not allow object bytes into the model/chat/MCP server",
       );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when copy-style transfer sends object data through the server", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        "## Safety gates",
+        "- Copy object data through the MCP server for inspection.\n\n## Safety gates",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must not allow object bytes into the model/chat/MCP server",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when bundled skill content contains a labeled secret", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = `${readFileSync(skillPath, "utf8")}\nB2_APPLICATION_KEY=do-not-ship-this-secret\n`;
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("secret-like content is not allowed");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when bundled skill content contains a private key block", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = `${readFileSync(skillPath, "utf8")}\n-----BEGIN PRIVATE KEY-----\nabc\n`;
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("secret-like content is not allowed");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when bundled skill content contains raw B2 key material", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const rawKey = "K005" + "a1b2c3d4e5f6g7h8i9j0k1";
+      const skill = `${readFileSync(skillPath, "utf8")}\nExample leaked key: ${rawKey}\n`;
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("secret-like content is not allowed");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when a bundled skill directory contains a secret-like path", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      writeFileSync(join(fixtureRoot, "skills", "b2-backup-restore", ".env"), "SAFE=example\n");
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("secret-like path is not allowed");
     } finally {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }

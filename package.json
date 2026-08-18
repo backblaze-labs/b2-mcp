@@ -75,7 +75,7 @@
     "lint:docs": "node scripts/run-doc-lint.mjs",
     "lint:docs:fix": "node scripts/run-doc-lint.mjs --fix",
     "lint:links": "node scripts/check-doc-links.mjs",
-    "validate:skills": "python scripts/validate_pack.py",
+    "validate:skills": "node scripts/validate-pack.mjs",
     "format": "node scripts/run-biome.mjs format . --write",
     "format:check": "node scripts/run-biome.mjs format .",
     "spell": "cspell lint --no-progress --gitignore"
