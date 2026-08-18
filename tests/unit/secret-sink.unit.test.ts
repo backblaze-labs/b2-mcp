@@ -23,6 +23,7 @@ import {
   resolveSecretSinkConfig,
   secretSinkFileOpsForTests,
 } from "../../src/utils/secret-sink";
+import { logger } from "../../src/utils/logger";
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "b2-mcp-secret-sink-"));
@@ -264,8 +265,12 @@ describe("secret sink file writer", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
     writeFileSync(file, "", { mode: 0o600 });
-    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementationOnce(() => {
-      throw new Error("simulated fsync failure");
+    const fsync = secretSinkFileOpsForTests.fsyncSync;
+    let calls = 0;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      calls++;
+      if (calls === 3) throw new Error("simulated fsync failure");
+      return fsync(fd);
     });
 
     expect(() =>
@@ -337,6 +342,71 @@ describe("secret sink file writer", () => {
     });
   });
 
+  it("rejects conflicting input on the same pending idempotency claim", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const started = deferred<void>();
+    const created = deferred<Record<string, unknown>>();
+    const base = {
+      toolName: "b2_create_key",
+      idempotencyKey: "same-key-different-input",
+      callerFingerprint: "credential-fingerprint",
+    };
+    const firstIdempotency = durableSecretIdempotency({
+      ...base,
+      normalizedInput: { keyName: "first", capabilities: ["listBuckets"] },
+    });
+    const secondIdempotency = durableSecretIdempotency({
+      ...base,
+      normalizedInput: { keyName: "second", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+    const options = {
+      secretSink: { mode: "file" as const, filePath: file },
+      toolName: "b2_create_key",
+      projectRedacted: (result: Record<string, unknown>, pointer: unknown) => ({
+        ...result,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (result: Record<string, unknown>, warning: string) => ({
+        ...result,
+        warning,
+      }),
+    };
+
+    const first = executeDurableSecretOperation({
+      ...options,
+      idempotency: firstIdempotency,
+      create: () => {
+        createCalls++;
+        started.resolve();
+        return created.promise;
+      },
+    });
+    await started.promise;
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        idempotency: secondIdempotency,
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_conflict" });
+
+    created.resolve({
+      applicationKeyId: "key-id",
+      applicationKey: "B2_MCP_CANARY_SECRET_claim",
+    });
+    await first;
+
+    expect(createCalls).toBe(1);
+    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+  });
+
   it("leaves an ambiguous provider outcome pending instead of retrying creation", async () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
@@ -384,5 +454,53 @@ describe("secret sink file writer", () => {
 
     expect(createCalls).toBe(1);
     expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+  });
+
+  it("does not compensate a committed credential when claim cleanup fails", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const recoverSpy = vi.fn();
+    const unlink = secretSinkFileOpsForTests.unlinkSync;
+    let unlinkCalls = 0;
+    vi.spyOn(secretSinkFileOpsForTests, "unlinkSync").mockImplementation((path) => {
+      unlinkCalls++;
+      if (unlinkCalls === 2) throw new Error("simulated claim cleanup failure");
+      return unlink(path);
+    });
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "claim-cleanup-failure",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "claim-cleanup-failure", capabilities: ["listBuckets"] },
+    });
+
+    const result = await executeDurableSecretOperation({
+      secretSink: { mode: "file", filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      create: async () => ({
+        applicationKeyId: "key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_claim_cleanup",
+      }),
+      projectRedacted: (created: Record<string, unknown>, pointer) => ({
+        ...created,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (created: Record<string, unknown>, warning: string) => ({
+        ...created,
+        warning,
+      }),
+      recoverAfterSinkFailure: recoverSpy,
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      applicationKeyId: "key-id",
+      applicationKey: "[redacted]",
+      secretSink: { type: "file", path: file },
+    });
+    expect(recoverSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("secret_sink.claim_cleanup_failed");
   });
 });

@@ -59,7 +59,7 @@ function failSecretRecordFsyncOnce(): void {
   let calls = 0;
   vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
     calls++;
-    if (calls === 3) throw new Error("simulated sink fsync failure");
+    if (calls === 5) throw new Error("simulated sink fsync failure");
     return fsync(fd);
   });
 }
