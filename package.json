@@ -115,6 +115,7 @@
     "eslint": "9.39.1",
     "eslint-plugin-jsdoc": "50.8.0",
     "eslint-plugin-tsdoc": "0.5.2",
+    "miniflare": "5.20260811.1-alpha",
     "semver": "7.8.5",
     "tsx": "4.23.11",
     "typescript": "~6.0.3",

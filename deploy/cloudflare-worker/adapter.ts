@@ -15,15 +15,29 @@ import { sanitizeForMcpOutput, sanitizeText } from "../../src/utils/secret-sanit
 
 const ALLOW_HEADER_MODE_FLAG = "B2_CLOUDFLARE_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_SHARED_SERVER_CREDENTIAL_FLAG = "B2_CLOUDFLARE_ALLOW_SHARED_SERVER_CREDENTIAL";
+const JWKS_SERVICE_BINDING = "B2_OAUTH_JWKS_SERVICE";
 
 export type CloudflareWorkerEnv = Record<string, unknown>;
 
 export interface CloudflareMcpFetchContext extends ServerlessMcpFetchContext {}
 
+interface CloudflareFetchBinding {
+  fetch(input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response>;
+}
+
 function envBindingToString(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return undefined;
+}
+
+function isCloudflareFetchBinding(value: unknown): value is CloudflareFetchBinding {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "fetch" in value &&
+    typeof (value as { fetch?: unknown }).fetch === "function"
+  );
 }
 
 export function installCloudflareEnvironment(env: CloudflareWorkerEnv): void {
@@ -42,6 +56,27 @@ function requestWithHostHeader(request: Request): Request {
   const headers = new Headers(request.headers);
   headers.set("host", new URL(request.url).host);
   return new Request(request, { headers });
+}
+
+function cloudflareOAuthFetch(env: CloudflareWorkerEnv): typeof fetch | undefined {
+  const jwksService = env[JWKS_SERVICE_BINDING];
+  const jwksUri = process.env.B2_OAUTH_JWKS_URI;
+  if (!jwksUri || !isCloudflareFetchBinding(jwksService)) return undefined;
+
+  let expectedJwksUrl: string;
+  try {
+    expectedJwksUrl = new URL(jwksUri).href;
+  } catch {
+    return undefined;
+  }
+
+  return (input, init) => {
+    const request = new Request(input, init);
+    if (new URL(request.url).href === expectedJwksUrl) {
+      return jwksService.fetch(request);
+    }
+    return fetch(request);
+  };
 }
 
 function validateCloudflareWorkerCredentialMode(): void {
@@ -83,7 +118,9 @@ export function validateCloudflareWorkerStaticConfiguration(): OAuthResourceServ
 function isCloudflareMcpFetchContext(
   input: AuthInfo | CloudflareMcpFetchContext,
 ): input is CloudflareMcpFetchContext {
-  return "authInfo" in input || "remoteAddress" in input || !("token" in input);
+  return (
+    "authInfo" in input || "oauthFetch" in input || "remoteAddress" in input || !("token" in input)
+  );
 }
 
 function cloudflareClientAddress(context: CloudflareMcpFetchContext): string {
@@ -146,7 +183,10 @@ export async function cloudflareWorkerFetch(
   const normalizedRequest = requestWithHostHeader(request);
   const url = new URL(normalizedRequest.url);
   if (url.pathname === "/mcp" || url.pathname === "/api/mcp") {
-    return cloudflareMcpFetch(normalizedRequest, context);
+    return cloudflareMcpFetch(normalizedRequest, {
+      ...context,
+      oauthFetch: cloudflareOAuthFetch(env),
+    });
   }
   if (url.pathname === "/health") return cloudflareHealthFetch(normalizedRequest);
   if (

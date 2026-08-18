@@ -228,6 +228,45 @@ describe("Cloudflare Worker adapter", () => {
     expect(jwksFetch).toHaveBeenCalledTimes(1);
   });
 
+  it("routes Worker JWKS fetches through a service binding when present", async () => {
+    process.env = { ...savedEnv };
+    const globalFetch = vi.fn(async () => {
+      throw new Error("global fetch should not be used for JWKS");
+    });
+    const jwksService = {
+      fetch: vi.fn(async (request: Request) => {
+        expect(request.method).toBe("GET");
+        expect(request.redirect).toBe("manual");
+        expect(request.url).toBe("https://issuer.example.com/oauth2/jwks");
+        return jwksResponse();
+      }),
+    };
+    vi.stubGlobal("fetch", globalFetch);
+    const env = {
+      ...cloudflareEnv(),
+      B2_OAUTH_INTROSPECTION_ENDPOINT: undefined,
+      B2_OAUTH_INTROSPECTION_CLIENT_ID: undefined,
+      B2_OAUTH_INTROSPECTION_CLIENT_SECRET: undefined,
+      B2_OAUTH_JWKS_URI: "https://issuer.example.com/oauth2/jwks",
+      B2_OAUTH_JWKS_SERVICE: jwksService,
+    };
+
+    const discover = await rpcJson(
+      await cloudflareWorkerFetch(
+        new Request("https://mcp.example.com/mcp", {
+          method: "POST",
+          headers: { ...modernHeaders("server/discover"), Authorization: `Bearer ${signedJwt()}` },
+          body: modernBody("server/discover"),
+        }),
+        env,
+      ),
+    );
+
+    expect(discover.result?.supportedVersions).toContain("2026-07-28");
+    expect(jwksService.fetch).toHaveBeenCalledTimes(1);
+    expect(globalFetch).not.toHaveBeenCalled();
+  });
+
   it("rejects bearer tokens whose subject is outside the local allowlist", async () => {
     process.env = { ...savedEnv };
     const introspection = vi

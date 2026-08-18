@@ -24,11 +24,13 @@ import { readCappedBodyBytes } from "./utils/http-body-limit.js";
 
 export interface ServerlessMcpFetchContext {
   authInfo?: AuthInfo | null;
+  oauthFetch?: typeof fetch;
   remoteAddress?: string;
 }
 
 export interface NormalizedServerlessMcpFetchContext {
   authInfo: AuthInfo | null;
+  oauthFetch?: typeof fetch;
   remoteAddress?: string;
 }
 
@@ -84,6 +86,7 @@ export function normalizeServerlessMcpContext<Context extends ServerlessMcpFetch
     const context = input as Context;
     return {
       authInfo: context.authInfo ?? null,
+      oauthFetch: context.oauthFetch,
       remoteAddress: context.remoteAddress,
     };
   }
@@ -240,7 +243,9 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
     const prepared = await runWithAdmissionLimit(request, context, async () => {
       const boundedRequest = await requestWithCappedBody(request);
       if (boundedRequest instanceof Response) return boundedRequest;
-      const auth = await authenticateOAuthRequest(boundedRequest, oauthConfig);
+      const auth = await authenticateOAuthRequest(boundedRequest, oauthConfig, {
+        fetch: context.oauthFetch,
+      });
       if (auth instanceof Response) return auth;
       return { auth, boundedRequest };
     });
