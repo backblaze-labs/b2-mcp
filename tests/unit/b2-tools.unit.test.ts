@@ -17,6 +17,7 @@ import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { logger } from "../../src/utils/logger";
 import { secretSinkFileOpsForTests } from "../../src/utils/secret-sink";
+import { LOGGER_SECRET_REDACTION_PATHS } from "../../src/utils/secret-sanitizer";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import {
@@ -892,12 +893,24 @@ describe("durable-secret-producing tools", () => {
     );
   });
 
-  it("returns only a sanitized error if the file sink fails after B2 creates a key", async () => {
+  it("logs a recovery key ID if cleanup fails after a key sink failure", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
     writeFileSync(secretFile, "", { mode: 0o600 });
     failSecretRecordFsyncOnce();
-    const transport = await useRecordingNativeSimulator();
+    invalidateAuthManagerCache();
+    const simulatorTransport = sim.transport();
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_delete_key") {
+        return new StaticHttpResponse(503, {
+          code: "simulated_delete_failure",
+          message: "simulated delete failure",
+        });
+      }
+      return simulatorTransport.send(request);
+    });
+    installSdkTransport(transport);
+    seed = await seedClient();
     server = createServer({
       ...testConfig,
       secretSink: { mode: "file", filePath: secretFile },
@@ -913,7 +926,14 @@ describe("durable-secret-producing tools", () => {
     expect(rawResult.isError).toBe(true);
     expect(rawResult.content[0].text).toContain("secret_sink_write_failed");
     expect(rawResult.content[0].text).not.toContain("K005");
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("secret_sink.write_failed");
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("secret_sink.write_failed");
+    expect(fatalLogs).toContain("recoveryApplicationKeyId");
+    expect(fatalLogs).toMatch(/"recoveryApplicationKeyId":"sim_key_[^"]+"/);
+    expect(LOGGER_SECRET_REDACTION_PATHS).toContain("*.applicationKeyId");
+    expect(LOGGER_SECRET_REDACTION_PATHS).not.toContain("*.recoveryApplicationKeyId");
+    expect(fatalLogs).toContain("simulated delete failure");
+    expect(fatalLogs).not.toContain("B2_MCP_CANARY_SECRET");
     expect(transport.requests.some((request) => b2EndpointName(request) === "b2_delete_key")).toBe(
       true,
     );

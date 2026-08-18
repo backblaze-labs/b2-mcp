@@ -200,12 +200,16 @@ export function registerKeyTools(
             projectInline: (created, warning) => ({ ...created, warning }),
             diagnostics: (created) => ({
               applicationKeyId: created.applicationKeyId,
+              recoveryApplicationKeyId: created.applicationKeyId,
               keyName: created.keyName,
               accountId: created.accountId,
             }),
             recoverAfterSinkFailure: async (created) => {
               await client.deleteKey(created.applicationKeyId);
-              return { status: "deleted", applicationKeyId: created.applicationKeyId };
+              return {
+                status: "deleted",
+                recoveryApplicationKeyId: created.applicationKeyId,
+              };
             },
           });
         } catch (err) {
