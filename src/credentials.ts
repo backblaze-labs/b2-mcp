@@ -117,6 +117,12 @@ function capabilityCacheKeyForConfig(prefix: string, config: B2Config): string {
   return `${prefix}:${verificationFingerprintConfig(config)}`;
 }
 
+function callerFingerprintForConfig(config: B2Config, callerScope: string): string {
+  return credentialFingerprint(
+    [config.credentialFingerprint ?? fingerprintConfig(config), callerScope].join("\0"),
+  );
+}
+
 function resolveDestructivePolicy(transport: "stdio" | "http"): DestructivePolicy {
   const value = process.env.B2_DESTRUCTIVE_POLICY;
   if (transport === "http") {
@@ -281,9 +287,11 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
       fileRoot: process.env.B2_FILE_ROOT ?? null,
       strictOptionalPairs: false,
     });
+    const cacheKey = `credential:${config.credentialFingerprint}`;
+    config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
     return {
       config,
-      cacheKey: `credential:${config.credentialFingerprint}`,
+      cacheKey,
       capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
     };
   }
@@ -297,9 +305,11 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
     }
     const config = configFromMaterial(headerMaterial(context.req.headers), httpConfigOptions());
+    const cacheKey = `credential:${config.credentialFingerprint}`;
+    config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
     return {
       config,
-      cacheKey: `credential:${config.credentialFingerprint}`,
+      cacheKey,
       capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
     };
   }
@@ -318,11 +328,13 @@ export class HttpServerCredentialProvider implements CredentialProvider {
     }
     const config = configFromMaterial(envMaterial(), httpConfigOptions());
     const principal = rateLimitPrincipalFromAuthInfo(context?.req?.auth);
+    const cacheKey = principal
+      ? `server-principal:${credentialFingerprint(principal)}`
+      : `credential:${config.credentialFingerprint}`;
+    config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
     return {
       config,
-      cacheKey: principal
-        ? `server-principal:${credentialFingerprint(principal)}`
-        : `credential:${config.credentialFingerprint}`,
+      cacheKey,
       capabilityCacheKey: capabilityCacheKeyForConfig("credential", config),
       ...(principal && { principal }),
     };
@@ -466,9 +478,11 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
       );
     }
     const config = configFromMaterial(material, httpConfigOptions());
+    const cacheKey = `principal:${credentialFingerprint(principal)}`;
+    config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
     return {
       config,
-      cacheKey: `principal:${credentialFingerprint(principal)}`,
+      cacheKey,
       capabilityCacheKey: `principal:${credentialFingerprint(
         [principal, verificationFingerprintConfig(config)].join("\0"),
       )}`,

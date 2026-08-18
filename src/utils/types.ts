@@ -66,6 +66,8 @@ export interface B2Config {
   secretSink?: SecretSinkConfig;
   /** Non-secret SHA-256-derived fingerprint used for logs, metrics, and caches. */
   credentialFingerprint?: string;
+  /** Non-secret fingerprint that includes the verified caller when one is available. */
+  callerFingerprint?: string;
 }
 
 export interface B2AuthResponse {

@@ -89,7 +89,7 @@ function validateCreateKeyPolicy(args: {
 }
 
 function callerFingerprint(config: B2Config): string {
-  return config.credentialFingerprint ?? config.applicationKeyId;
+  return config.callerFingerprint ?? config.credentialFingerprint ?? config.applicationKeyId;
 }
 
 export function registerKeyTools(

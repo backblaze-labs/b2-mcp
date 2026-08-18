@@ -255,6 +255,7 @@ export function appendSecretSinkRecord(
       envVarName: SECRET_SINK_FILE_ENV,
       mode: SECURE_APPEND_FILE_MODE,
     });
+    if (parentCreated || !fileExisted) fsyncParentDirectory(parent);
     const originalSize = fs.fstatSync(fd).size;
     try {
       writeAll(fd, `${JSON.stringify(record)}\n`);
@@ -277,7 +278,6 @@ export function appendSecretSinkRecord(
       lockPath: appendLock.lockPath,
     });
   }
-  if (parentCreated || !fileExisted) fsyncParentDirectory(parent);
   return { type: "file", path: sink.filePath, recordId };
 }
 

@@ -234,6 +234,8 @@ describe("credential providers", () => {
     expect(bob.cacheKey).toMatch(/^server-principal:[a-f0-9]{16}$/);
     expect(alice.cacheKey).not.toBe(bob.cacheKey);
     expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
+    expect(alice.config.credentialFingerprint).toBe(bob.config.credentialFingerprint);
+    expect(alice.config.callerFingerprint).not.toBe(bob.config.callerFingerprint);
     expect(alice.cacheKey).not.toContain("alice");
     expect(alice.cacheKey).not.toContain("server-secret");
   });
@@ -252,6 +254,7 @@ describe("credential providers", () => {
     expect(resolved.principal).toBe("alice");
     expect(resolved.cacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
     expect(resolved.capabilityCacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
+    expect(resolved.config.callerFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(resolved.cacheKey).not.toContain("alice");
     expect(resolved.cacheKey).not.toContain("tenant-id");
   });
