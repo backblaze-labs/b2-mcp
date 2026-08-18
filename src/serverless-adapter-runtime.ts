@@ -34,6 +34,8 @@ export interface NormalizedServerlessMcpFetchContext {
   remoteAddress?: string;
 }
 
+const SERVERLESS_MCP_CONTEXT_KEYS = ["authInfo", "oauthFetch", "remoteAddress"] as const;
+
 export type ServerlessWarnLogger = (fields: Record<string, unknown>, message: string) => void;
 
 export interface ServerlessAdapterRuntimeOptions<Context extends ServerlessMcpFetchContext> {
@@ -82,7 +84,7 @@ export function normalizeServerlessMcpContext<Context extends ServerlessMcpFetch
   isContext?: (input: AuthInfo | Context) => input is Context,
 ): NormalizedServerlessMcpFetchContext {
   if (!input) return { authInfo: null };
-  if (isContext?.(input) ?? ("authInfo" in input || "remoteAddress" in input)) {
+  if (isContext?.(input) ?? isServerlessMcpFetchContext(input)) {
     const context = input as Context;
     return {
       authInfo: context.authInfo ?? null,
@@ -91,6 +93,12 @@ export function normalizeServerlessMcpContext<Context extends ServerlessMcpFetch
     };
   }
   return { authInfo: input as AuthInfo };
+}
+
+export function isServerlessMcpFetchContext(
+  input: AuthInfo | ServerlessMcpFetchContext,
+): input is ServerlessMcpFetchContext {
+  return SERVERLESS_MCP_CONTEXT_KEYS.some((key) => key in input) || !("token" in input);
 }
 
 export function serverlessMcpPreflight(request: Request): Response | null {
