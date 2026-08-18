@@ -309,6 +309,30 @@ describe("skills pack validator", () => {
     }
   });
 
+  it("fails when bundled skill content contains a signed URL query secret", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      // cspell:disable-next-line
+      const signature = [
+        "3f8a5c2d9e1b4a7c",
+        "6d0f9a2b5e8c1d4f",
+        "9b2e6a0c5d8f3a1b",
+        "7c4e9d2f0a6b5c8e",
+      ].join("");
+      const signedUrl = `https://example.invalid/bucket/object?X-Amz-Signature=${signature}&X-Amz-Expires=3600`;
+      const skill = `${readFileSync(skillPath, "utf8")}\n${signedUrl}\n`;
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("secret-like content is not allowed");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when a bundled skill directory contains a secret-like path", () => {
     const fixtureRoot = copyValidatorFixture();
     try {
