@@ -119,6 +119,17 @@ describe("capability-aware registration", () => {
     expect(names.length).toBeLessThan(40);
   });
 
+  it("keeps file-mode durable-secret names callable when filters omit handlers", () => {
+    const names = toolNames(["listBuckets", "listFiles", "readFiles", "listKeys"], {
+      ...baseConfig,
+      secretSink: { mode: "file", filePath: "/tmp/b2-mcp-test-secrets.jsonl" },
+    } as B2Config);
+
+    expect(names).toContain("b2_create_key");
+    expect(names).toContain("b2_create_group_member");
+    expect(names).toContain("b2_reserve_trial_create_account");
+  });
+
   it("write-but-no-delete key keeps writes, drops deletes", () => {
     const names = toolNames([
       "listBuckets",

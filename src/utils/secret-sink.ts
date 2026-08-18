@@ -925,11 +925,21 @@ function acquireSecretSinkClaim(
   idempotency: DurableSecretIdempotency,
 ): SecretSinkClaim | ExistingSecretSinkRecord {
   preflightSecretSinkFile(sink.filePath);
+  const lockPath = pendingClaimPath(sink, idempotency);
+  const committed = readCommittedIdempotencyRecord(sink, tool, idempotency);
+  if (committed) return committed;
+  const pending = readPendingClaim(lockPath);
+  if (pending) {
+    if (pending.fingerprint !== idempotency.fingerprint) {
+      throw idempotencyConflictError();
+    }
+    pendingClaimError(lockPath);
+  }
+  if (fs.existsSync(lockPath)) pendingClaimError(lockPath);
   const existing = readMatchingSecretSinkRecord(sink, tool, idempotency);
   if (existing) return existing;
 
   const { parent } = ensureSecretSinkParent(sink.filePath);
-  const lockPath = pendingClaimPath(sink, idempotency);
   try {
     createExclusiveLockFile(lockPath, {
       ...lockPayload(tool, "pending"),

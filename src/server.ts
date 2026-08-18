@@ -310,15 +310,14 @@ export function createServer(
 
   // Rolling deploy compatibility: clients can cache tools/list entries for
   // durable-secret-producing tools. In off mode keep those names callable with
-  // a stable non-secret unavailable error. File mode registers recoverable
-  // durable-secret handlers above, while Reserve Trial remains a compatibility
-  // stub because the provider has no post-create recovery action.
+  // a stable non-secret unavailable error. File mode keeps filtered durable
+  // secret tool names callable as non-secret unavailable errors; Reserve Trial
+  // is always stubbed because the provider has no post-create recovery action.
   if (config.secretSink?.mode === "file") {
     registerDurableSecretCompatibilityStubs(
       registrar,
       config.secretSink,
-      (name) =>
-        name === "b2_reserve_trial_create_account" && isToolAllowedByOAuthScopes(name, oauthScopes),
+      (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
     );
   } else if (config.secretSink?.mode !== "inline") {
     registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>

@@ -859,6 +859,7 @@ describe("secret sink file writer", () => {
     vi.spyOn(secretSinkFileOpsForTests, "ftruncateSync").mockImplementation(() => {
       throw new Error("simulated rollback failure");
     });
+    let createCalls = 0;
     const idempotency = durableSecretIdempotency({
       toolName: "b2_create_key",
       idempotencyKey: "ambiguous-rollback",
@@ -888,6 +889,32 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_commit_ambiguous" });
 
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => {
+          createCalls++;
+          return {
+            applicationKeyId: "key-id-duplicate",
+            applicationKey: "B2_MCP_CANARY_SECRET_duplicate",
+          };
+        },
+        projectRedacted: (created: Record<string, unknown>, pointer) => ({
+          ...created,
+          applicationKey: "[redacted]",
+          secretSink: pointer,
+        }),
+        projectInline: (created: Record<string, unknown>, warning: string) => ({
+          ...created,
+          warning,
+        }),
+        recoverAfterSinkFailure: recoverSpy,
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    expect(createCalls).toBe(0);
     expect(recoverSpy).not.toHaveBeenCalled();
     expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("pending_reconciliation");
