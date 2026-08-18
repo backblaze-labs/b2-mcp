@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -673,6 +674,72 @@ describe("logger destination", () => {
         "B2_LOG_FILE write failed",
       );
     } finally {
+      vi.doUnmock("pino");
+      stderrWrite.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an error listener on retired streams after rotation timeout", async () => {
+    if (process.platform === "win32") return;
+    vi.useFakeTimers();
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-retired-reopen-"));
+    const logFile = join(dir, "server.log");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const firstDestination = Object.assign(new EventEmitter(), {
+      destroy: vi.fn(() => {
+        setTimeout(() => {
+          firstDestination.emit("error", new Error("late retired write failure"));
+        }, 0);
+      }),
+      flush: vi.fn(),
+      flushSync: vi.fn(),
+      write: vi.fn(() => true),
+    });
+    const secondDestination = Object.assign(new EventEmitter(), {
+      destroy: vi.fn(),
+      flush: vi.fn((cb?: (err?: Error) => void) => cb?.()),
+      flushSync: vi.fn(),
+      write: vi.fn(() => true),
+    });
+    const fakePino = Object.assign(
+      vi.fn((_options: unknown, destination: { write: (line: string) => void }) => ({
+        info: (message: string) => {
+          destination.write(`${JSON.stringify({ level: "info", msg: message })}\n`);
+        },
+      })),
+      {
+        destination: vi
+          .fn()
+          .mockReturnValueOnce(firstDestination)
+          .mockReturnValueOnce(secondDestination),
+      },
+    );
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ initLogging, logger }) => {
+          initLogging();
+          process.emit("SIGHUP", "SIGHUP");
+          await vi.advanceTimersByTimeAsync(1000);
+          await vi.runOnlyPendingTimersAsync();
+          logger.info("logger.after-retired-error");
+        },
+        () => {
+          vi.doMock("pino", () => ({ default: fakePino }));
+        },
+      );
+
+      expect(firstDestination.destroy).toHaveBeenCalled();
+      expect(secondDestination.write).toHaveBeenCalledWith(
+        expect.stringContaining("after-retired-error"),
+      );
+      expect(stderrWrite.mock.calls.map(([line]) => String(line)).join("")).toContain(
+        "retired B2_LOG_FILE destination error",
+      );
+    } finally {
+      vi.useRealTimers();
       vi.doUnmock("pino");
       stderrWrite.mockRestore();
       rmSync(dir, { recursive: true, force: true });

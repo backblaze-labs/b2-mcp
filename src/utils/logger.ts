@@ -222,6 +222,19 @@ function fileDestination(logFile: string): RotatableFileDestination {
 
   let errorListener = attachErrorHandler(destination);
 
+  const retireFileStream = (stream: ManagedDestination, listener: (err: Error) => void): void => {
+    let retiredErrorReported = false;
+    stream.on?.("error", (err) => {
+      if (retiredErrorReported) return;
+      retiredErrorReported = true;
+      process.stderr.write(
+        `b2-mcp: retired B2_LOG_FILE destination error for ${logFile}: ${errorDetail(err)}\n`,
+      );
+    });
+    detachErrorHandler(stream, listener);
+    destroyFileStream(stream);
+  };
+
   const swapFileStream = (
     previousDestination: ManagedDestination,
     previousErrorListener: (err: Error) => void,
@@ -236,8 +249,7 @@ function fileDestination(logFile: string): RotatableFileDestination {
       fallbackError = undefined;
       lastFailureReportAt = 0;
       errorListener = attachErrorHandler(destination);
-      detachErrorHandler(previousDestination, previousErrorListener);
-      destroyFileStream(previousDestination);
+      retireFileStream(previousDestination, previousErrorListener);
     } catch (err) {
       const failure = err instanceof Error ? err : new Error(String(err));
       reportFailure(failure, "reopen");
