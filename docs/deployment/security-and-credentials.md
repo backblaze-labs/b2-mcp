@@ -207,3 +207,8 @@ to `B2_MCP_RATE_LIMIT_RPS`, `B2_MCP_RATE_LIMIT_BURST`, `B2_MAX_SESSIONS`, and
 `B2_MAX_SESSIONS_PER_KEY`. Those application controls are process-local and are
 not deployment-wide in serverless isolates, warm function instances, or
 multi-replica containers.
+
+The standalone Node HTTP server also reads `B2_HTTP_REQUEST_TIMEOUT_MS` and
+`B2_HTTP_HEADERS_TIMEOUT_MS`. Leave `B2_TRUST_PROXY_HEADERS=false` unless every
+direct client path is blocked by a trusted proxy that strips caller-supplied
+`X-Forwarded-For` and `X-Real-IP` before forwarding to b2-mcp.

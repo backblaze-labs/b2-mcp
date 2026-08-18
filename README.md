@@ -196,9 +196,12 @@ the healthcheck probes the same port the server binds.
 | `B2_DESTRUCTIVE_POLICY`                                          | stdio: `confirm`; HTTP: `block` | Gate on destructive tools: `confirm` requires MCP form elicitation approval on compatible 2026 clients, or `confirm: true` when elicitation is unavailable/disabled; `block` refuses before elicitation; `allow` skips both gates |
 | `B2_DESTRUCTIVE_ELICITATION`                                     | `on`               | Set to `off`, `false`, or `0` to disable MCP form elicitation and rely only on `B2_DESTRUCTIVE_POLICY`                    |
 | `B2_ALLOWED_HOSTS` / `B2_ALLOWED_ORIGINS`                        | _none_             | HTTP transport: Host/Origin allowlists (DNS-rebinding protection) — **set these for any internet-facing HTTP deployment** |
+| `B2_HTTP_REQUEST_TIMEOUT_MS` / `B2_HTTP_HEADERS_TIMEOUT_MS`       | `30000` / `10000`  | Standalone Node HTTP transport request timeout and headers timeout                                                        |
+| `B2_TRUST_PROXY_HEADERS`                                         | `false`            | HTTP transport: trust `X-Forwarded-For` / `X-Real-IP` for unauthenticated admission keys only behind a trusted proxy       |
 | `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`              | `60` / `120`       | HTTP transport: per-credential request throttling                                                                         |
 | `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`                    | `1000` / `20`      | HTTP transport: global and per-credential concurrent in-flight request caps                                               |
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size. Cache identity is secret-bound; log labels are non-secret fingerprints   |
+| `B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS`                             | `60000`            | Idle timeout while streaming `s3_get_object` results to `saveToPath`                                                      |
 
 A ready-to-copy [`.env.example`](.env.example) lists the local environment
 variables, and [`deploy/customer-hosted/b2-mcp.env.example`](deploy/customer-hosted/b2-mcp.env.example)

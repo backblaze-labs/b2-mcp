@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { helpText } from "../../src/cli";
 import { B2_OAUTH_SCOPES, OAUTH_ENVIRONMENT_VARIABLES } from "../../src/oauth-resource-server";
@@ -12,23 +12,65 @@ function envNames(text: string): string[] {
   return [...new Set([...text.matchAll(/\bB2_[A-Z0-9_]+\b/g)].map((match) => match[0]).sort())];
 }
 
+function walkFiles(relativeDir: string, predicate: (relativePath: string) => boolean): string[] {
+  return readdirSync(join(root, relativeDir), { withFileTypes: true }).flatMap((entry) => {
+    const relativePath = join(relativeDir, entry.name);
+    if (entry.isDirectory()) return walkFiles(relativePath, predicate);
+    return predicate(relativePath) ? [relativePath] : [];
+  });
+}
+
 function markdownFiles(): string[] {
   return [
     "README.md",
     "CONTRIBUTING.md",
     "RELEASE.md",
     "SECURITY.md",
-    "docs/AUTHENTICATION.md",
-    "docs/ARCHITECTURE.md",
-    "docs/CLIENTS.md",
-    "docs/DEPLOY.md",
-    "docs/PUBLIC_CONTRACTS.md",
-    "docs/TESTING.md",
-    "docs/TOOL_CONTRACT.md",
-    "docs/TOOL_PROFILES.md",
-    "docs/V1_SCOPE.md",
-    "docs/deployment/security-and-credentials.md",
+    ...walkFiles("docs", (relativePath) => relativePath.endsWith(".md")),
+  ].sort();
+}
+
+function sourceFiles(): string[] {
+  return walkFiles("src", (relativePath) => relativePath.endsWith(".ts")).sort();
+}
+
+function runtimeEnvNamesFromSource(): string[] {
+  const names = new Set<string>(Object.values(OAUTH_ENVIRONMENT_VARIABLES));
+  const dynamicCredentialNames = [
+    "B2_APPLICATION_KEY_ID",
+    "B2_APPLICATION_KEY",
+    "B2_APP_KEY_ID",
+    "B2_APP_KEY",
+    "B2_MASTER_KEY_ID",
+    "B2_MASTER_KEY",
   ];
+  for (const name of dynamicCredentialNames) names.add(name);
+
+  const directReadPatterns = [
+    /\b(?:process\.)?env\.(B2_[A-Z0-9_]+)\b/g,
+    /\b(?:process\.)?env\[['"](B2_[A-Z0-9_]+)['"]\]/g,
+    /\b(?:intEnv|envInt|csvEnv)\(['"](B2_[A-Z0-9_]+)['"]/g,
+    /\b[A-Z0-9_]+_ENV\s*=\s*['"](B2_[A-Z0-9_]+)['"]/g,
+  ];
+
+  for (const file of sourceFiles()) {
+    const source = read(file);
+    for (const pattern of directReadPatterns) {
+      for (const match of source.matchAll(pattern)) {
+        const name = match[1];
+        if (name) names.add(name);
+      }
+    }
+  }
+
+  const internalNames = new Set([
+    // Constant of supported OAuth scopes, not an environment variable.
+    "B2_OAUTH_SCOPES",
+    // Secret sanitizer canary pattern, not operator configuration.
+    "B2_MCP_CANARY_SECRET_",
+  ]);
+
+  return [...names].filter((name) => !internalNames.has(name)).sort();
 }
 
 describe("public support and authentication claims", () => {
@@ -39,6 +81,7 @@ describe("public support and authentication claims", () => {
   const release = read("RELEASE.md");
   const security = read("SECURITY.md");
   const publicContracts = read("docs/PUBLIC_CONTRACTS.md");
+  const publicMarkdown = markdownFiles().map(read).join("\n");
   const packageJson = readJson<{
     bin: Record<string, string>;
     files: string[];
@@ -55,7 +98,6 @@ describe("public support and authentication claims", () => {
     expect(packageJson.files).toContain("docs/AUTHENTICATION.md");
     expect(publicContracts).toContain("[`AUTHENTICATION.md`](AUTHENTICATION.md)");
 
-    const publicMarkdown = markdownFiles().map(read).join("\n");
     expect(publicMarkdown).not.toContain("@backblaze/b2-mcp-server");
     expect(readme).toContain("The canonical package name is `@backblaze-labs/b2-mcp`");
     expect(readme).toContain("binary is `b2-mcp`");
@@ -103,6 +145,21 @@ describe("public support and authentication claims", () => {
       read("docs/deployment/security-and-credentials.md"),
     ].join("\n");
     const missing = envNames(localEnv).filter((name) => {
+      if (name.startsWith("B2_CREDENTIAL_")) return !referenceDocs.includes("B2_CREDENTIAL_<REF>");
+      return !referenceDocs.includes(name);
+    });
+
+    expect(missing).toEqual([]);
+  });
+
+  it("documents every runtime B2 environment variable read by src", () => {
+    const referenceDocs = [
+      readme,
+      authentication,
+      read("docs/DEPLOY.md"),
+      read("docs/deployment/security-and-credentials.md"),
+    ].join("\n");
+    const missing = runtimeEnvNamesFromSource().filter((name) => {
       if (name.startsWith("B2_CREDENTIAL_")) return !referenceDocs.includes("B2_CREDENTIAL_<REF>");
       return !referenceDocs.includes(name);
     });
@@ -159,6 +216,10 @@ describe("public support and authentication claims", () => {
     }
     expect(readme).toContain("Under stdio's default `confirm` policy");
     expect(readme).toContain("HTTP defaults to `block`");
+    expect(publicMarkdown).not.toContain("SDK Partner binding deferred");
+    expect(publicMarkdown).not.toMatch(
+      /\| `(?:b2_create_group_member|b2_reserve_trial_create_account)`\s+\|\s+`defer`/,
+    );
   });
 
   it("keeps support policy split between SECURITY and RELEASE", () => {

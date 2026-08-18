@@ -9,13 +9,19 @@ b2-mcp is an MCP resource server and B2 tool server. It is not an OAuth
 authorization server, not a Backblaze-managed credential broker, and not a
 hosted multi-tenant control plane.
 
-Caller authentication is performed by the customer-operated edge, adapter, or
-resource-server layer before B2 credential resolution. For the built-in hosted
-adapters, `src/oauth-resource-server.ts` validates the bearer token and passes
-verified MCP `authInfo` into the shared request pipeline. The published package
-does not expose a semver-managed Node HTTP embedding API; custom deployments
-should use the documented hosted adapter boundary or maintain their own
-source-level adapter that only forwards `authInfo` after caller authentication.
+Caller authentication for OAuth-enabled hosted adapters is performed by the
+customer-operated edge, adapter, or resource-server layer before B2 credential
+resolution. The standalone Node HTTP entry point (`b2-mcp --transport http` and
+`startHttp()`) does not authenticate callers by itself; with
+`B2_HTTP_CREDENTIAL_MODE` unset it uses `headers` compatibility mode and expects
+B2 credential headers on each request. Do not expose that endpoint without TLS,
+host/origin allowlists, and a separate caller-authentication boundary. For the
+built-in hosted adapters, `src/oauth-resource-server.ts` validates the bearer
+token and passes verified MCP `authInfo` into the shared request pipeline. The
+published package does not expose a semver-managed Node HTTP embedding API;
+custom deployments should use the documented hosted adapter boundary or
+maintain their own source-level adapter that only forwards `authInfo` after
+caller authentication.
 
 B2 credential custody is separate from MCP OAuth. OAuth proves who may call the
 MCP endpoint. B2 application keys are then selected by one of the credential
@@ -26,8 +32,8 @@ modes below and are never ordinary MCP tool arguments.
 | Mode | Transport | Who holds B2 credentials | Current use |
 | --- | --- | --- | --- |
 | `stdio-env` | stdio | Local client process environment | Local single-user desktop and IDE use. |
-| `headers` | HTTP | MCP client or bridge request headers | One-release compatibility mode. Treat B2 headers as durable secrets in proxies, logs, APM, and fixtures. |
-| `server` | HTTP | Customer-operated server process or provider secret store | Supported single-tenant hosted default. Clients send no B2 key. |
+| `headers` | HTTP | MCP client or bridge request headers | Unset runtime default for one-release compatibility. Treat B2 headers as durable secrets in proxies, logs, APM, and fixtures. |
+| `server` | HTTP | Customer-operated server process or provider secret store | Recommended explicit single-tenant hosted mode. Clients send no B2 key. |
 | `principal` | HTTP | Customer secret broker selected by verified MCP principal | Multi-principal hosted mode. Clients send no B2 key. |
 
 `server` and `principal` reject public B2 credential headers. `principal`
@@ -74,8 +80,9 @@ B2 SDK and AWS S3 SDK adapters
 Backblaze B2
 ```
 
-This is the default supported hosted shape. OAuth scopes, B2 key capabilities,
-and tool-profile filtering are cumulative restrictions.
+This is the recommended hosted shape for new single-tenant deployments, but it
+must be selected explicitly with `B2_HTTP_CREDENTIAL_MODE=server`. OAuth scopes,
+B2 key capabilities, and tool-profile filtering are cumulative restrictions.
 
 ### HTTP Client-Supplied Credential Compatibility
 
@@ -92,9 +99,10 @@ B2 SDK and AWS S3 SDK adapters
 Backblaze B2
 ```
 
-This compatibility mode keeps existing hosted clients working for one release,
-but it puts durable B2 secrets in every HTTP request. New hosted deployments
-should set `B2_HTTP_CREDENTIAL_MODE=server` or `principal`.
+This compatibility mode keeps existing hosted clients working for one release
+and is the runtime default when `B2_HTTP_CREDENTIAL_MODE` is unset, but it puts
+durable B2 secrets in every HTTP request. New hosted deployments should set
+`B2_HTTP_CREDENTIAL_MODE=server` or `principal`.
 
 ## MCP OAuth Resource Server
 
