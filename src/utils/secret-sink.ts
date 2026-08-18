@@ -23,6 +23,7 @@ const SECRET_SINK_FILE_ENV = "B2_SECRET_SINK_FILE";
 const SECRET_SINK_PARENT_MODE = 0o700;
 const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
+const SECRET_SINK_TAIL_READ_BYTES = 1024 * 1024;
 
 export const secretSinkFileOpsForTests = {
   closeSync: fs.closeSync,
@@ -404,22 +405,68 @@ function parseLedgerLine(line: string, lineNumber: number): SecretLedgerRecord {
   return record as unknown as SecretLedgerRecord;
 }
 
-function truncateIncompleteLedgerTail(filePath: string, tool: string): void {
-  let buffer: Buffer;
+function readFileTail(filePath: string, maxBytes: number): { buffer: Buffer; offset: number } {
+  const stats = fs.statSync(filePath);
+  const length = Math.min(stats.size, maxBytes);
+  const offset = stats.size - length;
+  const fd = fs.openSync(filePath, fs.constants.O_RDONLY);
   try {
-    buffer = fs.readFileSync(filePath);
+    const buffer = new Uint8Array(length);
+    fs.readSync(fd, buffer, 0, length, offset);
+    return { buffer: Buffer.from(buffer.buffer, buffer.byteOffset, buffer.byteLength), offset };
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function readBoundedJsonlTailLines(filePath: string): string[] {
+  let tail: { buffer: Buffer; offset: number };
+  try {
+    tail = readFileTail(filePath, SECRET_SINK_TAIL_READ_BYTES);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+  if (tail.buffer.length === 0) return [];
+  let buffer = tail.buffer;
+  if (tail.offset > 0) {
+    const firstNewline = buffer.indexOf(0x0a);
+    if (firstNewline === -1) return [];
+    buffer = buffer.subarray(firstNewline + 1);
+  }
+  return buffer
+    .toString("utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function truncateIncompleteLedgerTail(filePath: string, tool: string): void {
+  let tail: { buffer: Buffer; offset: number };
+  try {
+    tail = readFileTail(filePath, SECRET_SINK_TAIL_READ_BYTES);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
     throw err;
   }
+  const buffer = tail.buffer;
   if (buffer.length === 0 || buffer[buffer.length - 1] === 0x0a) return;
 
-  const tailStart = buffer.lastIndexOf(0x0a) + 1;
-  const tail = buffer.subarray(tailStart).toString("utf8").trim();
-  if (tail !== "") {
+  const lastNewline = buffer.lastIndexOf(0x0a);
+  if (lastNewline === -1 && tail.offset > 0) {
+    throw new Error(
+      `${SECRET_SINK_FILE_ENV} trailing JSONL record exceeds bounded recovery window: ${filePath}`,
+    );
+  }
+  const tailStart = tail.offset + lastNewline + 1;
+  const trailingLine = buffer
+    .subarray(lastNewline + 1)
+    .toString("utf8")
+    .trim();
+  if (trailingLine !== "") {
     let completeJsonTail = false;
     try {
-      JSON.parse(tail);
+      JSON.parse(trailingLine);
       completeJsonTail = true;
     } catch {
       // The unterminated final line is a torn append and is truncated below.
@@ -475,6 +522,8 @@ function readMatchingSecretSinkRecord(
   tool: string,
   idempotency: DurableSecretIdempotency,
 ): ExistingSecretSinkRecord | null {
+  const committed = readCommittedIdempotencyRecord(sink, tool, idempotency);
+  if (committed) return committed;
   recoverIncompleteLedgerTail(sink, tool);
   const activeLedgerMatch = readMatchingSecretSinkJsonlRecord(
     sink.filePath,
@@ -483,10 +532,7 @@ function readMatchingSecretSinkRecord(
     idempotency,
   );
   if (activeLedgerMatch) return activeLedgerMatch;
-  const indexPath = secretSinkIdempotencyIndexPath(sink.filePath);
-  if (!fs.existsSync(indexPath)) return null;
-  recoverIncompleteJsonlTail(indexPath, tool);
-  return readMatchingSecretSinkJsonlRecord(indexPath, sink, tool, idempotency);
+  return null;
 }
 
 function readMatchingSecretSinkJsonlRecord(
@@ -495,11 +541,7 @@ function readMatchingSecretSinkJsonlRecord(
   tool: string,
   idempotency: DurableSecretIdempotency,
 ): ExistingSecretSinkRecord | null {
-  const lines = fs
-    .readFileSync(filePath, "utf8")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const lines = readBoundedJsonlTailLines(filePath);
   for (let index = lines.length - 1; index >= 0; index--) {
     const record = parseLedgerLine(lines[index], index + 1);
     if (record.tool !== tool || !record.idempotency) continue;
@@ -511,18 +553,7 @@ function readMatchingSecretSinkJsonlRecord(
     if (record.idempotency.fingerprint !== idempotency.fingerprint) {
       throw idempotencyConflictError();
     }
-    const indexPointer = (record as SecretSinkIdempotencyIndexRecord).pointer;
-    const pointer =
-      indexPointer &&
-      indexPointer.type === "file" &&
-      typeof indexPointer.path === "string" &&
-      typeof indexPointer.recordId === "string"
-        ? indexPointer
-        : { type: "file" as const, path: sink.filePath, recordId: record.recordId };
-    return {
-      pointer,
-      result: record.result,
-    };
+    return existingRecordFromIndexRecord(record as SecretSinkIdempotencyIndexRecord, sink);
   }
   return null;
 }
@@ -531,17 +562,78 @@ function secretSinkIdempotencyIndexPath(filePath: string): string {
   return `${filePath}.idempotency.jsonl`;
 }
 
-function recoverIncompleteJsonlTail(filePath: string, tool: string): void {
-  const parent = dirname(filePath);
-  const appendLock = acquireLedgerAppendLock(filePath, parent, tool);
+function committedIdempotencyRecordPath(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  idempotency: DurableSecretIdempotency,
+): string {
+  return `${sink.filePath}.${idempotency.claimFingerprint}.committed.json`;
+}
+
+function secretSinkIdempotencyIndexRecord(
+  tool: string,
+  pointer: SecretSinkPointer,
+  result: unknown,
+  idempotency: DurableSecretIdempotency,
+): SecretSinkIdempotencyIndexRecord {
+  return {
+    ...secretLedgerRecord(tool, pointer.recordId, sanitizeForMcpOutput(result), idempotency),
+    pointer,
+  };
+}
+
+function existingRecordFromIndexRecord(
+  record: SecretSinkIdempotencyIndexRecord,
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+): ExistingSecretSinkRecord {
+  const pointer =
+    record.pointer &&
+    record.pointer.type === "file" &&
+    typeof record.pointer.path === "string" &&
+    typeof record.pointer.recordId === "string"
+      ? record.pointer
+      : { type: "file" as const, path: sink.filePath, recordId: record.recordId };
+  return { pointer, result: record.result };
+}
+
+function readCommittedIdempotencyRecord(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  tool: string,
+  idempotency: DurableSecretIdempotency,
+): ExistingSecretSinkRecord | null {
+  const recordPath = committedIdempotencyRecordPath(sink, idempotency);
+  let parsed: unknown;
   try {
-    truncateIncompleteLedgerTail(filePath, tool);
-  } finally {
-    releaseSecretSinkClaimBestEffort(appendLock, {
-      tool,
-      secretSink: { type: "file", path: filePath },
-      lockPath: appendLock.lockPath,
-    });
+    parsed = JSON.parse(fs.readFileSync(recordPath, "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
+  }
+  const record = parseLedgerLine(JSON.stringify(parsed), 1) as SecretSinkIdempotencyIndexRecord;
+  if (record.tool !== tool || !record.idempotency) return null;
+  if (record.idempotency.claimFingerprint !== idempotency.claimFingerprint) return null;
+  if (record.idempotency.fingerprint !== idempotency.fingerprint) throw idempotencyConflictError();
+  return existingRecordFromIndexRecord(record, sink);
+}
+
+function writeCommittedIdempotencyRecord(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  record: SecretSinkIdempotencyIndexRecord,
+  idempotency: DurableSecretIdempotency,
+): void {
+  const recordPath = committedIdempotencyRecordPath(sink, idempotency);
+  const parent = dirname(recordPath);
+  const tempPath = `${recordPath}.${randomUUID()}.tmp`;
+  try {
+    createExclusiveLockFile(tempPath, record);
+    fs.renameSync(tempPath, recordPath);
+    fsyncParentDirectory(parent);
+  } catch (err) {
+    try {
+      secretSinkFileOpsForTests.unlinkSync(tempPath);
+    } catch {
+      // Preserve the original committed-record write failure.
+    }
+    throw err;
   }
 }
 
@@ -556,22 +648,27 @@ function appendSecretSinkIdempotencyIndex(
   const parent = dirname(indexPath);
   const appendLock = acquireLedgerAppendLock(indexPath, parent, tool);
   try {
-    const record: SecretSinkIdempotencyIndexRecord = {
-      ...secretLedgerRecord(tool, pointer.recordId, sanitizeForMcpOutput(result), idempotency),
-      pointer,
-    };
-    truncateIncompleteLedgerTail(indexPath, tool);
-    const fd = openSecureAppendFile(indexPath, {
-      envVarName: SECRET_SINK_FILE_ENV,
-      mode: SECURE_APPEND_FILE_MODE,
-    });
+    const record = secretSinkIdempotencyIndexRecord(tool, pointer, result, idempotency);
+    writeCommittedIdempotencyRecord(sink, record, idempotency);
     try {
-      writeAll(fd, `${JSON.stringify(record)}\n`);
-      secretSinkFileOpsForTests.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
+      truncateIncompleteLedgerTail(indexPath, tool);
+      const fd = openSecureAppendFile(indexPath, {
+        envVarName: SECRET_SINK_FILE_ENV,
+        mode: SECURE_APPEND_FILE_MODE,
+      });
+      try {
+        writeAll(fd, `${JSON.stringify(record)}\n`);
+        secretSinkFileOpsForTests.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fsyncParentDirectory(parent);
+    } catch (err) {
+      logger.warn(
+        { err, tool, secretSink: { type: "file", path: sink.filePath }, indexPath },
+        "secret_sink.idempotency_audit_append_failed",
+      );
     }
-    fsyncParentDirectory(parent);
   } finally {
     releaseSecretSinkClaimBestEffort(appendLock, {
       tool,

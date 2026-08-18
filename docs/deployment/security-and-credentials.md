@@ -130,12 +130,13 @@ logs, query strings, screenshots, or client configuration.
 plaintext append-only JSONL file on POSIX platforms. Windows file sink paths are
 rejected because this implementation does not enforce owner-only ACLs there.
 Each record has stable metadata fields (`ts`, `tool`, `recordId`) and stores the
-provider payload under `result`. File mode also writes a non-secret sidecar
-idempotency index at `<B2_SECRET_SINK_FILE>.idempotency.jsonl`; retain that
-sidecar for the deployment's retry window when rotating, pruning, deleting, or
-vaulting the plaintext ledger. Treat the ledger as a credential store: protect it
-with owner-only permissions, rotate or revoke keys after use, and rotate, prune,
-delete, or vault old records under the same policy used for `B2_APPLICATION_KEY`.
+provider payload under `result`. File mode also writes non-secret sidecar
+idempotency markers, plus `<B2_SECRET_SINK_FILE>.idempotency.jsonl` as an audit
+trail; retain those sidecars for the deployment's retry window when rotating,
+pruning, deleting, or vaulting the plaintext ledger. Treat the ledger as a
+credential store: protect it with owner-only permissions, rotate or revoke keys
+after use, and rotate, prune, delete, or vault old records under the same policy
+used for `B2_APPLICATION_KEY`.
 The server does not impose a built-in size cap or retention window in 0.1.0, so
 operators must monitor and manage the ledger before it becomes an unbounded
 plaintext secret store. For
