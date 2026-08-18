@@ -110,6 +110,23 @@ describe("secret sink configuration", () => {
     expect(resolved).toHaveProperty("unavailableReason", expect.stringContaining(link));
     expect(JSON.stringify(resolved)).toContain("B2_SECRET_SINK=inline");
   });
+
+  it("treats empty stdio mode as the default when the default file cannot open", () => {
+    const dir = tempDir();
+    const target = join(dir, "target.jsonl");
+    const link = join(dir, "secrets.jsonl");
+    writeFileSync(target, "", { mode: 0o600 });
+    symlinkSync(target, link);
+
+    const resolved = resolveSecretSinkConfig({
+      transport: "stdio",
+      env: { B2_SECRET_SINK: "   " },
+      defaultFilePath: link,
+    });
+
+    expect(resolved.mode).toBe("off");
+    expect(resolved).toHaveProperty("unavailableReason", expect.stringContaining(link));
+  });
 });
 
 describe("secret sink file writer", () => {

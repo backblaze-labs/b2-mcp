@@ -125,6 +125,7 @@ export function resolveSecretSinkConfig(options: ResolveSecretSinkOptions): Secr
   const env = options.env ?? process.env;
   const transport = options.transport;
   const rawMode = env.B2_SECRET_SINK;
+  const usesTransportDefaultMode = rawMode === undefined || rawMode.trim() === "";
   const mode = parseSecretSinkMode(rawMode, transport);
 
   if (mode === "off") return { mode: "off" };
@@ -152,7 +153,7 @@ export function resolveSecretSinkConfig(options: ResolveSecretSinkOptions): Secr
     try {
       preflightSecretSinkFile(filePath);
     } catch (err) {
-      if (rawMode === undefined && transport === "stdio") {
+      if (usesTransportDefaultMode && transport === "stdio") {
         return {
           mode: "off",
           unavailableReason: defaultFileUnavailableReason(filePath, err),

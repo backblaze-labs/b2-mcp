@@ -1,4 +1,4 @@
-import { B2AuthManager } from "../../src/auth";
+import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
@@ -343,6 +343,26 @@ describe("B2AuthManager", () => {
 
     await expect(client.deleteKey("key-1")).rejects.toThrow(/lost response/);
     expect(deleteCalls).toBe(1);
+  });
+
+  it("marks Partner account-creation endpoints no-replay before transport send", async () => {
+    const inner = new RecordingTransport(() => new StaticHttpResponse(200, {}));
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    for (const endpoint of ["b2_create_group_member", "b2_reserve_trial_create_account"]) {
+      await transport.send({
+        url: `https://partner.backblaze.com/b2api/v3/${endpoint}`,
+        method: "POST",
+        body: "{}",
+      });
+
+      expect(inner.requests.at(-1)?.retry?.maxRetries).toBe(0);
+    }
   });
 
   it("passes the MCP abort signal into SDK retry backoff for native calls", async () => {
