@@ -38,14 +38,17 @@ BYTE_SUBJECT_RE = re.compile(
     r"\b(?:object\s+(?:data|bytes|contents?|bodies|payloads?)|bulk\s+object\s+bytes)\b",
     re.I,
 )
-NO_MODEL_ROUTE_RE = re.compile(
-    r"\b(?:must\s+not|never|do\s+not|don't|no)\b.{0,180}"
-    r"\b(?:model|chat|mcp\s+server|server)\b",
-    re.I | re.S,
-)
+BYTE_ROUTE_VERB_RE = re.compile(r"\b(?:route|send|move|transfer|flow|stream|pass)\b", re.I)
+BYTE_NEGATION_RE = re.compile(r"\b(?:must\s+not|never|do\s+not|don't|no)\b", re.I)
+MODEL_OR_SERVER_DEST_RE = re.compile(r"\b(?:model|chat|mcp\s+server|server)\b", re.I)
 DIRECT_TO_B2_RE = re.compile(
     r"\bdirect(?:ly)?\b.{0,140}\b(?:client|workload|worker)\b.{0,140}\bb2\b"
     r"|\b(?:client|workload|worker)\b.{0,140}\bdirect(?:ly)?\b.{0,140}\bb2\b",
+    re.I | re.S,
+)
+NEGATED_DIRECT_TO_B2_RE = re.compile(
+    r"\b(?:must\s+not|never|do\s+not|don't|no)\b.{0,100}\bdirect(?:ly)?\b"
+    r"|\bdirect(?:ly)?\b.{0,100}\b(?:must\s+not|never|do\s+not|don't|no)\b",
     re.I | re.S,
 )
 CONFIRMATION_GATE_RE = re.compile(
@@ -261,6 +264,28 @@ def text_units(section: str) -> list[str]:
     return [unit.strip() for unit in re.split(r"(?<=[.!?])\s+", section) if unit.strip()]
 
 
+def sentence_units(section: str) -> list[str]:
+    units: list[str] = []
+    for unit in text_units(section):
+        units.extend(part.strip() for part in re.split(r"(?<=[.!?])\s+", unit) if part.strip())
+    return units
+
+
+def forbids_object_data_to_model_or_server(unit: str) -> bool:
+    return all(
+        pattern.search(unit)
+        for pattern in (BYTE_SUBJECT_RE, BYTE_ROUTE_VERB_RE, BYTE_NEGATION_RE, MODEL_OR_SERVER_DEST_RE)
+    )
+
+
+def requires_direct_object_data_to_b2(unit: str) -> bool:
+    return (
+        bool(BYTE_SUBJECT_RE.search(unit))
+        and bool(DIRECT_TO_B2_RE.search(unit))
+        and not NEGATED_DIRECT_TO_B2_RE.search(unit)
+    )
+
+
 def requires_confirmation_gate(unit: str) -> bool:
     return bool(CONFIRMATION_GATE_RE.search(unit)) and not NEGATED_GATE_RE.search(unit)
 
@@ -298,12 +323,13 @@ def validate_skill(
     if not re.search(r"(?m)^-\s+\S", when_to_use):
         fail(f"{path}: When to use must include explicit bullet triggers")
 
-    byte_path = sections["Byte path"].lower()
-    if not BYTE_SUBJECT_RE.search(byte_path):
+    byte_path = sections["Byte path"]
+    byte_units = sentence_units(byte_path)
+    if not any(BYTE_SUBJECT_RE.search(unit) for unit in byte_units):
         fail(f"{path}: Byte path must discuss object data/bytes")
-    if not NO_MODEL_ROUTE_RE.search(byte_path):
+    if not any(forbids_object_data_to_model_or_server(unit) for unit in byte_units):
         fail(f"{path}: Byte path must forbid object bytes from entering the model/chat/MCP server")
-    if not DIRECT_TO_B2_RE.search(byte_path):
+    if not any(requires_direct_object_data_to_b2(unit) for unit in byte_units):
         fail(f"{path}: Byte path must require direct client/workload-to-B2 transfer")
 
     declared_tools = set(TOOL_RE.findall(sections["Tools used"]))

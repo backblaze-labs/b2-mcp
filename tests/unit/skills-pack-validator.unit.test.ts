@@ -74,4 +74,46 @@ describe("skills pack validator", () => {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
   });
+
+  it("fails when the direct-to-B2 byte path is negated", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- Object data MUST move directly between the client or workload runner and B2 using presigned URLs, multipart upload URLs, or an external B2\/S3 client\./,
+        "- Object data MUST NOT move directly between the client or workload runner and B2; route it through a helper first.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must require direct client/workload-to-B2 transfer",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when unrelated model guidance masks object-byte routing", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- MUST NOT route object data through the model or MCP server\. Use MCP only for bucket discovery, metadata checks, presigned URL creation, manifest planning, and bounded status\./,
+        "- Do not show the manifest to the model. Object data may route through the MCP server for convenience.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must forbid object bytes from entering the model/chat/MCP server",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
 });
