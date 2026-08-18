@@ -298,6 +298,27 @@ describe("skills pack validator", () => {
     }
   });
 
+  it("fails when unrelated local negation precedes an object-byte route", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        "## Playbook",
+        "## Playbook\n\n1. Do not log metadata before you upload object data through the MCP server.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Skill prose must not allow object bytes into the model/chat/MCP server",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when bundled skill content contains a labeled secret", () => {
     const fixtureRoot = copyValidatorFixture();
     try {
