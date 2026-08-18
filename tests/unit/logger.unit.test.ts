@@ -100,6 +100,22 @@ function parseLogLine(text: string): Record<string, unknown> {
   return JSON.parse(line as string);
 }
 
+async function waitForExpectation(assertion: () => void, timeoutMs = 1000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      assertion();
+      return;
+    } catch (err) {
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  if (lastError) throw lastError;
+  assertion();
+}
+
 type LoggerModule = typeof import("../../src/utils/logger");
 
 const loggerEnvKeys = ["B2_LOG_FILE", "LOG_LEVEL", "NODE_ENV"] as const;
@@ -305,6 +321,9 @@ describe("logger destination", () => {
 
           renameSync(logFile, rotatedLogFile);
           process.emit("SIGHUP", "SIGHUP");
+          await waitForExpectation(() => {
+            expect(existsSync(logFile)).toBe(true);
+          });
 
           logger.info("logger.after-rotate");
           flushLogsSync();
@@ -570,6 +589,10 @@ describe("logger destination", () => {
           symlinkSync(rotatedLogFile, logFile);
           process.emit("SIGHUP", "SIGHUP");
 
+          await waitForExpectation(() => {
+            const stderrOutput = stderrWrite.mock.calls.map(([line]) => String(line)).join("");
+            expect(stderrOutput).toContain("B2_LOG_FILE reopen failed");
+          });
           logger.info("logger.after-failed-reopen");
         },
       );
@@ -579,6 +602,78 @@ describe("logger destination", () => {
       expect(stderrOutput).toContain("falling back to stderr");
       expect(stderrOutput).toContain("logger.after-failed-reopen");
     } finally {
+      stderrWrite.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reopens a failed file destination without flushing the failed stream", async () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-failed-reopen-"));
+    const logFile = join(dir, "server.log");
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let firstErrorListener: ((err: Error) => void) | undefined;
+    const firstDestination = {
+      destroy: vi.fn(),
+      flush: vi.fn((cb?: (err?: Error) => void) => cb?.()),
+      flushSync: vi.fn(() => {
+        throw new Error("failed stream should not flush");
+      }),
+      off: vi.fn(() => firstDestination),
+      on: vi.fn((event: "error", listener: (err: Error) => void) => {
+        if (event === "error") firstErrorListener = listener;
+        return firstDestination;
+      }),
+      write: vi.fn(() => {
+        firstErrorListener?.(new Error("disk full"));
+        return true;
+      }),
+    };
+    const secondDestination = {
+      destroy: vi.fn(),
+      flush: vi.fn((cb?: (err?: Error) => void) => cb?.()),
+      flushSync: vi.fn(),
+      off: vi.fn(() => secondDestination),
+      on: vi.fn(() => secondDestination),
+      write: vi.fn(() => true),
+    };
+    const fakePino = Object.assign(
+      vi.fn((_options: unknown, destination: { write: (line: string) => void }) => ({
+        info: (message: string) => {
+          destination.write(`${JSON.stringify({ level: "info", msg: message })}\n`);
+        },
+      })),
+      {
+        destination: vi
+          .fn()
+          .mockReturnValueOnce(firstDestination)
+          .mockReturnValueOnce(secondDestination),
+      },
+    );
+
+    try {
+      await withFreshLogger(
+        { B2_LOG_FILE: logFile },
+        async ({ initLogging, logger }) => {
+          initLogging();
+          logger.info("logger.first");
+          process.emit("SIGHUP", "SIGHUP");
+          logger.info("logger.after-reopen");
+        },
+        () => {
+          vi.doMock("pino", () => ({ default: fakePino }));
+        },
+      );
+
+      expect(firstDestination.flush).not.toHaveBeenCalled();
+      expect(firstDestination.flushSync).not.toHaveBeenCalled();
+      expect(fakePino.destination).toHaveBeenCalledTimes(2);
+      expect(secondDestination.write).toHaveBeenCalledWith(expect.stringContaining("after-reopen"));
+      expect(stderrWrite.mock.calls.map(([line]) => String(line)).join("")).toContain(
+        "B2_LOG_FILE write failed",
+      );
+    } finally {
+      vi.doUnmock("pino");
       stderrWrite.mockRestore();
       rmSync(dir, { recursive: true, force: true });
     }

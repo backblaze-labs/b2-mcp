@@ -10,6 +10,7 @@ const GROUP_OR_OTHER_PERMISSIONS = 0o077;
 const LOG_FILE_MIN_LENGTH = 4096;
 const LOG_FILE_PERIODIC_FLUSH_MS = 1000;
 const LOG_FILE_FAILURE_REPORT_INTERVAL_MS = 60_000;
+const LOG_FILE_REOPEN_FLUSH_TIMEOUT_MS = 1000;
 
 const options = {
   level: process.env.LOG_LEVEL ?? (isTest ? "silent" : "info"),
@@ -187,6 +188,7 @@ function fileDestination(logFile: string): RotatableFileDestination {
   let destination = createFileStream(logFile);
   let fallbackError: Error | undefined;
   let lastFailureReportAt = 0;
+  let reopenInProgress = false;
 
   const reportFailure = (err: Error, operation: string): void => {
     fallbackError = err;
@@ -219,6 +221,61 @@ function fileDestination(logFile: string): RotatableFileDestination {
   };
 
   let errorListener = attachErrorHandler(destination);
+
+  const swapFileStream = (
+    previousDestination: ManagedDestination,
+    previousErrorListener: (err: Error) => void,
+    flushError?: Error,
+  ): void => {
+    try {
+      if (flushError) {
+        reportFailure(flushError, "flush");
+      }
+      const nextDestination = createFileStream(logFile);
+      destination = nextDestination;
+      fallbackError = undefined;
+      lastFailureReportAt = 0;
+      errorListener = attachErrorHandler(destination);
+      detachErrorHandler(previousDestination, previousErrorListener);
+      destroyFileStream(previousDestination);
+    } catch (err) {
+      const failure = err instanceof Error ? err : new Error(String(err));
+      reportFailure(failure, "reopen");
+    } finally {
+      reopenInProgress = false;
+    }
+  };
+
+  const reopenAfterBoundedFlush = (
+    previousDestination: ManagedDestination,
+    previousErrorListener: (err: Error) => void,
+  ): void => {
+    if (fallbackError || typeof previousDestination.flush !== "function") {
+      swapFileStream(previousDestination, previousErrorListener);
+      return;
+    }
+
+    let finished = false;
+    const finish = (flushError?: Error): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      swapFileStream(previousDestination, previousErrorListener, flushError);
+    };
+    const timeout = setTimeout(() => {
+      finish(new Error("flush timed out before log rotation reopen"));
+    }, LOG_FILE_REOPEN_FLUSH_TIMEOUT_MS);
+    timeout.unref?.();
+
+    try {
+      previousDestination.flush.call(previousDestination, (err?: Error) => {
+        finish(err);
+      });
+    } catch (err) {
+      const failure = err instanceof Error ? err : new Error(String(err));
+      finish(failure);
+    }
+  };
 
   const managedDestination: RotatableFileDestination = {
     write: (line) => {
@@ -255,21 +312,9 @@ function fileDestination(logFile: string): RotatableFileDestination {
       }
     },
     reopenForRotation: () => {
-      try {
-        destination.flushSync?.call(destination);
-        const nextDestination = createFileStream(logFile);
-        const previousDestination = destination;
-        const previousErrorListener = errorListener;
-        destination = nextDestination;
-        fallbackError = undefined;
-        lastFailureReportAt = 0;
-        errorListener = attachErrorHandler(destination);
-        detachErrorHandler(previousDestination, previousErrorListener);
-        destroyFileStream(previousDestination);
-      } catch (err) {
-        const failure = err instanceof Error ? err : new Error(String(err));
-        reportFailure(failure, "reopen");
-      }
+      if (reopenInProgress) return;
+      reopenInProgress = true;
+      reopenAfterBoundedFlush(destination, errorListener);
     },
   };
 
