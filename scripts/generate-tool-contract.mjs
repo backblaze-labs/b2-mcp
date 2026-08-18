@@ -18,8 +18,11 @@ const {
   MCP_REVISION,
   PROFILE_DESCRIPTIONS,
   PROFILE_NAMES,
+  TOOL_BACKING_CATEGORIES,
   TOOL_CONTRACT_ISSUE,
   TOOL_CONTRACT_ISSUE_URL,
+  backingCategoryCounts,
+  backingCategoryMapForNames,
   capabilitiesForProfile,
   confirmToolsFrom,
   contractSdkVersions,
@@ -168,6 +171,7 @@ async function main() {
           description: PROFILE_DESCRIPTIONS[profile],
           capabilities: capabilitiesForProfile(profile),
           counts: fixture.counts,
+          backingCounts: backingCategoryCounts(fixture.names),
           names: fixture.names,
           requiredFields: fixture.requiredFields,
           confirmTools: fixture.confirmTools,
@@ -192,6 +196,8 @@ async function main() {
       cacheScope: APPROVED_CACHE_SCOPE,
     },
     sdk: sdkVersions,
+    backingCategories: TOOL_BACKING_CATEGORIES,
+    toolBacking: backingCategoryMapForNames(fixtures["full.modern"].names),
     profiles,
   };
 

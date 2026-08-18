@@ -14,13 +14,19 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 ## `full`
 
-Complete tool superset for contract review and regression detection: 17 Native B2 SDK tools, 19 AWS S3 SDK tools, and 4 custom MCP analytics; 3 Native B2 SDK durable-secret producers are unavailable stubs.
+Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers remain availability-annotated stubs.
 
 Profile hash: `e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221`
 
 ### Capability Input
 
 - Full-surface override (`null` capability input).
+
+### Backing Categories
+
+- Native B2 SDK: 17
+- AWS S3 SDK: 19
+- Neither SDK: 4
 
 ### `b2_*` Tools (21)
 
@@ -70,7 +76,7 @@ Profile hash: `e36dab8c8dd73d85d6a66485b76c4a97b3f2c25d65d61fa26f9fa1c549acc221`
 
 ## `phase1-default`
 
-Default customer-hosted Phase 1 profile: 14 Native B2 SDK names (including 3 durable-secret stubs), 19 AWS S3 SDK tools, and 4 custom MCP analytics; no distinct Partner/master credential.
+Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed only as unavailable stubs.
 
 Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
 
@@ -89,6 +95,12 @@ Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
 - `writeFileLegalHolds`
 - `writeFileRetentions`
 - `writeFiles`
+
+### Backing Categories
+
+- Native B2 SDK: 14
+- AWS S3 SDK: 19
+- Neither SDK: 4
 
 ### `b2_*` Tools (18)
 
@@ -135,7 +147,7 @@ Profile hash: `1603c83f8e75af4df12d2403f5a5089c10fc3bc0a8513cf01a6a87619dcafa83`
 
 ## `read-only`
 
-Deterministic read/list profile for safe production use and contract tests: 7 Native B2 SDK names (including 3 durable-secret stubs), 9 AWS S3 SDK tools, and 4 custom MCP analytics.
+Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs.
 
 Profile hash: `4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2`
 
@@ -146,6 +158,12 @@ Profile hash: `4d56be08d66d204082d50fb315fc946bbddbecb52be49b34d8e61b918751b8a2`
 - `listKeys`
 - `readBucketNotifications`
 - `readFiles`
+
+### Backing Categories
+
+- Native B2 SDK: 7
+- AWS S3 SDK: 9
+- Neither SDK: 4
 
 ### `b2_*` Tools (11)
 

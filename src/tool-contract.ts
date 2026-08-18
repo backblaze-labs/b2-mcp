@@ -37,6 +37,70 @@ export type Era = "modern" | "legacy";
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
 export type JsonObject = { [key: string]: JsonValue };
 
+export const TOOL_BACKING_CATEGORIES = {
+  nativeB2Sdk: {
+    label: "Native B2 SDK",
+    sdkPackage: "@backblaze-labs/b2-sdk",
+    description: "B2 operations the S3 API has no equivalent for.",
+  },
+  awsS3Sdk: {
+    label: "AWS S3 SDK",
+    sdkPackage: "@aws-sdk/client-s3",
+    description: "The S3-compatible data plane.",
+  },
+  customMcp: {
+    label: "Neither SDK",
+    sdkPackage: null,
+    description: "Repository-owned MCP analytics that no SDK exposes as primitives.",
+  },
+} as const;
+
+export type ToolBackingCategory = keyof typeof TOOL_BACKING_CATEGORIES;
+export type ToolBackingCounts = Record<ToolBackingCategory, number>;
+
+export const TOOL_BACKING_BY_NAME = {
+  b2_authorize_account: "nativeB2Sdk",
+  b2_create_bucket: "nativeB2Sdk",
+  b2_create_group_member: "nativeB2Sdk",
+  b2_create_key: "nativeB2Sdk",
+  b2_delete_bucket: "nativeB2Sdk",
+  b2_delete_key: "nativeB2Sdk",
+  b2_egress_leaders: "customMcp",
+  b2_eject_group_member: "nativeB2Sdk",
+  b2_get_bucket_notification_rules: "nativeB2Sdk",
+  b2_largest_files: "customMcp",
+  b2_list_buckets: "nativeB2Sdk",
+  b2_list_group_members: "nativeB2Sdk",
+  b2_list_groups: "nativeB2Sdk",
+  b2_list_keys: "nativeB2Sdk",
+  b2_reserve_trial_create_account: "nativeB2Sdk",
+  b2_set_bucket_notification_rules: "nativeB2Sdk",
+  b2_unfinished_uploads: "customMcp",
+  b2_update_bucket: "nativeB2Sdk",
+  b2_update_file_legal_hold: "nativeB2Sdk",
+  b2_update_file_retention: "nativeB2Sdk",
+  b2_usage_growth: "customMcp",
+  s3_abort_multipart_upload: "awsS3Sdk",
+  s3_complete_multipart_upload: "awsS3Sdk",
+  s3_copy_object: "awsS3Sdk",
+  s3_create_multipart_upload: "awsS3Sdk",
+  s3_delete_object: "awsS3Sdk",
+  s3_delete_objects: "awsS3Sdk",
+  s3_get_bucket_location: "awsS3Sdk",
+  s3_get_object: "awsS3Sdk",
+  s3_get_presigned_url: "awsS3Sdk",
+  s3_head_bucket: "awsS3Sdk",
+  s3_head_object: "awsS3Sdk",
+  s3_list_multipart_uploads: "awsS3Sdk",
+  s3_list_object_versions: "awsS3Sdk",
+  s3_list_objects_v2: "awsS3Sdk",
+  s3_list_parts: "awsS3Sdk",
+  s3_presign_upload_part: "awsS3Sdk",
+  s3_put_bucket_lifecycle: "awsS3Sdk",
+  s3_put_object: "awsS3Sdk",
+  s3_upload_part_copy: "awsS3Sdk",
+} as const satisfies Record<string, ToolBackingCategory>;
+
 export interface NormalizedTool {
   name: string;
   descriptionSha256: string;
@@ -82,6 +146,7 @@ export interface ContractProfile {
   description: string;
   capabilities: string[] | null;
   counts: ToolFixture["counts"];
+  backingCounts: ToolBackingCounts;
   names: string[];
   requiredFields: Record<string, string[]>;
   confirmTools: string[];
@@ -97,6 +162,8 @@ export interface ContractArtifact {
   mcpRevision: string;
   approvedCacheHint: { ttlMs: number; cacheScope: string };
   sdk: Record<string, string>;
+  backingCategories: typeof TOOL_BACKING_CATEGORIES;
+  toolBacking: Record<string, ToolBackingCategory>;
   profiles: Record<ProfileName, ContractProfile>;
 }
 
@@ -144,11 +211,11 @@ export interface ToolFixtureFromCollectedOptions {
 }
 
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
-  full: "Complete tool superset for contract review and regression detection: 17 Native B2 SDK tools, 19 AWS S3 SDK tools, and 4 custom MCP analytics; 3 Native B2 SDK durable-secret producers are unavailable stubs.",
+  full: "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers remain availability-annotated stubs.",
   "phase1-default":
-    "Default customer-hosted Phase 1 profile: 14 Native B2 SDK names (including 3 durable-secret stubs), 19 AWS S3 SDK tools, and 4 custom MCP analytics; no distinct Partner/master credential.",
+    "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed only as unavailable stubs.",
   "read-only":
-    "Deterministic read/list profile for safe production use and contract tests: 7 Native B2 SDK names (including 3 durable-secret stubs), 9 AWS S3 SDK tools, and 4 custom MCP analytics.",
+    "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs.",
 };
 
 export const PROFILE_NAMES = Object.keys(PROFILE_CAPABILITIES) as ProfileName[];
@@ -206,6 +273,45 @@ export function countPrefixes(names: string[]): ToolFixture["counts"] {
     s3: names.filter((name) => name.startsWith("s3_")).length,
     bz: names.filter((name) => name.startsWith("bz_")).length,
   };
+}
+
+function backingCategoryNames(): ToolBackingCategory[] {
+  return Object.keys(TOOL_BACKING_CATEGORIES) as ToolBackingCategory[];
+}
+
+export function backingCategoryMapForNames(
+  names: readonly string[],
+): Record<string, ToolBackingCategory> {
+  const toolBacking = TOOL_BACKING_BY_NAME as Record<string, ToolBackingCategory | undefined>;
+  const missing: string[] = [];
+  const result: Record<string, ToolBackingCategory> = {};
+
+  for (const name of [...names].sort()) {
+    const category = toolBacking[name];
+    if (!category) {
+      missing.push(name);
+      continue;
+    }
+    result[name] = category;
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Missing backing category for tool(s): ${missing.join(", ")}`);
+  }
+
+  return result;
+}
+
+export function backingCategoryCounts(names: readonly string[]): ToolBackingCounts {
+  const counts = Object.fromEntries(
+    backingCategoryNames().map((category) => [category, 0]),
+  ) as ToolBackingCounts;
+
+  for (const category of Object.values(backingCategoryMapForNames(names))) {
+    counts[category] += 1;
+  }
+
+  return counts;
 }
 
 export function normalizeTool(tool: {
@@ -368,6 +474,12 @@ export function renderProfileReference(contract: ContractArtifact): string {
         .filter((name) => name.startsWith("s3_"))
         .map((name) => `- \`${name}\``)
         .join("\n");
+      const backingCounts = backingCategoryNames()
+        .map(
+          (category) =>
+            `- ${contract.backingCategories[category].label}: ${data.backingCounts[category]}`,
+        )
+        .join("\n");
       return [
         `## \`${profile}\``,
         "",
@@ -378,6 +490,10 @@ export function renderProfileReference(contract: ContractArtifact): string {
         "### Capability Input",
         "",
         capabilities,
+        "",
+        "### Backing Categories",
+        "",
+        backingCounts,
         "",
         `### \`b2_*\` Tools (${data.counts.b2})`,
         "",

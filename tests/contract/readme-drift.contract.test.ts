@@ -10,6 +10,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
+import { TOOL_BACKING_CATEGORIES, backingCategoryCounts } from "../../src/tool-contract";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 import { readJson } from "./support";
 
@@ -58,18 +59,11 @@ describe("README tool-surface drift", () => {
     const total = toolNames.length;
     const native = toolNames.filter((n) => n.startsWith("b2_")).length;
     const s3 = toolNames.filter((n) => n.startsWith("s3_")).length;
-    const customMcpTools = [
-      "b2_egress_leaders",
-      "b2_largest_files",
-      "b2_unfinished_uploads",
-      "b2_usage_growth",
-    ];
-    const nativeB2Sdk = native - customMcpTools.length;
+    const backingCounts = backingCategoryCounts(toolNames);
 
-    expect(customMcpTools.every((name) => toolNames.includes(name))).toBe(true);
     expect(readme).toContain(`**${total} tools, assigned by backing category:**`);
     expect(readme).toContain(
-      `**${total} total — ${nativeB2Sdk} Native B2 SDK + ${s3} AWS S3 SDK + ${customMcpTools.length} custom MCP tools.**`,
+      `**${total} total — ${backingCounts.nativeB2Sdk} ${TOOL_BACKING_CATEGORIES.nativeB2Sdk.label} + ${backingCounts.awsS3Sdk} ${TOOL_BACKING_CATEGORIES.awsS3Sdk.label} + ${backingCounts.customMcp} ${TOOL_BACKING_CATEGORIES.customMcp.label}/custom MCP tools.**`,
     );
     expect(readme).toContain(
       `Prefix counts remain ${native} native \`b2_*\` names + ${s3} data-plane \`s3_*\` names.`,

@@ -163,9 +163,9 @@ The profile count table below is the canonical numeric source in this document:
 
 | Profile          | Total tools | `b2_*` | `s3_*` | `bz_*` | Purpose                                                                                  |
 | ---------------- | ----------- | ------ | ------ | ------ | ---------------------------------------------------------------------------------------- |
-| `full`           | 40          | 21     | 19     | 0      | Complete surface: 17 Native B2 SDK, 19 AWS S3 SDK, 4 custom MCP; 3 unavailable stubs.   |
-| `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted profile; Partner read/eject/list omitted; 3 unavailable stubs.  |
-| `read-only`      | 20          | 11     | 9      | 0      | Deterministic read/list profile; narrowed backing categories; 3 unavailable stubs.      |
+| `full`           | 40          | 21     | 19     | 0      | Complete surface across all backing categories; durable-secret availability annotated.  |
+| `phase1-default` | 37          | 18     | 19     | 0      | Default customer-hosted profile; Partner read/eject/list omitted; secret stubs kept.    |
+| `read-only`      | 20          | 11     | 9      | 0      | Deterministic read/list profile; write/delete/admin handlers omitted; secret stubs kept. |
 
 The enumerated tool lists below are the canonical membership snapshot for this
 decision. The implementation source is the tool registration modules plus

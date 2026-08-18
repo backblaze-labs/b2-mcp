@@ -12,15 +12,79 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0"
   },
+  "backingCategories": {
+    "nativeB2Sdk": {
+      "label": "Native B2 SDK",
+      "sdkPackage": "@backblaze-labs/b2-sdk",
+      "description": "B2 operations the S3 API has no equivalent for."
+    },
+    "awsS3Sdk": {
+      "label": "AWS S3 SDK",
+      "sdkPackage": "@aws-sdk/client-s3",
+      "description": "The S3-compatible data plane."
+    },
+    "customMcp": {
+      "label": "Neither SDK",
+      "sdkPackage": null,
+      "description": "Repository-owned MCP analytics that no SDK exposes as primitives."
+    }
+  },
+  "toolBacking": {
+    "b2_authorize_account": "nativeB2Sdk",
+    "b2_create_bucket": "nativeB2Sdk",
+    "b2_create_group_member": "nativeB2Sdk",
+    "b2_create_key": "nativeB2Sdk",
+    "b2_delete_bucket": "nativeB2Sdk",
+    "b2_delete_key": "nativeB2Sdk",
+    "b2_egress_leaders": "customMcp",
+    "b2_eject_group_member": "nativeB2Sdk",
+    "b2_get_bucket_notification_rules": "nativeB2Sdk",
+    "b2_largest_files": "customMcp",
+    "b2_list_buckets": "nativeB2Sdk",
+    "b2_list_group_members": "nativeB2Sdk",
+    "b2_list_groups": "nativeB2Sdk",
+    "b2_list_keys": "nativeB2Sdk",
+    "b2_reserve_trial_create_account": "nativeB2Sdk",
+    "b2_set_bucket_notification_rules": "nativeB2Sdk",
+    "b2_unfinished_uploads": "customMcp",
+    "b2_update_bucket": "nativeB2Sdk",
+    "b2_update_file_legal_hold": "nativeB2Sdk",
+    "b2_update_file_retention": "nativeB2Sdk",
+    "b2_usage_growth": "customMcp",
+    "s3_abort_multipart_upload": "awsS3Sdk",
+    "s3_complete_multipart_upload": "awsS3Sdk",
+    "s3_copy_object": "awsS3Sdk",
+    "s3_create_multipart_upload": "awsS3Sdk",
+    "s3_delete_object": "awsS3Sdk",
+    "s3_delete_objects": "awsS3Sdk",
+    "s3_get_bucket_location": "awsS3Sdk",
+    "s3_get_object": "awsS3Sdk",
+    "s3_get_presigned_url": "awsS3Sdk",
+    "s3_head_bucket": "awsS3Sdk",
+    "s3_head_object": "awsS3Sdk",
+    "s3_list_multipart_uploads": "awsS3Sdk",
+    "s3_list_object_versions": "awsS3Sdk",
+    "s3_list_objects_v2": "awsS3Sdk",
+    "s3_list_parts": "awsS3Sdk",
+    "s3_presign_upload_part": "awsS3Sdk",
+    "s3_put_bucket_lifecycle": "awsS3Sdk",
+    "s3_put_object": "awsS3Sdk",
+    "s3_upload_part_copy": "awsS3Sdk"
+  },
   "profiles": {
     "full": {
-      "description": "Complete tool superset for contract review and regression detection: 17 Native B2 SDK tools, 19 AWS S3 SDK tools, and 4 custom MCP analytics; 3 Native B2 SDK durable-secret producers are unavailable stubs.",
+      "description": "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers remain availability-annotated stubs.",
       "capabilities": null,
       "counts": {
         "total": 40,
         "b2": 21,
         "s3": 19,
         "bz": 0
+      },
+      "backingCounts": {
+        "nativeB2Sdk": 17,
+        "awsS3Sdk": 19,
+        "customMcp": 4
       },
       "names": [
         "b2_authorize_account",
@@ -145,7 +209,7 @@
       }
     },
     "phase1-default": {
-      "description": "Default customer-hosted Phase 1 profile: 14 Native B2 SDK names (including 3 durable-secret stubs), 19 AWS S3 SDK tools, and 4 custom MCP analytics; no distinct Partner/master credential.",
+      "description": "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed only as unavailable stubs.",
       "capabilities": [
         "deleteBuckets",
         "deleteFiles",
@@ -166,6 +230,11 @@
         "b2": 18,
         "s3": 19,
         "bz": 0
+      },
+      "backingCounts": {
+        "nativeB2Sdk": 14,
+        "awsS3Sdk": 19,
+        "customMcp": 4
       },
       "names": [
         "b2_authorize_account",
@@ -282,7 +351,7 @@
       }
     },
     "read-only": {
-      "description": "Deterministic read/list profile for safe production use and contract tests: 7 Native B2 SDK names (including 3 durable-secret stubs), 9 AWS S3 SDK tools, and 4 custom MCP analytics.",
+      "description": "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs.",
       "capabilities": [
         "listBuckets",
         "listFiles",
@@ -295,6 +364,11 @@
         "b2": 11,
         "s3": 9,
         "bz": 0
+      },
+      "backingCounts": {
+        "nativeB2Sdk": 7,
+        "awsS3Sdk": 9,
+        "customMcp": 4
       },
       "names": [
         "b2_authorize_account",
