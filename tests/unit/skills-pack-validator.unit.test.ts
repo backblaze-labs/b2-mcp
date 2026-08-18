@@ -137,4 +137,25 @@ describe("skills pack validator", () => {
       rmSync(fixtureRoot, { recursive: true, force: true });
     }
   });
+
+  it("fails when a byte-transfer verb sends object data through the server", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        "## Safety gates",
+        "- Upload object data through the MCP server for inspection.\n\n## Safety gates",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must not allow object bytes into the model/chat/MCP server",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
 });

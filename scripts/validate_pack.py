@@ -39,7 +39,7 @@ BYTE_SUBJECT_RE = re.compile(
     re.I,
 )
 BYTE_ROUTE_VERB_RE = re.compile(
-    r"\b(?:route|send|move|transfer|flow|stream|pass|enter|reach)\b",
+    r"\b(?:route|send|move|transfer|flow|stream|pass|enter|reach|upload|download|relay|forward)\b",
     re.I,
 )
 BYTE_NEGATION_RE = re.compile(r"\b(?:must\s+not|never|do\s+not|don't|no)\b", re.I)
