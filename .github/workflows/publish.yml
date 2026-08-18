@@ -79,7 +79,12 @@ jobs:
         env:
           PUBLISH_TAG: ${{ steps.request.outputs.tag }}
           PUBLISH_REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Private repo: authenticate manual git remote reads (ls-remote/fetch)
+          # without persisting checkout credentials.
+          git config --global "http.${GITHUB_SERVER_URL}/.extraheader" \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 | tr -d '\n')"
           PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
           node scripts/resolve-publish-ref.mjs \
             --tag "${PUBLISH_TAG}" \
