@@ -1,7 +1,7 @@
 import { readFileSync } from "fs";
 import { join } from "path";
 import { helpText } from "../../src/cli";
-import { B2_OAUTH_SCOPES } from "../../src/oauth-resource-server";
+import { B2_OAUTH_SCOPES, OAUTH_ENVIRONMENT_VARIABLES } from "../../src/oauth-resource-server";
 import { readJson, root } from "./support";
 
 function read(relativePath: string): string {
@@ -9,14 +9,7 @@ function read(relativePath: string): string {
 }
 
 function envNames(text: string): string[] {
-  return [
-    ...new Set(
-      [...text.matchAll(/\bB2_[A-Z0-9_]+\b/g)]
-        .map((match) => match[0])
-        .filter((name) => name !== "B2_OAUTH_SCOPES")
-        .sort(),
-    ),
-  ];
+  return [...new Set([...text.matchAll(/\bB2_[A-Z0-9_]+\b/g)].map((match) => match[0]).sort())];
 }
 
 function markdownFiles(): string[] {
@@ -41,6 +34,7 @@ function markdownFiles(): string[] {
 describe("public support and authentication claims", () => {
   const readme = read("README.md");
   const clients = read("docs/CLIENTS.md");
+  const contributing = read("CONTRIBUTING.md");
   const authentication = read("docs/AUTHENTICATION.md");
   const release = read("RELEASE.md");
   const security = read("SECURITY.md");
@@ -49,6 +43,7 @@ describe("public support and authentication claims", () => {
     bin: Record<string, string>;
     files: string[];
     name: string;
+    scripts: Record<string, string>;
   }>("package.json");
 
   it("keeps package and binary naming claims canonical", () => {
@@ -69,12 +64,23 @@ describe("public support and authentication claims", () => {
   });
 
   it("does not present the unpublished npm package as an active quick start", () => {
+    expect([readme, clients].join("\n")).not.toContain("as of 2026-08-18");
     for (const line of [readme, clients, release]
       .join("\n")
       .split(/\r?\n/)
       .filter((candidate) => candidate.includes("npx @backblaze-labs/b2-mcp"))) {
       expect(line).toMatch(/do not use|does not advertise|Do not advertise/);
     }
+  });
+
+  it("keeps CONTRIBUTING pnpm run references backed by package scripts", () => {
+    const citedScripts = [
+      ...new Set([...contributing.matchAll(/`pnpm run ([a-z0-9:.-]+)`/g)].map((match) => match[1])),
+    ].sort();
+    const missing = citedScripts.filter((script) => !packageJson.scripts[script]);
+
+    expect(citedScripts.length).toBeGreaterThan(0);
+    expect(missing).toEqual([]);
   });
 
   it("keeps the checked-in CLI reference aligned with source help", () => {
@@ -105,13 +111,9 @@ describe("public support and authentication claims", () => {
   });
 
   it("documents every OAuth environment variable read by the resource server", () => {
-    const sourceEnv = envNames(read("src/oauth-resource-server.ts")).filter(
-      (name) =>
-        name.startsWith("B2_OAUTH_") ||
-        name === "B2_MCP_PUBLIC_URL" ||
-        name === "B2_MCP_SERVICE_DOCUMENTATION_URL",
-    );
-    const missing = sourceEnv.filter((name) => !authentication.includes(name));
+    const documentedEnv = envNames(authentication);
+    const sourceEnv = [...new Set(Object.values(OAUTH_ENVIRONMENT_VARIABLES))].sort();
+    const missing = sourceEnv.filter((name) => !documentedEnv.includes(name));
 
     expect(missing).toEqual([]);
   });
@@ -147,6 +149,16 @@ describe("public support and authentication claims", () => {
     ]) {
       expect(authentication).toContain(required);
     }
+    expect(security).toMatch(/registered\s+only as non-secret unavailable compatibility stubs/);
+    for (const required of [
+      "b2_create_key",
+      "b2_create_group_member",
+      "b2_reserve_trial_create_account",
+    ]) {
+      expect(security).toContain(required);
+    }
+    expect(readme).toContain("Under stdio's default `confirm` policy");
+    expect(readme).toContain("HTTP defaults to `block`");
   });
 
   it("keeps support policy split between SECURITY and RELEASE", () => {

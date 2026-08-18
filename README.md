@@ -33,9 +33,9 @@ Destructive actions are gated, durable B2 secrets never enter the model's contex
 
 The canonical package name is `@backblaze-labs/b2-mcp` and the canonical
 binary is `b2-mcp`. The transition binary alias `b2-mcp-server` is kept only
-for existing local configs. The first `0.1.0` npm publish has not happened yet
-as of 2026-08-18, so do not use an `npx @backblaze-labs/b2-mcp` quick start
-until the package is visible on npm. For now, run from a source checkout:
+for existing local configs. Until the first `0.1.0` npm publish is visible on
+npm, do not use an `npx @backblaze-labs/b2-mcp` quick start. For now, run from
+a source checkout:
 
 **1. Build from source:**
 
@@ -309,7 +309,7 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 
 ## Available tools
 
-**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: 37 tools are available in the full surface, while `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are durable-secret-producing compatibility stubs for stale cached `tools/list` clients. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Fourteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` under the default policy: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion).
+**40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: 37 tools are available in the full surface, while `b2_create_key`, `b2_create_group_member`, and `b2_reserve_trial_create_account` are durable-secret-producing compatibility stubs for stale cached `tools/list` clients. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fourteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
 
 <details>
 <summary><b>Category 1 — Native B2 SDK (17)</b></summary>

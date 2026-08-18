@@ -43,9 +43,7 @@ You also need a Backblaze B2 **Application Key** (key ID + secret). A single non
 
 The canonical npm package binary is `b2-mcp`; `b2-mcp-server` remains a
 transition alias for existing stdio configurations.
-The first `0.1.0` npm publish has not happened yet as of 2026-08-18, so this
-guide does not advertise `npx @backblaze-labs/b2-mcp` as an active setup path.
-Use the source checkout command until the package is visible on npm.
+Until the first `0.1.0` npm publish is visible on npm, this guide does not advertise `npx @backblaze-labs/b2-mcp` as an active setup path. Use the source checkout command until the package is visible on npm.
 
 ---
 

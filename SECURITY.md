@@ -57,11 +57,12 @@ Out of scope:
 
 Default MCP tools must not return durable B2 secrets. Operations that create
 one-time application-key material, including `b2_create_key`,
-`b2_create_group_member`, and `b2_reserve_trial_create_account`, are not
-registered until a reviewed out-of-band secret sink exists. Tool responses,
-structured logs, thrown errors, snapshots, and CI artifacts are covered by a
-central sanitizer that redacts known B2 credential, authorization-token, upload
-token, notification signing-secret, and secret-header fields.
+`b2_create_group_member`, and `b2_reserve_trial_create_account`, are registered
+only as non-secret unavailable compatibility stubs until a reviewed out-of-band
+secret sink exists. Tool responses, structured logs, thrown errors, snapshots,
+and CI artifacts are covered by a central sanitizer that redacts known B2
+credential, authorization-token, upload token, notification signing-secret, and
+secret-header fields.
 
 Structured successful tool results use `structuredContent` as the canonical
 sanitized JSON value. The LLM-facing text block may be TOON or compact JSON, but

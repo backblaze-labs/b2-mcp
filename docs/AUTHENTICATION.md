@@ -12,10 +12,10 @@ hosted multi-tenant control plane.
 Caller authentication is performed by the customer-operated edge, adapter, or
 resource-server layer before B2 credential resolution. For the built-in hosted
 adapters, `src/oauth-resource-server.ts` validates the bearer token and passes
-verified MCP `authInfo` into the shared request pipeline. Custom Node HTTP
-embeds may inject `authInfo` through the `getAuthInfo` option on
-`buildHttpServer`; that hook is trusted only when the embedding edge has already
-authenticated the caller.
+verified MCP `authInfo` into the shared request pipeline. The published package
+does not expose a semver-managed Node HTTP embedding API; custom deployments
+should use the documented hosted adapter boundary or maintain their own
+source-level adapter that only forwards `authInfo` after caller authentication.
 
 B2 credential custody is separate from MCP OAuth. OAuth proves who may call the
 MCP endpoint. B2 application keys are then selected by one of the credential
@@ -32,8 +32,9 @@ modes below and are never ordinary MCP tool arguments.
 
 `server` and `principal` reject public B2 credential headers. `principal`
 requires verified `authInfo`, derives a stable principal from `iss#sub` or an
-equivalent verified subject claim, looks it up in `B2_PRINCIPAL_CREDENTIAL_MAP`,
-and resolves the matching `B2_CREDENTIAL_<REF>_*` environment-backed secret.
+equivalent verified introspection `subject` or `principal` claim, looks it up in
+`B2_PRINCIPAL_CREDENTIAL_MAP`, and resolves the matching
+`B2_CREDENTIAL_<REF>_*` environment-backed secret.
 
 ## Credential Flow Diagrams
 
