@@ -243,7 +243,7 @@ jobs:
             const [pack] = JSON.parse(readFileSync("publish-package/npm-pack.json", "utf8"));
             process.stdout.write(npmDistTag(pack.version));
           ')"
-          npm publish "publish-package/${EXPECTED_TARBALL_NAME}" \
+          npm publish "./publish-package/${EXPECTED_TARBALL_NAME}" \
             --dry-run \
             --access public \
             --ignore-scripts \
@@ -328,7 +328,7 @@ jobs:
           EXPECTED_TARBALL_INTEGRITY: ${{ needs.prepare.outputs.tarball-integrity }}
         run: |
           set -euo pipefail
-          tarball="publish-package/${EXPECTED_TARBALL_NAME}"
+          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
           if [[ ! -f "$tarball" ]]; then
             echo "::error::Expected publish tarball ${tarball} is missing"
             exit 1
@@ -359,7 +359,7 @@ jobs:
           EXPECTED_TARBALL_INTEGRITY: ${{ needs.prepare.outputs.tarball-integrity }}
         run: |
           set -euo pipefail
-          tarball="publish-package/${EXPECTED_TARBALL_NAME}"
+          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
           package_metadata="$(node -e '
             const cp = require("child_process");
             const pkg = JSON.parse(cp.execFileSync("tar", ["-xOf", process.argv[1], "package/package.json"], { encoding: "utf8" }));
@@ -462,7 +462,7 @@ jobs:
           EXPECTED_RELEASE_NOTES_SHA256: ${{ needs.prepare.outputs.release-notes-sha256 }}
         run: |
           set -euo pipefail
-          tarball="publish-package/${EXPECTED_TARBALL_NAME}"
+          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
           sbom="publish-package/${EXPECTED_SBOM_NAME}"
           checksums="publish-package/${EXPECTED_CHECKSUMS_NAME}"
           notes="publish-package/${EXPECTED_RELEASE_NOTES_NAME}"
