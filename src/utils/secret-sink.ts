@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { logger } from "./logger.js";
 import { toolJson, toolJsonInlineDurableSecret } from "./errors.js";
 import type { StructuredToolResult } from "./result-serializer.js";
@@ -154,6 +154,30 @@ function preflightSecretSinkFile(filePath: string): void {
   if (created || !fileExisted) fsyncParentDirectory(parent);
 }
 
+function canonicalDestinationPath(filePath: string): string {
+  try {
+    return fs.realpathSync.native(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+
+  const parent = dirname(filePath);
+  try {
+    return join(fs.realpathSync.native(parent), basename(filePath));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return resolve(filePath);
+  }
+}
+
+function assertSecretSinkDoesNotCollideWithLogFile(filePath: string, env: NodeJS.ProcessEnv): void {
+  const logFile = env.B2_LOG_FILE?.trim();
+  if (!logFile) return;
+  if (canonicalDestinationPath(filePath) === canonicalDestinationPath(logFile)) {
+    throw new Error(`${SECRET_SINK_FILE_ENV} must not resolve to B2_LOG_FILE: ${filePath}`);
+  }
+}
+
 function defaultFileUnavailableReason(filePath: string, err: unknown): string {
   return [
     `the default secret sink file could not be opened at ${filePath}`,
@@ -210,6 +234,7 @@ export function resolveSecretSinkConfig(options: ResolveSecretSinkOptions): Secr
   }
 
   const filePath = explicitPath ?? options.defaultFilePath ?? DEFAULT_SECRET_SINK_PATH;
+  assertSecretSinkDoesNotCollideWithLogFile(filePath, env);
   if (options.preflight !== false) {
     try {
       preflightSecretSinkFile(filePath);
@@ -287,34 +312,37 @@ export function appendSecretSinkRecord(
       envVarName: SECRET_SINK_FILE_ENV,
       mode: SECURE_APPEND_FILE_MODE,
     });
-    fsyncParentDirectory(parent);
-    const originalSize = fs.fstatSync(fd).size;
     let committed = false;
+    let originalSize: number | undefined;
     let operationError: unknown;
     let closeError: unknown;
     try {
+      fsyncParentDirectory(parent);
+      originalSize = fs.fstatSync(fd).size;
       writeAll(fd, `${JSON.stringify(record)}\n`);
       secretSinkFileOpsForTests.fsyncSync(fd);
       committed = true;
     } catch (err) {
       operationError = err;
-      try {
-        secretSinkFileOpsForTests.ftruncateSync(fd, originalSize);
-        secretSinkFileOpsForTests.fsyncSync(fd);
-      } catch (rollbackErr) {
-        operationError = new SecretSinkCommitAmbiguousError(
-          `${SECRET_SINK_FILE_ENV} write failed and rollback could not be confirmed`,
-          rollbackErr,
-        );
-        logger.fatal(
-          {
-            err,
+      if (originalSize !== undefined) {
+        try {
+          secretSinkFileOpsForTests.ftruncateSync(fd, originalSize);
+          secretSinkFileOpsForTests.fsyncSync(fd);
+        } catch (rollbackErr) {
+          operationError = new SecretSinkCommitAmbiguousError(
+            `${SECRET_SINK_FILE_ENV} write failed and rollback could not be confirmed`,
             rollbackErr,
-            tool,
-            secretSink: { type: "file", path: sink.filePath },
-          },
-          "secret_sink.rollback_failed_after_write_error",
-        );
+          );
+          logger.fatal(
+            {
+              err,
+              rollbackErr,
+              tool,
+              secretSink: { type: "file", path: sink.filePath },
+            },
+            "secret_sink.rollback_failed_after_write_error",
+          );
+        }
       }
     } finally {
       try {

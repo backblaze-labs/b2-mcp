@@ -168,6 +168,26 @@ describe("secret sink configuration", () => {
       }),
     ).toThrow(/B2_SECRET_SINK=file could not open/);
   });
+
+  it("rejects a secret sink path that resolves to the log file", () => {
+    const file = join(tempDir(), "shared.jsonl");
+    const missingParentFile = join(tempDir(), "missing", "shared.jsonl");
+
+    expect(() =>
+      resolveSecretSinkConfig({
+        transport: "stdio",
+        env: { B2_SECRET_SINK_FILE: file, B2_LOG_FILE: file },
+        preflight: false,
+      }),
+    ).toThrow(/B2_SECRET_SINK_FILE must not resolve to B2_LOG_FILE/);
+    expect(() =>
+      resolveSecretSinkConfig({
+        transport: "stdio",
+        env: { B2_SECRET_SINK_FILE: missingParentFile, B2_LOG_FILE: missingParentFile },
+        preflight: false,
+      }),
+    ).toThrow(/B2_SECRET_SINK_FILE must not resolve to B2_LOG_FILE/);
+  });
 });
 
 describe("secret sink file writer", () => {
@@ -202,6 +222,26 @@ describe("secret sink file writer", () => {
       applicationKey: "B2_MCP_CANARY_SECRET_file_sink",
     });
     expect(record.ts).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  });
+
+  it("closes the ledger descriptor when pre-commit directory fsync fails", () => {
+    const originalFsync = secretSinkFileOpsForTests.fsyncSync;
+    let fsyncCalls = 0;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      fsyncCalls++;
+      if (fsyncCalls === 3) throw new Error("directory fsync failed");
+      return originalFsync(fd);
+    });
+    const closeSpy = vi.spyOn(secretSinkFileOpsForTests, "closeSync");
+    const file = join(tempDir(), "secrets.jsonl");
+
+    expect(() =>
+      appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+        applicationKey: "B2_MCP_CANARY_SECRET_precommit_fsync",
+      }),
+    ).toThrow(/directory fsync failed/);
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
   });
 
   it("rejects symlink, hard-linked, and wrong-owner targets", () => {
