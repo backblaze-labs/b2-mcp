@@ -365,9 +365,12 @@ there. HTTP/serverless defaults to `off`; enabling `file` there requires both
 into MCP output with a warning; HTTP/serverless also requires
 `B2_ALLOW_INLINE_SECRETS=true`. File sink records use stable JSONL
 metadata fields (`ts`, `tool`, `recordId`) plus idempotency metadata and a
-`result` payload. The file has no built-in rotation or pruning, so operators
-must rotate, prune, vault, or delete it under the same credential-retention
-policy used for live B2 keys. The SDK-backed
+`result` payload. File mode also writes a non-secret sidecar idempotency index at
+`<B2_SECRET_SINK_FILE>.idempotency.jsonl`, which preserves retry history when the
+plaintext ledger is rotated or vaulted. The ledger has no built-in rotation or
+pruning, so operators must rotate, prune, vault, or delete it under the same
+credential-retention policy used for live B2 keys while retaining the sidecar for
+the deployment's retry window. The SDK-backed
 Partner/Groups tools remain available only when a distinct master key is
 configured and the account is authorized for the Partner API.
 

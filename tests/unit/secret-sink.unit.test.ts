@@ -531,6 +531,58 @@ describe("secret sink file writer", () => {
     });
   });
 
+  it("reuses idempotency records after the plaintext ledger is rotated away", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "ledger-rotated",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "ledger-rotated", capabilities: ["listBuckets"] },
+    });
+    const options = {
+      secretSink: { mode: "file" as const, filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      projectRedacted: (result: Record<string, unknown>, pointer: unknown) => ({
+        ...result,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (result: Record<string, unknown>, warning: string) => ({
+        ...result,
+        warning,
+      }),
+    };
+    let createCalls = 0;
+
+    const first = await executeDurableSecretOperation({
+      ...options,
+      create: async () => {
+        createCalls++;
+        return {
+          applicationKeyId: "key-id",
+          applicationKey: "B2_MCP_CANARY_SECRET_indexed",
+        };
+      },
+    });
+    rmSync(file);
+
+    const second = await executeDurableSecretOperation({
+      ...options,
+      create: async () => {
+        createCalls++;
+        return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+      },
+    });
+
+    expect(createCalls).toBe(1);
+    expect(second.structuredContent).toEqual(first.structuredContent);
+    const index = readFileSync(`${file}.idempotency.jsonl`, "utf8");
+    expect(index).toContain("ledger-rotated");
+    expect(index).not.toContain("B2_MCP_CANARY_SECRET_indexed");
+  });
+
   it("rejects conflicting input on the same pending idempotency claim", async () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");

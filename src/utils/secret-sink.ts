@@ -12,6 +12,7 @@ import {
   SECURE_APPEND_FILE_MODE,
   secureAppendFileErrorDetail,
 } from "./secure-append-file.js";
+import { sanitizeForMcpOutput } from "./secret-sanitizer.js";
 
 export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.jsonl");
 export const APPLICATION_KEY_REDACTED = "[redacted]";
@@ -62,6 +63,10 @@ interface SecretLedgerRecord {
   recordId: string;
   result: unknown;
   idempotency?: DurableSecretIdempotency;
+}
+
+interface SecretSinkIdempotencyIndexRecord extends SecretLedgerRecord {
+  pointer?: SecretSinkPointer;
 }
 
 interface ExistingSecretSinkRecord {
@@ -471,8 +476,27 @@ function readMatchingSecretSinkRecord(
   idempotency: DurableSecretIdempotency,
 ): ExistingSecretSinkRecord | null {
   recoverIncompleteLedgerTail(sink, tool);
+  const activeLedgerMatch = readMatchingSecretSinkJsonlRecord(
+    sink.filePath,
+    sink,
+    tool,
+    idempotency,
+  );
+  if (activeLedgerMatch) return activeLedgerMatch;
+  const indexPath = secretSinkIdempotencyIndexPath(sink.filePath);
+  if (!fs.existsSync(indexPath)) return null;
+  recoverIncompleteJsonlTail(indexPath, tool);
+  return readMatchingSecretSinkJsonlRecord(indexPath, sink, tool, idempotency);
+}
+
+function readMatchingSecretSinkJsonlRecord(
+  filePath: string,
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  tool: string,
+  idempotency: DurableSecretIdempotency,
+): ExistingSecretSinkRecord | null {
   const lines = fs
-    .readFileSync(sink.filePath, "utf8")
+    .readFileSync(filePath, "utf8")
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
@@ -487,12 +511,74 @@ function readMatchingSecretSinkRecord(
     if (record.idempotency.fingerprint !== idempotency.fingerprint) {
       throw idempotencyConflictError();
     }
+    const indexPointer = (record as SecretSinkIdempotencyIndexRecord).pointer;
+    const pointer =
+      indexPointer &&
+      indexPointer.type === "file" &&
+      typeof indexPointer.path === "string" &&
+      typeof indexPointer.recordId === "string"
+        ? indexPointer
+        : { type: "file" as const, path: sink.filePath, recordId: record.recordId };
     return {
-      pointer: { type: "file", path: sink.filePath, recordId: record.recordId },
+      pointer,
       result: record.result,
     };
   }
   return null;
+}
+
+function secretSinkIdempotencyIndexPath(filePath: string): string {
+  return `${filePath}.idempotency.jsonl`;
+}
+
+function recoverIncompleteJsonlTail(filePath: string, tool: string): void {
+  const parent = dirname(filePath);
+  const appendLock = acquireLedgerAppendLock(filePath, parent, tool);
+  try {
+    truncateIncompleteLedgerTail(filePath, tool);
+  } finally {
+    releaseSecretSinkClaimBestEffort(appendLock, {
+      tool,
+      secretSink: { type: "file", path: filePath },
+      lockPath: appendLock.lockPath,
+    });
+  }
+}
+
+function appendSecretSinkIdempotencyIndex(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  tool: string,
+  pointer: SecretSinkPointer,
+  result: unknown,
+  idempotency: DurableSecretIdempotency,
+): void {
+  const indexPath = secretSinkIdempotencyIndexPath(sink.filePath);
+  const parent = dirname(indexPath);
+  const appendLock = acquireLedgerAppendLock(indexPath, parent, tool);
+  try {
+    const record: SecretSinkIdempotencyIndexRecord = {
+      ...secretLedgerRecord(tool, pointer.recordId, sanitizeForMcpOutput(result), idempotency),
+      pointer,
+    };
+    truncateIncompleteLedgerTail(indexPath, tool);
+    const fd = openSecureAppendFile(indexPath, {
+      envVarName: SECRET_SINK_FILE_ENV,
+      mode: SECURE_APPEND_FILE_MODE,
+    });
+    try {
+      writeAll(fd, `${JSON.stringify(record)}\n`);
+      secretSinkFileOpsForTests.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fsyncParentDirectory(parent);
+  } finally {
+    releaseSecretSinkClaimBestEffort(appendLock, {
+      tool,
+      secretSink: { type: "file", path: sink.filePath },
+      lockPath: appendLock.lockPath,
+    });
+  }
 }
 
 function idempotencyConflictError(): unknown {
@@ -931,10 +1017,36 @@ export async function executeDurableSecretOperation<T>({
         "B2 created a durable credential, but the configured file secret sink failed before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status, then rotate or revoke the created resource.",
     };
   }
-  releaseSecretSinkClaimBestEffort(claim, {
-    tool: toolName,
-    secretSink: { type: "file", path: secretSink.filePath },
-    lockPath: claim.lockPath,
-  });
+  let idempotencyIndexed = false;
+  try {
+    appendSecretSinkIdempotencyIndex(secretSink, toolName, pointer, result, idempotency);
+    idempotencyIndexed = true;
+  } catch (err) {
+    logger.fatal(
+      {
+        err,
+        tool: toolName,
+        secretSink: { type: "file", path: secretSink.filePath },
+        lockPath: claim.lockPath,
+      },
+      "secret_sink.idempotency_index_write_failed",
+    );
+  }
+  if (idempotencyIndexed) {
+    releaseSecretSinkClaimBestEffort(claim, {
+      tool: toolName,
+      secretSink: { type: "file", path: secretSink.filePath },
+      lockPath: claim.lockPath,
+    });
+  } else {
+    logger.fatal(
+      {
+        tool: toolName,
+        secretSink: { type: "file", path: secretSink.filePath },
+        lockPath: claim.lockPath,
+      },
+      "secret_sink.idempotency_claim_retained_after_index_failure",
+    );
+  }
   return toolJson(projectRedacted(result, pointer));
 }
