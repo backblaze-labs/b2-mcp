@@ -59,45 +59,50 @@ afterAll(async () => {
 });
 
 // ── Notification rule write-shape contract ────────────────────────────────────
-describe("Contract: notification rules objectNamePrefix", () => {
-  liveIt(
-    "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
-    async () => {
-      const cleanupBucket: ContractBucketRef = { bucketId: "" };
-      try {
-        const bucket = await bucketTracker.createBucket("notify");
-        cleanupBucket.bucketId = bucket.bucketId;
-        cleanupBucket.bucketName = bucket.bucketName;
-        const res = await callTool(server, "b2_set_bucket_notification_rules", {
-          bucketId: cleanupBucket.bucketId,
-          eventNotificationRules: [
-            {
-              name: contractRuleName("notify-rule"),
-              // objectNamePrefix deliberately omitted — the tool must inject "".
-              eventTypes: ["b2:ObjectCreated:*"],
-              isEnabled: false,
-              targetConfiguration: {
-                targetType: "webhook",
-                url: "https://example.com/contract",
+// Requires the B2 event-notifications API entitlement, which not every contract
+// account has. Opt in with B2_LIVE_EVENT_NOTIFICATIONS=1; skipped by default.
+describe.skipIf(process.env.B2_LIVE_EVENT_NOTIFICATIONS !== "1")(
+  "Contract: notification rules objectNamePrefix",
+  () => {
+    liveIt(
+      "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
+      async () => {
+        const cleanupBucket: ContractBucketRef = { bucketId: "" };
+        try {
+          const bucket = await bucketTracker.createBucket("notify");
+          cleanupBucket.bucketId = bucket.bucketId;
+          cleanupBucket.bucketName = bucket.bucketName;
+          const res = await callTool(server, "b2_set_bucket_notification_rules", {
+            bucketId: cleanupBucket.bucketId,
+            eventNotificationRules: [
+              {
+                name: contractRuleName("notify-rule"),
+                // objectNamePrefix deliberately omitted — the tool must inject "".
+                eventTypes: ["b2:ObjectCreated:*"],
+                isEnabled: false,
+                targetConfiguration: {
+                  targetType: "webhook",
+                  url: "https://example.com/contract",
+                },
               },
-            },
-          ],
-        });
-        if (isError(res)) {
-          const detail = liveErrorText(res);
-          if (detail.toLowerCase().includes("api not enabled")) {
-            failContractPrerequisite("Event Notifications API is unavailable", detail);
+            ],
+          });
+          if (isError(res)) {
+            const detail = liveErrorText(res);
+            if (detail.toLowerCase().includes("api not enabled")) {
+              failContractPrerequisite("Event Notifications API is unavailable", detail);
+            }
+            throw new Error(`notification rules shape contract failed: ${detail}`);
           }
-          throw new Error(`notification rules shape contract failed: ${detail}`);
+          expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
+        } finally {
+          await bucketTracker.cleanupBucket(cleanupBucket);
         }
-        expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
-      } finally {
-        await bucketTracker.cleanupBucket(cleanupBucket);
-      }
-    },
-    30_000,
-  );
-});
+      },
+      30_000,
+    );
+  },
+);
 
 // ── b2_update_bucket Object Lock retrofit ─────────────────────────────────────
 describe("Contract: b2_update_bucket Object Lock retrofit", () => {
