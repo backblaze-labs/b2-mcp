@@ -7,6 +7,9 @@ name: Publish Package
 # runs from the default branch through workflow_run, checks out trusted resolver
 # code from `ci-green`, and only then checks out the validated tag.
 on:
+  # zizmor: ignore[dangerous-triggers] This workflow_run only consumes an inert
+  # tag artifact, checks out ci-green resolver code, validates protected refs,
+  # and publishes behind protected environments.
   workflow_run:
     workflows: ["Release Tag Request"]
     types: [completed]

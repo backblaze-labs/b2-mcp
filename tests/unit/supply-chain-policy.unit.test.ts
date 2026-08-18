@@ -834,6 +834,9 @@ describe("supply-chain audit policy", () => {
     expect(releaseTagWorkflow).not.toContain("actions/checkout");
     expect(releaseTagWorkflow).not.toContain("npm publish");
     expect(releaseTagWorkflow).not.toContain("GHCR_TOKEN");
+    expect(publishWorkflow).toContain("zizmor: ignore[dangerous-triggers]");
+    expect(publishWorkflow).toContain("tag artifact");
+    expect(publishWorkflow).toContain("validates protected refs");
     expect(publishWorkflowRunBlock).toContain("Release Tag Request");
     expect(yamlBlockForKey(publishOnBlock, "release")).toBeNull();
     expect(yamlBlockForKey(publishOnBlock, "push")).toBeNull();
