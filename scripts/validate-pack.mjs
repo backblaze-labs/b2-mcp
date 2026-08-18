@@ -47,6 +47,8 @@ const secretValuePatterns = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   /\b(?:B2_APPLICATION_KEY|B2_MASTER_KEY|AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN|NPM_TOKEN)\s*[:=]/i,
   /\b(?:applicationKey|application_key|secretAccessKey|privateKey|password)\s*[:=]\s*['"]?[A-Za-z0-9_./+=-]{12,}/i,
+  // cspell:disable-next-line
+  /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/,
   /\bK[0-9A-Za-z]{20,}\b/,
 ];
 
@@ -255,11 +257,17 @@ function shannonEntropy(token) {
   return entropy;
 }
 
+function stripRecognizedNonSecretTokens(text) {
+  return text
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\b(?:\.github|deploy|docs|scripts|skills|src|tests)\/[A-Za-z0-9_./-]+/g, " ")
+    .replace(/\b(?:b2|s3|bz)_[a-z0-9_]+\b/g, " ");
+}
+
 function hasHighEntropyToken(text) {
   const tokenRe = /\b[A-Za-z0-9][A-Za-z0-9+/=_-]{31,}\b/g;
-  for (const match of text.matchAll(tokenRe)) {
+  for (const match of stripRecognizedNonSecretTokens(text).matchAll(tokenRe)) {
     const token = match[0];
-    if (/[/_.-]/.test(token) || /^(?:b2|s3|bz)_/.test(token)) continue;
     if (!/[A-Za-z]/.test(token) || !/\d/.test(token)) continue;
     if (shannonEntropy(token) >= 3.8) return true;
   }

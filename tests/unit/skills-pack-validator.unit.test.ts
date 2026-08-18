@@ -249,6 +249,25 @@ describe("skills pack validator", () => {
     }
   });
 
+  it("fails when bundled skill content contains punctuation-bearing secrets", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const githubToken = ["ghp", "1234567890", "abcdefghijklmnopqrstuvwxyzAB"].join("_");
+      // cspell:disable-next-line
+      const slashToken = ["wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY"].join("/");
+      const skill = `${readFileSync(skillPath, "utf8")}\n${githubToken}\n${slashToken}\n`;
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("secret-like content is not allowed");
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when a bundled skill directory contains a secret-like path", () => {
     const fixtureRoot = copyValidatorFixture();
     try {
