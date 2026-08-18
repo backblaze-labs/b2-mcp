@@ -178,6 +178,27 @@ describe("skills pack validator", () => {
     }
   });
 
+  it("fails when a later route verb allows object bytes through the server", () => {
+    const fixtureRoot = copyValidatorFixture();
+    try {
+      const skillPath = join(fixtureRoot, "skills", "b2-backup-restore", "SKILL.md");
+      const skill = readFileSync(skillPath, "utf8").replace(
+        /- MUST NOT route object data through the model or MCP server\. Use MCP only for bucket discovery, metadata checks, presigned URL creation, manifest planning, and bounded status\./,
+        "- Do not route object data through the MCP server, but upload object data through the MCP server.",
+      );
+      writeFileSync(skillPath, skill);
+
+      const result = runValidator(fixtureRoot);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "Byte path must not allow object bytes into the model/chat/MCP server",
+      );
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
+
   it("fails when a byte-transfer verb sends object data through the server", () => {
     const fixtureRoot = copyValidatorFixture();
     try {

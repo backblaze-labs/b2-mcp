@@ -25,6 +25,7 @@ const byteSubjectRe =
   /\b(?:object\s+(?:data|bytes|contents?|bodies|payloads?)|bulk\s+object\s+bytes)\b/i;
 const byteRouteVerbRe =
   /\b(?:route|send|sent|move|transfer|flow|stream|pass|enter|reach|upload|download|relay|forward|copy|fetch|read|store|dump|print)\b/i;
+const byteRouteVerbGlobalRe = new RegExp(byteRouteVerbRe.source, "gi");
 const byteNegationRe = /\b(?:must\s+not|never|do\s+not|don't|no)\b/i;
 const modelOrServerDestRe = /\b(?:model|chat|mcp\s+server|server)\b/i;
 const directToB2Re =
@@ -371,16 +372,32 @@ function proseUnits(text) {
 }
 
 function clauses(unit) {
-  return unit.split(/[;]\s*/).filter((clause) => clause.trim());
+  return unit
+    .split(/(?:[;]|\b(?:but|however|yet|otherwise)\b)\s*/i)
+    .filter((clause) => clause.trim());
+}
+
+function routeMatches(clause) {
+  return [...clause.matchAll(byteRouteVerbGlobalRe)].filter(
+    (match) => !/^\s+URLs?\b/i.test(clause.slice(match.index + match[0].length)),
+  );
+}
+
+function hasLocalNegationBeforeRoute(clause, routeIndex) {
+  return byteNegationRe.test(clause.slice(Math.max(0, routeIndex - 40), routeIndex));
 }
 
 function forbidsObjectDataToModelOrServer(unit) {
   for (const clause of clauses(unit)) {
-    const routeMatch = clause.match(byteRouteVerbRe);
     const destMatch = clause.match(modelOrServerDestRe);
-    const negationMatch = clause.match(byteNegationRe);
-    if (!(routeMatch && destMatch && negationMatch && byteSubjectRe.test(clause))) continue;
-    if (negationMatch.index < routeMatch.index && negationMatch.index < destMatch.index) {
+    if (!(destMatch && byteSubjectRe.test(clause))) continue;
+    if (
+      routeMatches(clause).some(
+        (routeMatch) =>
+          hasLocalNegationBeforeRoute(clause, routeMatch.index) &&
+          routeMatch.index < destMatch.index,
+      )
+    ) {
       return true;
     }
   }
@@ -389,11 +406,16 @@ function forbidsObjectDataToModelOrServer(unit) {
 
 function allowsObjectDataToModelOrServer(unit) {
   for (const clause of clauses(unit)) {
-    const routeMatch = clause.match(byteRouteVerbRe);
-    if (!(routeMatch && byteSubjectRe.test(clause) && modelOrServerDestRe.test(clause))) {
+    if (!(byteSubjectRe.test(clause) && modelOrServerDestRe.test(clause))) {
       continue;
     }
-    if (!byteNegationRe.test(clause.slice(0, routeMatch.index))) return true;
+    if (
+      routeMatches(clause).some(
+        (routeMatch) => !hasLocalNegationBeforeRoute(clause, routeMatch.index),
+      )
+    ) {
+      return true;
+    }
   }
   return false;
 }
