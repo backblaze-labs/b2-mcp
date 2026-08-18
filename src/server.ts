@@ -100,10 +100,14 @@ function registerDurableSecretCompatibilityStubs(
   secretSink: SecretSinkConfig | undefined,
   shouldRegister = (_name: string) => true,
 ): void {
-  const unavailableMessage = (name: string) =>
-    secretSink?.mode === "off" && secretSink.unavailableReason
+  const unavailableMessage = (name: string) => {
+    if (secretSink?.mode === "file" && name === "b2_reserve_trial_create_account") {
+      return `${name} is unavailable in file secret sink mode because Reserve Trial account creation has no provider-side recovery path after a sink write failure. Use B2_SECRET_SINK=inline for explicit local use or create trial accounts outside MCP.`;
+    }
+    return secretSink?.mode === "off" && secretSink.unavailableReason
       ? `${name} is unavailable because ${secretSink.unavailableReason}`
       : `${name} is unavailable because it produces durable credential material and no out-of-band secret sink is configured.`;
+  };
   for (const name of DURABLE_SECRET_PRODUCING_TOOLS) {
     if (!shouldRegister(name)) continue;
     const inputSchema: z.ZodRawShape = isDestructiveTool(name)
@@ -306,9 +310,17 @@ export function createServer(
 
   // Rolling deploy compatibility: clients can cache tools/list entries for
   // durable-secret-producing tools. In off mode keep those names callable with
-  // a stable non-secret unavailable error; file/inline modes register the real
-  // handlers above.
-  if (config.secretSink?.mode !== "file" && config.secretSink?.mode !== "inline") {
+  // a stable non-secret unavailable error. File mode registers recoverable
+  // durable-secret handlers above, while Reserve Trial remains a compatibility
+  // stub because the provider has no post-create recovery action.
+  if (config.secretSink?.mode === "file") {
+    registerDurableSecretCompatibilityStubs(
+      registrar,
+      config.secretSink,
+      (name) =>
+        name === "b2_reserve_trial_create_account" && isToolAllowedByOAuthScopes(name, oauthScopes),
+    );
+  } else if (config.secretSink?.mode !== "inline") {
     registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>
       isToolAllowedByOAuthScopes(name, oauthScopes),
     );

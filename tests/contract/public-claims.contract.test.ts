@@ -197,8 +197,8 @@ describe("public support and authentication claims", () => {
 
   it("documents secret, destructive-action, overwrite, and omitted-protocol claims", () => {
     for (const required of [
-      "non-secret unavailable compatibility stubs",
-      "Issue #186 will revise this invariant",
+      "run only when a reviewed out-of-band secret sink",
+      "no provider-side recovery path",
       "Presigned S3 URLs are different",
       "`B2_DESTRUCTIVE_POLICY=confirm` is defense in depth, not authorization",
       "Replacing an unversioned object",
@@ -206,7 +206,7 @@ describe("public support and authentication claims", () => {
     ]) {
       expect(authentication).toContain(required);
     }
-    expect(security).toMatch(/registered\s+only as non-secret unavailable compatibility stubs/);
+    expect(authentication).toContain("inline mode");
     for (const required of [
       "b2_create_key",
       "b2_create_group_member",

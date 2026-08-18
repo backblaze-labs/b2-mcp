@@ -251,6 +251,7 @@ export function appendSecretSinkRecord(
   const { parent } = ensureSecretSinkParent(sink.filePath);
   const appendLock = acquireLedgerAppendLock(sink.filePath, parent, tool);
   try {
+    truncateIncompleteLedgerTail(sink.filePath, tool);
     const fd = openSecureAppendFile(sink.filePath, {
       envVarName: SECRET_SINK_FILE_ENV,
       mode: SECURE_APPEND_FILE_MODE,
@@ -341,11 +342,78 @@ function parseLedgerLine(line: string, lineNumber: number): SecretLedgerRecord {
   return record as unknown as SecretLedgerRecord;
 }
 
+function truncateIncompleteLedgerTail(filePath: string, tool: string): void {
+  let buffer: Buffer;
+  try {
+    buffer = fs.readFileSync(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  if (buffer.length === 0 || buffer[buffer.length - 1] === 0x0a) return;
+
+  const tailStart = buffer.lastIndexOf(0x0a) + 1;
+  const tail = buffer.subarray(tailStart).toString("utf8").trim();
+  if (tail !== "") {
+    let completeJsonTail = false;
+    try {
+      JSON.parse(tail);
+      completeJsonTail = true;
+    } catch {
+      // The unterminated final line is a torn append and is truncated below.
+    }
+    if (completeJsonTail) {
+      const fd = openSecureAppendFile(filePath, {
+        envVarName: SECRET_SINK_FILE_ENV,
+        mode: SECURE_APPEND_FILE_MODE,
+      });
+      try {
+        writeAll(fd, "\n");
+        secretSinkFileOpsForTests.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      logger.warn({ tool, filePath }, "secret_sink.incomplete_tail_terminated");
+      return;
+    }
+  }
+
+  const fd = openSecureAppendFile(filePath, {
+    envVarName: SECRET_SINK_FILE_ENV,
+    mode: SECURE_APPEND_FILE_MODE,
+  });
+  try {
+    fs.ftruncateSync(fd, tailStart);
+    secretSinkFileOpsForTests.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  logger.warn({ tool, filePath }, "secret_sink.incomplete_tail_truncated");
+}
+
+function recoverIncompleteLedgerTail(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+  tool: string,
+): void {
+  const { parent } = ensureSecretSinkParent(sink.filePath);
+  const appendLock = acquireLedgerAppendLock(sink.filePath, parent, tool);
+  try {
+    truncateIncompleteLedgerTail(sink.filePath, tool);
+  } finally {
+    releaseSecretSinkClaimBestEffort(appendLock, {
+      tool,
+      secretSink: { type: "file", path: sink.filePath },
+      lockPath: appendLock.lockPath,
+    });
+  }
+}
+
 function readMatchingSecretSinkRecord(
   sink: Extract<SecretSinkConfig, { mode: "file" }>,
   tool: string,
   idempotency: DurableSecretIdempotency,
 ): ExistingSecretSinkRecord | null {
+  recoverIncompleteLedgerTail(sink, tool);
   const lines = fs
     .readFileSync(sink.filePath, "utf8")
     .split("\n")
@@ -586,7 +654,7 @@ function releaseSecretSinkClaimBestEffort(
 function createErrorHasKnownProviderRejection(err: unknown): boolean {
   if (!err || typeof err !== "object" || !("status" in err)) return false;
   const status = (err as { status?: unknown }).status;
-  return typeof status === "number" && status >= 400 && status < 500;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408;
 }
 
 function recoveryClearedProviderSideEffect(recovery: unknown): boolean {

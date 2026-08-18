@@ -278,12 +278,12 @@ export function registerPartnerTools(
   );
 
   // ── b2_reserve_trial_create_account ───────────────────────────────────────
-  if (config.secretSink?.mode === "file" || config.secretSink?.mode === "inline") {
+  if (config.secretSink?.mode === "inline") {
     server.registerTool(
       "b2_reserve_trial_create_account",
       {
         description:
-          "Reserve a B2 trial account through the Partner API. In file sink mode, created application key secrets are written to the configured out-of-band secret sink and the MCP response contains only redacted metadata plus a secretSink pointer. In inline mode, the secrets are returned with an explicit warning.",
+          "Reserve a B2 trial account through the Partner API. Available only in explicit inline mode because Reserve Trial has no provider-side recovery path if a file sink write fails after account creation.",
         inputSchema: {
           email: z.string().email().describe("Email address for the new B2 Reserve trial account."),
           region: z
@@ -335,11 +335,6 @@ export function registerPartnerTools(
             }),
             projectInline: (created, warning) => ({ results: created, warning }),
             diagnostics: partnerSecretDiagnostics,
-            recoverAfterSinkFailure: (created) => ({
-              status: "quarantine_required",
-              accountIds: created.map((result) => result.accountId),
-              applicationKeyIds: created.map((result) => result.applicationKeyId),
-            }),
           });
         } catch (err) {
           return toolError(err);

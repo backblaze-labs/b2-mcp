@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   linkSync,
@@ -262,7 +263,7 @@ describe("secret sink file writer", () => {
     expect(fsyncSpy).toHaveBeenCalled();
   });
 
-  it("fsyncs the parent directory before every append commit", () => {
+  it("calls fsync on the parent directory before every append commit", () => {
     const fsyncSpy = vi.spyOn(secretSinkFileOpsForTests, "fsyncSync");
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
@@ -313,6 +314,111 @@ describe("secret sink file writer", () => {
     expect(pointer.recordId).toEqual(expect.any(String));
     expect(existsSync(appendLock)).toBe(false);
     expect(JSON.stringify(warnSpy.mock.calls)).toContain("stale_append_lock_reclaimed");
+  });
+
+  it("truncates an incomplete trailing ledger record before idempotency lookup", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "reuse-after-torn-tail",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "reuse-after-torn-tail", capabilities: ["listBuckets"] },
+    });
+    const pointer = appendSecretSinkRecord(
+      { mode: "file", filePath: file },
+      "b2_create_key",
+      { applicationKeyId: "key-id", applicationKey: "B2_MCP_CANARY_SECRET_reuse" },
+      idempotency,
+    );
+    appendFileSync(file, '{"ts":"2026-08-18T15:24:45Z","tool":"b2_create_key"');
+    let createCalls = 0;
+
+    const result = await executeDurableSecretOperation({
+      secretSink: { mode: "file", filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      create: async () => {
+        createCalls++;
+        return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+      },
+      projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+        ...created,
+        applicationKey: "[redacted]",
+        secretSink: sinkPointer,
+      }),
+      projectInline: (created: Record<string, unknown>, warning: string) => ({
+        ...created,
+        warning,
+      }),
+    });
+
+    expect(createCalls).toBe(0);
+    expect(result.structuredContent).toMatchObject({
+      applicationKeyId: "key-id",
+      applicationKey: "[redacted]",
+      secretSink: pointer,
+    });
+    expect(readFileSync(file, "utf8")).not.toContain("15:24:45");
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("incomplete_tail_truncated");
+  });
+
+  it("terminates a complete trailing ledger record before appending another", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "complete-tail",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "complete-tail", capabilities: ["listBuckets"] },
+    });
+    appendSecretSinkRecord(
+      { mode: "file", filePath: file },
+      "b2_create_key",
+      { applicationKeyId: "key-id", applicationKey: "B2_MCP_CANARY_SECRET_complete_tail" },
+      idempotency,
+    );
+    const withoutTrailingNewline = readFileSync(file, "utf8").trimEnd();
+    writeFileSync(file, withoutTrailingNewline, { mode: 0o600 });
+
+    appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+      applicationKeyId: "key-id-2",
+      applicationKey: "B2_MCP_CANARY_SECRET_second_record",
+    });
+
+    expect(readFileSync(file, "utf8").trim().split("\n")).toHaveLength(2);
+    expect(JSON.stringify(warnSpy.mock.calls)).toContain("incomplete_tail_terminated");
+  });
+
+  it("continues to reject malformed committed ledger records", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    writeFileSync(file, '{"tool":"b2_create_key"}\n', { mode: 0o600 });
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "malformed-committed",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "malformed-committed", capabilities: ["listBuckets"] },
+    });
+
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => ({ applicationKey: "B2_MCP_CANARY_SECRET_unreached" }),
+        projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+          ...created,
+          secretSink: sinkPointer,
+        }),
+        projectInline: (created: Record<string, unknown>, warning: string) => ({
+          ...created,
+          warning,
+        }),
+      }),
+    ).rejects.toThrow(/contains an invalid record/);
   });
 
   it("holds an exclusive pending claim before provider creation", async () => {
@@ -489,6 +595,55 @@ describe("secret sink file writer", () => {
     expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
   });
 
+  it("keeps the pending claim after an HTTP 408 provider timeout", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "provider-408-timeout",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "provider-408-timeout", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+    const options = {
+      secretSink: { mode: "file" as const, filePath: file },
+      toolName: "b2_create_key",
+      idempotency,
+      projectRedacted: (result: Record<string, unknown>, pointer: unknown) => ({
+        ...result,
+        applicationKey: "[redacted]",
+        secretSink: pointer,
+      }),
+      projectInline: (result: Record<string, unknown>, warning: string) => ({
+        ...result,
+        warning,
+      }),
+    };
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          throw { status: 408, code: "request_timeout" };
+        },
+      }),
+    ).rejects.toMatchObject({ status: 408 });
+
+    await expect(
+      executeDurableSecretOperation({
+        ...options,
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    expect(createCalls).toBe(1);
+    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+  });
+
   it("releases the pending claim when pre-provider claim durability fails", async () => {
     const fsync = secretSinkFileOpsForTests.fsyncSync;
     let calls = 0;
@@ -538,10 +693,12 @@ describe("secret sink file writer", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const recoverSpy = vi.fn();
     const unlink = secretSinkFileOpsForTests.unlinkSync;
-    let unlinkCalls = 0;
+    let failedPendingCleanup = false;
     vi.spyOn(secretSinkFileOpsForTests, "unlinkSync").mockImplementation((path) => {
-      unlinkCalls++;
-      if (unlinkCalls === 2) throw new Error("simulated claim cleanup failure");
+      if (!failedPendingCleanup && String(path).endsWith(".pending")) {
+        failedPendingCleanup = true;
+        throw new Error("simulated claim cleanup failure");
+      }
       return unlink(path);
     });
     const dir = tempDir();

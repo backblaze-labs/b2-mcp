@@ -395,13 +395,12 @@ contract before it can be enabled:
   secret-free critical telemetry record with the tool name, sink pointer
   context, target identifier, and non-secret created-resource ID. The MCP
   response must not claim that the sink write succeeded.
-- For `b2_create_key`, `b2_create_group_member`, and
-  `b2_reserve_trial_create_account`, sink failure after provider-side creation
-  returns only a sanitized MCP error. `b2_create_key` attempts to delete the
-  created key, `b2_create_group_member` attempts to eject the created member
-  from the group, and reserve-trial account creation records a secret-free
-  quarantine-required telemetry entry with account and key identifiers so an
-  operator can locate and rotate or revoke the orphaned resource out of band.
+- For `b2_create_key` and `b2_create_group_member`, sink failure after
+  provider-side creation returns only a sanitized MCP error. `b2_create_key`
+  attempts to delete the created key, and `b2_create_group_member` attempts to
+  eject the created member from the group. `b2_reserve_trial_create_account`
+  remains unavailable in file mode because Reserve Trial has no provider-side
+  recovery path after account creation.
 - Restart-after-side-effect tests must cover request crash, timeout, duplicate
   retry, sink outage, compensation success, and compensation failure.
 
