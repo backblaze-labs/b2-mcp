@@ -69,6 +69,37 @@ block.
 
 Create and rotate application keys outside the MCP workflow, such as in the Backblaze console or CLI, until a reviewed secret sink is available.
 
+## B2 Skills pack
+
+This repo bundles a client-side Backblaze B2 skills pack under [`skills/`](skills/).
+The MCP server is the action layer; these Markdown playbooks are the expertise
+layer for common workflows: backup/restore, least-privilege keys, Object Lock,
+lifecycle and cost hygiene, migration, and incident response.
+
+The pack is optional but recommended for clients that support Markdown skills.
+Each skill keeps bulk object bytes off the model and MCP server, uses
+presigned/direct transfer paths for data movement, and pauses before destructive
+or irreversible steps that are also gated by `B2_DESTRUCTIVE_POLICY`.
+
+Validate the pack locally:
+
+```bash
+pnpm run validate:skills
+```
+
+Load the pack in supported clients:
+
+- **Claude Code:** put each `skills/b2-*/` directory under `~/.claude/skills/`
+  or the client-supported project skills directory, then restart the session.
+- **Claude.ai / Claude Desktop with Skills:** open **Settings -> Capabilities ->
+  Skills** and import the `skills/b2-*/` directories from this checkout.
+- **Other MCP clients with Markdown skills:** register each `skills/b2-*/SKILL.md`
+  file or containing directory according to that client's skills documentation.
+
+The skills do not add server endpoints or new permissions. They only sequence
+the existing B2 MCP tools and reinforce the same byte-path and destructive-action
+guardrails enforced by the server.
+
 ### Docker quick start
 
 The published image defaults to the HTTP transport, reads configuration only

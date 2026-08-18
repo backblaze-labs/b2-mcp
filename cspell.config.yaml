@@ -44,6 +44,7 @@ files:
   - 'tests/**/*.ts'
   - 'scripts/**/*.{mjs,cjs}'
   - 'docs/**/*.md'
+  - 'skills/**/*.md'
   - '*.md'
   - 'CLAUDE.md'
   - '.github/**/*.yml'

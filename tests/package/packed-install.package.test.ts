@@ -243,6 +243,8 @@ describe("packed package", () => {
             "docs/CLIENTS.md",
             "docs/DEPLOY.md",
             "README.md",
+            "skills/b2-backup-restore/SKILL.md",
+            "skills/b2-incident-response/SKILL.md",
           ]),
         );
 
