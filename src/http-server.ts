@@ -18,7 +18,7 @@ import {
 } from "./utils/node-web-bridge.js";
 import {
   configFromHttpHeaders,
-  validateHttpCredentialConfiguration,
+  validateHttpStartupConfiguration,
   type AuthenticatedIncomingMessage,
 } from "./credentials.js";
 import {
@@ -139,7 +139,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
 
 export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
   initLogging();
-  validateHttpCredentialConfiguration();
+  validateHttpStartupConfiguration();
   const port = options.port ?? getPort();
   const handle = buildHttpServer();
   const { server: httpServer, sessions, drain } = handle;

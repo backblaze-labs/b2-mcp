@@ -519,9 +519,14 @@ export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProv
 export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
+  validateHttpStartupConfiguration();
+  provider.validateConfiguration?.();
+}
+
+export function validateHttpStartupConfiguration(): void {
   resolveOutputFormat();
   resolveSecretSinkConfig({ transport: "http", preflight: true });
-  provider.validateConfiguration?.();
+  getHttpCredentialMode();
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   HttpServerCredentialProvider,
   StdioEnvCredentialProvider,
   validateHttpCredentialConfiguration,
+  validateHttpStartupConfiguration,
   verificationFingerprintConfig,
 } from "../../src/credentials";
 import { existsSync, mkdtempSync } from "node:fs";
@@ -98,6 +99,13 @@ describe("credential providers", () => {
       caught = err;
     }
     expect(caught).toMatchObject({ code: "invalid_output_format" });
+  });
+
+  it("allows HTTP startup without server-mode credentials for readiness reporting", () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+
+    expect(() => validateHttpStartupConfiguration()).not.toThrow();
+    expect(() => validateHttpCredentialConfiguration()).toThrow(CredentialResolutionError);
   });
 
   it("rejects TOON mode during HTTP readiness when the encoder preflight fails", async () => {
