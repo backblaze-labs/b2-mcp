@@ -26,6 +26,7 @@ jobs:
       - name: Record release tag request
         env:
           REQUEST_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           REQUEST_TAG="${REQUEST_TAG#refs/tags/}"
@@ -33,7 +34,7 @@ jobs:
             echo "::error::Release tag requests must use a vX.Y.Z[-prerelease] tag; got ${REQUEST_TAG}"
             exit 1
           fi
-          if ! git ls-remote --exit-code "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" "refs/tags/${REQUEST_TAG}" >/dev/null; then
+          if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${REQUEST_TAG}" >/dev/null 2>&1; then
             echo "::error::Release tag refs/tags/${REQUEST_TAG} does not exist"
             exit 1
           fi
