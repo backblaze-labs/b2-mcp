@@ -14,15 +14,38 @@ import type {
   LifecycleRule as SdkLifecycleRule,
   PartInfo,
   ReplicationConfiguration as SdkReplicationConfiguration,
+  ReserveTrialCreateAccountRequest,
+  ReserveTrialCreateAccountRequestEntry,
+  RetryOptions,
   SetBucketNotificationRulesResponse,
   UpdateBucketRequest,
   UnfinishedLargeFile,
 } from "@backblaze-labs/b2-sdk";
-import { accountId, applicationKeyId, bucketId, fileId, largeFileId } from "@backblaze-labs/b2-sdk";
+import {
+  accountId,
+  applicationKeyId,
+  B2PartnerAuthorizationError,
+  bucketId,
+  fileId,
+  groupId,
+  largeFileId,
+} from "@backblaze-labs/b2-sdk";
+import type {
+  CreateGroupMemberResponse,
+  EjectGroupMemberResponse,
+  ListGroupMembersResponse,
+  ListGroupsResponse,
+  PartnerAuthorizeResponse,
+  PartnerRawRequestOptions,
+  Region,
+  ReserveTrialCreateAccountResponse,
+} from "@backblaze-labs/b2-sdk/partner";
+import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2AuthManager } from "../auth.js";
 import { withCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import type {
+  B2Config,
   B2AuthResponse,
   B2S3FileVersionBinding,
   B2S3FileVersionResolution,
@@ -30,6 +53,7 @@ import type {
 } from "../utils/types.js";
 import { forEachBounded } from "../utils/concurrency.js";
 import { buildUserAgent } from "../utils/user-agent.js";
+import { isTestRuntime } from "../utils/runtime.js";
 
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
 export type BucketTypeFilter = BucketType | "all";
@@ -296,6 +320,65 @@ export interface ListPartsResult {
   nextPartNumber?: number | null;
 }
 
+export interface PartnerListGroupsOptions {
+  adminAccountId: string;
+  groupName?: string;
+  startGroupId?: number;
+  maxGroupCount?: number;
+}
+
+export interface PartnerListGroupMembersOptions {
+  adminAccountId: string;
+  groupId: string;
+  startEmail?: string;
+  maxMemberCount?: number;
+}
+
+export interface PartnerEjectGroupMemberOptions {
+  adminAccountId: string;
+  groupId: string;
+  memberAccountId: string;
+  email?: string | null;
+}
+
+export interface PartnerCreateGroupMemberOptions {
+  adminAccountId: string;
+  groupId: string;
+  memberEmail: string;
+  region?: Region | null;
+}
+
+export type PartnerReserveTrialCreateAccountOptions =
+  | ReserveTrialCreateAccountRequestEntry
+  | ReserveTrialCreateAccountRequest;
+
+type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
+
+const PARTNER_RETRY_OPTIONS: Partial<RetryOptions> = {
+  maxRetries: 3,
+  initialRetryDelayMs: 1000,
+  maxRetryDelayMs: 4000,
+  requestTimeoutMs: 30_000,
+};
+
+let partnerClientFactoryForTests: PartnerClientFactory | null = null;
+
+export function setB2PartnerClientFactoryForTests(factory: PartnerClientFactory | null): void {
+  if (!isTestRuntime()) {
+    throw new Error("Partner SDK client factory override is only available in tests.");
+  }
+  partnerClientFactoryForTests = factory;
+}
+
+function defaultPartnerClientFactory(config: B2Config): SdkPartnerClient {
+  return new SdkPartnerClient({
+    masterKeyId: config.applicationKeyId,
+    masterKey: config.applicationKey,
+    retry: PARTNER_RETRY_OPTIONS,
+    userAgent: buildUserAgent(config),
+  });
+}
+
 function cloneJsonResponse<T>(value: T): T {
   // SDK simulator responses can contain shared object references that the MCP
   // sanitizer would otherwise mark as circular. B2 API payloads are JSON-only,
@@ -540,7 +623,7 @@ function toBucketFilters(auth: B2AuthResponse, options: BucketFilters): ListBuck
     accountId: accountId(auth.accountId),
     bucketId: maybeBucketId(options.bucketId),
     bucketName: options.bucketName,
-    // The native B2 API accepts the "all" wildcard, but SDK 0.2.0's type only
+    // The native B2 API accepts the "all" wildcard, but the SDK type only
     // models concrete bucket types. Keep the compatibility cast isolated here.
     bucketTypes: requestedTypes?.length
       ? (requestedTypes as unknown as ListBucketsRequest["bucketTypes"])
@@ -570,7 +653,7 @@ function normalizeLifecycleRule(rule: LifecycleRuleInput): SdkLifecycleRule {
     daysFromHidingToDeleting: rule.daysFromHidingToDeleting ?? null,
     daysFromUploadingToHiding: rule.daysFromUploadingToHiding ?? null,
   };
-  // The native API accepts this field for large-file cleanup. SDK 0.2.0's
+  // The native API accepts this field for large-file cleanup. The SDK
   // LifecycleRule type omits it, so keep the wire-compatible extension local to
   // the adapter instead of leaking it through tool handlers.
   if (rule.daysFromStartingToCancelingUnfinishedLargeFiles !== undefined) {
@@ -705,6 +788,8 @@ function normalizeEventNotificationRule(
     suspensionReason: rule.suspensionReason ?? "",
     targetConfiguration: {
       ...rule.targetConfiguration,
+      targetType: rule.targetConfiguration
+        .targetType as SdkEventNotificationRule["targetConfiguration"]["targetType"],
       customHeaders: normalizeCustomHeaders(rule.targetConfiguration.customHeaders),
     },
   };
@@ -744,67 +829,20 @@ function b2NotFound(message: string): Error {
   return Object.assign(new Error(message), { status: 404, code: "not_found" });
 }
 
-export interface NativeCallOptions {
-  method?: "GET" | "POST";
-  useDownloadUrl?: boolean;
-  apiPath?: string;
-  params?: Record<string, unknown>;
-}
-
-function appendQueryParams(url: URL, params: Record<string, unknown> | undefined): void {
-  if (!params) return;
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null) continue;
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (item !== undefined && item !== null) url.searchParams.append(key, String(item));
-      }
-    } else {
-      url.searchParams.set(key, String(value));
-    }
+function partnerGroupsCoordinates(auth: PartnerAuthorizeResponse): {
+  groupsApiUrl: string;
+  authToken: PartnerAuthorizeResponse["authorizationToken"];
+} {
+  const groupsApiUrl = auth.apiInfo.groupsApi?.groupsApiUrl;
+  if (!groupsApiUrl) {
+    throw new B2PartnerAuthorizationError(
+      "Partner API is not available; authorization did not return apiInfo.groupsApi.",
+    );
   }
-}
-
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return {};
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
-}
-
-function responseRequestId(headers: Headers): string | undefined {
-  return (
-    headers.get("x-bz-request-id") ??
-    headers.get("x-amz-request-id") ??
-    headers.get("x-request-id") ??
-    undefined
-  );
-}
-
-class NativeB2HttpError extends Error {
-  readonly status: number;
-  readonly code: string;
-  readonly requestId?: string;
-
-  constructor(status: number, body: unknown, headers: Headers) {
-    const data =
-      body && typeof body === "object" && !Array.isArray(body)
-        ? (body as Record<string, unknown>)
-        : {};
-    const code = typeof data.code === "string" && data.code ? data.code : "unknown_error";
-    const message =
-      typeof data.message === "string" && data.message
-        ? data.message
-        : `B2 API request failed with HTTP ${status}`;
-    super(message);
-    this.name = "NativeB2HttpError";
-    this.status = status;
-    this.code = code;
-    this.requestId = responseRequestId(headers);
-  }
+  return {
+    groupsApiUrl,
+    authToken: auth.authorizationToken,
+  };
 }
 
 /**
@@ -812,34 +850,9 @@ class NativeB2HttpError extends Error {
  * class instead of constructing SDK clients or raw credential details.
  */
 export class B2Client {
+  private partnerClient: SdkPartnerClient | null = null;
+
   constructor(private readonly auth: B2AuthManager) {}
-
-  async call<T>(path: string, data?: unknown, options: NativeCallOptions = {}): Promise<T> {
-    return this.withNativeCircuit(async (_client, auth) => {
-      const baseUrl = options.useDownloadUrl ? auth.downloadUrl : auth.apiUrl;
-      assertB2ApiUrl(baseUrl);
-      const apiPath = options.apiPath ?? "b2api/v2";
-      const url = new URL(`${baseUrl.replace(/\/$/, "")}/${apiPath}/${path}`);
-      appendQueryParams(url, options.params);
-
-      const method = options.method ?? (data !== undefined ? "POST" : "GET");
-      const headers: Record<string, string> = {
-        Authorization: auth.authorizationToken,
-        "User-Agent": buildUserAgent(this.auth.getConfig()),
-      };
-      if (data !== undefined) headers["Content-Type"] = "application/json";
-
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: data === undefined ? undefined : JSON.stringify(data),
-        signal: currentMcpRequestSignal(),
-      });
-      const body = await readResponseBody(response);
-      if (!response.ok) throw new NativeB2HttpError(response.status, body, response.headers);
-      return body as T;
-    });
-  }
 
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
     const result = await this.withNativeCircuit((client, auth) =>
@@ -1068,6 +1081,126 @@ export class B2Client {
       parts: result.parts.map(toPartInfoResult),
       nextPartNumber: result.nextPartNumber,
     };
+  }
+
+  async listGroups(options: PartnerListGroupsOptions): Promise<ListGroupsResponse> {
+    return cloneJsonResponse(
+      await this.withPartnerCircuit((client, auth, requestOptions) => {
+        const { groupsApiUrl, authToken } = partnerGroupsCoordinates(auth);
+        return client.raw.listGroups(
+          groupsApiUrl,
+          authToken,
+          {
+            adminAccountId: accountId(options.adminAccountId),
+            ...(options.groupName !== undefined ? { groupName: options.groupName } : {}),
+            ...(options.startGroupId !== undefined
+              ? { startGroupId: groupId(String(options.startGroupId)) }
+              : {}),
+            ...(options.maxGroupCount !== undefined
+              ? { maxGroupCount: options.maxGroupCount }
+              : {}),
+          },
+          requestOptions,
+        );
+      }),
+    );
+  }
+
+  async listGroupMembers(
+    options: PartnerListGroupMembersOptions,
+  ): Promise<ListGroupMembersResponse> {
+    return cloneJsonResponse(
+      await this.withPartnerCircuit((client, auth, requestOptions) => {
+        const { groupsApiUrl, authToken } = partnerGroupsCoordinates(auth);
+        return client.raw.listGroupMembers(
+          groupsApiUrl,
+          authToken,
+          {
+            adminAccountId: accountId(options.adminAccountId),
+            groupId: groupId(options.groupId),
+            ...(options.startEmail !== undefined ? { startEmail: options.startEmail } : {}),
+            ...(options.maxMemberCount !== undefined
+              ? { maxMemberCount: options.maxMemberCount }
+              : {}),
+          },
+          requestOptions,
+        );
+      }),
+    );
+  }
+
+  async ejectGroupMember(
+    options: PartnerEjectGroupMemberOptions,
+  ): Promise<EjectGroupMemberResponse> {
+    return cloneJsonResponse(
+      await this.withPartnerCircuit((client, auth, requestOptions) => {
+        const { groupsApiUrl, authToken } = partnerGroupsCoordinates(auth);
+        return client.raw.ejectGroupMember(
+          groupsApiUrl,
+          authToken,
+          {
+            adminAccountId: accountId(options.adminAccountId),
+            groupId: groupId(options.groupId),
+            memberAccountId: accountId(options.memberAccountId),
+            ...(options.email !== undefined ? { email: options.email } : {}),
+          },
+          requestOptions,
+        );
+      }),
+    );
+  }
+
+  async createGroupMember(
+    options: PartnerCreateGroupMemberOptions,
+  ): Promise<CreateGroupMemberResponse> {
+    return this.withPartnerCircuit((client, auth, requestOptions) => {
+      const { groupsApiUrl, authToken } = partnerGroupsCoordinates(auth);
+      return client.raw.createGroupMember(
+        groupsApiUrl,
+        authToken,
+        {
+          adminAccountId: accountId(options.adminAccountId),
+          groupId: groupId(options.groupId),
+          memberEmail: options.memberEmail,
+          ...(options.region !== undefined ? { region: options.region } : {}),
+        },
+        requestOptions,
+      );
+    });
+  }
+
+  async reserveTrialCreateAccount(
+    request: PartnerReserveTrialCreateAccountOptions,
+  ): Promise<ReserveTrialCreateAccountResponse> {
+    return this.withPartnerCircuit((client, auth, requestOptions) => {
+      const { groupsApiUrl, authToken } = partnerGroupsCoordinates(auth);
+      return client.raw.reserveTrialCreateAccount(groupsApiUrl, authToken, request, requestOptions);
+    });
+  }
+
+  private getPartnerClient(): SdkPartnerClient {
+    this.partnerClient ??= (partnerClientFactoryForTests ?? defaultPartnerClientFactory)(
+      this.auth.getConfig(),
+    );
+    return this.partnerClient;
+  }
+
+  private async withPartnerCircuit<T>(
+    operation: (
+      client: SdkPartnerClient,
+      auth: PartnerAuthorizeResponse,
+      options?: PartnerRawRequestOptions,
+    ) => Promise<T>,
+  ): Promise<T> {
+    return withCircuit(async () => {
+      const signal = currentMcpRequestSignal();
+      const client = this.getPartnerClient();
+      const auth =
+        client.partnerAccountInfo.getAuth() ??
+        (await client.authorize(signal ? { signal } : undefined));
+      const requestOptions = signal ? { signal } : undefined;
+      return runWithMcpRequestSignal(signal, () => operation(client, auth, requestOptions));
+    });
   }
 
   private async withNativeCircuit<T>(

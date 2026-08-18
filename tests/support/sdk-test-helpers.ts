@@ -5,9 +5,11 @@ import {
   type HttpTransport,
   type RetryOptions,
 } from "@backblaze-labs/b2-sdk";
+import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import type { ReadableStream } from "node:stream/web";
 import { setB2SdkClientFactoryForTests } from "./sdk-factory-hook";
 import { createMcpHttpTransport } from "../../src/auth";
+import { setB2PartnerClientFactoryForTests } from "../../src/b2/client";
 import { B2Config } from "../../src/utils/types";
 
 export class StaticHttpResponse implements HttpResponse {
@@ -104,4 +106,15 @@ export function installSdkTransport(
       retry,
     }),
   }));
+  setB2PartnerClientFactoryForTests(
+    (config: B2Config) =>
+      new SdkPartnerClient({
+        masterKeyId: config.applicationKeyId,
+        masterKey: config.applicationKey,
+        transport,
+        retry,
+        realm: "http://127.0.0.1",
+        allowCustomAuthorizeRealm: true,
+      }),
+  );
 }

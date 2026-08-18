@@ -68,7 +68,7 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 The surface is split by plane: **control plane = native B2 semantics, data plane = compatibility `s3_*` tool contracts.**
 
-**B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, and native bucket/key/Object Lock/notification operations. `B2Client` owns the shared auth/circuit wrapper and native lookups used by S3 safety guards, such as version-ID ownership checks and delete-marker metadata synthesis.
+**B2 SDK boundary** (`src/b2/`) — the official `@backblaze-labs/b2-sdk` integration boundary for B2 authorization state, endpoint data, retry semantics, and native bucket/key/Object Lock/notification/Partner operations. `B2Client` owns the shared auth/circuit wrapper and native lookups used by S3 safety guards, such as version-ID ownership checks and delete-marker metadata synthesis.
 
 **S3-compatible API** (`src/s3/`) — the **data-plane tool contract**: all `s3_*` object, presigned URL, multipart, bucket reachability/location/lifecycle, upload-part-copy, and report-bucket reads use the permanent AWS S3 SDK peer client configured through `@backblaze-labs/b2-sdk/s3`. B2 rejects **master** keys on the S3 endpoint, but ordinary application keys are accepted — which is why the application key (`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`) is the primary credential and signs S3 requests. (The deprecated `B2_APP_KEY_ID` / `B2_APP_KEY` override remains only for legacy setups whose application key is a master key.)
 
@@ -88,7 +88,7 @@ Object data movement runs through the **`s3_*` data-plane tools**. Inline object
 
 ### Tool naming conventions
 
-- `b2_*` — B2 native **control-plane** tools (buckets, application keys, Object Lock, notifications), plus Partner API group/trial tools (use b2api/v3)
+- `b2_*` — B2 native **control-plane** tools (buckets, application keys, Object Lock, notifications), plus SDK-backed Partner API group/trial tools
 - `s3_*` — compatibility **data-plane** tools; object aliases, presigned URLs, multipart, reachability, and lifecycle paths use the AWS SDK peer client through the SDK `/s3` boundary
 
 ### Retry logic (`src/utils/retry.ts`)

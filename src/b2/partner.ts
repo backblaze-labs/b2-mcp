@@ -11,9 +11,6 @@ import { checkDestructive } from "../utils/destructive-gate.js";
  * computer backup management. These endpoints require the admin account to
  * be authorized for the Partner API and a MASTER application key.
  *
- * The official SDK release consumed by this server does not yet publish typed
- * Partner/Groups operations. The read/eject contracts remain callable through
- * the repository-owned native HTTP adapter until upstream SDK gap #153 ships.
  * Secret-producing Partner account-creation flows remain disabled unless and
  * until they have a durable secret sink.
  */
@@ -54,17 +51,11 @@ export function registerPartnerTools(
     },
     async (args) => {
       try {
-        const params: Record<string, unknown> = {
+        const result = await client.listGroups({
           adminAccountId: args.adminAccountId,
           maxGroupCount: args.maxGroupCount ?? 100,
-        };
-        if (args.groupName) params.groupName = args.groupName;
-        if (args.startGroupId !== undefined) params.startGroupId = args.startGroupId;
-
-        const result = await client.call("b2_list_groups", undefined, {
-          method: "GET",
-          apiPath: "b2api/v3",
-          params,
+          ...(args.groupName ? { groupName: args.groupName } : {}),
+          ...(args.startGroupId !== undefined ? { startGroupId: args.startGroupId } : {}),
         });
         return toolJson(result);
       } catch (err) {
@@ -113,15 +104,12 @@ export function registerPartnerTools(
       try {
         const gate = checkDestructive("b2_eject_group_member", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
-        const payload: Record<string, unknown> = {
+
+        const result = await client.ejectGroupMember({
           adminAccountId: args.adminAccountId,
           groupId: args.groupId,
           memberAccountId: args.memberAccountId,
-        };
-        if (args.email) payload.email = args.email;
-
-        const result = await client.call("b2_eject_group_member", payload, {
-          apiPath: "b2api/v3",
+          ...(args.email ? { email: args.email } : {}),
         });
         return toolJson(result);
       } catch (err) {
@@ -159,17 +147,11 @@ export function registerPartnerTools(
     },
     async (args) => {
       try {
-        const params: Record<string, unknown> = {
+        const result = await client.listGroupMembers({
           adminAccountId: args.adminAccountId,
           groupId: args.groupId,
           maxMemberCount: args.maxMemberCount ?? 100,
-        };
-        if (args.startEmail) params.startEmail = args.startEmail;
-
-        const result = await client.call("b2_list_group_members", undefined, {
-          method: "GET",
-          apiPath: "b2api/v3",
-          params,
+          ...(args.startEmail ? { startEmail: args.startEmail } : {}),
         });
         return toolJson(result);
       } catch (err) {

@@ -6,10 +6,10 @@ import { spawnSync } from "child_process";
 const root = join(__dirname, "../..");
 const script = join(root, "scripts/check-package-budget.mjs");
 const sdkProvenance = {
-  version: "0.2.0",
-  resolved: "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz",
+  version: "0.3.0",
+  resolved: "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.3.0.tgz",
   integrity:
-    "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==",
+    "sha512-ABfrCTV0uN3ADXBgOC6hmMm2n3Mcnz2mnFafC1z1/Hvijv9GKlhaNBmfkY3UiRuVyjgWFCm8f5uiuQyNWFwFAg==",
 };
 
 function writeFixture(
@@ -127,7 +127,11 @@ function writeFixture(
           },
         },
         runtimeImportPolicy: {
-          allowedBackblazeSdkSpecifiers: ["@backblaze-labs/b2-sdk", "@backblaze-labs/b2-sdk/s3"],
+          allowedBackblazeSdkSpecifiers: [
+            "@backblaze-labs/b2-sdk",
+            "@backblaze-labs/b2-sdk/partner",
+            "@backblaze-labs/b2-sdk/s3",
+          ],
           allowedAwsRuntimeImports: [],
           forbiddenRuntimeDependencies: ["axios"],
         },
@@ -190,12 +194,12 @@ describe("package budget policy gate", () => {
   it.each([
     [
       "ranged package dependency",
-      { packageSpec: "^0.2.0" },
-      /must be exact-pinned to reviewed version 0\.2\.0, got \^0\.2\.0/,
+      { packageSpec: "^0.3.0" },
+      /must be exact-pinned to reviewed version 0\.3\.0, got \^0\.3\.0/,
     ],
     [
       "registry drift",
-      { lockEntry: { resolved: "https://registry.example.test/b2-sdk-0.2.0.tgz" } },
+      { lockEntry: { resolved: "https://registry.example.test/b2-sdk-0.3.0.tgz" } },
       /resolved expected https:\/\/registry\.npmjs\.org\//,
     ],
   ])("rejects direct dependency provenance drift: %s", (_label, options, expected) => {
@@ -224,8 +228,8 @@ describe("package budget policy gate", () => {
         "  .:",
         "    dependencies:",
         "      '@backblaze-labs/b2-sdk':",
-        "        specifier: 0.2.0",
-        "        version: 0.2.0",
+        "        specifier: 0.3.0",
+        "        version: 0.3.0",
         "    devDependencies:",
         "      '@backblaze-labs/b2-sdk':",
         "        specifier: 0.1.0",
@@ -236,14 +240,14 @@ describe("package budget policy gate", () => {
         "  '@backblaze-labs/b2-sdk@0.1.0':",
         "    resolution: {integrity: sha512-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}",
         "",
-        "  '@backblaze-labs/b2-sdk@0.2.0':",
+        "  '@backblaze-labs/b2-sdk@0.3.0':",
         `    resolution: {integrity: ${sdkProvenance.integrity}}`,
         "",
         "snapshots:",
         "",
         "  '@backblaze-labs/b2-sdk@0.1.0': {}",
         "",
-        "  '@backblaze-labs/b2-sdk@0.2.0': {}",
+        "  '@backblaze-labs/b2-sdk@0.3.0': {}",
         "",
       ].join("\n"),
     });
@@ -294,17 +298,17 @@ describe("package budget policy gate", () => {
         "  .:",
         "    dependencies:",
         "      '@backblaze-labs/b2-sdk':",
-        "        specifier: 0.2.0",
-        "        version: 0.2.0",
+        "        specifier: 0.3.0",
+        "        version: 0.3.0",
         "",
         "packages:",
         "",
-        "  '@backblaze-labs/b2-sdk@0.2.0':",
-        `    resolution: {tarball: https://attacker.example/b2-sdk-0.2.0.tgz, integrity: ${sdkProvenance.integrity}}`,
+        "  '@backblaze-labs/b2-sdk@0.3.0':",
+        `    resolution: {tarball: https://attacker.example/b2-sdk-0.3.0.tgz, integrity: ${sdkProvenance.integrity}}`,
         "",
         "snapshots:",
         "",
-        "  '@backblaze-labs/b2-sdk@0.2.0': {}",
+        "  '@backblaze-labs/b2-sdk@0.3.0': {}",
         "",
       ].join("\n"),
     });
@@ -335,17 +339,17 @@ describe("package budget policy gate", () => {
         "  .:",
         "    dependencies:",
         "      '@backblaze-labs/b2-sdk':",
-        "        specifier: 0.2.0",
-        "        version: 0.2.0",
+        "        specifier: 0.3.0",
+        "        version: 0.3.0",
         "",
         "packages:",
         "",
-        "  '@backblaze-labs/b2-sdk@0.2.0':",
+        "  '@backblaze-labs/b2-sdk@0.3.0':",
         `    resolution: {integrity: ${sdkProvenance.integrity}}`,
         "",
         "snapshots:",
         "",
-        "  '@backblaze-labs/b2-sdk@0.2.0': {}",
+        "  '@backblaze-labs/b2-sdk@0.3.0': {}",
         "",
       ].join("\n"),
     });

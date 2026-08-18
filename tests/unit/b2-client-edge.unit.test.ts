@@ -50,47 +50,6 @@ describe("B2Client native edge branches", () => {
     setB2SdkClientFactoryForTests(null);
   });
 
-  it("invalidates cached auth and re-authorizes direct native calls after a 401", async () => {
-    let authorizeCalls = 0;
-    const transport = new RecordingTransport((request) => {
-      if (b2EndpointName(request) !== "b2_authorize_account") {
-        return new StaticHttpResponse(500, {
-          status: 500,
-          code: "unexpected",
-          message: "only authorization should use the SDK transport",
-        });
-      }
-      authorizeCalls++;
-      return new StaticHttpResponse(
-        200,
-        authResponseWithToken(authorizeCalls === 1 ? "expired-token" : "fresh-token"),
-      );
-    });
-    const client = clientWithTransport(transport);
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ code: "expired_auth_token", message: "expired" }), {
-          status: 401,
-          headers: { "x-bz-request-id": "req-expired" },
-        }),
-      )
-      .mockResolvedValueOnce(Response.json({ ok: true }));
-
-    await expect(
-      client.call("b2_partner_probe", { probe: true }, { apiPath: "b2api/v3" }),
-    ).resolves.toEqual({ ok: true });
-
-    expect(authorizeCalls).toBe(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(
-      fetchMock.mock.calls.map(([, init]) => {
-        const headers = (init as RequestInit).headers as Record<string, string>;
-        return headers.Authorization;
-      }),
-    ).toEqual(["expired-token", "fresh-token"]);
-  });
-
   it("rejects immediately without authorizing when the native circuit is open", async () => {
     const transport = new RecordingTransport(() => new StaticHttpResponse(200, {}));
     const client = clientWithTransport(transport);
@@ -130,61 +89,6 @@ describe("B2Client native edge branches", () => {
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
     ).toHaveLength(2);
-  });
-
-  it("normalizes direct native HTTP error bodies and request IDs", async () => {
-    const transport = new RecordingTransport((request) => {
-      expect(b2EndpointName(request)).toBe("b2_authorize_account");
-      return new StaticHttpResponse(200, authResponseWithToken("native-token"));
-    });
-    const client = clientWithTransport(transport);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ code: "bad_request", message: "bad input" }), {
-        status: 400,
-        headers: { "x-amz-request-id": "amz-request-1" },
-      }),
-    );
-
-    const error = await client.call("b2_partner_probe", undefined, { apiPath: "b2api/v3" }).then(
-      () => null,
-      (err: unknown) => err,
-    );
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error).toMatchObject({
-      name: "NativeB2HttpError",
-      status: 400,
-      code: "bad_request",
-      message: "bad input",
-      requestId: "amz-request-1",
-    });
-  });
-
-  it.each([
-    ["empty", null, "unknown_error", "B2 API request failed with HTTP 503"],
-    ["non-JSON", "temporarily unavailable", "unknown_error", "B2 API request failed with HTTP 503"],
-  ])("normalizes %s direct native HTTP error responses", async (_name, body, code, message) => {
-    const transport = new RecordingTransport((request) => {
-      expect(b2EndpointName(request)).toBe("b2_authorize_account");
-      return new StaticHttpResponse(200, authResponseWithToken("native-token"));
-    });
-    const client = clientWithTransport(transport);
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(body, { status: 503, headers: { "x-request-id": "generic-request-1" } }),
-    );
-
-    const error = await client.call("b2_partner_probe", undefined, { apiPath: "b2api/v3" }).then(
-      () => null,
-      (err: unknown) => err,
-    );
-
-    expect(error).toMatchObject({
-      name: "NativeB2HttpError",
-      status: 503,
-      code,
-      message,
-      requestId: "generic-request-1",
-    });
   });
 
   it("rejects S3 version IDs that resolve to a different key in the same bucket", async () => {

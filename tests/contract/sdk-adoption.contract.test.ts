@@ -13,10 +13,10 @@ import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 import { readJson, readLock, root as ROOT } from "./support";
 
-const SDK_VERSION = "0.2.0";
-const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.2.0.tgz";
+const SDK_VERSION = "0.3.0";
+const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.3.0.tgz";
 const SDK_INTEGRITY =
-  "sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==";
+  "sha512-ABfrCTV0uN3ADXBgOC6hmMm2n3Mcnz2mnFafC1z1/Hvijv9GKlhaNBmfkY3UiRuVyjgWFCm8f5uiuQyNWFwFAg==";
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir)
@@ -193,21 +193,25 @@ describe("SDK adoption contract", () => {
     expectMatrixPath("b2_update_bucket", "raw", "RawClient.updateBucket");
     expect(b2Client).toContain("client.raw.updateBucket");
 
-    expectMatrixPath("b2_list_groups", "partner-http", 'B2Client.call("b2_list_groups")');
+    expectMatrixPath("b2_list_groups", "partner", "PartnerRawClient.listGroups");
+    expectMatrixPath("b2_create_group_member", "partner", "PartnerRawClient.createGroupMember");
+    expectMatrixPath("b2_eject_group_member", "partner", "PartnerRawClient.ejectGroupMember");
+    expectMatrixPath("b2_list_group_members", "partner", "PartnerRawClient.listGroupMembers");
     expectMatrixPath(
-      "b2_eject_group_member",
-      "partner-http",
-      'B2Client.call("b2_eject_group_member")',
+      "b2_reserve_trial_create_account",
+      "partner",
+      "PartnerRawClient.reserveTrialCreateAccount",
     );
-    expectMatrixPath(
-      "b2_list_group_members",
-      "partner-http",
-      'B2Client.call("b2_list_group_members")',
-    );
-    expect(partner).toContain('client.call("b2_list_groups"');
-    expect(partner).toContain('client.call("b2_eject_group_member"');
-    expect(partner).toContain('client.call("b2_list_group_members"');
-    expect(partner).not.toContain("partnerSdkGap");
+    expect(b2Client).toContain("client.raw.listGroups");
+    expect(b2Client).toContain("client.raw.createGroupMember");
+    expect(b2Client).toContain("client.raw.ejectGroupMember");
+    expect(b2Client).toContain("client.raw.listGroupMembers");
+    expect(b2Client).toContain("client.raw.reserveTrialCreateAccount");
+    expect(partner).toContain("client.listGroups");
+    expect(partner).toContain("client.ejectGroupMember");
+    expect(partner).toContain("client.listGroupMembers");
+    expect(partner).not.toContain("client.call(");
+    expect(b2Client).not.toContain("async call<");
 
     expectMatrixPath("s3_put_object", "s3", "B2S3PeerClient.putObject");
     expectMatrixPath("s3_get_object", "s3", "B2S3PeerClient.getObject");
@@ -272,8 +276,7 @@ describe("SDK adoption contract", () => {
     expect(shim).toContain("export class B2Simulator");
   });
 
-  it("links the upstream SDK gaps and the #49 release gate", () => {
-    expect(contract).toContain("backblaze-labs/b2-sdk-typescript/issues/153");
+  it("links the remaining upstream SDK gap and the #49 release gate", () => {
     expect(contract).toContain("backblaze-labs/b2-sdk-typescript/issues/154");
     expect(contract).toContain("github.com/backblaze-labs/b2-mcp/issues/49");
     expect(contract).toContain("intentionally pre-provisioned in runtime dependencies");

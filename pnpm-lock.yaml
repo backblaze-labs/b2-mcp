@@ -41,8 +41,8 @@ importers:
         specifier: 3.1103.0
         version: 3.1103.0
       '@backblaze-labs/b2-sdk':
-        specifier: 0.2.0
-        version: 0.2.0(@aws-sdk/client-s3@3.1103.0)
+        specifier: 0.3.0
+        version: 0.3.0(@aws-sdk/client-s3@3.1103.0)
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
@@ -222,8 +222,8 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
-  '@backblaze-labs/b2-sdk@0.2.0':
-    resolution: {integrity: sha512-qYjCVtFuiHp54R8okZbuG7oVU0U0Xj9A/Yn4VBLeMKp5JxVKFp3+M3Ywry+aB6ZKX24P3NTh8JURZMGuayFWDQ==}
+  '@backblaze-labs/b2-sdk@0.3.0':
+    resolution: {integrity: sha512-ABfrCTV0uN3ADXBgOC6hmMm2n3Mcnz2mnFafC1z1/Hvijv9GKlhaNBmfkY3UiRuVyjgWFCm8f5uiuQyNWFwFAg==}
     engines: {node: '>=22.3.0'}
     peerDependencies:
       '@aws-sdk/client-s3': ^3.0.0
@@ -4296,7 +4296,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@backblaze-labs/b2-sdk@0.2.0(@aws-sdk/client-s3@3.1103.0)':
+  '@backblaze-labs/b2-sdk@0.3.0(@aws-sdk/client-s3@3.1103.0)':
     optionalDependencies:
       '@aws-sdk/client-s3': 3.1103.0
 

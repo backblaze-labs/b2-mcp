@@ -19,6 +19,9 @@ hash covers the sorted tool names and normalized tool definitions, including
 model-visible schema and parameter descriptions.
 The artifact and fixtures also identify the resolved MCP SDK packages and
 `@backblaze-labs/b2-sdk` version used to produce the snapshot.
+Partner/Groups read/eject/list handlers are SDK-backed native B2 operations in
+the full profile; Partner operations that produce durable secrets remain
+non-secret unavailable compatibility stubs until a reviewed sink exists.
 
 The public contract defines:
 
