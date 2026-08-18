@@ -74,16 +74,16 @@ Before publishing `v0.1.0`:
    Node.js 22.23.1, Node.js 24, and Node.js 26.
 11. Confirm any claimed MCP SDK package split is either implemented or tracked as
    a release-blocking follow-up once the upstream package exists.
-12. Create the GitHub Release for the publish tag, then publish only from the
-    canonical repository through the protected
-    `.github/workflows/publish.yml` workflow. Do not publish from a developer
-    workstation. The publish workflow must prove the `v*` tag is reachable from
-    `ci-green`, build explicitly, enforce the runtime package budget, scan the
-    generated packlist and tarball, generate and verify a CycloneDX production
-    SBOM artifact, call the protected live B2 contract workflow as a pre-release
-    gate, verify the tarball SHA-256, publish the already-scanned tarball with
-    lifecycle scripts disabled, and attach the SBOM to the GitHub Release only
-    after npm publish succeeds.
+12. Push the release commit and `v*` tag, then publish only from the canonical
+    repository through the protected `.github/workflows/publish.yml` workflow.
+    Do not publish from a developer workstation. The publish workflow must prove
+    the `v*` tag is reachable from `ci-green`, build explicitly, enforce the
+    runtime package budget, scan the generated packlist and tarball, generate
+    and verify a CycloneDX production SBOM artifact, call the protected live B2
+    contract workflow as a pre-release gate, verify the tarball SHA-256, publish
+    the already-scanned tarball with lifecycle scripts disabled, publish and
+    verify the GHCR image, and attach the SBOM to the GitHub Release only after
+    npm publish and GHCR publishing succeed.
 
 ## First Package Bootstrap
 
@@ -111,17 +111,26 @@ exists. For the first public package only:
    `npm-publish` GitHub environment.
 3. Deprecate the bootstrap version with a note that it is a reserved package
    bootstrap and is not supported for installation.
-4. Run the publish workflow against the signed `v0.1.0` tag. The workflow must
+4. Push the signed `v0.1.0` tag to run the publish workflow. The workflow must
    publish the verified tarball with OIDC provenance; do not publish a different
    local tarball to bootstrap the package.
 
 ## Normal Release
 
-1. Keep `[Unreleased]` for future work and move the release contents into a
-   matching `## [x.y.z] - YYYY-MM-DD` changelog section.
-2. Commit the version and changelog update, wait for `ci-green`, then create the
-   signed `vX.Y.Z` tag at that commit.
-3. Dispatch `Publish Package` with the exact tag. The workflow verifies
+1. Start from a clean, up-to-date `main`, confirm the intended release content
+   is under `[Unreleased]`, and run the deterministic local gate listed above.
+2. Run `pnpm version patch`, `pnpm version minor`, or `pnpm version major`. The
+   package `version` lifecycle promotes `[Unreleased]` into a dated
+   `## [x.y.z] - YYYY-MM-DD` changelog section, stages `CHANGELOG.md`, creates
+   the version commit, and creates the matching `vX.Y.Z` tag.
+3. Push the release commit and tag:
+
+   ```bash
+   git push --follow-tags
+   ```
+
+   The tag push starts `Publish Package`. The workflow waits until the tag is
+   reachable from the protected `ci-green` marker, then verifies
    tag/package/changelog consistency, runs `pnpm run verify`, requires live
    contract success, builds one tarball, runs an npm dry-run publish, records
    checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
@@ -149,8 +158,9 @@ exists. For the first public package only:
 ## Prerelease
 
 Use npm semver prerelease tags such as `v0.2.0-rc.1`. Publish from the same
-workflow and tag shape. Validate install commands against the prerelease tag
-before advertising the release candidate outside the release issue.
+`pnpm version prerelease --preid rc` and `git push --follow-tags` flow. Validate
+install commands against the prerelease tag before advertising the release
+candidate outside the release issue.
 
 ## Rollback
 

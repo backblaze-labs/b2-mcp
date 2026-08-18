@@ -21,9 +21,10 @@ function runGit(cwd: string, args: string[]) {
   return result.stdout.trim();
 }
 
-function runResolver(remote: string, tag: string, outputPath?: string) {
+function runResolver(remote: string, tag: string, outputPath?: string, extraArgs: string[] = []) {
   const args = [script, "--tag", tag, "--remote", remote];
   if (outputPath) args.push("--output", outputPath);
+  args.push(...extraArgs);
   return spawnSync(process.execPath, args, { cwd: root, encoding: "utf8" });
 }
 
@@ -133,6 +134,32 @@ describe("publish ref resolver", () => {
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain("must be reachable from refs/heads/ci-green");
+      expect(result.stderr).toContain(`ci_green_sha=${ciGreenSha}`);
+      expect(result.stderr).toContain(`tag_sha=${tagSha}`);
+    });
+  });
+
+  it("times out while waiting for a tag that never reaches ci-green", () => {
+    withTempDir((dir) => {
+      const ciGreenSha = createRepo(dir);
+      runGit(dir, ["branch", "ci-green", ciGreenSha]);
+      writeFileSync(join(dir, "README.md"), "changed\n");
+      runGit(dir, ["add", "README.md"]);
+      runGit(dir, ["commit", "-m", "changed"]);
+      const tagSha = runGit(dir, ["rev-parse", "HEAD"]);
+      runGit(dir, ["tag", "--no-sign", "v0.2.0", tagSha]);
+
+      const result = runResolver(dir, "v0.2.0", undefined, [
+        "--wait-for-ci-green-timeout-ms",
+        "1",
+        "--wait-for-ci-green-interval-ms",
+        "1",
+      ]);
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Timed out waiting for refs/tags/v0.2.0 to reach refs/heads/ci-green",
+      );
       expect(result.stderr).toContain(`ci_green_sha=${ciGreenSha}`);
       expect(result.stderr).toContain(`tag_sha=${tagSha}`);
     });

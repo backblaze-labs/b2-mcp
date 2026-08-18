@@ -600,6 +600,9 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts["release:sbom"]).toBe(
       "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     );
+    expect(packageJson.scripts.version).toBe(
+      "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
+    );
     expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
     expect(packageJson.scripts.prepublishOnly).toBeUndefined();
@@ -804,15 +807,14 @@ describe("supply-chain audit policy", () => {
     const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
 
-    expect(publishWorkflow).toContain("release:");
-    expect(publishWorkflow).toContain("types: [published]");
-    expect(publishWorkflow).not.toContain("push:");
-    expect(publishWorkflow).not.toContain("tags:");
-    expect(publishWorkflow).not.toContain("workflow_dispatch");
+    expect(publishWorkflow).toMatch(/^ {2}push:\n {4}tags:\n {6}- "v\*"$/m);
+    expect(publishWorkflow).not.toMatch(/^ {2}release:/m);
+    expect(publishWorkflow).not.toMatch(/^ {2}workflow_dispatch:/m);
     expect(publishWorkflow).not.toContain("inputs.tag");
-    expect(publishWorkflow).not.toContain("${{ github.ref_name }}");
-    expect(publishWorkflow).toContain("${{ github.event.release.tag_name }}");
+    expect(publishWorkflow).toContain("${{ github.ref_name }}");
+    expect(publishWorkflow).not.toContain("${{ github.event.release.tag_name }}");
     expect(prepareJob).not.toContain("id-token: write");
+    expect(prepareJob).toContain("--wait-for-ci-green-timeout-ms");
     expect(prepareJob).toContain("pnpm run verify");
     expect(prepareJob).not.toContain("actions/setup-python");
     expect(prepareJob).toContain("pnpm run typecheck");

@@ -1,8 +1,14 @@
 name: Publish Package
 
+# Tag-driven release. Release owners cut a version with
+# `pnpm version <patch|minor|major>` and push the resulting commit and `v*` tag
+# with `git push --follow-tags`. The tag push starts this workflow; the prepare
+# job waits until that tag is reachable from the protected `ci-green` marker
+# before building or publishing anything.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ jobs:
   prepare:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 90
     outputs:
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
       tarball-name: ${{ steps.pack.outputs.tarball_name }}
@@ -45,12 +51,14 @@ jobs:
       - name: Resolve ci-green protected release ref
         id: ref
         env:
-          PUBLISH_TAG: ${{ github.event.release.tag_name }}
+          PUBLISH_TAG: ${{ github.ref_name }}
           PUBLISH_REMOTE: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
           node scripts/resolve-publish-ref.mjs \
             --tag "${PUBLISH_TAG}" \
-            --remote "${PUBLISH_REMOTE}"
+            --remote "${PUBLISH_REMOTE}" \
+            --wait-for-ci-green-timeout-ms 2700000 \
+            --wait-for-ci-green-interval-ms 30000
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -63,7 +71,7 @@ jobs:
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
-          PUBLISH_TAG: ${{ github.event.release.tag_name }}
+          PUBLISH_TAG: ${{ github.ref_name }}
         run: node scripts/verify-release-input.mjs --tag "${PUBLISH_TAG}"
       - name: Fetch protected refs for denylist scan
         run: |
@@ -142,7 +150,7 @@ jobs:
           ACTIONS_RESULTS_URL: ""
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
-          PUBLISH_TAG: ${{ github.event.release.tag_name }}
+          PUBLISH_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p publish-package
@@ -379,7 +387,7 @@ jobs:
           ACTIONS_RUNTIME_URL: ""
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
           GHCR_TOKEN: ${{ github.token }}
-          PUBLISH_TAG: ${{ github.event.release.tag_name }}
+          PUBLISH_TAG: ${{ github.ref_name }}
           REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
         run: node scripts/publish-container-image.mjs
 
@@ -459,7 +467,7 @@ jobs:
           EXPECTED_SBOM_NAME: ${{ needs.prepare.outputs.sbom-name }}
           EXPECTED_CHECKSUMS_NAME: ${{ needs.prepare.outputs.checksums-name }}
           EXPECTED_RELEASE_NOTES_NAME: ${{ needs.prepare.outputs.release-notes-name }}
-          PUBLISH_TAG: ${{ github.event.release.tag_name }}
+          PUBLISH_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           release_flags=(

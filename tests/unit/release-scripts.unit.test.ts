@@ -85,6 +85,32 @@ describe("release scripts", () => {
     });
   });
 
+  it("promotes Unreleased notes into the bumped version changelog section", () => {
+    withFixture((fixtureRoot) => {
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.2.0" }, null, 2));
+
+      const result = spawnSync(process.execPath, ["scripts/cut-changelog.mjs"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+
+      const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.2.0]");
+      expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.2\.0\] - \d{4}-\d{2}-\d{2}/m);
+      expect(changelog).toContain("Future change.");
+      expect(changelog).toContain(
+        "[Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.2.0...HEAD",
+      );
+      expect(changelog).toContain(
+        "[0.2.0]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.2.0",
+      );
+    });
+  });
+
   it("includes the issue 64 release automation entry in v0.1.0 notes", () => {
     const result = spawnSync(
       process.execPath,

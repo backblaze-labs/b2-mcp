@@ -6,11 +6,19 @@ import { spawnSync } from "node:child_process";
 
 function usage() {
   return [
-    "Usage: node scripts/resolve-publish-ref.mjs --tag <vX.Y.Z[-prerelease]> --remote <url> [--output <path>]",
+    "Usage: node scripts/resolve-publish-ref.mjs --tag <vX.Y.Z[-prerelease]> --remote <url> [--output <path>] [--wait-for-ci-green-timeout-ms <ms>]",
     "",
     "Validates that the requested release tag is reachable from refs/heads/ci-green and",
     "writes checkout_sha=<sha> to the GitHub Actions output file when provided.",
   ].join("\n");
+}
+
+function parseNonNegativeInteger(value, optionName) {
+  if (!/^(0|[1-9]\d*)$/.test(String(value))) {
+    console.error(`publish-ref: ${optionName} must be a non-negative integer`);
+    process.exit(2);
+  }
+  return Number(value);
 }
 
 function parseArgs(argv) {
@@ -18,6 +26,8 @@ function parseArgs(argv) {
     tag: "",
     remote: "",
     output: process.env.GITHUB_OUTPUT ?? "",
+    waitForCiGreenTimeoutMs: 0,
+    waitForCiGreenIntervalMs: 30_000,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -26,7 +36,13 @@ function parseArgs(argv) {
       console.log(usage());
       process.exit(0);
     }
-    if (arg === "--tag" || arg === "--remote" || arg === "--output") {
+    if (
+      arg === "--tag" ||
+      arg === "--remote" ||
+      arg === "--output" ||
+      arg === "--wait-for-ci-green-timeout-ms" ||
+      arg === "--wait-for-ci-green-interval-ms"
+    ) {
       const value = argv[index + 1];
       if (!value) {
         console.error(`publish-ref: ${arg} requires a value`);
@@ -35,7 +51,12 @@ function parseArgs(argv) {
       index += 1;
       if (arg === "--tag") options.tag = value;
       else if (arg === "--remote") options.remote = value;
-      else options.output = value;
+      else if (arg === "--output") options.output = value;
+      else if (arg === "--wait-for-ci-green-timeout-ms") {
+        options.waitForCiGreenTimeoutMs = parseNonNegativeInteger(value, arg);
+      } else {
+        options.waitForCiGreenIntervalMs = parseNonNegativeInteger(value, arg);
+      }
       continue;
     }
     console.error(`publish-ref: unknown option ${arg}`);
@@ -49,6 +70,10 @@ function parseArgs(argv) {
   }
   if (!options.remote) {
     console.error("publish-ref: --remote is required");
+    process.exit(2);
+  }
+  if (options.waitForCiGreenTimeoutMs > 0 && options.waitForCiGreenIntervalMs === 0) {
+    console.error("publish-ref: --wait-for-ci-green-interval-ms must be greater than zero");
     process.exit(2);
   }
   return options;
@@ -139,6 +164,73 @@ function fetchReleaseRefs(remote, tag) {
   }
 }
 
+function failUnreachable(tag, tagSha, ciGreenSha, waited) {
+  if (waited) {
+    console.error(`::error::Timed out waiting for refs/tags/${tag} to reach refs/heads/ci-green`);
+  }
+  console.error(`::error::refs/tags/${tag} must be reachable from refs/heads/ci-green`);
+  console.error(`ci_green_sha=${ciGreenSha}`);
+  console.error(`tag_sha=${tagSha}`);
+  process.exit(1);
+}
+
+function waitForReachableTag(options, tagSha) {
+  const startedAt = Date.now();
+  const deadline = startedAt + options.waitForCiGreenTimeoutMs;
+  let lastCiGreenSha = "";
+
+  for (;;) {
+    const ciGreenSha = lsRemote(options.remote, "refs/heads/ci-green");
+    if (!ciGreenSha) {
+      if (Date.now() >= deadline) {
+        console.error("::error::refs/heads/ci-green is missing");
+        process.exit(1);
+      }
+      const sleepMs = Math.min(
+        options.waitForCiGreenIntervalMs,
+        Math.max(0, deadline - Date.now()),
+      );
+      console.warn(
+        `publish-ref: refs/heads/ci-green is missing; waiting ${Math.ceil(
+          sleepMs / 1000,
+        )}s before retrying`,
+      );
+      sleep(sleepMs);
+      continue;
+    }
+
+    const currentTagSha = lsRemoteTagCommit(options.remote, options.tag);
+    if (!currentTagSha) {
+      console.error(`::error::refs/tags/${options.tag} is missing`);
+      process.exit(1);
+    }
+    if (currentTagSha !== tagSha) {
+      console.error(`::error::refs/tags/${options.tag} changed while resolving release tag`);
+      process.exit(1);
+    }
+
+    const fetched = fetchReleaseRefs(options.remote, options.tag);
+    if (fetched.tagSha !== tagSha) {
+      console.error(`::error::refs/tags/${options.tag} changed while resolving release tag`);
+      process.exit(1);
+    }
+    if (fetched.isAncestor) return fetched;
+
+    lastCiGreenSha = fetched.ciGreenSha || ciGreenSha;
+    if (Date.now() >= deadline) {
+      failUnreachable(options.tag, tagSha, lastCiGreenSha, options.waitForCiGreenTimeoutMs > 0);
+    }
+
+    const sleepMs = Math.min(options.waitForCiGreenIntervalMs, Math.max(0, deadline - Date.now()));
+    console.warn(
+      `publish-ref: refs/tags/${options.tag} is not yet reachable from ci-green ${lastCiGreenSha}; waiting ${Math.ceil(
+        sleepMs / 1000,
+      )}s before retrying`,
+    );
+    sleep(sleepMs);
+  }
+}
+
 const options = parseArgs(process.argv.slice(2));
 
 const numericIdentifier = "(?:0|[1-9]\\d*)";
@@ -154,35 +246,16 @@ if (!publishTagPattern.test(options.tag)) {
   process.exit(1);
 }
 
-const ciGreenSha = lsRemote(options.remote, "refs/heads/ci-green");
 const tagSha = lsRemoteTagCommit(options.remote, options.tag);
 
-if (!ciGreenSha) {
-  console.error("::error::refs/heads/ci-green is missing");
-  process.exit(1);
-}
 if (!tagSha) {
   console.error(`::error::refs/tags/${options.tag} is missing`);
   process.exit(1);
 }
 
-const fetched = fetchReleaseRefs(options.remote, options.tag);
-if (lsRemote(options.remote, "refs/heads/ci-green") !== ciGreenSha) {
-  console.error("::error::refs/heads/ci-green changed while resolving release tag");
-  process.exit(1);
-}
-if (fetched.tagSha !== tagSha) {
-  console.error(`::error::refs/tags/${options.tag} changed while resolving release tag`);
-  process.exit(1);
-}
-if (!fetched.isAncestor) {
-  console.error(`::error::refs/tags/${options.tag} must be reachable from refs/heads/ci-green`);
-  console.error(`ci_green_sha=${ciGreenSha}`);
-  console.error(`tag_sha=${tagSha}`);
-  process.exit(1);
-}
+const fetched = waitForReachableTag(options, tagSha);
 
 if (options.output) appendFileSync(options.output, `checkout_sha=${tagSha}\n`);
 console.log(
-  `publish-ref: ${options.tag} resolves to ${tagSha}, reachable from ci-green ${ciGreenSha}`,
+  `publish-ref: ${options.tag} resolves to ${tagSha}, reachable from ci-green ${fetched.ciGreenSha}`,
 );
