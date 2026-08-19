@@ -102,7 +102,10 @@ const vitestArgs = [
   ...layerConfig.args,
   ...coverageArgs,
   ...extraVitestArgs,
-  ...(!hasB2CredentialEnv ? ["--reporter=default"] : []),
+  // Always include the console reporter so a failing test's name and error are
+  // visible in CI logs (not only in the JUnit file). For credential-bearing
+  // layers the output is piped and secret-redacted below before it is printed.
+  "--reporter=default",
   `--reporter=${summaryReporter}`,
   ...(allowJunit ? ["--reporter=junit", `--outputFile.junit=${junitPath}`] : []),
 ];

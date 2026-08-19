@@ -290,6 +290,7 @@ describe("S3 presigned and multipart helpers", () => {
           bucket: bucketName(),
           key,
           operation: "PutObject",
+          contentType: "text/plain",
           expiresIn: 60,
           confirm: true,
         }),

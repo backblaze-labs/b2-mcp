@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Live B2 contract CI now sets `B2_REGION` so the S3-compatible live suites
+  target the correct account region instead of the default S3 endpoint.
+- Pinned a `contentType` on the live PutObject presigned-URL assertion to match
+  the server's required signed-content-type policy.
+- The Vitest layer runner always emits the default reporter so live-layer test
+  failures are visible in CI logs.
+
 ## [0.1.1] - 2026-08-18
 
 ### Changed
