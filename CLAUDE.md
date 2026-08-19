@@ -33,15 +33,19 @@ Run a single test by name:
 pnpm exec vitest run --config vitest.config.mts --project=unit --testNamePattern="should cache the token"
 ```
 
-Integration tests require env vars. A single non-master application key works for B2 native, S3, **and** key management (`b2_create_key`/`list_keys`/`delete_key` only need `writeKeys`/`listKeys`/`deleteKeys`). A master key is only needed to exercise the Partner API tests — set `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` for those (the master key is used only by those tools; the application key drives everything else):
+Integration tests require env vars. The live suite exercises native, S3, key
+management, event notifications, and the Partner API with no opt-in skips, so it
+needs the full set: a non-master application key (`B2_APPLICATION_KEY_ID` /
+`B2_APPLICATION_KEY`) for native, S3, and key management; the account master key
+(`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`) for the Partner API (which rejects
+non-master keys); `B2_REGION` for the account's S3 region; and
+`B2_LIVE_NOTIFICATION_BUCKET` naming a pre-provisioned, notifications-enabled
+bucket:
 
 ```bash
-# Most users — one (non-master) application key covers native + S3 + key mgmt:
-B2_APPLICATION_KEY_ID=xxx B2_APPLICATION_KEY=yyy pnpm run test:integration:live
-
-# Add a master key ONLY for Partner API flows:
 B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
 B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
+B2_REGION=us-east-005 B2_LIVE_NOTIFICATION_BUCKET=your-notify-bucket \
 pnpm run test:integration:live
 ```
 
@@ -110,20 +114,24 @@ calls, no credentials needed. `tests/contract/tools-schema.contract.test.ts`
 builds the full server with dummy credentials and validates all 40 tool schemas
 structurally.
 
-Live integration tests (`tests/live/b2.integration.live.test.ts`) use these skip guards:
+Live integration tests (`tests/live/b2.integration.live.test.ts` and
+`tests/live/request-shape.contract.live.test.ts`) run against real B2 and gate
+on credentials, with no opt-in escape hatches:
 
-- `liveIt` — skips when `B2_APPLICATION_KEY_ID` is absent (general B2 + Partner/master-only tests use this credential)
-- `liveS3It` — skips when `B2_APP_KEY_ID` is absent (S3 tests need a non-master application key, which is only required when the primary key is a master key)
-- `partnerIt` — skips unless `B2_PARTNER_LIVE=1` **and** the primary key is a master key on a Partner-API-entitled account. Runs the read-only Groups flow (`b2_list_groups → b2_list_group_members`); bails gracefully if the account isn't entitled.
-- The mutating Groups test (`create_group_member → eject`) is additionally gated on `B2_PARTNER_MUTATE=1` + `B2_PARTNER_TEST_EMAIL`, and skipped by default — `b2_create_group_member` creates a **real, non-deletable** Backblaze account that eject does not remove, so it must never run in CI.
+- `liveIt` runs a case only when `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY`
+  are present, and skips otherwise. Every live case uses this guard.
+- The Partner read paths (`b2_list_groups`, `b2_list_group_members`) require the
+  account master key (`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`) on a Partner-entitled
+  account; they assert real results and fail (never skip) when it is missing.
+  There is no `B2_PARTNER_LIVE` flag.
+- The event-notification write-shape contract requires
+  `B2_LIVE_NOTIFICATION_BUCKET` to name a pre-provisioned, notifications-enabled
+  bucket, with the key holding `writeBucketNotifications`. It sets then clears
+  rules and never deletes the bucket.
 
-To run the Partner Groups test, supply a **master** key via `B2_MASTER_KEY_*` (Partner endpoints reject non-master keys); the application key stays non-master so native + S3 tests still work in the same run:
-
-```bash
-B2_APPLICATION_KEY_ID=appkey_id B2_APPLICATION_KEY=appkey_secret \
-B2_MASTER_KEY_ID=master_id B2_MASTER_KEY=master_secret \
-B2_PARTNER_LIVE=1 pnpm run test:integration:live
-```
+There is no `create_group_member`/`eject` mutating test in the live suite;
+`b2_create_group_member` would create a real, non-deletable account and must
+never run in CI.
 
 ## HTTP transport: per-request credentials & hardening
 
