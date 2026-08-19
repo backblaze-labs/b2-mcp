@@ -133,6 +133,13 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
   s3_put_object: ["readFileLegalHolds", "readFileRetentions", "writeFiles"],
 };
 
+// Live tools gated behind an opt-in env flag are skipped by default, so their
+// capabilities are not required of the default contract key. The notification
+// rules test runs only with B2_LIVE_EVENT_NOTIFICATIONS=1 and needs an
+// event-notifications entitlement most accounts (including the test account)
+// lack, so writeBucketNotifications must not gate the standard live run.
+const OPT_IN_LIVE_TOOL_CAPABILITIES = new Set(["b2_set_bucket_notification_rules"]);
+
 function liveSuiteToolNames(): string[] {
   const names = new Set<string>();
   for (const sourcePath of liveSuiteSources) {
@@ -320,7 +327,9 @@ describe("live secret workflow policy", () => {
     expect(missingMappings).toEqual([]);
 
     const exercisedCapabilities = sortedUnique(
-      liveSuiteToolNames().flatMap((name) => liveToolCapabilities[name]),
+      liveSuiteToolNames()
+        .filter((name) => !OPT_IN_LIVE_TOOL_CAPABILITIES.has(name))
+        .flatMap((name) => liveToolCapabilities[name]),
     );
     expect(sortedUnique(LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES)).toEqual(exercisedCapabilities);
     for (const forbidden of LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES) {

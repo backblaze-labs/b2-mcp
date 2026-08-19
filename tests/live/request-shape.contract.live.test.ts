@@ -59,50 +59,66 @@ afterAll(async () => {
 });
 
 // ── Notification rule write-shape contract ────────────────────────────────────
-// Requires the B2 event-notifications API entitlement, which not every contract
-// account has. Opt in with B2_LIVE_EVENT_NOTIFICATIONS=1; skipped by default.
-describe.skipIf(process.env.B2_LIVE_EVENT_NOTIFICATIONS !== "1")(
-  "Contract: notification rules objectNamePrefix",
-  () => {
-    liveIt(
-      "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
-      async () => {
-        const cleanupBucket: ContractBucketRef = { bucketId: "" };
-        try {
-          const bucket = await bucketTracker.createBucket("notify");
-          cleanupBucket.bucketId = bucket.bucketId;
-          cleanupBucket.bucketName = bucket.bucketName;
-          const res = await callTool(server, "b2_set_bucket_notification_rules", {
-            bucketId: cleanupBucket.bucketId,
-            eventNotificationRules: [
-              {
-                name: contractRuleName("notify-rule"),
-                // objectNamePrefix deliberately omitted — the tool must inject "".
-                eventTypes: ["b2:ObjectCreated:*"],
-                isEnabled: false,
-                targetConfiguration: {
-                  targetType: "webhook",
-                  url: "https://example.com/contract",
-                },
+// B2 Event Notifications is a per-bucket entitlement, so this runs against a
+// pre-provisioned, notifications-enabled bucket named by B2_LIVE_NOTIFICATION_BUCKET.
+// It is skipped unless that variable is set, and it never creates or deletes the
+// bucket: it sets a rule, asserts the injected objectNamePrefix, then clears the
+// rules it added. The running key must additionally hold writeBucketNotifications
+// on the account that owns the bucket.
+const NOTIFICATION_BUCKET = process.env.B2_LIVE_NOTIFICATION_BUCKET;
+
+describe.skipIf(!NOTIFICATION_BUCKET)("Contract: notification rules objectNamePrefix", () => {
+  liveIt(
+    "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
+    async () => {
+      const listed = await callTool(server, "b2_list_buckets", {
+        bucketName: NOTIFICATION_BUCKET,
+      });
+      if (isError(listed)) {
+        failContractPrerequisite(
+          "could not list the notification fixture bucket",
+          liveErrorText(listed),
+        );
+      }
+      const bucketId = parseResult(listed).buckets?.[0]?.bucketId;
+      if (!bucketId) {
+        failContractPrerequisite(`notification fixture bucket not found: ${NOTIFICATION_BUCKET}`);
+      }
+      try {
+        const res = await callTool(server, "b2_set_bucket_notification_rules", {
+          bucketId,
+          eventNotificationRules: [
+            {
+              name: contractRuleName("notify-rule"),
+              // objectNamePrefix deliberately omitted, so the tool must inject "".
+              eventTypes: ["b2:ObjectCreated:*"],
+              isEnabled: false,
+              targetConfiguration: {
+                targetType: "webhook",
+                url: "https://example.com/contract",
               },
-            ],
-          });
-          if (isError(res)) {
-            const detail = liveErrorText(res);
-            if (detail.toLowerCase().includes("api not enabled")) {
-              failContractPrerequisite("Event Notifications API is unavailable", detail);
-            }
-            throw new Error(`notification rules shape contract failed: ${detail}`);
+            },
+          ],
+        });
+        if (isError(res)) {
+          const detail = liveErrorText(res);
+          if (detail.toLowerCase().includes("api not enabled")) {
+            failContractPrerequisite("Event Notifications API is unavailable", detail);
           }
-          expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
-        } finally {
-          await bucketTracker.cleanupBucket(cleanupBucket);
+          throw new Error(`notification rules shape contract failed: ${detail}`);
         }
-      },
-      30_000,
-    );
-  },
-);
+        expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
+      } finally {
+        // Persistent fixture: clear only the rules we added; never delete the bucket.
+        await callTool(server, "b2_set_bucket_notification_rules", {
+          bucketId,
+          eventNotificationRules: [],
+        });
+      }
+    },
+    30_000,
+  );
+});
 
 // ── b2_update_bucket Object Lock retrofit ─────────────────────────────────────
 describe("Contract: b2_update_bucket Object Lock retrofit", () => {

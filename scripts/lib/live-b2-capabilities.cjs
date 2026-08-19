@@ -14,7 +14,6 @@ const LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES = Object.freeze([
   "readFileRetentions",
   "readFiles",
   "writeBucketEncryption",
-  "writeBucketNotifications",
   "writeBucketRetentions",
   "writeBuckets",
   "writeFileLegalHolds",

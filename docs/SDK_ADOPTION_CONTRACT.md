@@ -68,7 +68,7 @@ the time of adoption. The root and customer-hosted workspaces carry a temporary
 exact-version `minimumReleaseAgeExclude` entry for
 `@backblaze-labs/b2-sdk@0.3.0` so frozen installs can verify the reviewed
 lockfile while the cooldown elapses. The exception expires at
-`2026-08-19T09:00:00.000Z`; after that timestamp, the supply-chain policy test
+`2026-09-02T09:00:00.000Z`; after that timestamp, the supply-chain policy test
 fails until the exclusion is removed from both workspaces. Future SDK bumps must
 either wait out the release-age window or add a new reviewed, time-bounded
 exception.

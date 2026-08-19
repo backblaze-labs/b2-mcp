@@ -106,7 +106,7 @@ describe("supply-chain audit policy", () => {
     const excludedPackage = `@backblaze-labs/b2-sdk@${sdkVersion}`;
     const rootExcludes = pnpmWorkspace.minimumReleaseAgeExclude ?? [];
     const customerHostedExcludes = customerHostedPnpmWorkspace.minimumReleaseAgeExclude ?? [];
-    const exceptionExpiresAt = "2026-08-19T09:00:00.000Z";
+    const exceptionExpiresAt = "2026-09-02T09:00:00.000Z";
 
     expect(rootExcludes).toContain(excludedPackage);
     expect(customerHostedExcludes).toContain(excludedPackage);
