@@ -19,10 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the server's required signed-content-type policy.
 - The Vitest layer runner always emits the default reporter so live-layer test
   failures are visible in CI logs.
-- Gate the event-notification write-shape contract on a pre-provisioned,
-  notifications-enabled bucket (`B2_LIVE_NOTIFICATION_BUCKET`) instead of an
-  ephemeral one, so the default live-contract key no longer needs
-  `writeBucketNotifications`.
+- Run the event-notification write-shape contract in CI against a
+  pre-provisioned, notifications-enabled bucket (`B2_LIVE_NOTIFICATION_BUCKET`)
+  instead of an ephemeral one.
+- Exercise the Partner API read paths in CI against a Partner-entitled account
+  via a master key (`B2_MASTER_KEY_ID`/`B2_MASTER_KEY`).
 
 ## [0.1.0] - 2026-08-18
 

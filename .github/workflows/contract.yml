@@ -22,6 +22,10 @@ on:
         required: true
       LIVE_B2_KEY:
         required: true
+      LIVE_B2_MASTER_KEY_ID:
+        required: false
+      LIVE_B2_MASTER_KEY:
+        required: false
 
 permissions:
   contents: read
@@ -140,6 +144,9 @@ jobs:
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
         run: |
           set -euo pipefail
@@ -194,6 +201,9 @@ jobs:
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
         run: pnpm run test:live:b2
       - name: Clean current live B2 run resources
@@ -203,6 +213,9 @@ jobs:
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
           B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
           B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
         run: |
           set -euo pipefail

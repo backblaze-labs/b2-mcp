@@ -473,16 +473,13 @@ describe("Insight scans, cancellation, and error mapping", () => {
 });
 
 describe("Partner API read paths", () => {
-  liveIt("b2_list_groups returns groups or a structured unauthorized error", async () => {
+  liveIt("b2_list_groups returns groups for the Partner-entitled account", async () => {
     const authData = parseResult(await callTool(server, "b2_authorize_account", {}));
     const result = await callTool(server, "b2_list_groups", { adminAccountId: authData.accountId });
-    if (!isError(result)) {
-      const data = parseResult(result);
-      expect(data).toHaveProperty("groups");
-      expect(Array.isArray(data.groups)).toBe(true);
-    } else {
-      expect(liveErrorText(result)).toMatch(/unauthorized|bad_request|invalid/i);
-    }
+    expectLiveSuccess(result, "b2_list_groups");
+    const data = parseResult(result);
+    expect(data).toHaveProperty("groups");
+    expect(Array.isArray(data.groups)).toBe(true);
   });
 
   liveIt("b2_list_group_members returns a structured error for an unknown groupId", async () => {
@@ -492,6 +489,6 @@ describe("Partner API read paths", () => {
       groupId: "000000000000000000000000",
     });
     expect(isError(result)).toBe(true);
-    expect(liveErrorText(result)).toMatch(/invalid_group_id|unauthorized|bad_request/i);
+    expect(liveErrorText(result)).toMatch(/invalid_group_id|bad_request/i);
   });
 });

@@ -413,21 +413,27 @@ For the integration and request-shape contract suites, use the
   `bypassGovernance`, `deleteBuckets`, `deleteFiles`, `listBuckets`,
   `listFiles`, `listKeys`, `readBucketEncryption`, `readBucketRetentions`,
   `readBuckets`, `readFileLegalHolds`, `readFileRetentions`, `readFiles`,
-  `writeBucketEncryption`, `writeBucketRetentions`,
+  `writeBucketEncryption`, `writeBucketNotifications`, `writeBucketRetentions`,
   `writeBuckets`, `writeFileLegalHolds`, `writeFileRetentions`, and
   `writeFiles`. Do not grant `writeKeys`, `deleteKeys`, master-key access, or
   account-admin capabilities.
-- Secrets: `LIVE_B2_KEY_ID` and `LIVE_B2_KEY`, mapped by
-  `.github/workflows/contract.yml` to `B2_APPLICATION_KEY_ID` and
-  `B2_APPLICATION_KEY`.
+- Secrets: `LIVE_B2_KEY_ID` and `LIVE_B2_KEY` (mapped to `B2_APPLICATION_KEY_ID`
+  and `B2_APPLICATION_KEY`), plus `LIVE_B2_MASTER_KEY_ID` and `LIVE_B2_MASTER_KEY`
+  (mapped to `B2_MASTER_KEY_ID`/`B2_MASTER_KEY`) for the Partner read paths, all
+  wired through `.github/workflows/contract.yml`.
 - Variables: `B2_LIVE_TEST_ACCOUNT_ID`, `B2_REGION` (the account's S3 region,
-  e.g. `us-east-005`), and the workflow-generated `B2_MCP_LIVE_RUN_PREFIX`.
-- Event Notifications (optional): to run the opt-in notification write-shape
-  contract, pre-create a bucket in the same test account, have Backblaze enable
-  Event Notifications on it (a per-bucket entitlement), and set
-  `B2_LIVE_NOTIFICATION_BUCKET` to its name. The test sets then clears rules on
-  that bucket and never deletes it, and the running key must additionally hold
-  `writeBucketNotifications`. Skipped when the variable is unset (the CI default).
+  e.g. `us-east-005`), `B2_LIVE_NOTIFICATION_BUCKET`, and the workflow-generated
+  `B2_MCP_LIVE_RUN_PREFIX`.
+- Event Notifications (required): the notification write-shape contract runs
+  against a pre-provisioned, notifications-enabled bucket. Create a bucket in the
+  test account, have Backblaze enable Event Notifications on it (a per-bucket
+  entitlement), and set `B2_LIVE_NOTIFICATION_BUCKET` to its name. The test sets
+  then clears rules and never deletes the bucket, and the key holds
+  `writeBucketNotifications`.
+- Partner API (required): provide the account master key via
+  `LIVE_B2_MASTER_KEY_ID`/`LIVE_B2_MASTER_KEY`; the account must have Partner API
+  access. Partner endpoints reject non-master keys, so this is separate from the
+  non-master application key.
 - Use a dedicated, disposable key in an isolated test account. A bucket-creating
   key is account-wide, so the test account is the isolation boundary.
 

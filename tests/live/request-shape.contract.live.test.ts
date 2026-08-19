@@ -61,16 +61,21 @@ afterAll(async () => {
 // ── Notification rule write-shape contract ────────────────────────────────────
 // B2 Event Notifications is a per-bucket entitlement, so this runs against a
 // pre-provisioned, notifications-enabled bucket named by B2_LIVE_NOTIFICATION_BUCKET.
-// It is skipped unless that variable is set, and it never creates or deletes the
-// bucket: it sets a rule, asserts the injected objectNamePrefix, then clears the
-// rules it added. The running key must additionally hold writeBucketNotifications
-// on the account that owns the bucket.
+// It never creates or deletes the bucket: it sets a rule, asserts the injected
+// objectNamePrefix, then clears the rules it added. B2_LIVE_NOTIFICATION_BUCKET is
+// required for the live contract suite (no skip), and the running key must hold
+// writeBucketNotifications on the account that owns the bucket.
 const NOTIFICATION_BUCKET = process.env.B2_LIVE_NOTIFICATION_BUCKET;
 
-describe.skipIf(!NOTIFICATION_BUCKET)("Contract: notification rules objectNamePrefix", () => {
+describe("Contract: notification rules objectNamePrefix", () => {
   liveIt(
     "b2_set_bucket_notification_rules never fails for a missing objectNamePrefix",
     async () => {
+      if (!NOTIFICATION_BUCKET) {
+        failContractPrerequisite(
+          "B2_LIVE_NOTIFICATION_BUCKET must name a notifications-enabled bucket",
+        );
+      }
       const listed = await callTool(server, "b2_list_buckets", {
         bucketName: NOTIFICATION_BUCKET,
       });

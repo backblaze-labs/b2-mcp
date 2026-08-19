@@ -285,6 +285,8 @@ jobs:
     secrets:
       LIVE_B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
       LIVE_B2_KEY: ${{ secrets.LIVE_B2_KEY }}
+      LIVE_B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+      LIVE_B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
 
   publish:
     needs: [prepare, live-contract]
