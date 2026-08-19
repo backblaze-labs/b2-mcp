@@ -617,7 +617,7 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts.pretest).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
     expect(publishWorkflow).toContain("id-token: write");
-    expect(publishWorkflow).toContain("environment: npm-publish");
+    expect(publishWorkflow).not.toContain("environment: npm-publish");
     expect(publishWorkflow).toContain("ci-green");
     expect(publishWorkflow).toContain("node scripts/verify-release-input.mjs --tag");
     expect(publishWorkflow).toContain(
@@ -651,7 +651,7 @@ describe("supply-chain audit policy", () => {
     expect(githubReleaseJob).toContain('sha256sum "$sbom"');
     expect(githubReleaseJob).toContain("sha256sum --check");
     expect(containerImageJob).toContain("needs: [prepare, publish]");
-    expect(containerImageJob).toContain("environment: ghcr-publish");
+    expect(containerImageJob).not.toContain("environment: ghcr-publish");
     expect(containerImageJob).toContain("packages: write");
     expect(containerImageJob).toContain("id-token: write");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");

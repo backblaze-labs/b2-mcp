@@ -17,6 +17,11 @@ on:
         description: Exact release candidate commit SHA resolved by the caller.
         required: true
         type: string
+    secrets:
+      LIVE_B2_KEY_ID:
+        required: true
+      LIVE_B2_KEY:
+        required: true
 
 permissions:
   contents: read
@@ -100,9 +105,6 @@ jobs:
     needs: guard
     if: needs.guard.outputs.should-run == 'true'
     runs-on: ubuntu-latest
-    # Environment secrets are resolved here for every entry point, including
-    # workflow_call. Reusable-workflow callers cannot bind an environment.
-    environment: live-b2-contract
     timeout-minutes: 18
     strategy:
       fail-fast: false

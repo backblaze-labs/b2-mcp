@@ -282,12 +282,14 @@ jobs:
     uses: ./.github/workflows/contract.yml
     with:
       checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}
+    secrets:
+      LIVE_B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+      LIVE_B2_KEY: ${{ secrets.LIVE_B2_KEY }}
 
   publish:
     needs: [prepare, live-contract]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    environment: npm-publish
     timeout-minutes: 5
     permissions:
       actions: read
@@ -395,7 +397,6 @@ jobs:
     needs: [prepare, publish]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    environment: ghcr-publish
     timeout-minutes: 45
     permissions:
       contents: read

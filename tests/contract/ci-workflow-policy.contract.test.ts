@@ -354,7 +354,7 @@ describe("CI workflow policy", () => {
 
     expect(publishJob).toContain("needs: [prepare, live-contract]");
     expect(containerImageJob).toContain("needs: [prepare, publish]");
-    expect(containerImageJob).toContain("environment: ghcr-publish");
+    expect(containerImageJob).not.toContain("environment: ghcr-publish");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
     expect(containerImageJob).toContain("packages: write");
     expect(containerImageJob).toContain("id-token: write");
@@ -368,8 +368,9 @@ describe("CI workflow policy", () => {
     expect(liveContract).toContain("needs: prepare");
     expect(liveContract).toContain("uses: ./.github/workflows/contract.yml");
     expect(liveContract).toContain("checkout-sha: ${{ needs.prepare.outputs.checkout-sha }}");
-    expect(liveContract).not.toContain("secrets:");
-    expect(liveContract).not.toContain("${{ secrets.");
+    expect(liveContract).toContain("LIVE_B2_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
+    expect(liveContract).toContain("LIVE_B2_KEY: ${{ secrets.LIVE_B2_KEY }}");
+    expect(liveContract).not.toContain("secrets: inherit");
     expect(liveContract).not.toContain("for attempt in 1 2 3");
     expect(liveContract).not.toContain("retrying");
     expect(publish).toContain("github-release:");

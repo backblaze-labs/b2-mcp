@@ -24,7 +24,9 @@ const liveWorkflows = [
   {
     path: ".github/workflows/contract.yml",
     job: "contract",
-    environment: "live-b2-contract",
+    // Release-workflow callers cannot bind a GitHub Environment, so the contract
+    // job no longer uses one; credentials arrive via named workflow_call secrets.
+    environment: null as string | null,
     concurrency: "live-b2-contract-${{ github.repository }}-resources",
     cancelsInProgress: false,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY"],
@@ -159,11 +161,15 @@ function documentedContractCapabilities(): string[] {
 
 describe("live secret workflow policy", () => {
   it.each(liveWorkflows)(
-    "$path wires the protected environment, trusted triggers, and serialized Node matrix",
+    "$path wires the trusted triggers and serialized Node matrix",
     ({ path, job, environment }) => {
       const text = workflowText(path);
       expect(text).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
-      expect(text).toMatch(jobField(job, "environment", environment));
+      if (environment) {
+        expect(text).toMatch(jobField(job, "environment", environment));
+      } else {
+        expect(workflowJobBlock(text, job) ?? "").not.toContain("environment:");
+      }
       expectYamlList(text, "node-version", runtimePolicy.liveNodeMatrix);
       expectYamlScalar(text, "max-parallel", "1");
       expect(text).toMatch(/^\s{2}guard:\s*$/m);
@@ -236,9 +242,10 @@ describe("live secret workflow policy", () => {
     expect(workflowCall).not.toBe("");
     expect(text).toContain("checkout-sha:");
     expect(workflowCall).toContain("checkout-sha:");
-    expect(workflowCall).not.toContain("secrets:");
-    expect(workflowCall).not.toContain("LIVE_B2_KEY_ID");
-    expect(workflowCall).not.toContain("LIVE_B2_KEY");
+    expect(workflowCall).toContain("secrets:");
+    expect(workflowCall).toContain("LIVE_B2_KEY_ID:");
+    expect(workflowCall).toContain("LIVE_B2_KEY:");
+    expect(workflowCall).not.toContain("secrets: inherit");
     expect(text).toContain("WORKFLOW_CALL_CHECKOUT_SHA");
     expect(text).toContain('event_kind="workflow_call"');
     expect(text).toContain("workflow_call requires a full checkout-sha commit");
