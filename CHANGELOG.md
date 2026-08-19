@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-18
+
+### Changed
+- Verify the automated OIDC-based npm publish workflow with a patch release; no runtime code changes.
+
 ### Fixed
 - Live B2 contract CI now sets `B2_REGION` so the S3-compatible live suites
   target the correct account region instead of the default S3 endpoint.
@@ -14,11 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the server's required signed-content-type policy.
 - The Vitest layer runner always emits the default reporter so live-layer test
   failures are visible in CI logs.
-
-## [0.1.1] - 2026-08-18
-
-### Changed
-- Verify the automated OIDC-based npm publish workflow with a patch release; no runtime code changes.
 
 ## [0.1.0] - 2026-08-18
 
