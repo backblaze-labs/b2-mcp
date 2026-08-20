@@ -5,7 +5,7 @@
 [![npm](https://img.shields.io/npm/v/@backblaze-labs/b2-mcp?color=cb3837)](https://www.npmjs.com/package/@backblaze-labs/b2-mcp)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A522.3-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22.3%2B%20%7C%2024%20%7C%2026-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-5b5fc7)](https://modelcontextprotocol.io/specification/2026-07-28)
 [![Coverage floors](https://img.shields.io/badge/coverage-S%2090.5%20%7C%20B%2081.8%20%7C%20F%2094.6%20%7C%20L%2093.8-brightgreen)](docs/TESTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-9-blue)](package-budget.json)
@@ -29,7 +29,7 @@ Destructive actions are gated, durable B2 secrets stay out of the model's contex
 
 ## Quick start
 
-**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime (22.23.1+, or 24 / 26) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys). A non-master key is all you need. The package engine floor is `>=22.3.0`; CI runs on Node.js 22.23.1, 24, and 26.
+**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime (22.23.1+, or 24 / 26) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys). A non-master key is all you need. The package engine range is `^22.3.0 || ^24 || ^26`; CI runs on Node.js 22.23.1, 24, and 26.
 
 The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary is `b2-mcp` (`b2-mcp-server` is a transition alias). The fastest setup runs it with `npx`, no clone or build.
 

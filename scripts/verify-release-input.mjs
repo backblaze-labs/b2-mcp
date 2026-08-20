@@ -65,7 +65,10 @@ export function verifyReleaseInput(root, tag) {
   assert(pkg.repository?.url === canonicalRepository, "package repository URL is not canonical");
   assert(pkg.bugs?.url === canonicalIssues, "package bugs URL is not canonical");
   assert(pkg.homepage === canonicalHomepage, "package homepage is not canonical");
-  assert(pkg.engines?.node === ">=22.3.0", "package engine floor must be >=22.3.0");
+  assert(
+    pkg.engines?.node === "^22.3.0 || ^24 || ^26",
+    "package engine range must be ^22.3.0 || ^24 || ^26",
+  );
   assert(pkg.bin?.["b2-mcp"] === "dist/index.js", "missing b2-mcp executable");
   assert(pkg.bin?.["b2-mcp-server"] === "dist/index.js", "missing b2-mcp-server alias");
   for (const file of requiredFiles) {

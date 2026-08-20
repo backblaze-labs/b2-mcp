@@ -81,8 +81,8 @@ function matrixRows(
 }
 
 function parseFloor(value: string): [number, number, number] {
-  const match = value.match(/^>=(\d+)\.(\d+)\.(\d+)$/);
-  if (!match) throw new Error(`Unsupported engine floor: ${value}`);
+  const match = value.match(/^(?:>=|\^)(\d+)\.(\d+)\.(\d+)(?:\s|\||$)/);
+  if (!match) throw new Error(`Unsupported engine floor/range: ${value}`);
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 

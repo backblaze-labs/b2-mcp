@@ -151,8 +151,8 @@ const policy = readJson("runtime-policy.json");
 const packageJson = readJson("package.json");
 const lock = readPackageManagerLock(root);
 
-requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineFloor);
-requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineFloor);
+requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineRange);
+requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineRange);
 requireEqual(
   "Backblaze SDK engine floor",
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
@@ -249,7 +249,10 @@ for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smo
   requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");
 }
 
+requireContains("docs/V1_SCOPE.md", policy.engineRange, "package engine range");
 requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
+requireContains("README.md", policy.engineRange, "package engine range");
+requireContains("CONTRIBUTING.md", policy.engineRange, "package engine range");
 requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("CONTRIBUTING.md", policy.crossPlatformNode, "patched Node 22 pin");
