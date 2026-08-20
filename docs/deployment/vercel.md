@@ -39,9 +39,9 @@ compatibility path, Pino, timers, and shared HTTP code. The checked-in
 `api/*.js` files are thin launchers; the package `vercel-build` hook runs
 repository `typecheck`/`build` and compiles `deploy/vercel/**/*.ts` plus `src/`
 into `.vercel/build-runtime/` before `@vercel/node` traces functions. The
-package engine range remains `>=22.3.0` for consumers; the Vercel builder
-config explicitly pins the deployed Function runtime to `nodejs24.x`. This is
-an intentional move from the previous Vercel Node 22 function runtime to
+package engine range is `^22.3.0 || ^24 || ^26`; the Vercel builder config
+explicitly pins the deployed Function runtime to `nodejs24.x`. This is an
+intentional move from the previous Vercel Node 22 function runtime to
 Vercel's reviewed Node 24 line, and CI fails if the generated `.vercel/output`
 Function runtime changes before the pin and allowed runtime set are reviewed.
 Import the repository into Vercel and keep the project framework setting

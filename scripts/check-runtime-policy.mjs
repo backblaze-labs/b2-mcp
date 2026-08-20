@@ -5,7 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import workflowYaml from "./lib/workflow-yaml.cjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.B2_MCP_RUNTIME_POLICY_ROOT
+  ? path.resolve(process.env.B2_MCP_RUNTIME_POLICY_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const errors = [];
@@ -70,6 +72,25 @@ function parseNodeVersion(value) {
   };
 }
 
+function parseEngineRangeMinimums(value) {
+  return String(value)
+    .split(/\s*\|\|\s*/)
+    .map((part) => {
+      const match = part.match(/^\^(\d+)(?:\.(\d+)\.(\d+))?$/);
+      if (!match) return null;
+      const major = Number(match[1]);
+      const minor = match[2] === undefined ? null : Number(match[2]);
+      const patch = match[3] === undefined ? null : Number(match[3]);
+      return {
+        major,
+        minor,
+        patch,
+        raw: minor === null || patch === null ? String(major) : `${major}.${minor}.${patch}`,
+      };
+    })
+    .filter(Boolean);
+}
+
 function comparePatch(a, b) {
   const left = parseNodeVersion(a);
   const right = parseNodeVersion(b);
@@ -80,6 +101,18 @@ function comparePatch(a, b) {
     if (left[key] !== right[key]) return left[key] - right[key];
   }
   return 0;
+}
+
+function isSupportedWorkflowNodeVersion(version, policy) {
+  const parsed = parseNodeVersion(version);
+  if (!parsed) return true;
+  const minimum = parseEngineRangeMinimums(policy.engineRange).find(
+    (candidate) => candidate.major === parsed.major,
+  );
+  if (!minimum) return false;
+  if (minimum.minor === null || minimum.patch === null) return true;
+  if (parsed.minor === null || parsed.patch === null) return false;
+  return comparePatch(parsed.raw, minimum.raw) >= 0;
 }
 
 function requireNode22LtsPatch(label, version, policy) {
@@ -130,8 +163,7 @@ function parseEnvironmentNodeVersion() {
   return match?.[1] ?? null;
 }
 
-function requireNoLegacyRuntimeJobs(policy) {
-  const unsupported = new Set(policy.unsupportedMajors.map(String));
+function requireSupportedRuntimeJobs(policy) {
   for (const workflow of listFiles(".github/workflows")) {
     const text = read(workflow);
     if (text.includes("node-version-file:")) fail(`${workflow}: node-version-file is not allowed`);
@@ -140,8 +172,10 @@ function requireNoLegacyRuntimeJobs(policy) {
     );
     for (const version of versions) {
       const parsed = parseNodeVersion(version);
-      if (parsed && unsupported.has(String(parsed.major))) {
-        fail(`${workflow}: unsupported Node ${parsed.major} is present`);
+      if (parsed && !isSupportedWorkflowNodeVersion(version, policy)) {
+        fail(
+          `${workflow}: unsupported Node ${parsed.raw} is present; expected ${policy.engineRange}`,
+        );
       }
     }
   }
@@ -243,7 +277,7 @@ requireWorkflowMatrixInJob(
   "node-version",
   policy.liveNodeMatrix,
 );
-requireNoLegacyRuntimeJobs(policy);
+requireSupportedRuntimeJobs(policy);
 
 for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smoke.yml"]) {
   requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");
@@ -253,6 +287,9 @@ requireContains("docs/V1_SCOPE.md", policy.engineRange, "package engine range");
 requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
 requireContains("README.md", policy.engineRange, "package engine range");
 requireContains("CONTRIBUTING.md", policy.engineRange, "package engine range");
+requireContains("docs/DEPLOY.md", policy.engineRange, "package engine range");
+requireContains("docs/deployment/vercel.md", policy.engineRange, "package engine range");
+requireContains("deploy/vercel/README.md", policy.engineRange, "package engine range");
 requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("CONTRIBUTING.md", policy.crossPlatformNode, "patched Node 22 pin");

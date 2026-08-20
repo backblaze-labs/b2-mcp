@@ -50,12 +50,13 @@ function parseArgs(argv) {
   return { tag };
 }
 
-function packageJson(root) {
-  return JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+function readJson(root, relativePath) {
+  return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
 
 export function verifyReleaseInput(root, tag) {
-  const pkg = packageJson(root);
+  const pkg = readJson(root, "package.json");
+  const runtimePolicy = readJson(root, "runtime-policy.json");
   const expectedTag = `v${pkg.version}`;
 
   assert(tag === expectedTag, `release tag ${tag} does not match package version ${pkg.version}`);
@@ -66,8 +67,8 @@ export function verifyReleaseInput(root, tag) {
   assert(pkg.bugs?.url === canonicalIssues, "package bugs URL is not canonical");
   assert(pkg.homepage === canonicalHomepage, "package homepage is not canonical");
   assert(
-    pkg.engines?.node === "^22.3.0 || ^24 || ^26",
-    "package engine range must be ^22.3.0 || ^24 || ^26",
+    pkg.engines?.node === runtimePolicy.engineRange,
+    `package engine range must be ${runtimePolicy.engineRange}`,
   );
   assert(pkg.bin?.["b2-mcp"] === "dist/index.js", "missing b2-mcp executable");
   assert(pkg.bin?.["b2-mcp-server"] === "dist/index.js", "missing b2-mcp-server alias");

@@ -65,6 +65,10 @@ function withFixture(run: (fixtureRoot: string) => void): void {
         "",
       ].join("\n"),
     );
+    writeFileSync(
+      join(fixtureRoot, "runtime-policy.json"),
+      JSON.stringify({ engineRange: "^22.3.0 || ^24 || ^26" }, null, 2),
+    );
     run(fixtureRoot);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });

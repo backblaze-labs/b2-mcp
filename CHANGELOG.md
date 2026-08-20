@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Aligned the package `engines.node` range with the supported Node.js 22.3+,
-  24, and 26 lines so it matches the runtime policy and opossum 10 support.
+  24, and 26 lines so it matches the runtime policy and opossum 10 support,
+  with drift guards for workflow and deployment documentation claims.
 
 ## [0.1.1] - 2026-08-18
 
