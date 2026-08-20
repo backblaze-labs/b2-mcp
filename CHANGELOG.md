@@ -135,11 +135,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `backblaze-labs/b2-mcp`.
 - Aligned package metadata on the `0.1.0` Phase 1 release line.
 - Aligned the enforced runtime policy with the official B2 SDK floor:
-  `engines.node` is `^22.3.0 || ^24 || ^26`, CI verifies production
-  dependencies and the full toolchain on Node.js 22.23.1, 24, and 26, local and
-  live 22.x jobs use a patched Node 22 LTS release, the packed-package smoke
-  runs on the Node.js 22.3.0 engine floor, and workflow drift is checked from
-  `runtime-policy.json`.
+  `engines.node` is `>=22.3.0`, CI verifies production dependencies and the full
+  toolchain on Node.js 22.23.1, 24, and 26, local and live 22.x jobs use a
+  patched Node 22 LTS release, the packed-package smoke runs on the Node.js
+  22.3.0 engine floor, and workflow drift is checked from `runtime-policy.json`.
 - Kept coverage, slow lifecycle, package install, runtime floor, package budget,
   and supply-chain checks as independent required CI gates, with CODEOWNER
   review required for protected files.
