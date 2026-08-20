@@ -73,7 +73,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!HAS_CREDS) return;
   await bucketTracker.cleanupAll();
-});
+}, 120_000);
 
 describe("B2 Auth", () => {
   liveIt("b2_authorize_account returns accountId and apiUrl without exposing tokens", async () => {

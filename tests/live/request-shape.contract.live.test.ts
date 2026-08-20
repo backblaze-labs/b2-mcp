@@ -56,7 +56,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (!HAS_CREDS) return;
   await bucketTracker.cleanupAll();
-});
+}, 120_000);
 
 // ── Notification rule write-shape contract ────────────────────────────────────
 // B2 Event Notifications is a per-bucket entitlement, so this runs against a
