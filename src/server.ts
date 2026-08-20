@@ -131,40 +131,28 @@ function registerDurableSecretCompatibilityStubs(
   }
 }
 
-/**
- * Create and configure the MCP server with all B2 tools registered.
- *
- * Tools are grouped into three families, each registered by the register*Tools
- * functions below: B2 Native API (buckets, files, large files, download URLs,
- * keys, object lock, auth), Partner API (groups + trial provisioning), and
- * S3-Compatible (buckets, objects, multipart, presigned URLs, object lock,
- * extras). The exact tool count is asserted in
- * tests/contract/tools-schema.contract.test.ts and logged at startup
- * ("server.ready") rather than tracked here, so this comment can't drift out of
- * date.
- *
- * Credential model: B2_APPLICATION_KEY_ID/KEY is the application key — the
- * workhorse for the B2 native API, S3, and key management. A single non-master
- * key works for everything except the Partner API,
- * which need a master key — set B2_MASTER_KEY_ID/KEY for those (optional). The
- * master key is used only by those tools; everything else uses the application
- * key. (B2's S3 endpoint rejects master keys, which is exactly why the
- * application key, not the master key, is the primary credential.)
- */
-/**
- * Build the MCP server. When `capabilities` is a non-null array, registration is
- * capability-aware: only tools the key can use (per src/utils/tool-capabilities)
- * are registered, and Partner tools register only with a distinct master key.
- * When `capabilities` is null/undefined, the full surface is registered; this is
- * reserved for explicit operator override and legacy unit tests. An empty array
- * is a fail-closed capability set, not "unknown".
- *
- * @returns The configured MCP server instance.
- */
+/** Options for {@link createServer}. */
 export interface CreateServerOptions {
   oauthScopes?: readonly string[];
 }
 
+/**
+ * Build the MCP server and register the B2 tool surface.
+ *
+ * Registration is capability-aware: when `capabilities` is a non-null array,
+ * only tools the key can use are registered (per src/utils/tool-capabilities),
+ * and Partner tools register only with a distinct master key. `null`/`undefined`
+ * registers the full surface (operator override and legacy unit tests); an empty
+ * array is a fail-closed capability set, not "unknown".
+ *
+ * Credential model: `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` is the
+ * application key that drives the B2 native API, S3, and key management. Only the
+ * Partner API tools use a master key (`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`,
+ * optional); a single non-master key covers everything else. B2's S3 endpoint
+ * rejects master keys, which is why the application key is the primary credential.
+ *
+ * @returns The configured MCP server instance.
+ */
 export function createServer(
   config: B2Config,
   capabilities?: string[] | null,
@@ -204,7 +192,7 @@ export function createServer(
         outputFormatInstructions(outputFormat),
         "",
         "Companion skills (optional, recommended):",
-        "These tools are the capability layer. A separate Backblaze B2 Skills pack supplies the procedural knowledge — workload playbooks (backup, disaster recovery, SaaS multi-tenant storage, AI training, AI inference) built on reusable primitives, each encoding B2-accurate best practice and an approval gate for risky actions. Skills are installed in the client, not delivered by this server. If the user is doing B2 work that matches a playbook and no such skill appears to be active, mention that installing the B2 Skills pack will make these workflows safer and more repeatable (Claude Code: ~/.claude/skills/; Claude.ai / Claude Desktop: Settings -> Capabilities -> Skills). Do not block on it — the tools work without the skills.",
+        "Optional client-side Backblaze B2 Skills pack: `b2-backup-restore`, `b2-incident-response`, `b2-least-privilege-keys`, `b2-lifecycle-cost-hygiene`, `b2-migration`, `b2-object-lock`. If relevant and inactive, suggest installing it using the MCP client's skills docs. Do not block; tools work without skills.",
       ].join("\n"),
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
