@@ -104,9 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   durable-secret create/reserve tools now run when the reviewed secret sink is
   active and remain unavailable stubs when `B2_SECRET_SINK=off`.
 - Restored the transport-independent `b2_create_key` lockdown: key-management
-  grants and unscoped write/delete keys are refused by default, optional
-  `B2_MAX_KEY_DURATION_SECONDS` caps lifetime, and HTTP inline secret responses
-  require the dedicated `B2_ALLOW_INLINE_SECRETS=true` opt-in.
+  grants are refused by default unless `B2_ALLOW_KEY_MGMT_GRANTS=true`,
+  unscoped write/delete keys are refused by default unless
+  `B2_ALLOW_UNSCOPED_KEYS=true`, optional `B2_MAX_KEY_DURATION_SECONDS` caps
+  lifetime, and HTTP inline secret responses require the dedicated
+  `B2_ALLOW_INLINE_SECRETS=true` opt-in.
 - Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
   other supported algorithms with `B2_OAUTH_ALLOWED_ALGORITHMS`.
 - Documented the exported OAuth config TypeScript surface change: token-cache
@@ -208,12 +210,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both development and published dependency graphs.
 - Added explicit read-only workflow permissions and consolidated the safe AWS
   SDK, Axios, and TypeScript dependency updates from superseded Dependabot PRs.
-
-### Removed
-- Removed the `b2_create_key` lockdown toggles
-  `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, and
-  `B2_MAX_KEY_DURATION_SECONDS` because the durable-secret-producing handler is
-  no longer exposed in Phase 1.
 
 [Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1
