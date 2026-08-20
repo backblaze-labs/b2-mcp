@@ -264,9 +264,8 @@ const start: () => Promise<void> = b2Mcp.startStdio;
 
 Programmatic TypeScript imports beyond that root entry are not a supported
 public API. Deep imports such as `@backblaze-labs/b2-mcp/dist/server.js` are
-private implementation details and are closed by the package `exports` map
-before the 0.1 release. Use the CLI/bin entry or the root `startStdio` export
-instead.
+private implementation details and are closed by the package `exports` map. Use
+the CLI/bin entry or the root `startStdio` export instead.
 
 ---
 

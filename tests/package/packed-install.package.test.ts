@@ -1,4 +1,4 @@
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { createRequire } from "module";
 import { join, relative } from "path";
@@ -33,6 +33,12 @@ const { npmInvocation, runNpmCommandWithRetries } = nodeRequire(
     stdout?: string;
   };
 };
+const { sanitizedEnv } = nodeRequire("../../scripts/lib/sanitized-env.cjs") as {
+  sanitizedEnv: (
+    extra?: Record<string, string>,
+    options?: { nonSecretEnvNames?: string[]; sourceEnv?: NodeJS.ProcessEnv },
+  ) => NodeJS.ProcessEnv;
+};
 
 interface PackFile {
   path: string;
@@ -63,7 +69,6 @@ interface PackageJson {
   license?: string;
   bin?: Record<string, string>;
   dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
   engines?: Record<string, string>;
 }
 
@@ -85,6 +90,16 @@ function packageNameFromNodeModulesPath(lockPath: string): string {
 function productionEntries(lock: PackageLock): Array<[string, LockPackage]> {
   return Object.entries(lock.packages).filter(
     ([path, entry]) => path.startsWith("node_modules/") && !entry.dev && Boolean(entry.version),
+  );
+}
+
+function checkedDevelopmentEntries(
+  lock: PackageLock,
+  packageNames: string[],
+): Array<[string, LockPackage]> {
+  const checkedPaths = new Set(packageNames.map((packageName) => `node_modules/${packageName}`));
+  return Object.entries(lock.packages).filter(
+    ([path, entry]) => checkedPaths.has(path) && entry.dev && Boolean(entry.version),
   );
 }
 
@@ -138,18 +153,23 @@ function committedProductionOverrides(lock: PackageLock): Record<string, unknown
   return overrides;
 }
 
-function committedProductionGraphMismatches(
+function committedPackageGraphMismatches(
   repoLock: PackageLock,
   consumerLock: PackageLock,
+  options: { checkedDevelopmentPackages?: string[] } = {},
 ): string[] {
+  const expectedEntries = [
+    ...productionEntries(repoLock),
+    ...checkedDevelopmentEntries(repoLock, options.checkedDevelopmentPackages ?? []),
+  ];
   const consumerByIdentity = new Map(
-    productionEntries(consumerLock).map(([path, entry]) => [
-      `${packageNameFromNodeModulesPath(path)}@${entry.version}`,
-      entry,
-    ]),
+    [
+      ...productionEntries(consumerLock),
+      ...checkedDevelopmentEntries(consumerLock, options.checkedDevelopmentPackages ?? []),
+    ].map(([path, entry]) => [`${packageNameFromNodeModulesPath(path)}@${entry.version}`, entry]),
   );
 
-  return productionEntries(repoLock).flatMap(([path, entry]) => {
+  return expectedEntries.flatMap(([path, entry]) => {
     const identity = `${packageNameFromNodeModulesPath(path)}@${entry.version}`;
     const installed = consumerByIdentity.get(identity);
     if (!installed) return [`${identity} missing from consumer lock`];
@@ -178,11 +198,32 @@ function assertSuccessfulNpmResult(
   );
 }
 
-function installPackedConsumer(appDir: string, cacheDir: string): void {
+function lockedDevelopmentPackage(lock: PackageLock, packageName: string): LockPackage {
+  const entries = checkedDevelopmentEntries(lock, [packageName]);
+  if (entries.length !== 1) {
+    throw new Error(
+      `Expected exactly one committed lockfile entry for dev dependency ${packageName}, got ${entries.length}`,
+    );
+  }
+  const [, entry] = entries[0];
+  if (!entry.version) throw new Error(`${packageName} lockfile entry is missing a version`);
+  if (!entry.integrity) throw new Error(`${packageName}@${entry.version} is missing integrity`);
+  return entry;
+}
+
+function installPackedDependencies(
+  appDir: string,
+  cacheDir: string,
+  mode: "production" | "development",
+): void {
+  const label =
+    mode === "development"
+      ? "packed consumer npm install dev dependencies"
+      : "packed consumer npm install";
   const result = runNpmCommandWithRetries(
     [
       "install",
-      "--omit=dev",
+      mode === "development" ? "--include=dev" : "--omit=dev",
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
@@ -195,7 +236,7 @@ function installPackedConsumer(appDir: string, cacheDir: string): void {
     ],
     {
       attempts: 3,
-      retryLabel: "packed consumer npm install",
+      retryLabel: label,
       spawnOptions: {
         cwd: appDir,
         encoding: "utf8",
@@ -204,41 +245,84 @@ function installPackedConsumer(appDir: string, cacheDir: string): void {
       },
     },
   );
-  assertSuccessfulNpmResult(result, "packed consumer npm install");
+  assertSuccessfulNpmResult(result, label);
 }
 
-function installConsumerDevDependencies(appDir: string, cacheDir: string): void {
-  const result = runNpmCommandWithRetries(
+function readReadmeTypescriptConsumerSample(): string {
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  const packageApi = readme.indexOf("## Package API Surface");
+  const fenceStart = readme.indexOf("```ts\n", packageApi);
+  const sampleStart = fenceStart + "```ts\n".length;
+  const fenceEnd = readme.indexOf("\n```", sampleStart);
+  if (packageApi === -1 || fenceStart === -1 || fenceEnd === -1) {
+    throw new Error("README Package API Surface must include a TypeScript code sample");
+  }
+  return `${readme.slice(sampleStart, fenceEnd).trimEnd()}\n`;
+}
+
+function typescriptEnv(): NodeJS.ProcessEnv {
+  return sanitizedEnv({
+    NODE_ENV: "test",
+    NODE_OPTIONS: `--import ${pathToFileURL(join(root, "scripts/no-network-guard.mjs")).href}`,
+  });
+}
+
+function runTypescriptCompiler(appDir: string, projectFile: string): ReturnType<typeof spawnSync> {
+  return spawnSync(
+    process.execPath,
     [
-      "install",
-      "--include=dev",
-      "--ignore-scripts",
-      "--no-audit",
-      "--no-fund",
-      "--fetch-retries=3",
-      "--fetch-retry-factor=2",
-      "--fetch-retry-mintimeout=1000",
-      "--fetch-retry-maxtimeout=10000",
-      "--cache",
-      cacheDir,
+      join(appDir, "node_modules", "typescript", "bin", "tsc"),
+      "--noEmit",
+      "--pretty",
+      "false",
+      "-p",
+      projectFile,
     ],
     {
-      attempts: 3,
-      retryLabel: "packed consumer npm install dev dependencies",
-      spawnOptions: {
-        cwd: appDir,
-        encoding: "utf8",
-        stdio: "pipe",
-        timeout: 180_000,
-      },
+      cwd: appDir,
+      encoding: "utf8",
+      env: typescriptEnv(),
+      stdio: "pipe",
+      timeout: 60_000,
     },
   );
-  assertSuccessfulNpmResult(result, "packed consumer npm install dev dependencies");
 }
 
-function compileDocumentedTypescriptConsumer(appDir: string): void {
+function typescriptResultOutput(result: ReturnType<typeof spawnSync>): string {
+  return [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n");
+}
+
+function assertTypescriptCompileSucceeds(appDir: string, projectFile: string): void {
+  const result = runTypescriptCompiler(appDir, projectFile);
+  if (!result.error && result.status === 0) return;
+  throw new Error(
+    [
+      `documented TS consumer failed to compile with status ${result.status ?? "unknown"}`,
+      result.signal ? `signal: ${result.signal}` : "",
+      typescriptResultOutput(result),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+}
+
+function assertTypescriptCompileFails(appDir: string, projectFile: string, label: string): void {
+  const result = runTypescriptCompiler(appDir, projectFile);
+  if (!result.error && result.status !== 0) return;
+  throw new Error(
+    [
+      `${label} unexpectedly compiled with status ${result.status ?? "unknown"}`,
+      result.signal ? `signal: ${result.signal}` : "",
+      typescriptResultOutput(result),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+  );
+}
+
+function writeTypescriptConfig(appDir: string, projectFile: string, files: string[]): void {
   writeFileSync(
-    join(appDir, "tsconfig.json"),
+    join(appDir, projectFile),
     JSON.stringify(
       {
         compilerOptions: {
@@ -249,44 +333,73 @@ function compileDocumentedTypescriptConsumer(appDir: string): void {
           target: "ES2022",
           types: [],
         },
-        files: ["consumer.ts"],
+        files,
       },
       null,
       2,
     ),
   );
-  writeFileSync(
-    join(appDir, "consumer.ts"),
-    [
-      'import b2Mcp = require("@backblaze-labs/b2-mcp");',
-      "",
-      "const start: () => Promise<void> = b2Mcp.startStdio;",
-      "void start;",
-      "",
-    ].join("\n"),
-  );
+}
 
-  execFileSync(
-    process.execPath,
-    [
-      join(appDir, "node_modules", "typescript", "bin", "tsc"),
-      "--noEmit",
-      "--pretty",
-      "false",
-      "-p",
-      "tsconfig.json",
-    ],
-    {
-      cwd: appDir,
-      stdio: "pipe",
-      timeout: 60_000,
-    },
+function compileDocumentedTypescriptConsumer(appDir: string): void {
+  writeTypescriptConfig(appDir, "tsconfig.json", ["consumer.ts"]);
+  writeFileSync(join(appDir, "consumer.ts"), readReadmeTypescriptConsumerSample());
+  assertTypescriptCompileSucceeds(appDir, "tsconfig.json");
+
+  writeTypescriptConfig(appDir, "tsconfig.deep.json", ["consumer-deep.ts"]);
+  writeFileSync(
+    join(appDir, "consumer-deep.ts"),
+    'import server = require("@backblaze-labs/b2-mcp/dist/server.js");\nvoid server;\n',
   );
+  assertTypescriptCompileFails(appDir, "tsconfig.deep.json", "private deep TypeScript import");
 }
 
 const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 360_000 : 180_000;
 
 describe("packed package", () => {
+  it("rejects unpinned TypeScript dev dependency resolution before execution", () => {
+    const repoLock: PackageLock = {
+      packages: {
+        "node_modules/typescript": {
+          dev: true,
+          integrity: "sha512-locked",
+          version: "6.0.3",
+        },
+      },
+    };
+
+    expect(
+      committedPackageGraphMismatches(
+        repoLock,
+        {
+          packages: {
+            "node_modules/typescript": {
+              dev: true,
+              integrity: "sha512-new-patch",
+              version: "6.0.4",
+            },
+          },
+        },
+        { checkedDevelopmentPackages: ["typescript"] },
+      ),
+    ).toEqual(["typescript@6.0.3 missing from consumer lock"]);
+    expect(
+      committedPackageGraphMismatches(
+        repoLock,
+        {
+          packages: {
+            "node_modules/typescript": {
+              dev: true,
+              integrity: "sha512-tampered",
+              version: "6.0.3",
+            },
+          },
+        },
+        { checkedDevelopmentPackages: ["typescript"] },
+      ),
+    ).toEqual(["typescript@6.0.3 integrity mismatch"]);
+  });
+
   it(
     "installs from npm pack and exposes the package entry point",
     async () => {
@@ -335,9 +448,11 @@ describe("packed package", () => {
 
         const tarball = join(packDir, pack.filename);
         const tarballSpec = `file:${relative(appDir, tarball)}`;
-        const typescriptVersion = repoPkg.devDependencies?.typescript;
-        if (!typescriptVersion)
-          throw new Error("package.json must declare devDependencies.typescript");
+        const lockedTypescript = lockedDevelopmentPackage(repoLock, "typescript");
+        const overrides = {
+          ...committedProductionOverrides(repoLock),
+          typescript: lockedTypescript.version,
+        };
         writeFileSync(
           join(appDir, "package.json"),
           JSON.stringify(
@@ -345,22 +460,26 @@ describe("packed package", () => {
               name: "b2-mcp-pack-test",
               private: true,
               dependencies: { [repoPkg.name]: tarballSpec },
-              devDependencies: { typescript: typescriptVersion },
-              overrides: committedProductionOverrides(repoLock),
+              devDependencies: { typescript: lockedTypescript.version },
+              overrides,
             },
             null,
             2,
           ),
         );
-        installPackedConsumer(appDir, cacheDir);
+        installPackedDependencies(appDir, cacheDir, "production");
 
         expect(
-          committedProductionGraphMismatches(
+          committedPackageGraphMismatches(repoLock, readNpmLock(join(appDir, "package-lock.json"))),
+        ).toEqual([]);
+        installPackedDependencies(appDir, cacheDir, "development");
+        expect(
+          committedPackageGraphMismatches(
             repoLock,
             readNpmLock(join(appDir, "package-lock.json")),
+            { checkedDevelopmentPackages: ["typescript"] },
           ),
         ).toEqual([]);
-        installConsumerDevDependencies(appDir, cacheDir);
         compileDocumentedTypescriptConsumer(appDir);
 
         execFileSync(

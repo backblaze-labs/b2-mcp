@@ -464,6 +464,7 @@ describe("package surface policy", () => {
     expect(readme).toContain("startStdio");
     expect(readme).toContain("Deep imports");
     expect(readme).toContain("private implementation details");
+    expect(readme).not.toContain("before the 0.1 release");
   });
 
   it("exact-pins runtime-sensitive lint and typing packages", () => {
