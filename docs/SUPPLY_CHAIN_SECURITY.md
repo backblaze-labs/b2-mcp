@@ -212,6 +212,9 @@ The only repository workflow allowed to publish npm packages is
   package directory for publishing;
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
+- allows matching-integrity idempotent reruns for immutable legacy versions
+  `0.1.0` and `0.1.1` with a warning when those versions still expose
+  pre-fix `_from` or `_resolved` registry metadata;
 - repacks the staged package directory and compares it to the verified tarball
   before invoking npm publish;
 - verifies checksums and creates or updates the GitHub Release after npm publish
@@ -246,7 +249,8 @@ The only repository workflow allowed to publish npm packages is
 - publishes the staged package directory with lifecycle scripts disabled:
   `npm publish <staged-package-directory> --provenance --access public --ignore-scripts`;
 - verifies the published npm registry metadata does not include local
-  `_from` or `_resolved` publish coordinates.
+  `_from` or `_resolved` publish coordinates, using bounded retry for transient
+  npm registry errors and short-lived post-publish propagation gaps.
 
 Do not publish from a developer workstation or from a workflow that has not
 first proved the release tag is reachable from `ci-green`. Treat

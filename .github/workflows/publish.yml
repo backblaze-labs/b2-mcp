@@ -247,12 +247,9 @@ jobs:
             echo "::error::Expected staged package.json is missing"
             exit 1
           fi
-          npm_tag="$(node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { npmDistTag } from "./scripts/lib/release-utils.mjs";
-            const pkg = JSON.parse(readFileSync(process.argv[1], "utf8"));
-            process.stdout.write(npmDistTag(pkg.version));
-          ' "${package_dir}/package.json")"
+          npm_tag="$(node scripts/npm-publish-metadata.mjs \
+            --package-json "${package_dir}/package.json" \
+            --field tag)"
           npm publish "$package_dir" \
             --dry-run \
             --access public \
@@ -272,6 +269,20 @@ jobs:
           checksums_sha256="$(sha256sum SHA256SUMS | awk '{print $1}')"
           echo "checksums_name=SHA256SUMS" >> "$GITHUB_OUTPUT"
           echo "checksums_sha256=${checksums_sha256}" >> "$GITHUB_OUTPUT"
+      - name: Stage publish helper scripts
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: |
+          set -euo pipefail
+          mkdir -p publish-package/release-tools/lib
+          cp \
+            scripts/npm-publish-metadata.mjs \
+            scripts/verify-npm-registry-metadata.mjs \
+            publish-package/release-tools/
+          cp scripts/lib/release-utils.mjs publish-package/release-tools/lib/
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
@@ -282,6 +293,8 @@ jobs:
             publish-package/SHA256SUMS
             publish-package/release-notes.md
             publish-package/npm-pack.json
+            publish-package/release-tools/*.mjs
+            publish-package/release-tools/lib/*.mjs
           if-no-files-found: error
           retention-days: 7
 
@@ -376,7 +389,6 @@ jobs:
           fi
       - name: Publish staged package directory with trusted provenance
         env:
-          EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
           EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
           EXPECTED_TARBALL_INTEGRITY: ${{ needs.prepare.outputs.tarball-integrity }}
         run: |
@@ -386,34 +398,26 @@ jobs:
             echo "::error::Expected staged package.json is missing"
             exit 1
           fi
-          package_metadata="$(node -e '
-            const { readFileSync } = require("fs");
-            const pkg = JSON.parse(readFileSync(process.argv[1], "utf8"));
-            const prerelease = String(pkg.version).split("-")[1];
-            const channel = prerelease ? prerelease.split(".")[0].toLowerCase() : "";
-            const tag = prerelease && ["alpha", "beta", "canary", "next", "rc"].includes(channel) ? channel : prerelease ? "next" : "latest";
-            process.stdout.write(JSON.stringify({ spec: `${pkg.name}@${pkg.version}`, tag }));
-          ' "${package_dir}/package.json")"
+          package_metadata="$(node publish-package/release-tools/npm-publish-metadata.mjs \
+            --package-json "${package_dir}/package.json")"
           package_spec="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).spec)' "$package_metadata")"
           npm_tag="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).tag)' "$package_metadata")"
-          verify_registry_metadata() {
-            local registry_metadata
-            registry_metadata="$(npm view "${package_spec}" _from _resolved --json)"
-            node -e '
-              const raw = String(process.argv[1] || "").trim();
-              const metadata = raw ? JSON.parse(raw) : {};
-              const leaked = ["_from", "_resolved"].filter((key) => metadata?.[key]);
-              if (leaked.length > 0) {
-                console.error(`registry metadata exposes local publish coordinates: ${leaked.join(", ")}`);
-                for (const key of leaked) console.error(`${key}=${metadata[key]}`);
-                process.exit(1);
-              }
-            ' "$registry_metadata"
-          }
+          metadata_verify_args=(
+            --package "$package_spec"
+            --timeout-ms 120000
+            --initial-interval-ms 5000
+            --max-interval-ms 30000
+          )
+          legacy_metadata_args=(
+            --allow-legacy-local-path-metadata "@backblaze-labs/b2-mcp@0.1.0"
+            --allow-legacy-local-path-metadata "@backblaze-labs/b2-mcp@0.1.1"
+          )
           if registry_integrity="$(npm view "${package_spec}" dist.integrity --json 2>/tmp/npm-view-error)"; then
             registry_integrity="$(node -e 'const value = JSON.parse(process.argv[1] || "null"); process.stdout.write(value || "");' "$registry_integrity")"
             if [[ "$registry_integrity" == "$EXPECTED_TARBALL_INTEGRITY" ]]; then
-              verify_registry_metadata
+              node publish-package/release-tools/verify-npm-registry-metadata.mjs \
+                "${metadata_verify_args[@]}" \
+                "${legacy_metadata_args[@]}"
               echo "::notice::${package_spec} already exists on npm with matching integrity; treating as idempotent success"
               exit 0
             fi
@@ -456,7 +460,8 @@ jobs:
             --access public \
             --ignore-scripts \
             --tag "$npm_tag"
-          verify_registry_metadata
+          node publish-package/release-tools/verify-npm-registry-metadata.mjs \
+            "${metadata_verify_args[@]}"
 
   container-image:
     needs: [prepare, publish]
