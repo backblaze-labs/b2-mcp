@@ -131,11 +131,28 @@ function registerDurableSecretCompatibilityStubs(
   }
 }
 
-/** Build the MCP server and register the capability-scoped B2 tool surface. */
+/** Options for {@link createServer}. */
 export interface CreateServerOptions {
   oauthScopes?: readonly string[];
 }
 
+/**
+ * Build the MCP server and register the B2 tool surface.
+ *
+ * Registration is capability-aware: when `capabilities` is a non-null array,
+ * only tools the key can use are registered (per src/utils/tool-capabilities),
+ * and Partner tools register only with a distinct master key. `null`/`undefined`
+ * registers the full surface (operator override and legacy unit tests); an empty
+ * array is a fail-closed capability set, not "unknown".
+ *
+ * Credential model: `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` is the
+ * application key that drives the B2 native API, S3, and key management. Only the
+ * Partner API tools use a master key (`B2_MASTER_KEY_ID` / `B2_MASTER_KEY`,
+ * optional); a single non-master key covers everything else. B2's S3 endpoint
+ * rejects master keys, which is why the application key is the primary credential.
+ *
+ * @returns The configured MCP server instance.
+ */
 export function createServer(
   config: B2Config,
   capabilities?: string[] | null,
