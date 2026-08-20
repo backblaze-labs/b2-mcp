@@ -5,7 +5,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import workflowYaml from "./lib/workflow-yaml.cjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const root = process.env.B2_MCP_RUNTIME_POLICY_ROOT
+  ? path.resolve(process.env.B2_MCP_RUNTIME_POLICY_ROOT)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const errors = [];
@@ -70,6 +72,31 @@ function parseNodeVersion(value) {
   };
 }
 
+function parseEngineRangeMinimums(value) {
+  return String(value)
+    .split(/\s*\|\|\s*/)
+    .map((part) => {
+      const match = part.match(/^\^(\d+)(?:\.(\d+)\.(\d+))?$/);
+      if (!match) {
+        // Fail loud rather than silently dropping a comparator: the parser only
+        // understands caret ranges, so any other form must surface as an error
+        // instead of quietly shrinking the supported-major set.
+        throw new Error(
+          `Unsupported engineRange comparator ${JSON.stringify(part)} in ${JSON.stringify(String(value))}; expected caret ranges like "^22.3.0" or "^24"`,
+        );
+      }
+      const major = Number(match[1]);
+      const minor = match[2] === undefined ? null : Number(match[2]);
+      const patch = match[3] === undefined ? null : Number(match[3]);
+      return {
+        major,
+        minor,
+        patch,
+        raw: minor === null || patch === null ? String(major) : `${major}.${minor}.${patch}`,
+      };
+    });
+}
+
 function comparePatch(a, b) {
   const left = parseNodeVersion(a);
   const right = parseNodeVersion(b);
@@ -80,6 +107,21 @@ function comparePatch(a, b) {
     if (left[key] !== right[key]) return left[key] - right[key];
   }
   return 0;
+}
+
+function isSupportedWorkflowNodeVersion(version, policy) {
+  // Fail closed: callers pre-filter non-literal tokens (e.g. `${{ ... }}`
+  // expressions parse to null and are skipped), so anything that reaches here
+  // and does not parse as a concrete version is treated as unsupported.
+  const parsed = parseNodeVersion(version);
+  if (!parsed) return false;
+  const minimum = parseEngineRangeMinimums(policy.engineRange).find(
+    (candidate) => candidate.major === parsed.major,
+  );
+  if (!minimum) return false;
+  if (minimum.minor === null || minimum.patch === null) return true;
+  if (parsed.minor === null || parsed.patch === null) return false;
+  return comparePatch(parsed.raw, minimum.raw) >= 0;
 }
 
 function requireNode22LtsPatch(label, version, policy) {
@@ -130,8 +172,7 @@ function parseEnvironmentNodeVersion() {
   return match?.[1] ?? null;
 }
 
-function requireNoLegacyRuntimeJobs(policy) {
-  const unsupported = new Set(policy.unsupportedMajors.map(String));
+function requireSupportedRuntimeJobs(policy) {
   for (const workflow of listFiles(".github/workflows")) {
     const text = read(workflow);
     if (text.includes("node-version-file:")) fail(`${workflow}: node-version-file is not allowed`);
@@ -140,8 +181,10 @@ function requireNoLegacyRuntimeJobs(policy) {
     );
     for (const version of versions) {
       const parsed = parseNodeVersion(version);
-      if (parsed && unsupported.has(String(parsed.major))) {
-        fail(`${workflow}: unsupported Node ${parsed.major} is present`);
+      if (parsed && !isSupportedWorkflowNodeVersion(version, policy)) {
+        fail(
+          `${workflow}: unsupported Node ${parsed.raw} is present; expected ${policy.engineRange}`,
+        );
       }
     }
   }
@@ -151,8 +194,8 @@ const policy = readJson("runtime-policy.json");
 const packageJson = readJson("package.json");
 const lock = readPackageManagerLock(root);
 
-requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineFloor);
-requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineFloor);
+requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineRange);
+requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineRange);
 requireEqual(
   "Backblaze SDK engine floor",
   lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
@@ -243,13 +286,19 @@ requireWorkflowMatrixInJob(
   "node-version",
   policy.liveNodeMatrix,
 );
-requireNoLegacyRuntimeJobs(policy);
+requireSupportedRuntimeJobs(policy);
 
 for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smoke.yml"]) {
   requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");
 }
 
+requireContains("docs/V1_SCOPE.md", policy.engineRange, "package engine range");
 requireContains("docs/V1_SCOPE.md", policy.engineFloor, "runtime floor");
+requireContains("README.md", policy.engineRange, "package engine range");
+requireContains("CONTRIBUTING.md", policy.engineRange, "package engine range");
+requireContains("docs/DEPLOY.md", policy.engineRange, "package engine range");
+requireContains("docs/deployment/vercel.md", policy.engineRange, "package engine range");
+requireContains("deploy/vercel/README.md", policy.engineRange, "package engine range");
 requireContains("docs/DEPLOY.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("README.md", policy.crossPlatformNode, "patched Node 22 pin");
 requireContains("CONTRIBUTING.md", policy.crossPlatformNode, "patched Node 22 pin");

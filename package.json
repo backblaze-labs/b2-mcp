@@ -127,7 +127,7 @@
     "wrangler": "4.123.0"
   },
   "engines": {
-    "node": ">=22.3.0"
+    "node": "^22.3.0 || ^24 || ^26"
   },
   "files": [
     ".dockerignore",

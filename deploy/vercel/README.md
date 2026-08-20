@@ -56,13 +56,14 @@ keeps Fluid Compute enabled, sets a bounded function duration, selects `iad1`,
 and rewrites `/mcp` to the API function. The checked-in JavaScript API files are
 thin launchers; the `vercel-build` hook runs repository typecheck/build and
 compiles the typed Vercel adapter sources into `.vercel/build-runtime/` before
-`@vercel/node` traces functions. The package engine range remains `>=22.3.0`
-for consumers, while `vercel.json` explicitly pins the deployed Vercel Function
-runtime to the reviewed `nodejs24.x` line. This intentionally moves the Vercel
-deployment from the older Node 22 function runtime to the reviewed Node 24
-line; CI fails if generated `.vercel/output` runtime configs do not match that
-pin. Change the region only after reviewing latency to your B2 account region;
-Vercel function region selection does not change B2 data residency.
+`@vercel/node` traces functions. The package engine range is
+`^22.3.0 || ^24 || ^26`, while `vercel.json` explicitly pins the deployed
+Vercel Function runtime to the reviewed `nodejs24.x` line. This intentionally
+moves the Vercel deployment from the older Node 22 function runtime to the
+reviewed Node 24 line; CI fails if generated `.vercel/output` runtime configs do
+not match that pin. Change the region only after reviewing latency to your B2
+account region; Vercel function region selection does not change B2 data
+residency.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_JWKS_URI,B2_OAUTH_JWKS_CACHE_TTL_SECONDS,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
 

@@ -7,11 +7,11 @@ By participating you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.m
 
 ## Development setup
 
-The package engine floor is `>=22.3.0` because it matches the official B2 SDK.
-For local development and deployed 22.x hosts, use the patched Node 22 LTS
-release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later patched
-22.x release. The package engine remains `>=22.3.0` for consumer compatibility;
-CI runs the full toolchain on Node.js 22.23.1, 24, and 26.
+The package engine range is `^22.3.0 || ^24 || ^26`: it preserves the official
+B2 SDK's Node 22.3.0 floor and excludes Node.js lines outside opossum's supported
+range. For local development and deployed 22.x hosts, use the patched Node 22
+LTS release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later
+patched 22.x release. CI runs the full toolchain on Node.js 22.23.1, 24, and 26.
 
 ```bash
 corepack enable pnpm

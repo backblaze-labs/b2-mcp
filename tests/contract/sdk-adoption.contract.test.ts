@@ -80,28 +80,12 @@ function matrixRows(
   return rows;
 }
 
-function parseFloor(value: string): [number, number, number] {
-  const match = value.match(/^>=(\d+)\.(\d+)\.(\d+)$/);
-  if (!match) throw new Error(`Unsupported engine floor: ${value}`);
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function compareFloor(a: string, b: string): number {
-  const left = parseFloor(a);
-  const right = parseFloor(b);
-  for (let i = 0; i < left.length; i++) {
-    if (left[i] !== right[i]) return left[i] - right[i];
-  }
-  return 0;
-}
-
 describe("SDK adoption contract", () => {
   const contract = readFileSync(join(ROOT, "docs/SDK_ADOPTION_CONTRACT.md"), "utf8");
 
   it("pins the reviewed Backblaze SDK package exactly", () => {
     const pkg = readJson<{
       dependencies: Record<string, string>;
-      engines: { node: string };
     }>("package.json");
     const lock = readLock<{
       packages: Record<
@@ -115,7 +99,6 @@ describe("SDK adoption contract", () => {
     expect(sdk?.version).toBe(SDK_VERSION);
     expect(sdk?.resolved).toBe(SDK_RESOLVED);
     expect(sdk?.integrity).toBe(SDK_INTEGRITY);
-    expect(compareFloor(pkg.engines.node, sdk?.engines?.node ?? "")).toBeGreaterThanOrEqual(0);
   });
 
   it("has rows for every registered tool and only approved sink-blocked extras", () => {

@@ -717,7 +717,7 @@ try {
         "  try { require.resolve(legacyPackage, { paths: [packageRoot] }); throw new Error(`${legacyPackage} should not be installed`); }",
         '  catch (err) { if (err.code !== "MODULE_NOT_FOUND") throw err; }',
         "}",
-        `if (meta.engines.node !== ${JSON.stringify(runtimePolicy.engineFloor)}) throw new Error("wrong package engine");`,
+        `if (meta.engines.node !== ${JSON.stringify(runtimePolicy.engineRange)}) throw new Error("wrong package engine");`,
         'if (meta.bin["b2-mcp"] !== "dist/index.js") throw new Error("wrong b2-mcp bin");',
         'if (meta.bin["b2-mcp-server"] !== "dist/index.js") throw new Error("wrong b2-mcp-server bin");',
         'for (const requiredDoc of ["docs/CLIENTS.md", "docs/DEPLOY.md"]) {',
