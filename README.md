@@ -53,6 +53,8 @@ The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary 
 Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from clients that do not expose child-process stderr, add `"B2_LOG_FILE": "/absolute/path/to/b2-mcp.log"` to the same `env` block.
 
 > **One non-master application key covers normal storage work:** B2 native, S3, and key management. SDK-backed Partner/Groups tools require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on an account authorized for the Partner API. B2's S3 endpoint rejects master keys, which is why the application key remains the primary credential. See [Configuration](#configuration) for the full list.
+>
+> **Why your client may show fewer than 40 tools:** registration is capability-aware, so a client only sees the tools its key can actually use. With a non-master key and no master key configured, the three Partner/Groups tools that require a master key (`b2_list_groups`, `b2_list_group_members`, `b2_eject_group_member`) are not surfaced, so `tools/list` reports 37. Add `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on a Partner-entitled account to get the full 40. A read-only key trims the surface further, and durable-secret tools appear as non-secret "unavailable" stubs unless a secret sink is configured. This is expected, not a missing-install problem.
 
 > **Other clients:** [`docs/CLIENTS.md`](docs/CLIENTS.md) has copy-paste setup for Cursor, VS Code, Cline, Windsurf, Zed, Continue, Goose, Claude.ai, and hosted (Streamable HTTP), plus a compatibility matrix.
 
