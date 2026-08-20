@@ -251,13 +251,17 @@ function installPackedDependencies(
 function readReadmeTypescriptConsumerSample(): string {
   const readme = readFileSync(join(root, "README.md"), "utf8");
   const packageApi = readme.indexOf("## Package API Surface");
-  const fenceStart = readme.indexOf("```ts\n", packageApi);
-  const sampleStart = fenceStart + "```ts\n".length;
-  const fenceEnd = readme.indexOf("\n```", sampleStart);
-  if (packageApi === -1 || fenceStart === -1 || fenceEnd === -1) {
+  const packageApiSection = packageApi === -1 ? "" : readme.slice(packageApi);
+  const fenceStart = packageApiSection.match(/```ts\r?\n/);
+  const sampleStart = packageApi + (fenceStart?.index ?? 0) + (fenceStart?.[0].length ?? 0);
+  const fenceEnd = readme.slice(sampleStart).match(/\r?\n```/);
+  if (packageApi === -1 || !fenceStart || !fenceEnd) {
     throw new Error("README Package API Surface must include a TypeScript code sample");
   }
-  return `${readme.slice(sampleStart, fenceEnd).trimEnd()}\n`;
+  return `${readme
+    .slice(sampleStart, sampleStart + (fenceEnd.index ?? 0))
+    .replace(/\r\n/g, "\n")
+    .trimEnd()}\n`;
 }
 
 function typescriptEnv(): NodeJS.ProcessEnv {
