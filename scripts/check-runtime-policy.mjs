@@ -77,7 +77,14 @@ function parseEngineRangeMinimums(value) {
     .split(/\s*\|\|\s*/)
     .map((part) => {
       const match = part.match(/^\^(\d+)(?:\.(\d+)\.(\d+))?$/);
-      if (!match) return null;
+      if (!match) {
+        // Fail loud rather than silently dropping a comparator: the parser only
+        // understands caret ranges, so any other form must surface as an error
+        // instead of quietly shrinking the supported-major set.
+        throw new Error(
+          `Unsupported engineRange comparator ${JSON.stringify(part)} in ${JSON.stringify(String(value))}; expected caret ranges like "^22.3.0" or "^24"`,
+        );
+      }
       const major = Number(match[1]);
       const minor = match[2] === undefined ? null : Number(match[2]);
       const patch = match[3] === undefined ? null : Number(match[3]);
@@ -87,8 +94,7 @@ function parseEngineRangeMinimums(value) {
         patch,
         raw: minor === null || patch === null ? String(major) : `${major}.${minor}.${patch}`,
       };
-    })
-    .filter(Boolean);
+    });
 }
 
 function comparePatch(a, b) {
@@ -104,8 +110,11 @@ function comparePatch(a, b) {
 }
 
 function isSupportedWorkflowNodeVersion(version, policy) {
+  // Fail closed: callers pre-filter non-literal tokens (e.g. `${{ ... }}`
+  // expressions parse to null and are skipped), so anything that reaches here
+  // and does not parse as a concrete version is treated as unsupported.
   const parsed = parseNodeVersion(version);
-  if (!parsed) return true;
+  if (!parsed) return false;
   const minimum = parseEngineRangeMinimums(policy.engineRange).find(
     (candidate) => candidate.major === parsed.major,
   );
