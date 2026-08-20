@@ -104,9 +104,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   durable-secret create/reserve tools now run when the reviewed secret sink is
   active and remain unavailable stubs when `B2_SECRET_SINK=off`.
 - Restored the transport-independent `b2_create_key` lockdown: key-management
-  grants and unscoped write/delete keys are refused by default, optional
-  `B2_MAX_KEY_DURATION_SECONDS` caps lifetime, and HTTP inline secret responses
-  require the dedicated `B2_ALLOW_INLINE_SECRETS=true` opt-in.
+  grants are refused by default unless `B2_ALLOW_KEY_MGMT_GRANTS=true`,
+  unscoped write/delete keys are refused by default unless
+  `B2_ALLOW_UNSCOPED_KEYS=true`, optional `B2_MAX_KEY_DURATION_SECONDS` caps
+  lifetime, and HTTP inline secret responses require the dedicated
+  `B2_ALLOW_INLINE_SECRETS=true` opt-in.
 - Defaulted JWT/JWKS verification to `RS256`; operators can still opt into
   other supported algorithms with `B2_OAUTH_ALLOWED_ALGORITHMS`.
 - Documented the exported OAuth config TypeScript surface change: token-cache
@@ -173,9 +175,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protections before bypass-governance version cleanup.
 - Made release publishing attach the SBOM only after npm publish succeeds and
   removed whole-suite retries from live B2 contract publication evidence.
-- Replaced `b2_create_key`, `b2_create_group_member`, and
-  `b2_reserve_trial_create_account` with unavailable compatibility stubs until a
-  reviewed out-of-band secret sink exists.
+- Gated durable-secret-producing tools (`b2_create_key`,
+  `b2_create_group_member`, and `b2_reserve_trial_create_account`) on the
+  reviewed secret sink: sink-backed handlers run when a supported secret sink
+  mode is active, and unavailable compatibility stubs remain only for
+  intentionally disabled modes such as `B2_SECRET_SINK=off`.
 - Structured successful tool results now keep canonical sanitized JSON in
   `structuredContent` while emitting only one selected text serialization in
   `content`; the default text JSON changed from 2-space pretty-printed JSON to
@@ -208,12 +212,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both development and published dependency graphs.
 - Added explicit read-only workflow permissions and consolidated the safe AWS
   SDK, Axios, and TypeScript dependency updates from superseded Dependabot PRs.
-
-### Removed
-- Removed the `b2_create_key` lockdown toggles
-  `B2_ALLOW_KEY_MGMT_GRANTS`, `B2_ALLOW_UNSCOPED_KEYS`, and
-  `B2_MAX_KEY_DURATION_SECONDS` because the durable-secret-producing handler is
-  no longer exposed in Phase 1.
 
 [Unreleased]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/backblaze-labs/b2-mcp/compare/v0.1.0...v0.1.1
