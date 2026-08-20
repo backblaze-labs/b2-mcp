@@ -305,17 +305,26 @@ function typescriptResultOutput(result: ReturnType<typeof spawnSync>): string {
 function assertTypescriptCompile(
   appDir: string,
   projectFile: string,
-  options: { expectSuccess: boolean; label: string },
+  options: { expectSuccess: boolean; label: string; expectOutputIncludes?: string },
 ): void {
   const result = runTypescriptCompiler(appDir, projectFile);
-  const passed =
+  const output = typescriptResultOutput(result);
+  const statusPassed =
     !result.error && (options.expectSuccess ? result.status === 0 : result.status !== 0);
-  if (passed) return;
+  // Negative cases assert not just a non-zero exit but that the failure is the
+  // expected module-resolution diagnostic, so an unrelated fixture error cannot
+  // masquerade as a correctly-closed deep import.
+  const outputPassed =
+    options.expectOutputIncludes === undefined || output.includes(options.expectOutputIncludes);
+  if (statusPassed && outputPassed) return;
   throw new Error(
     [
       `${options.label} ${options.expectSuccess ? "failed to compile" : "unexpectedly compiled"} with status ${result.status ?? "unknown"}`,
+      !outputPassed
+        ? `expected diagnostics to include ${JSON.stringify(options.expectOutputIncludes)}`
+        : "",
       result.signal ? `signal: ${result.signal}` : "",
-      typescriptResultOutput(result),
+      output,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -329,8 +338,17 @@ function assertTypescriptCompileSucceeds(appDir: string, projectFile: string): v
   });
 }
 
-function assertTypescriptCompileFails(appDir: string, projectFile: string, label: string): void {
-  assertTypescriptCompile(appDir, projectFile, { expectSuccess: false, label });
+function assertTypescriptCompileFails(
+  appDir: string,
+  projectFile: string,
+  label: string,
+  expectOutputIncludes?: string,
+): void {
+  assertTypescriptCompile(appDir, projectFile, {
+    expectSuccess: false,
+    label,
+    expectOutputIncludes,
+  });
 }
 
 function writeTypescriptConfig(appDir: string, projectFile: string, files: string[]): void {
@@ -361,7 +379,12 @@ function compileDocumentedTypescriptConsumer(appDir: string): void {
 
   writeTypescriptConfig(appDir, "tsconfig.deep.json", ["consumer-deep.ts"]);
   writeFileSync(join(appDir, "consumer-deep.ts"), PRIVATE_DEEP_IMPORT_CONSUMER_SOURCE);
-  assertTypescriptCompileFails(appDir, "tsconfig.deep.json", "private deep TypeScript import");
+  assertTypescriptCompileFails(
+    appDir,
+    "tsconfig.deep.json",
+    "private deep TypeScript import",
+    PRIVATE_DEEP_IMPORT_SPECIFIER,
+  );
 }
 
 const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 360_000 : 180_000;
