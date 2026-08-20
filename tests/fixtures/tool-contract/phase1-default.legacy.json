@@ -152,8 +152,11 @@
             "additionalProperties": {
               "type": "string"
             },
-            "description": "Up to 10 custom key-value pairs stored with the bucket.",
+            "description": "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with 'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, but all values together must be <= 10,000 UTF-8 bytes.",
             "propertyNames": {
+              "maxLength": 50,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._`~!#$%^&*'|+-]+$",
               "type": "string"
             },
             "type": "object"
@@ -168,7 +171,7 @@
             "type": "string"
           },
           "corsRules": {
-            "description": "CORS rules for browser-based access.",
+            "description": "CORS rules for browser-based access. At most 100 rules; each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -190,6 +193,10 @@
                   "type": "array"
                 },
                 "corsRuleName": {
+                  "description": "Unique CORS rule name, 6-63 characters. Use only letters, digits, and hyphens; names starting with 'b2-' are reserved for Backblaze.",
+                  "maxLength": 63,
+                  "minLength": 6,
+                  "pattern": "^[A-Za-z0-9-]+$",
                   "type": "string"
                 },
                 "exposeHeaders": {
@@ -211,6 +218,7 @@
               ],
               "type": "object"
             },
+            "maxItems": 100,
             "type": "array"
           },
           "defaultServerSideEncryption": {
@@ -670,7 +678,11 @@
             "additionalProperties": {
               "type": "string"
             },
+            "description": "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with 'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, but all values together must be <= 10,000 UTF-8 bytes. Replaces all existing bucketInfo when supplied.",
             "propertyNames": {
+              "maxLength": 50,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._`~!#$%^&*'|+-]+$",
               "type": "string"
             },
             "type": "object"
@@ -684,6 +696,7 @@
             "type": "boolean"
           },
           "corsRules": {
+            "description": "CORS rules for browser-based access. At most 100 rules; each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket. Replaces all existing CORS rules when supplied.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -705,6 +718,10 @@
                   "type": "array"
                 },
                 "corsRuleName": {
+                  "description": "Unique CORS rule name, 6-63 characters. Use only letters, digits, and hyphens; names starting with 'b2-' are reserved for Backblaze.",
+                  "maxLength": 63,
+                  "minLength": 6,
+                  "pattern": "^[A-Za-z0-9-]+$",
                   "type": "string"
                 },
                 "exposeHeaders": {
@@ -726,6 +743,7 @@
               ],
               "type": "object"
             },
+            "maxItems": 100,
             "type": "array"
           },
           "defaultRetention": {
@@ -1874,5 +1892,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "69e5ecbb1a8cadb95d5928d10813bfe7c869938b3821543cb85100064005c850"
+  "hash": "f217d8a6a68f4a60ef506ab87604f260169987eb6d75357d061a8613c30fa1db"
 }

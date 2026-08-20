@@ -1181,6 +1181,27 @@ describe("b2_update_bucket", () => {
     },
   };
 
+  async function expectUpdateBucketValidationError(
+    args: Record<string, unknown>,
+    expectedMessage: RegExp,
+  ) {
+    invalidateAuthManagerCache();
+    const transport = new RecordingTransport((request) => {
+      throw new Error(`unexpected ${b2EndpointName(request)}`);
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_update_bucket", {
+      bucketId: "bucket-1",
+      ...args,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(expectedMessage);
+    expect(transport.requests).toHaveLength(0);
+  }
+
   it("updates bucket metadata and Object Lock settings", async () => {
     const bucket = await createBucket("update-bucket", BucketType.AllPrivate, {
       fileLockEnabled: true,
@@ -1201,6 +1222,95 @@ describe("b2_update_bucket", () => {
     expect(result.bucketType).toBe("allPublic");
     expect(result.defaultRetention).toEqual(defaultRetention);
     expect(result.fileLockConfiguration.value.isFileLockEnabled).toBe(true);
+  });
+
+  it.each([
+    [
+      "reserved bucketInfo prefix",
+      { bucketInfo: { "b2-mcp-qa": "x" } },
+      /bucketInfo key "b2-mcp-qa" must not start with 'b2-'/,
+    ],
+    [
+      "bucketInfo character set",
+      { bucketInfo: { "invalid/key": "x" } },
+      /bucketInfo key "invalid\/key" may contain only letters/,
+    ],
+    [
+      "bucketInfo pair count",
+      {
+        bucketInfo: Object.fromEntries(
+          Array.from({ length: 11 }, (_, index) => [`key${index}`, "x"]),
+        ),
+      },
+      /bucketInfo must contain at most 10 key-value pairs/,
+    ],
+    [
+      "bucketInfo aggregate value size",
+      { bucketInfo: { safe: "x".repeat(10_001) } },
+      /bucketInfo values must total at most 10000 UTF-8 bytes/,
+    ],
+  ])("rejects invalid %s before SDK update", async (_label, args, expectedMessage) => {
+    await expectUpdateBucketValidationError(args, expectedMessage);
+  });
+
+  const validCorsRule = {
+    corsRuleName: "valid-rule",
+    allowedOrigins: ["https://example.com"],
+    allowedHeaders: ["range"],
+    allowedOperations: ["b2_download_file_by_name"],
+    maxAgeSeconds: 3600,
+  };
+
+  it.each([
+    [
+      "reserved CORS rule prefix",
+      { corsRules: [{ ...validCorsRule, corsRuleName: "b2-mcp-qa-temporary" }] },
+      /corsRules\[0\]\.corsRuleName must not start with 'b2-'/,
+    ],
+    [
+      "CORS rule name length",
+      { corsRules: [{ ...validCorsRule, corsRuleName: "short" }] },
+      /corsRules\[0\]\.corsRuleName must be 6-63 characters long/,
+    ],
+    [
+      "CORS rule name character set",
+      { corsRules: [{ ...validCorsRule, corsRuleName: "invalid_rule" }] },
+      /corsRules\[0\]\.corsRuleName may contain only letters, digits, and hyphens/,
+    ],
+    [
+      "CORS rule count",
+      {
+        corsRules: Array.from({ length: 101 }, (_, index) => ({
+          ...validCorsRule,
+          corsRuleName: `rule-${index}`,
+        })),
+      },
+      /corsRules must contain at most 100 rules/,
+    ],
+    [
+      "duplicate CORS rule names",
+      {
+        corsRules: [
+          { ...validCorsRule, corsRuleName: "dup-rule" },
+          { ...validCorsRule, corsRuleName: "dup-rule" },
+        ],
+      },
+      /corsRules\[1\]\.corsRuleName "dup-rule" must be unique/,
+    ],
+    [
+      "CORS rule aggregate size",
+      {
+        corsRules: [
+          {
+            ...validCorsRule,
+            allowedOrigins: [`https://${"a".repeat(980)}.example.com`],
+          },
+        ],
+      },
+      /corsRules\[0\] must be less than 1000 UTF-8 bytes/,
+    ],
+  ])("rejects invalid %s before SDK update", async (_label, args, expectedMessage) => {
+    await expectUpdateBucketValidationError(args, expectedMessage);
   });
 
   it("blocks replication updates without confirmation before SDK update", async () => {
