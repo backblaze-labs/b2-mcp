@@ -175,9 +175,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protections before bypass-governance version cleanup.
 - Made release publishing attach the SBOM only after npm publish succeeds and
   removed whole-suite retries from live B2 contract publication evidence.
-- Replaced `b2_create_key`, `b2_create_group_member`, and
-  `b2_reserve_trial_create_account` with unavailable compatibility stubs until a
-  reviewed out-of-band secret sink exists.
+- Gated durable-secret-producing tools (`b2_create_key`,
+  `b2_create_group_member`, and `b2_reserve_trial_create_account`) on the
+  reviewed secret sink: sink-backed handlers run when a supported secret sink
+  mode is active, and unavailable compatibility stubs remain only for
+  intentionally disabled modes such as `B2_SECRET_SINK=off`.
 - Structured successful tool results now keep canonical sanitized JSON in
   `structuredContent` while emitting only one selected text serialization in
   `content`; the default text JSON changed from 2-space pretty-printed JSON to
