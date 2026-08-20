@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import {
   createMcpServer,
   getMcpClientCapabilities,
@@ -73,47 +71,6 @@ export const SERVER_INSTRUCTION_OPENING = "Backblaze B2 operational flow.";
 export const SERVER_CREDENTIAL_SAFETY_INSTRUCTION =
   "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.";
 
-export interface SkillsPackManifest {
-  skills: Array<{ name: string }>;
-}
-
-function loadSkillsPackManifest(): SkillsPackManifest {
-  const manifestPath = path.resolve(__dirname, "..", "skills", "pack.json");
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as SkillsPackManifest;
-  if (
-    !manifest ||
-    !Array.isArray(manifest.skills) ||
-    manifest.skills.some((skill) => typeof skill?.name !== "string")
-  ) {
-    throw new Error(`${manifestPath}: skills must be an array of named skills`);
-  }
-  return manifest;
-}
-
-function joinList(values: readonly string[]): string {
-  if (values.length <= 1) return values.join("");
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
-}
-
-export function formatCompanionSkillsInstruction(manifest: SkillsPackManifest): string {
-  const skillNames = manifest.skills.map((skill) => `\`${skill.name}\``);
-  return [
-    "These tools are the capability layer.",
-    `The shipped Backblaze B2 Skills pack contains these optional client-side Markdown skills: ${joinList(
-      skillNames,
-    )}.`,
-    "Skills are installed in the MCP client, not delivered or activated by this server.",
-    "If the user is doing B2 work that matches one of those skills and no such skill appears to be active, mention that installing the B2 Skills pack can make the workflow safer and more repeatable.",
-    "Follow the client's skills documentation to register each desired `skills/b2-*/SKILL.md` file or containing directory.",
-    "Do not block on it; the tools work without the skills.",
-  ].join(" ");
-}
-
-export const SERVER_COMPANION_SKILLS_INSTRUCTION = formatCompanionSkillsInstruction(
-  loadSkillsPackManifest(),
-);
-
 /**
  * Load and validate configuration from environment variables.
  *
@@ -174,36 +131,7 @@ function registerDurableSecretCompatibilityStubs(
   }
 }
 
-/**
- * Create and configure the MCP server with all B2 tools registered.
- *
- * Tools are grouped into three families, each registered by the register*Tools
- * functions below: B2 Native API (buckets, files, large files, download URLs,
- * keys, object lock, auth), Partner API (groups + trial provisioning), and
- * S3-Compatible (buckets, objects, multipart, presigned URLs, object lock,
- * extras). The exact tool count is asserted in
- * tests/contract/tools-schema.contract.test.ts and logged at startup
- * ("server.ready") rather than tracked here, so this comment can't drift out of
- * date.
- *
- * Credential model: B2_APPLICATION_KEY_ID/KEY is the application key — the
- * workhorse for the B2 native API, S3, and key management. A single non-master
- * key works for everything except the Partner API,
- * which need a master key — set B2_MASTER_KEY_ID/KEY for those (optional). The
- * master key is used only by those tools; everything else uses the application
- * key. (B2's S3 endpoint rejects master keys, which is exactly why the
- * application key, not the master key, is the primary credential.)
- */
-/**
- * Build the MCP server. When `capabilities` is a non-null array, registration is
- * capability-aware: only tools the key can use (per src/utils/tool-capabilities)
- * are registered, and Partner tools register only with a distinct master key.
- * When `capabilities` is null/undefined, the full surface is registered; this is
- * reserved for explicit operator override and legacy unit tests. An empty array
- * is a fail-closed capability set, not "unknown".
- *
- * @returns The configured MCP server instance.
- */
+/** Build the MCP server and register the capability-scoped B2 tool surface. */
 export interface CreateServerOptions {
   oauthScopes?: readonly string[];
 }
@@ -247,7 +175,7 @@ export function createServer(
         outputFormatInstructions(outputFormat),
         "",
         "Companion skills (optional, recommended):",
-        SERVER_COMPANION_SKILLS_INSTRUCTION,
+        "Optional client-side Backblaze B2 Skills pack: `b2-backup-restore`, `b2-incident-response`, `b2-least-privilege-keys`, `b2-lifecycle-cost-hygiene`, `b2-migration`, `b2-object-lock`. If relevant and inactive, suggest installing it using the MCP client's skills docs. Do not block; tools work without skills.",
       ].join("\n"),
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },

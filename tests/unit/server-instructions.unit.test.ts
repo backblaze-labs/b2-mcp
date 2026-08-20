@@ -1,43 +1,81 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  formatCompanionSkillsInstruction,
-  SERVER_COMPANION_SKILLS_INSTRUCTION,
-} from "../../src/server";
+import { createServer } from "../../src/server";
+import type { B2Config } from "../../src/utils/types";
 
 interface PackManifest {
-  skills: Array<{ name: string }>;
+  skills: Array<{ name: string; path: string }>;
+  packageFiles: string[];
 }
 
 const root = join(__dirname, "../..");
+
+function testConfig(): B2Config {
+  return {
+    applicationKeyId: "app-id",
+    applicationKey: "app-secret",
+    appKeyId: "app-id",
+    appKey: "app-secret",
+    masterKeyId: "app-id",
+    masterKey: "app-secret",
+    region: "us-west-004",
+    allowLocalFiles: false,
+    fileRoot: null,
+    destructivePolicy: "block",
+    outputFormat: "json",
+    transport: "stdio",
+    credentialFingerprint: "credential-fingerprint",
+  };
+}
 
 function readPackManifest(): PackManifest {
   return JSON.parse(readFileSync(join(root, "skills", "pack.json"), "utf8")) as PackManifest;
 }
 
-describe("server instructions", () => {
-  it("advertises the shipped skills pack without client-specific install notes", () => {
-    const skillNames = readPackManifest().skills.map((skill) => skill.name);
-    const advertisedSkillNames = [
-      ...SERVER_COMPANION_SKILLS_INSTRUCTION.matchAll(/`(b2-[a-z0-9-]+)`/g),
-    ].map((match) => match[1]);
+function serverInstructions(): string {
+  const server = createServer(testConfig());
+  return (server as unknown as { server: { _instructions: string } }).server._instructions;
+}
 
-    expect(advertisedSkillNames).toEqual(skillNames);
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toMatch(/disaster recovery/i);
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toMatch(/saas multi-tenant/i);
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toMatch(/AI training/i);
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toMatch(/AI inference/i);
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toMatch(/Claude/i);
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toContain("~/.claude/skills");
-    expect(SERVER_COMPANION_SKILLS_INSTRUCTION).not.toContain("Settings -> Capabilities -> Skills");
+describe("server instructions", () => {
+  let instructions: string;
+
+  beforeAll(() => {
+    instructions = serverInstructions();
   });
 
-  it("formats companion skills from the provided manifest", () => {
-    const instruction = formatCompanionSkillsInstruction({
-      skills: [{ name: "b2-example-one" }, { name: "b2-example-two" }],
-    });
+  it("keeps manifest package files aligned with skill paths", () => {
+    const manifest = readPackManifest();
+    expect(manifest.packageFiles).toEqual([
+      "skills/pack.json",
+      ...manifest.skills.map((skill) => `skills/${skill.path}`),
+    ]);
+  });
 
-    expect(instruction).toContain("`b2-example-one` and `b2-example-two`");
-    expect(instruction).toContain("Follow the client's skills documentation");
+  it("advertises the shipped skills pack without client-specific install notes", () => {
+    const manifest = readPackManifest();
+    const skillNames = manifest.skills.map((skill) => skill.name);
+    const advertisedSkillNames = [...instructions.matchAll(/`(b2-[a-z0-9-]+)`/g)].map(
+      (match) => match[1],
+    );
+
+    expect(advertisedSkillNames).toEqual(skillNames);
+    expect(instructions).not.toMatch(/disaster recovery/i);
+    expect(instructions).not.toMatch(/saas multi-tenant/i);
+    expect(instructions).not.toMatch(/AI training/i);
+    expect(instructions).not.toMatch(/AI inference/i);
+    expect(instructions).not.toMatch(/Claude/i);
+    expect(instructions).not.toContain("~/.claude/skills");
+    expect(instructions).not.toContain("skills/b2-*/SKILL.md");
+    expect(instructions).not.toContain("Settings -> Capabilities -> Skills");
+  });
+
+  it("keeps registration guidance client neutral", () => {
+    const mentionedSkillPaths = [...instructions.matchAll(/skills\/b2-[a-z0-9-]+\/SKILL\.md/g)].map(
+      (match) => match[0],
+    );
+
+    expect(mentionedSkillPaths).toEqual([]);
+    expect(instructions).toContain("MCP client's skills docs");
   });
 });
