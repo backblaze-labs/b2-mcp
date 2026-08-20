@@ -4,24 +4,21 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { pathToFileURL } from "node:url";
 
 const retryableViewFailure = [
-  "E404",
-  "404",
-  "not found",
-  "EAI_AGAIN",
-  "ECONNRESET",
-  "ETIMEDOUT",
-  "ENOTFOUND",
-  "ECONNREFUSED",
-  "EPIPE",
-  "fetch failed",
-  "network socket",
-  "network timeout",
-  "rate limit",
-  "429",
-  "500",
-  "502",
-  "503",
-  "504",
+  /\bE404\b/i,
+  /not found/i,
+  /\bEAI_AGAIN\b/i,
+  /\bECONNRESET\b/i,
+  /\bETIMEDOUT\b/i,
+  /\bENOTFOUND\b/i,
+  /\bECONNREFUSED\b/i,
+  /\bEPIPE\b/i,
+  /fetch failed/i,
+  /network socket/i,
+  /network timeout/i,
+  /rate limit/i,
+  // Transient HTTP statuses, matched only as standalone tokens so an embedded
+  // number (a version like 1.500.0, or 1500) is not misread as a 5xx/404/429.
+  /(?<![\w.])(?:404|429|500|502|503|504)(?![\w.])/,
 ];
 
 function usage() {
@@ -135,7 +132,7 @@ function compactErrorText(result) {
 
 export function isRetryableNpmViewFailure(result) {
   const text = compactErrorText(result);
-  return retryableViewFailure.some((pattern) => text.toLowerCase().includes(pattern.toLowerCase()));
+  return retryableViewFailure.some((pattern) => pattern.test(text));
 }
 
 function npmViewMetadata(packageSpec) {

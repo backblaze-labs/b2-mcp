@@ -7,6 +7,13 @@ const root = join(__dirname, "../..");
 
 type RegistryMetadataModule = {
   verifyNpmRegistryMetadata: (options: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  isRetryableNpmViewFailure: (result: {
+    status: number | null;
+    stdout?: string;
+    stderr?: string;
+  }) => boolean;
+  parseRegistryMetadata: (raw: unknown) => Record<string, unknown>;
+  leakedRegistryMetadataKeys: (metadata: unknown) => string[];
 };
 
 async function registryMetadataModule(): Promise<RegistryMetadataModule> {
@@ -239,6 +246,34 @@ describe("release scripts", () => {
         log: { log: () => undefined, warn: () => undefined },
       }),
     ).rejects.toThrow("registry metadata exposes local publish coordinates");
+  });
+
+  it("classifies npm view failures as retryable only for transient signals", async () => {
+    const { isRetryableNpmViewFailure } = await registryMetadataModule();
+    const failing = (stderr: string) =>
+      isRetryableNpmViewFailure({ status: 1, stdout: "", stderr });
+
+    expect(failing("npm error 503 registry busy")).toBe(true);
+    expect(failing("npm error 429 Too Many Requests")).toBe(true);
+    expect(failing("npm error code E404")).toBe(true);
+    expect(failing("npm error network timeout while fetching")).toBe(true);
+    // Non-transient failures must fail fast, not retry to the deadline.
+    expect(failing("npm error code E403 403 Forbidden")).toBe(false);
+    expect(failing("EACCES: permission denied")).toBe(false);
+    // An embedded version/number must not be misread as an HTTP status.
+    expect(failing("cannot find matching version 1.500.0")).toBe(false);
+  });
+
+  it("reads registry metadata without assuming absent _from/_resolved are present", async () => {
+    const { parseRegistryMetadata, leakedRegistryMetadataKeys } = await registryMetadataModule();
+
+    expect(parseRegistryMetadata("")).toEqual({});
+    expect(parseRegistryMetadata("{}")).toEqual({});
+    expect(leakedRegistryMetadataKeys(parseRegistryMetadata("{}"))).toEqual([]);
+    expect(leakedRegistryMetadataKeys({ _resolved: "" })).toEqual([]);
+    expect(
+      leakedRegistryMetadataKeys({ _from: "file:x.tgz", _resolved: "/Users/x/x.tgz" }),
+    ).toEqual(["_from", "_resolved"]);
   });
 
   it("retries not-yet-visible npm registry metadata before passing", async () => {
