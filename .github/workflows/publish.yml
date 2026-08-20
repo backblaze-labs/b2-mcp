@@ -228,7 +228,7 @@ jobs:
           echo "tarball_name=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
           echo "tarball_sha256=$(sha256sum "$tarball" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "tarball_integrity=$(node -e 'const fs = require("fs"); const [pack] = JSON.parse(fs.readFileSync("publish-package/npm-pack.json", "utf8")); process.stdout.write(pack.integrity || "");')" >> "$GITHUB_OUTPUT"
-      - name: Dry-run npm publish from verified tarball
+      - name: Dry-run npm publish from staged package directory
         env:
           ACTIONS_CACHE_URL: ""
           ACTIONS_RESULTS_URL: ""
@@ -237,13 +237,20 @@ jobs:
           EXPECTED_TARBALL_NAME: ${{ steps.pack.outputs.tarball_name }}
         run: |
           set -euo pipefail
-          npm_tag="$(node --input-type=module -e '
-            import { readFileSync } from "node:fs";
-            import { npmDistTag } from "./scripts/lib/release-utils.mjs";
-            const [pack] = JSON.parse(readFileSync("publish-package/npm-pack.json", "utf8"));
-            process.stdout.write(npmDistTag(pack.version));
-          ')"
-          npm publish "./publish-package/${EXPECTED_TARBALL_NAME}" \
+          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
+          stage_dir="publish-package/dry-run-stage"
+          rm -rf "$stage_dir"
+          mkdir -p "$stage_dir"
+          tar -xzf "$tarball" -C "$stage_dir"
+          package_dir="${stage_dir}/package"
+          if [[ ! -f "${package_dir}/package.json" ]]; then
+            echo "::error::Expected staged package.json is missing"
+            exit 1
+          fi
+          npm_tag="$(node scripts/npm-publish-metadata.mjs \
+            --package-json "${package_dir}/package.json" \
+            --field tag)"
+          npm publish "$package_dir" \
             --dry-run \
             --access public \
             --ignore-scripts \
@@ -262,6 +269,20 @@ jobs:
           checksums_sha256="$(sha256sum SHA256SUMS | awk '{print $1}')"
           echo "checksums_name=SHA256SUMS" >> "$GITHUB_OUTPUT"
           echo "checksums_sha256=${checksums_sha256}" >> "$GITHUB_OUTPUT"
+      - name: Stage publish helper scripts
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: |
+          set -euo pipefail
+          mkdir -p publish-package/release-tools/lib
+          cp \
+            scripts/npm-publish-metadata.mjs \
+            scripts/verify-npm-registry-metadata.mjs \
+            publish-package/release-tools/
+          cp scripts/lib/release-utils.mjs publish-package/release-tools/lib/
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
@@ -272,6 +293,8 @@ jobs:
             publish-package/SHA256SUMS
             publish-package/release-notes.md
             publish-package/npm-pack.json
+            publish-package/release-tools/*.mjs
+            publish-package/release-tools/lib/*.mjs
           if-no-files-found: error
           retention-days: 7
 
@@ -357,26 +380,44 @@ jobs:
             echo "actual=${local_integrity}"
             exit 1
           fi
-      - name: Publish prebuilt tarball with trusted provenance
+          rm -rf publish-package/staged
+          mkdir -p publish-package/staged
+          tar -xzf "$tarball" -C publish-package/staged
+          if [[ ! -f publish-package/staged/package/package.json ]]; then
+            echo "::error::Expected staged package.json is missing"
+            exit 1
+          fi
+      - name: Publish staged package directory with trusted provenance
         env:
-          EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
+          EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
           EXPECTED_TARBALL_INTEGRITY: ${{ needs.prepare.outputs.tarball-integrity }}
         run: |
           set -euo pipefail
-          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
-          package_metadata="$(node -e '
-            const cp = require("child_process");
-            const pkg = JSON.parse(cp.execFileSync("tar", ["-xOf", process.argv[1], "package/package.json"], { encoding: "utf8" }));
-            const prerelease = String(pkg.version).split("-")[1];
-            const channel = prerelease ? prerelease.split(".")[0].toLowerCase() : "";
-            const tag = prerelease && ["alpha", "beta", "canary", "next", "rc"].includes(channel) ? channel : prerelease ? "next" : "latest";
-            process.stdout.write(JSON.stringify({ spec: `${pkg.name}@${pkg.version}`, tag }));
-          ' "$tarball")"
+          package_dir="./publish-package/staged/package"
+          if [[ ! -f "${package_dir}/package.json" ]]; then
+            echo "::error::Expected staged package.json is missing"
+            exit 1
+          fi
+          package_metadata="$(node publish-package/release-tools/npm-publish-metadata.mjs \
+            --package-json "${package_dir}/package.json")"
           package_spec="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).spec)' "$package_metadata")"
           npm_tag="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).tag)' "$package_metadata")"
+          metadata_verify_args=(
+            --package "$package_spec"
+            --timeout-ms 120000
+            --initial-interval-ms 5000
+            --max-interval-ms 30000
+          )
+          legacy_metadata_args=(
+            --allow-legacy-local-path-metadata "@backblaze-labs/b2-mcp@0.1.0"
+            --allow-legacy-local-path-metadata "@backblaze-labs/b2-mcp@0.1.1"
+          )
           if registry_integrity="$(npm view "${package_spec}" dist.integrity --json 2>/tmp/npm-view-error)"; then
             registry_integrity="$(node -e 'const value = JSON.parse(process.argv[1] || "null"); process.stdout.write(value || "");' "$registry_integrity")"
             if [[ "$registry_integrity" == "$EXPECTED_TARBALL_INTEGRITY" ]]; then
+              node publish-package/release-tools/verify-npm-registry-metadata.mjs \
+                "${metadata_verify_args[@]}" \
+                "${legacy_metadata_args[@]}"
               echo "::notice::${package_spec} already exists on npm with matching integrity; treating as idempotent success"
               exit 0
             fi
@@ -389,11 +430,38 @@ jobs:
             cat /tmp/npm-view-error
             exit 1
           fi
-          npm publish "$tarball" \
+          rm -rf publish-package/repacked
+          mkdir -p publish-package/repacked
+          repack_json="$(npm pack "$package_dir" --json --ignore-scripts --pack-destination publish-package/repacked)"
+          printf '%s\n' "$repack_json" > publish-package/repacked/npm-pack.json
+          repacked_tarball="$(find publish-package/repacked -maxdepth 1 -type f -name '*.tgz' | sort | head -n 1)"
+          if [[ -z "$repacked_tarball" ]]; then
+            echo "::error::npm pack did not produce a staged tarball"
+            exit 1
+          fi
+          repacked_sha256="$(sha256sum "$repacked_tarball" | awk '{print $1}')"
+          if [[ "$repacked_sha256" != "$EXPECTED_TARBALL_SHA256" ]]; then
+            echo "::error::Staged package tarball SHA-256 mismatch"
+            echo "expected=${EXPECTED_TARBALL_SHA256}"
+            echo "actual=${repacked_sha256}"
+            exit 1
+          fi
+          repacked_integrity="$(node -e 'const [pack] = JSON.parse(process.argv[1]); process.stdout.write(pack.integrity || "");' "$repack_json")"
+          if [[ "$repacked_integrity" != "$EXPECTED_TARBALL_INTEGRITY" ]]; then
+            echo "::error::Staged package tarball npm integrity mismatch"
+            echo "expected=${EXPECTED_TARBALL_INTEGRITY}"
+            echo "actual=${repacked_integrity}"
+            exit 1
+          fi
+          # Publish from the staged directory; npm records local file coordinates
+          # in registry metadata when the publish target is a .tgz path.
+          npm publish "$package_dir" \
             --provenance \
             --access public \
             --ignore-scripts \
             --tag "$npm_tag"
+          node publish-package/release-tools/verify-npm-registry-metadata.mjs \
+            "${metadata_verify_args[@]}"
 
   container-image:
     needs: [prepare, publish]

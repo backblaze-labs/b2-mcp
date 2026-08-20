@@ -242,6 +242,17 @@ describe("supply-chain audit policy", () => {
     return workflowJobBlock(publishWorkflow, name) ?? "";
   }
 
+  function workflowStepBlock(job: string, stepName: string): string {
+    const escaped = stepName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = job.match(
+      new RegExp(
+        `- name: ${escaped}[\\s\\S]*?(?=\\n\\s+- name:|\\n\\s+- uses:|\\n\\n  [A-Za-z0-9_-]+:|\\s*$)`,
+      ),
+    );
+    if (!match) throw new Error(`Missing workflow step ${stepName}`);
+    return match[0];
+  }
+
   function scopedAuditReport(overrides: Record<string, unknown> = {}) {
     return {
       auditReportVersion: 2,
@@ -625,7 +636,7 @@ describe("supply-chain audit policy", () => {
     );
     expect(publishWorkflow).toContain("pnpm run release:sbom");
     expect(publishWorkflow).toContain("node scripts/extract-release-notes.mjs");
-    expect(publishWorkflow).toContain("Dry-run npm publish from verified tarball");
+    expect(publishWorkflow).toContain("Dry-run npm publish from staged package directory");
     expect(publishWorkflow).toContain("--dry-run");
     expect(publishWorkflow).toContain("--access public");
     expect(publishWorkflow).toContain("--ignore-scripts");
@@ -637,6 +648,10 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("release-notes.md");
     expect(publishWorkflow).toContain("sbom-sha256");
     expect(publishWorkflow).toContain("EXPECTED_SBOM_SHA256");
+    expect(publishWorkflow).toContain("Stage publish helper scripts");
+    expect(publishWorkflow).toContain("scripts/npm-publish-metadata.mjs");
+    expect(publishWorkflow).toContain("scripts/verify-npm-registry-metadata.mjs");
+    expect(publishWorkflow).toContain("publish-package/release-tools/*.mjs");
     expect(publishWorkflow).toContain("Create GitHub release from verified artifact");
     expect(publishWorkflow).toContain("gh release upload");
     expect(publishWorkflow).toContain("gh release create");
@@ -674,7 +689,7 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("--provenance");
     expect(publishWorkflow).toContain('--tag "$npm_tag"');
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
-    expect(publishWorkflow).not.toContain("tar -xzf");
+    expect(publishWorkflow).toContain('tar -xzf "$tarball" -C publish-package/staged');
   });
 
   it("keeps tsx dev-only and denies esbuild install builds", () => {
@@ -728,10 +743,11 @@ describe("supply-chain audit policy", () => {
     const prepareJob = publishJobBlock("prepare");
     const publishJob = publishJobBlock("publish");
 
-    expect(prepareJob).toContain("npmDistTag(pack.version)");
+    expect(prepareJob).toContain("node scripts/npm-publish-metadata.mjs");
     expect(prepareJob).toContain('--tag "${npm_tag}"');
-    expect(publishJob).toContain('const prerelease = String(pkg.version).split("-")[1]');
-    expect(publishJob).toContain(
+    expect(publishJob).toContain("node publish-package/release-tools/npm-publish-metadata.mjs");
+    expect(publishJob).not.toContain('const prerelease = String(pkg.version).split("-")[1]');
+    expect(publishJob).not.toContain(
       'const tag = prerelease && ["alpha", "beta", "canary", "next", "rc"].includes(channel) ? channel : prerelease ? "next" : "latest"',
     );
     expect(publishJob).toContain('--tag "$npm_tag"');
@@ -815,6 +831,10 @@ describe("supply-chain audit policy", () => {
     const githubReleaseJob = publishJobBlock("github-release");
     const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
+    const publishStep = workflowStepBlock(
+      publishJob,
+      "Publish staged package directory with trusted provenance",
+    );
     const publishOnBlock = yamlBlockForKey(publishWorkflow, "on") ?? "";
     const publishWorkflowRunBlock = yamlBlockForKey(publishOnBlock, "workflow_run") ?? "";
     const releaseTagOnBlock = yamlBlockForKey(releaseTagWorkflow, "on") ?? "";
@@ -859,6 +879,8 @@ describe("supply-chain audit policy", () => {
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
     expect(prepareJob).toContain("package-manager-cache: false");
+    expect(prepareJob).toContain("Dry-run npm publish from staged package directory");
+    expect(prepareJob).toContain('stage_dir="publish-package/dry-run-stage"');
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");
     expect(githubReleaseJob).not.toContain("id-token: write");
@@ -876,6 +898,32 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).not.toContain("--ignore-scripts=false");
     expect(publishJob).toContain("npm publish");
     expect(publishJob).toContain("--ignore-scripts");
+    expect(publishJob).toContain('package_dir="./publish-package/staged/package"');
+    expect(publishStep).toContain("node publish-package/release-tools/npm-publish-metadata.mjs");
+    expect(publishStep).toContain(
+      "node publish-package/release-tools/verify-npm-registry-metadata.mjs",
+    );
+    expect(publishStep).toContain("--timeout-ms 120000");
+    expect(publishStep).toContain("--initial-interval-ms 5000");
+    expect(publishStep).toContain("--max-interval-ms 30000");
+    expect(publishStep).toContain(
+      '--allow-legacy-local-path-metadata "@backblaze-labs/b2-mcp@0.1.0"',
+    );
+    expect(publishStep).toContain(
+      '--allow-legacy-local-path-metadata "@backblaze-labs/b2-mcp@0.1.1"',
+    );
+    expect(publishStep).toContain('"${legacy_metadata_args[@]}"');
+    expect(publishStep).toContain('npm publish "$package_dir"');
+    expect(publishStep).not.toContain('npm publish "$tarball"');
+    expect(publishStep).not.toContain("EXPECTED_TARBALL_NAME");
+    expect(publishStep).toContain('npm pack "$package_dir" --json --ignore-scripts');
+    expect(publishStep).toContain("Staged package tarball SHA-256 mismatch");
+    expect(publishStep.indexOf('npm publish "$package_dir"')).toBeLessThan(
+      publishStep.lastIndexOf("verify-npm-registry-metadata.mjs"),
+    );
+    expect(publishStep.slice(publishStep.lastIndexOf('npm publish "$package_dir"'))).not.toContain(
+      '"${legacy_metadata_args[@]}"',
+    );
   });
 
   it.each(allWorkflows)("pins every marketplace action used by %s", (_name, workflowText) => {

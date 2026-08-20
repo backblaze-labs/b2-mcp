@@ -5,6 +5,23 @@ import { spawnSync } from "child_process";
 
 const root = join(__dirname, "../..");
 
+type RegistryMetadataModule = {
+  verifyNpmRegistryMetadata: (options: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  isRetryableNpmViewFailure: (result: {
+    status: number | null;
+    stdout?: string;
+    stderr?: string;
+  }) => boolean;
+  parseRegistryMetadata: (raw: unknown) => Record<string, unknown>;
+  leakedRegistryMetadataKeys: (metadata: unknown) => string[];
+};
+
+async function registryMetadataModule(): Promise<RegistryMetadataModule> {
+  return (await import(
+    "../../scripts/verify-npm-registry-metadata.mjs"
+  )) as unknown as RegistryMetadataModule;
+}
+
 function runGit(cwd: string, args: string[]): string {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
   if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
@@ -189,6 +206,146 @@ describe("release scripts", () => {
 
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual(["latest", "rc", "next"]);
+  });
+
+  it("prints package publish metadata through the shared helper", () => {
+    withFixture((fixtureRoot) => {
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.2.0-preview.1" }, null, 2));
+
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/npm-publish-metadata.mjs", "--package-json", packagePath],
+        { cwd: root, encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        spec: "@backblaze-labs/b2-mcp@0.2.0-preview.1",
+        tag: "next",
+      });
+    });
+  });
+
+  it("rejects leaked npm registry _from/_resolved metadata", async () => {
+    const { verifyNpmRegistryMetadata } = await registryMetadataModule();
+
+    await expect(
+      verifyNpmRegistryMetadata({
+        packageSpec: "@backblaze-labs/b2-mcp@9.9.9",
+        viewMetadata: () => ({
+          status: 0,
+          stdout: JSON.stringify({
+            _resolved:
+              "/home/runner/work/b2-mcp/b2-mcp/publish-package/backblaze-labs-b2-mcp-9.9.9.tgz",
+          }),
+          stderr: "",
+        }),
+        wait: async () => undefined,
+        log: { log: () => undefined, warn: () => undefined },
+      }),
+    ).rejects.toThrow("registry metadata exposes local publish coordinates");
+  });
+
+  it("classifies npm view failures as retryable only for transient signals", async () => {
+    const { isRetryableNpmViewFailure } = await registryMetadataModule();
+    const failing = (stderr: string) =>
+      isRetryableNpmViewFailure({ status: 1, stdout: "", stderr });
+
+    expect(failing("npm error 503 registry busy")).toBe(true);
+    expect(failing("npm error 429 Too Many Requests")).toBe(true);
+    expect(failing("npm error code E404")).toBe(true);
+    expect(failing("npm error network timeout while fetching")).toBe(true);
+    // Non-transient failures must fail fast, not retry to the deadline.
+    expect(failing("npm error code E403 403 Forbidden")).toBe(false);
+    expect(failing("EACCES: permission denied")).toBe(false);
+    // An embedded version/number must not be misread as an HTTP status.
+    expect(failing("cannot find matching version 1.500.0")).toBe(false);
+  });
+
+  it("reads registry metadata without assuming absent _from/_resolved are present", async () => {
+    const { parseRegistryMetadata, leakedRegistryMetadataKeys } = await registryMetadataModule();
+
+    expect(parseRegistryMetadata("")).toEqual({});
+    expect(parseRegistryMetadata("{}")).toEqual({});
+    expect(leakedRegistryMetadataKeys(parseRegistryMetadata("{}"))).toEqual([]);
+    expect(leakedRegistryMetadataKeys({ _resolved: "" })).toEqual([]);
+    expect(
+      leakedRegistryMetadataKeys({ _from: "file:x.tgz", _resolved: "/Users/x/x.tgz" }),
+    ).toEqual(["_from", "_resolved"]);
+  });
+
+  it("retries not-yet-visible npm registry metadata before passing", async () => {
+    const { verifyNpmRegistryMetadata } = await registryMetadataModule();
+    const warnings: string[] = [];
+    const delays: number[] = [];
+    let attempts = 0;
+
+    const result = await verifyNpmRegistryMetadata({
+      packageSpec: "@backblaze-labs/b2-mcp@9.9.9",
+      timeoutMs: 1_000,
+      initialIntervalMs: 1,
+      maxIntervalMs: 4,
+      viewMetadata: () => {
+        attempts += 1;
+        return attempts === 1
+          ? { status: 1, stdout: "", stderr: "npm ERR! 404 not found" }
+          : { status: 0, stdout: "{}", stderr: "" };
+      },
+      wait: async (delayMs: number) => {
+        delays.push(delayMs);
+      },
+      log: { log: () => undefined, warn: (message: string) => warnings.push(message) },
+    });
+
+    expect(result).toMatchObject({ status: "verified", attempts: 2 });
+    expect(delays).toEqual([1]);
+    expect(warnings.join("\n")).toContain("retrying npm view");
+  });
+
+  it("allows matching-integrity reruns for documented legacy metadata leaks", async () => {
+    const { verifyNpmRegistryMetadata } = await registryMetadataModule();
+    const warnings: string[] = [];
+
+    const result = await verifyNpmRegistryMetadata({
+      packageSpec: "@backblaze-labs/b2-mcp@0.1.1",
+      allowedLegacySpecs: new Set(["@backblaze-labs/b2-mcp@0.1.1"]),
+      viewMetadata: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          _from: "file:publish-package/backblaze-labs-b2-mcp-0.1.1.tgz",
+          _resolved:
+            "/home/runner/work/b2-mcp/b2-mcp/publish-package/backblaze-labs-b2-mcp-0.1.1.tgz",
+        }),
+        stderr: "",
+      }),
+      wait: async () => undefined,
+      log: { log: () => undefined, warn: (message: string) => warnings.push(message) },
+    });
+
+    expect(result).toMatchObject({ status: "legacy-allowed", leaked: ["_from", "_resolved"] });
+    expect(warnings.join("\n")).toContain("matching-integrity rerun is allowed");
+  });
+
+  it("fails registry metadata verification when the retry deadline expires", async () => {
+    const { verifyNpmRegistryMetadata } = await registryMetadataModule();
+    let nowCalls = 0;
+
+    await expect(
+      verifyNpmRegistryMetadata({
+        packageSpec: "@backblaze-labs/b2-mcp@9.9.9",
+        timeoutMs: 5,
+        initialIntervalMs: 1,
+        viewMetadata: () => ({ status: 1, stdout: "", stderr: "npm ERR! 503 registry busy" }),
+        wait: async () => undefined,
+        now: () => {
+          nowCalls += 1;
+          return nowCalls === 1 ? 0 : 10;
+        },
+        log: { log: () => undefined, warn: () => undefined },
+      }),
+    ).rejects.toThrow("did not complete within 5ms");
   });
 
   it("verifies tag, metadata, package files, and changelog agreement", () => {

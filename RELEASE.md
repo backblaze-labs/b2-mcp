@@ -83,8 +83,9 @@ Before publishing `v0.1.0`:
     explicitly, enforce the runtime package budget, scan the generated packlist
     and tarball, generate and verify a CycloneDX production SBOM artifact, call
     the protected live B2 contract workflow as a pre-release gate, verify the
-    tarball SHA-256, publish the already-scanned tarball with lifecycle scripts
-    disabled, publish and verify the GHCR image, and attach the SBOM to the
+    tarball SHA-256, publish the staged package directory only after its
+    repacked tarball matches the scanned artifact, verify registry metadata with
+    bounded retry, publish and verify the GHCR image, and attach the SBOM to the
     GitHub Release only after npm publish and GHCR publishing succeed.
 13. Confirm the release tag ruleset only allows release owners to create
     `v*` tags and does not allow force-updating or deleting release tags.
@@ -138,8 +139,8 @@ exists. For the first public package only:
 3. Deprecate the bootstrap version with a note that it is a reserved package
    bootstrap and is not supported for installation.
 4. Push the signed `v0.1.0` tag to run the publish workflow. The workflow must
-   publish the verified tarball with OIDC provenance; do not publish a different
-   local tarball to bootstrap the package.
+   publish the verified package contents with OIDC provenance; do not publish a
+   different local tarball to bootstrap the package.
 
 ## Normal Release
 
@@ -183,8 +184,10 @@ exists. For the first public package only:
    starts `Publish Package` from the default branch. The publish workflow waits
    until the tag is reachable from the protected `ci-green` marker, then verifies
    tag/package/changelog consistency, runs `pnpm run verify`, requires live
-   contract success, builds one tarball, runs an npm dry-run publish, records
-   checksums and SBOM, publishes that exact tarball with npm OIDC provenance,
+   contract success, builds one tarball, runs an npm dry-run publish from staged
+   package contents, records checksums and SBOM, repacks the staged package to
+   prove it still matches the tarball, publishes the staged package directory
+   with npm OIDC provenance, verifies registry metadata with bounded retry,
    publishes and anonymously verifies the idempotent GHCR container image from
    the same verified ref, and then creates or updates the GitHub Release. A
    Docker/GHCR failure can be retried against the same tag; it must not sign an
@@ -198,7 +201,11 @@ exists. For the first public package only:
    `Publish Package` from the default branch. Do not delete, force-move, or
    re-push the tag. Creating or editing a GitHub Release is not a publish
    trigger; the workflow creates or updates the GitHub Release only after npm
-   and GHCR succeed.
+   and GHCR succeed. Existing immutable npm versions `0.1.0` and `0.1.1` may
+   expose local `_from` or `_resolved` registry metadata from the former
+   tarball-publish flow. Matching-integrity reruns for only those versions log a
+   warning and continue so downstream GHCR or GitHub Release recovery remains
+   possible; newer versions fail if that metadata is present.
 6. If GHCR has the version/release tags but the retry fails because the digest is
    unsigned or missing trusted attestations, delete that specific GHCR package
    version and rerun the same tag:
