@@ -1181,7 +1181,8 @@ describe("b2_update_bucket", () => {
     },
   };
 
-  async function expectUpdateBucketValidationError(
+  async function expectBucketValidationError(
+    toolName: "b2_create_bucket" | "b2_update_bucket",
     args: Record<string, unknown>,
     expectedMessage: RegExp,
   ) {
@@ -1192,14 +1193,25 @@ describe("b2_update_bucket", () => {
     installSdkTransport(transport);
     server = createServer(testConfig);
 
-    const result = await callTool(server, "b2_update_bucket", {
-      bucketId: "bucket-1",
-      ...args,
-    });
+    const baseArgs =
+      toolName === "b2_create_bucket"
+        ? { bucketName: "fixture-bucket", bucketType: "allPrivate" }
+        : { bucketId: "bucket-1" };
+    const result = await callTool(server, toolName, { ...baseArgs, ...args });
 
     expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("B2 Error [bad_request] (HTTP 400)");
     expect(result.content[0].text).toMatch(expectedMessage);
     expect(transport.requests).toHaveLength(0);
+  }
+
+  async function expectCreateAndUpdateValidationError(
+    args: Record<string, unknown>,
+    expectedMessage: RegExp,
+  ) {
+    for (const toolName of ["b2_create_bucket", "b2_update_bucket"] as const) {
+      await expectBucketValidationError(toolName, args, expectedMessage);
+    }
   }
 
   it("updates bucket metadata and Object Lock settings", async () => {
@@ -1245,12 +1257,17 @@ describe("b2_update_bucket", () => {
       /bucketInfo must contain at most 10 key-value pairs/,
     ],
     [
-      "bucketInfo aggregate value size",
+      "bucketInfo individual value size",
       { bucketInfo: { safe: "x".repeat(10_001) } },
+      /bucketInfo value for "safe" must be at most 10000 characters/,
+    ],
+    [
+      "bucketInfo aggregate value size",
+      { bucketInfo: { safeA: "x".repeat(6000), safeB: "x".repeat(6000) } },
       /bucketInfo values must total at most 10000 UTF-8 bytes/,
     ],
-  ])("rejects invalid %s before SDK update", async (_label, args, expectedMessage) => {
-    await expectUpdateBucketValidationError(args, expectedMessage);
+  ])("rejects invalid %s before SDK call", async (_label, args, expectedMessage) => {
+    await expectCreateAndUpdateValidationError(args, expectedMessage);
   });
 
   const validCorsRule = {
@@ -1288,6 +1305,33 @@ describe("b2_update_bucket", () => {
       /corsRules must contain at most 100 rules/,
     ],
     [
+      "empty required CORS array",
+      { corsRules: [{ ...validCorsRule, allowedOrigins: [] }] },
+      /corsRules\[0\]\.allowedOrigins must contain at least 1 item/,
+    ],
+    [
+      "empty CORS string value",
+      { corsRules: [{ ...validCorsRule, allowedOperations: [""] }] },
+      /corsRules\[0\]\.allowedOperations\[0\] must not be empty/,
+    ],
+    [
+      "large CORS string value",
+      { corsRules: [{ ...validCorsRule, allowedOrigins: [`https://${"a".repeat(1000)}`] }] },
+      /corsRules\[0\]\.allowedOrigins\[0\] must be at most 999 characters/,
+    ],
+    [
+      "large CORS array",
+      {
+        corsRules: [
+          {
+            ...validCorsRule,
+            allowedOperations: Array.from({ length: 101 }, (_, index) => `op-${index}`),
+          },
+        ],
+      },
+      /corsRules\[0\]\.allowedOperations must contain at most 100 items/,
+    ],
+    [
       "duplicate CORS rule names",
       {
         corsRules: [
@@ -1303,14 +1347,17 @@ describe("b2_update_bucket", () => {
         corsRules: [
           {
             ...validCorsRule,
-            allowedOrigins: [`https://${"a".repeat(980)}.example.com`],
+            allowedOrigins: Array.from(
+              { length: 50 },
+              (_, index) => `https://origin-${index}.example.com`,
+            ),
           },
         ],
       },
       /corsRules\[0\] must be less than 1000 UTF-8 bytes/,
     ],
-  ])("rejects invalid %s before SDK update", async (_label, args, expectedMessage) => {
-    await expectUpdateBucketValidationError(args, expectedMessage);
+  ])("rejects invalid %s before SDK call", async (_label, args, expectedMessage) => {
+    await expectCreateAndUpdateValidationError(args, expectedMessage);
   });
 
   it("blocks replication updates without confirmation before SDK update", async () => {

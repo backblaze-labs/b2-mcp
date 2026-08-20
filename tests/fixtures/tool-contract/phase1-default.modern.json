@@ -150,6 +150,7 @@
         "properties": {
           "bucketInfo": {
             "additionalProperties": {
+              "maxLength": 10000,
               "type": "string"
             },
             "description": "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with 'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, but all values together must be <= 10,000 UTF-8 bytes.",
@@ -171,25 +172,36 @@
             "type": "string"
           },
           "corsRules": {
-            "description": "CORS rules for browser-based access. At most 100 rules; each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket.",
+            "description": "CORS rules for browser-based access. At most 100 rules. allowedOrigins and allowedOperations each require 1-100 non-empty entries; allowedHeaders and exposeHeaders may contain up to 100 non-empty entries. String entries must be at most 999 characters. Each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket.",
             "items": {
               "properties": {
                 "allowedHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "allowedOperations": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "allowedOrigins": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "corsRuleName": {
@@ -201,8 +213,11 @@
                 },
                 "exposeHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "maxAgeSeconds": {
@@ -676,6 +691,7 @@
           },
           "bucketInfo": {
             "additionalProperties": {
+              "maxLength": 10000,
               "type": "string"
             },
             "description": "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with 'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, but all values together must be <= 10,000 UTF-8 bytes. Replaces all existing bucketInfo when supplied.",
@@ -696,25 +712,36 @@
             "type": "boolean"
           },
           "corsRules": {
-            "description": "CORS rules for browser-based access. At most 100 rules; each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket. Replaces all existing CORS rules when supplied.",
+            "description": "CORS rules for browser-based access. At most 100 rules. allowedOrigins and allowedOperations each require 1-100 non-empty entries; allowedHeaders and exposeHeaders may contain up to 100 non-empty entries. String entries must be at most 999 characters. Each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket. Replaces all existing CORS rules when supplied.",
             "items": {
               "properties": {
                 "allowedHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "allowedOperations": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "allowedOrigins": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "corsRuleName": {
@@ -726,8 +753,11 @@
                 },
                 "exposeHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "maxAgeSeconds": {
@@ -1905,5 +1935,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "f217d8a6a68f4a60ef506ab87604f260169987eb6d75357d061a8613c30fa1db"
+  "hash": "8668c4d39cf4d058fe39899979c91ee5b64bfa0001caf9ab2deedb62738ed935"
 }
