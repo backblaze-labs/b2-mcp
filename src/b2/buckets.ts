@@ -91,26 +91,16 @@ const BUCKET_INFO_KEY_MAX_BYTES = 50;
 const BUCKET_INFO_VALUES_MAX_BYTES = 10_000;
 const BUCKET_INFO_KEY_PATTERN = /^[A-Za-z0-9._`~!#$%^&*'|+-]+$/;
 const BUCKET_INFO_DESCRIPTION =
-  "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, " +
-  "letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with " +
-  "'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, " +
-  "but all values together must be <= 10,000 UTF-8 bytes.";
+  "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.";
 
 const CORS_RULES_MAX_COUNT = 100;
 const CORS_RULE_MAX_BYTES = 1_000;
 const CORS_FIELD_MAX_ITEMS = 100;
 const CORS_STRING_MAX_CHARS = CORS_RULE_MAX_BYTES - 1;
 const CORS_RULE_NAME_PATTERN = /^[A-Za-z0-9-]+$/;
-const CORS_RULE_NAME_DESCRIPTION =
-  "Unique CORS rule name, 6-63 characters. Use only letters, digits, and hyphens; " +
-  "names starting with 'b2-' are reserved for Backblaze.";
+const CORS_RULE_NAME_DESCRIPTION = "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.";
 const CORS_RULES_DESCRIPTION =
-  "CORS rules for browser-based access. At most 100 rules. allowedOrigins and " +
-  "allowedOperations each require 1-100 non-empty entries; allowedHeaders and " +
-  "exposeHeaders may contain up to 100 non-empty entries. String entries must " +
-  "be at most 999 characters. Each rule's combined UTF-8 bytes across " +
-  "corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and " +
-  "exposeHeaders must be less than 1,000. Rule names must be unique within the bucket.";
+  "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.";
 
 const bucketInfoKeySchema = z
   .string()
@@ -159,7 +149,8 @@ const corsRulesSchema = z
   .superRefine((value, ctx) => {
     const message = corsRulesInputError(value);
     if (message) ctx.addIssue({ code: "custom", message });
-  });
+  })
+  .describe(CORS_RULES_DESCRIPTION);
 
 type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
 let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
@@ -258,6 +249,10 @@ function quotedName(value: string): string {
   return JSON.stringify(value.length > 80 ? `${value.slice(0, 77)}...` : value);
 }
 
+function bucketInfoKeySizeError(key: string): string {
+  return `bucketInfo key ${quotedName(key)} must be 1-${BUCKET_INFO_KEY_MAX_BYTES} UTF-8 bytes.`;
+}
+
 function bucketInfoInputError(bucketInfo: Record<string, string> | undefined): string | null {
   if (bucketInfo === undefined) return null;
   const entries = Object.entries(bucketInfo);
@@ -268,11 +263,10 @@ function bucketInfoInputError(bucketInfo: Record<string, string> | undefined): s
   let valuesBytes = 0;
   for (const [key, value] of entries) {
     if (key.length < 1 || key.length > BUCKET_INFO_KEY_MAX_BYTES) {
-      return `bucketInfo key ${quotedName(key)} must be 1-${BUCKET_INFO_KEY_MAX_BYTES} UTF-8 bytes.`;
+      return bucketInfoKeySizeError(key);
     }
-    const keyBytes = utf8Bytes(key);
-    if (keyBytes > BUCKET_INFO_KEY_MAX_BYTES) {
-      return `bucketInfo key ${quotedName(key)} must be 1-${BUCKET_INFO_KEY_MAX_BYTES} UTF-8 bytes.`;
+    if (utf8Bytes(key) > BUCKET_INFO_KEY_MAX_BYTES) {
+      return bucketInfoKeySizeError(key);
     }
     if (!BUCKET_INFO_KEY_PATTERN.test(key)) {
       return `bucketInfo key ${quotedName(key)} may contain only letters, digits, and these characters: - _ . \` ~ ! # $ % ^ & * ' | +.`;
@@ -290,6 +284,10 @@ function bucketInfoInputError(bucketInfo: Record<string, string> | undefined): s
   }
 
   return null;
+}
+
+function corsRuleSizeError(rulePath: string): string {
+  return `${rulePath} must be less than ${CORS_RULE_MAX_BYTES} UTF-8 bytes.`;
 }
 
 function corsRuleNameError(name: string, path: string): string | null {
@@ -339,7 +337,7 @@ function addCorsStringArrayBytes(
     if (total >= CORS_RULE_MAX_BYTES) {
       return {
         ok: false,
-        message: `${rulePath} must be less than ${CORS_RULE_MAX_BYTES} UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders.`,
+        message: corsRuleSizeError(rulePath),
       };
     }
   }
@@ -361,9 +359,6 @@ function corsRulesInputError(
     const nameError = corsRuleNameError(rule.corsRuleName, path);
     if (nameError) return nameError;
     let ruleBytes = rule.corsRuleName.length;
-    if (ruleBytes >= CORS_RULE_MAX_BYTES) {
-      return `corsRules[${index}] must be less than ${CORS_RULE_MAX_BYTES} UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders.`;
-    }
     if (names.has(rule.corsRuleName)) {
       return `${path} ${quotedName(rule.corsRuleName)} must be unique within the bucket.`;
     }
@@ -604,7 +599,7 @@ export function registerBucketTools(
             "allPublic allows unauthenticated downloads; allPrivate requires authorization.",
           ),
         bucketInfo: bucketInfoSchema.optional(),
-        corsRules: corsRulesSchema.optional().describe(CORS_RULES_DESCRIPTION),
+        corsRules: corsRulesSchema.optional(),
         lifecycleRules: z
           .array(
             z.object({
@@ -694,12 +689,8 @@ export function registerBucketTools(
       inputSchema: {
         bucketId: z.string().describe("The ID of the bucket to update."),
         bucketType: z.enum(["allPublic", "allPrivate"]).optional(),
-        bucketInfo: bucketInfoSchema
-          .optional()
-          .describe(`${BUCKET_INFO_DESCRIPTION} Replaces all existing bucketInfo when supplied.`),
-        corsRules: corsRulesSchema
-          .optional()
-          .describe(`${CORS_RULES_DESCRIPTION} Replaces all existing CORS rules when supplied.`),
+        bucketInfo: bucketInfoSchema.optional(),
+        corsRules: corsRulesSchema.optional(),
         lifecycleRules: z
           .array(
             z.object({

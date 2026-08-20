@@ -1214,6 +1214,31 @@ describe("b2_update_bucket", () => {
     }
   }
 
+  function expectBucketSchemaValidation(
+    toolName: "b2_create_bucket" | "b2_update_bucket",
+    args: Record<string, unknown>,
+    expectedMessage?: RegExp,
+  ) {
+    server = createServer(testConfig);
+    const tool = getRegisteredTools(server)?.[toolName];
+    expect(tool).toBeDefined();
+    const baseArgs =
+      toolName === "b2_create_bucket"
+        ? { bucketName: "fixture-bucket", bucketType: "allPrivate" }
+        : { bucketId: "bucket-1" };
+    const parsed = tool?.inputSchema?.safeParse({ ...baseArgs, ...args });
+
+    if (!expectedMessage) {
+      expect(parsed?.success).toBe(true);
+      return;
+    }
+
+    expect(parsed?.success).toBe(false);
+    if (parsed?.success === false) {
+      expect(parsed.error.issues.map((issue) => issue.message).join("\n")).toMatch(expectedMessage);
+    }
+  }
+
   it("updates bucket metadata and Object Lock settings", async () => {
     const bucket = await createBucket("update-bucket", BucketType.AllPrivate, {
       fileLockEnabled: true,
@@ -1257,6 +1282,16 @@ describe("b2_update_bucket", () => {
       /bucketInfo must contain at most 10 key-value pairs/,
     ],
     [
+      "bucketInfo key character length",
+      { bucketInfo: { ["k".repeat(51)]: "x" } },
+      /bucketInfo key "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk" must be 1-50 UTF-8 bytes/,
+    ],
+    [
+      "bucketInfo key UTF-8 byte length",
+      { bucketInfo: { ["\u00e9".repeat(26)]: "x" } },
+      /bucketInfo key .* must be 1-50 UTF-8 bytes/,
+    ],
+    [
       "bucketInfo individual value size",
       { bucketInfo: { safe: "x".repeat(10_001) } },
       /bucketInfo value for "safe" must be at most 10000 characters/,
@@ -1277,6 +1312,37 @@ describe("b2_update_bucket", () => {
     allowedOperations: ["b2_download_file_by_name"],
     maxAgeSeconds: 3600,
   };
+
+  it("applies bucketInfo and CORS rules through registered schemas", () => {
+    const validArgs = { bucketInfo: { qa: "ok" }, corsRules: [validCorsRule] };
+    const invalidSchemaCases: Array<[Record<string, unknown>, RegExp]> = [
+      [{ bucketInfo: { "b2-mcp-qa": "x" } }, /Invalid key in record/],
+      [
+        { bucketInfo: { safeA: "x".repeat(6000), safeB: "x".repeat(6000) } },
+        /bucketInfo values must total at most 10000 UTF-8 bytes/,
+      ],
+      [
+        { corsRules: [{ ...validCorsRule, corsRuleName: "b2-mcp-qa-temporary" }] },
+        /reserved for Backblaze/,
+      ],
+      [
+        {
+          corsRules: [
+            { ...validCorsRule, corsRuleName: "dup-rule" },
+            { ...validCorsRule, corsRuleName: "dup-rule" },
+          ],
+        },
+        /must be unique/,
+      ],
+    ];
+
+    for (const toolName of ["b2_create_bucket", "b2_update_bucket"] as const) {
+      expectBucketSchemaValidation(toolName, validArgs);
+      for (const [args, expectedMessage] of invalidSchemaCases) {
+        expectBucketSchemaValidation(toolName, args, expectedMessage);
+      }
+    }
+  });
 
   it.each([
     [

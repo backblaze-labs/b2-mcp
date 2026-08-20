@@ -153,7 +153,7 @@
               "maxLength": 10000,
               "type": "string"
             },
-            "description": "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with 'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, but all values together must be <= 10,000 UTF-8 bytes.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.",
             "propertyNames": {
               "maxLength": 50,
               "minLength": 1,
@@ -172,7 +172,7 @@
             "type": "string"
           },
           "corsRules": {
-            "description": "CORS rules for browser-based access. At most 100 rules. allowedOrigins and allowedOperations each require 1-100 non-empty entries; allowedHeaders and exposeHeaders may contain up to 100 non-empty entries. String entries must be at most 999 characters. Each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket.",
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -205,7 +205,7 @@
                   "type": "array"
                 },
                 "corsRuleName": {
-                  "description": "Unique CORS rule name, 6-63 characters. Use only letters, digits, and hyphens; names starting with 'b2-' are reserved for Backblaze.",
+                  "description": "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.",
                   "maxLength": 63,
                   "minLength": 6,
                   "pattern": "^[A-Za-z0-9-]+$",
@@ -694,7 +694,7 @@
               "maxLength": 10000,
               "type": "string"
             },
-            "description": "Custom bucket metadata. Up to 10 key-value pairs. Keys are 1-50 UTF-8 bytes, letters/digits plus - _ . ` ~ ! # $ % ^ & * ' | +, and must not start with 'b2-' (case-insensitive; B2 lowercases keys). Values may contain any text, but all values together must be <= 10,000 UTF-8 bytes. Replaces all existing bucketInfo when supplied.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.",
             "propertyNames": {
               "maxLength": 50,
               "minLength": 1,
@@ -712,7 +712,7 @@
             "type": "boolean"
           },
           "corsRules": {
-            "description": "CORS rules for browser-based access. At most 100 rules. allowedOrigins and allowedOperations each require 1-100 non-empty entries; allowedHeaders and exposeHeaders may contain up to 100 non-empty entries. String entries must be at most 999 characters. Each rule's combined UTF-8 bytes across corsRuleName, allowedOrigins, allowedOperations, allowedHeaders, and exposeHeaders must be less than 1,000. Rule names must be unique within the bucket. Replaces all existing CORS rules when supplied.",
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.",
             "items": {
               "properties": {
                 "allowedHeaders": {
@@ -745,7 +745,7 @@
                   "type": "array"
                 },
                 "corsRuleName": {
-                  "description": "Unique CORS rule name, 6-63 characters. Use only letters, digits, and hyphens; names starting with 'b2-' are reserved for Backblaze.",
+                  "description": "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.",
                   "maxLength": 63,
                   "minLength": 6,
                   "pattern": "^[A-Za-z0-9-]+$",
@@ -1922,5 +1922,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "8668c4d39cf4d058fe39899979c91ee5b64bfa0001caf9ab2deedb62738ed935"
+  "hash": "d5bdcd66faa57a0aac0bb73599c0d16b72d5bee2e02de4cbeacbbba6af1da971"
 }
