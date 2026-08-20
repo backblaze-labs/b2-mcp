@@ -625,7 +625,7 @@ describe("supply-chain audit policy", () => {
     );
     expect(publishWorkflow).toContain("pnpm run release:sbom");
     expect(publishWorkflow).toContain("node scripts/extract-release-notes.mjs");
-    expect(publishWorkflow).toContain("Dry-run npm publish from verified tarball");
+    expect(publishWorkflow).toContain("Dry-run npm publish from staged package directory");
     expect(publishWorkflow).toContain("--dry-run");
     expect(publishWorkflow).toContain("--access public");
     expect(publishWorkflow).toContain("--ignore-scripts");
@@ -674,7 +674,7 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("--provenance");
     expect(publishWorkflow).toContain('--tag "$npm_tag"');
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
-    expect(publishWorkflow).not.toContain("tar -xzf");
+    expect(publishWorkflow).toContain('tar -xzf "$tarball" -C publish-package/staged');
   });
 
   it("keeps tsx dev-only and denies esbuild install builds", () => {
@@ -728,7 +728,7 @@ describe("supply-chain audit policy", () => {
     const prepareJob = publishJobBlock("prepare");
     const publishJob = publishJobBlock("publish");
 
-    expect(prepareJob).toContain("npmDistTag(pack.version)");
+    expect(prepareJob).toContain("npmDistTag(pkg.version)");
     expect(prepareJob).toContain('--tag "${npm_tag}"');
     expect(publishJob).toContain('const prerelease = String(pkg.version).split("-")[1]');
     expect(publishJob).toContain(
@@ -859,6 +859,8 @@ describe("supply-chain audit policy", () => {
     expect(prepareJob).toContain("pnpm run build");
     expect(prepareJob).toContain("persist-credentials: false");
     expect(prepareJob).toContain("package-manager-cache: false");
+    expect(prepareJob).toContain("Dry-run npm publish from staged package directory");
+    expect(prepareJob).toContain('stage_dir="publish-package/dry-run-stage"');
     expect(githubReleaseJob).toContain("actions: read");
     expect(githubReleaseJob).toContain("contents: write");
     expect(githubReleaseJob).not.toContain("id-token: write");
@@ -876,6 +878,13 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).not.toContain("--ignore-scripts=false");
     expect(publishJob).toContain("npm publish");
     expect(publishJob).toContain("--ignore-scripts");
+    expect(publishJob).toContain('package_dir="./publish-package/staged/package"');
+    expect(publishJob).toContain('npm publish "$package_dir"');
+    expect(publishJob).not.toContain('npm publish "$tarball"');
+    expect(publishJob).toContain('npm view "${package_spec}" _from _resolved --json');
+    expect(publishJob).toContain("registry metadata exposes local publish coordinates");
+    expect(publishJob).toContain('npm pack "$package_dir" --json --ignore-scripts');
+    expect(publishJob).toContain("Staged package tarball SHA-256 mismatch");
   });
 
   it.each(allWorkflows)("pins every marketplace action used by %s", (_name, workflowText) => {

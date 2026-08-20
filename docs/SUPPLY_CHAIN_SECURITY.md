@@ -199,18 +199,21 @@ The only repository workflow allowed to publish npm packages is
   `dist/index.js` in the packlist, runs the npm production audit and CycloneDX
   SBOM flow through `pnpm run release:sbom`, creates an npm tarball with
   lifecycle scripts disabled, scans that exact tarball through the safe denylist
-  extractor, runs an npm dry-run publish against that tarball, writes SHA-256
-  checksums and versioned release notes, and uploads the tarball, SBOM,
-  checksums, pack manifest, and notes as seven-day artifacts for protected
-  environment approval;
+  extractor, runs an npm dry-run publish from the tarball's staged package
+  directory, writes SHA-256 checksums and versioned release notes, and uploads
+  the tarball, SBOM, checksums, pack manifest, and notes as seven-day artifacts
+  for protected environment approval;
 - runs the protected live B2 contract suite once on the exact publish ref before
   the npm publish job can start;
 - requires a protected `npm-publish` environment for npm publishing and a
   protected `ghcr-publish` environment for container publishing, so tag push
   alone cannot publish release artifacts;
-- verifies the tarball SHA-256 and npm `dist.integrity` before publishing;
+- verifies the tarball SHA-256 and npm `dist.integrity` before staging the
+  package directory for publishing;
 - compares an already-published registry version's integrity to the verified
   local tarball before treating the run as an idempotent success;
+- repacks the staged package directory and compares it to the verified tarball
+  before invoking npm publish;
 - verifies checksums and creates or updates the GitHub Release after npm publish
   and the public GHCR manifest check succeed, from a separate job that does not
   hold npm OIDC permission; the GHCR job is idempotent, so a Docker/GHCR retry
@@ -240,8 +243,10 @@ The only repository workflow allowed to publish npm packages is
 - publishes only immutable container tags: the package version without a leading
   `v` and the matching signed release tag; no mutable `latest` tag is produced;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
-- publishes the prebuilt tarball with lifecycle scripts disabled:
-  `npm publish <tarball> --provenance --access public --ignore-scripts`.
+- publishes the staged package directory with lifecycle scripts disabled:
+  `npm publish <staged-package-directory> --provenance --access public --ignore-scripts`;
+- verifies the published npm registry metadata does not include local
+  `_from` or `_resolved` publish coordinates.
 
 Do not publish from a developer workstation or from a workflow that has not
 first proved the release tag is reachable from `ci-green`. Treat
