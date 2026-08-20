@@ -459,6 +459,8 @@ describe("package surface policy", () => {
     expect(Object.keys(pkg.exports).sort()).toEqual([".", "./package.json"]);
     expect(readme).toContain("Package API Surface");
     expect(readme).toContain("root CommonJS entry");
+    expect(readme).toContain("consumers may compile against that same root CommonJS surface");
+    expect(readme).toContain("Programmatic TypeScript imports beyond that root entry");
     expect(readme).toContain("startStdio");
     expect(readme).toContain("Deep imports");
     expect(readme).toContain("private implementation details");

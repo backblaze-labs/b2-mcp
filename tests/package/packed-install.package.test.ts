@@ -63,6 +63,7 @@ interface PackageJson {
   license?: string;
   bin?: Record<string, string>;
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   engines?: Record<string, string>;
 }
 
@@ -206,7 +207,84 @@ function installPackedConsumer(appDir: string, cacheDir: string): void {
   assertSuccessfulNpmResult(result, "packed consumer npm install");
 }
 
-const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 120_000;
+function installConsumerDevDependencies(appDir: string, cacheDir: string): void {
+  const result = runNpmCommandWithRetries(
+    [
+      "install",
+      "--include=dev",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--fetch-retries=3",
+      "--fetch-retry-factor=2",
+      "--fetch-retry-mintimeout=1000",
+      "--fetch-retry-maxtimeout=10000",
+      "--cache",
+      cacheDir,
+    ],
+    {
+      attempts: 3,
+      retryLabel: "packed consumer npm install dev dependencies",
+      spawnOptions: {
+        cwd: appDir,
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 180_000,
+      },
+    },
+  );
+  assertSuccessfulNpmResult(result, "packed consumer npm install dev dependencies");
+}
+
+function compileDocumentedTypescriptConsumer(appDir: string): void {
+  writeFileSync(
+    join(appDir, "tsconfig.json"),
+    JSON.stringify(
+      {
+        compilerOptions: {
+          module: "Node16",
+          moduleResolution: "Node16",
+          noEmit: true,
+          strict: true,
+          target: "ES2022",
+          types: [],
+        },
+        files: ["consumer.ts"],
+      },
+      null,
+      2,
+    ),
+  );
+  writeFileSync(
+    join(appDir, "consumer.ts"),
+    [
+      'import b2Mcp = require("@backblaze-labs/b2-mcp");',
+      "",
+      "const start: () => Promise<void> = b2Mcp.startStdio;",
+      "void start;",
+      "",
+    ].join("\n"),
+  );
+
+  execFileSync(
+    process.execPath,
+    [
+      join(appDir, "node_modules", "typescript", "bin", "tsc"),
+      "--noEmit",
+      "--pretty",
+      "false",
+      "-p",
+      "tsconfig.json",
+    ],
+    {
+      cwd: appDir,
+      stdio: "pipe",
+      timeout: 60_000,
+    },
+  );
+}
+
+const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 360_000 : 180_000;
 
 describe("packed package", () => {
   it(
@@ -238,6 +316,7 @@ describe("packed package", () => {
 
         expect(packedPaths).toEqual(
           expect.arrayContaining([
+            "dist/index.d.ts",
             "dist/index.js",
             "dist/http-server.js",
             "deploy/customer-hosted/Dockerfile",
@@ -256,6 +335,9 @@ describe("packed package", () => {
 
         const tarball = join(packDir, pack.filename);
         const tarballSpec = `file:${relative(appDir, tarball)}`;
+        const typescriptVersion = repoPkg.devDependencies?.typescript;
+        if (!typescriptVersion)
+          throw new Error("package.json must declare devDependencies.typescript");
         writeFileSync(
           join(appDir, "package.json"),
           JSON.stringify(
@@ -263,6 +345,7 @@ describe("packed package", () => {
               name: "b2-mcp-pack-test",
               private: true,
               dependencies: { [repoPkg.name]: tarballSpec },
+              devDependencies: { typescript: typescriptVersion },
               overrides: committedProductionOverrides(repoLock),
             },
             null,
@@ -277,6 +360,8 @@ describe("packed package", () => {
             readNpmLock(join(appDir, "package-lock.json")),
           ),
         ).toEqual([]);
+        installConsumerDevDependencies(appDir, cacheDir);
+        compileDocumentedTypescriptConsumer(appDir);
 
         execFileSync(
           "node",

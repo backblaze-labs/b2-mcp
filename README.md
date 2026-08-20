@@ -251,7 +251,22 @@ recommended.
 
 ## Package API Surface
 
-The npm package intentionally supports only the root CommonJS entry (`require("@backblaze-labs/b2-mcp")`), which exposes `startStdio`, plus `./package.json` for metadata. Deep imports such as `@backblaze-labs/b2-mcp/dist/server.js` are private implementation details and are closed by the package `exports` map before the 0.1 release. Use the CLI/bin entry or the root `startStdio` export instead.
+The npm package intentionally supports only the root CommonJS entry
+(`require("@backblaze-labs/b2-mcp")`), which exposes
+`startStdio(): Promise<void>`, plus `./package.json` for metadata. TypeScript
+consumers may compile against that same root CommonJS surface:
+
+```ts
+import b2Mcp = require("@backblaze-labs/b2-mcp");
+
+const start: () => Promise<void> = b2Mcp.startStdio;
+```
+
+Programmatic TypeScript imports beyond that root entry are not a supported
+public API. Deep imports such as `@backblaze-labs/b2-mcp/dist/server.js` are
+private implementation details and are closed by the package `exports` map
+before the 0.1 release. Use the CLI/bin entry or the root `startStdio` export
+instead.
 
 ---
 
