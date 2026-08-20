@@ -40,6 +40,11 @@ const { sanitizedEnv } = nodeRequire("../../scripts/lib/sanitized-env.cjs") as {
   ) => NodeJS.ProcessEnv;
 };
 
+const PRIVATE_DEEP_IMPORT_SPECIFIER = "@backblaze-labs/b2-mcp/dist/server.js";
+const PRIVATE_DEEP_IMPORT_CONSUMER_SOURCE = `import server = require("${PRIVATE_DEEP_IMPORT_SPECIFIER}");
+void server;
+`;
+
 interface PackFile {
   path: string;
 }
@@ -250,18 +255,19 @@ function installPackedDependencies(
 
 function readReadmeTypescriptConsumerSample(): string {
   const readme = readFileSync(join(root, "README.md"), "utf8");
-  const packageApi = readme.indexOf("## Package API Surface");
-  const packageApiSection = packageApi === -1 ? "" : readme.slice(packageApi);
-  const fenceStart = packageApiSection.match(/```ts\r?\n/);
-  const sampleStart = packageApi + (fenceStart?.index ?? 0) + (fenceStart?.[0].length ?? 0);
-  const fenceEnd = readme.slice(sampleStart).match(/\r?\n```/);
-  if (packageApi === -1 || !fenceStart || !fenceEnd) {
-    throw new Error("README Package API Surface must include a TypeScript code sample");
+  const sectionStart = readme.search(/^## Package API Surface$/m);
+  if (sectionStart === -1) throw new Error("README must include a Package API Surface section");
+  const nextSection = readme.slice(sectionStart + 1).search(/^## /m);
+  const sectionEnd = nextSection === -1 ? readme.length : sectionStart + 1 + nextSection;
+  const packageApiSection = readme.slice(sectionStart, sectionEnd);
+  const samples = [...packageApiSection.matchAll(/```ts\r?\n([\s\S]*?)\r?\n```/g)];
+
+  if (samples.length !== 1) {
+    throw new Error(
+      `README Package API Surface must include exactly one TypeScript code sample, got ${samples.length}`,
+    );
   }
-  return `${readme
-    .slice(sampleStart, sampleStart + (fenceEnd.index ?? 0))
-    .replace(/\r\n/g, "\n")
-    .trimEnd()}\n`;
+  return `${samples[0][1].replace(/\r\n/g, "\n").trimEnd()}\n`;
 }
 
 function typescriptEnv(): NodeJS.ProcessEnv {
@@ -296,12 +302,18 @@ function typescriptResultOutput(result: ReturnType<typeof spawnSync>): string {
   return [result.stdout, result.stderr, result.error?.message].filter(Boolean).join("\n");
 }
 
-function assertTypescriptCompileSucceeds(appDir: string, projectFile: string): void {
+function assertTypescriptCompile(
+  appDir: string,
+  projectFile: string,
+  options: { expectSuccess: boolean; label: string },
+): void {
   const result = runTypescriptCompiler(appDir, projectFile);
-  if (!result.error && result.status === 0) return;
+  const passed =
+    !result.error && (options.expectSuccess ? result.status === 0 : result.status !== 0);
+  if (passed) return;
   throw new Error(
     [
-      `documented TS consumer failed to compile with status ${result.status ?? "unknown"}`,
+      `${options.label} ${options.expectSuccess ? "failed to compile" : "unexpectedly compiled"} with status ${result.status ?? "unknown"}`,
       result.signal ? `signal: ${result.signal}` : "",
       typescriptResultOutput(result),
     ]
@@ -310,18 +322,15 @@ function assertTypescriptCompileSucceeds(appDir: string, projectFile: string): v
   );
 }
 
+function assertTypescriptCompileSucceeds(appDir: string, projectFile: string): void {
+  assertTypescriptCompile(appDir, projectFile, {
+    expectSuccess: true,
+    label: "documented TS consumer",
+  });
+}
+
 function assertTypescriptCompileFails(appDir: string, projectFile: string, label: string): void {
-  const result = runTypescriptCompiler(appDir, projectFile);
-  if (!result.error && result.status !== 0) return;
-  throw new Error(
-    [
-      `${label} unexpectedly compiled with status ${result.status ?? "unknown"}`,
-      result.signal ? `signal: ${result.signal}` : "",
-      typescriptResultOutput(result),
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  );
+  assertTypescriptCompile(appDir, projectFile, { expectSuccess: false, label });
 }
 
 function writeTypescriptConfig(appDir: string, projectFile: string, files: string[]): void {
@@ -351,10 +360,7 @@ function compileDocumentedTypescriptConsumer(appDir: string): void {
   assertTypescriptCompileSucceeds(appDir, "tsconfig.json");
 
   writeTypescriptConfig(appDir, "tsconfig.deep.json", ["consumer-deep.ts"]);
-  writeFileSync(
-    join(appDir, "consumer-deep.ts"),
-    'import server = require("@backblaze-labs/b2-mcp/dist/server.js");\nvoid server;\n',
-  );
+  writeFileSync(join(appDir, "consumer-deep.ts"), PRIVATE_DEEP_IMPORT_CONSUMER_SOURCE);
   assertTypescriptCompileFails(appDir, "tsconfig.deep.json", "private deep TypeScript import");
 }
 
