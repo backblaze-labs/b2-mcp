@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   createMcpServer,
   getMcpClientCapabilities,
@@ -70,6 +72,47 @@ const COMPATIBILITY_STUB_CONFIRM_DESC =
 export const SERVER_INSTRUCTION_OPENING = "Backblaze B2 operational flow.";
 export const SERVER_CREDENTIAL_SAFETY_INSTRUCTION =
   "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.";
+
+export interface SkillsPackManifest {
+  skills: Array<{ name: string }>;
+}
+
+function loadSkillsPackManifest(): SkillsPackManifest {
+  const manifestPath = path.resolve(__dirname, "..", "skills", "pack.json");
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as SkillsPackManifest;
+  if (
+    !manifest ||
+    !Array.isArray(manifest.skills) ||
+    manifest.skills.some((skill) => typeof skill?.name !== "string")
+  ) {
+    throw new Error(`${manifestPath}: skills must be an array of named skills`);
+  }
+  return manifest;
+}
+
+function joinList(values: readonly string[]): string {
+  if (values.length <= 1) return values.join("");
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+export function formatCompanionSkillsInstruction(manifest: SkillsPackManifest): string {
+  const skillNames = manifest.skills.map((skill) => `\`${skill.name}\``);
+  return [
+    "These tools are the capability layer.",
+    `The shipped Backblaze B2 Skills pack contains these optional client-side Markdown skills: ${joinList(
+      skillNames,
+    )}.`,
+    "Skills are installed in the MCP client, not delivered or activated by this server.",
+    "If the user is doing B2 work that matches one of those skills and no such skill appears to be active, mention that installing the B2 Skills pack can make the workflow safer and more repeatable.",
+    "Follow the client's skills documentation to register each desired `skills/b2-*/SKILL.md` file or containing directory.",
+    "Do not block on it; the tools work without the skills.",
+  ].join(" ");
+}
+
+export const SERVER_COMPANION_SKILLS_INSTRUCTION = formatCompanionSkillsInstruction(
+  loadSkillsPackManifest(),
+);
 
 /**
  * Load and validate configuration from environment variables.
@@ -204,7 +247,7 @@ export function createServer(
         outputFormatInstructions(outputFormat),
         "",
         "Companion skills (optional, recommended):",
-        "These tools are the capability layer. A separate Backblaze B2 Skills pack supplies the procedural knowledge — workload playbooks (backup, disaster recovery, SaaS multi-tenant storage, AI training, AI inference) built on reusable primitives, each encoding B2-accurate best practice and an approval gate for risky actions. Skills are installed in the client, not delivered by this server. If the user is doing B2 work that matches a playbook and no such skill appears to be active, mention that installing the B2 Skills pack will make these workflows safer and more repeatable (Claude Code: ~/.claude/skills/; Claude.ai / Claude Desktop: Settings -> Capabilities -> Skills). Do not block on it — the tools work without the skills.",
+        SERVER_COMPANION_SKILLS_INSTRUCTION,
       ].join("\n"),
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
