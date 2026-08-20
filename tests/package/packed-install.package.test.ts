@@ -387,7 +387,10 @@ function compileDocumentedTypescriptConsumer(appDir: string): void {
   );
 }
 
-const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 360_000 : 180_000;
+// Two npm installs (production, then dev TypeScript), each with a bounded retry
+// budget, plus pack, the documented-consumer compile, and the runtime smoke.
+// Sized above the worst case so a slow-but-successful CI run cannot trip Vitest.
+const PACKED_INSTALL_TEST_TIMEOUT_MS = process.platform === "win32" ? 600_000 : 360_000;
 
 describe("packed package", () => {
   it("rejects unpinned TypeScript dev dependency resolution before execution", () => {
@@ -505,16 +508,10 @@ describe("packed package", () => {
         expect(
           committedPackageGraphMismatches(repoLock, readNpmLock(join(appDir, "package-lock.json"))),
         ).toEqual([]);
-        installPackedDependencies(appDir, cacheDir, "development");
-        expect(
-          committedPackageGraphMismatches(
-            repoLock,
-            readNpmLock(join(appDir, "package-lock.json")),
-            { checkedDevelopmentPackages: ["typescript"] },
-          ),
-        ).toEqual([]);
-        compileDocumentedTypescriptConsumer(appDir);
 
+        // Runtime and package-contract checks run against the production-only
+        // install (before any dev dependency is present), so a runtime that
+        // accidentally imports a dev dependency cannot pass here.
         execFileSync(
           "node",
           [
@@ -585,6 +582,21 @@ describe("packed package", () => {
         } finally {
           await client.close().catch(() => undefined);
         }
+
+        // Production contract is proven above. Only now install the pinned dev
+        // TypeScript and verify the documented .d.ts consumer contract compiles
+        // (and that deep TypeScript imports do not).
+        installPackedDependencies(appDir, cacheDir, "development");
+        expect(
+          committedPackageGraphMismatches(
+            repoLock,
+            readNpmLock(join(appDir, "package-lock.json")),
+            {
+              checkedDevelopmentPackages: ["typescript"],
+            },
+          ),
+        ).toEqual([]);
+        compileDocumentedTypescriptConsumer(appDir);
       } finally {
         rmSync(tmp, { recursive: true, force: true });
       }
