@@ -530,8 +530,8 @@ describe("package budget policy gate", () => {
     expect(pkg.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(pkg.scripts.prepublishOnly).toContain("pnpm run release:stamp");
     expect(packageBudgetStep).toBeGreaterThan(-1);
+    expect(releaseStampStep).toBeGreaterThan(-1);
+    expect(releaseStampStep).toBeLessThan(packageBudgetStep);
     expect(packageBudgetStep).toBeLessThan(packStep);
-    expect(releaseStampStep).toBeGreaterThan(packageBudgetStep);
-    expect(releaseStampStep).toBeLessThan(packStep);
   });
 });

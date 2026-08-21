@@ -271,6 +271,23 @@ describe("release scripts", () => {
     });
   });
 
+  it("cleans release markers after package lifecycle packing", () => {
+    withFixture((fixtureRoot) => {
+      mkdirSync(join(fixtureRoot, "dist"));
+      writeFileSync(join(fixtureRoot, "dist/release-version.json"), '{"version":"stale"}\n');
+
+      const result = spawnSync(process.execPath, ["scripts/write-release-version.mjs", "--clean"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("release-version: removed dist/release-version.json");
+      expect(() => readFileSync(join(fixtureRoot, "dist/release-version.json"), "utf8")).toThrow();
+    });
+  });
+
   it("rejects leaked npm registry _from/_resolved metadata", async () => {
     const { verifyNpmRegistryMetadata } = await registryMetadataModule();
 

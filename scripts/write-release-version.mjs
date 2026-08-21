@@ -8,11 +8,12 @@ const PACKAGE_NAME = "@backblaze-labs/b2-mcp";
 const MARKER_RELATIVE_PATH = "dist/release-version.json";
 
 function usage() {
-  return "Usage: node scripts/write-release-version.mjs [--version <x.y.z[-prerelease]>]";
+  return "Usage: node scripts/write-release-version.mjs [--clean] [--version <x.y.z[-prerelease]>]";
 }
 
 function parseArgs(argv) {
   let expectedVersion = "";
+  let clean = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--help") {
@@ -20,6 +21,10 @@ function parseArgs(argv) {
       process.exit(0);
     }
     if (arg === "--") continue;
+    if (arg === "--clean") {
+      clean = true;
+      continue;
+    }
     if (arg === "--version") {
       const value = argv[index + 1];
       if (!value) throw new Error("--version requires a value");
@@ -33,7 +38,7 @@ function parseArgs(argv) {
     }
     throw new Error(`unknown argument ${arg}`);
   }
-  return { expectedVersion };
+  return { clean, expectedVersion };
 }
 
 function readJson(root, relativePath) {
@@ -46,6 +51,11 @@ function isPrerelease(version) {
 
 function removeStaleMarker(root) {
   rmSync(path.join(root, MARKER_RELATIVE_PATH), { force: true });
+}
+
+export function cleanReleaseVersionMarker(root) {
+  removeStaleMarker(root);
+  return { action: "removed", path: MARKER_RELATIVE_PATH };
 }
 
 export function writeReleaseVersionMarker(root, expectedVersion = "") {
@@ -80,6 +90,11 @@ export function writeReleaseVersionMarker(root, expectedVersion = "") {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.clean) {
+    const result = cleanReleaseVersionMarker(releaseRoot());
+    console.log(`release-version: ${result.action} ${result.path}`);
+    return;
+  }
   const result = writeReleaseVersionMarker(releaseRoot(), options.expectedVersion);
   console.log(`release-version: ${result.action} ${result.path} for ${result.version}`);
 }
