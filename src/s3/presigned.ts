@@ -1,7 +1,7 @@
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
+import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
 import type { B2Config, B2S3VersionGuard } from "../utils/types.js";
 import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
 
@@ -110,7 +110,7 @@ export function registerS3PresignedTools(
           });
         }
         const gate = checkDestructive("s3_get_presigned_url", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         if (args.operation === "GetObject" && args.versionId) {
           if (!allowExplicitVersionInspection) {
             return toolError({

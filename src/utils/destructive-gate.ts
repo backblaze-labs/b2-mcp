@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "async_hooks";
 import { createHmac } from "crypto";
+import type { B2ApiError } from "./errors.js";
 import { B2Config, DestructivePolicy } from "./types.js";
 
 /**
@@ -174,11 +175,40 @@ export function getDestructivePolicy(config: B2Config): DestructivePolicy {
 export interface GateResult {
   ok: boolean;
   message?: string;
+  error?: B2ApiError;
+}
+
+export const DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE = "destructive_confirmation_required";
+export const DESTRUCTIVE_CONFIRMATION_REFUSED_CODE = "destructive_confirmation_refused";
+export const DESTRUCTIVE_POLICY_BLOCKED_CODE = "destructive_policy_blocked";
+export const DESTRUCTIVE_CONFIRMATION_STATUS = 409;
+export const DESTRUCTIVE_POLICY_BLOCKED_STATUS = 403;
+
+function destructivePolicyError(status: number, code: string, message: string): B2ApiError {
+  return { status, code, message };
+}
+
+export function destructiveGateError(gate: GateResult): B2ApiError {
+  if (gate.ok) {
+    return destructivePolicyError(
+      DESTRUCTIVE_CONFIRMATION_STATUS,
+      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
+      "Destructive operation was not refused.",
+    );
+  }
+  return (
+    gate.error ??
+    destructivePolicyError(
+      DESTRUCTIVE_CONFIRMATION_STATUS,
+      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
+      gate.message ?? "Destructive operation requires confirmation.",
+    )
+  );
 }
 
 /**
  * Evaluate whether a tool call may proceed. Call at the top of a destructive
- * tool's handler; if `ok` is false, return `toolError(new Error(message))`.
+ * tool's handler; if `ok` is false, return `toolError(destructiveGateError(result))`.
  *
  * Under the `confirm` policy, approval can be supplied by the legacy
  * model-provided `confirm: true` fallback, or by the audited tool wrapper
@@ -199,11 +229,17 @@ export function checkDestructive(
   if (policy === "allow") return { ok: true };
 
   if (policy === "block") {
+    const message =
+      `Refused: this would ${effect}. Destructive operations are blocked on this ` +
+      `server (B2_DESTRUCTIVE_POLICY=block).`;
     return {
       ok: false,
-      message:
-        `Refused: this would ${effect}. Destructive operations are blocked on this ` +
-        `server (B2_DESTRUCTIVE_POLICY=block).`,
+      message,
+      error: destructivePolicyError(
+        DESTRUCTIVE_POLICY_BLOCKED_STATUS,
+        DESTRUCTIVE_POLICY_BLOCKED_CODE,
+        message,
+      ),
     };
   }
 
@@ -216,11 +252,17 @@ export function checkDestructive(
     return { ok: true };
   }
   if (args.confirm === true) return { ok: true };
+  const message =
+    `Confirmation required: this would ${effect} — a destructive/irreversible action. ` +
+    `Re-invoke the identical call with "confirm": true to proceed. ` +
+    `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`;
   return {
     ok: false,
-    message:
-      `Confirmation required: this would ${effect} — a destructive/irreversible action. ` +
-      `Re-invoke the identical call with "confirm": true to proceed. ` +
-      `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`,
+    message,
+    error: destructivePolicyError(
+      DESTRUCTIVE_CONFIRMATION_STATUS,
+      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
+      message,
+    ),
   };
 }

@@ -13,7 +13,7 @@ import {
 } from "./client.js";
 import { B2Config } from "../utils/types.js";
 import { badRequest, toolJson, toolError } from "../utils/errors.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
+import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
 import { isTestRuntime } from "../utils/runtime.js";
 
 /**
@@ -671,7 +671,7 @@ export function registerBucketTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_delete_bucket", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         const result = await client.deleteBucket(args.bucketId);
         return toolJson(result);
       } catch (err) {
@@ -775,7 +775,7 @@ export function registerBucketTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_update_bucket", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         validateBucketInfoInput(args.bucketInfo);
         validateCorsRulesInput(args.corsRules);
         const payload: UpdateBucketOptions = {
@@ -869,7 +869,7 @@ export function registerBucketTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_set_bucket_notification_rules", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         const eventNotificationRules: EventNotificationRuleInput[] =
           args.eventNotificationRules.map(normalizeNotificationRule);
         for (const rule of eventNotificationRules) {

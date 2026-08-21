@@ -4,6 +4,10 @@
  */
 import {
   checkDestructive,
+  DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
+  DESTRUCTIVE_CONFIRMATION_STATUS,
+  DESTRUCTIVE_POLICY_BLOCKED_CODE,
+  DESTRUCTIVE_POLICY_BLOCKED_STATUS,
   getDestructivePolicy,
   isDestructiveTool,
 } from "../../src/utils/destructive-gate";
@@ -62,6 +66,10 @@ describe("destructive-gate", () => {
       const r = checkDestructive("b2_delete_bucket", { bucketId: "b" }, cfg());
       expect(r.ok).toBe(false);
       expect(r.message).toMatch(/confirm/i);
+      expect(r.error).toMatchObject({
+        code: DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
+        status: DESTRUCTIVE_CONFIRMATION_STATUS,
+      });
     });
 
     it("allows a destructive call with confirm:true", () => {
@@ -79,6 +87,10 @@ describe("destructive-gate", () => {
       );
       expect(r.ok).toBe(false);
       expect(r.message).toMatch(/blocked/i);
+      expect(r.error).toMatchObject({
+        code: DESTRUCTIVE_POLICY_BLOCKED_CODE,
+        status: DESTRUCTIVE_POLICY_BLOCKED_STATUS,
+      });
     });
   });
 

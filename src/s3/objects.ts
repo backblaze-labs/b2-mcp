@@ -8,7 +8,7 @@ import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import type { B2Config } from "../utils/types.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
+import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
 import { withS3Circuit, withS3LongCircuit } from "../utils/circuit-breaker.js";
 import { currentMcpRequestSignal } from "../request-context.js";
 import type { B2S3FileVersionBinding, B2S3VersionGuard } from "../utils/types.js";
@@ -649,7 +649,7 @@ export function registerS3ObjectTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_delete_object", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         await verifyVersionBinding(
           versions,
           {
@@ -696,7 +696,7 @@ export function registerS3ObjectTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_delete_objects", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         if (args.bypassGovernance === true && !allowBypassGovernance) {
           return toolError(
             Object.assign(

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { B2Client, type UpdateFileRetentionOptions } from "./client.js";
 import { toolJson, toolError } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
-import { checkDestructive } from "../utils/destructive-gate.js";
+import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
 
 const CONFIRM_DESC =
   "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).";
@@ -44,7 +44,7 @@ export function registerObjectLockTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_update_file_legal_hold", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         const result = await client.updateFileLegalHold({
           fileId: args.fileId,
           fileName: args.fileName,
@@ -100,7 +100,7 @@ export function registerObjectLockTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_update_file_retention", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(destructiveGateError(gate));
         const payload: UpdateFileRetentionOptions = {
           fileId: args.fileId,
           fileName: args.fileName,
