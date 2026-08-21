@@ -380,4 +380,21 @@ jobs:
             echo "::error::live B2 cleanup outcome was ${{ steps.cleanup.outcome }}"
             failed=1
           fi
+          evidence_json="reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json"
+          evidence_status="$(
+            node -e '
+              const fs = require("node:fs");
+              const path = process.argv[1];
+              try {
+                const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+                console.log(typeof parsed.status === "string" ? parsed.status : "invalid");
+              } catch {
+                console.log("missing");
+              }
+            ' "${evidence_json}"
+          )"
+          if [[ "${evidence_status}" != "passed" ]]; then
+            echo "::error::live B2 evidence status was ${evidence_status}"
+            failed=1
+          fi
           exit "$failed"

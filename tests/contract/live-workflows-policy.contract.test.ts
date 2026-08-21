@@ -399,6 +399,9 @@ describe("live secret workflow policy", () => {
     expect(finalFallback).toContain("cleanup failure");
     expect(finalFallback).toContain("product failure");
     expect(contractJob).toContain("live B2 matrix validation outcome was");
+    expect(contractJob).toContain("evidence_status=");
+    expect(contractJob).toContain("JSON.parse(fs.readFileSync");
+    expect(contractJob).toContain("live B2 evidence status was");
   });
 
   it("uploads only finalized secret-safe live B2 evidence artifacts", () => {
