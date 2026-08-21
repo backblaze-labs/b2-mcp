@@ -688,7 +688,7 @@ export function computeSnapshotGrowth(
 /**
  * Resolve a bucket from the authorize response's `allowedBuckets` scope. A
  * bucket-scoped key cannot call the unfiltered `listBuckets()` (no `listBuckets`
- * capability -> 401), but its id (and usually name) is already in that scope.
+ * capability, so B2 answers 401), but its id (and usually name) is in scope.
  * Returns null for unrestricted keys so the caller falls back to a live listing.
  *
  * The scope is read from `B2AuthManager`'s ~23h cache, so a rename can briefly
