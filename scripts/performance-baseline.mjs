@@ -648,6 +648,52 @@ async function runEnvProbe() {
   const zeroPaddedLoopbackBlocked = blockedNetworkCall(() =>
     new net.Socket().connect({ host: "127.000.000.001", port: 443 }),
   );
+  const customLookupBlocked = blockedNetworkCall(() =>
+    net.connect({
+      host: "localhost",
+      port: 443,
+      lookup: (_host, _options, callback) => callback(null, "1.1.1.1", 4),
+    }),
+  );
+  const stdioGuardProbe = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      [
+        'import net, { connect, Socket } from "node:net";',
+        'import tls from "node:tls";',
+        "const blocked = (call) => {",
+        "  try {",
+        "    const handle = call();",
+        "    handle?.destroy?.();",
+        "    return false;",
+        "  } catch {",
+        "    return true;",
+        "  }",
+        "};",
+        "const results = {",
+        '  netSocket: blocked(() => new net.Socket().connect({ host: "example.com", port: 443 })),',
+        '  tlsSocket: blocked(() => new tls.TLSSocket(new net.Socket()).connect({ host: "example.com", port: 443 })),',
+        '  esmConnect: blocked(() => connect({ host: "example.com", port: 443 })),',
+        '  esmSocket: blocked(() => new Socket().connect({ host: "example.com", port: 443 })),',
+        "};",
+        "console.log(JSON.stringify(results));",
+        "process.exitCode = Object.values(results).every(Boolean) ? 0 : 1;",
+      ].join("\n"),
+    ],
+    {
+      cwd: root,
+      env: stdioEnv,
+      encoding: "utf8",
+      timeout: 10_000,
+    },
+  );
+  const stdioGuardProbeBlocked =
+    stdioGuardProbe.status === 0 &&
+    Object.values(JSON.parse(stdioGuardProbe.stdout.trim().split(/\r?\n/).at(-1) ?? "{}")).every(
+      Boolean,
+    );
   return {
     importedDependency: typeof SignJWT === "function",
     observedSentinelNames,
@@ -664,6 +710,8 @@ async function runEnvProbe() {
     esmSocketConnectBlocked,
     malformedLoopbackBlocked,
     zeroPaddedLoopbackBlocked,
+    customLookupBlocked,
+    stdioGuardProbeBlocked,
   };
 }
 
@@ -767,7 +815,9 @@ function runSelfTestEnvSanitizer() {
     !payload.probe.esmNetConnectBlocked ||
     !payload.probe.esmSocketConnectBlocked ||
     !payload.probe.malformedLoopbackBlocked ||
-    !payload.probe.zeroPaddedLoopbackBlocked
+    !payload.probe.zeroPaddedLoopbackBlocked ||
+    !payload.probe.customLookupBlocked ||
+    !payload.probe.stdioGuardProbeBlocked
     ? 1
     : 0;
 }

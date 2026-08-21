@@ -45,6 +45,14 @@ function assertLocal(kind, host) {
   if (!isLocalHost(host)) block(kind, host);
 }
 
+function assertNoCustomLookup(kind, args) {
+  for (const value of args) {
+    if (value && typeof value === "object" && typeof value.lookup === "function") {
+      block(kind, "custom-lookup");
+    }
+  }
+}
+
 function urlHost(value) {
   if (value instanceof URL) return value.hostname;
   if (typeof Request !== "undefined" && value instanceof Request) {
@@ -104,10 +112,12 @@ for (const [moduleName, module] of [
   const originalRequest = module.request;
   const originalGet = module.get;
   module.request = function guardedRequest(...args) {
+    assertNoCustomLookup(`${moduleName}.request`, args);
     assertLocal(`${moduleName}.request`, requestHost(args));
     return originalRequest.apply(this, args);
   };
   module.get = function guardedGet(...args) {
+    assertNoCustomLookup(`${moduleName}.get`, args);
     assertLocal(`${moduleName}.get`, requestHost(args));
     return originalGet.apply(this, args);
   };
@@ -119,23 +129,28 @@ const originalNetSocketConnect = net.Socket.prototype.connect;
 const originalTlsConnect = tls.connect;
 const originalTlsSocketConnect = tls.TLSSocket.prototype.connect;
 net.connect = function guardedNetConnect(...args) {
+  assertNoCustomLookup("net.connect", args);
   assertLocal("net.connect", socketHost(args));
   return originalNetConnect.apply(this, args);
 };
 net.createConnection = function guardedNetCreateConnection(...args) {
+  assertNoCustomLookup("net.createConnection", args);
   assertLocal("net.createConnection", socketHost(args));
   return originalNetCreateConnection.apply(this, args);
 };
 net.Socket.prototype.connect = function guardedNetSocketConnect(...args) {
+  assertNoCustomLookup("net.Socket.connect", args);
   assertLocal("net.Socket.connect", socketHost(args));
   return originalNetSocketConnect.apply(this, args);
 };
 
 tls.connect = function guardedTlsConnect(...args) {
+  assertNoCustomLookup("tls.connect", args);
   assertLocal("tls.connect", socketHost(args));
   return originalTlsConnect.apply(this, args);
 };
 tls.TLSSocket.prototype.connect = function guardedTlsSocketConnect(...args) {
+  assertNoCustomLookup("tls.TLSSocket.connect", args);
   assertLocal("tls.TLSSocket.connect", socketHost(args));
   return originalTlsSocketConnect.apply(this, args);
 };
