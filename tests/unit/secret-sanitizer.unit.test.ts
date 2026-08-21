@@ -148,6 +148,60 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
+  it("sanitizes log arrays without invoking accessors", () => {
+    const payload: unknown[] = [];
+    let getterReads = 0;
+    Object.defineProperty(payload, "0", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+    payload[1] = {
+      applicationKey: CANARY,
+    };
+
+    const safe = sanitizeStructuredLogValue(payload) as unknown[];
+
+    expect(getterReads).toBe(0);
+    expect(Array.isArray(safe)).toBe(true);
+    expect(safe[0]).toBe("[accessor]");
+    expect(safe[1]).toEqual({ applicationKey: SECRET_SANITIZER_REDACTION });
+    expectNoCanary(safe);
+  });
+
+  it("returns inert log values for callables and built-ins", () => {
+    const createdAt = new Date("2026-08-21T00:00:00.000Z");
+    Object.defineProperty(createdAt, "toJSON", {
+      enumerable: true,
+      value: () => CANARY,
+    });
+    const bytes = Buffer.from(CANARY);
+    Object.defineProperty(bytes, "toJSON", {
+      enumerable: true,
+      value: () => ({ applicationKey: CANARY }),
+    });
+
+    const safe = sanitizeStructuredLogValue({
+      toJSON: () => CANARY,
+      fn: () => CANARY,
+      createdAt,
+      bytes,
+    }) as {
+      bytes: { byteLength: number; type: string };
+      createdAt: string;
+      fn: string;
+      toJSON: string;
+    };
+
+    expect(safe.toJSON).toBe("[function]");
+    expect(safe.fn).toBe("[function]");
+    expect(safe.createdAt).toBe("2026-08-21T00:00:00.000Z");
+    expect(safe.bytes).toEqual({ type: "Buffer", byteLength: Buffer.byteLength(CANARY) });
+    expect(JSON.stringify(safe)).not.toContain(CANARY);
+  });
+
   it("preserves safe Error metadata in structured logs", () => {
     const err = Object.assign(new Error(`failed with ${CANARY}`), {
       code: "ENOENT",
@@ -177,6 +231,29 @@ describe("secret sanitizer canary policy", () => {
     expect(safe.path).toBe("/tmp/b2-mcp-safe-metadata");
     expect(safe.authorizationToken).toBe(SECRET_SANITIZER_REDACTION);
     expect(safe.details?.applicationKey).toBe(SECRET_SANITIZER_REDACTION);
+    expectNoCanary(safe);
+  });
+
+  it("reads Error core fields without invoking accessors", () => {
+    const err = new Error("placeholder");
+    let getterReads = 0;
+    for (const key of ["message", "name", "stack"] as const) {
+      Object.defineProperty(err, key, {
+        configurable: true,
+        enumerable: true,
+        get() {
+          getterReads++;
+          throw new Error(CANARY);
+        },
+      });
+    }
+
+    const safe = sanitizeStructuredLogValue(err) as Error;
+
+    expect(getterReads).toBe(0);
+    expect(safe.message).toBe("[accessor]");
+    expect(safe.name).toBe("[accessor]");
+    expect(safe.stack).toBe("[accessor]");
     expectNoCanary(safe);
   });
 

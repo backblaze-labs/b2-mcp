@@ -3,6 +3,8 @@ import { AsyncLocalStorage } from "async_hooks";
 const REDACTED = "[redacted]";
 export const LOG_SANITIZER_FAILURE = "[log_sanitizer_failed]";
 const ACCESSOR_VALUE = "[accessor]";
+const FUNCTION_VALUE = "[function]";
+const INVALID_DATE_VALUE = "[invalid_date]";
 
 const MIN_CONFIGURED_SECRET_LENGTH = 8;
 
@@ -249,14 +251,23 @@ function sanitizeValue(
   if (typeof value === "string") {
     return sanitizeText(value, options);
   }
+  if (typeof value === "function") return FUNCTION_VALUE;
   if (value === null || typeof value !== "object") return value;
-  if (value instanceof Date) return value;
-  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Date) return sanitizeDate(value);
+  if (Buffer.isBuffer(value)) return sanitizeBuffer(value);
   if (seen.has(value)) return "[circular]";
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeValue(item, path, seen, options, mode));
+    const output: unknown[] = [];
+    const outputRecord = output as unknown as Record<string, unknown>;
+    output.length = value.length;
+    for (const [key, descriptor] of enumerableDescriptors(value)) {
+      outputRecord[key] = isSensitiveField(key, path, mode)
+        ? REDACTED
+        : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
+    }
+    return output;
   }
 
   const output: Record<string, unknown> = {};
@@ -285,10 +296,52 @@ function sanitizeDescriptorValue(
   return sanitizeValue(descriptor.value, path, seen, options, mode);
 }
 
+function sanitizeDate(value: Date): string {
+  try {
+    return Date.prototype.toISOString.call(value);
+  } catch {
+    return INVALID_DATE_VALUE;
+  }
+}
+
+function sanitizeBuffer(value: Buffer): { type: "Buffer"; byteLength: number } {
+  return {
+    type: "Buffer",
+    byteLength: value.length,
+  };
+}
+
+function findPropertyDescriptor(value: object, key: string): PropertyDescriptor | undefined {
+  let current: object | null = value;
+  while (current) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key);
+    if (descriptor) return descriptor;
+    current = Object.getPrototypeOf(current);
+  }
+  return undefined;
+}
+
+function sanitizeErrorStringField(
+  err: Error,
+  key: "message" | "name" | "stack",
+  options: SanitizerOptions,
+): string | undefined {
+  const descriptor = findPropertyDescriptor(err, key);
+  if (!descriptor) return undefined;
+  if (!("value" in descriptor)) return ACCESSOR_VALUE;
+  const value = descriptor.value;
+  if (typeof value === "string") return sanitizeText(value, options);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return sanitizeText(String(value), options);
+  }
+  return ACCESSOR_VALUE;
+}
+
 function sanitizeErrorForLog(err: Error, seen: WeakSet<object>, options: SanitizerOptions): Error {
-  const safe = new Error(sanitizeText(err.message, options));
-  safe.name = sanitizeText(err.name, options);
-  if (err.stack) safe.stack = sanitizeText(err.stack, options);
+  const safe = new Error(sanitizeErrorStringField(err, "message", options) ?? "");
+  safe.name = sanitizeErrorStringField(err, "name", options) ?? "Error";
+  const stack = sanitizeErrorStringField(err, "stack", options);
+  if (stack !== undefined) safe.stack = stack;
   const safeRecord = safe as unknown as Record<string, unknown>;
 
   for (const [key, descriptor] of enumerableDescriptors(err)) {
