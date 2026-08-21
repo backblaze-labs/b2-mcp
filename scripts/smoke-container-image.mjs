@@ -14,10 +14,11 @@ function usage() {
     "Usage: node scripts/smoke-container-image.mjs --image <image> [--build]",
     "",
     "Options:",
-    "  --image <image>       Local image tag to smoke",
-    "  --build               Build the image from the current checkout first",
-    "  --ready-port <port>   Host port for the ready smoke (default: 3106)",
-    "  --missing-port <port> Host port for the missing-credential smoke (default: 3107)",
+    "  --image <image>            Local image tag to smoke",
+    "  --build                    Build the image from the current checkout first",
+    "  --release-version <semver> Stamp and assert the published channel for this stable semver",
+    "  --ready-port <port>        Host port for the ready smoke (default: 3106)",
+    "  --missing-port <port>      Host port for the missing-credential smoke (default: 3107)",
   ].join("\n");
 }
 
@@ -37,6 +38,10 @@ function parseArgs(argv) {
       options.image = argv[++index];
       continue;
     }
+    if (arg === "--release-version") {
+      options.releaseVersion = argv[++index];
+      continue;
+    }
     if (arg === "--ready-port") {
       options.readyPort = Number(argv[++index]);
       continue;
@@ -48,6 +53,9 @@ function parseArgs(argv) {
     throw new Error(`Unknown argument: ${arg}`);
   }
   if (!options.image) throw new Error("--image is required");
+  if (options.releaseVersion !== undefined && !/^\d+\.\d+\.\d+$/.test(options.releaseVersion)) {
+    throw new Error("--release-version must be a stable semver (x.y.z)");
+  }
   for (const [label, port] of [
     ["--ready-port", options.readyPort],
     ["--missing-port", options.missingPort],
@@ -163,14 +171,51 @@ async function smokeMissingCredentials(image, port) {
   }
 }
 
+function readImageChannel(image) {
+  const output = capture("docker", [
+    "run",
+    "--rm",
+    "--entrypoint",
+    "node",
+    image,
+    "-e",
+    "const v=require('./dist/version.js'); process.stdout.write(JSON.stringify({productVersion:v.productVersion(),releaseChannel:v.RELEASE_CHANNEL,version:v.VERSION}))",
+  ]);
+  return JSON.parse(output);
+}
+
+function smokeReleaseChannel(image, releaseVersion) {
+  const info = readImageChannel(image);
+  if (releaseVersion) {
+    if (
+      info.releaseChannel !== "published" ||
+      info.productVersion !== releaseVersion ||
+      info.version !== releaseVersion
+    ) {
+      throw new Error(`expected published channel ${releaseVersion}, got ${JSON.stringify(info)}`);
+    }
+  } else if (info.releaseChannel !== "dev" || info.productVersion !== "dev") {
+    throw new Error(`expected dev channel, got ${JSON.stringify(info)}`);
+  }
+  return info;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.build) {
-    run("docker", ["build", "--tag", options.image, "."]);
+    const buildArgs = ["build", "--tag", options.image];
+    if (options.releaseVersion) {
+      buildArgs.push("--build-arg", `RELEASE_VERSION=${options.releaseVersion}`);
+    }
+    buildArgs.push(".");
+    run("docker", buildArgs);
   }
+  const channel = smokeReleaseChannel(options.image, options.releaseVersion);
   await smokeReadyImage(options.image, options.readyPort);
   await smokeMissingCredentials(options.image, options.missingPort);
-  console.log(`container-smoke: ${options.image} passed HTTP readiness checks`);
+  console.log(
+    `container-smoke: ${options.image} passed HTTP readiness checks (${channel.releaseChannel} ${channel.productVersion})`,
+  );
 }
 
 main().catch((err) => {

@@ -619,11 +619,16 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts["release:sbom"]).toBe(
       "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     );
+    expect(packageJson.scripts["release:stamp"]).toBe("node scripts/write-release-version.mjs");
     expect(packageJson.scripts.version).toBe(
       "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
     );
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
     expect(packageJson.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
+    expect(packageJson.scripts.prepublishOnly).toContain("pnpm run release:stamp");
+    expect(packageJson.scripts.postpack).toBe(
+      "node -e \"require('node:fs').rmSync('dist/release-version.json',{force:true})\"",
+    );
     expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
@@ -634,6 +639,7 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain(
       "pnpm run audit:supply-chain:denylist --ref HEAD --ref origin/main --packlist --expect-pack-file dist/index.js",
     );
+    expect(publishWorkflow).toContain("pnpm run release:stamp -- --version");
     expect(publishWorkflow).toContain("pnpm run release:sbom");
     expect(publishWorkflow).toContain("node scripts/extract-release-notes.mjs");
     expect(publishWorkflow).toContain("Dry-run npm publish from staged package directory");

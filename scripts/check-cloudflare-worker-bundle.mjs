@@ -38,6 +38,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const reportDir = path.join(root, "reports", "cloudflare-worker-bundle");
 const wranglerConfigPath = path.join(root, "deploy/cloudflare-worker/wrangler.jsonc");
 const entrypoints = ["deploy/cloudflare-worker/worker.ts"];
+const packageVersion = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
 const WORKER_SMOKE_TIMEOUT_MS = 30_000;
 const WORKER_SMOKE_PROBE_TIMEOUT_MS = 1_000;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: Wrangler may emit ANSI colors.
@@ -265,7 +266,12 @@ async function runWranglerStartupSmoke(config) {
           signal: probeController.signal,
         });
         const body = await response.json();
-        if (response.status === 200 && body.status === "ok" && body.server === "backblaze-b2-mcp") {
+        if (
+          response.status === 200 &&
+          body.status === "ok" &&
+          body.server === "backblaze-b2-mcp" &&
+          body.version === packageVersion
+        ) {
           return { healthStatus: response.status, healthBody: body };
         }
         lastError = new Error(

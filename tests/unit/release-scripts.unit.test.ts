@@ -228,6 +228,66 @@ describe("release scripts", () => {
     });
   });
 
+  it("writes a stable release marker after build output exists", () => {
+    withFixture((fixtureRoot) => {
+      mkdirSync(join(fixtureRoot, "dist"));
+
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/write-release-version.mjs", "--version", "0.1.0"],
+        { cwd: root, env: scriptEnv(fixtureRoot), encoding: "utf8" },
+      );
+      const marker = JSON.parse(
+        readFileSync(join(fixtureRoot, "dist/release-version.json"), "utf8"),
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("release-version: wrote dist/release-version.json");
+      expect(marker).toEqual({
+        name: "@backblaze-labs/b2-mcp",
+        releaseChannel: "published",
+        version: "0.1.0",
+      });
+    });
+  });
+
+  it("skips release markers for prerelease package versions", () => {
+    withFixture((fixtureRoot) => {
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      mkdirSync(join(fixtureRoot, "dist"));
+      writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.2.0-rc.1" }, null, 2));
+      writeFileSync(join(fixtureRoot, "dist/release-version.json"), '{"version":"stale"}\n');
+
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/write-release-version.mjs", "--version", "0.2.0-rc.1"],
+        { cwd: root, env: scriptEnv(fixtureRoot), encoding: "utf8" },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("release-version: skipped dist/release-version.json");
+      expect(() => readFileSync(join(fixtureRoot, "dist/release-version.json"), "utf8")).toThrow();
+    });
+  });
+
+  it("cleans release markers after package lifecycle packing", () => {
+    withFixture((fixtureRoot) => {
+      mkdirSync(join(fixtureRoot, "dist"));
+      writeFileSync(join(fixtureRoot, "dist/release-version.json"), '{"version":"stale"}\n');
+
+      const result = spawnSync(process.execPath, ["scripts/write-release-version.mjs", "--clean"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("release-version: removed dist/release-version.json");
+      expect(() => readFileSync(join(fixtureRoot, "dist/release-version.json"), "utf8")).toThrow();
+    });
+  });
+
   it("rejects leaked npm registry _from/_resolved metadata", async () => {
     const { verifyNpmRegistryMetadata } = await registryMetadataModule();
 

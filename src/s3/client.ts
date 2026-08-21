@@ -4,7 +4,7 @@ import type { B2AuthResponse, B2Config } from "../utils/types.js";
 import { runWithMcpRequestSignal } from "../request-context.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
-import { VERSION } from "../version.js";
+import { productVersion } from "../version.js";
 import {
   createB2S3PeerClient,
   type B2S3PeerClient,
@@ -124,7 +124,7 @@ function customUserAgent(
   surface?: string,
 ): B2S3PeerClientConfig["customUserAgent"] {
   const entries: Array<[string, string]> = [
-    ["backblaze-b2-mcp", VERSION],
+    ["backblaze-b2-mcp", productVersion()],
     ["transport", config.transport ?? "stdio"],
   ];
   if (surface) entries.push(["surface", surface]);

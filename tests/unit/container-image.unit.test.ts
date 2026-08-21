@@ -13,6 +13,8 @@ describe("container image policy", () => {
     packageManager: string;
   };
   const publishScript = readFileSync(join(root, "scripts/publish-container-image.mjs"), "utf8");
+  const smokeScript = readFileSync(join(root, "scripts/smoke-container-image.mjs"), "utf8");
+  const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
 
   function isIgnored(candidate: string): boolean {
     const patterns = dockerignore
@@ -120,6 +122,22 @@ describe("container image policy", () => {
       publishScript.indexOf("verifyAnonymousManifestPull(versionRef);"),
     );
     expect(publishScript).not.toContain(":latest");
+  });
+
+  it("stamps the runtime release channel into stable images", () => {
+    // Dockerfile stamps dist/release-version.json for a stable RELEASE_VERSION so
+    // productVersion() reports the published channel; prereleases stay on dev.
+    expect(dockerfile).toContain('ARG RELEASE_VERSION=""');
+    expect(dockerfile).toContain("dist/release-version.json");
+    expect(dockerfile).toContain("releaseChannel:'published'");
+    // Publish and smoke propagate the version so the image is not built as dev.
+    expect(publishScript).toContain("RELEASE_VERSION=${version}");
+    expect(publishScript).toContain("...releaseBuildArgs");
+    expect(smokeScript).toContain("--release-version");
+    expect(smokeScript).toContain("smokeReleaseChannel");
+    expect(smokeScript).toContain("RELEASE_CHANNEL");
+    // The release smoke passes the stable version through to assert the channel.
+    expect(publishWorkflow).toContain("--release-version");
   });
 
   it("documents container healthcheck constraints for non-HTTP modes", () => {
