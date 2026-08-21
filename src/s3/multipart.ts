@@ -3,7 +3,7 @@ import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
-import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 
 type B2S3MultipartClient = Pick<
   B2S3PeerClient,
@@ -175,7 +175,7 @@ export function registerS3MultipartTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_abort_multipart_upload", args, config);
-        if (!gate.ok) return toolError(destructiveGateError(gate));
+        if (!gate.ok) return toolError(gate.error);
         await s3.abortMultipartUpload({
           bucket: args.bucket,
           key: args.key,

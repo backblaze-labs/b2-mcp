@@ -4,7 +4,7 @@ import { toolJson, toolError } from "../utils/errors.js";
 import type { B2AuthManager } from "../auth.js";
 import type { B2Client } from "./client.js";
 import type { B2Config } from "../utils/types.js";
-import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
   durableSecretIdempotency,
@@ -138,7 +138,7 @@ export function registerPartnerTools(
       async (args) => {
         try {
           const gate = checkDestructive("b2_create_group_member", args, config);
-          if (!gate.ok) return toolError(destructiveGateError(gate));
+          if (!gate.ok) return toolError(gate.error);
 
           const request = {
             adminAccountId: args.adminAccountId,
@@ -220,7 +220,7 @@ export function registerPartnerTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_eject_group_member", args, config);
-        if (!gate.ok) return toolError(destructiveGateError(gate));
+        if (!gate.ok) return toolError(gate.error);
 
         const result = await client.ejectGroupMember({
           adminAccountId: args.adminAccountId,
@@ -310,7 +310,7 @@ export function registerPartnerTools(
       async (args) => {
         try {
           const gate = checkDestructive("b2_reserve_trial_create_account", args, config);
-          if (!gate.ok) return toolError(destructiveGateError(gate));
+          if (!gate.ok) return toolError(gate.error);
 
           const request = {
             email: args.email,

@@ -14,12 +14,6 @@ import {
 } from "../../src/utils/destructive-elicitation";
 import {
   checkDestructive,
-  DESTRUCTIVE_CONFIRMATION_REFUSED_CODE,
-  DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
-  DESTRUCTIVE_CONFIRMATION_STATUS,
-  DESTRUCTIVE_POLICY_BLOCKED_CODE,
-  DESTRUCTIVE_POLICY_BLOCKED_STATUS,
-  destructiveGateError,
   DESTRUCTIVE_TOOL_NAMES,
   destructiveEffect,
 } from "../../src/utils/destructive-gate";
@@ -181,7 +175,7 @@ function acceptedResponse() {
 function destructiveOriginal(config: B2Config, toolName = "s3_delete_object") {
   return vi.fn((args: Record<string, unknown>) => {
     const gate = checkDestructive(toolName, args, config);
-    if (!gate.ok) return toolError(destructiveGateError(gate));
+    if (!gate.ok) return toolError(gate.error);
     return { content: [{ type: "text" as const, text: "deleted" }] };
   });
 }
@@ -344,7 +338,7 @@ describe("destructive elicitation", () => {
       expect(result.isError).toBe(true);
       expect(result.content?.[0]?.text).toMatch(/requires explicit human approval/i);
       expect(result.content?.[0]?.text).toContain(
-        `B2 Error [${DESTRUCTIVE_CONFIRMATION_REFUSED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
       );
       expect(original).not.toHaveBeenCalled();
     },
@@ -362,7 +356,7 @@ describe("destructive elicitation", () => {
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toMatch(/was not provided/i);
     expect(result.content?.[0]?.text).toContain(
-      `B2 Error [${DESTRUCTIVE_CONFIRMATION_REFUSED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+      "B2 Error [destructive_confirmation_refused] (HTTP 409)",
     );
     expect(original).not.toHaveBeenCalled();
   });
@@ -390,7 +384,7 @@ describe("destructive elicitation", () => {
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toMatch(/did not approve/i);
     expect(result.content?.[0]?.text).toContain(
-      `B2 Error [${DESTRUCTIVE_CONFIRMATION_REFUSED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+      "B2 Error [destructive_confirmation_refused] (HTTP 409)",
     );
     expect(original).not.toHaveBeenCalled();
   });
@@ -416,7 +410,7 @@ describe("destructive elicitation", () => {
         expect(result.content?.[0]?.text).toMatch(new RegExp(expectedText, "i"));
         if (policy === "block") {
           expect(result.content?.[0]?.text).toContain(
-            `B2 Error [${DESTRUCTIVE_POLICY_BLOCKED_CODE}] (HTTP ${DESTRUCTIVE_POLICY_BLOCKED_STATUS})`,
+            "B2 Error [destructive_policy_blocked] (HTTP 403)",
           );
         }
         expect(original).toHaveBeenCalledTimes(1);
@@ -447,7 +441,7 @@ describe("destructive elicitation", () => {
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toMatch(/Confirmation required/i);
     expect(result.content?.[0]?.text).toContain(
-      `B2 Error [${DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+      "B2 Error [destructive_confirmation_required] (HTTP 409)",
     );
     expect(original).toHaveBeenCalledTimes(1);
 
@@ -462,16 +456,16 @@ describe("destructive elicitation", () => {
       cfg("confirm"),
       providers(URL_ONLY_ELICITATION),
       { bucket: "photos", key: "old.jpg" },
-      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
-      DESTRUCTIVE_CONFIRMATION_STATUS,
+      "destructive_confirmation_required",
+      409,
     ],
     [
       "block policy",
       cfg("block"),
       providers(),
       { bucket: "photos", key: "old.jpg", confirm: true },
-      DESTRUCTIVE_POLICY_BLOCKED_CODE,
-      DESTRUCTIVE_POLICY_BLOCKED_STATUS,
+      "destructive_policy_blocked",
+      403,
     ],
   ])(
     "audits %s refusal as a non-500 policy outcome",
@@ -552,7 +546,7 @@ describe("destructive elicitation", () => {
     expect(missingConfirm.resultType).not.toBe("input_required");
     expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
     expect(missingConfirm.content?.[0]?.text).toContain(
-      `B2 Error [${DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+      "B2 Error [destructive_confirmation_required] (HTTP 409)",
     );
     expect(original).toHaveBeenCalledTimes(1);
 
@@ -731,8 +725,8 @@ describe("destructive elicitation", () => {
       { resultType: "complete", outcome: "declined", handlerRan: false },
     ]);
     expect(toolCallLogs[toolCallLogs.length - 1]?.[0]).toMatchObject({
-      code: DESTRUCTIVE_CONFIRMATION_REFUSED_CODE,
-      status: DESTRUCTIVE_CONFIRMATION_STATUS,
+      code: "destructive_confirmation_refused",
+      status: 409,
     });
     const serializedLogs = JSON.stringify(elicitationLogs);
     expect(serializedLogs).not.toContain("photos");

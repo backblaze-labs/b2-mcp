@@ -3,7 +3,7 @@ import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
-import { checkDestructive, destructiveGateError } from "../utils/destructive-gate.js";
+import { checkDestructive } from "../utils/destructive-gate.js";
 
 // Retained S3 bucket tools cover S3 reachability and lifecycle features that
 // lack native B2 equivalents. Expiration and empty-rules clearing are gated.
@@ -88,7 +88,7 @@ export function registerS3BucketTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_put_bucket_lifecycle", args, config);
-        if (!gate.ok) return toolError(destructiveGateError(gate));
+        if (!gate.ok) return toolError(gate.error);
         const rules = args.rules as B2S3LifecycleRule[];
         if (rules.length === 0) {
           await s3.deleteBucketLifecycle(args.bucket);

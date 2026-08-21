@@ -172,37 +172,11 @@ export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   return p === "allow" || p === "block" ? p : "confirm";
 }
 
-interface GateAllowed {
-  ok: true;
-  message?: undefined;
-  error?: undefined;
-}
-
-export interface GateRefused {
-  ok: false;
-  message: string;
-  error: B2ApiError;
-}
-
-export type GateResult = GateAllowed | GateRefused;
-
-export const DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE = "destructive_confirmation_required";
-export const DESTRUCTIVE_CONFIRMATION_REFUSED_CODE = "destructive_confirmation_refused";
-export const DESTRUCTIVE_POLICY_BLOCKED_CODE = "destructive_policy_blocked";
-export const DESTRUCTIVE_CONFIRMATION_STATUS = 409;
-export const DESTRUCTIVE_POLICY_BLOCKED_STATUS = 403;
-
-function destructivePolicyError(status: number, code: string, message: string): B2ApiError {
-  return { status, code, message };
-}
-
-export function destructiveGateError(gate: GateRefused): B2ApiError {
-  return gate.error;
-}
+export type GateResult = { ok: true } | { ok: false; error: B2ApiError };
 
 /**
  * Evaluate whether a tool call may proceed. Call at the top of a destructive
- * tool's handler; if `ok` is false, return `toolError(destructiveGateError(result))`.
+ * tool's handler; if `ok` is false, return `toolError(result.error)`.
  *
  * Under the `confirm` policy, approval can be supplied by the legacy
  * model-provided `confirm: true` fallback, or by the audited tool wrapper
@@ -228,12 +202,11 @@ export function checkDestructive(
       `server (B2_DESTRUCTIVE_POLICY=block).`;
     return {
       ok: false,
-      message,
-      error: destructivePolicyError(
-        DESTRUCTIVE_POLICY_BLOCKED_STATUS,
-        DESTRUCTIVE_POLICY_BLOCKED_CODE,
+      error: {
+        status: 403,
+        code: "destructive_policy_blocked",
         message,
-      ),
+      },
     };
   }
 
@@ -252,11 +225,10 @@ export function checkDestructive(
     `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`;
   return {
     ok: false,
-    message,
-    error: destructivePolicyError(
-      DESTRUCTIVE_CONFIRMATION_STATUS,
-      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
+    error: {
+      status: 409,
+      code: "destructive_confirmation_required",
       message,
-    ),
+    },
   };
 }

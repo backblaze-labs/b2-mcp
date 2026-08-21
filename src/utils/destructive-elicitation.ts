@@ -12,8 +12,6 @@ import {
 import { createHash } from "crypto";
 import { toolError } from "./errors.js";
 import {
-  DESTRUCTIVE_CONFIRMATION_REFUSED_CODE,
-  DESTRUCTIVE_CONFIRMATION_STATUS,
   destructiveEffect,
   destructiveTargetDigest,
   getDestructivePolicy,
@@ -332,8 +330,8 @@ function destructiveElicitationRefused(
     reason,
   );
   return toolError({
-    status: DESTRUCTIVE_CONFIRMATION_STATUS,
-    code: DESTRUCTIVE_CONFIRMATION_REFUSED_CODE,
+    status: 409,
+    code: "destructive_confirmation_refused",
     message: `Refused: ${toolName} requires explicit human approval by MCP elicitation; ${reason}.`,
   });
 }

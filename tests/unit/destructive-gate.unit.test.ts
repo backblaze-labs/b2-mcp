@@ -4,10 +4,6 @@
  */
 import {
   checkDestructive,
-  DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
-  DESTRUCTIVE_CONFIRMATION_STATUS,
-  DESTRUCTIVE_POLICY_BLOCKED_CODE,
-  DESTRUCTIVE_POLICY_BLOCKED_STATUS,
   getDestructivePolicy,
   isDestructiveTool,
 } from "../../src/utils/destructive-gate";
@@ -64,11 +60,13 @@ describe("destructive-gate", () => {
   describe("confirm policy (default)", () => {
     it("blocks a destructive call without confirm", () => {
       const r = checkDestructive("b2_delete_bucket", { bucketId: "b" }, cfg());
-      expect(r.ok).toBe(false);
-      expect(r.message).toMatch(/confirm/i);
-      expect(r.error).toMatchObject({
-        code: DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
-        status: DESTRUCTIVE_CONFIRMATION_STATUS,
+      expect(r).toMatchObject({
+        ok: false,
+        error: {
+          code: "destructive_confirmation_required",
+          status: 409,
+          message: expect.stringMatching(/confirm/i),
+        },
       });
     });
 
@@ -85,11 +83,13 @@ describe("destructive-gate", () => {
         { applicationKeyId: "k", confirm: true },
         cfg("block"),
       );
-      expect(r.ok).toBe(false);
-      expect(r.message).toMatch(/blocked/i);
-      expect(r.error).toMatchObject({
-        code: DESTRUCTIVE_POLICY_BLOCKED_CODE,
-        status: DESTRUCTIVE_POLICY_BLOCKED_STATUS,
+      expect(r).toMatchObject({
+        ok: false,
+        error: {
+          code: "destructive_policy_blocked",
+          status: 403,
+          message: expect.stringMatching(/blocked/i),
+        },
       });
     });
   });
@@ -104,9 +104,13 @@ describe("destructive-gate", () => {
   describe("s3_delete_objects Object Lock bypass text", () => {
     it("keeps the plain delete effect unchanged", () => {
       const r = checkDestructive("s3_delete_objects", { bucket: "b", objects: [] }, cfg());
-      expect(r.ok).toBe(false);
-      expect(r.message).toContain("permanently delete multiple objects (irreversible)");
-      expect(r.message).not.toMatch(/Object Lock|retention/i);
+      expect(r).toMatchObject({
+        ok: false,
+        error: {
+          message: expect.stringContaining("permanently delete multiple objects (irreversible)"),
+        },
+      });
+      if (!r.ok) expect(r.error.message).not.toMatch(/Object Lock|retention/i);
     });
 
     it("states when governance-mode Object Lock retention is bypassed", () => {
@@ -115,8 +119,12 @@ describe("destructive-gate", () => {
         { bucket: "b", objects: [], bypassGovernance: true },
         cfg(),
       );
-      expect(r.ok).toBe(false);
-      expect(r.message).toContain("bypass governance-mode Object Lock retention");
+      expect(r).toMatchObject({
+        ok: false,
+        error: {
+          message: expect.stringContaining("bypass governance-mode Object Lock retention"),
+        },
+      });
     });
   });
 
@@ -127,8 +135,10 @@ describe("destructive-gate", () => {
         { bucket: "b", key: "k", operation: "PutObject" },
         cfg(),
       );
-      expect(r.ok).toBe(false);
-      expect(r.message).toMatch(/PutObject presigned URL/i);
+      expect(r).toMatchObject({
+        ok: false,
+        error: { message: expect.stringMatching(/PutObject presigned URL/i) },
+      });
     });
 
     it("allows confirmed PutObject presigning", () => {
