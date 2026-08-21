@@ -45,6 +45,7 @@ export interface LiveB2ContractModule {
   CONTRACT_BUCKET_PREFIX: string;
   CONTRACT_KEY_PREFIX_ENV: string;
   LIVE_B2_RESOURCE_PATTERN: RegExp;
+  LIVE_RESOURCE_LEDGER_ENV: string;
   MAX_BUCKET_NAME_LENGTH: number;
   MAX_LIVE_PREFIX_LENGTH: number;
   PRESIGNED_URL_PATTERN: RegExp;
@@ -67,9 +68,55 @@ export interface LiveB2ContractModule {
   isContractBucketName(bucketName: string, label?: string, options?: { prefix?: string }): boolean;
   isError(result: McpToolResult): boolean;
   liveErrorText(result: McpToolResult): string;
+  liveResourceEvidenceEntry(
+    resource: {
+      type?: string;
+      label?: string;
+      name?: string;
+      bucketName?: string;
+      key?: string;
+      id?: string;
+      bucketId?: string;
+      fileId?: string;
+    },
+    options?: { prefix?: string; env?: NodeJS.ProcessEnv },
+  ): {
+    schemaVersion: number;
+    recordedAt: string;
+    type: string;
+    label?: string;
+    runPrefix: string;
+    matchesRunPrefix: boolean;
+    nameFingerprint?: string;
+    idFingerprint?: string;
+  };
+  liveResourceLedgerPath(env?: NodeJS.ProcessEnv): string;
   liveRunPrefix(env?: NodeJS.ProcessEnv): string;
   normalizeLivePrefix(value?: string): string;
+  recordLiveResource(
+    resource: {
+      type?: string;
+      label?: string;
+      name?: string;
+      bucketName?: string;
+      key?: string;
+      id?: string;
+      bucketId?: string;
+      fileId?: string;
+    },
+    options?: { ledgerPath?: string; prefix?: string; env?: NodeJS.ProcessEnv },
+  ): {
+    schemaVersion: number;
+    recordedAt: string;
+    type: string;
+    label?: string;
+    runPrefix: string;
+    matchesRunPrefix: boolean;
+    nameFingerprint?: string;
+    idFingerprint?: string;
+  } | null;
   redactKnownLiveResourceDetails(value: unknown, options?: { prefix?: string }): string;
+  stableResourceFingerprint(value: string): string;
 }
 
 const nodeRequire = createRequire(__filename);

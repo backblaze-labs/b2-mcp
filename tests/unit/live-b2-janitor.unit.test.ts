@@ -1,6 +1,6 @@
+import { readFileSync } from "fs";
 import { join } from "path";
 import { pathToFileURL } from "url";
-import { readFileSync } from "fs";
 
 interface JanitorModule {
   assertExpectedLiveTestAccount(
@@ -56,6 +56,16 @@ describe("live B2 janitor", () => {
       prefix: "mcp-contract-123",
       bestEffort: true,
       dryRun: false,
+    });
+    expect(
+      janitor.parseArgs([
+        "--prefix",
+        "mcp-contract-123",
+        "--summary-json",
+        "reports/live-b2/cleanup.json",
+      ]),
+    ).toMatchObject({
+      summaryJson: "reports/live-b2/cleanup.json",
     });
     expect(janitor.parseArgs(["--prefix", "mcp-contract-123"])).toMatchObject({
       bestEffort: false,

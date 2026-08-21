@@ -127,6 +127,12 @@ export function createContractBucketTracker(server: McpServer): ContractBucketTr
         );
       }
       const bucket = parseResult(created) as CreatedContractBucket;
+      liveB2Contract.recordLiveResource({
+        type: "bucket",
+        label,
+        name: bucket.bucketName,
+        id: bucket.bucketId,
+      });
       tracker.track(bucket);
       return bucket;
     },

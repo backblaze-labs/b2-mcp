@@ -1,3 +1,6 @@
+import { mkdtempSync, readFileSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { liveB2Contract, type McpToolResult } from "../support/live-b2-contract-types";
 
 describe("live B2 contract helper", () => {
@@ -27,6 +30,36 @@ describe("live B2 contract helper", () => {
     expect(liveB2Contract.bucketMatchesPrefix("mcp-contract-run10-bucket", "mcp-contract-")).toBe(
       true,
     );
+  });
+
+  it("records live resource evidence without raw bucket names or ids", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-resource-"));
+    try {
+      const ledgerPath = join(dir, "resources.jsonl");
+      const entry = liveB2Contract.recordLiveResource(
+        {
+          type: "bucket",
+          label: "integration",
+          name: "mcp-contract-run1-integration-abc123",
+          id: "bucket-id-sensitive",
+        },
+        { ledgerPath, prefix: "mcp-contract-run1" },
+      );
+
+      expect(entry).toMatchObject({
+        type: "bucket",
+        label: "integration",
+        runPrefix: "mcp-contract-run1",
+        matchesRunPrefix: true,
+      });
+      const written = readFileSync(ledgerPath, "utf8");
+      expect(written).not.toContain("mcp-contract-run1-integration-abc123");
+      expect(written).not.toContain("bucket-id-sensitive");
+      expect(written).toContain('"nameFingerprint"');
+      expect(written).toContain('"idFingerprint"');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("counts dry-run bucket contents before skipping destructive cleanup", async () => {
