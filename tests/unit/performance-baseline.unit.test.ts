@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 const root = join(__dirname, "../..");
+const helpers = require("../../scripts/lib/performance-baseline.cjs");
 
 function readJson<T>(relativePath: string): T {
   return JSON.parse(readFileSync(join(root, relativePath), "utf8")) as T;
@@ -83,5 +84,127 @@ describe("local performance baseline", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("issue #199");
     expect(result.stdout).toContain("--enforce");
+  });
+
+  it("uses displayed precision for byte budget boundaries", () => {
+    const config = readJson<{
+      budgets: Record<string, { unit: string; direction: string; baseline: number }>;
+    }>("performance-baseline.json");
+
+    const metric = helpers.evaluateMetric(
+      "node-http.full.toolsListBytes",
+      56035,
+      config.budgets["node-http.full.toolsListBytes"],
+    );
+
+    expect(metric.value).toBe(56035);
+    expect(metric.budget.limit).toBe(56035);
+    expect(metric.status).toBe("pass");
+  });
+
+  it("renders failure artifacts with partial metrics", () => {
+    const config = readJson<{
+      issue: { number: number; url: string };
+      measurementPlan: Record<string, unknown>;
+      runtimeApplicability: Record<string, unknown>;
+      budgets: Record<string, unknown>;
+    }>("performance-baseline.json");
+    const measurements = [{ id: "node-http.full.toolsListBytes", value: 47217 }];
+    const metrics = helpers.evaluateMeasurements(config, measurements, { requireAll: false });
+    const failure = {
+      phase: "oauth-jwks",
+      message: "simulated failure",
+      partialMetricIds: measurements.map((metric) => metric.id),
+    };
+
+    const artifact = helpers.createArtifact({
+      config,
+      metrics,
+      measurements,
+      enforce: true,
+      failure,
+      generatedAt: "2026-08-21T00:00:00.000Z",
+    });
+    const summary = helpers.renderSummary(config, metrics, { enforce: true, failure });
+
+    expect(artifact.failure).toEqual(failure);
+    expect(artifact.partialMeasurements).toEqual(measurements);
+    expect(summary).toContain("Status: measurement failed (oauth-jwks)");
+    expect(summary).toContain("Error: simulated failure");
+  });
+
+  it("writes reports when measurement execution fails", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/performance-baseline.mjs", "--self-test-measurement-failure"],
+      {
+        cwd: root,
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    const artifact = readJson<{
+      mode: string;
+      node: string;
+      platform: { os: string; arch: string };
+      failure: { phase: string; message: string; partialMetricIds: string[] };
+      partialMeasurements: unknown[];
+    }>("reports/performance/local-baseline.json");
+    const summary = readFileSync(
+      join(root, "reports/performance/local-baseline-summary.md"),
+      "utf8",
+    );
+
+    expect(artifact.mode).toBe("enforce");
+    expect(artifact.node).toMatch(/^v\d+/);
+    expect(artifact.platform.os).toBeTruthy();
+    expect(artifact.platform.arch).toBeTruthy();
+    expect(artifact.failure.phase).toBe("self-test-measurement");
+    expect(artifact.failure.message).toContain("Forced measurement failure");
+    expect(artifact.failure.partialMetricIds).toEqual([]);
+    expect(artifact.partialMeasurements).toEqual([]);
+    expect(summary).toContain("Status: measurement failed (self-test-measurement)");
+  });
+
+  it("sanitizes benchmark worker secrets and blocks non-local egress", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/performance-baseline.mjs", "--self-test-env-sanitizer"],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          AWS_SECRET_ACCESS_KEY: "sentinel-parent-secret",
+          B2_APPLICATION_KEY: "sentinel-parent-secret",
+          GITHUB_TOKEN: "sentinel-parent-secret",
+          NPM_TOKEN: "sentinel-parent-secret",
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    const probe = JSON.parse(result.stdout);
+    expect(probe.importedDependency).toBe(true);
+    expect(probe.observedSentinelNames).toEqual([]);
+    expect(probe.sentinelValueVisible).toBe(false);
+    expect(probe.benchmarkCredentialIsFake).toBe(true);
+    expect(probe.nonLocalFetchBlocked).toBe(true);
+  });
+
+  it("rejects direct worker mode without sanitized launcher state", () => {
+    const result = spawnSync(process.execPath, ["scripts/performance-baseline.mjs", "--worker"], {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        B2_APPLICATION_KEY: "sentinel-parent-secret",
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("requires a sanitized launcher");
+    expect(result.stdout).not.toContain("sentinel-parent-secret");
   });
 });

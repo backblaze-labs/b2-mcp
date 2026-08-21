@@ -54,7 +54,9 @@ Run it with:
 pnpm run perf:baseline
 ```
 
-The script builds the package, uses fake deterministic credentials, and writes:
+The script builds the package, runs measurements in a sanitized worker process
+with fake deterministic credentials, blocks non-local network egress, and
+writes:
 
 - Machine-readable artifact: `reports/performance/local-baseline.json`
 - Human-readable summary: `reports/performance/local-baseline-summary.md`
@@ -65,6 +67,9 @@ The baseline measures local protocol overhead only: stdio startup-to-ready,
 `server/discover`, heap growth across repeated local `tools/list` requests, and
 fake OAuth/JWKS cold-cache and warm-cache verification. It does not use real B2
 credentials and does not claim to measure end-to-end Backblaze B2 latency.
+Measurement failures still write the JSON and Markdown reports with the failed
+phase, error message, runtime metadata, and any partial metrics collected before
+the failure.
 
 Budgets and runtime applicability decisions live in
 [`../performance-baseline.json`](../performance-baseline.json). Node stdio and

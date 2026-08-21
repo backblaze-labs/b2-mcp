@@ -1,70 +1,54 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
+const { sanitizedEnv } = require("./lib/sanitized-env.cjs");
+const {
+  createArtifact,
+  evaluateMeasurements,
+  renderSummary,
+  round,
+} = require("./lib/performance-baseline.cjs");
+
 const scriptPath = fileURLToPath(import.meta.url);
 const root = path.dirname(path.dirname(scriptPath));
 const configPath = path.join(root, "performance-baseline.json");
 const reportsDir = path.join(root, "reports", "performance");
 const artifactPath = path.join(reportsDir, "local-baseline.json");
 const summaryPath = path.join(reportsDir, "local-baseline-summary.md");
-const mcpRevision = "2026-07-28";
-const jsonHeaders = {
-  "content-type": "application/json",
-  accept: "application/json, text/event-stream",
-  "mcp-protocol-version": mcpRevision,
-};
-const benchmarkEnv = {
+const localNetworkGuardPath = path.join(root, "scripts/lib/local-network-guard.mjs");
+const noNetworkGuardPath = path.join(root, "scripts/no-network-guard.mjs");
+const workerEnvFlag = "B2_MCP_PERFORMANCE_BASELINE_WORKER";
+const probeOnlyFlag = "B2_MCP_PERFORMANCE_BASELINE_PROBE_ONLY";
+const forceFailurePhaseFlag = "B2_MCP_PERFORMANCE_BASELINE_FORCE_FAILURE_PHASE";
+const parentSecretSentinel = "sentinel-parent-secret";
+const workerTimeoutMs = 120_000;
+
+const benchmarkWorkerEnv = {
   B2_ALLOWED_HOSTS: "",
   B2_ALLOWED_ORIGINS: "",
+  B2_APPLICATION_KEY_ID: "performance-key-id",
+  B2_APPLICATION_KEY: "performance-key-secret",
   B2_CAPABILITY_CACHE_TTL_MS: "0",
   B2_MAX_SESSIONS: "1000",
   B2_MAX_SESSIONS_PER_KEY: "1000",
   B2_MCP_RATE_LIMIT_BURST: "1000",
   B2_MCP_RATE_LIMIT_RPS: "1000",
+  B2_REGISTER_ALL_TOOLS: "true",
   LOG_LEVEL: "fatal",
+  NODE_ENV: "test",
+  NODE_OPTIONS: `--import ${pathToFileURL(localNetworkGuardPath).href}`,
+  [workerEnvFlag]: "1",
 };
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-function round(value, digits = 2) {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
-}
-
-export function budgetLimit(budget) {
-  const percent = Number(budget.tolerance?.percent ?? 0);
-  const absolute = Number(budget.tolerance?.absolute ?? 0);
-  if (budget.direction === "min") {
-    return budget.baseline * (1 - percent / 100) - absolute;
-  }
-  return budget.baseline * (1 + percent / 100) + absolute;
-}
-
-export function evaluateMetric(id, value, budget) {
-  const limit = budgetLimit(budget);
-  const pass = budget.direction === "min" ? value >= limit : value <= limit;
-  return {
-    id,
-    label: budget.label,
-    unit: budget.unit,
-    value: budget.unit === "bytes" ? Math.round(value) : round(value),
-    status: pass ? "pass" : "fail",
-    budget: {
-      direction: budget.direction,
-      baseline: budget.baseline,
-      tolerance: budget.tolerance,
-      limit: budget.unit === "bytes" ? Math.round(limit) : round(limit),
-    },
-  };
 }
 
 function usage() {
@@ -85,12 +69,36 @@ function usage() {
 
 function parseArgs(argv) {
   const args = new Set(argv);
-  if (args.has("--help") || args.has("-h")) return { help: true, enforce: false };
-  const unknown = argv.filter((arg) => arg !== "--advisory" && arg !== "--enforce");
+  if (args.has("--help") || args.has("-h")) {
+    return {
+      help: true,
+      enforce: false,
+      worker: false,
+      selfTestEnvSanitizer: false,
+      selfTestMeasurementFailure: false,
+    };
+  }
+  const worker = args.has("--worker");
+  const selfTestEnvSanitizer = args.has("--self-test-env-sanitizer");
+  const selfTestMeasurementFailure = args.has("--self-test-measurement-failure");
+  const allowed = new Set([
+    "--advisory",
+    "--enforce",
+    "--worker",
+    "--self-test-env-sanitizer",
+    "--self-test-measurement-failure",
+  ]);
+  const unknown = argv.filter((arg) => !allowed.has(arg));
   if (unknown.length > 0) {
     throw new Error(`Unknown argument(s): ${unknown.join(", ")}`);
   }
-  return { help: false, enforce: args.has("--enforce") };
+  return {
+    help: false,
+    enforce: args.has("--enforce"),
+    worker,
+    selfTestEnvSanitizer,
+    selfTestMeasurementFailure,
+  };
 }
 
 function assertBuiltArtifacts() {
@@ -109,62 +117,41 @@ function assertBuiltArtifacts() {
   }
 }
 
-function saveBenchmarkEnv() {
-  const saved = {};
-  for (const key of Object.keys(benchmarkEnv)) saved[key] = process.env[key];
-  return saved;
-}
-
-function applyBenchmarkEnv() {
-  for (const [key, value] of Object.entries(benchmarkEnv)) {
-    if (value === "") delete process.env[key];
-    else process.env[key] = value;
-  }
-}
-
-function restoreBenchmarkEnv(saved) {
-  for (const [key, value] of Object.entries(saved)) {
-    if (value === undefined) delete process.env[key];
-    else process.env[key] = value;
-  }
-}
-
-function safeChildEnv(extra) {
-  const inheritedNames = [
-    "PATH",
-    "Path",
-    "SystemRoot",
-    "COMSPEC",
-    "PATHEXT",
-    "HOME",
-    "USERPROFILE",
-    "TMPDIR",
-    "TMP",
-    "TEMP",
-  ];
-  const inherited = Object.fromEntries(
-    inheritedNames.flatMap((name) =>
-      process.env[name] === undefined ? [] : [[name, process.env[name]]],
-    ),
-  );
-  return {
-    ...inherited,
-    NODE_ENV: "test",
-    LOG_LEVEL: "fatal",
+function createWorkerEnv(extra = {}, sourceEnv = process.env) {
+  const merged = {
+    ...benchmarkWorkerEnv,
     ...extra,
   };
-}
-
-function fakeServerEnv() {
-  return safeChildEnv({
-    B2_APPLICATION_KEY_ID: "performance-key-id",
-    B2_APPLICATION_KEY: "performance-key-secret",
-    B2_REGISTER_ALL_TOOLS: "true",
-    NODE_OPTIONS: `--import ${pathToFileURL(path.join(root, "scripts/no-network-guard.mjs")).href}`,
+  return sanitizedEnv(merged, {
+    sourceEnv,
+    nonSecretEnvNames: Object.keys(merged),
   });
 }
 
-async function measureStdioStartup() {
+function fakeServerEnv() {
+  const extra = {
+    B2_APPLICATION_KEY_ID: "performance-key-id",
+    B2_APPLICATION_KEY: "performance-key-secret",
+    B2_REGISTER_ALL_TOOLS: "true",
+    LOG_LEVEL: "fatal",
+    NODE_ENV: "test",
+    NODE_OPTIONS: `--import ${pathToFileURL(noNetworkGuardPath).href}`,
+  };
+  return sanitizedEnv(extra, {
+    sourceEnv: process.env,
+    nonSecretEnvNames: Object.keys(extra),
+  });
+}
+
+function jsonHeaders(mcpRevision) {
+  return {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    "mcp-protocol-version": mcpRevision,
+  };
+}
+
+async function measureStdioStartup(mcpRevision) {
   const [{ Client }, { StdioClientTransport }] = await Promise.all([
     import("@modelcontextprotocol/client"),
     import("@modelcontextprotocol/client/stdio"),
@@ -277,7 +264,7 @@ async function withProfileServer(profile, modules, contract, run) {
   }
 }
 
-function modernBody(method, params = {}, id = 1) {
+function modernBody(method, mcpRevision, params = {}, id = 1) {
   return JSON.stringify({
     jsonrpc: "2.0",
     id,
@@ -296,14 +283,14 @@ function modernBody(method, params = {}, id = 1) {
   });
 }
 
-async function rawMcpRequest(port, method, id) {
+async function rawMcpRequest(port, method, id, mcpRevision) {
   const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
     method: "POST",
     headers: {
-      ...jsonHeaders,
+      ...jsonHeaders(mcpRevision),
       "mcp-method": method,
     },
-    body: modernBody(method, {}, id),
+    body: modernBody(method, mcpRevision, {}, id),
     signal: AbortSignal.timeout(10_000),
   });
   const text = await response.text();
@@ -317,10 +304,10 @@ async function rawMcpRequest(port, method, id) {
   return { text, result: parsed.result };
 }
 
-async function measureToolsList(profile, modules, contract) {
+async function measureToolsList(profile, modules, contract, mcpRevision) {
   return withProfileServer(profile, modules, contract, async (port) => {
     const started = performance.now();
-    const response = await rawMcpRequest(port, "tools/list", 1);
+    const response = await rawMcpRequest(port, "tools/list", 1, mcpRevision);
     const elapsed = performance.now() - started;
     const bytes = Buffer.byteLength(response.text, "utf8");
     const expectedCount = contract.profiles[profile].counts.total;
@@ -344,14 +331,14 @@ function percentile(values, p) {
   return sorted[index];
 }
 
-async function measureConcurrentDiscovery(modules, contract, concurrency) {
+async function measureConcurrentDiscovery(modules, contract, concurrency, mcpRevision) {
   return withProfileServer("full", modules, contract, async (port) => {
     const ids = Array.from({ length: concurrency }, (_, index) => index + 1);
     const started = performance.now();
     const latencies = await Promise.all(
       ids.map(async (id) => {
         const requestStarted = performance.now();
-        const response = await rawMcpRequest(port, "server/discover", id);
+        const response = await rawMcpRequest(port, "server/discover", id, mcpRevision);
         if (!response.result?.supportedVersions?.includes(mcpRevision)) {
           throw new Error("server/discover did not advertise the target MCP revision");
         }
@@ -372,12 +359,12 @@ async function measureConcurrentDiscovery(modules, contract, concurrency) {
   });
 }
 
-async function measureMemoryGrowth(modules, contract, requestCount) {
+async function measureMemoryGrowth(modules, contract, requestCount, mcpRevision) {
   return withProfileServer("full", modules, contract, async (port) => {
     globalThis.gc?.();
     const before = process.memoryUsage().heapUsed;
     for (let index = 0; index < requestCount; index++) {
-      await rawMcpRequest(port, "tools/list", index + 1);
+      await rawMcpRequest(port, "tools/list", index + 1, mcpRevision);
     }
     globalThis.gc?.();
     const after = process.memoryUsage().heapUsed;
@@ -515,106 +502,219 @@ async function measureOAuthJwks(modules) {
   ];
 }
 
+function serializeError(error, phase, partialMeasurements) {
+  return {
+    phase,
+    message: error instanceof Error ? error.message : String(error),
+    name: error instanceof Error ? error.name : "Error",
+    ...(partialMeasurements && {
+      partialMetricIds: partialMeasurements.map((metric) => metric.id),
+    }),
+  };
+}
+
+async function recordPhase(measurements, phase, run) {
+  try {
+    const result = await run();
+    const entries = Array.isArray(result) ? result : [result];
+    measurements.push(...entries);
+  } catch (error) {
+    const wrapped = new Error(error instanceof Error ? error.message : String(error));
+    wrapped.name = error instanceof Error ? error.name : "Error";
+    wrapped.phase = phase;
+    wrapped.partialMeasurements = [...measurements];
+    throw wrapped;
+  }
+}
+
 async function runMeasurements(config) {
+  if (process.env[forceFailurePhaseFlag]) {
+    const error = new Error("Forced measurement failure for performance artifact self-test.");
+    error.phase = process.env[forceFailurePhaseFlag];
+    error.partialMeasurements = [];
+    throw error;
+  }
   assertBuiltArtifacts();
   const contract = readJson(path.join(root, "docs/tool-profile-contract.json"));
+  const mcpRevision = contract.mcpRevision;
+  const modules = loadDistModules();
   const measurements = [];
-  const saved = saveBenchmarkEnv();
-  let modules;
-  applyBenchmarkEnv();
+
   try {
-    modules = loadDistModules();
-    measurements.push(await measureStdioStartup());
+    await recordPhase(measurements, "node-stdio.startupReadyMs", () =>
+      measureStdioStartup(mcpRevision),
+    );
     for (const profile of config.reviewedBaseline.toolProfiles) {
-      measurements.push(...(await measureToolsList(profile, modules, contract)));
+      await recordPhase(measurements, `node-http.${profile}.toolsList`, () =>
+        measureToolsList(profile, modules, contract, mcpRevision),
+      );
     }
-    measurements.push(
-      ...(await measureConcurrentDiscovery(
+    await recordPhase(measurements, "node-http.discovery", () =>
+      measureConcurrentDiscovery(
         modules,
         contract,
         config.measurementPlan.modestConcurrency,
-      )),
+        mcpRevision,
+      ),
     );
-    measurements.push(
-      await measureMemoryGrowth(modules, contract, config.measurementPlan.memoryRequestCount),
+    await recordPhase(measurements, "node-http.memory.repeatedToolsListGrowthMiB", () =>
+      measureMemoryGrowth(
+        modules,
+        contract,
+        config.measurementPlan.memoryRequestCount,
+        mcpRevision,
+      ),
     );
-    measurements.push(...(await measureOAuthJwks(modules)));
+    await recordPhase(measurements, "oauth-jwks", () => measureOAuthJwks(modules));
   } finally {
-    restoreBenchmarkEnv(saved);
-    modules?.oauth.resetOAuthVerifierCacheForTests();
+    modules.oauth.resetOAuthVerifierCacheForTests();
   }
   return measurements;
 }
 
-function evaluateMeasurements(config, measurements) {
-  const byId = new Map(measurements.map((metric) => [metric.id, metric]));
-  return Object.entries(config.budgets).map(([id, budget]) => {
-    const measured = byId.get(id);
-    if (!measured) throw new Error(`Performance budget ${id} has no measurement.`);
+async function runEnvProbe() {
+  const { SignJWT } = await import("jose");
+  const observedSentinelNames = Object.entries(process.env)
+    .filter(([, value]) => String(value).includes(parentSecretSentinel))
+    .map(([name]) => name)
+    .sort();
+  let nonLocalFetchBlocked = false;
+  try {
+    await fetch("https://example.com");
+  } catch (error) {
+    nonLocalFetchBlocked = /Non-local network access blocked/.test(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return {
+    importedDependency: typeof SignJWT === "function",
+    observedSentinelNames,
+    sentinelValueVisible: observedSentinelNames.length > 0,
+    benchmarkCredentialIsFake: process.env.B2_APPLICATION_KEY === "performance-key-secret",
+    nonLocalFetchBlocked,
+  };
+}
+
+async function workerMain() {
+  if (process.env[probeOnlyFlag] === "1") {
+    return { ok: true, probe: await runEnvProbe() };
+  }
+  const config = readJson(configPath);
+  try {
+    return { ok: true, measurements: await runMeasurements(config) };
+  } catch (error) {
     return {
-      ...evaluateMetric(id, measured.value, budget),
-      ...(measured.details && { details: measured.details }),
+      ok: false,
+      error: serializeError(error, error?.phase ?? "measurement", error?.partialMeasurements),
+      partialMeasurements: error?.partialMeasurements ?? [],
     };
+  }
+}
+
+function parseWorkerPayload(stdout) {
+  const line = stdout
+    .split(/\r?\n/)
+    .map((candidate) => candidate.trim())
+    .filter(Boolean)
+    .at(-1);
+  if (!line) throw new Error("Performance worker wrote no JSON payload.");
+  return JSON.parse(line);
+}
+
+function runWorkerProcess(extraEnv = {}) {
+  const result = spawnSync(process.execPath, ["--expose-gc", scriptPath, "--worker"], {
+    cwd: root,
+    env: createWorkerEnv(extraEnv),
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+    timeout: workerTimeoutMs,
   });
+  let payload = null;
+  try {
+    payload = result.stdout ? parseWorkerPayload(result.stdout) : null;
+  } catch {
+    payload = null;
+  }
+  if (result.error) {
+    return {
+      ok: false,
+      error: {
+        phase: "worker",
+        message:
+          result.error.code === "ETIMEDOUT"
+            ? `Performance worker timed out after ${workerTimeoutMs} ms`
+            : result.error.message,
+        name: result.error.name,
+      },
+      partialMeasurements: payload?.partialMeasurements ?? [],
+    };
+  }
+  if (payload?.ok === true && result.status === 0) return payload;
+  return {
+    ok: false,
+    error: payload?.error ?? {
+      phase: "worker",
+      message:
+        result.stderr?.trim().split(/\r?\n/).at(-1) ||
+        `Performance worker exited with status ${result.status ?? "unknown"}`,
+      name: "WorkerError",
+    },
+    partialMeasurements: payload?.partialMeasurements ?? [],
+  };
 }
 
-function renderSummary(config, metrics, enforce) {
-  const failures = metrics.filter((metric) => metric.status !== "pass");
-  const mode = enforce ? "enforce" : "advisory";
-  const rows = metrics.map((metric) =>
-    [
-      metric.status === "pass" ? "PASS" : "FAIL",
-      metric.id,
-      `${metric.value} ${metric.unit}`,
-      `${metric.budget.direction} ${metric.budget.limit} ${metric.unit}`,
-    ].join(" | "),
-  );
-  return [
-    "# Local Performance Baseline",
-    "",
-    `Mode: ${mode}`,
-    `Issue: #${config.issue.number} ${config.issue.url}`,
-    `Status: ${failures.length === 0 ? "pass" : `${failures.length} budget violation(s)`}`,
-    "",
-    "This local baseline uses fake deterministic fixtures and does not measure live Backblaze B2 latency.",
-    "",
-    "status | metric | measured | budget",
-    "--- | --- | --- | ---",
-    ...rows,
-    "",
-    "Runtime applicability:",
-    ...Object.entries(config.runtimeApplicability).map(
-      ([runtime, decision]) => `- ${runtime}: ${decision.decision} (${decision.budgetSet})`,
-    ),
-    "",
-  ].join("\n");
-}
-
-function writeReports(config, metrics, summary, enforce) {
+function writeReports(config, metrics, measurements, enforce, failure = null) {
   mkdirSync(reportsDir, { recursive: true });
   rmSync(artifactPath, { force: true });
   rmSync(summaryPath, { force: true });
-  const artifact = {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    issue: config.issue,
-    mode: enforce ? "enforce" : "advisory",
-    advisory: !enforce,
-    liveB2CredentialsUsed: false,
-    liveB2NetworkMeasured: false,
-    node: process.version,
-    platform: {
-      os: os.platform(),
-      arch: os.arch(),
-    },
-    measurementPlan: config.measurementPlan,
-    runtimeApplicability: config.runtimeApplicability,
+  const summary = renderSummary(config, metrics, { enforce, failure });
+  const artifact = createArtifact({
+    config,
     metrics,
-    violations: metrics.filter((metric) => metric.status !== "pass").map((metric) => metric.id),
-  };
+    measurements,
+    enforce,
+    failure,
+  });
   writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`);
   writeFileSync(summaryPath, summary);
-  return artifact;
+  return { artifact, summary };
+}
+
+function runSelfTestEnvSanitizer() {
+  const payload = runWorkerProcess({ [probeOnlyFlag]: "1" });
+  if (!payload.ok) {
+    console.error(payload.error?.message ?? "Environment sanitizer self-test failed");
+    return 1;
+  }
+  console.log(JSON.stringify(payload.probe));
+  return payload.probe.sentinelValueVisible || !payload.probe.nonLocalFetchBlocked ? 1 : 0;
+}
+
+function runParent(enforce, workerExtraEnv = {}) {
+  const config = readJson(configPath);
+  const payload = runWorkerProcess(workerExtraEnv);
+  if (!payload.ok) {
+    const measurements = payload.partialMeasurements ?? [];
+    const metrics = evaluateMeasurements(config, measurements, { requireAll: false });
+    const failure = payload.error ?? {
+      phase: "worker",
+      message: "Performance worker failed before returning an error payload.",
+    };
+    const { summary } = writeReports(config, metrics, measurements, enforce, failure);
+    console.log(summary);
+    return enforce ? 1 : 0;
+  }
+
+  const measurements = payload.measurements ?? [];
+  const metrics = evaluateMeasurements(config, measurements);
+  const { artifact, summary } = writeReports(config, metrics, measurements, enforce);
+  console.log(summary);
+  if (enforce && artifact.violations.length > 0) return 1;
+  return 0;
+}
+
+function runSelfTestMeasurementFailure() {
+  return runParent(true, { [forceFailurePhaseFlag]: "self-test-measurement" });
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -623,14 +723,18 @@ async function main(argv = process.argv.slice(2)) {
     console.log(usage());
     return 0;
   }
-  const config = readJson(configPath);
-  const measurements = await runMeasurements(config);
-  const metrics = evaluateMeasurements(config, measurements);
-  const summary = renderSummary(config, metrics, options.enforce);
-  const artifact = writeReports(config, metrics, summary, options.enforce);
-  console.log(summary);
-  if (options.enforce && artifact.violations.length > 0) return 1;
-  return 0;
+  if (options.worker) {
+    if (process.env[workerEnvFlag] !== "1") {
+      console.error("Performance baseline worker mode requires a sanitized launcher.");
+      return 1;
+    }
+    const payload = await workerMain();
+    process.stdout.write(`${JSON.stringify(payload)}\n`);
+    return payload.ok ? 0 : 1;
+  }
+  if (options.selfTestEnvSanitizer) return runSelfTestEnvSanitizer();
+  if (options.selfTestMeasurementFailure) return runSelfTestMeasurementFailure();
+  return runParent(options.enforce);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
