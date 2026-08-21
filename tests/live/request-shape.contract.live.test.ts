@@ -116,6 +116,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
           url: "https://example.com/contract",
         },
       };
+      let cleanupFailure: string | undefined;
       try {
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
@@ -145,8 +146,11 @@ describe("Contract: notification rules objectNamePrefix", () => {
           eventNotificationRules: [],
         });
         if (isError(cleanup)) {
-          throw new Error(`notification rule cleanup failed: ${liveErrorText(cleanup)}`);
+          cleanupFailure = liveErrorText(cleanup);
         }
+      }
+      if (cleanupFailure) {
+        throw new Error(`notification rule cleanup failed: ${cleanupFailure}`);
       }
     },
     30_000,

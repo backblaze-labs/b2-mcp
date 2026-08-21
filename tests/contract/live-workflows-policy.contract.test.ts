@@ -98,6 +98,7 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
     "writeBuckets",
   ],
   b2_delete_bucket: ["deleteBuckets", "readBucketEncryption", "readBucketRetentions"],
+  b2_get_bucket_notification_rules: ["writeBucketNotifications"],
   b2_largest_files: ["listFiles"],
   b2_list_buckets: ["listBuckets", "readBucketEncryption", "readBucketRetentions"],
   b2_list_group_members: [],
