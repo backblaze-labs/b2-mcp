@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 
 const require = createRequire(import.meta.url);
 const http = require("node:http");
@@ -21,4 +21,8 @@ https.request = block("https.request");
 https.get = block("https.get");
 net.connect = block("net.connect");
 net.createConnection = block("net.createConnection");
+net.Socket.prototype.connect = block("net.Socket.connect");
 tls.connect = block("tls.connect");
+tls.TLSSocket.prototype.connect = block("tls.TLSSocket.connect");
+
+syncBuiltinESMExports();

@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "mode": "advisory",
+  "issue": {
+    "number": 199,
+    "url": "https://github.com/backblaze-labs/b2-mcp/issues/199",
+    "title": "[b2-mcp] Establish an advisory local performance regression baseline",
+    "priority": "P2"
+  },
+  "reviewedBaseline": {
+    "date": "2026-08-21",
+    "nodeVersions": ["22.3.0", "22.23.1", "24", "26"],
+    "toolProfiles": ["full", "phase1-default", "read-only"],
+    "artifact": "reports/performance/local-baseline.json",
+    "summary": "reports/performance/local-baseline-summary.md"
+  },
+  "runtimeApplicability": {
+    "node-stdio": {
+      "decision": "measured",
+      "budgetSet": "startup-to-ready",
+      "reason": "Local stdio is the packaged CLI path and has deterministic fake-credential startup."
+    },
+    "node-http": {
+      "decision": "measured",
+      "budgetSet": "tools-list-discovery-memory",
+      "reason": "The local Node HTTP server owns the shared MCP fetch pipeline used by standalone deployments."
+    },
+    "vercel-serverless": {
+      "decision": "shared-runtime-advisory",
+      "budgetSet": "oauth-jwks-fake-path",
+      "reason": "The Vercel adapter shares the OAuth and MCP fetch runtime; platform cold-start latency is not claimed by this local baseline."
+    },
+    "cloudflare-worker": {
+      "decision": "shared-runtime-advisory",
+      "budgetSet": "oauth-jwks-fake-path",
+      "reason": "The Worker adapter shares OAuth/JWKS verification; workerd startup and edge placement latency are outside this deterministic local check."
+    }
+  },
+  "measurementPlan": {
+    "localOnly": true,
+    "usesRealB2Credentials": false,
+    "usesLiveB2Network": false,
+    "modestConcurrency": 8,
+    "memoryRequestCount": 50,
+    "notes": [
+      "Budgets are advisory until reviewed main-branch runs prove stable.",
+      "Use --enforce only when promoting the baseline to a merge gate.",
+      "The check measures local protocol overhead and resource growth, not end-to-end Backblaze B2 latency."
+    ]
+  },
+  "budgets": {
+    "node-stdio.startupReadyMs": {
+      "label": "Node stdio startup to ready",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 180,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 400
+      }
+    },
+    "node-http.full.toolsListMs": {
+      "label": "tools/list latency, full profile",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 60,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 75
+      }
+    },
+    "node-http.full.toolsListBytes": {
+      "label": "tools/list serialized bytes, full profile",
+      "unit": "bytes",
+      "direction": "max",
+      "baseline": 47217,
+      "tolerance": {
+        "percent": 10,
+        "absolute": 4096
+      }
+    },
+    "node-http.phase1-default.toolsListMs": {
+      "label": "tools/list latency, phase1-default profile",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 20,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 75
+      }
+    },
+    "node-http.phase1-default.toolsListBytes": {
+      "label": "tools/list serialized bytes, phase1-default profile",
+      "unit": "bytes",
+      "direction": "max",
+      "baseline": 43874,
+      "tolerance": {
+        "percent": 10,
+        "absolute": 4096
+      }
+    },
+    "node-http.read-only.toolsListMs": {
+      "label": "tools/list latency, read-only profile",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 15,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 75
+      }
+    },
+    "node-http.read-only.toolsListBytes": {
+      "label": "tools/list serialized bytes, read-only profile",
+      "unit": "bytes",
+      "direction": "max",
+      "baseline": 17216,
+      "tolerance": {
+        "percent": 10,
+        "absolute": 4096
+      }
+    },
+    "node-http.discovery.concurrentP95Ms": {
+      "label": "Concurrent local server/discover p95",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 70,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 75
+      }
+    },
+    "node-http.discovery.throughputRps": {
+      "label": "Concurrent local server/discover throughput",
+      "unit": "requests/sec",
+      "direction": "min",
+      "baseline": 100,
+      "tolerance": {
+        "percent": 50,
+        "absolute": 1
+      }
+    },
+    "node-http.memory.repeatedToolsListGrowthMiB": {
+      "label": "Heap growth after repeated local tools/list",
+      "unit": "MiB",
+      "direction": "max",
+      "baseline": 1.5,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 2
+      }
+    },
+    "oauth-jwks.coldVerifyMs": {
+      "label": "OAuth/JWKS fake cold-cache verification",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 8,
+      "tolerance": {
+        "percent": 200,
+        "absolute": 10
+      }
+    },
+    "oauth-jwks.warmVerifyMs": {
+      "label": "OAuth/JWKS fake warm-cache verification",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 5,
+      "tolerance": {
+        "percent": 200,
+        "absolute": 5
+      }
+    }
+  }
+}
