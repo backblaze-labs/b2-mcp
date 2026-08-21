@@ -86,7 +86,7 @@ describe("local performance baseline", () => {
     expect(result.stdout).toContain("--enforce");
   });
 
-  it("uses displayed precision for byte budget boundaries", () => {
+  it("uses displayed precision for max byte budget boundaries", () => {
     const config = readJson<{
       budgets: Record<string, { unit: string; direction: string; baseline: number }>;
     }>("performance-baseline.json");
@@ -100,6 +100,50 @@ describe("local performance baseline", () => {
     expect(metric.value).toBe(56035);
     expect(metric.budget.limit).toBe(56035);
     expect(metric.status).toBe("pass");
+  });
+
+  it("uses displayed precision for min throughput budget boundaries", () => {
+    const config = readJson<{
+      budgets: Record<string, { unit: string; direction: string; baseline: number }>;
+    }>("performance-baseline.json");
+
+    const metric = helpers.evaluateMetric(
+      "node-http.discovery.throughputRps",
+      49,
+      config.budgets["node-http.discovery.throughputRps"],
+    );
+
+    expect(metric.value).toBe(49);
+    expect(metric.budget.limit).toBe(49);
+    expect(metric.status).toBe("pass");
+  });
+
+  it("fails enforce mode for deterministic budget violations", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/performance-baseline.mjs", "--self-test-budget-violation"],
+      {
+        cwd: root,
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    const artifact = readJson<{
+      mode: string;
+      violations: string[];
+    }>("reports/performance/local-baseline.json");
+    const summary = readFileSync(
+      join(root, "reports/performance/local-baseline-summary.md"),
+      "utf8",
+    );
+
+    expect(artifact.mode).toBe("enforce");
+    expect(artifact.violations).toEqual([
+      "node-http.full.toolsListBytes",
+      "node-http.discovery.throughputRps",
+    ]);
+    expect(summary).toContain("Status: 2 budget violation(s)");
   });
 
   it("renders failure artifacts with partial metrics", () => {
@@ -190,6 +234,9 @@ describe("local performance baseline", () => {
     expect(probe.observedSentinelNames).toEqual([]);
     expect(probe.sentinelValueVisible).toBe(false);
     expect(probe.benchmarkCredentialIsFake).toBe(true);
+    expect(probe.benchmarkSecretSinkIsOff).toBe(true);
+    expect(probe.stdioSecretSinkIsOff).toBe(true);
+    expect(probe.stdioSecretSinkFileUnset).toBe(true);
     expect(probe.nonLocalFetchBlocked).toBe(true);
   });
 

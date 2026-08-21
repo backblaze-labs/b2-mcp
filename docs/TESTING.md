@@ -67,6 +67,8 @@ The baseline measures local protocol overhead only: stdio startup-to-ready,
 `server/discover`, heap growth across repeated local `tools/list` requests, and
 fake OAuth/JWKS cold-cache and warm-cache verification. It does not use real B2
 credentials and does not claim to measure end-to-end Backblaze B2 latency.
+The stdio startup measurement explicitly sets `B2_SECRET_SINK=off`; file secret
+sink startup and writes are outside this protocol-overhead baseline.
 Measurement failures still write the JSON and Markdown reports with the failed
 phase, error message, runtime metadata, and any partial metrics collected before
 the failure.

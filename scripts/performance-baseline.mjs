@@ -10,7 +10,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const require = createRequire(import.meta.url);
 const { sanitizedEnv } = require("./lib/sanitized-env.cjs");
 const {
+  budgetLimit,
   createArtifact,
+  displayValue,
   evaluateMeasurements,
   renderSummary,
   round,
@@ -27,6 +29,7 @@ const noNetworkGuardPath = path.join(root, "scripts/no-network-guard.mjs");
 const workerEnvFlag = "B2_MCP_PERFORMANCE_BASELINE_WORKER";
 const probeOnlyFlag = "B2_MCP_PERFORMANCE_BASELINE_PROBE_ONLY";
 const forceFailurePhaseFlag = "B2_MCP_PERFORMANCE_BASELINE_FORCE_FAILURE_PHASE";
+const forceBudgetViolationFlag = "B2_MCP_PERFORMANCE_BASELINE_FORCE_BUDGET_VIOLATION";
 const parentSecretSentinel = "sentinel-parent-secret";
 const workerTimeoutMs = 120_000;
 
@@ -41,6 +44,7 @@ const benchmarkWorkerEnv = {
   B2_MCP_RATE_LIMIT_BURST: "1000",
   B2_MCP_RATE_LIMIT_RPS: "1000",
   B2_REGISTER_ALL_TOOLS: "true",
+  B2_SECRET_SINK: "off",
   LOG_LEVEL: "fatal",
   NODE_ENV: "test",
   NODE_OPTIONS: `--import ${pathToFileURL(localNetworkGuardPath).href}`,
@@ -76,17 +80,20 @@ function parseArgs(argv) {
       worker: false,
       selfTestEnvSanitizer: false,
       selfTestMeasurementFailure: false,
+      selfTestBudgetViolation: false,
     };
   }
   const worker = args.has("--worker");
   const selfTestEnvSanitizer = args.has("--self-test-env-sanitizer");
   const selfTestMeasurementFailure = args.has("--self-test-measurement-failure");
+  const selfTestBudgetViolation = args.has("--self-test-budget-violation");
   const allowed = new Set([
     "--advisory",
     "--enforce",
     "--worker",
     "--self-test-env-sanitizer",
     "--self-test-measurement-failure",
+    "--self-test-budget-violation",
   ]);
   const unknown = argv.filter((arg) => !allowed.has(arg));
   if (unknown.length > 0) {
@@ -98,6 +105,7 @@ function parseArgs(argv) {
     worker,
     selfTestEnvSanitizer,
     selfTestMeasurementFailure,
+    selfTestBudgetViolation,
   };
 }
 
@@ -133,6 +141,7 @@ function fakeServerEnv() {
     B2_APPLICATION_KEY_ID: "performance-key-id",
     B2_APPLICATION_KEY: "performance-key-secret",
     B2_REGISTER_ALL_TOOLS: "true",
+    B2_SECRET_SINK: "off",
     LOG_LEVEL: "fatal",
     NODE_ENV: "test",
     NODE_OPTIONS: `--import ${pathToFileURL(noNetworkGuardPath).href}`,
@@ -528,6 +537,9 @@ async function recordPhase(measurements, phase, run) {
 }
 
 async function runMeasurements(config) {
+  if (process.env[forceBudgetViolationFlag] === "1") {
+    return syntheticBudgetViolationMeasurements(config);
+  }
   if (process.env[forceFailurePhaseFlag]) {
     const error = new Error("Forced measurement failure for performance artifact self-test.");
     error.phase = process.env[forceFailurePhaseFlag];
@@ -572,8 +584,24 @@ async function runMeasurements(config) {
   return measurements;
 }
 
+function syntheticBudgetViolationMeasurements(config) {
+  const maxViolationId = "node-http.full.toolsListBytes";
+  const minViolationId = "node-http.discovery.throughputRps";
+  return Object.entries(config.budgets).map(([id, budget]) => {
+    const displayedLimit = displayValue(budgetLimit(budget), budget.unit);
+    if (id === maxViolationId) {
+      return { id, value: displayedLimit + (budget.unit === "bytes" ? 1 : 0.01) };
+    }
+    if (id === minViolationId) {
+      return { id, value: displayedLimit - (budget.unit === "bytes" ? 1 : 0.01) };
+    }
+    return { id, value: budget.baseline };
+  });
+}
+
 async function runEnvProbe() {
   const { SignJWT } = await import("jose");
+  const stdioEnv = fakeServerEnv();
   const observedSentinelNames = Object.entries(process.env)
     .filter(([, value]) => String(value).includes(parentSecretSentinel))
     .map(([name]) => name)
@@ -591,6 +619,9 @@ async function runEnvProbe() {
     observedSentinelNames,
     sentinelValueVisible: observedSentinelNames.length > 0,
     benchmarkCredentialIsFake: process.env.B2_APPLICATION_KEY === "performance-key-secret",
+    benchmarkSecretSinkIsOff: process.env.B2_SECRET_SINK === "off",
+    stdioSecretSinkIsOff: stdioEnv.B2_SECRET_SINK === "off",
+    stdioSecretSinkFileUnset: stdioEnv.B2_SECRET_SINK_FILE === undefined,
     nonLocalFetchBlocked,
   };
 }
@@ -717,6 +748,10 @@ function runSelfTestMeasurementFailure() {
   return runParent(true, { [forceFailurePhaseFlag]: "self-test-measurement" });
 }
 
+function runSelfTestBudgetViolation() {
+  return runParent(true, { [forceBudgetViolationFlag]: "1" });
+}
+
 async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   if (options.help) {
@@ -734,6 +769,7 @@ async function main(argv = process.argv.slice(2)) {
   }
   if (options.selfTestEnvSanitizer) return runSelfTestEnvSanitizer();
   if (options.selfTestMeasurementFailure) return runSelfTestMeasurementFailure();
+  if (options.selfTestBudgetViolation) return runSelfTestBudgetViolation();
   return runParent(options.enforce);
 }
 
