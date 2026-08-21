@@ -63,6 +63,10 @@ const LOGGER_SECRET_FIELD_NAMES = [
   "masterKeyId",
 ] as const;
 
+const LOGGER_SENSITIVE_FIELD_NAMES = new Set(
+  LOGGER_SECRET_FIELD_NAMES.map((name) => normalizeKey(name)),
+);
+
 export const LOGGER_SECRET_REDACTION_PATHS = redactionPaths(LOGGER_SECRET_FIELD_NAMES);
 
 export const TEXT_SECRET_LABELS = [
@@ -111,9 +115,10 @@ function redactionPaths(names: readonly string[]): string[] {
   ];
 }
 
-function isSensitiveField(key: string, path: readonly string[]): boolean {
+function isSensitiveField(key: string, path: readonly string[], mode: SanitizerMode): boolean {
   const normalized = normalizeKey(key);
   if (SENSITIVE_FIELD_NAMES.has(normalized)) return true;
+  if (mode === "log" && LOGGER_SENSITIVE_FIELD_NAMES.has(normalized)) return true;
   if (normalized.endsWith("secret") && normalized !== "secretname") return true;
   if (normalized.endsWith("token") && !NON_SECRET_TOKEN_FIELD_NAMES.has(normalized)) {
     return true;
@@ -256,7 +261,7 @@ function sanitizeValue(
 
   const output: Record<string, unknown> = {};
   for (const [key, descriptor] of enumerableDescriptors(value)) {
-    output[key] = isSensitiveField(key, path)
+    output[key] = isSensitiveField(key, path, mode)
       ? REDACTED
       : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
   }
@@ -288,7 +293,7 @@ function sanitizeErrorForLog(err: Error, seen: WeakSet<object>, options: Sanitiz
 
   for (const [key, descriptor] of enumerableDescriptors(err)) {
     if (key === "message" || key === "name" || key === "stack") continue;
-    safeRecord[key] = isSensitiveField(key, [])
+    safeRecord[key] = isSensitiveField(key, [], "log")
       ? REDACTED
       : sanitizeDescriptorValue(descriptor, [key], seen, options, "log");
   }

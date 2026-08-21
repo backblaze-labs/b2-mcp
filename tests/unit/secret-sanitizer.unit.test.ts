@@ -180,6 +180,37 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
+  it("redacts logger-only credential handles at arbitrary log depths", () => {
+    const safe = sanitizeStructuredLogValue({
+      outer: {
+        inner: {
+          details: {
+            accessKeyId: "safe-to-hide-access-key-id",
+            appKeyId: "safe-to-hide-app-key-id",
+            applicationKeyId: "safe-to-hide-application-key-id",
+            masterKeyId: "safe-to-hide-master-key-id",
+          },
+        },
+      },
+    });
+
+    expect(safe).toEqual({
+      outer: {
+        inner: {
+          details: {
+            accessKeyId: SECRET_SANITIZER_REDACTION,
+            appKeyId: SECRET_SANITIZER_REDACTION,
+            applicationKeyId: SECRET_SANITIZER_REDACTION,
+            masterKeyId: SECRET_SANITIZER_REDACTION,
+          },
+        },
+      },
+    });
+    expect(sanitizeForMcpOutput({ applicationKeyId: "key-id-is-non-secret" })).toEqual({
+      applicationKeyId: "key-id-is-non-secret",
+    });
+  });
+
   it("leaves non-secret JSON-valued strings byte-for-byte unchanged", () => {
     const metadata = `{"plain":"value","nested":{"count":2}}`;
     const largeJsonLookingString = `[${Array.from({ length: 2000 }, (_, i) => `"item-${i}"`).join(
