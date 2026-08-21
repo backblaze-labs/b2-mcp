@@ -271,7 +271,11 @@ function listFences(file) {
       continue;
     }
 
-    if (fenceMatch[1][0] === active.char && fenceMatch[1].length >= active.length) {
+    if (
+      fenceMatch[1][0] === active.char &&
+      fenceMatch[1].length >= active.length &&
+      fenceMatch[2].trim() === ""
+    ) {
       fences.push({
         line: active.line,
         lang: active.lang,
@@ -699,7 +703,9 @@ function validateTransportReferences(file, text, startLine) {
     }
   }
 
-  for (const match of text.matchAll(/\b(?:b2-mcp|node\s+dist\/index\.js)\s+(stdio|http)\b/g)) {
+  const positionalTransportPattern =
+    /(?:^|[\s`])(?:b2-mcp|b2-mcp-server|node\s+dist\/index\.js|["']?\$B2_MCP_IMAGE["']?)[ \t]+([a-z0-9][a-z0-9-]*)/gm;
+  for (const match of text.matchAll(positionalTransportPattern)) {
     const transport = match[1];
     if (!cliAccepts([transport])) {
       addFinding(

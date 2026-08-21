@@ -74,6 +74,24 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("B2_HTTP_CREDENTIAL_MODE must be server");
   });
 
+  it("rejects closing Markdown fences that carry an info string", () => {
+    const readme = replaceLast(read("README.md"), "\n```\n", "\n```bash\n");
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("README.md:489");
+    expect(result.stderr).toContain("has an unclosed Markdown code fence");
+  });
+
+  it("rejects unsupported positional transports in Docker examples", () => {
+    const readme = read("README.md").replace('"$B2_MCP_IMAGE" stdio', '"$B2_MCP_IMAGE" htp');
+    const result = runDocExamplesWithOverrides({ "README.md": readme });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("README.md:");
+    expect(result.stderr).toContain("references unsupported positional transport htp");
+  });
+
   it("rejects missing pnpm shorthand scripts in documented commands", () => {
     const readme = read("README.md").replace("pnpm test", "pnpm missing-script");
     const result = runDocExamplesWithOverrides({ "README.md": readme });
@@ -83,3 +101,9 @@ describe("documentation example validator policy", () => {
     expect(result.stderr).toContain("references missing package script missing-script");
   });
 });
+
+function replaceLast(input: string, search: string, replacement: string): string {
+  const index = input.lastIndexOf(search);
+  expect(index).toBeGreaterThanOrEqual(0);
+  return `${input.slice(0, index)}${replacement}${input.slice(index + search.length)}`;
+}
