@@ -575,6 +575,14 @@ function validationSummaryProvesLiveB2Policy(validationSummary, options = {}) {
       required: false,
     });
     if (expectedToolProfile && summary.expectedToolProfile !== expectedToolProfile) return false;
+    const expectedToolCount =
+      Number.isInteger(options.expectedToolCount) && options.expectedToolCount > 0
+        ? options.expectedToolCount
+        : null;
+    const expectedNamesHash = options.expectedNamesHash
+      ? safeHash(options.expectedNamesHash, "expectedNamesHash")
+      : null;
+    if (expectedToolProfile && (!expectedToolCount || !expectedNamesHash)) return false;
     const expectedPrefix = options.expectedPrefix ? safeRunPrefix(options.expectedPrefix) : null;
     if (expectedPrefix) {
       if (summary.isolation?.runPrefix !== expectedPrefix) return false;
@@ -583,8 +591,8 @@ function validationSummaryProvesLiveB2Policy(validationSummary, options = {}) {
     }
     if (summary.expectedToolProfileApproved !== true) return false;
     if (summary.actualToolProfile?.matchesExpectedProfile !== true) return false;
-    if (!summary.actualToolProfile?.namesHash) return false;
-    if (summary.actualToolProfile?.toolCount <= 0) return false;
+    if (summary.actualToolProfile?.namesHash !== expectedNamesHash) return false;
+    if (summary.actualToolProfile?.toolCount !== expectedToolCount) return false;
     if ((summary.actualToolProfile?.missingExpectedTools ?? []).length > 0) return false;
     if ((summary.actualToolProfile?.unexpectedTools ?? []).length > 0) return false;
     if (summary.target?.accountMatchedExpectedLiveTestAccount !== true) return false;

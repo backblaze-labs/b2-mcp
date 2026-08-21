@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { spawnSync } from "child_process";
+import { createHash } from "crypto";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -7,6 +8,9 @@ import { join } from "path";
 const nodeRequire = createRequire(__filename);
 const liveB2Capabilities = nodeRequire("../../scripts/lib/live-b2-capabilities.cjs") as {
   LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: string[];
+};
+const toolContract = nodeRequire("../../docs/tool-profile-contract.json") as {
+  profiles: Record<string, { names: string[] }>;
 };
 const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
   assertSecretSafe(value: unknown, env?: Record<string, string>): void;
@@ -65,7 +69,10 @@ const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
 const LIVE_PREFIX = "mcp-contract-run1";
 const EXPECTED_PROFILE = "live-b2-contract";
 const HEX_12 = "a".repeat(12);
-const HASH_64 = "b".repeat(64);
+const EXPECTED_PROFILE_NAMES = toolContract.profiles[EXPECTED_PROFILE].names;
+const EXPECTED_PROFILE_HASH = createHash("sha256")
+  .update(JSON.stringify([...EXPECTED_PROFILE_NAMES].sort()))
+  .digest("hex");
 
 function validValidationSummary(
   options: {
@@ -76,6 +83,8 @@ function validValidationSummary(
     missingRequiredCapabilities?: string[];
     notificationBucketValidated?: boolean;
     toolProfileMatches?: boolean;
+    toolCount?: number;
+    namesHash?: string;
   } = {},
 ) {
   const requiredCapabilities = liveB2Capabilities.LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES;
@@ -95,8 +104,8 @@ function validValidationSummary(
       expectedToolProfile: options.expectedToolProfile ?? EXPECTED_PROFILE,
       expectedToolProfileApproved: options.expectedToolProfileApproved ?? true,
       actualToolProfile: {
-        toolCount: 42,
-        namesHash: HASH_64,
+        toolCount: options.toolCount ?? EXPECTED_PROFILE_NAMES.length,
+        namesHash: options.namesHash ?? EXPECTED_PROFILE_HASH,
         matchesExpectedProfile: toolProfileMatches,
         missingExpectedTools: toolProfileMatches ? [] : ["b2_list_buckets"],
         unexpectedTools: [],
@@ -468,6 +477,14 @@ describe("live B2 evidence", () => {
       finalizeFixture({
         validationSummary: validValidationSummary({
           missingRequiredCapabilities: ["writeBucketNotifications"],
+        }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({
+          toolCount: 1,
+          namesHash: "c".repeat(64),
         }),
       }).status,
     ).toBe("configuration blocked");

@@ -260,12 +260,16 @@ function writeFinalEvidence(options) {
   });
   const rawPreflightOutcome = options.preflightOutcome || "success";
   const rawCleanupOutcome = options.cleanupOutcome || "skipped";
+  const expectedToolProfile = process.env.B2_MCP_EXPECTED_TOOL_PROFILE || "";
+  const expectedProfile = expectedToolProfile ? toolContract().profiles[expectedToolProfile] : null;
   const validationRequired = Boolean(options.validationSummary);
   const validationTrusted =
     !validationRequired ||
     validationSummaryProvesLiveB2Policy(validationSummary, {
       expectedPrefix,
-      expectedToolProfile: process.env.B2_MCP_EXPECTED_TOOL_PROFILE,
+      expectedToolProfile,
+      expectedToolCount: expectedProfile?.names?.length,
+      expectedNamesHash: expectedProfile?.names ? namesHash(expectedProfile.names) : null,
       requiredCapabilities,
       forbiddenCapabilities,
     });
