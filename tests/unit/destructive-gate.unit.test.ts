@@ -333,6 +333,12 @@ describe("destructive-gate", () => {
   });
 
   describe("lifecycle mass-delete is gated (s3)", () => {
+    it("gates clearing lifecycle configuration", () => {
+      expect(
+        checkDestructive("s3_put_bucket_lifecycle", { bucket: "b", rules: [] }, cfg()).ok,
+      ).toBe(false);
+    });
+
     it("gates an expiration rule", () => {
       expect(
         checkDestructive(

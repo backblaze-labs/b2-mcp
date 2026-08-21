@@ -5,6 +5,7 @@ import {
   CompleteMultipartUploadCommand,
   CopyObjectCommand,
   CreateMultipartUploadCommand,
+  DeleteBucketLifecycleCommand,
   DeleteObjectCommand,
   GetBucketLocationCommand,
   GetObjectCommand,
@@ -448,6 +449,10 @@ export class B2S3PeerClient {
 
   async headBucket(bucket: string): Promise<void> {
     await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
+  }
+
+  async deleteBucketLifecycle(bucket: string): Promise<void> {
+    await this.sendWithCircuit(new DeleteBucketLifecycleCommand({ Bucket: bucket }));
   }
 
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {

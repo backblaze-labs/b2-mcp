@@ -1828,7 +1828,7 @@
     },
     {
       "name": "s3_put_bucket_lifecycle",
-      "descriptionSha256": "c85754636636c43c7e9cd46a744a1c35438e8340bca6086fa7123cb7e4f425aa",
+      "descriptionSha256": "ce0c7401773a46ec2a093c238d9a5ecc430bf4abe51e963e1ec4f8d078633351",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1837,10 +1837,11 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm a lifecycle rule that schedules object deletion/expiration. Required when the server destructive policy is 'confirm' (the default). Not needed for abort-incomplete-upload-only rules.",
+            "description": "Required under 'confirm' when rules is [] or rules expire objects. Not needed for abort-incomplete-upload-only rules.",
             "type": "boolean"
           },
           "rules": {
+            "description": "Rules to set; [] clears the configuration.",
             "items": {
               "properties": {
                 "abortIncompleteMultipartUpload": {
@@ -2028,5 +2029,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "6cf6387cb398b095081f9379e3c8c9610ebc6ee8cdb103c9c5dff02f53733dd8"
+  "hash": "bac3452310f5b6b2cd919a2c194cd90ddb98d6a1a59afd432910102afd846b01"
 }

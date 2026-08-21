@@ -867,6 +867,46 @@ describe("s3_put_bucket_lifecycle", () => {
     expect(command.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("logs/");
     expect(command.input.LifecycleConfiguration.Rules[0].Expiration.Days).toBe(90);
   });
+
+  it("clears lifecycle configuration when rules is empty", async () => {
+    const result = await callTool(server, "s3_put_bucket_lifecycle", {
+      bucket: "my-bucket",
+      rules: [],
+      confirm: true,
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe("Lifecycle configuration cleared for bucket 'my-bucket'.");
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("DeleteBucketLifecycleCommand");
+    expect(command.input).toMatchObject({ Bucket: "my-bucket" });
+  });
+
+  it("requires confirmation before clearing lifecycle configuration", async () => {
+    const result = await callTool(server, "s3_put_bucket_lifecycle", {
+      bucket: "prod-bucket",
+      rules: [],
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toContain("Confirmation required");
+    expect(parseResult(result)).toContain("clear the bucket's entire S3 lifecycle configuration");
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("blocks lifecycle configuration clearing under block policy", async () => {
+    const blockServer = createServer({ ...testConfig, destructivePolicy: "block" as const });
+    const result = await callTool(blockServer, "s3_put_bucket_lifecycle", {
+      bucket: "prod-bucket",
+      rules: [],
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toContain("B2_DESTRUCTIVE_POLICY=block");
+    expect(parseResult(result)).toContain("clear the bucket's entire S3 lifecycle configuration");
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("s3_get_bucket_location", () => {
