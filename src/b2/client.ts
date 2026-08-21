@@ -638,56 +638,34 @@ function bucketIdFromAuthorizedScope(auth: B2AuthResponse, bucketName: string): 
   return null;
 }
 
-type AuthorizedBucket = NonNullable<NonNullable<B2AuthResponse["allowedBuckets"]>[number]>;
-
-function scopedBucketError(message: string): Error {
-  return Object.assign(new Error(message), { status: 403, code: "unauthorized" });
-}
-
-function validateAuthorizedBucketFilters(
+function scopedBucketIds(
   auth: B2AuthResponse,
-  options: BucketFilters,
-): AuthorizedBucket | null {
-  const buckets = auth.allowedBuckets;
-  if (!buckets || (!options.bucketId && !options.bucketName)) return null;
-
-  const bucketById = options.bucketId
-    ? buckets.find((bucket) => bucket.id === options.bucketId)
-    : null;
-  if (options.bucketId && !bucketById) {
-    throw scopedBucketError(
-      `b2_list_buckets bucketId '${options.bucketId}' is outside the authorized bucket scope.`,
-    );
-  }
-
-  const bucketByName = options.bucketName
-    ? buckets.find((bucket) => bucket.name === options.bucketName)
-    : null;
-  if (options.bucketName && !bucketByName) {
-    throw scopedBucketError(
-      `b2_list_buckets bucketName '${options.bucketName}' is outside the authorized bucket scope.`,
-    );
-  }
-
-  if (bucketById && bucketByName && bucketById.id !== bucketByName.id) {
-    throw scopedBucketError(
-      `b2_list_buckets bucketId '${options.bucketId}' and bucketName '${options.bucketName}' do not refer to the same authorized bucket.`,
-    );
-  }
-
-  return bucketById ?? bucketByName ?? null;
-}
-
-function implicitBucketIdsFromAuthorizedScope(
-  auth: B2AuthResponse,
-  options: BucketFilters,
+  { bucketId: id, bucketName: name }: BucketFilters,
 ): string[] | null {
-  if (options.bucketId || options.bucketName) return null;
   const buckets = auth.allowedBuckets;
   if (!buckets) return null;
-  // This scope is derived from the cached authorize response, so it intentionally
-  // reflects B2AuthManager's auth-token cache window until a refresh occurs.
-  return Array.from(new Set(buckets.map((bucket) => bucket.id).filter((id) => id.length > 0)));
+  const fail = (kind: string, value: string): never => {
+    throw Object.assign(
+      new Error(`b2_list_buckets ${kind} '${value}' is outside the authorized bucket scope.`),
+      { status: 403, code: "unauthorized" },
+    );
+  };
+  const byId = id ? buckets.find((bucket) => bucket.id === id) || fail("bucketId", id) : null;
+  const byName = name
+    ? buckets.find((bucket) => bucket.name === name) || fail("bucketName", name)
+    : null;
+  if (byId && byName && byId.id !== byName.id) fail("bucketName", name!);
+  if (byId || byName) return [(byId ?? byName)!.id];
+
+  // Uses B2AuthManager's cached authorize scope until auth refresh.
+  const ids = Array.from(new Set(buckets.map(({ id }) => id).filter(Boolean)));
+  if (ids.length) {
+    logger.debug(
+      { bucketCount: ids.length, bucketIds: ids, tool: "b2_list_buckets" },
+      "b2.list_buckets.auto_scoped",
+    );
+  }
+  return ids;
 }
 
 async function resolveTrustedBucketId(
@@ -710,13 +688,10 @@ function maybeApplicationKeyId(value: string | undefined): ApplicationKeyId | un
   return value ? applicationKeyId(value) : undefined;
 }
 
-function toBucketFilter(
-  auth: B2AuthResponse,
-  options: BucketFilters,
-  bucketIdValue: string | null,
-): ListBucketsRequest {
+function toBucketFilters(auth: B2AuthResponse, options: BucketFilters): ListBucketsRequest[] {
   const requestedTypes = options.bucketTypes?.includes("all") ? ["all"] : options.bucketTypes;
-  return {
+  const bucketIds = scopedBucketIds(auth, options) ?? [options.bucketId ?? null];
+  return bucketIds.map((bucketIdValue) => ({
     accountId: accountId(auth.accountId),
     bucketId: maybeBucketId(bucketIdValue ?? undefined),
     bucketName: options.bucketName,
@@ -725,26 +700,7 @@ function toBucketFilter(
     bucketTypes: requestedTypes?.length
       ? (requestedTypes as unknown as ListBucketsRequest["bucketTypes"])
       : undefined,
-  };
-}
-
-function toBucketFilters(auth: B2AuthResponse, options: BucketFilters): ListBucketsRequest[] {
-  const explicitBucket = validateAuthorizedBucketFilters(auth, options);
-  const implicitBucketIds = implicitBucketIdsFromAuthorizedScope(auth, options);
-  if (implicitBucketIds !== null) {
-    if (implicitBucketIds.length > 0) {
-      logger.debug(
-        {
-          bucketCount: implicitBucketIds.length,
-          bucketIds: implicitBucketIds,
-          tool: "b2_list_buckets",
-        },
-        "b2.list_buckets.auto_scoped",
-      );
-    }
-    return implicitBucketIds.map((bucketIdValue) => toBucketFilter(auth, options, bucketIdValue));
-  }
-  return [toBucketFilter(auth, options, options.bucketId ?? explicitBucket?.id ?? null)];
+  }));
 }
 
 function normalizeCorsRule(rule: CorsRuleInput): SdkCorsRule {

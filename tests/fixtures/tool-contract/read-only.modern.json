@@ -216,7 +216,7 @@
     },
     {
       "name": "b2_list_buckets",
-      "descriptionSha256": "d23dc0ed897958bc0b6649b672e8e1b76e0fe8401db912446d4047d08e4d7499",
+      "descriptionSha256": "07b4f2dc6621c8309ca3574b90a0c96afe8ef7df9a9b67023a3bbc2b8a73c23c",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -710,5 +710,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "d65932946c674eb65cf25e45fed06235e5f899def2f3234dee1abd29caa1737d"
+  "hash": "23a707ac7b596db31e641e7b4b670d05b7a1314d2c0d4cbc24639721987f0228"
 }
