@@ -47,6 +47,7 @@ const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
 const STATELESS_ACTIVE_SESSIONS = 0;
 const STATELESS_OPEN_SUBSCRIPTIONS = 0;
 const MODERN_MCP_PROTOCOL_VERSION = "2026-07-28";
+const JSON_RPC_CREDENTIAL_RESOLUTION_FAILED = -32001;
 const JSON_RPC_HEADER_BODY_MISMATCH = -32020;
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -323,9 +324,28 @@ function runIdleSweep(): void {
   sweepAuthManagerCache(now);
 }
 
-function credentialErrorResponse(err: unknown): Response {
+function credentialErrorResponse(err: unknown, mcpRequestId?: string | number | null): Response {
   if (err instanceof CredentialResolutionError) {
+    if (mcpRequestId !== undefined) {
+      return jsonResponse(
+        err.status,
+        jsonRpcErrorBody(JSON_RPC_CREDENTIAL_RESOLUTION_FAILED, err.message, mcpRequestId, {
+          code: err.code,
+          status: err.status,
+        }),
+      );
+    }
     return jsonResponse(err.status, { error: err.message });
+  }
+  if (mcpRequestId !== undefined) {
+    return jsonResponse(
+      500,
+      jsonRpcErrorBody(
+        JSON_RPC_CREDENTIAL_RESOLUTION_FAILED,
+        "Credential resolution failed",
+        mcpRequestId,
+      ),
+    );
   }
   return jsonResponse(500, { error: "Credential resolution failed" });
 }
@@ -842,7 +862,8 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
       }
 
       const sanitizedHeaders = sanitizedHeadersFromRequest(request);
-      const parsedBody = method === "POST" ? parsedJsonBody(rawBody) : ({ ok: true } as const);
+      const parsedBody =
+        method === "POST" ? parsedJsonBody(rawBody) : ({ ok: true, body: undefined } as const);
       const protocolPreflight = classifyProtocolPreflight(request, sanitizedHeaders, parsedBody);
       if (protocolPreflight.rejection) {
         logProtocolRejection(request, protocolPreflight.rejection);
@@ -863,11 +884,12 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
 
       let resolved: CredentialResolution;
       const credentialRequest = makeCredentialRequest(request, authInfo);
+      const mcpRequestId = parsedBody.ok ? requestIdFromParsedBody(parsedBody.body) : null;
       try {
         resolved = credentialProvider.resolve({ req: credentialRequest });
       } catch (err) {
         logCredentialResolutionFailure(credentialProvider, request, authInfo, err);
-        return responseWithCleanup(credentialErrorResponse(err), () =>
+        return responseWithCleanup(credentialErrorResponse(err, mcpRequestId), () =>
           finalize(limitKey, prepared),
         );
       }
@@ -901,7 +923,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
           resolved.cacheKey,
         );
       } catch (err) {
-        return responseWithCleanup(credentialErrorResponse(err), () =>
+        return responseWithCleanup(credentialErrorResponse(err, mcpRequestId), () =>
           finalize(limitKey, prepared),
         );
       }

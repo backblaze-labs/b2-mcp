@@ -55,6 +55,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Run local verification entry point
         run: pnpm run verify
+      - name: Run local runtime smoke
+        run: pnpm run smoke:local
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload primary verification reports
         if: always()

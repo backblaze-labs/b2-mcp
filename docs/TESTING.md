@@ -21,6 +21,9 @@ Markdown link validation, Node-based bundled skills-pack validation, the Biome-s
 format check, spelling, and listener diagnostics across the fast non-live
 layers. Coverage, slow lifecycle, and packed-package installation evidence stay
 in distinct scripts and CI jobs so their failures do not mask each other.
+Use `pnpm run smoke:local` for deterministic runtime-startup evidence without a
+deployed endpoint or real B2 credentials; CI runs it on Node.js 22.23.1 after
+the primary verification gate.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
@@ -36,6 +39,7 @@ The individual deterministic layers are:
 | `pnpm run test:package`  | Builds, packs, installs through an npm consumer, and verifies installed entry points. |
 | `pnpm run test:coverage` | Coverage for all deterministic non-live layers.                                      |
 | `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners and open-handle warnings. |
+| `pnpm run smoke:local`  | Builds, starts local HTTP MCP on 127.0.0.1:0, validates discovery/tools, and stops.   |
 
 Local scripts can call each deterministic layer independently. Required PR jobs
 keep the major evidence classes distinct so coverage regression, contract drift,
@@ -200,11 +204,30 @@ Tool-surface tests inspect the repository-owned registration registry, not SDK
 private fields. The registry is sorted by tool name and mirrors the public
 `registerTool()` calls made at server construction.
 
+## Deterministic Local Runtime Smoke
+
+The local runtime smoke is the credential-free startup check for clean
+checkouts and QK runtime evidence:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm run smoke:local
+```
+
+`smoke:local` builds `dist/`, starts the built HTTP MCP server in a sanitized
+child process bound to `127.0.0.1` on an ephemeral port, connects with the
+official MCP client SDK, validates `server/discover` and `tools/list` against
+the frozen full profile, sends a missing-credential request and expects a
+JSON-RPC error, blocks outbound B2 network access in the server worker, and
+shuts the child process down with a bounded timeout. It does not read `MCP_URL`
+and does not require real Backblaze B2 credentials.
+
 ## Supplemental External Client Smoke
 
-The required PR gate remains repo-native: `pnpm run verify` and the protocol
-layers above are the correctness oracle. External clients are advisory evidence
-until they prove deterministic enough for CI.
+The external-client checks below remain supplemental: `pnpm run verify`, the
+protocol layers above, and `pnpm run smoke:local` are the repo-native
+credential-free evidence. External clients are advisory evidence until they
+prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned by the repository wrapper to
 `@modelcontextprotocol/inspector@2.1.0`. That Inspector release requires
