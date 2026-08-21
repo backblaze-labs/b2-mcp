@@ -251,10 +251,10 @@ function sanitizeValue(
   if (typeof value === "string") {
     return sanitizeText(value, options);
   }
-  if (typeof value === "function") return FUNCTION_VALUE;
+  if (mode === "log" && typeof value === "function") return FUNCTION_VALUE;
   if (value === null || typeof value !== "object") return value;
-  if (value instanceof Date) return sanitizeDate(value);
-  if (Buffer.isBuffer(value)) return sanitizeBuffer(value);
+  if (value instanceof Date) return mode === "log" ? sanitizeDate(value) : value;
+  if (Buffer.isBuffer(value)) return mode === "log" ? sanitizeBuffer(value) : value;
   if (seen.has(value)) return "[circular]";
   seen.add(value);
 

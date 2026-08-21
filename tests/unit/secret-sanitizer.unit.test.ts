@@ -202,6 +202,28 @@ describe("secret sanitizer canary policy", () => {
     expect(JSON.stringify(safe)).not.toContain(CANARY);
   });
 
+  it("keeps MCP output representations for callables and built-ins", () => {
+    const safe = sanitizeForMcpOutput({
+      createdAt: new Date("2026-08-21T00:00:00.000Z"),
+      invalidDate: new Date(Number.NaN),
+      bytes: Buffer.from("ok"),
+      fn: () => "ignored",
+    }) as {
+      bytes: unknown;
+      createdAt: unknown;
+      fn?: unknown;
+      invalidDate: unknown;
+    };
+
+    expect(safe.createdAt).toBeInstanceOf(Date);
+    expect(safe.invalidDate).toBeInstanceOf(Date);
+    expect(Buffer.isBuffer(safe.bytes)).toBe(true);
+    expect(typeof safe.fn).toBe("function");
+    expect(JSON.stringify(safe)).toBe(
+      '{"createdAt":"2026-08-21T00:00:00.000Z","invalidDate":null,"bytes":{"type":"Buffer","data":[111,107]}}',
+    );
+  });
+
   it("preserves safe Error metadata in structured logs", () => {
     const err = Object.assign(new Error(`failed with ${CANARY}`), {
       code: "ENOENT",
