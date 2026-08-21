@@ -35,9 +35,13 @@ function stringValue(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function defaultRuntimeDir(): string {
+  return typeof __dirname === "string" ? __dirname : ".";
+}
+
 export function resolveBuildVersion(options: VersionResolutionOptions = {}): VersionResolution {
-  const packageRoot = options.packageRoot ?? join(__dirname, "..");
-  const runtimeDir = options.runtimeDir ?? __dirname;
+  const runtimeDir = options.runtimeDir ?? defaultRuntimeDir();
+  const packageRoot = options.packageRoot ?? join(runtimeDir, "..");
   const pkg = readJson(join(packageRoot, "package.json"));
   const marker = readJson(join(runtimeDir, RELEASE_MARKER_FILE));
   const version = stringValue(pkg.version, "unknown");
