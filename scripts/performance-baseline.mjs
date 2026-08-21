@@ -601,6 +601,7 @@ function syntheticBudgetViolationMeasurements(config) {
 
 async function runEnvProbe() {
   const { SignJWT } = await import("jose");
+  const http = require("node:http");
   const stdioEnv = fakeServerEnv();
   const observedSentinelNames = Object.entries(process.env)
     .filter(([, value]) => String(value).includes(parentSecretSentinel))
@@ -614,6 +615,15 @@ async function runEnvProbe() {
       error instanceof Error ? error.message : String(error),
     );
   }
+  let requestOptionsOverrideBlocked = false;
+  try {
+    const request = http.request("http://127.0.0.1", { hostname: "example.com" });
+    request.destroy();
+  } catch (error) {
+    requestOptionsOverrideBlocked = /Non-local network access blocked/.test(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
   return {
     importedDependency: typeof SignJWT === "function",
     observedSentinelNames,
@@ -623,6 +633,7 @@ async function runEnvProbe() {
     stdioSecretSinkIsOff: stdioEnv.B2_SECRET_SINK === "off",
     stdioSecretSinkFileUnset: stdioEnv.B2_SECRET_SINK_FILE === undefined,
     nonLocalFetchBlocked,
+    requestOptionsOverrideBlocked,
   };
 }
 

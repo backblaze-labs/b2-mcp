@@ -44,8 +44,15 @@ function urlHost(value) {
   return undefined;
 }
 
+function explicitRequestOptionsHost(value) {
+  if (!value || typeof value !== "object") return undefined;
+  return value.hostname ?? value.host;
+}
+
 function requestHost(args) {
   const [first, second] = args;
+  const optionOverrideHost = explicitRequestOptionsHost(second);
+  if (optionOverrideHost) return optionOverrideHost;
   const directUrlHost = urlHost(first);
   if (directUrlHost) return directUrlHost;
   if (first && typeof first === "object") {

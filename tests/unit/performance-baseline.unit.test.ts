@@ -238,6 +238,7 @@ describe("local performance baseline", () => {
     expect(probe.stdioSecretSinkIsOff).toBe(true);
     expect(probe.stdioSecretSinkFileUnset).toBe(true);
     expect(probe.nonLocalFetchBlocked).toBe(true);
+    expect(probe.requestOptionsOverrideBlocked).toBe(true);
   });
 
   it("rejects direct worker mode without sanitized launcher state", () => {
