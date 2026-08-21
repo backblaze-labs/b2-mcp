@@ -272,6 +272,7 @@ function writeFinalEvidence(options) {
       expectedNamesHash: expectedProfile?.names ? namesHash(expectedProfile.names) : null,
       requiredCapabilities,
       forbiddenCapabilities,
+      env: process.env,
     });
   const cleanupRequired = Boolean(options.cleanupSummary);
   const cleanupTrusted = !cleanupRequired || cleanupSummaryProvesCleanup(cleanupSummary);

@@ -571,6 +571,7 @@ function validationSummaryProvesLiveB2Policy(validationSummary, options = {}) {
     if (!validationSummary?.present || validationSummary.validationError) return false;
     const summary = validationSummary.summary;
     if (!summary || summary.status !== "passed") return false;
+    const env = options.env ?? process.env;
     const expectedToolProfile = safeToken(options.expectedToolProfile, "expectedToolProfile", {
       required: false,
     });
@@ -596,8 +597,12 @@ function validationSummaryProvesLiveB2Policy(validationSummary, options = {}) {
     if ((summary.actualToolProfile?.missingExpectedTools ?? []).length > 0) return false;
     if ((summary.actualToolProfile?.unexpectedTools ?? []).length > 0) return false;
     if (summary.target?.accountMatchedExpectedLiveTestAccount !== true) return false;
-    if (!summary.target?.accountFingerprint) return false;
-    if (!summary.target?.expectedAccountFingerprint) return false;
+    const expectedAccountFingerprint = env.B2_LIVE_TEST_ACCOUNT_ID
+      ? liveB2Contract.stableResourceFingerprint(env.B2_LIVE_TEST_ACCOUNT_ID)
+      : null;
+    if (!expectedAccountFingerprint) return false;
+    if (summary.target?.accountFingerprint !== expectedAccountFingerprint) return false;
+    if (summary.target?.expectedAccountFingerprint !== expectedAccountFingerprint) return false;
     if (summary.target?.notificationBucketConfigured !== true) return false;
     if (summary.target?.notificationBucketValidated !== true) return false;
     if (summary.target?.notificationRuleToolRegistered !== true) return false;

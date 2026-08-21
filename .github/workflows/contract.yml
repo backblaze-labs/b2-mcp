@@ -109,6 +109,7 @@ jobs:
     needs: guard
     if: needs.guard.outputs.should-run == 'true'
     runs-on: ubuntu-latest
+    environment: live-b2-contract
     timeout-minutes: 8
     env:
       # Trusted live contract runs require these together: preflight validates
@@ -208,6 +209,7 @@ jobs:
     needs: [guard, preflight]
     if: needs.guard.outputs.should-run == 'true' && needs.preflight.result == 'success'
     runs-on: ubuntu-latest
+    environment: live-b2-contract
     timeout-minutes: 18
     strategy:
       fail-fast: false

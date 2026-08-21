@@ -24,9 +24,7 @@ const liveWorkflows = [
   {
     path: ".github/workflows/contract.yml",
     job: "contract",
-    // Release-workflow callers cannot bind a GitHub Environment, so the contract
-    // job no longer uses one; credentials arrive via named workflow_call secrets.
-    environment: null as string | null,
+    environment: "live-b2-contract",
     concurrency: "live-b2-contract-${{ github.repository }}-resources",
     cancelsInProgress: false,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_MASTER_KEY_ID", "LIVE_B2_MASTER_KEY"],
@@ -379,6 +377,7 @@ describe("live secret workflow policy", () => {
 
     expect(preflightJob).toContain("name: live B2 preflight");
     expect(preflightJob).toContain("needs: guard");
+    expect(preflightJob).toContain("environment: live-b2-contract");
     expect(preflightJob).toContain("Validate live B2 configuration before Node matrix");
     expect(preflightJob).toContain(
       "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",

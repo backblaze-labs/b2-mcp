@@ -9,6 +9,9 @@ const nodeRequire = createRequire(__filename);
 const liveB2Capabilities = nodeRequire("../../scripts/lib/live-b2-capabilities.cjs") as {
   LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: string[];
 };
+const liveB2Contract = nodeRequire("../../scripts/lib/live-b2-contract.cjs") as {
+  stableResourceFingerprint(value: string): string;
+};
 const toolContract = nodeRequire("../../docs/tool-profile-contract.json") as {
   profiles: Record<string, { names: string[] }>;
 };
@@ -68,11 +71,13 @@ const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
 
 const LIVE_PREFIX = "mcp-contract-run1";
 const EXPECTED_PROFILE = "live-b2-contract";
+const EXPECTED_ACCOUNT_ID = "fake-account-id";
 const HEX_12 = "a".repeat(12);
 const EXPECTED_PROFILE_NAMES = toolContract.profiles[EXPECTED_PROFILE].names;
 const EXPECTED_PROFILE_HASH = createHash("sha256")
   .update(JSON.stringify([...EXPECTED_PROFILE_NAMES].sort()))
   .digest("hex");
+const EXPECTED_ACCOUNT_FINGERPRINT = liveB2Contract.stableResourceFingerprint(EXPECTED_ACCOUNT_ID);
 
 function validValidationSummary(
   options: {
@@ -85,6 +90,8 @@ function validValidationSummary(
     toolProfileMatches?: boolean;
     toolCount?: number;
     namesHash?: string;
+    accountFingerprint?: string;
+    expectedAccountFingerprint?: string;
   } = {},
 ) {
   const requiredCapabilities = liveB2Capabilities.LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES;
@@ -113,8 +120,9 @@ function validValidationSummary(
     },
     target: {
       accountMatchedExpectedLiveTestAccount: options.accountMatched ?? true,
-      accountFingerprint: HEX_12,
-      expectedAccountFingerprint: HEX_12,
+      accountFingerprint: options.accountFingerprint ?? EXPECTED_ACCOUNT_FINGERPRINT,
+      expectedAccountFingerprint:
+        options.expectedAccountFingerprint ?? EXPECTED_ACCOUNT_FINGERPRINT,
       notificationBucketConfigured: true,
       notificationBucketValidated: options.notificationBucketValidated ?? true,
       notificationRuleToolRegistered: true,
@@ -224,7 +232,7 @@ function finalizeFixture(options: {
           B2_APPLICATION_KEY_ID: "fake-key-id-secret",
           B2_APPLICATION_KEY: "fake-application-key-secret",
           B2_LIVE_NOTIFICATION_BUCKET: "fake-notification-bucket",
-          B2_LIVE_TEST_ACCOUNT_ID: "fake-account-id",
+          B2_LIVE_TEST_ACCOUNT_ID: EXPECTED_ACCOUNT_ID,
           B2_MCP_EXPECTED_TOOL_PROFILE: EXPECTED_PROFILE,
           B2_MCP_LIVE_RUN_PREFIX: LIVE_PREFIX,
         },
@@ -486,6 +494,16 @@ describe("live B2 evidence", () => {
           toolCount: 1,
           namesHash: "c".repeat(64),
         }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({ accountFingerprint: HEX_12 }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({ expectedAccountFingerprint: HEX_12 }),
       }).status,
     ).toBe("configuration blocked");
   });
