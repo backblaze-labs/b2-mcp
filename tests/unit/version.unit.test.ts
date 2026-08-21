@@ -58,6 +58,18 @@ describe("build version resolution", () => {
     });
   });
 
+  it("keeps the bundled build version when runtime files are unavailable", () => {
+    withVersionFixture("1.2.3", ({ packageRoot, runtimeDir }) => {
+      rmSync(join(packageRoot, "package.json"));
+
+      const resolved = resolveBuildVersion({ packageRoot, runtimeDir });
+
+      expect(resolved.version).toBe(JSON.parse(readFileSync("package.json", "utf8")).version);
+      expect(resolved.releaseChannel).toBe("dev");
+      expect(resolved.isPublishedRelease).toBe(false);
+    });
+  });
+
   it("keeps prerelease builds on the dev channel even when marked", () => {
     withVersionFixture("1.2.3-rc.1", ({ packageRoot, runtimeDir }) => {
       writeMarker(runtimeDir, "1.2.3-rc.1");

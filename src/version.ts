@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import packageMetadata from "../package.json";
 
 const PACKAGE_NAME = "@backblaze-labs/b2-mcp";
 const RELEASE_MARKER_FILE = "release-version.json";
@@ -44,10 +45,11 @@ export function resolveBuildVersion(options: VersionResolutionOptions = {}): Ver
   const packageRoot = options.packageRoot ?? join(runtimeDir, "..");
   const pkg = readJson(join(packageRoot, "package.json"));
   const marker = readJson(join(runtimeDir, RELEASE_MARKER_FILE));
-  const version = stringValue(pkg.version, "unknown");
+  const packageName = stringValue(pkg.name, stringValue(packageMetadata.name));
+  const version = stringValue(pkg.version, stringValue(packageMetadata.version, "unknown"));
   const isPublishedRelease =
-    stringValue(pkg.name) === PACKAGE_NAME &&
-    marker.name === pkg.name &&
+    packageName === PACKAGE_NAME &&
+    marker.name === packageName &&
     marker.releaseChannel === "published" &&
     marker.version === version &&
     STABLE_SEMVER.test(version);
