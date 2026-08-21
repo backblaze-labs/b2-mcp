@@ -78,6 +78,10 @@ const EXPECTED_PROFILE_HASH = createHash("sha256")
   .update(JSON.stringify([...EXPECTED_PROFILE_NAMES].sort()))
   .digest("hex");
 const EXPECTED_ACCOUNT_FINGERPRINT = liveB2Contract.stableResourceFingerprint(EXPECTED_ACCOUNT_ID);
+const EXPECTED_NOTIFICATION_BUCKET = "fake-notification-bucket";
+const EXPECTED_NOTIFICATION_BUCKET_FINGERPRINT = liveB2Contract.stableResourceFingerprint(
+  EXPECTED_NOTIFICATION_BUCKET,
+);
 
 function validValidationSummary(
   options: {
@@ -92,6 +96,7 @@ function validValidationSummary(
     namesHash?: string;
     accountFingerprint?: string;
     expectedAccountFingerprint?: string;
+    notificationBucketFingerprint?: string;
   } = {},
 ) {
   const requiredCapabilities = liveB2Capabilities.LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES;
@@ -126,7 +131,8 @@ function validValidationSummary(
       notificationBucketConfigured: true,
       notificationBucketValidated: options.notificationBucketValidated ?? true,
       notificationRuleToolRegistered: true,
-      notificationBucketFingerprint: HEX_12,
+      notificationBucketFingerprint:
+        options.notificationBucketFingerprint ?? EXPECTED_NOTIFICATION_BUCKET_FINGERPRINT,
     },
     credentialPolicy: {
       nonMasterApplicationKey: forbiddenCapabilitiesGranted.length === 0,
@@ -231,7 +237,7 @@ function finalizeFixture(options: {
           PATH: process.env.PATH ?? "",
           B2_APPLICATION_KEY_ID: "fake-key-id-secret",
           B2_APPLICATION_KEY: "fake-application-key-secret",
-          B2_LIVE_NOTIFICATION_BUCKET: "fake-notification-bucket",
+          B2_LIVE_NOTIFICATION_BUCKET: EXPECTED_NOTIFICATION_BUCKET,
           B2_LIVE_TEST_ACCOUNT_ID: EXPECTED_ACCOUNT_ID,
           B2_MCP_EXPECTED_TOOL_PROFILE: EXPECTED_PROFILE,
           B2_MCP_LIVE_RUN_PREFIX: LIVE_PREFIX,
@@ -504,6 +510,11 @@ describe("live B2 evidence", () => {
     expect(
       finalizeFixture({
         validationSummary: validValidationSummary({ expectedAccountFingerprint: HEX_12 }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({ notificationBucketFingerprint: HEX_12 }),
       }).status,
     ).toBe("configuration blocked");
   });

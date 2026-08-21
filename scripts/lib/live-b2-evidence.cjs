@@ -606,7 +606,13 @@ function validationSummaryProvesLiveB2Policy(validationSummary, options = {}) {
     if (summary.target?.notificationBucketConfigured !== true) return false;
     if (summary.target?.notificationBucketValidated !== true) return false;
     if (summary.target?.notificationRuleToolRegistered !== true) return false;
-    if (!summary.target?.notificationBucketFingerprint) return false;
+    const expectedNotificationBucketFingerprint = env.B2_LIVE_NOTIFICATION_BUCKET
+      ? liveB2Contract.stableResourceFingerprint(env.B2_LIVE_NOTIFICATION_BUCKET)
+      : null;
+    if (!expectedNotificationBucketFingerprint) return false;
+    if (summary.target?.notificationBucketFingerprint !== expectedNotificationBucketFingerprint) {
+      return false;
+    }
     const credentialPolicy = summary.credentialPolicy ?? {};
     if (credentialPolicy.nonMasterApplicationKey !== true) return false;
     if (credentialPolicy.overbroadCredentialRejected === true) return false;
