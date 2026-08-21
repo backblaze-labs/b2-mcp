@@ -141,6 +141,38 @@ describe("s3_head_bucket", () => {
     expect(seenRegions).toEqual(["us-west-004"]);
   });
 
+  it("falls back promptly when authorize stalls during cold S3 initialization", async () => {
+    restoreB2SdkTransportForTests();
+    invalidateAuthManagerCache();
+    vi.useFakeTimers();
+    const pendingAuth = deferred<StaticHttpResponse>();
+    try {
+      const transport = new RecordingTransport((request) => {
+        if (b2EndpointName(request) === "b2_authorize_account") return pendingAuth.promise;
+        return new StaticHttpResponse(200, {});
+      });
+      installSdkTransport(transport);
+      server = createServer(testConfig);
+      const seenRegions: string[] = [];
+      sendSpy.mockImplementation(async function (this: S3Client) {
+        seenRegions.push(await s3ClientRegion(this));
+        return {};
+      });
+
+      const resultPromise = callTool(server, "s3_head_bucket", { bucket: "existing-bucket" });
+      await vi.waitFor(() => expect(transport.requests).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(10_001);
+      await vi.waitFor(() => expect(seenRegions).toEqual(["us-west-004"]));
+
+      const result = await resultPromise;
+      expect(result.isError).toBeFalsy();
+      expect(seenRegions).toEqual(["us-west-004"]);
+    } finally {
+      pendingAuth.resolve(new StaticHttpResponse(200, authorizeResponseWithS3ApiUrl([])));
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps concurrent cold S3 authorization independent of the first caller abort", async () => {
     restoreB2SdkTransportForTests();
     invalidateAuthManagerCache();

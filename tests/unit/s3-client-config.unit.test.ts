@@ -232,6 +232,23 @@ describe("B2 S3 client configuration", () => {
     ).toContain("https");
   });
 
+  it.each([
+    [
+      "trailing suffix host",
+      "https://s3.us-west-004.backblazeb2.com.attacker.com",
+      "s3.<region>.backblazeb2.com",
+    ],
+    [
+      "embedded S3 host in path",
+      "https://attacker.com/s3.us-east-005.backblazeb2.com",
+      "s3.<region>.backblazeb2.com",
+    ],
+    ["embedded credentials", "https://user:pass@s3.us-east-005.backblazeb2.com", "credentials"],
+    ["custom port", "https://s3.us-east-005.backblazeb2.com:8443", "custom port"],
+  ])("rejects authorized endpoint hostname-confusion payloads: %s", (_name, raw, reason) => {
+    expect(validateB2S3ApiUrl(raw, { mode: "authorized-region" })).toContain(reason);
+  });
+
   it("logs when the authorized S3 region overrides configured B2_REGION", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
     try {

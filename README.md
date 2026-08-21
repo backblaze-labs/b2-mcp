@@ -210,7 +210,7 @@ the healthcheck probes the same port the server binds.
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
 | `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                 |
 
-S3-compatible and report tools use the `s3ApiUrl` returned by `b2_authorize_account` when a tool call authorizes; setting `B2_REGION` does not override that authorized region. If authorization is temporarily unavailable, S3 tools fall back to the `B2_REGION` endpoint so the S3 data plane can still be attempted with the configured default.
+S3-compatible and report tools use the `s3ApiUrl` returned by `b2_authorize_account` when a tool call authorizes; setting `B2_REGION` does not override that authorized region. On a cold authorization cache, the first S3/report call attempts B2 authorization to learn the authoritative region. That wait is bounded, and if authorization is temporarily unavailable, S3 tools fall back to the `B2_REGION` endpoint for that operation so the S3 data plane can still be attempted with the configured default. Once authorization succeeds, the derived S3 endpoint is cached for the server process lifetime; restart the process to pick up a later account-region migration. Authorized S3 endpoints remain restricted to HTTPS `s3.<region>.backblazeb2.com` hosts with no credentials, custom port, path, query, or fragment.
 
 **Security / policy (safe defaults; override as needed):**
 
