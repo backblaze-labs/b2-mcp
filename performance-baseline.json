@@ -10,7 +10,7 @@
   "reviewedBaseline": {
     "date": "2026-08-21",
     "nodeVersions": ["22.3.0", "22.23.1", "24", "26"],
-    "toolProfiles": ["full", "phase1-default", "read-only"],
+    "toolProfiles": ["full", "live-b2-contract", "phase1-default", "read-only"],
     "artifact": "reports/performance/local-baseline.json",
     "summary": "reports/performance/local-baseline-summary.md"
   },
@@ -74,6 +74,26 @@
       "unit": "bytes",
       "direction": "max",
       "baseline": 47217,
+      "tolerance": {
+        "percent": 10,
+        "absolute": 4096
+      }
+    },
+    "node-http.live-b2-contract.toolsListMs": {
+      "label": "tools/list latency, live-b2-contract profile",
+      "unit": "ms",
+      "direction": "max",
+      "baseline": 60,
+      "tolerance": {
+        "percent": 100,
+        "absolute": 75
+      }
+    },
+    "node-http.live-b2-contract.toolsListBytes": {
+      "label": "tools/list serialized bytes, live-b2-contract profile",
+      "unit": "bytes",
+      "direction": "max",
+      "baseline": 46544,
       "tolerance": {
         "percent": 10,
         "absolute": 4096
