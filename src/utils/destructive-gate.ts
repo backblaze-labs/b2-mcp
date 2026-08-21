@@ -172,11 +172,19 @@ export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   return p === "allow" || p === "block" ? p : "confirm";
 }
 
-export interface GateResult {
-  ok: boolean;
-  message?: string;
-  error?: B2ApiError;
+interface GateAllowed {
+  ok: true;
+  message?: undefined;
+  error?: undefined;
 }
+
+export interface GateRefused {
+  ok: false;
+  message: string;
+  error: B2ApiError;
+}
+
+export type GateResult = GateAllowed | GateRefused;
 
 export const DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE = "destructive_confirmation_required";
 export const DESTRUCTIVE_CONFIRMATION_REFUSED_CODE = "destructive_confirmation_refused";
@@ -188,22 +196,8 @@ function destructivePolicyError(status: number, code: string, message: string): 
   return { status, code, message };
 }
 
-export function destructiveGateError(gate: GateResult): B2ApiError {
-  if (gate.ok) {
-    return destructivePolicyError(
-      DESTRUCTIVE_CONFIRMATION_STATUS,
-      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
-      "Destructive operation was not refused.",
-    );
-  }
-  return (
-    gate.error ??
-    destructivePolicyError(
-      DESTRUCTIVE_CONFIRMATION_STATUS,
-      DESTRUCTIVE_CONFIRMATION_REQUIRED_CODE,
-      gate.message ?? "Destructive operation requires confirmation.",
-    )
-  );
+export function destructiveGateError(gate: GateRefused): B2ApiError {
+  return gate.error;
 }
 
 /**

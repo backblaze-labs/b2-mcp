@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scope `b2_list_buckets` to authorized bucket IDs for bucket-scoped keys when
   no bucketId/bucketName filter is supplied, and reject out-of-scope explicit
   bucket filters before calling B2 (fixes #211).
+- Classify destructive confirmation/policy refusals as stable non-500 tool
+  outcomes: `destructive_confirmation_required` and
+  `destructive_confirmation_refused` as HTTP 409, and
+  `destructive_policy_blocked` as HTTP 403, with `tool.call` audit logs
+  recording those codes/statuses instead of `internal_error`/500.
 - Aligned the package `engines.node` range with the supported Node.js 22.3+,
   24, and 26 lines so it matches the runtime policy and opossum 10 support,
   with drift guards for workflow and deployment documentation claims.

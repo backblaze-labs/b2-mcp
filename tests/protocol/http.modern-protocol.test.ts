@@ -14,10 +14,6 @@ import {
   type HttpServerHandle,
   type HttpServerOptions,
 } from "../../src/http-server";
-import {
-  DESTRUCTIVE_CONFIRMATION_REFUSED_CODE,
-  DESTRUCTIVE_CONFIRMATION_STATUS,
-} from "../../src/utils/destructive-gate";
 import { invalidateAuthManagerCache } from "../../src/server";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -332,7 +328,7 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(swappedResult.isError).toBe(true);
       expect(swappedResult.content?.[0]?.text).toMatch(/target did not match/i);
       expect(swappedResult.content?.[0]?.text).toContain(
-        `B2 Error [${DESTRUCTIVE_CONFIRMATION_REFUSED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
       );
       expect(s3Send).toHaveBeenCalledTimes(1);
 
@@ -386,7 +382,7 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(declinedResult.isError).toBe(true);
       expect(declinedResult.content?.[0]?.text).toMatch(/human confirmation was decline/i);
       expect(declinedResult.content?.[0]?.text).toContain(
-        `B2 Error [${DESTRUCTIVE_CONFIRMATION_REFUSED_CODE}] (HTTP ${DESTRUCTIVE_CONFIRMATION_STATUS})`,
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
       );
       expect(s3Send).toHaveBeenCalledTimes(1);
     } finally {
