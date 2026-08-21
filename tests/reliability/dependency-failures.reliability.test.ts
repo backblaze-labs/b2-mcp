@@ -172,11 +172,16 @@ function s3XmlErrorResponse(status: number, code: string, message: string) {
   };
 }
 
+const OAUTH_ISSUER = "http://localhost:9000/";
+const OAUTH_RESOURCE = "http://localhost:3000/mcp";
+const OAUTH_AUDIENCE = "http://localhost:3000/mcp";
+const OAUTH_PUBLIC_URL = "http://localhost:3000/mcp";
+
 const oauthJwksConfig = {
-  issuer: "http://localhost:9000/",
-  resource: "http://localhost:3000/mcp",
-  audience: "http://localhost:3000/mcp",
-  publicUrl: "http://localhost:3000/mcp",
+  issuer: OAUTH_ISSUER,
+  resource: OAUTH_RESOURCE,
+  audience: OAUTH_AUDIENCE,
+  publicUrl: OAUTH_PUBLIC_URL,
   authorizationEndpoint: "http://localhost:9000/oauth2/authorize",
   tokenEndpoint: "http://localhost:9000/oauth2/token",
   jwksUri: "http://localhost:9000/oauth2/jwks",
@@ -204,9 +209,9 @@ const oauthJwksConfig = {
 
 function oauthRequest(): Request {
   const token = signedJwt({
-    iss: oauthJwksConfig.issuer,
-    aud: oauthJwksConfig.audience,
-    resource: oauthJwksConfig.resource,
+    iss: OAUTH_ISSUER,
+    aud: OAUTH_AUDIENCE,
+    resource: OAUTH_RESOURCE,
     exp: 2_000_000_000,
     nbf: 900,
     token_type: "bearer",
@@ -214,7 +219,7 @@ function oauthRequest(): Request {
     client_id: "reliability-client",
     sub: "user-123",
   });
-  return new Request(oauthJwksConfig.publicUrl, {
+  return new Request(OAUTH_PUBLIC_URL, {
     headers: { Authorization: `Bearer ${token}` },
   });
 }
