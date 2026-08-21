@@ -1,6 +1,6 @@
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -18,6 +18,10 @@ interface PackResult {
 
 function packageVersion(): string {
   return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version as string;
+}
+
+function isPrerelease(version: string): boolean {
+  return version.includes("-");
 }
 
 function sha256(path: string): string {
@@ -85,10 +89,14 @@ describe.skipIf(process.platform === "win32")("packed package reproducibility", 
         const stageDir = join(tmp, "stage");
         mkdirSync(stageDir, { recursive: true });
         execFileSync("tar", ["-xzf", first.tarball, "-C", stageDir], { encoding: "utf8" });
-        const marker = JSON.parse(
-          readFileSync(join(stageDir, "package/dist/release-version.json"), "utf8"),
-        ) as { version?: string };
-        expect(marker.version).toBe(packageVersion());
+        const markerPath = join(stageDir, "package/dist/release-version.json");
+        const version = packageVersion();
+        if (isPrerelease(version)) {
+          expect(existsSync(markerPath)).toBe(false);
+        } else {
+          const marker = JSON.parse(readFileSync(markerPath, "utf8")) as { version?: string };
+          expect(marker.version).toBe(version);
+        }
 
         const second = pack([join(stageDir, "package")], join(tmp, "second"));
         const secondSha256 = sha256(second.tarball);
