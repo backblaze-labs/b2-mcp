@@ -523,11 +523,15 @@ describe("package budget policy gate", () => {
     };
     const publishWorkflow = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
     const packageBudgetStep = publishWorkflow.indexOf("- run: pnpm run check:package-budget");
+    const releaseStampStep = publishWorkflow.indexOf("- name: Stamp release channel");
     const packStep = publishWorkflow.indexOf("- name: Build and scan publish tarball");
 
     expect(pkg.scripts.prepublishOnly).toContain("pnpm run build");
     expect(pkg.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
+    expect(pkg.scripts.prepublishOnly).toContain("pnpm run release:stamp");
     expect(packageBudgetStep).toBeGreaterThan(-1);
     expect(packageBudgetStep).toBeLessThan(packStep);
+    expect(releaseStampStep).toBeGreaterThan(packageBudgetStep);
+    expect(releaseStampStep).toBeLessThan(packStep);
   });
 });

@@ -8,9 +8,9 @@ function cfg(over: Partial<B2Config> = {}): B2Config {
 describe("buildUserAgent", () => {
   afterEach(() => delete process.env.B2_MCP_UA_SUFFIX);
 
-  it("includes product, version, and transport", () => {
+  it("includes product, release channel, and transport", () => {
     const ua = buildUserAgent(cfg({ transport: "http" }));
-    expect(ua).toMatch(/^backblaze-b2-mcp\/\d+\.\d+\.\d+ \(http\)/);
+    expect(ua).toBe("backblaze-b2-mcp/dev (http)");
   });
 
   it("does not rebuild the SDK transport stack identity", () => {

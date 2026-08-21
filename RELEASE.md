@@ -220,6 +220,22 @@ exists. For the first public package only:
    gh api --method DELETE "orgs/backblaze-labs/packages/container/b2-mcp/versions/${version_id}"
    ```
 
+## Build Version and Release Channel
+
+Runtime version resolution is intentionally split:
+
+- `VERSION` is the package semver from `package.json`. The MCP handshake,
+  `--version`, HTTP server metadata, and server logs keep reporting this numeric
+  build version in source, CI, packed, and published contexts.
+- `productVersion()` is the outbound User-Agent token. It reports the semver
+  only when `dist/release-version.json` is present, matches the package name and
+  version, and the version is a stable semver. Otherwise it reports `dev`.
+
+The publish workflow writes that marker after release verification and before
+the tarball is built. Normal source checkouts, CI builds, development installs,
+plain `npm pack`, and prerelease versions do not carry a published-release
+marker, so outbound SDK User-Agent metadata uses `dev` there.
+
 ## Prerelease
 
 Use npm semver prerelease tags such as `v0.2.0-rc.1`. Follow the same Normal

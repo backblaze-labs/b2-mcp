@@ -103,7 +103,7 @@ describe("B2 S3 client configuration", () => {
       secretAccessKey: "principal-secret",
     });
     expect(s3.customUserAgent).toEqual([
-      ["backblaze-b2-mcp", expect.any(String)],
+      ["backblaze-b2-mcp", "dev"],
       ["transport", "stdio"],
       ["surface", "s3-object-tools"],
     ]);
@@ -119,7 +119,7 @@ describe("B2 S3 client configuration", () => {
       );
 
       expect(s3.customUserAgent).toEqual([
-        ["backblaze-b2-mcp", expect.any(String)],
+        ["backblaze-b2-mcp", "dev"],
         ["transport", "http"],
         ["surface", "s3-object-tools"],
         ["suffix", "tenant-a"],

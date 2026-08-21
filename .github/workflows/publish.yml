@@ -171,6 +171,17 @@ jobs:
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
           B2_MCP_AUDIT_EXPIRED_EXCEPTION_MODE: fail
+      - name: Stamp release channel
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+          PUBLISH_TAG: ${{ steps.request.outputs.tag }}
+        run: |
+          set -euo pipefail
+          PUBLISH_TAG="${PUBLISH_TAG#refs/tags/}"
+          pnpm run release:stamp -- --version "${PUBLISH_TAG#v}"
       - name: Run production audit and generate release SBOM
         id: sbom
         env:

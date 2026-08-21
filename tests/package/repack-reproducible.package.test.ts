@@ -16,6 +16,10 @@ interface PackResult {
   integrity: string;
 }
 
+function packageVersion(): string {
+  return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version as string;
+}
+
 function sha256(path: string): string {
   return createHash("sha256")
     .update(new Uint8Array(readFileSync(path)))
@@ -43,26 +47,48 @@ function pack(sourceArgs: string[], destDir: string): PackResult {
   return { tarball: join(destDir, meta.filename), integrity: String(meta.integrity ?? "") };
 }
 
+function stampReleaseMarker(): void {
+  execFileSync(
+    process.execPath,
+    ["scripts/write-release-version.mjs", "--version", packageVersion()],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  );
+}
+
+function removeReleaseMarker(): void {
+  rmSync(join(root, "dist", "release-version.json"), { force: true });
+}
+
 const REPACK_TEST_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 120_000;
 
 // The publish job publishes from a staged directory (to avoid leaking the
 // runner's local `.tgz` path into registry `_from`/`_resolved`) but must still
 // prove the staged directory reproduces the exact scanned/attested tarball. That
-// guarantee only runs during a real release, so this test exercises the same
-// pack -> extract -> repack -> compare path in CI. The publish job runs on
-// Linux; reproducibility is asserted there, not for the Windows dev matrix.
+// release tarball includes the published-channel marker, so this test exercises
+// the same stamp -> pack -> extract -> repack -> compare path in CI. The publish
+// job runs on Linux; reproducibility is asserted there, not for the Windows dev
+// matrix.
 describe.skipIf(process.platform === "win32")("packed package reproducibility", () => {
   it(
     "repacking the extracted tarball reproduces identical bytes and integrity",
     () => {
       const tmp = mkdtempSync(join(tmpdir(), "b2-mcp-repack-"));
       try {
+        removeReleaseMarker();
+        stampReleaseMarker();
         const first = pack([], join(tmp, "first"));
         const firstSha256 = sha256(first.tarball);
 
         const stageDir = join(tmp, "stage");
         mkdirSync(stageDir, { recursive: true });
         execFileSync("tar", ["-xzf", first.tarball, "-C", stageDir], { encoding: "utf8" });
+        const marker = JSON.parse(
+          readFileSync(join(stageDir, "package/dist/release-version.json"), "utf8"),
+        ) as { version?: string };
+        expect(marker.version).toBe(packageVersion());
 
         const second = pack([join(stageDir, "package")], join(tmp, "second"));
         const secondSha256 = sha256(second.tarball);
@@ -70,6 +96,7 @@ describe.skipIf(process.platform === "win32")("packed package reproducibility", 
         expect(secondSha256).toBe(firstSha256);
         expect(second.integrity).toBe(first.integrity);
       } finally {
+        removeReleaseMarker();
         rmSync(tmp, { recursive: true, force: true });
       }
     },
