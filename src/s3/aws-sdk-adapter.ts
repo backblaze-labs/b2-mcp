@@ -35,6 +35,7 @@ import type {
 import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit } from "../utils/circuit-breaker.js";
 import { forEachBounded } from "../utils/concurrency.js";
+import { badRequest } from "../utils/errors.js";
 
 type S3SendCommand<
   InputType extends ServiceInputTypes,
@@ -373,10 +374,6 @@ const BROWSER_EXECUTABLE_CONTENT_TYPE =
 function normalizedMediaType(contentType: string | undefined): string | null {
   const mediaType = contentType?.split(";")[0]?.trim().toLowerCase();
   return mediaType ? mediaType : null;
-}
-
-function badRequest(message: string): Error & { status: 400; code: "bad_request" } {
-  return Object.assign(new Error(message), { status: 400 as const, code: "bad_request" as const });
 }
 
 export function assertSafeObjectContentType(

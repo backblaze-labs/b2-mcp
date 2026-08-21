@@ -12,7 +12,7 @@ import {
   type UpdateBucketOptions,
 } from "./client.js";
 import { B2Config } from "../utils/types.js";
-import { toolJson, toolError } from "../utils/errors.js";
+import { badRequest, toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { isTestRuntime } from "../utils/runtime.js";
 
@@ -385,7 +385,7 @@ function corsRulesInputError(
 }
 
 function failB2InputValidation(message: string): never {
-  throw { status: 400, code: "bad_request", message };
+  throw badRequest(message);
 }
 
 function validateBucketInfoInput(bucketInfo: Record<string, string> | undefined): void {

@@ -23,6 +23,14 @@ export interface B2ApiError {
   extendedRequestId?: string;
 }
 
+export function clientInputError(code: string, message: string): B2ApiError {
+  return { status: 400, code, message };
+}
+
+export function badRequest(message: string): B2ApiError {
+  return clientInputError("bad_request", message);
+}
+
 /** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */
 function headerRequestId(headers: unknown): string | undefined {
   if (typeof headers !== "object" || headers === null) return undefined;
