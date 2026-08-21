@@ -261,7 +261,7 @@ function sanitizeValue(
   if (Array.isArray(value)) {
     const output: unknown[] = [];
     const outputRecord = output as unknown as Record<string, unknown>;
-    output.length = value.length;
+    output.length = safeArrayLength(value);
     for (const [key, descriptor] of enumerableDescriptors(value)) {
       outputRecord[key] = isSensitiveField(key, path, mode)
         ? REDACTED
@@ -283,6 +283,13 @@ function enumerableDescriptors(value: object): Array<[string, PropertyDescriptor
   return Object.entries(Object.getOwnPropertyDescriptors(value)).filter(
     (entry): entry is [string, PropertyDescriptor] => entry[1].enumerable === true,
   );
+}
+
+function safeArrayLength(value: unknown[]): number {
+  const descriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (!descriptor || !("value" in descriptor)) return 0;
+  const length = descriptor.value;
+  return Number.isSafeInteger(length) && length >= 0 ? length : 0;
 }
 
 function sanitizeDescriptorValue(

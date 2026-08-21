@@ -171,6 +171,28 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
+  it("sanitizes proxied log arrays without reading length getters", () => {
+    const payload = [{ applicationKey: CANARY }];
+    let lengthReads = 0;
+    const proxied = new Proxy(payload, {
+      get(target, property, receiver) {
+        if (property === "length") {
+          lengthReads++;
+          throw new Error(CANARY);
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(proxied) as unknown[];
+
+    expect(lengthReads).toBe(0);
+    expect(Array.isArray(safe)).toBe(true);
+    expect(safe).toHaveLength(1);
+    expect(safe[0]).toEqual({ applicationKey: SECRET_SANITIZER_REDACTION });
+    expectNoCanary(safe);
+  });
+
   it("returns inert log values for callables and built-ins", () => {
     const createdAt = new Date("2026-08-21T00:00:00.000Z");
     Object.defineProperty(createdAt, "toJSON", {
