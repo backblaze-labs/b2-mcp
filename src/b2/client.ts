@@ -57,7 +57,7 @@ import type {
   B2S3FileVersionResolution,
   B2S3VersionTarget,
 } from "../utils/types.js";
-import { forEachBounded } from "../utils/concurrency.js";
+import { DEFAULT_BOUNDED_WORKER_CONCURRENCY, forEachBounded } from "../utils/concurrency.js";
 import { isTestRuntime } from "../utils/runtime.js";
 import { abortError } from "../utils/named-error.js";
 
@@ -638,6 +638,12 @@ function bucketIdFromAuthorizedScope(auth: B2AuthResponse, bucketName: string): 
   return null;
 }
 
+function authorizedBucketIdSet(auth: B2AuthResponse): Set<string> | null {
+  const buckets = auth.allowedBuckets;
+  if (!buckets) return null;
+  return new Set(buckets.map(({ id }) => id).filter(Boolean));
+}
+
 function scopedBucketIds(
   auth: B2AuthResponse,
   { bucketId: id, bucketName: name }: BucketFilters,
@@ -658,7 +664,7 @@ function scopedBucketIds(
   if (byId || byName) return [(byId ?? byName)!.id];
 
   // Uses B2AuthManager's cached authorize scope until auth refresh.
-  const ids = Array.from(new Set(buckets.map(({ id }) => id).filter(Boolean)));
+  const ids = [...(authorizedBucketIdSet(auth) ?? [])];
   if (ids.length) {
     logger.debug(
       { bucketCount: ids.length, bucketIds: ids, tool: "b2_list_buckets" },
@@ -666,6 +672,15 @@ function scopedBucketIds(
     );
   }
   return ids;
+}
+
+function filterBucketsToAuthorizedScope(
+  auth: B2AuthResponse,
+  buckets: readonly BucketInfo[],
+): readonly BucketInfo[] {
+  const authorizedBucketIds = authorizedBucketIdSet(auth);
+  if (!authorizedBucketIds) return buckets;
+  return buckets.filter((bucket) => authorizedBucketIds.has(String(bucket.bucketId)));
 }
 
 async function resolveTrustedBucketId(
@@ -981,12 +996,23 @@ export class B2Client {
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
     const buckets = await this.withNativeCircuit(async (client, auth) => {
       const requests = toBucketFilters(auth, options);
-      const results = await Promise.all(
-        requests.map((request) =>
-          client.raw.listBuckets(auth.apiUrl, auth.authorizationToken, request),
-        ),
+      const results: Array<readonly BucketInfo[] | undefined> = [];
+      await forEachBounded(
+        requests,
+        { maxConcurrency: DEFAULT_BOUNDED_WORKER_CONCURRENCY, signal: currentMcpRequestSignal() },
+        async (request, index) => {
+          const result = await client.raw.listBuckets(
+            auth.apiUrl,
+            auth.authorizationToken,
+            request,
+          );
+          results[index] = result.buckets;
+        },
       );
-      return results.flatMap((result) => result.buckets);
+      return filterBucketsToAuthorizedScope(
+        auth,
+        results.flatMap((result) => result ?? []),
+      );
     });
     return { buckets: buckets.map(toBucketInfoResult) };
   }

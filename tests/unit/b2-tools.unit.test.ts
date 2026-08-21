@@ -16,6 +16,7 @@ import { B2AuthManager } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { logger } from "../../src/utils/logger";
+import { DEFAULT_BOUNDED_WORKER_CONCURRENCY } from "../../src/utils/concurrency";
 import { secretSinkFileOpsForTests } from "../../src/utils/secret-sink";
 import { LOGGER_SECRET_REDACTION_PATHS } from "../../src/utils/secret-sanitizer";
 import type { McpServer } from "../../src/mcp";
@@ -665,6 +666,34 @@ describe("b2_list_buckets", () => {
     ]);
   });
 
+  it("filters returned buckets to the authorized scope before serialization", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(["listBuckets"]);
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, {
+          buckets: [
+            bucketInfoFixture("bucket-1", "scoped-bucket"),
+            bucketInfoFixture("victim-bucket-id", "prod-secrets"),
+          ],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(
+      await callTool(server, "b2_list_buckets", { bucketName: "scoped-bucket" }),
+    );
+
+    expect(result.buckets.map((bucket: { bucketName: string }) => bucket.bucketName)).toEqual([
+      "scoped-bucket",
+    ]);
+  });
+
   it("rejects out-of-scope bucketId before listing buckets", async () => {
     invalidateAuthManagerCache();
     const auth = scopedAuthorizeResponse(["listBuckets"]);
@@ -717,6 +746,44 @@ describe("b2_list_buckets", () => {
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
     ).toHaveLength(0);
+  });
+
+  it("caps native listBuckets concurrency for large bucket-scoped keys", async () => {
+    invalidateAuthManagerCache();
+    const buckets = Array.from({ length: DEFAULT_BOUNDED_WORKER_CONCURRENCY + 4 }, (_, index) => ({
+      id: `bucket-${index + 1}`,
+      name: `scoped-${index + 1}`,
+    }));
+    const auth = scopedAuthorizeResponse(["listBuckets"], buckets);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const transport = new RecordingTransport(async (request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        const requestedBucketId = typeof body.bucketId === "string" ? body.bucketId : "";
+        const bucket = buckets.find(({ id }) => id === requestedBucketId);
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        inFlight--;
+        return new StaticHttpResponse(200, {
+          buckets: bucket ? [bucketInfoFixture(bucket.id, bucket.name)] : [],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+
+    expect(result.buckets).toHaveLength(buckets.length);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(buckets.length);
+    expect(maxInFlight).toBeLessThanOrEqual(DEFAULT_BOUNDED_WORKER_CONCURRENCY);
   });
 
   it("returns buckets and supports bucketTypes filtering", async () => {
