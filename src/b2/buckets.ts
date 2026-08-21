@@ -532,7 +532,7 @@ export function registerBucketTools(
     "b2_list_buckets",
     {
       description:
-        "List B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket. Capped to `limit` buckets (default 100, max 1000) to keep the response small for accounts with many buckets; if more exist the result is truncated with total_bucket_count and a note — raise limit or filter to target specific buckets.",
+        "List B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. When the key is bucket-scoped and no bucketId/bucketName filter is supplied, requests are automatically narrowed to the authorized bucket IDs. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket. Capped to `limit` buckets (default 100, max 1000) to keep the response small for accounts with many buckets; if more exist the result is truncated with total_bucket_count and a note — raise limit or filter to target specific buckets.",
       inputSchema: {
         bucketId: z.string().optional().describe("Filter to a specific bucket by its ID"),
         bucketName: z.string().optional().describe("Filter to a specific bucket by its name"),

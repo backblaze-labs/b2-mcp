@@ -89,6 +89,36 @@ export function authorizeResponse(capabilities: string[] = []) {
   };
 }
 
+export interface AuthorizedBucketFixture {
+  id: string;
+  name: string | null;
+}
+
+export function scopedAuthorizeResponse(
+  capabilities: string[] = [],
+  buckets: AuthorizedBucketFixture[] = [{ id: "bucket-1", name: "scoped-bucket" }],
+) {
+  const base = authorizeResponse(capabilities);
+  const singleBucket = buckets.length === 1 ? (buckets[0] ?? null) : null;
+  return {
+    ...base,
+    apiInfo: {
+      ...base.apiInfo,
+      storageApi: {
+        ...base.apiInfo.storageApi,
+        bucketId: singleBucket?.id ?? null,
+        bucketName: singleBucket?.name ?? null,
+        allowed: {
+          ...base.apiInfo.storageApi.allowed,
+          buckets,
+          bucketId: singleBucket?.id ?? null,
+          bucketName: singleBucket?.name ?? null,
+        },
+      },
+    },
+  };
+}
+
 export function installSdkTransport(
   transport: HttpTransport,
   retry: Partial<RetryOptions> = {

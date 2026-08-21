@@ -16,6 +16,7 @@ import { B2AuthManager } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { logger } from "../../src/utils/logger";
+import { DEFAULT_BOUNDED_WORKER_CONCURRENCY } from "../../src/utils/concurrency";
 import { secretSinkFileOpsForTests } from "../../src/utils/secret-sink";
 import { LOGGER_SECRET_REDACTION_PATHS } from "../../src/utils/secret-sanitizer";
 import type { McpServer } from "../../src/mcp";
@@ -26,6 +27,7 @@ import {
   installSdkTransport,
   RecordingTransport,
   requestJson,
+  scopedAuthorizeResponse,
   StaticHttpResponse,
 } from "../support/sdk-test-helpers";
 
@@ -82,6 +84,20 @@ async function createBucket(
   options: Record<string, unknown> = {},
 ) {
   return seed.createBucket({ bucketName: name, bucketType, ...options } as never);
+}
+
+function bucketInfoFixture(bucketId: string, bucketName: string, bucketType = "allPrivate") {
+  return {
+    accountId: "test-account-123",
+    bucketId,
+    bucketName,
+    bucketType,
+    bucketInfo: {},
+    corsRules: [],
+    lifecycleRules: [],
+    revision: 1,
+    options: [],
+  };
 }
 
 async function usePartnerSimulator() {
@@ -195,10 +211,7 @@ describe("B2Client S3 version guard", () => {
 
   it("uses authorize bucket scope for version binding without listBuckets", async () => {
     invalidateAuthManagerCache();
-    const auth = authorizeResponse(["readFiles"]) as any;
-    auth.apiInfo.storageApi.allowed.buckets = [{ id: "bucket-1", name: "scoped-bucket" }];
-    auth.apiInfo.storageApi.allowed.bucketId = "bucket-1";
-    auth.apiInfo.storageApi.allowed.bucketName = "scoped-bucket";
+    const auth = scopedAuthorizeResponse(["readFiles"]);
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
       if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
@@ -242,10 +255,7 @@ describe("B2Client S3 version guard", () => {
 
   it("does not trust unnamed authorize bucket scope for version binding", async () => {
     invalidateAuthManagerCache();
-    const auth = authorizeResponse(["readFiles"]) as any;
-    auth.apiInfo.storageApi.allowed.buckets = [{ id: "bucket-1", name: null }];
-    auth.apiInfo.storageApi.allowed.bucketId = "bucket-1";
-    auth.apiInfo.storageApi.allowed.bucketName = null;
+    const auth = scopedAuthorizeResponse(["readFiles"], [{ id: "bucket-1", name: null }]);
     const transport = new RecordingTransport((request) => {
       const endpoint = b2EndpointName(request);
       if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
@@ -507,6 +517,325 @@ describe("SDK 401 re-auth-and-retry", () => {
 });
 
 describe("b2_list_buckets", () => {
+  it("uses the single authorized bucket scope when no bucket filter is supplied", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(["listBuckets"]);
+    const logSpy = vi.spyOn(logger, "debug").mockImplementation(() => undefined as never);
+    const listBucketBodies: Record<string, unknown>[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        listBucketBodies.push(body);
+        if (body.bucketId !== "bucket-1") {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "unauthorized",
+            message: "",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          buckets: [bucketInfoFixture("bucket-1", "scoped-bucket")],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0].bucketName).toBe("scoped-bucket");
+    expect(listBucketBodies).toEqual([
+      expect.objectContaining({ accountId: "test-account-123", bucketId: "bucket-1" }),
+    ]);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucketCount: 1,
+        bucketIds: ["bucket-1"],
+        tool: "b2_list_buckets",
+      }),
+      "b2.list_buckets.auto_scoped",
+    );
+  });
+
+  it("fans out multi-bucket authorized scope when no bucket filter is supplied", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(
+      ["listBuckets"],
+      [
+        { id: "bucket-1", name: "scoped-one" },
+        { id: "bucket-2", name: "scoped-two" },
+      ],
+    );
+    const bucketNames = new Map([
+      ["bucket-1", "scoped-one"],
+      ["bucket-2", "scoped-two"],
+    ]);
+    const listBucketBodies: Record<string, unknown>[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        listBucketBodies.push(body);
+        const requestedBucketId = typeof body.bucketId === "string" ? body.bucketId : "";
+        const bucketName = bucketNames.get(requestedBucketId);
+        if (!bucketName) {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "unauthorized",
+            message: "",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          buckets: [bucketInfoFixture(requestedBucketId, bucketName)],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+
+    expect(result.buckets.map((bucket: { bucketName: string }) => bucket.bucketName)).toEqual([
+      "scoped-one",
+      "scoped-two",
+    ]);
+    expect(listBucketBodies).toEqual([
+      expect.objectContaining({ accountId: "test-account-123", bucketId: "bucket-1" }),
+      expect.objectContaining({ accountId: "test-account-123", bucketId: "bucket-2" }),
+    ]);
+  });
+
+  it("allows explicit filters that match the authorized bucket scope", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(
+      ["listBuckets"],
+      [
+        { id: "bucket-1", name: "scoped-one" },
+        { id: "bucket-2", name: "scoped-two" },
+      ],
+    );
+    const bucketNames = new Map([
+      ["bucket-1", "scoped-one"],
+      ["bucket-2", "scoped-two"],
+    ]);
+    const listBucketBodies: Record<string, unknown>[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        listBucketBodies.push(body);
+        const requestedBucketId = typeof body.bucketId === "string" ? body.bucketId : "";
+        const bucketName = bucketNames.get(requestedBucketId);
+        if (!bucketName) {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "unauthorized",
+            message: "",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          buckets: [bucketInfoFixture(requestedBucketId, bucketName)],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const byId = parseResult(await callTool(server, "b2_list_buckets", { bucketId: "bucket-2" }));
+    const byName = parseResult(
+      await callTool(server, "b2_list_buckets", { bucketName: "scoped-one" }),
+    );
+
+    expect(byId.buckets[0].bucketName).toBe("scoped-two");
+    expect(byName.buckets[0].bucketName).toBe("scoped-one");
+    expect(listBucketBodies).toEqual([
+      expect.objectContaining({ accountId: "test-account-123", bucketId: "bucket-2" }),
+      expect.objectContaining({
+        accountId: "test-account-123",
+        bucketId: "bucket-1",
+        bucketName: "scoped-one",
+      }),
+    ]);
+  });
+
+  it("filters returned buckets to the authorized scope before serialization", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(["listBuckets"]);
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, {
+          buckets: [
+            bucketInfoFixture("bucket-1", "scoped-bucket"),
+            bucketInfoFixture("victim-bucket-id", "prod-secrets"),
+          ],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(
+      await callTool(server, "b2_list_buckets", { bucketName: "scoped-bucket" }),
+    );
+
+    expect(result.buckets.map((bucket: { bucketName: string }) => bucket.bucketName)).toEqual([
+      "scoped-bucket",
+    ]);
+  });
+
+  it("rejects out-of-scope bucketId before listing buckets", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(["listBuckets"]);
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(500, {
+          status: 500,
+          code: "unexpected",
+          message: "listBuckets should not be called",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_list_buckets", { bucketId: "victim-bucket-id" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("outside the authorized bucket scope");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(0);
+  });
+
+  it("rejects out-of-scope bucketName before listing buckets", async () => {
+    invalidateAuthManagerCache();
+    const auth = scopedAuthorizeResponse(["listBuckets"]);
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(500, {
+          status: 500,
+          code: "unexpected",
+          message: "listBuckets should not be called",
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_list_buckets", { bucketName: "victim-bucket" });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("outside the authorized bucket scope");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(0);
+  });
+
+  it("caps native listBuckets concurrency for large bucket-scoped keys", async () => {
+    invalidateAuthManagerCache();
+    const buckets = Array.from({ length: DEFAULT_BOUNDED_WORKER_CONCURRENCY + 4 }, (_, index) => ({
+      id: `bucket-${index + 1}`,
+      name: `scoped-${index + 1}`,
+    }));
+    const auth = scopedAuthorizeResponse(["listBuckets"], buckets);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const transport = new RecordingTransport(async (request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        const requestedBucketId = typeof body.bucketId === "string" ? body.bucketId : "";
+        const bucket = buckets.find(({ id }) => id === requestedBucketId);
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        inFlight--;
+        return new StaticHttpResponse(200, {
+          buckets: bucket ? [bucketInfoFixture(bucket.id, bucket.name)] : [],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+
+    expect(result.buckets).toHaveLength(buckets.length);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
+    ).toHaveLength(buckets.length);
+    expect(maxInFlight).toBeLessThanOrEqual(DEFAULT_BOUNDED_WORKER_CONCURRENCY);
+  });
+
+  it("drains failed listBuckets fan-out before unauthorized retry", async () => {
+    invalidateAuthManagerCache();
+    const buckets = Array.from({ length: DEFAULT_BOUNDED_WORKER_CONCURRENCY + 4 }, (_, index) => ({
+      id: `bucket-${index + 1}`,
+      name: `scoped-${index + 1}`,
+    }));
+    const auth = scopedAuthorizeResponse(["listBuckets"], buckets);
+    let authorizeCalls = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let listCalls = 0;
+    const transport = new RecordingTransport(async (request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCalls++;
+        return new StaticHttpResponse(200, auth);
+      }
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        inFlight++;
+        listCalls++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          if (body.bucketId === "bucket-1") {
+            return new StaticHttpResponse(401, {
+              status: 401,
+              code: "expired_auth_token",
+              message: "expired",
+            });
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return new StaticHttpResponse(200, { buckets: [] });
+        } finally {
+          inFlight--;
+        }
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_list_buckets", {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(result.isError).toBe(true);
+    expect(authorizeCalls).toBe(2);
+    expect(listCalls).toBe(DEFAULT_BOUNDED_WORKER_CONCURRENCY * 2);
+    expect(maxInFlight).toBeLessThanOrEqual(DEFAULT_BOUNDED_WORKER_CONCURRENCY);
+  });
+
   it("returns buckets and supports bucketTypes filtering", async () => {
     await createBucket("private-bucket", BucketType.AllPrivate);
     await createBucket("public-bucket", BucketType.AllPublic);
