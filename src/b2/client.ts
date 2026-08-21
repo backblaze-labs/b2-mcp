@@ -683,6 +683,39 @@ function filterBucketsToAuthorizedScope(
   return buckets.filter((bucket) => authorizedBucketIds.has(String(bucket.bucketId)));
 }
 
+async function listBucketsBounded(
+  client: SdkB2Client,
+  auth: B2AuthResponse,
+  requests: readonly ListBucketsRequest[],
+  signal: AbortSignal | undefined,
+): Promise<readonly BucketInfo[]> {
+  const results: Array<readonly BucketInfo[] | undefined> = [];
+  let nextIndex = 0;
+  let firstError: unknown;
+  const workerCount = Math.min(DEFAULT_BOUNDED_WORKER_CONCURRENCY, requests.length);
+  const worker = async () => {
+    for (;;) {
+      if (firstError || signal?.aborted) return;
+      const index = nextIndex++;
+      if (index >= requests.length) return;
+      try {
+        const result = await client.raw.listBuckets(
+          auth.apiUrl,
+          auth.authorizationToken,
+          requests[index],
+        );
+        results[index] = result.buckets;
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  if (firstError) throw firstError;
+  if (signal?.aborted) throw abortReason(signal);
+  return results.flatMap((result) => result ?? []);
+}
+
 async function resolveTrustedBucketId(
   client: SdkB2Client,
   auth: B2AuthResponse,
@@ -996,23 +1029,8 @@ export class B2Client {
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
     const buckets = await this.withNativeCircuit(async (client, auth) => {
       const requests = toBucketFilters(auth, options);
-      const results: Array<readonly BucketInfo[] | undefined> = [];
-      await forEachBounded(
-        requests,
-        { maxConcurrency: DEFAULT_BOUNDED_WORKER_CONCURRENCY, signal: currentMcpRequestSignal() },
-        async (request, index) => {
-          const result = await client.raw.listBuckets(
-            auth.apiUrl,
-            auth.authorizationToken,
-            request,
-          );
-          results[index] = result.buckets;
-        },
-      );
-      return filterBucketsToAuthorizedScope(
-        auth,
-        results.flatMap((result) => result ?? []),
-      );
+      const results = await listBucketsBounded(client, auth, requests, currentMcpRequestSignal());
+      return filterBucketsToAuthorizedScope(auth, results);
     });
     return { buckets: buckets.map(toBucketInfoResult) };
   }

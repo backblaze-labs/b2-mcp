@@ -786,6 +786,56 @@ describe("b2_list_buckets", () => {
     expect(maxInFlight).toBeLessThanOrEqual(DEFAULT_BOUNDED_WORKER_CONCURRENCY);
   });
 
+  it("drains failed listBuckets fan-out before unauthorized retry", async () => {
+    invalidateAuthManagerCache();
+    const buckets = Array.from({ length: DEFAULT_BOUNDED_WORKER_CONCURRENCY + 4 }, (_, index) => ({
+      id: `bucket-${index + 1}`,
+      name: `scoped-${index + 1}`,
+    }));
+    const auth = scopedAuthorizeResponse(["listBuckets"], buckets);
+    let authorizeCalls = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let listCalls = 0;
+    const transport = new RecordingTransport(async (request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") {
+        authorizeCalls++;
+        return new StaticHttpResponse(200, auth);
+      }
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        inFlight++;
+        listCalls++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        try {
+          if (body.bucketId === "bucket-1") {
+            return new StaticHttpResponse(401, {
+              status: 401,
+              code: "expired_auth_token",
+              message: "expired",
+            });
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return new StaticHttpResponse(200, { buckets: [] });
+        } finally {
+          inFlight--;
+        }
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = await callTool(server, "b2_list_buckets", {});
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    expect(result.isError).toBe(true);
+    expect(authorizeCalls).toBe(2);
+    expect(listCalls).toBe(DEFAULT_BOUNDED_WORKER_CONCURRENCY * 2);
+    expect(maxInFlight).toBeLessThanOrEqual(DEFAULT_BOUNDED_WORKER_CONCURRENCY);
+  });
+
   it("returns buckets and supports bucketTypes filtering", async () => {
     await createBucket("private-bucket", BucketType.AllPrivate);
     await createBucket("public-bucket", BucketType.AllPublic);
