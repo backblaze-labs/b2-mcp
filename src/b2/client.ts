@@ -653,7 +653,7 @@ function scopedBucketIds(
   const fail = (kind: string, value: string): never => {
     throw Object.assign(
       new Error(`b2_list_buckets ${kind} '${value}' is outside the authorized bucket scope.`),
-      { status: 403, code: "unauthorized" },
+      { status: 403, code: "forbidden" },
     );
   };
   const byId = id ? buckets.find((bucket) => bucket.id === id) || fail("bucketId", id) : null;
