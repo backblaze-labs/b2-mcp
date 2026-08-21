@@ -108,6 +108,7 @@ describe("test layer naming", () => {
         !/^tests\/unit\/.+\.unit\.test\.ts$/.test(path) &&
         !/^tests\/contract\/.+\.contract\.test\.ts$/.test(path) &&
         !/^tests\/protocol\/.+\.(modern|legacy)-protocol\.test\.ts$/.test(path) &&
+        !/^tests\/runtime-security\/.+\.runtime-security\.test\.ts$/.test(path) &&
         !/^tests\/slow\/.+\.slow\.test\.ts$/.test(path) &&
         !/^tests\/package\/.+\.package\.test\.ts$/.test(path) &&
         !/^tests\/live\/.+\.(integration|contract)\.live\.test\.ts$/.test(path) &&
