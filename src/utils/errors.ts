@@ -23,7 +23,11 @@ export interface B2ApiError {
   extendedRequestId?: string;
 }
 
-/** Throw a normalized HTTP 400 bad_request client-input error. */
+/**
+ * Throw HTTP 400 bad_request.
+ *
+ * @throws A normalized B2 API error object.
+ */
 export function badRequest(message: string): never {
   throw { status: 400, code: "bad_request", message } satisfies B2ApiError;
 }

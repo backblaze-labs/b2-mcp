@@ -375,7 +375,7 @@ function normalizedMediaType(contentType: string | undefined): string | null {
   return mediaType ? mediaType : null;
 }
 
-// Keep local to avoid adding a runtime errors.ts import to the Worker S3 adapter bundle.
+// Local to keep the Worker S3 bundle under budget.
 function badRequest(message: string): never {
   throw { status: 400, code: "bad_request", message };
 }
