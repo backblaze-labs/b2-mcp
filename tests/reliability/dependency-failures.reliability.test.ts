@@ -124,6 +124,18 @@ async function waitForB2Requests(
   expect(transport.requestsFor(endpoint)).toHaveLength(count);
 }
 
+async function waitForS3HandlerCalls(
+  handle: ReturnType<typeof vi.fn>,
+  count: number,
+): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    await vi.advanceTimersByTimeAsync(0);
+    if (handle.mock.calls.length >= count) return;
+    await Promise.resolve();
+  }
+  expect(handle).toHaveBeenCalledTimes(count);
+}
+
 function s3ClientWithHandler(
   handle: ReturnType<typeof vi.fn>,
   options: { maxAttempts?: number } = {},
@@ -144,6 +156,20 @@ function s3ClientWithHandler(
       },
     } as any,
   });
+}
+
+function s3XmlErrorResponse(status: number, code: string, message: string) {
+  const body = `<Error><Code>${code}</Code><Message>${message}</Message></Error>`;
+  return {
+    response: {
+      statusCode: status,
+      headers: {
+        "content-type": "application/xml",
+        "x-amz-request-id": `${code}-request`,
+      },
+      body: Readable.from([body]),
+    },
+  };
 }
 
 const oauthJwksConfig = {
@@ -251,50 +277,69 @@ describe("deterministic dependency failure and recovery suite", () => {
   it.each([
     {
       name: "429",
-      operation: "headBucket",
-      tool: "s3_head_bucket",
-      args: { bucket: "reliability-bucket" },
-      error: s3ServiceError("SlowDown", "S3 rate limited", 429),
+      reply: () => s3XmlErrorResponse(429, "SlowDown", "S3 rate limited"),
       expected: { status: 429, code: "SlowDown" },
       message: /rate limited/i,
+      retryDelaysMs: [250, 500],
     },
     {
       name: "500",
-      operation: "headBucket",
-      tool: "s3_head_bucket",
-      args: { bucket: "reliability-bucket" },
-      error: s3ServiceError("InternalError", "S3 unavailable", 500),
+      reply: () => s3XmlErrorResponse(500, "InternalError", "S3 unavailable"),
       expected: { status: 500, code: "InternalError" },
       message: /unavailable/i,
+      retryDelaysMs: [50, 100],
     },
     {
       name: "timeout",
-      operation: "headBucket",
-      tool: "s3_head_bucket",
-      args: { bucket: "reliability-bucket" },
-      error: timeoutFailure(),
-      expected: { status: 500, code: "internal_error" },
+      reply: () => {
+        throw timeoutFailure();
+      },
+      expected: { status: 500, code: "TimeoutError" },
       message: /timed out/i,
+      retryDelaysMs: [50, 100],
     },
     {
       name: "connection reset",
-      operation: "headBucket",
-      tool: "s3_head_bucket",
-      args: { bucket: "reliability-bucket" },
-      error: connectionResetFailure(),
+      reply: () => {
+        throw Object.assign(connectionResetFailure(), { name: "ECONNRESET" });
+      },
       expected: { status: 500, code: "ECONNRESET" },
       message: /ECONNRESET/i,
+      retryDelaysMs: [50, 100],
     },
-  ])("returns controlled MCP errors for S3 $name failures", async (testCase) => {
-    const s3 = new DeterministicS3ClientFake().fail(testCase.operation, testCase.error);
-    const tools = registerS3Harness(s3);
+  ])(
+    "bounds adapter retries and returns controlled MCP errors for S3 $name failures",
+    async (testCase) => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, "random").mockReturnValue(0.5);
+      const handle = vi.fn(async () => testCase.reply());
+      const s3 = s3ClientWithHandler(handle, { maxAttempts: 3 });
+      const tools = new ToolHarness();
+      registerS3BucketTools(tools, s3, reliabilityConfig);
 
-    const result = await tools.call(testCase.tool, testCase.args);
+      try {
+        const pending = tools.call("s3_head_bucket", { bucket: "reliability-bucket" });
+        await waitForS3HandlerCalls(handle, 1);
+        expect(handle).toHaveBeenCalledTimes(1);
 
-    const text = expectMcpError(result, testCase.expected);
-    expect(text).toMatch(testCase.message);
-    expect(s3.requestsFor(testCase.operation)).toHaveLength(1);
-  });
+        await vi.advanceTimersByTimeAsync(testCase.retryDelaysMs[0] - 1);
+        expect(handle).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await waitForS3HandlerCalls(handle, 2);
+
+        await vi.advanceTimersByTimeAsync(testCase.retryDelaysMs[1] - 1);
+        expect(handle).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(1);
+        await waitForS3HandlerCalls(handle, 3);
+
+        const text = expectMcpError(await pending, testCase.expected);
+        expect(text).toMatch(testCase.message);
+        expect(handle).toHaveBeenCalledTimes(3);
+      } finally {
+        s3.destroy();
+      }
+    },
+  );
 
   it("returns a controlled MCP error for malformed S3 object metadata", async () => {
     const s3 = new DeterministicS3ClientFake().respond("getObject", {
