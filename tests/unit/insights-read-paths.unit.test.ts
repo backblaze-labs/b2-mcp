@@ -46,6 +46,7 @@ type NativeInsightClient = Pick<
 
 type NativeClientOptions = {
   buckets?: BucketInfoResult[];
+  listBucketsError?: Error;
   filePages?: Array<ListFileNamesResult | Error>;
   uploadPages?: Array<ListUnfinishedLargeFilesResult | Error>;
   partPagesByFileId?: Record<string, Array<ListPartsResult | Error>>;
@@ -122,11 +123,10 @@ function createNativeClient(options: NativeClientOptions) {
     partPagesByFileId[fileId] = [...pages];
   }
   return {
-    listBuckets: vi.fn(
-      async (_input: BucketFilters = {}): Promise<ListBucketsResult> => ({
-        buckets: options.buckets ?? [bucket],
-      }),
-    ),
+    listBuckets: vi.fn(async (_input: BucketFilters = {}): Promise<ListBucketsResult> => {
+      if (options.listBucketsError) throw options.listBucketsError;
+      return { buckets: options.buckets ?? [bucket] };
+    }),
     listFileNames: vi.fn(async (_input: ListFileNamesOptions): Promise<ListFileNamesResult> => {
       const reply = filePages.shift() ?? { files: [], nextFileName: null };
       if (reply instanceof Error) throw reply;
@@ -153,12 +153,13 @@ function createNativeClient(options: NativeClientOptions) {
 function registerTools(
   reportClient: ReportObjectClient,
   nativeClient: NativeInsightClient = createNativeClient({}),
+  allowedBuckets?: Array<{ id: string; name: string | null }> | null,
 ) {
   const harness = new ToolHarness();
   registerInsightTools(
     harness,
     nativeClient as B2Client,
-    { getAuth: async () => ({ accountId: "test-account" }) } as Parameters<
+    { getAuth: async () => ({ accountId: "test-account", allowedBuckets }) } as Parameters<
       typeof registerInsightTools
     >[2],
     reportClient,
@@ -414,6 +415,65 @@ describe("insight native bucket read paths", () => {
 
     expect(result.error).toBe("bucket_not_uniquely_resolved");
     expect(result.candidates).toEqual(["logs-alpha", "logs-beta"]);
+  });
+
+  it("resolves a bucket-scoped key from its authorized scope without listBuckets", async () => {
+    // A bucket-scoped key cannot call the unfiltered listBuckets() — B2 answers
+    // 401 — so the tool must resolve from the authorize response's allowedBuckets.
+    const nativeClient = createNativeClient({
+      listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
+      filePages: [{ files: [file("raw/a.bin", 10 * GB)], nextFileName: null }],
+    });
+    const tools = registerTools(createPagedReportClient({}).client, nativeClient, [
+      { id: "bucket-1", name: "photos" },
+    ]);
+
+    const result = parseResult(
+      await tools.call("b2_largest_files", { bucket: "photos", limit: 5, max_scan: 1000 }),
+    );
+
+    expect(result).toMatchObject({ bucket: "photos", returned: 1, truncated: false });
+    expect(nativeClient.listBuckets).not.toHaveBeenCalled();
+    expect(nativeClient.listFileNames).toHaveBeenCalledWith(
+      expect.objectContaining({ bucketId: "bucket-1" }),
+    );
+  });
+
+  it("resolves a scoped bucket by bucketId even when its name is unknown", async () => {
+    const nativeClient = createNativeClient({
+      listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
+      uploadPages: [{ files: [], nextFileId: null }],
+    });
+    const tools = registerTools(createPagedReportClient({}).client, nativeClient, [
+      { id: "bucket-1", name: null },
+    ]);
+
+    const result = parseResult(
+      await tools.call("b2_unfinished_uploads", { bucket: "bucket-1", max_uploads: 10 }),
+    );
+
+    expect(result).toMatchObject({ bucket: "bucket-1", unfinished_count: 0 });
+    expect(nativeClient.listBuckets).not.toHaveBeenCalled();
+    expect(nativeClient.listUnfinishedLargeFiles).toHaveBeenCalledWith(
+      expect.objectContaining({ bucketId: "bucket-1" }),
+    );
+  });
+
+  it("surfaces in-scope candidates when a scoped key requests an out-of-scope bucket", async () => {
+    const nativeClient = createNativeClient({
+      listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
+    });
+    const tools = registerTools(createPagedReportClient({}).client, nativeClient, [
+      { id: "bucket-1", name: "photos" },
+    ]);
+
+    const result = parseResult(
+      await tools.call("b2_largest_files", { bucket: "other-bucket", limit: 5, max_scan: 1000 }),
+    );
+
+    expect(result.error).toBe("bucket_not_uniquely_resolved");
+    expect(result.candidates).toEqual(["photos"]);
+    expect(nativeClient.listBuckets).not.toHaveBeenCalled();
   });
 
   it("returns an empty b2_largest_files result and passes the prefix filter", async () => {

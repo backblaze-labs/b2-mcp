@@ -685,11 +685,39 @@ export function computeSnapshotGrowth(
 
 // ── Phase 2 helpers ─────────────────────────────────────────────────────────
 
+/**
+ * Resolve the caller's authorized bucket scope directly from the authorize
+ * response. A bucket-scoped key cannot call the unfiltered `listBuckets()`
+ * (it lacks the `listBuckets` capability and B2 answers 401), yet the authorized
+ * bucket's id — and usually its name — is already present in `allowedBuckets`.
+ * Returns null when the key is unrestricted (no recorded scope), so the caller
+ * falls back to a live listing.
+ *
+ * @returns The resolved bucket, in-scope candidates, or null for unrestricted keys.
+ */
+async function resolveFromAuthorizedScope(
+  auth: B2AuthManager,
+  input: string,
+): Promise<{ name?: string; id?: string; candidates?: string[] } | null> {
+  const { allowedBuckets } = await auth.getAuth();
+  if (!allowedBuckets || allowedBuckets.length === 0) return null;
+  const exact = allowedBuckets.find((b) => b.name === input || b.id === input);
+  // A key restricted by name (not id) may report a null name; matched by id we
+  // still have a usable id and fall back to the supplied input for display.
+  if (exact) return { name: exact.name ?? input, id: exact.id };
+  // Restricted key whose scope excludes the requested bucket: surface the
+  // in-scope names as candidates rather than let an out-of-scope listing 401.
+  return { candidates: allowedBuckets.map((b) => b.name).filter((n): n is string => Boolean(n)) };
+}
+
 /** Resolve a bucket name/id pair from a name-or-bucketId input. */
 async function resolveBucketName(
   b2Client: B2Client,
+  auth: B2AuthManager,
   input: string,
 ): Promise<{ name?: string; id?: string; candidates?: string[] }> {
+  const scoped = await resolveFromAuthorizedScope(auth, input);
+  if (scoped) return scoped;
   const result = await b2Client.listBuckets();
   const buckets = result.buckets ?? [];
   const exact = buckets.find((b) => b.bucketName === input || b.bucketId === input);
@@ -990,7 +1018,7 @@ export function registerInsightTools(
     },
     async (args) => {
       try {
-        const resolved = await resolveBucketName(b2Client, args.bucket);
+        const resolved = await resolveBucketName(b2Client, auth, args.bucket);
         const resolutionError = bucketResolutionError(args.bucket, resolved);
         if (resolutionError) return toolJson(resolutionError);
         const resolvedBucketName = resolved.name!;
@@ -1114,7 +1142,7 @@ export function registerInsightTools(
     },
     async (args) => {
       try {
-        const resolved = await resolveBucketName(b2Client, args.bucket);
+        const resolved = await resolveBucketName(b2Client, auth, args.bucket);
         const resolutionError = bucketResolutionError(args.bucket, resolved);
         if (resolutionError) return toolJson(resolutionError);
         const resolvedBucketName = resolved.name!;
