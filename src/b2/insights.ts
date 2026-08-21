@@ -693,6 +693,18 @@ export function computeSnapshotGrowth(
  * Returns null when the key is unrestricted (no recorded scope), so the caller
  * falls back to a live listing.
  *
+ * Resolution reads the authorize scope cached by `B2AuthManager` (~23h TTL), so
+ * after a bucket rename a lookup by the new name can briefly miss (falling to the
+ * "no match" path) and a lookup by id can display the stale cached name. This is
+ * self-healing within the token TTL and never targets the wrong bucket — object
+ * operations always use the resolved `id`, which a rename does not change.
+ *
+ * Matching mirrors the unrestricted `resolveBucketName()` path exactly: an exact
+ * name/id hit, else a substring match against in-scope names. It never echoes the
+ * whole scope on a miss — on the `server`/`principal` HTTP modes the remote caller
+ * does not hold the key, so dumping every in-scope bucket name for an arbitrary
+ * bogus input would let them enumerate the credential's full bucket namespace.
+ *
  * @returns The resolved bucket, in-scope candidates, or null for unrestricted keys.
  */
 async function resolveFromAuthorizedScope(
@@ -705,9 +717,15 @@ async function resolveFromAuthorizedScope(
   // A key restricted by name (not id) may report a null name; matched by id we
   // still have a usable id and fall back to the supplied input for display.
   if (exact) return { name: exact.name ?? input, id: exact.id };
-  // Restricted key whose scope excludes the requested bucket: surface the
-  // in-scope names as candidates rather than let an out-of-scope listing 401.
-  return { candidates: allowedBuckets.map((b) => b.name).filter((n): n is string => Boolean(n)) };
+  // No exact hit: surface only in-scope names that partially match the input,
+  // never the full scope. A fully-unrelated input yields {} → "No bucket matches",
+  // matching the unrestricted path's 'no match' vs 'ambiguous match' distinction.
+  const subs = allowedBuckets.filter((b) => b.name?.includes(input));
+  if (subs.length === 1 && subs[0].name) return { name: subs[0].name, id: subs[0].id };
+  if (subs.length > 1) {
+    return { candidates: subs.map((b) => b.name).filter((n): n is string => Boolean(n)) };
+  }
+  return {};
 }
 
 /** Resolve a bucket name/id pair from a name-or-bucketId input. */

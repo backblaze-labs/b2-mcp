@@ -459,20 +459,49 @@ describe("insight native bucket read paths", () => {
     );
   });
 
-  it("surfaces in-scope candidates when a scoped key requests an out-of-scope bucket", async () => {
+  it("does not enumerate the key's scope when a scoped key requests an unrelated bucket", async () => {
+    // A bogus, fully-unrelated name must NOT echo the credential's whole bucket
+    // scope back — that would let a server/principal HTTP caller enumerate every
+    // in-scope bucket with one request. Expect a plain "no match", no candidates.
     const nativeClient = createNativeClient({
       listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
     });
     const tools = registerTools(createPagedReportClient({}).client, nativeClient, [
       { id: "bucket-1", name: "photos" },
+      { id: "bucket-2", name: "invoices" },
     ]);
 
     const result = parseResult(
-      await tools.call("b2_largest_files", { bucket: "other-bucket", limit: 5, max_scan: 1000 }),
+      await tools.call("b2_largest_files", {
+        bucket: "zzz-does-not-exist",
+        limit: 5,
+        max_scan: 1000,
+      }),
     );
 
     expect(result.error).toBe("bucket_not_uniquely_resolved");
-    expect(result.candidates).toEqual(["photos"]);
+    expect(result.candidates).toEqual([]);
+    expect(result.note).toBe("No bucket matches 'zzz-does-not-exist'.");
+    expect(nativeClient.listBuckets).not.toHaveBeenCalled();
+  });
+
+  it("surfaces only partially-matching in-scope names for an ambiguous scoped input", async () => {
+    const nativeClient = createNativeClient({
+      listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
+    });
+    const tools = registerTools(createPagedReportClient({}).client, nativeClient, [
+      { id: "logs-a", name: "logs-alpha" },
+      { id: "logs-b", name: "logs-beta" },
+      { id: "photos-1", name: "photos" },
+    ]);
+
+    const result = parseResult(
+      await tools.call("b2_largest_files", { bucket: "logs", limit: 5, max_scan: 1000 }),
+    );
+
+    expect(result.error).toBe("bucket_not_uniquely_resolved");
+    expect(result.candidates).toEqual(["logs-alpha", "logs-beta"]);
+    expect(result.note).toBe("Multiple buckets match; pass an exact name or bucketId.");
     expect(nativeClient.listBuckets).not.toHaveBeenCalled();
   });
 
