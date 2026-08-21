@@ -41,7 +41,8 @@ Use `deploy/cloudflare-worker/wrangler.jsonc`. It pins
 budget, and lists the required encrypted secrets in comments. This Worker
 source is a repo-checkout deployment template, not a published npm package
 entrypoint; run Wrangler from a checkout with repository dependencies
-installed. Review the file before deploying:
+installed. The checked-in vars set `B2_HTTP_CREDENTIAL_MODE=server` and
+`B2_ALLOW_LOCAL_FILES=false`. Review the file before deploying:
 
 ```bash
 cd deploy/cloudflare-worker
