@@ -121,21 +121,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Verify trusted live-test checkout
+      - name: Check out trusted live-test commit
         env:
           EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
+          git checkout --detach "${EXPECTED_CHECKOUT_SHA}"
           actual_sha="$(git rev-parse HEAD)"
-          if [[ "${EVENT_NAME}" == "workflow_call" ]]; then
-            if ! git merge-base --is-ancestor "${EXPECTED_CHECKOUT_SHA}" HEAD; then
-              echo "::error::live B2 checkout ${actual_sha} does not contain expected ${EXPECTED_CHECKOUT_SHA}"
-              exit 1
-            fi
-            exit 0
-          fi
           if [[ "${actual_sha}" != "${EXPECTED_CHECKOUT_SHA}" ]]; then
             echo "::error::live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}"
             exit 1
@@ -233,21 +227,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
+          fetch-depth: 0
           persist-credentials: false
-      - name: Verify trusted live-test checkout
+      - name: Check out trusted live-test commit
         env:
           EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
+          git checkout --detach "${EXPECTED_CHECKOUT_SHA}"
           actual_sha="$(git rev-parse HEAD)"
-          if [[ "${EVENT_NAME}" == "workflow_call" ]]; then
-            if ! git merge-base --is-ancestor "${EXPECTED_CHECKOUT_SHA}" HEAD; then
-              echo "::error::live B2 checkout ${actual_sha} does not contain expected ${EXPECTED_CHECKOUT_SHA}"
-              exit 1
-            fi
-            exit 0
-          fi
           if [[ "${actual_sha}" != "${EXPECTED_CHECKOUT_SHA}" ]]; then
             echo "::error::live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}"
             exit 1
@@ -326,6 +314,13 @@ jobs:
       - name: Publish live B2 isolation and cleanup evidence
         if: always()
         env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
+          B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
           B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
           B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}

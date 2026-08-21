@@ -231,13 +231,11 @@ describe("live secret workflow policy", () => {
         expect(text).toContain(
           "ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}",
         );
-        expect(text).toContain("Verify trusted live-test checkout");
+        expect(text).toContain("fetch-depth: 0");
+        expect(text).toContain("Check out trusted live-test commit");
         expect(text).toContain("EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}");
-        expect(text).toContain("EVENT_NAME: ${{ github.event_name }}");
+        expect(text).toContain('git checkout --detach "${EXPECTED_CHECKOUT_SHA}"');
         expect(text).toContain('actual_sha="$(git rev-parse HEAD)"');
-        expect(text).toContain(
-          "live B2 checkout ${actual_sha} does not contain expected ${EXPECTED_CHECKOUT_SHA}",
-        );
         expect(text).toContain(
           "live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}",
         );
@@ -409,6 +407,14 @@ describe("live secret workflow policy", () => {
       "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
     );
     expect(finalizer).toContain("--validation-summary");
+    expect(finalizer).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
+    expect(finalizer).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
+    expect(finalizer).toContain("B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}");
+    expect(finalizer).toContain("B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}");
+    expect(finalizer).toContain("B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}");
+    expect(finalizer).toContain(
+      "B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}",
+    );
     expect(finalizer).toContain("reports/live-b2/validation-node-${{ matrix.node-version }}.json");
     expect(finalizer).toContain('--preflight-outcome "${{ steps.matrix_validation.outcome }}"');
     expect(finalFallback).toContain("live B2 final evidence fallback");
