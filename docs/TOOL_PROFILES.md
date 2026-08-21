@@ -9,6 +9,7 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `full` | 40 | 21 | 19 | 0 | `023b2a4c819f` |
+| `live-b2-contract` | 39 | 20 | 19 | 0 | `4d5c97ef2a70` |
 | `phase1-default` | 37 | 18 | 19 | 0 | `11be52cf8f07` |
 | `read-only` | 20 | 11 | 9 | 0 | `23a707ac7b59` |
 
@@ -36,6 +37,85 @@ Profile hash: `023b2a4c819f53a8ecbf3a0daca9d65a3d361bb0b0c8a81cd8afa3945d9c09fe`
 - `b2_create_key`
 - `b2_delete_bucket`
 - `b2_delete_key`
+- `b2_egress_leaders`
+- `b2_eject_group_member`
+- `b2_get_bucket_notification_rules`
+- `b2_largest_files`
+- `b2_list_buckets`
+- `b2_list_group_members`
+- `b2_list_groups`
+- `b2_list_keys`
+- `b2_reserve_trial_create_account`
+- `b2_set_bucket_notification_rules`
+- `b2_unfinished_uploads`
+- `b2_update_bucket`
+- `b2_update_file_legal_hold`
+- `b2_update_file_retention`
+- `b2_usage_growth`
+
+### `s3_*` Tools (19)
+
+- `s3_abort_multipart_upload`
+- `s3_complete_multipart_upload`
+- `s3_copy_object`
+- `s3_create_multipart_upload`
+- `s3_delete_object`
+- `s3_delete_objects`
+- `s3_get_bucket_location`
+- `s3_get_object`
+- `s3_get_presigned_url`
+- `s3_head_bucket`
+- `s3_head_object`
+- `s3_list_multipart_uploads`
+- `s3_list_object_versions`
+- `s3_list_objects_v2`
+- `s3_list_parts`
+- `s3_presign_upload_part`
+- `s3_put_bucket_lifecycle`
+- `s3_put_object`
+- `s3_upload_part_copy`
+
+## `live-b2-contract`
+
+Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
+
+Profile hash: `4d5c97ef2a70f3c45c5084dd9054b59e685b178d9240c177bac2162c1d967136`
+
+### Capability Input
+
+- `bypassGovernance`
+- `deleteBuckets`
+- `deleteFiles`
+- `listBuckets`
+- `listFiles`
+- `listKeys`
+- `readBucketEncryption`
+- `readBucketRetentions`
+- `readBuckets`
+- `readFileLegalHolds`
+- `readFileRetentions`
+- `readFiles`
+- `writeBucketEncryption`
+- `writeBucketNotifications`
+- `writeBucketRetentions`
+- `writeBuckets`
+- `writeFileLegalHolds`
+- `writeFileRetentions`
+- `writeFiles`
+
+### Backing Categories
+
+- Native B2 SDK: 16
+- AWS S3 SDK: 19
+- Neither SDK: 4
+
+### `b2_*` Tools (20)
+
+- `b2_authorize_account`
+- `b2_create_bucket`
+- `b2_create_group_member`
+- `b2_create_key`
+- `b2_delete_bucket`
 - `b2_egress_leaders`
 - `b2_eject_group_member`
 - `b2_get_bucket_notification_rules`

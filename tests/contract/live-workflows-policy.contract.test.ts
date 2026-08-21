@@ -356,6 +356,11 @@ describe("live secret workflow policy", () => {
     const matrixValidation = workflowStepBlock(workflow, "Validate live B2 matrix leg");
     const liveTests = workflowStepBlock(workflow, "Run live B2 contract and integration suites");
     const finalizer = workflowStepBlock(workflow, "Publish live B2 isolation and cleanup evidence");
+    const preflightFallback = workflowStepBlock(
+      workflow,
+      "Ensure live B2 preflight evidence exists",
+    );
+    const finalFallback = workflowStepBlock(workflow, "Ensure live B2 final evidence exists");
 
     expect(preflightJob).toContain("name: live B2 preflight");
     expect(preflightJob).toContain("needs: guard");
@@ -364,7 +369,11 @@ describe("live secret workflow policy", () => {
       "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
     );
     expect(preflightJob).toContain("node scripts/live-b2-evidence.mjs preflight");
+    expect(preflightJob).toContain("B2_REGION: ${{ vars.B2_REGION }}");
     expect(preflightJob).toContain("live-b2-preflight-isolation-cleanup");
+    expect(preflightFallback).toContain("preflight did not reach live B2 validation");
+    expect(preflightFallback).toContain('status": "configuration blocked');
+    expect(preflightJob).toContain("if-no-files-found: error");
     expect(preflightJob).toContain("if: always()");
     expect(contractJob).toContain("needs: [guard, preflight]");
     expect(contractJob).toContain("needs.preflight.result == 'success'");
@@ -385,6 +394,10 @@ describe("live secret workflow policy", () => {
     expect(finalizer).toContain("--validation-summary");
     expect(finalizer).toContain("reports/live-b2/validation-node-${{ matrix.node-version }}.json");
     expect(finalizer).toContain('--preflight-outcome "${{ steps.matrix_validation.outcome }}"');
+    expect(finalFallback).toContain("live B2 final evidence fallback");
+    expect(finalFallback).toContain("configuration blocked");
+    expect(finalFallback).toContain("cleanup failure");
+    expect(finalFallback).toContain("product failure");
     expect(contractJob).toContain("live B2 matrix validation outcome was");
   });
 

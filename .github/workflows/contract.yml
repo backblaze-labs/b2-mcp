@@ -147,6 +147,40 @@ jobs:
           set -euo pipefail
           mkdir -p reports/live-b2
           node scripts/live-b2-evidence.mjs preflight --out reports/live-b2/preflight.json
+      - name: Ensure live B2 preflight evidence exists
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p reports/live-b2
+          if [[ -s reports/live-b2/preflight.json ]]; then
+            exit 0
+          fi
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > reports/live-b2/preflight.json <<JSON
+          {
+            "schemaVersion": 1,
+            "issue": {
+              "number": 194,
+              "url": "https://github.com/backblaze-labs/b2-mcp/issues/194",
+              "title": "[b2-mcp] Publish live B2 isolation and cleanup evidence"
+            },
+            "generatedAt": "${generated_at}",
+            "phase": "preflight",
+            "status": "configuration blocked",
+            "statusReason": "preflight did not reach live B2 validation",
+            "sensitivity": {
+              "secretSafe": true,
+              "omitted": [
+                "key IDs",
+                "application keys",
+                "authorization headers",
+                "account IDs",
+                "bucket IDs",
+                "raw bucket names"
+              ]
+            }
+          }
+          JSON
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload live B2 preflight evidence
         if: always()
@@ -154,7 +188,7 @@ jobs:
         with:
           name: live-b2-preflight-isolation-cleanup
           path: reports/live-b2/preflight.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   contract:
@@ -271,6 +305,55 @@ jobs:
             --preflight-outcome "${{ steps.matrix_validation.outcome }}" \
             --test-outcome "${{ steps.live_tests.outcome }}" \
             --cleanup-outcome "${{ steps.cleanup.outcome }}"
+      - name: Ensure live B2 final evidence exists
+        if: always()
+        run: |
+          set -euo pipefail
+          final_json="reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json"
+          mkdir -p reports/live-b2
+          if [[ -s "${final_json}" ]]; then
+            exit 0
+          fi
+          status="configuration blocked"
+          reason="live B2 final evidence fallback created before matrix validation completed"
+          if [[ "${{ steps.cleanup.outcome }}" != "success" && "${{ steps.cleanup.outcome }}" != "skipped" ]]; then
+            status="cleanup failure"
+            reason="live B2 final evidence fallback created after cleanup did not complete successfully"
+          elif [[ "${{ steps.live_tests.outcome }}" != "success" && "${{ steps.live_tests.outcome }}" != "skipped" ]]; then
+            status="product failure"
+            reason="live B2 final evidence fallback created after tests did not complete successfully"
+          fi
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > "${final_json}" <<JSON
+          {
+            "schemaVersion": 1,
+            "issue": {
+              "number": 194,
+              "url": "https://github.com/backblaze-labs/b2-mcp/issues/194",
+              "title": "[b2-mcp] Publish live B2 isolation and cleanup evidence"
+            },
+            "generatedAt": "${generated_at}",
+            "phase": "final",
+            "status": "${status}",
+            "statusReason": "${reason}",
+            "outcomes": {
+              "preflight": "${{ steps.matrix_validation.outcome }}",
+              "tests": "${{ steps.live_tests.outcome }}",
+              "cleanup": "${{ steps.cleanup.outcome }}"
+            },
+            "sensitivity": {
+              "secretSafe": true,
+              "omitted": [
+                "key IDs",
+                "application keys",
+                "authorization headers",
+                "account IDs",
+                "bucket IDs",
+                "raw bucket names"
+              ]
+            }
+          }
+          JSON
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload live B2 isolation and cleanup evidence
         if: always()

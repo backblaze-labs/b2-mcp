@@ -14,6 +14,27 @@ export const APPROVED_CACHE_SCOPE = "private";
 
 export const PROFILE_CAPABILITIES = {
   full: null,
+  "live-b2-contract": [
+    "bypassGovernance",
+    "deleteBuckets",
+    "deleteFiles",
+    "listBuckets",
+    "listFiles",
+    "listKeys",
+    "readBucketEncryption",
+    "readBucketRetentions",
+    "readBuckets",
+    "readFileLegalHolds",
+    "readFileRetentions",
+    "readFiles",
+    "writeBucketEncryption",
+    "writeBucketNotifications",
+    "writeBucketRetentions",
+    "writeBuckets",
+    "writeFileLegalHolds",
+    "writeFileRetentions",
+    "writeFiles",
+  ],
   "phase1-default": [
     "deleteBuckets",
     "deleteFiles",
@@ -212,6 +233,8 @@ export interface ToolFixtureFromCollectedOptions {
 
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
   full: "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
+  "live-b2-contract":
+    "Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.",
   "phase1-default":
     "Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.",
   "read-only":
@@ -231,6 +254,15 @@ export const CONTRACT_TEST_CONFIG: B2Config = {
   allowLocalFiles: true,
   fileRoot: null,
 };
+
+export function configForProfile(profile: ProfileName): B2Config {
+  if (profile !== "live-b2-contract") return CONTRACT_TEST_CONFIG;
+  return {
+    ...CONTRACT_TEST_CONFIG,
+    masterKeyId: "contract-master-key-id",
+    masterKey: "contract-master-key-secret",
+  };
+}
 
 export function capabilitiesForProfile(profile: ProfileName): string[] | null {
   const capabilities = PROFILE_CAPABILITIES[profile];

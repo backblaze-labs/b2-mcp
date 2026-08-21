@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { spawnSync } from "child_process";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -317,5 +318,42 @@ describe("live B2 evidence", () => {
         { expectedPrefix: "mcp-contract-run1" },
       ),
     ).toThrow(/finite non-negative integer/);
+  });
+
+  it("blocks preflight before B2 calls when B2_REGION is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-region-preflight-"));
+    try {
+      const out = join(dir, "preflight.json");
+      const result = spawnSync(
+        process.execPath,
+        ["scripts/live-b2-evidence.mjs", "preflight", "--out", out],
+        {
+          cwd: join(__dirname, "../.."),
+          encoding: "utf8",
+          env: {
+            PATH: process.env.PATH ?? "",
+            B2_APPLICATION_KEY_ID: "fake-key-id",
+            B2_APPLICATION_KEY: "fake-application-key",
+            B2_LIVE_TEST_ACCOUNT_ID: "fake-account-id",
+            B2_LIVE_NOTIFICATION_BUCKET: "fake-notification-bucket",
+            B2_MCP_EXPECTED_TOOL_PROFILE: "live-b2-contract",
+            B2_MCP_LIVE_RUN_PREFIX: "mcp-contract-region",
+            B2_REQUIRE_LIVE_TESTS: "1",
+            B2_INTEGRATION_REQUIRE_CREDENTIALS: "1",
+          },
+        },
+      );
+
+      expect(result.status).toBe(2);
+      const written = JSON.parse(readFileSync(out, "utf8")) as {
+        status: string;
+        configuration: { missingEnv: string[] };
+      };
+      expect(written.status).toBe("configuration blocked");
+      expect(written.configuration.missingEnv).toContain("B2_REGION");
+      expect(JSON.stringify(written)).not.toContain("fake-application-key");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

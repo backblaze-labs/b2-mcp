@@ -12,7 +12,6 @@ const { buildHttpServer } = require("../dist/http-server.js");
 const {
   APPROVED_CACHE_SCOPE,
   APPROVED_TTL_MS,
-  CONTRACT_TEST_CONFIG,
   CONTRACT_VERSION,
   LEGACY_PROTOCOL_VERSION,
   MCP_REVISION,
@@ -24,6 +23,7 @@ const {
   backingCategoryCounts,
   backingCategoryMapForNames,
   capabilitiesForProfile,
+  configForProfile,
   confirmToolsFrom,
   contractSdkVersions,
   countPrefixes,
@@ -53,7 +53,7 @@ async function collectToolsList(profile, era) {
     },
     resolve() {
       return {
-        config: CONTRACT_TEST_CONFIG,
+        config: configForProfile(profile),
         cacheKey: `tool-contract:${profile}`,
         capabilityCacheKey: `tool-contract:${profile}`,
       };

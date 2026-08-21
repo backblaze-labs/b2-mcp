@@ -488,7 +488,7 @@ For the integration and request-shape contract suites, use the
   wired through `.github/workflows/contract.yml`.
 - Variables: `B2_LIVE_TEST_ACCOUNT_ID`, `B2_REGION` (the account's S3 region,
   e.g. `us-east-005`), `B2_LIVE_NOTIFICATION_BUCKET`,
-  `B2_MCP_EXPECTED_TOOL_PROFILE`, and the workflow-generated
+  `B2_MCP_EXPECTED_TOOL_PROFILE=live-b2-contract`, and the workflow-generated
   `B2_MCP_LIVE_RUN_PREFIX`.
 - Event Notifications (required): the notification write-shape contract runs
   against a pre-provisioned, notifications-enabled bucket. Create a bucket in the
