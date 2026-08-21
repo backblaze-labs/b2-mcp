@@ -327,6 +327,9 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(swapped.status).toBe(200);
       expect(swappedResult.isError).toBe(true);
       expect(swappedResult.content?.[0]?.text).toMatch(/target did not match/i);
+      expect(swappedResult.content?.[0]?.text).toContain(
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+      );
       expect(s3Send).toHaveBeenCalledTimes(1);
 
       const tamperedState = await request(port, "POST", "/mcp", {
@@ -378,6 +381,9 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(declined.status).toBe(200);
       expect(declinedResult.isError).toBe(true);
       expect(declinedResult.content?.[0]?.text).toMatch(/human confirmation was decline/i);
+      expect(declinedResult.content?.[0]?.text).toContain(
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+      );
       expect(s3Send).toHaveBeenCalledTimes(1);
     } finally {
       if (savedPolicy === undefined) delete process.env.B2_DESTRUCTIVE_POLICY;

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "async_hooks";
 import { createHmac } from "crypto";
+import type { B2ApiError } from "./errors.js";
 import { B2Config, DestructivePolicy } from "./types.js";
 
 /**
@@ -171,14 +172,11 @@ export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   return p === "allow" || p === "block" ? p : "confirm";
 }
 
-export interface GateResult {
-  ok: boolean;
-  message?: string;
-}
+export type GateResult = { ok: true } | { ok: false; error: B2ApiError };
 
 /**
  * Evaluate whether a tool call may proceed. Call at the top of a destructive
- * tool's handler; if `ok` is false, return `toolError(new Error(message))`.
+ * tool's handler; if `ok` is false, return `toolError(result.error)`.
  *
  * Under the `confirm` policy, approval can be supplied by the legacy
  * model-provided `confirm: true` fallback, or by the audited tool wrapper
@@ -199,11 +197,16 @@ export function checkDestructive(
   if (policy === "allow") return { ok: true };
 
   if (policy === "block") {
+    const message =
+      `Refused: this would ${effect}. Destructive operations are blocked on this ` +
+      `server (B2_DESTRUCTIVE_POLICY=block).`;
     return {
       ok: false,
-      message:
-        `Refused: this would ${effect}. Destructive operations are blocked on this ` +
-        `server (B2_DESTRUCTIVE_POLICY=block).`,
+      error: {
+        status: 403,
+        code: "destructive_policy_blocked",
+        message,
+      },
     };
   }
 
@@ -216,11 +219,16 @@ export function checkDestructive(
     return { ok: true };
   }
   if (args.confirm === true) return { ok: true };
+  const message =
+    `Confirmation required: this would ${effect} — a destructive/irreversible action. ` +
+    `Re-invoke the identical call with "confirm": true to proceed. ` +
+    `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`;
   return {
     ok: false,
-    message:
-      `Confirmation required: this would ${effect} — a destructive/irreversible action. ` +
-      `Re-invoke the identical call with "confirm": true to proceed. ` +
-      `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`,
+    error: {
+      status: 409,
+      code: "destructive_confirmation_required",
+      message,
+    },
   };
 }

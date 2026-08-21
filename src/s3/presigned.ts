@@ -110,7 +110,7 @@ export function registerS3PresignedTools(
           });
         }
         const gate = checkDestructive("s3_get_presigned_url", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         if (args.operation === "GetObject" && args.versionId) {
           if (!allowExplicitVersionInspection) {
             return toolError({

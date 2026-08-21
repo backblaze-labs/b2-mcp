@@ -649,7 +649,7 @@ export function registerS3ObjectTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_delete_object", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         await verifyVersionBinding(
           versions,
           {
@@ -696,7 +696,7 @@ export function registerS3ObjectTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_delete_objects", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         if (args.bypassGovernance === true && !allowBypassGovernance) {
           return toolError(
             Object.assign(

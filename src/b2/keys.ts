@@ -170,7 +170,7 @@ export function registerKeyTools(
             { mode: "file" | "inline" }
           >;
           const gate = checkDestructive("b2_create_key", args, config);
-          if (!gate.ok) return toolError(new Error(gate.message));
+          if (!gate.ok) return toolError(gate.error);
           const bucketScope = normalizeCreateKeyBucketScope(args);
           validateCreateKeyPolicy(args);
           const createRequest = {
@@ -274,7 +274,7 @@ export function registerKeyTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_delete_key", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         const result = await client.deleteKey(args.applicationKeyId);
         return toolJson(result);
       } catch (err) {

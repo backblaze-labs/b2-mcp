@@ -88,7 +88,7 @@ export function registerS3BucketTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_put_bucket_lifecycle", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         const rules = args.rules as B2S3LifecycleRule[];
         if (rules.length === 0) {
           await s3.deleteBucketLifecycle(args.bucket);

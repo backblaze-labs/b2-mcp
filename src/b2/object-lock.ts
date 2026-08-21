@@ -44,7 +44,7 @@ export function registerObjectLockTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_update_file_legal_hold", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         const result = await client.updateFileLegalHold({
           fileId: args.fileId,
           fileName: args.fileName,
@@ -100,7 +100,7 @@ export function registerObjectLockTools(
     async (args) => {
       try {
         const gate = checkDestructive("b2_update_file_retention", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         const payload: UpdateFileRetentionOptions = {
           fileId: args.fileId,
           fileName: args.fileName,

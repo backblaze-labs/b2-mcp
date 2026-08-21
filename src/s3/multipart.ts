@@ -175,7 +175,7 @@ export function registerS3MultipartTools(
     async (args) => {
       try {
         const gate = checkDestructive("s3_abort_multipart_upload", args, config);
-        if (!gate.ok) return toolError(new Error(gate.message));
+        if (!gate.ok) return toolError(gate.error);
         await s3.abortMultipartUpload({
           bucket: args.bucket,
           key: args.key,

@@ -329,11 +329,11 @@ function destructiveElicitationRefused(
     onDecision,
     reason,
   );
-  return toolError(
-    new Error(
-      `Refused: ${toolName} requires explicit human approval by MCP elicitation; ${reason}.`,
-    ),
-  );
+  return toolError({
+    status: 409,
+    code: "destructive_confirmation_refused",
+    message: `Refused: ${toolName} requires explicit human approval by MCP elicitation; ${reason}.`,
+  });
 }
 
 function safePromptValue(value: unknown, sanitizerOptions: SanitizerOptions): string | null {

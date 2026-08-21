@@ -175,7 +175,7 @@ function acceptedResponse() {
 function destructiveOriginal(config: B2Config, toolName = "s3_delete_object") {
   return vi.fn((args: Record<string, unknown>) => {
     const gate = checkDestructive(toolName, args, config);
-    if (!gate.ok) return toolError(new Error(gate.message));
+    if (!gate.ok) return toolError(gate.error);
     return { content: [{ type: "text" as const, text: "deleted" }] };
   });
 }
@@ -337,6 +337,9 @@ describe("destructive elicitation", () => {
 
       expect(result.isError).toBe(true);
       expect(result.content?.[0]?.text).toMatch(/requires explicit human approval/i);
+      expect(result.content?.[0]?.text).toContain(
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+      );
       expect(original).not.toHaveBeenCalled();
     },
   );
@@ -352,6 +355,37 @@ describe("destructive elicitation", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toMatch(/was not provided/i);
+    expect(result.content?.[0]?.text).toContain(
+      "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+    );
+    expect(original).not.toHaveBeenCalled();
+  });
+
+  it("treats accepted responses without positive confirmation as user refusal", async () => {
+    const config = cfg();
+    const original = destructiveOriginal(config);
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
+    const args = { bucket: "photos", key: "old.jpg" };
+    const requestState = await requestStateFor(wrapped, args);
+
+    const result = await wrapped(
+      args,
+      extraWithElicitation(
+        {
+          [DESTRUCTIVE_ELICITATION_RESPONSE_KEY]: {
+            action: "accept",
+            content: { confirm: false },
+          },
+        },
+        requestState,
+      ),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content?.[0]?.text).toMatch(/did not approve/i);
+    expect(result.content?.[0]?.text).toContain(
+      "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+    );
     expect(original).not.toHaveBeenCalled();
   });
 
@@ -374,6 +408,11 @@ describe("destructive elicitation", () => {
       } else {
         expect(result.resultType).not.toBe("input_required");
         expect(result.content?.[0]?.text).toMatch(new RegExp(expectedText, "i"));
+        if (policy === "block") {
+          expect(result.content?.[0]?.text).toContain(
+            "B2 Error [destructive_policy_blocked] (HTTP 403)",
+          );
+        }
         expect(original).toHaveBeenCalledTimes(1);
       }
     },
@@ -401,12 +440,52 @@ describe("destructive elicitation", () => {
     expect(result.resultType).not.toBe("input_required");
     expect(result.isError).toBe(true);
     expect(result.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(result.content?.[0]?.text).toContain(
+      "B2 Error [destructive_confirmation_required] (HTTP 409)",
+    );
     expect(original).toHaveBeenCalledTimes(1);
 
     const confirmed = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, {});
     expect(confirmed.content?.[0]?.text).toBe("deleted");
     expect(original).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    [
+      "missing legacy confirmation",
+      cfg("confirm"),
+      providers(URL_ONLY_ELICITATION),
+      { bucket: "photos", key: "old.jpg" },
+      "destructive_confirmation_required",
+      409,
+    ],
+    [
+      "block policy",
+      cfg("block"),
+      providers(),
+      { bucket: "photos", key: "old.jpg", confirm: true },
+      "destructive_policy_blocked",
+      403,
+    ],
+  ])(
+    "audits %s refusal as a non-500 policy outcome",
+    async (_case, config, context, args, expectedCode, expectedStatus) => {
+      const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+      const original = destructiveOriginal(config);
+      const wrapped = createAuditedToolCallback("s3_delete_object", original, config, context);
+
+      const result = await wrapped(args, {});
+
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0]?.text).toContain(
+        `B2 Error [${expectedCode}] (HTTP ${expectedStatus})`,
+      );
+      expect(info.mock.calls.find(([, message]) => message === "tool.call")?.[0]).toMatchObject({
+        code: expectedCode,
+        status: expectedStatus,
+      });
+    },
+  );
 
   it.each([
     ["missing form capability", { mcpReq: { envelope: envelope() } }],
@@ -466,6 +545,9 @@ describe("destructive elicitation", () => {
     const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, extra);
     expect(missingConfirm.resultType).not.toBe("input_required");
     expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(missingConfirm.content?.[0]?.text).toContain(
+      "B2 Error [destructive_confirmation_required] (HTTP 409)",
+    );
     expect(original).toHaveBeenCalledTimes(1);
 
     const confirmed = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
@@ -642,6 +724,10 @@ describe("destructive elicitation", () => {
       { resultType: "input_required", outcome: "requested", handlerRan: false },
       { resultType: "complete", outcome: "declined", handlerRan: false },
     ]);
+    expect(toolCallLogs[toolCallLogs.length - 1]?.[0]).toMatchObject({
+      code: "destructive_confirmation_refused",
+      status: 409,
+    });
     const serializedLogs = JSON.stringify(elicitationLogs);
     expect(serializedLogs).not.toContain("photos");
     expect(serializedLogs).not.toContain("old.jpg");
