@@ -602,28 +602,46 @@ function syntheticBudgetViolationMeasurements(config) {
 async function runEnvProbe() {
   const { SignJWT } = await import("jose");
   const http = require("node:http");
+  const net = require("node:net");
+  const tls = require("node:tls");
+  const { connect: esmNetConnect, Socket: EsmSocket } = await import("node:net");
   const stdioEnv = fakeServerEnv();
   const observedSentinelNames = Object.entries(process.env)
     .filter(([, value]) => String(value).includes(parentSecretSentinel))
     .map(([name]) => name)
     .sort();
+  const isBlocked = (error) =>
+    /Non-local network access blocked/.test(error instanceof Error ? error.message : String(error));
+  const blockedNetworkCall = (call) => {
+    try {
+      const handle = call();
+      handle?.destroy?.();
+      return false;
+    } catch (error) {
+      return isBlocked(error);
+    }
+  };
   let nonLocalFetchBlocked = false;
   try {
     await fetch("https://example.com");
   } catch (error) {
-    nonLocalFetchBlocked = /Non-local network access blocked/.test(
-      error instanceof Error ? error.message : String(error),
-    );
+    nonLocalFetchBlocked = isBlocked(error);
   }
-  let requestOptionsOverrideBlocked = false;
-  try {
-    const request = http.request("http://127.0.0.1", { hostname: "example.com" });
-    request.destroy();
-  } catch (error) {
-    requestOptionsOverrideBlocked = /Non-local network access blocked/.test(
-      error instanceof Error ? error.message : String(error),
-    );
-  }
+  const requestOptionsOverrideBlocked = blockedNetworkCall(() =>
+    http.request("http://127.0.0.1", { hostname: "example.com" }),
+  );
+  const netSocketConnectBlocked = blockedNetworkCall(() =>
+    new net.Socket().connect({ host: "example.com", port: 443 }),
+  );
+  const tlsSocketConnectBlocked = blockedNetworkCall(() =>
+    new tls.TLSSocket(new net.Socket()).connect({ host: "example.com", port: 443 }),
+  );
+  const esmNetConnectBlocked = blockedNetworkCall(() =>
+    esmNetConnect({ host: "example.com", port: 443 }),
+  );
+  const esmSocketConnectBlocked = blockedNetworkCall(() =>
+    new EsmSocket().connect({ host: "example.com", port: 443 }),
+  );
   return {
     importedDependency: typeof SignJWT === "function",
     observedSentinelNames,
@@ -634,6 +652,10 @@ async function runEnvProbe() {
     stdioSecretSinkFileUnset: stdioEnv.B2_SECRET_SINK_FILE === undefined,
     nonLocalFetchBlocked,
     requestOptionsOverrideBlocked,
+    netSocketConnectBlocked,
+    tlsSocketConnectBlocked,
+    esmNetConnectBlocked,
+    esmSocketConnectBlocked,
   };
 }
 
@@ -729,7 +751,15 @@ function runSelfTestEnvSanitizer() {
     return 1;
   }
   console.log(JSON.stringify(payload.probe));
-  return payload.probe.sentinelValueVisible || !payload.probe.nonLocalFetchBlocked ? 1 : 0;
+  return payload.probe.sentinelValueVisible ||
+    !payload.probe.nonLocalFetchBlocked ||
+    !payload.probe.requestOptionsOverrideBlocked ||
+    !payload.probe.netSocketConnectBlocked ||
+    !payload.probe.tlsSocketConnectBlocked ||
+    !payload.probe.esmNetConnectBlocked ||
+    !payload.probe.esmSocketConnectBlocked
+    ? 1
+    : 0;
 }
 
 function runParent(enforce, workerExtraEnv = {}) {

@@ -239,6 +239,10 @@ describe("local performance baseline", () => {
     expect(probe.stdioSecretSinkFileUnset).toBe(true);
     expect(probe.nonLocalFetchBlocked).toBe(true);
     expect(probe.requestOptionsOverrideBlocked).toBe(true);
+    expect(probe.netSocketConnectBlocked).toBe(true);
+    expect(probe.tlsSocketConnectBlocked).toBe(true);
+    expect(probe.esmNetConnectBlocked).toBe(true);
+    expect(probe.esmSocketConnectBlocked).toBe(true);
   });
 
   it("rejects direct worker mode without sanitized launcher state", () => {

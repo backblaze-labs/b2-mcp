@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 
 const require = createRequire(import.meta.url);
 const http = require("node:http");
@@ -105,6 +105,9 @@ for (const [moduleName, module] of [
 
 const originalNetConnect = net.connect;
 const originalNetCreateConnection = net.createConnection;
+const originalNetSocketConnect = net.Socket.prototype.connect;
+const originalTlsConnect = tls.connect;
+const originalTlsSocketConnect = tls.TLSSocket.prototype.connect;
 net.connect = function guardedNetConnect(...args) {
   assertLocal("net.connect", socketHost(args));
   return originalNetConnect.apply(this, args);
@@ -113,9 +116,18 @@ net.createConnection = function guardedNetCreateConnection(...args) {
   assertLocal("net.createConnection", socketHost(args));
   return originalNetCreateConnection.apply(this, args);
 };
+net.Socket.prototype.connect = function guardedNetSocketConnect(...args) {
+  assertLocal("net.Socket.connect", socketHost(args));
+  return originalNetSocketConnect.apply(this, args);
+};
 
-const originalTlsConnect = tls.connect;
 tls.connect = function guardedTlsConnect(...args) {
   assertLocal("tls.connect", socketHost(args));
   return originalTlsConnect.apply(this, args);
 };
+tls.TLSSocket.prototype.connect = function guardedTlsSocketConnect(...args) {
+  assertLocal("tls.TLSSocket.connect", socketHost(args));
+  return originalTlsSocketConnect.apply(this, args);
+};
+
+syncBuiltinESMExports();
