@@ -473,11 +473,30 @@ jobs:
       id-token: write
       packages: write
     steps:
+      # Check out the protected `ci-green` ref (a trusted constant, like the
+      # prepare job) rather than a dynamic sha in this write-privileged job, then
+      # hard-pin to the validated release commit below. This keeps the checkout
+      # off attacker-influenced refs in a packages:write/id-token:write context.
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.prepare.outputs.checkout-sha }}
+          ref: refs/heads/ci-green
+          fetch-depth: 0
           persist-credentials: false
+      - name: Pin to the validated release commit
+        env:
+          CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
+        run: |
+          set -euo pipefail
+          # `ci-green` is the protected ref prepare already validated the tag
+          # against; fail closed if the validated release sha is not contained in
+          # it, then detach to that exact commit so the image is built from the
+          # reproducible release source.
+          if ! git merge-base --is-ancestor "${CHECKOUT_SHA}" HEAD; then
+            echo "::error::${CHECKOUT_SHA} is not contained in protected ci-green"
+            exit 1
+          fi
+          git checkout --detach "${CHECKOUT_SHA}"
       # docker/setup-qemu-action v3.6.0, reviewed 2026-08-07.
       - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
       # docker/setup-buildx-action v3.11.1, reviewed 2026-08-07.
