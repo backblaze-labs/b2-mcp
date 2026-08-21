@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { MODERN_META, MODERN_PROTOCOL_VERSION, RawStdioSession } from "../protocol/support/clients";
+import { MODERN_META, MODERN_PROTOCOL_VERSION, RawStdioSession } from "../support/protocol";
 
 const CANARY_PATTERN = /B2_MCP_CANARY_SECRET_[A-Za-z0-9_-]+/;
 const tsxBin = join(
@@ -9,6 +9,27 @@ const tsxBin = join(
   ".bin",
   process.platform === "win32" ? "tsx.cmd" : "tsx",
 );
+const fixturePath = join(process.cwd(), "tests/observability/support/logging-probe-fixture.ts");
+const SAFE_ENV_NAMES = [
+  "PATH",
+  "Path",
+  "SystemRoot",
+  "COMSPEC",
+  "PATHEXT",
+  "HOME",
+  "USERPROFILE",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+] as const;
+
+type ProbeName =
+  | "accessor-safety"
+  | "environment"
+  | "policy-confirmation"
+  | "redaction"
+  | "retry-budget"
+  | "thrown-failure";
 
 function assertNoCanaries(label: string, text: string): void {
   const leaked = text.match(CANARY_PATTERN)?.[0];
@@ -50,8 +71,13 @@ function expectNoIncidentLogs(logs: Array<Record<string, unknown>>): void {
 }
 
 function probeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const inherited = Object.fromEntries(
+    SAFE_ENV_NAMES.flatMap((name) =>
+      process.env[name] === undefined ? [] : [[name, process.env[name] as string]],
+    ),
+  );
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...inherited,
     NODE_ENV: "test",
     LOG_LEVEL: "info",
     ...extra,
@@ -62,8 +88,8 @@ function probeEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return env;
 }
 
-function runProbe(source: string, env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(tsxBin, ["-e", source], {
+function runProbe(probe: ProbeName, env: NodeJS.ProcessEnv = {}) {
+  return spawnSync(tsxBin, [fixturePath, probe], {
     cwd: process.cwd(),
     encoding: "utf8",
     env: probeEnv(env),
@@ -74,7 +100,7 @@ function runProbe(source: string, env: NodeJS.ProcessEnv = {}) {
 function expectProbeSucceeded(result: ReturnType<typeof runProbe>): void {
   const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
   assertNoCanaries("probe output", output);
-  expect(result.status, output).toBe(0);
+  expect(result.status).toBe(0);
 }
 
 function resultOf(frame: any): any {
@@ -146,39 +172,7 @@ describe("observability logging behavior", () => {
   });
 
   it("redacts top-level, nested, header, token, B2 key, and error fields", () => {
-    const result = runProbe(`
-import { flushLogsSync, initLogging, logger } from "./src/utils/logger";
-
-initLogging();
-const err = Object.assign(
-  new Error("provider failed B2_MCP_CANARY_SECRET_ERROR_MESSAGE"),
-  {
-    code: "B2_MCP_CANARY_SECRET_ERROR_CODE",
-    status: 503,
-    requestId: "B2_MCP_CANARY_SECRET_ERROR_REQUEST_ID",
-  },
-);
-logger.error(
-  {
-    applicationKey: "B2_MCP_CANARY_SECRET_TOP_LEVEL_KEY",
-    authorization: "Bearer B2_MCP_CANARY_SECRET_TOP_LEVEL_AUTH",
-    headers: {
-      authorization: "Bearer B2_MCP_CANARY_SECRET_HEADER_AUTH",
-      "x-b2-key": "B2_MCP_CANARY_SECRET_HEADER_B2_KEY",
-    },
-    credentials: {
-      appKey: "B2_MCP_CANARY_SECRET_NESTED_APP_KEY",
-      nested: {
-        masterKey: "B2_MCP_CANARY_SECRET_DEEP_MASTER_KEY",
-        sessionToken: "B2_MCP_CANARY_SECRET_DEEP_SESSION_TOKEN",
-      },
-    },
-    err,
-  },
-  "observability.redaction",
-);
-flushLogsSync();
-`);
+    const result = runProbe("redaction");
     expectProbeSucceeded(result);
     expect(result.stdout).toBe("");
 
@@ -197,39 +191,18 @@ flushLogsSync();
         sessionToken: "[redacted]",
       },
     });
+    expect(log.err).toMatchObject({
+      code: "[redacted]",
+      errno: -2,
+      path: "/tmp/b2-mcp-observability-safe-path",
+      requestId: "[redacted]",
+      syscall: "open",
+    });
     expect(JSON.stringify(log.err)).toContain("[redacted]");
   });
 
   it("records retry budget warnings with bounded context", () => {
-    const result = runProbe(`
-import { flushLogsSync, initLogging } from "./src/utils/logger";
-import { _consumeRetryToken, _resetRetryBudget, withRetry } from "./src/utils/retry";
-
-initLogging();
-async function main() {
-  _resetRetryBudget();
-  for (let i = 0; i < 100; i++) _consumeRetryToken();
-  try {
-    await withRetry(async () => {
-      throw {
-        message: "rate limited B2_MCP_CANARY_SECRET_RETRY_MESSAGE",
-        response: {
-          status: 429,
-          headers: { authorization: "Bearer B2_MCP_CANARY_SECRET_RETRY_AUTH" },
-          data: { applicationKey: "B2_MCP_CANARY_SECRET_RETRY_BODY_KEY" },
-        },
-      };
-    }, 1);
-  } catch (err) {
-    process.stdout.write(JSON.stringify({ status: err.response.status }));
-  }
-  flushLogsSync();
-}
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
-`);
+    const result = runProbe("retry-budget");
     expectProbeSucceeded(result);
     expect(JSON.parse(result.stdout)).toEqual({ status: 429 });
 
@@ -242,53 +215,7 @@ main().catch((err) => {
   });
 
   it("logs expected confirmation outcomes as tool calls, not incidents", () => {
-    const result = runProbe(`
-import { createAuditedToolCallback } from "./src/server";
-import { checkDestructive } from "./src/utils/destructive-gate";
-import { toolError, toolSuccess } from "./src/utils/errors";
-import { flushLogsSync, initLogging } from "./src/utils/logger";
-
-initLogging();
-const config = {
-  applicationKeyId: "policy-key-id",
-  applicationKey: "B2_MCP_CANARY_SECRET_POLICY_APPLICATION_KEY",
-  appKeyId: "policy-key-id",
-  appKey: "B2_MCP_CANARY_SECRET_POLICY_APP_KEY",
-  masterKeyId: "policy-key-id",
-  masterKey: "B2_MCP_CANARY_SECRET_POLICY_MASTER_KEY",
-  region: "us-west-004",
-  allowLocalFiles: false,
-  fileRoot: null,
-  destructivePolicy: "confirm",
-  outputFormat: "json",
-  transport: "stdio",
-  credentialFingerprint: "policy-fingerprint",
-};
-const wrapped = createAuditedToolCallback(
-  "b2_delete_bucket",
-  async (args) => {
-    const gate = checkDestructive("b2_delete_bucket", args, config);
-    return gate.ok ? toolSuccess("deleted") : toolError(gate.error);
-  },
-  config,
-);
-async function main() {
-  const result = await wrapped(
-    {
-      bucketId: "bucket-with-confirmation-required",
-      confirm: false,
-      nested: { applicationKey: "B2_MCP_CANARY_SECRET_POLICY_ARG" },
-    },
-    {},
-  );
-  process.stdout.write(JSON.stringify(result));
-  flushLogsSync();
-}
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
-`);
+    const result = runProbe("policy-confirmation");
     expectProbeSucceeded(result);
     const response = JSON.parse(result.stdout) as { isError?: boolean; content?: unknown[] };
     expect(response.isError).toBe(true);
@@ -310,66 +237,7 @@ main().catch((err) => {
   });
 
   it("logs thrown tool failures as sanitized warnings", () => {
-    const result = runProbe(`
-import { createAuditedToolCallback } from "./src/server";
-import { flushLogsSync, initLogging } from "./src/utils/logger";
-
-initLogging();
-const config = {
-  applicationKeyId: "failure-key-id",
-  applicationKey: "B2_MCP_CANARY_SECRET_FAILURE_APPLICATION_KEY",
-  appKeyId: "failure-key-id",
-  appKey: "B2_MCP_CANARY_SECRET_FAILURE_APP_KEY",
-  masterKeyId: "failure-key-id",
-  masterKey: "B2_MCP_CANARY_SECRET_FAILURE_MASTER_KEY",
-  region: "us-west-004",
-  allowLocalFiles: false,
-  fileRoot: null,
-  destructivePolicy: "confirm",
-  outputFormat: "json",
-  transport: "stdio",
-  credentialFingerprint: "failure-fingerprint",
-};
-const wrapped = createAuditedToolCallback(
-  "b2_list_buckets",
-  async () => {
-    throw Object.assign(
-      new Error("upstream failed B2_MCP_CANARY_SECRET_THROWN_MESSAGE"),
-      {
-        code: "B2_MCP_CANARY_SECRET_THROWN_CODE",
-        status: 503,
-        requestId: "B2_MCP_CANARY_SECRET_THROWN_REQUEST",
-      },
-    );
-  },
-  config,
-);
-async function main() {
-  try {
-    await wrapped(
-      {
-        bucketName: "failure-bucket",
-        secret: "B2_MCP_CANARY_SECRET_THROWN_ARG",
-      },
-      {},
-    );
-  } catch (err) {
-    process.stdout.write(
-      JSON.stringify({
-        message: err.message,
-        code: err.code,
-        status: err.status,
-        requestId: err.requestId,
-      }),
-    );
-  }
-  flushLogsSync();
-}
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
-`);
+    const result = runProbe("thrown-failure");
     expectProbeSucceeded(result);
     const thrown = JSON.parse(result.stdout);
     expect(thrown).toMatchObject({
@@ -377,6 +245,9 @@ main().catch((err) => {
       code: "[redacted]",
       status: 503,
       requestId: "[redacted]",
+      errno: -2,
+      syscall: "open",
+      path: "/tmp/b2-mcp-observability-safe-path",
     });
 
     const logs = parseLogLines(result.stderr);
@@ -390,5 +261,61 @@ main().catch((err) => {
     expect(failure.argKeys).toEqual(["bucketName", "secret"]);
     expect(logs.map((entry) => entry.msg)).not.toContain("server.error");
     expect(logs.map((entry) => entry.msg)).not.toContain("server.fatal");
+  });
+
+  it("does not invoke hostile accessors while logging", () => {
+    const result = runProbe("accessor-safety");
+    expectProbeSucceeded(result);
+    expect(JSON.parse(result.stdout)).toEqual({ getterReads: 0 });
+
+    const logs = parseLogLines(result.stderr);
+    const accessor = findLog(logs, "observability.accessor");
+    expect(accessor).toMatchObject({
+      authorization: "[redacted]",
+      metadata: "[accessor]",
+    });
+
+    const failure = findLog(logs, "observability.sanitizerFailure");
+    expect(failure).toMatchObject({
+      logSanitizer: "[log_sanitizer_failed]",
+    });
+  });
+
+  it("does not inherit unrelated developer or CI secrets into probes", () => {
+    const previous = {
+      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+      GH_TOKEN: process.env.GH_TOKEN,
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+      NPM_TOKEN: process.env.NPM_TOKEN,
+      SERVICE_SECRET: process.env.SERVICE_SECRET,
+      SERVICE_TOKEN: process.env.SERVICE_TOKEN,
+    };
+    const sentinel = "sentinel-non-b2-secret";
+    process.env.AWS_SECRET_ACCESS_KEY = sentinel;
+    process.env.GH_TOKEN = sentinel;
+    process.env.GITHUB_TOKEN = sentinel;
+    process.env.NPM_TOKEN = sentinel;
+    process.env.SERVICE_SECRET = sentinel;
+    process.env.SERVICE_TOKEN = sentinel;
+
+    try {
+      const result = runProbe("environment");
+      const output = `${result.stdout}${result.stderr}`;
+      expect(output).not.toContain(sentinel);
+      expectProbeSucceeded(result);
+      expect(JSON.parse(result.stdout)).toEqual({
+        aws: null,
+        gh: null,
+        github: null,
+        npm: null,
+        serviceSecret: null,
+        serviceToken: null,
+      });
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 });

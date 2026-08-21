@@ -2,6 +2,7 @@ import { closeSync } from "node:fs";
 import pino, { type DestinationStream } from "pino";
 import { VERSION } from "../version.js";
 import {
+  LOG_SANITIZER_FAILURE,
   currentSanitizerOptions,
   LOGGER_SECRET_REDACTION_PATHS,
   SECRET_SANITIZER_REDACTION,
@@ -24,9 +25,15 @@ const options = {
   },
   hooks: {
     logMethod(inputArgs: unknown[], method: (...args: unknown[]) => void) {
-      const safeArgs = inputArgs.map((arg) =>
-        sanitizeStructuredLogValue(arg, currentSanitizerOptions()),
-      );
+      const safeArgs = inputArgs.map((arg) => {
+        try {
+          return sanitizeStructuredLogValue(arg, currentSanitizerOptions());
+        } catch {
+          return typeof arg === "string"
+            ? LOG_SANITIZER_FAILURE
+            : { logSanitizer: LOG_SANITIZER_FAILURE };
+        }
+      });
       return method.apply(this, safeArgs);
     },
   },

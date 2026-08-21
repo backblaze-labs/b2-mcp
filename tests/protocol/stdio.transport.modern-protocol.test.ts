@@ -3,10 +3,9 @@ import {
   MODERN_META,
   MODERN_PROTOCOL_VERSION,
   RawStdioSession,
-  closeClient,
-  connectModernStdioClient,
   protocolEnv,
-} from "./support/clients";
+} from "../support/protocol";
+import { closeClient, connectModernStdioClient } from "./support/clients";
 
 function resultOf(frame: any): any {
   expect(frame.error).toBeUndefined();

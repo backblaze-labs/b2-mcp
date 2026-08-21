@@ -4,8 +4,10 @@ import { toolError, toolJson } from "../../src/utils/errors";
 import {
   configuredSecretValuesFromConfig,
   LOGGER_SECRET_REDACTION_PATHS,
+  LOG_SANITIZER_FAILURE,
   sanitizeForMcpOutput,
   sanitizeError,
+  sanitizeStructuredLogValue,
   sanitizeText,
   SECRET_SANITIZER_REDACTION,
   STRUCTURED_SECRET_FIELD_NAMES,
@@ -116,6 +118,66 @@ describe("secret sanitizer canary policy", () => {
 
     expect(safe.message).not.toContain(CANARY);
     expect(safe.message).not.toContain(CONFIGURED_APP_KEY);
+  });
+
+  it("sanitizes log objects without invoking accessors", () => {
+    const payload: Record<string, unknown> = {};
+    let getterReads = 0;
+    Object.defineProperty(payload, "authorization", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+    Object.defineProperty(payload, "metadata", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(payload);
+
+    expect(getterReads).toBe(0);
+    expect(safe).toEqual({
+      authorization: SECRET_SANITIZER_REDACTION,
+      metadata: "[accessor]",
+    });
+    expectNoCanary(safe);
+  });
+
+  it("preserves safe Error metadata in structured logs", () => {
+    const err = Object.assign(new Error(`failed with ${CANARY}`), {
+      code: "ENOENT",
+      errno: -2,
+      syscall: "open",
+      path: "/tmp/b2-mcp-safe-metadata",
+      authorizationToken: CANARY,
+      details: {
+        applicationKey: CANARY,
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(err) as Error & {
+      authorizationToken?: unknown;
+      code?: unknown;
+      details?: { applicationKey?: unknown };
+      errno?: unknown;
+      path?: unknown;
+      syscall?: unknown;
+    };
+
+    expect(safe).toBeInstanceOf(Error);
+    expect(safe.message).toBe("failed with [redacted]");
+    expect(safe.code).toBe("ENOENT");
+    expect(safe.errno).toBe(-2);
+    expect(safe.syscall).toBe("open");
+    expect(safe.path).toBe("/tmp/b2-mcp-safe-metadata");
+    expect(safe.authorizationToken).toBe(SECRET_SANITIZER_REDACTION);
+    expect(safe.details?.applicationKey).toBe(SECRET_SANITIZER_REDACTION);
+    expectNoCanary(safe);
   });
 
   it("leaves non-secret JSON-valued strings byte-for-byte unchanged", () => {
@@ -292,5 +354,6 @@ describe("secret sanitizer canary policy", () => {
     for (const field of STRUCTURED_SECRET_FIELD_NAMES) {
       expect(LOGGER_SECRET_REDACTION_PATHS).toContain(field);
     }
+    expect(LOG_SANITIZER_FAILURE).toBe("[log_sanitizer_failed]");
   });
 });
