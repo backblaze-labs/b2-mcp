@@ -451,12 +451,11 @@ export class B2S3PeerClient {
     await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
   }
 
-  async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {
-    if (input.rules.length === 0) {
-      await this.sendWithCircuit(new DeleteBucketLifecycleCommand({ Bucket: input.bucket }));
-      return;
-    }
+  async deleteBucketLifecycle(bucket: string): Promise<void> {
+    await this.sendWithCircuit(new DeleteBucketLifecycleCommand({ Bucket: bucket }));
+  }
 
+  async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {
     await this.sendWithCircuit(
       new PutBucketLifecycleConfigurationCommand({
         Bucket: input.bucket,

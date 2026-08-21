@@ -216,6 +216,7 @@ export function s3ServiceError(
 export type DeterministicS3PeerClient = Pick<
   B2S3PeerClient,
   | "headBucket"
+  | "deleteBucketLifecycle"
   | "putBucketLifecycle"
   | "getBucketLocation"
   | "putObject"
@@ -267,6 +268,10 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
 
   async headBucket(input: string): Promise<void> {
     await this.next("headBucket", input, undefined);
+  }
+
+  async deleteBucketLifecycle(input: string): Promise<void> {
+    await this.next("deleteBucketLifecycle", input, undefined);
   }
 
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {

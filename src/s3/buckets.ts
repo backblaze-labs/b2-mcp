@@ -89,7 +89,7 @@ export function registerS3BucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a lifecycle rule that schedules object deletion/expiration. Required when the server destructive policy is 'confirm' (the default). Not needed for abort-incomplete-upload-only rules.",
+            "Confirm clearing the lifecycle configuration or setting a lifecycle rule that schedules object deletion/expiration. Required when the server destructive policy is 'confirm' (the default). Not needed for abort-incomplete-upload-only rules.",
           ),
       },
     },
@@ -97,9 +97,14 @@ export function registerS3BucketTools(
       try {
         const gate = checkDestructive("s3_put_bucket_lifecycle", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        const rules = args.rules as B2S3LifecycleRule[];
+        if (rules.length === 0) {
+          await s3.deleteBucketLifecycle(args.bucket);
+          return toolSuccess(`Lifecycle configuration cleared for bucket '${args.bucket}'.`);
+        }
         await s3.putBucketLifecycle({
           bucket: args.bucket,
-          rules: args.rules as B2S3LifecycleRule[],
+          rules,
         });
         return toolSuccess(`Lifecycle rules updated for bucket '${args.bucket}'.`);
       } catch (err) {

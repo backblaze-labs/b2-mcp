@@ -69,6 +69,9 @@ const DETECTORS: Record<string, Detector> = {
   // Lifecycle rules can schedule mass deletion of objects and prior versions.
   s3_put_bucket_lifecycle: (args) => {
     const rules = (args.rules as Array<Record<string, unknown>> | undefined) ?? [];
+    if (rules.length === 0) {
+      return "clear the bucket's entire S3 lifecycle configuration, removing incomplete-multipart cleanup and expiration/retention governance";
+    }
     const deletes = rules.some(
       (r) => r.expiration != null || r.noncurrentVersionExpiration != null,
     );
