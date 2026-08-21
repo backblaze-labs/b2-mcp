@@ -3,7 +3,7 @@ import { z } from "zod";
 import { B2Client, type FullApplicationKeyResult, type ListKeysOptions } from "./client.js";
 import { B2AuthManager } from "../auth.js";
 import { ALL_CAPABILITIES, B2Config } from "../utils/types.js";
-import { clientInputError, toolJson, toolError } from "../utils/errors.js";
+import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
@@ -99,10 +99,11 @@ function normalizeCreateKeyBucketScope(args: { bucketId?: string; bucketIds?: st
   bucketIds?: string[];
 } {
   if (args.bucketId !== undefined && args.bucketIds !== undefined) {
-    clientInputError(
-      "invalid_bucket_scope",
-      "b2_create_key accepts either bucketId or bucketIds, not both.",
-    );
+    throw {
+      status: 400,
+      code: "invalid_bucket_scope",
+      message: "b2_create_key accepts either bucketId or bucketIds, not both.",
+    };
   }
   if (args.bucketId !== undefined) return { bucketId: args.bucketId };
   if (args.bucketIds !== undefined) return { bucketIds: args.bucketIds };

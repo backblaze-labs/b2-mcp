@@ -35,7 +35,6 @@ import type {
 import { currentMcpRequestSignal } from "../request-context.js";
 import { withS3Circuit } from "../utils/circuit-breaker.js";
 import { forEachBounded } from "../utils/concurrency.js";
-import { badRequest } from "../utils/errors.js";
 
 type S3SendCommand<
   InputType extends ServiceInputTypes,
@@ -374,6 +373,11 @@ const BROWSER_EXECUTABLE_CONTENT_TYPE =
 function normalizedMediaType(contentType: string | undefined): string | null {
   const mediaType = contentType?.split(";")[0]?.trim().toLowerCase();
   return mediaType ? mediaType : null;
+}
+
+// Keep local to avoid adding a runtime errors.ts import to the Worker S3 adapter bundle.
+function badRequest(message: string): never {
+  throw { status: 400, code: "bad_request", message };
 }
 
 export function assertSafeObjectContentType(

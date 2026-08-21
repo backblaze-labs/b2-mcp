@@ -23,23 +23,9 @@ export interface B2ApiError {
   extendedRequestId?: string;
 }
 
-/**
- * Throw a normalized HTTP 400 client-input error with the given code.
- *
- * @throws A normalized B2 API error object.
- */
-export function clientInputError(code: string, message: string): never {
-  const error = { status: 400, code, message } satisfies B2ApiError;
-  throw error;
-}
-
-/**
- * Throw a normalized HTTP 400 bad_request client-input error.
- *
- * @throws A normalized B2 API error object.
- */
+/** Throw a normalized HTTP 400 bad_request client-input error. */
 export function badRequest(message: string): never {
-  clientInputError("bad_request", message);
+  throw { status: 400, code: "bad_request", message } satisfies B2ApiError;
 }
 
 /** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */
