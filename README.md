@@ -36,9 +36,9 @@ The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary 
 Before copying the config, check the account's B2 S3-compatible endpoint
 region. Accounts in the default `us-west-004` region can omit `B2_REGION` or
 set it to `us-west-004`. For any non-default account, add `B2_REGION` to the
-`env` block and replace the example below with the account's region, such as
-`us-east-005`; otherwise S3-compatible tools target `us-west-004`. See
-[Configuration](#configuration) for the full requirement.
+`env` block with the account's region, such as `us-east-005`; otherwise
+S3-compatible tools target `us-west-004`. See [Configuration](#configuration)
+for the full requirement.
 
 **Connect Claude Desktop** by editing `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -50,11 +50,21 @@ set it to `us-west-004`. For any non-default account, add `B2_REGION` to the
       "args": ["-y", "@backblaze-labs/b2-mcp"],
       "env": {
         "B2_APPLICATION_KEY_ID": "your-application-key-id",
-        "B2_APPLICATION_KEY": "your-application-key-secret",
-        "B2_REGION": "us-east-005"
+        "B2_APPLICATION_KEY": "your-application-key-secret"
       }
     }
   }
+}
+```
+
+For a non-default-region account, include `B2_REGION` in the same `env` block
+before restarting Claude Desktop:
+
+```json
+{
+  "B2_APPLICATION_KEY_ID": "your-application-key-id",
+  "B2_APPLICATION_KEY": "your-application-key-secret",
+  "B2_REGION": "us-east-005"
 }
 ```
 
