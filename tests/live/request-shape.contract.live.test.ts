@@ -101,6 +101,11 @@ describe("Contract: notification rules objectNamePrefix", () => {
       const retainedRules = (parseResult(existing).eventNotificationRules ?? []).filter(
         (rule: { name?: string }) => rule.name !== ruleName,
       );
+      if (retainedRules.length > 0) {
+        failContractPrerequisite(
+          "notification fixture bucket must not contain unrelated persistent rules",
+        );
+      }
       const runRule = {
         name: ruleName,
         // objectNamePrefix deliberately omitted, so the tool must inject "".
@@ -114,7 +119,7 @@ describe("Contract: notification rules objectNamePrefix", () => {
       try {
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
-          eventNotificationRules: [...retainedRules, runRule],
+          eventNotificationRules: [runRule],
         });
         if (isError(res)) {
           const detail = liveErrorText(res);
@@ -134,10 +139,10 @@ describe("Contract: notification rules objectNamePrefix", () => {
         );
         expect(writtenRule?.objectNamePrefix).toBe("");
       } finally {
-        // Persistent fixture: restore only the rules that existed before this test.
+        // Persistent fixture: restore the dedicated bucket to an empty rule set.
         const cleanup = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
-          eventNotificationRules: retainedRules,
+          eventNotificationRules: [],
         });
         if (isError(cleanup)) {
           throw new Error(`notification rule cleanup failed: ${liveErrorText(cleanup)}`);

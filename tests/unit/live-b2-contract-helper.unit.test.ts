@@ -135,7 +135,7 @@ describe("live B2 contract helper", () => {
     });
   });
 
-  it("removes only run-prefixed notification rules from the fixture bucket", async () => {
+  it("removes run-prefixed notification rules from a dedicated fixture bucket", async () => {
     const stats = liveB2Contract.createCleanupStats();
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     let getCalls = 0;
@@ -144,12 +144,6 @@ describe("live B2 contract helper", () => {
       eventTypes: ["b2:ObjectCreated:*"],
       isEnabled: false,
       targetConfiguration: { targetType: "webhook", url: "https://example.com/run" },
-    };
-    const retainedRule = {
-      name: "customer-rule",
-      eventTypes: ["b2:ObjectCreated:*"],
-      isEnabled: true,
-      targetConfiguration: { targetType: "webhook", url: "https://example.com/customer" },
     };
     const callTool = async (
       name: string,
@@ -160,12 +154,12 @@ describe("live B2 contract helper", () => {
         getCalls++;
         return {
           structuredContent: {
-            eventNotificationRules: getCalls === 1 ? [runRule, retainedRule] : [retainedRule],
+            eventNotificationRules: getCalls === 1 ? [runRule] : [],
           },
         };
       }
       if (name === "b2_set_bucket_notification_rules") {
-        return { structuredContent: { eventNotificationRules: [retainedRule] } };
+        return { structuredContent: { eventNotificationRules: [] } };
       }
       throw new Error(`unexpected call: ${name}`);
     };
@@ -186,9 +180,52 @@ describe("live B2 contract helper", () => {
     ]);
     expect(calls[1].args).toMatchObject({
       bucketId: "notification-bucket-id",
-      eventNotificationRules: [retainedRule],
+      eventNotificationRules: [],
       confirm: true,
     });
+  });
+
+  it("fails safely instead of rewriting unrelated notification rules", async () => {
+    const stats = liveB2Contract.createCleanupStats();
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    const callTool = async (
+      name: string,
+      args: Record<string, unknown>,
+    ): Promise<McpToolResult> => {
+      calls.push({ name, args });
+      if (name === "b2_get_bucket_notification_rules") {
+        return {
+          structuredContent: {
+            eventNotificationRules: [
+              {
+                name: "mcp-contract-run1-notify-rule",
+                eventTypes: ["b2:ObjectCreated:*"],
+                isEnabled: false,
+                targetConfiguration: { targetType: "webhook", url: "https://example.com/run" },
+              },
+              {
+                name: "customer-rule",
+                eventTypes: ["b2:ObjectCreated:*"],
+                isEnabled: true,
+                targetConfiguration: { targetType: "webhook", url: "[redacted]" },
+              },
+            ],
+          },
+        };
+      }
+      throw new Error(`unexpected call: ${name}`);
+    };
+
+    const cleaned = await liveB2Contract.cleanupContractNotificationRulesWithTools(
+      callTool,
+      { bucketId: "notification-bucket-id", bucketName: "persistent-notification-bucket" },
+      { prefix: "mcp-contract-run1", stats },
+    );
+
+    expect(cleaned).toBe(false);
+    expect(stats.notificationRules).toBe(1);
+    expect(stats.errors).toBe(1);
+    expect(calls.map((call) => call.name)).toEqual(["b2_get_bucket_notification_rules"]);
   });
 
   it("counts returned MCP errors while cleaning notification rules", async () => {

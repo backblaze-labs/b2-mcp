@@ -208,6 +208,15 @@ async function cleanupContractNotificationRulesWithTools(callTool, bucket, optio
   const runRules = rules.filter((rule) => ruleMatchesPrefix(rule, prefix));
   if (runRules.length === 0) return false;
   if (options.stats) options.stats.notificationRules += runRules.length;
+  const retainedRules = rules.filter((rule) => !ruleMatchesPrefix(rule, prefix));
+  if (retainedRules.length > 0) {
+    if (options.stats) options.stats.errors++;
+    const error = options.error || (() => undefined);
+    error(
+      `notification-rule cleanup refused to rewrite ${retainedRules.length} non-run rule(s) from redacted MCP output`,
+    );
+    return false;
+  }
   if (options.log) {
     options.log(
       `cleaning notificationRules=${runRules.length} bucketFingerprint=${options.fingerprint?.(
@@ -217,13 +226,12 @@ async function cleanupContractNotificationRulesWithTools(callTool, bucket, optio
   }
   if (options.dryRun) return false;
 
-  const retainedRules = rules.filter((rule) => !ruleMatchesPrefix(rule, prefix));
   const updated = await callOptional(
     callTool,
     "b2_set_bucket_notification_rules",
     {
       bucketId: bucket.bucketId,
-      eventNotificationRules: retainedRules,
+      eventNotificationRules: [],
       confirm: true,
     },
     options,
