@@ -1,15 +1,15 @@
+import * as http from "node:http";
 import { Readable } from "node:stream";
-import { ReadableStream } from "node:stream/web";
 import { B2Client as SdkB2Client } from "@backblaze-labs/b2-sdk";
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { registerBucketTools } from "../../src/b2/buckets";
+import { buildHttpServer } from "../../src/http-server";
 import {
   authenticateOAuthRequest,
   resetOAuthVerifierCacheForTests,
 } from "../../src/oauth-resource-server";
 import type { OAuthJwtVerifierConfig } from "../../src/oauth-resource-server";
-import { runWithMcpRequestSignal } from "../../src/request-context";
 import { B2S3PeerClient } from "../../src/s3/aws-sdk-adapter";
 import { registerS3BucketTools } from "../../src/s3/buckets";
 import { registerS3ObjectTools } from "../../src/s3/objects";
@@ -26,13 +26,14 @@ import type { B2Config, B2S3VersionGuard } from "../../src/utils/types";
 import {
   b2ErrorResponse,
   DeterministicB2NativeFake,
-  DeterministicS3ClientFake,
   parseResult,
   s3ServiceError,
   testConfig,
   ToolHarness,
 } from "../support/deterministic-fakes";
+import { closeHttpServer, creds, JSON_HEADERS, listenOnLocalhost } from "../support/http";
 import { jwksResponse, signedJwt } from "../support/oauth-jwks";
+import { MODERN_META, MODERN_PROTOCOL_VERSION } from "../support/protocol";
 import { installSdkTransport, StaticHttpResponse } from "../support/sdk-test-helpers";
 import {
   restoreB2SdkTransportForTests,
@@ -73,14 +74,6 @@ function registerB2BucketHarness(
   return tools;
 }
 
-function registerS3Harness(s3: DeterministicS3ClientFake): ToolHarness {
-  const tools = new ToolHarness();
-  const peer = s3.asPeerClient();
-  registerS3BucketTools(tools, peer, reliabilityConfig);
-  registerS3ObjectTools(tools, peer, noopVersionGuard, reliabilityConfig);
-  return tools;
-}
-
 function expectMcpError(result: unknown, expected: { status: number; code: string }): string {
   expect(result).toMatchObject({ isError: true });
   const text = parseResult(result);
@@ -101,14 +94,6 @@ class MalformedJsonResponse extends StaticHttpResponse {
   async json<T>(): Promise<T> {
     throw new SyntaxError("Malformed JSON from B2 dependency");
   }
-}
-
-function emptyWebBody(): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.close();
-    },
-  });
 }
 
 async function waitForB2Requests(
@@ -170,6 +155,66 @@ function s3XmlErrorResponse(status: number, code: string, message: string) {
       body: Readable.from([body]),
     },
   };
+}
+
+function mcpToolCallBody(name: string, args: Record<string, unknown>, id = 1): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name, arguments: args, _meta: MODERN_META },
+  });
+}
+
+function mcpToolCallHeaders(name: string, body: string): Record<string, string | number> {
+  return {
+    ...creds,
+    ...JSON_HEADERS,
+    "content-length": Buffer.byteLength(body),
+    "mcp-protocol-version": MODERN_PROTOCOL_VERSION,
+    "mcp-method": "tools/call",
+    "mcp-name": name,
+  };
+}
+
+function startDisconnectableMcpRequest(
+  port: number,
+  name: string,
+  args: Record<string, unknown>,
+): {
+  req: http.ClientRequest;
+  bodyChunks: string[];
+  done: Promise<{ status?: number; body: string; error?: Error }>;
+} {
+  const body = mcpToolCallBody(name, args);
+  const bodyChunks: string[] = [];
+  let req!: http.ClientRequest;
+  const done = new Promise<{ status?: number; body: string; error?: Error }>((resolve) => {
+    let settled = false;
+    const finish = (result: { status?: number; body: string; error?: Error }) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        method: "POST",
+        path: "/mcp",
+        headers: mcpToolCallHeaders(name, body),
+      },
+      (res) => {
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => bodyChunks.push(String(chunk)));
+        res.on("end", () => finish({ status: res.statusCode, body: bodyChunks.join("") }));
+        res.on("close", () => finish({ status: res.statusCode, body: bodyChunks.join("") }));
+      },
+    );
+    req.on("error", (error) => finish({ error, body: bodyChunks.join("") }));
+    req.end(body);
+  });
+  return { req, bodyChunks, done };
 }
 
 const oauthJwksConfig = {
@@ -341,24 +386,34 @@ describe("deterministic dependency failure and recovery suite", () => {
     },
   );
 
-  it("returns a controlled MCP error for malformed S3 object metadata", async () => {
-    const s3 = new DeterministicS3ClientFake().respond("getObject", {
-      key: "bad-object.txt",
-      contentType: "text/plain",
-      contentLength: Number.NaN,
-      metadata: {},
-      body: emptyWebBody(),
-    });
-    const tools = registerS3Harness(s3);
+  it("returns a controlled MCP error for malformed S3 dependency response data", async () => {
+    const handle = vi.fn(async () => ({
+      response: {
+        statusCode: 200,
+        headers: {
+          "content-type": "text/plain",
+          "content-length": "not-a-number",
+          "x-amz-request-id": "malformed-get-object",
+        },
+        body: Readable.from(["malformed provider body"]),
+      },
+    }));
+    const s3 = s3ClientWithHandler(handle, { maxAttempts: 1 });
+    const tools = new ToolHarness();
+    registerS3ObjectTools(tools, s3, noopVersionGuard, reliabilityConfig);
 
-    const result = await tools.call("s3_get_object", {
-      bucket: "reliability-bucket",
-      key: "bad-object.txt",
-    });
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "reliability-bucket",
+        key: "bad-object.txt",
+      });
 
-    const text = expectMcpError(result, { status: 500, code: "internal_error" });
-    expect(text).toMatch(/invalid content length/i);
-    expect(s3.requestsFor("getObject")).toHaveLength(1);
+      const text = expectMcpError(result, { status: 500, code: "internal_error" });
+      expect(text).toMatch(/invalid content length|not-a-number|malformed/i);
+      expect(handle).toHaveBeenCalledTimes(1);
+    } finally {
+      s3.destroy();
+    }
   });
 
   it("bounds B2 retries and resumes after transient 429 responses", async () => {
@@ -525,7 +580,7 @@ describe("deterministic dependency failure and recovery suite", () => {
     }
   });
 
-  it("cancels a downstream B2 request and keeps late provider work from changing the result", async () => {
+  it("cancels a disconnected HTTP/MCP B2 request and emits no late response frame", async () => {
     let releaseProviderSuccess!: () => void;
     let downstreamAborted = false;
     const transport = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
@@ -543,23 +598,29 @@ describe("deterministic dependency failure and recovery suite", () => {
           );
         }),
     );
-    const tools = registerB2BucketHarness(transport);
-    const controller = new AbortController();
+    installSdkTransport(transport);
+    const handle = buildHttpServer();
+    const port = await listenOnLocalhost(handle);
+    const client = startDisconnectableMcpRequest(port, "b2_list_buckets", {});
 
-    const pending = runWithMcpRequestSignal(controller.signal, () =>
-      tools.call("b2_list_buckets", {}),
-    );
-    await vi.waitFor(() => expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1));
-    controller.abort(abortError("caller cancelled"));
+    try {
+      await vi.waitFor(() => expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1));
+      client.req.destroy(abortError("client disconnected"));
 
-    const result = await pending;
-    const text = expectMcpError(result, { status: 500, code: "internal_error" });
-    expect(text).toMatch(/cancel|abort/i);
-    expect(downstreamAborted).toBe(true);
+      const disconnected = await client.done;
+      expect(disconnected.error?.message ?? disconnected.body).toMatch(
+        /disconnect|socket hang up/i,
+      );
+      expect(disconnected.body).toBe("");
+      await vi.waitFor(() => expect(downstreamAborted).toBe(true));
 
-    releaseProviderSuccess();
-    await Promise.resolve();
-    expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1);
+      releaseProviderSuccess();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(client.bodyChunks.join("")).toBe("");
+      expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1);
+    } finally {
+      await closeHttpServer(handle);
+    }
   });
 
   it("isolates concurrent dependency failures by credential", async () => {
