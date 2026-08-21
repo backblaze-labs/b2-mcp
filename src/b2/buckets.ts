@@ -86,6 +86,71 @@ const NON_GLOBAL_IPV6_CIDRS: Array<[string, number]> = [
 ];
 
 const WEBHOOK_DNS_LOOKUP_TIMEOUT_MS = 2_000;
+const BUCKET_INFO_MAX_PAIRS = 10;
+const BUCKET_INFO_KEY_MAX_BYTES = 50;
+const BUCKET_INFO_VALUES_MAX_BYTES = 10_000;
+const BUCKET_INFO_KEY_PATTERN = /^[A-Za-z0-9._`~!#$%^&*'|+-]+$/;
+const BUCKET_INFO_DESCRIPTION =
+  "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.";
+
+const CORS_RULES_MAX_COUNT = 100;
+const CORS_RULE_MAX_BYTES = 1_000;
+const CORS_FIELD_MAX_ITEMS = 100;
+const CORS_STRING_MAX_CHARS = CORS_RULE_MAX_BYTES - 1;
+const CORS_RULE_NAME_PATTERN = /^[A-Za-z0-9-]+$/;
+const CORS_RULE_NAME_DESCRIPTION = "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.";
+const CORS_RULES_DESCRIPTION =
+  "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.";
+
+const bucketInfoKeySchema = z
+  .string()
+  .min(1)
+  .max(BUCKET_INFO_KEY_MAX_BYTES)
+  .regex(BUCKET_INFO_KEY_PATTERN)
+  .refine((value) => !value.toLowerCase().startsWith("b2-"), {
+    message: "bucketInfo keys starting with 'b2-' are reserved for Backblaze",
+  });
+const bucketInfoValueSchema = z.string().max(BUCKET_INFO_VALUES_MAX_BYTES);
+
+const bucketInfoSchema = z
+  .record(bucketInfoKeySchema, bucketInfoValueSchema)
+  .superRefine((value, ctx) => {
+    const message = bucketInfoInputError(value);
+    if (message) ctx.addIssue({ code: "custom", message });
+  })
+  .describe(BUCKET_INFO_DESCRIPTION);
+
+const corsRuleNameSchema = z
+  .string()
+  .min(6)
+  .max(63)
+  .regex(CORS_RULE_NAME_PATTERN)
+  .refine((value) => !value.toLowerCase().startsWith("b2-"), {
+    message: "corsRuleName values starting with 'b2-' are reserved for Backblaze",
+  })
+  .describe(CORS_RULE_NAME_DESCRIPTION);
+
+const corsStringSchema = z.string().min(1).max(CORS_STRING_MAX_CHARS);
+const requiredCorsStringArraySchema = z.array(corsStringSchema).min(1).max(CORS_FIELD_MAX_ITEMS);
+const optionalCorsStringArraySchema = z.array(corsStringSchema).max(CORS_FIELD_MAX_ITEMS);
+
+const corsRuleSchema = z.object({
+  corsRuleName: corsRuleNameSchema,
+  allowedOrigins: requiredCorsStringArraySchema,
+  allowedHeaders: optionalCorsStringArraySchema,
+  allowedOperations: requiredCorsStringArraySchema,
+  exposeHeaders: optionalCorsStringArraySchema.optional(),
+  maxAgeSeconds: z.number(),
+});
+
+const corsRulesSchema = z
+  .array(corsRuleSchema)
+  .max(CORS_RULES_MAX_COUNT)
+  .superRefine((value, ctx) => {
+    const message = corsRulesInputError(value);
+    if (message) ctx.addIssue({ code: "custom", message });
+  })
+  .describe(CORS_RULES_DESCRIPTION);
 
 type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
 let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
@@ -174,6 +239,163 @@ function isNonGlobalIpLiteral(host: string): boolean {
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
   const maybeUnref = (timer as { unref?: unknown }).unref;
   if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function quotedName(value: string): string {
+  return JSON.stringify(value.length > 80 ? `${value.slice(0, 77)}...` : value);
+}
+
+function bucketInfoKeySizeError(key: string): string {
+  return `bucketInfo key ${quotedName(key)} must be 1-${BUCKET_INFO_KEY_MAX_BYTES} UTF-8 bytes.`;
+}
+
+function bucketInfoInputError(bucketInfo: Record<string, string> | undefined): string | null {
+  if (bucketInfo === undefined) return null;
+  const entries = Object.entries(bucketInfo);
+  if (entries.length > BUCKET_INFO_MAX_PAIRS) {
+    return `bucketInfo must contain at most ${BUCKET_INFO_MAX_PAIRS} key-value pairs.`;
+  }
+
+  let valuesBytes = 0;
+  for (const [key, value] of entries) {
+    if (key.length < 1 || key.length > BUCKET_INFO_KEY_MAX_BYTES) {
+      return bucketInfoKeySizeError(key);
+    }
+    if (utf8Bytes(key) > BUCKET_INFO_KEY_MAX_BYTES) {
+      return bucketInfoKeySizeError(key);
+    }
+    if (!BUCKET_INFO_KEY_PATTERN.test(key)) {
+      return `bucketInfo key ${quotedName(key)} may contain only letters, digits, and these characters: - _ . \` ~ ! # $ % ^ & * ' | +.`;
+    }
+    if (key.toLowerCase().startsWith("b2-")) {
+      return `bucketInfo key ${quotedName(key)} must not start with 'b2-'; that prefix is reserved for Backblaze.`;
+    }
+    if (value.length > BUCKET_INFO_VALUES_MAX_BYTES) {
+      return `bucketInfo value for ${quotedName(key)} must be at most ${BUCKET_INFO_VALUES_MAX_BYTES} characters.`;
+    }
+    valuesBytes += utf8Bytes(value);
+    if (valuesBytes > BUCKET_INFO_VALUES_MAX_BYTES) {
+      return `bucketInfo values must total at most ${BUCKET_INFO_VALUES_MAX_BYTES} UTF-8 bytes.`;
+    }
+  }
+
+  return null;
+}
+
+function corsRuleSizeError(rulePath: string): string {
+  return `${rulePath} must be less than ${CORS_RULE_MAX_BYTES} UTF-8 bytes.`;
+}
+
+function corsRuleNameError(name: string, path: string): string | null {
+  if (name.length < 6 || name.length > 63) {
+    return `${path} must be 6-63 characters long.`;
+  }
+  if (!CORS_RULE_NAME_PATTERN.test(name)) {
+    return `${path} may contain only letters, digits, and hyphens.`;
+  }
+  if (name.toLowerCase().startsWith("b2-")) {
+    return `${path} must not start with 'b2-'; that prefix is reserved for Backblaze.`;
+  }
+  return null;
+}
+
+function addCorsStringArrayBytes(
+  ruleBytes: number,
+  values: readonly string[] | null | undefined,
+  path: string,
+  minItems: number,
+  rulePath: string,
+): { ok: true; ruleBytes: number } | { ok: false; message: string } {
+  const items = values ?? [];
+  if (items.length < minItems) {
+    return { ok: false, message: `${path} must contain at least ${minItems} item.` };
+  }
+  if (items.length > CORS_FIELD_MAX_ITEMS) {
+    return {
+      ok: false,
+      message: `${path} must contain at most ${CORS_FIELD_MAX_ITEMS} items.`,
+    };
+  }
+
+  let total = ruleBytes;
+  for (const [index, value] of items.entries()) {
+    const itemPath = `${path}[${index}]`;
+    if (value.length < 1) {
+      return { ok: false, message: `${itemPath} must not be empty.` };
+    }
+    if (value.length > CORS_STRING_MAX_CHARS) {
+      return {
+        ok: false,
+        message: `${itemPath} must be at most ${CORS_STRING_MAX_CHARS} characters.`,
+      };
+    }
+    total += utf8Bytes(value);
+    if (total >= CORS_RULE_MAX_BYTES) {
+      return {
+        ok: false,
+        message: corsRuleSizeError(rulePath),
+      };
+    }
+  }
+
+  return { ok: true, ruleBytes: total };
+}
+
+function corsRulesInputError(
+  corsRules: CreateBucketOptions["corsRules"] | undefined,
+): string | null {
+  if (corsRules === undefined) return null;
+  if (corsRules.length > CORS_RULES_MAX_COUNT) {
+    return `corsRules must contain at most ${CORS_RULES_MAX_COUNT} rules.`;
+  }
+
+  const names = new Set<string>();
+  for (const [index, rule] of corsRules.entries()) {
+    const path = `corsRules[${index}].corsRuleName`;
+    const nameError = corsRuleNameError(rule.corsRuleName, path);
+    if (nameError) return nameError;
+    let ruleBytes = rule.corsRuleName.length;
+    if (names.has(rule.corsRuleName)) {
+      return `${path} ${quotedName(rule.corsRuleName)} must be unique within the bucket.`;
+    }
+    names.add(rule.corsRuleName);
+
+    for (const [field, minItems] of [
+      ["allowedOrigins", 1],
+      ["allowedOperations", 1],
+      ["allowedHeaders", 0],
+      ["exposeHeaders", 0],
+    ] as const) {
+      const result = addCorsStringArrayBytes(
+        ruleBytes,
+        rule[field],
+        `corsRules[${index}].${field}`,
+        minItems,
+        `corsRules[${index}]`,
+      );
+      if (!result.ok) return result.message;
+      ruleBytes = result.ruleBytes;
+    }
+  }
+  return null;
+}
+
+function failB2InputValidation(message: string): never {
+  throw { status: 400, code: "bad_request", message };
+}
+
+function validateBucketInfoInput(bucketInfo: Record<string, string> | undefined): void {
+  const message = bucketInfoInputError(bucketInfo);
+  if (message) failB2InputValidation(message);
+}
+
+function validateCorsRulesInput(corsRules: CreateBucketOptions["corsRules"] | undefined): void {
+  const message = corsRulesInputError(corsRules);
+  if (message) failB2InputValidation(message);
 }
 
 async function lookupWebhookHost(host: string): Promise<Array<{ address: string }>> {
@@ -376,23 +598,8 @@ export function registerBucketTools(
           .describe(
             "allPublic allows unauthenticated downloads; allPrivate requires authorization.",
           ),
-        bucketInfo: z
-          .record(z.string(), z.string())
-          .optional()
-          .describe("Up to 10 custom key-value pairs stored with the bucket."),
-        corsRules: z
-          .array(
-            z.object({
-              corsRuleName: z.string(),
-              allowedOrigins: z.array(z.string()),
-              allowedHeaders: z.array(z.string()),
-              allowedOperations: z.array(z.string()),
-              exposeHeaders: z.array(z.string()).optional(),
-              maxAgeSeconds: z.number(),
-            }),
-          )
-          .optional()
-          .describe("CORS rules for browser-based access."),
+        bucketInfo: bucketInfoSchema.optional(),
+        corsRules: corsRulesSchema.optional(),
         lifecycleRules: z
           .array(
             z.object({
@@ -423,6 +630,8 @@ export function registerBucketTools(
     },
     async (args) => {
       try {
+        validateBucketInfoInput(args.bucketInfo);
+        validateCorsRulesInput(args.corsRules);
         const payload: CreateBucketOptions = {
           bucketName: args.bucketName,
           bucketType: args.bucketType,
@@ -480,19 +689,8 @@ export function registerBucketTools(
       inputSchema: {
         bucketId: z.string().describe("The ID of the bucket to update."),
         bucketType: z.enum(["allPublic", "allPrivate"]).optional(),
-        bucketInfo: z.record(z.string(), z.string()).optional(),
-        corsRules: z
-          .array(
-            z.object({
-              corsRuleName: z.string(),
-              allowedOrigins: z.array(z.string()),
-              allowedHeaders: z.array(z.string()),
-              allowedOperations: z.array(z.string()),
-              exposeHeaders: z.array(z.string()).optional(),
-              maxAgeSeconds: z.number(),
-            }),
-          )
-          .optional(),
+        bucketInfo: bucketInfoSchema.optional(),
+        corsRules: corsRulesSchema.optional(),
         lifecycleRules: z
           .array(
             z.object({
@@ -578,6 +776,8 @@ export function registerBucketTools(
       try {
         const gate = checkDestructive("b2_update_bucket", args, config);
         if (!gate.ok) return toolError(new Error(gate.message));
+        validateBucketInfoInput(args.bucketInfo);
+        validateCorsRulesInput(args.corsRules);
         const payload: UpdateBucketOptions = {
           bucketId: args.bucketId,
           ...(args.bucketType !== undefined ? { bucketType: args.bucketType } : {}),

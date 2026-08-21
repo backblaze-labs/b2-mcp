@@ -143,10 +143,14 @@
         "properties": {
           "bucketInfo": {
             "additionalProperties": {
+              "maxLength": 10000,
               "type": "string"
             },
-            "description": "Up to 10 custom key-value pairs stored with the bucket.",
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.",
             "propertyNames": {
+              "maxLength": 50,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._`~!#$%^&*'|+-]+$",
               "type": "string"
             },
             "type": "object"
@@ -161,34 +165,52 @@
             "type": "string"
           },
           "corsRules": {
-            "description": "CORS rules for browser-based access.",
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.",
             "items": {
               "properties": {
                 "allowedHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "allowedOperations": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "allowedOrigins": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "corsRuleName": {
+                  "description": "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.",
+                  "maxLength": 63,
+                  "minLength": 6,
+                  "pattern": "^[A-Za-z0-9-]+$",
                   "type": "string"
                 },
                 "exposeHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "maxAgeSeconds": {
@@ -204,6 +226,7 @@
               ],
               "type": "object"
             },
+            "maxItems": 100,
             "type": "array"
           },
           "defaultServerSideEncryption": {
@@ -774,9 +797,14 @@
           },
           "bucketInfo": {
             "additionalProperties": {
+              "maxLength": 10000,
               "type": "string"
             },
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes.",
             "propertyNames": {
+              "maxLength": 50,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9._`~!#$%^&*'|+-]+$",
               "type": "string"
             },
             "type": "object"
@@ -790,33 +818,52 @@
             "type": "boolean"
           },
           "corsRules": {
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique.",
             "items": {
               "properties": {
                 "allowedHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "allowedOperations": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "allowedOrigins": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
+                  "minItems": 1,
                   "type": "array"
                 },
                 "corsRuleName": {
+                  "description": "Unique name: 6-63 letters, digits, hyphens; no b2- prefix.",
+                  "maxLength": 63,
+                  "minLength": 6,
+                  "pattern": "^[A-Za-z0-9-]+$",
                   "type": "string"
                 },
                 "exposeHeaders": {
                   "items": {
+                    "maxLength": 999,
+                    "minLength": 1,
                     "type": "string"
                   },
+                  "maxItems": 100,
                   "type": "array"
                 },
                 "maxAgeSeconds": {
@@ -832,6 +879,7 @@
               ],
               "type": "object"
             },
+            "maxItems": 100,
             "type": "array"
           },
           "defaultRetention": {
@@ -1980,5 +2028,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "0514a29fe155fd62b718351a65d7e41a079638cfbc7981241f89cfc6f93e8c94"
+  "hash": "6cf6387cb398b095081f9379e3c8c9610ebc6ee8cdb103c9c5dff02f53733dd8"
 }
