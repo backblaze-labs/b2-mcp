@@ -2,27 +2,31 @@
 
 /* global console, process */
 
-import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { b2CredentialPolicy, redactB2CredentialValues } from "./b2-credential-env.mjs";
 import liveB2Contract from "./lib/live-b2-contract.cjs";
+import liveB2Evidence from "./lib/live-b2-evidence.cjs";
 
 const {
   CONTRACT_BUCKET_PREFIX,
   bucketMatchesPrefix,
   cleanupContractBucketWithTools,
+  cleanupContractNotificationRulesWithTools,
   createCleanupStats,
   isSafeLivePrefix,
   normalizeLivePrefix,
 } = liveB2Contract;
+const { createCleanupEvidence, writeEvidenceJson } = liveB2Evidence;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+let activeOptions = null;
+let activeStats = createCleanupStats();
 
 function usage(message) {
   if (message) console.error(message);
   console.error(
-    "Usage: node scripts/live-b2-janitor.mjs [--prefix <test-prefix>] [--exclude-prefix <active-prefix>] [--dry-run] [--best-effort]",
+    "Usage: node scripts/live-b2-janitor.mjs [--prefix <test-prefix>] [--exclude-prefix <active-prefix>] [--dry-run] [--best-effort] [--summary-json <path>]",
   );
 }
 
@@ -32,6 +36,7 @@ export function parseArgs(argv) {
     excludePrefixes: [],
     dryRun: false,
     bestEffort: false,
+    summaryJson: "",
   };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
@@ -47,6 +52,10 @@ export function parseArgs(argv) {
       const value = argv[++index];
       if (!value) throw new Error("--exclude-prefix requires a value");
       options.excludePrefixes.push(value);
+    } else if (arg === "--summary-json") {
+      const value = argv[++index];
+      if (!value) throw new Error("--summary-json requires a value");
+      options.summaryJson = value;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -64,8 +73,12 @@ function expectedLiveTestAccountId() {
   return String(process.env.B2_LIVE_TEST_ACCOUNT_ID ?? "").trim();
 }
 
+function expectedNotificationBucketName() {
+  return String(process.env.B2_LIVE_NOTIFICATION_BUCKET ?? "").trim();
+}
+
 function fingerprint(value) {
-  return createHash("sha256").update(String(value)).digest("hex").slice(0, 12);
+  return liveB2Contract.stableResourceFingerprint(value);
 }
 
 function redactDetail(value, prefix) {
@@ -73,6 +86,49 @@ function redactDetail(value, prefix) {
     redactB2CredentialValues(String(value ?? ""), process.env),
     { prefix },
   );
+}
+
+export function writeJanitorSummary(options, stats, outcome, extra = {}) {
+  if (!options?.summaryJson) return;
+  writeEvidenceJson(
+    options.summaryJson,
+    createCleanupEvidence({
+      options,
+      stats,
+      outcome,
+      error: extra.error,
+      missing: extra.missing,
+    }),
+  );
+}
+
+function safeWriteJanitorSummary(options, stats, outcome, extra = {}) {
+  if (!options?.summaryJson) return;
+  try {
+    writeJanitorSummary(options, stats, outcome, extra);
+  } catch (err) {
+    console.error(
+      `live-b2-janitor: could not write cleanup summary: ${redactDetail(
+        err?.message ?? err,
+        options.prefix,
+      )}`,
+    );
+  }
+}
+
+function fallbackSummaryOptions(argv) {
+  const summaryIndex = argv.indexOf("--summary-json");
+  if (summaryIndex === -1 || !argv[summaryIndex + 1]) return null;
+  const prefixIndex = argv.indexOf("--prefix");
+  const prefix =
+    prefixIndex === -1 || !argv[prefixIndex + 1] ? CONTRACT_BUCKET_PREFIX : argv[prefixIndex + 1];
+  return {
+    prefix: normalizeLivePrefix(prefix),
+    excludePrefixes: [],
+    dryRun: argv.includes("--dry-run"),
+    bestEffort: argv.includes("--best-effort"),
+    summaryJson: argv[summaryIndex + 1],
+  };
 }
 
 async function loadRuntime() {
@@ -122,33 +178,92 @@ function selectedBuckets(buckets, options) {
   );
 }
 
+async function cleanupNotificationFixtureRules(b2Client, tools, options, stats) {
+  const bucketName = expectedNotificationBucketName();
+  if (!bucketName) {
+    stats.errors++;
+    console.error("live-b2-janitor: B2_LIVE_NOTIFICATION_BUCKET is required for rule cleanup");
+    return;
+  }
+  let bucket;
+  try {
+    bucket = (await b2Client.listBuckets({ bucketName })).buckets?.find(
+      (candidate) => candidate.bucketName === bucketName,
+    );
+  } catch (err) {
+    stats.errors++;
+    console.error(
+      `live-b2-janitor: could not list notification bucket: ${redactDetail(
+        err?.message ?? err,
+        options.prefix,
+      )}`,
+    );
+    return;
+  }
+  if (!bucket?.bucketId) {
+    stats.errors++;
+    console.error(
+      `live-b2-janitor: notification bucket fingerprint=${fingerprint(bucketName)} is not visible`,
+    );
+    return;
+  }
+  await cleanupContractNotificationRulesWithTools(
+    (name, args) => callTool(tools, name, args),
+    bucket,
+    {
+      dryRun: options.dryRun,
+      error: (message) => console.error(`live-b2-janitor: ${message}`),
+      fingerprint,
+      log: (message) => console.log(`live-b2-janitor: ${message}`),
+      prefix: options.prefix,
+      redact: (message) => redactDetail(message, options.prefix),
+      stats,
+    },
+  );
+}
+
 async function main() {
   let options;
   try {
     options = parseArgs(process.argv.slice(2));
   } catch (err) {
+    safeWriteJanitorSummary(
+      fallbackSummaryOptions(process.argv.slice(2)),
+      createCleanupStats(),
+      "configuration blocked",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
     usage(err instanceof Error ? err.message : String(err));
     process.exit(2);
   }
+  activeOptions = options;
+  activeStats = createCleanupStats();
 
   if (!isSafeLivePrefix(options.prefix)) {
+    safeWriteJanitorSummary(options, activeStats, "configuration blocked", {
+      error: "unsafe live B2 janitor prefix",
+    });
     usage(`Refusing unsafe live B2 janitor prefix: ${options.prefix}`);
     process.exit(2);
   }
 
   const missing = exactSecretMissing();
   if (missing.length) {
+    safeWriteJanitorSummary(options, activeStats, "configuration blocked", { missing });
     console.error(`live-b2-janitor: missing required live B2 credentials: ${missing.join(", ")}`);
     process.exit(2);
   }
 
   const { authManager, b2Client, tools } = await loadRuntime();
-  const stats = createCleanupStats();
+  const stats = activeStats;
   try {
     await assertExpectedLiveTestAccount(authManager, expectedLiveTestAccountId(), {
       log: (message) => console.log(`live-b2-janitor: ${message}`),
     });
   } catch (err) {
+    safeWriteJanitorSummary(options, stats, "configuration blocked", {
+      error: redactDetail(err?.message ?? err, options.prefix),
+    });
     console.error(`live-b2-janitor: ${redactDetail(err?.message ?? err, options.prefix)}`);
     process.exit(2);
   }
@@ -157,6 +272,9 @@ async function main() {
   try {
     buckets = selectedBuckets((await b2Client.listBuckets({})).buckets ?? [], options);
   } catch (err) {
+    safeWriteJanitorSummary(options, stats, "cleanup failure", {
+      error: redactDetail(err?.message ?? err, options.prefix),
+    });
     console.error(
       `live-b2-janitor: could not list buckets: ${redactDetail(err?.message ?? err, options.prefix)}`,
     );
@@ -172,6 +290,7 @@ async function main() {
     redact: (message) => redactDetail(message, options.prefix),
     stats,
   };
+  await cleanupNotificationFixtureRules(b2Client, tools, options, stats);
   for (const bucket of buckets) {
     await cleanupContractBucketWithTools(
       (name, args) => callTool(tools, name, args),
@@ -181,7 +300,12 @@ async function main() {
   }
 
   console.log(
-    `live-b2-janitor: summary buckets=${stats.buckets} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
+    `live-b2-janitor: summary buckets=${stats.buckets} notificationRules=${stats.notificationRules} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
+  );
+  safeWriteJanitorSummary(
+    options,
+    stats,
+    stats.errors || stats.leakedBuckets ? "cleanup failure" : "passed",
   );
   if (stats.errors || stats.leakedBuckets) {
     const annotation = options.bestEffort ? "warning" : "error";
@@ -195,6 +319,10 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
+    const options = activeOptions ?? fallbackSummaryOptions(process.argv.slice(2));
+    safeWriteJanitorSummary(options, activeStats, "cleanup failure", {
+      error: redactDetail(err?.message ?? err, options?.prefix || CONTRACT_BUCKET_PREFIX),
+    });
     console.error(`live-b2-janitor: ${redactB2CredentialValues(err?.message ?? err, process.env)}`);
     process.exit(1);
   });

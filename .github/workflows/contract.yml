@@ -104,11 +104,112 @@ jobs:
           echo "checkout_sha=${checkout_sha}" >> "$GITHUB_OUTPUT"
           echo "run_prefix=${run_prefix}" >> "$GITHUB_OUTPUT"
 
-  contract:
-    name: live B2 contract / Node ${{ matrix.node-version }}
+  preflight:
+    name: live B2 preflight
     needs: guard
     if: needs.guard.outputs.should-run == 'true'
     runs-on: ubuntu-latest
+    environment: live-b2-contract
+    timeout-minutes: 8
+    env:
+      # Trusted live contract runs require these together: preflight validates
+      # configuration, profile, account, and capabilities before the Node matrix.
+      B2_REQUIRE_LIVE_TESTS: "1"
+      B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
+      B2_MCP_LIVE_RUN_PREFIX: ${{ needs.guard.outputs.run-prefix }}-preflight
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out trusted live-test commit
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}
+        run: |
+          set -euo pipefail
+          git checkout --detach "${EXPECTED_CHECKOUT_SHA}"
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_CHECKOUT_SHA}" ]]; then
+            echo "::error::live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}"
+            exit 1
+          fi
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Validate live B2 configuration before Node matrix
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
+          B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports/live-b2
+          node scripts/live-b2-evidence.mjs preflight --out reports/live-b2/preflight.json
+      - name: Ensure live B2 preflight evidence exists
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p reports/live-b2
+          if [[ -s reports/live-b2/preflight.json ]]; then
+            exit 0
+          fi
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > reports/live-b2/preflight.json <<JSON
+          {
+            "schemaVersion": 1,
+            "issue": {
+              "number": 194,
+              "url": "https://github.com/backblaze-labs/b2-mcp/issues/194",
+              "title": "[b2-mcp] Publish live B2 isolation and cleanup evidence"
+            },
+            "generatedAt": "${generated_at}",
+            "phase": "preflight",
+            "status": "configuration blocked",
+            "statusReason": "preflight did not reach live B2 validation",
+            "sensitivity": {
+              "secretSafe": true,
+              "omitted": [
+                "key IDs",
+                "application keys",
+                "authorization headers",
+                "account IDs",
+                "bucket IDs",
+                "raw bucket names"
+              ]
+            }
+          }
+          JSON
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload live B2 preflight evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: live-b2-preflight-isolation-cleanup
+          path: reports/live-b2/preflight.json
+          if-no-files-found: error
+          retention-days: 14
+
+  contract:
+    name: live B2 contract / Node ${{ matrix.node-version }}
+    needs: [guard, preflight]
+    if: needs.guard.outputs.should-run == 'true' && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    environment: live-b2-contract
     timeout-minutes: 18
     strategy:
       fail-fast: false
@@ -121,12 +222,26 @@ jobs:
       B2_REQUIRE_LIVE_TESTS: "1"
       B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
       B2_MCP_LIVE_RUN_PREFIX: ${{ needs.guard.outputs.run-prefix }}-n${{ matrix.node-version }}
+      B2_MCP_LIVE_RESOURCE_LEDGER: reports/live-b2/resources-node-${{ matrix.node-version }}.jsonl
+      MATRIX_NODE_VERSION: ${{ matrix.node-version }}
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.guard.outputs.checkout-sha }}
+          ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Check out trusted live-test commit
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}
+        run: |
+          set -euo pipefail
+          git checkout --detach "${EXPECTED_CHECKOUT_SHA}"
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_CHECKOUT_SHA}" ]]; then
+            echo "::error::live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}"
+            exit 1
+          fi
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
@@ -138,7 +253,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - name: Validate live B2 environment
+      - name: Prepare live B2 evidence directory
+        run: mkdir -p reports/live-b2
+      - name: Validate live B2 matrix leg
+        id: matrix_validation
+        continue-on-error: true
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
           B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
@@ -147,54 +266,17 @@ jobs:
           B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
           B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
           B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
+          B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
         run: |
           set -euo pipefail
-          echo "::add-mask::${B2_MCP_LIVE_RUN_PREFIX}"
-          if [[ -n "${B2_LIVE_TEST_ACCOUNT_ID:-}" ]]; then echo "::add-mask::${B2_LIVE_TEST_ACCOUNT_ID}"; fi
-          missing=0
-          for name in B2_APPLICATION_KEY_ID B2_APPLICATION_KEY B2_LIVE_TEST_ACCOUNT_ID B2_MCP_LIVE_RUN_PREFIX; do
-            if [[ -z "${!name:-}" ]]; then
-              echo "::error::Missing required live-b2-contract variable or secret for ${name}"
-              missing=1
-            fi
-          done
-          if [[ "${B2_REQUIRE_LIVE_TESTS:-}" != "1" || "${B2_INTEGRATION_REQUIRE_CREDENTIALS:-}" != "1" ]]; then
-            echo "::error::Trusted live-b2-contract runs must set B2_REQUIRE_LIVE_TESTS=1 and B2_INTEGRATION_REQUIRE_CREDENTIALS=1 together"
-            missing=1
-          fi
-          if [[ "$missing" != 0 ]]; then exit "$missing"; fi
-          node --input-type=module <<'NODE'
-          import { B2AuthManager } from "./dist/auth.js";
-          import { loadConfig } from "./dist/server.js";
-          import liveB2Capabilities from "./scripts/lib/live-b2-capabilities.cjs";
-
-          const {
-            LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES: forbiddenCapabilities,
-            LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: requiredCapabilities,
-          } = liveB2Capabilities;
-          const auth = await new B2AuthManager(loadConfig()).getAuth();
-          if (auth.accountId !== process.env.B2_LIVE_TEST_ACCOUNT_ID) {
-            throw new Error("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
-          }
-          const missingCapabilities = requiredCapabilities.filter(
-            (capability) => !auth.capabilities.includes(capability),
-          );
-          if (missingCapabilities.length > 0) {
-            throw new Error(
-              `live B2 contract key is missing required capability: ${missingCapabilities.join(", ")}`,
-            );
-          }
-          const forbiddenGrantedCapabilities = forbiddenCapabilities.filter((capability) =>
-            auth.capabilities.includes(capability),
-          );
-          if (forbiddenGrantedCapabilities.length > 0) {
-            throw new Error(
-              `live B2 contract key grants forbidden capability: ${forbiddenGrantedCapabilities.join(", ")}`,
-            );
-          }
-          NODE
+          node scripts/live-b2-evidence.mjs preflight \
+            --out "reports/live-b2/validation-node-${{ matrix.node-version }}.json"
       - name: Run live B2 contract and integration suites
+        id: live_tests
+        if: steps.matrix_validation.outcome == 'success'
+        continue-on-error: true
         timeout-minutes: 12
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
@@ -204,9 +286,34 @@ jobs:
           B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
           B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
           B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
+          B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
         run: pnpm run test:live:b2
       - name: Clean current live B2 run resources
+        id: cleanup
+        if: always()
+        continue-on-error: true
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
+          B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
+          B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f dist/server.js ]]; then
+            echo "::notice::dist/server.js is missing; no live resources should have been created before build."
+            exit 0
+          fi
+          node scripts/live-b2-janitor.mjs \
+            --prefix "${B2_MCP_LIVE_RUN_PREFIX}" \
+            --summary-json "reports/live-b2/cleanup-node-${{ matrix.node-version }}.json"
+      - name: Publish live B2 isolation and cleanup evidence
         if: always()
         env:
           B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
@@ -216,11 +323,111 @@ jobs:
           B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
           B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
           B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
+          B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
+          MATRIX_NODE_VERSION: ${{ matrix.node-version }}
         run: |
           set -euo pipefail
-          if [[ ! -f dist/server.js ]]; then
-            echo "::notice::dist/server.js is missing; no live resources should have been created before build."
+          mkdir -p reports/live-b2
+          node scripts/live-b2-evidence.mjs finalize \
+            --out "reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json" \
+            --resource-ledger "${B2_MCP_LIVE_RESOURCE_LEDGER}" \
+            --cleanup-summary "reports/live-b2/cleanup-node-${{ matrix.node-version }}.json" \
+            --validation-summary "reports/live-b2/validation-node-${{ matrix.node-version }}.json" \
+            --preflight-outcome "${{ steps.matrix_validation.outcome }}" \
+            --test-outcome "${{ steps.live_tests.outcome }}" \
+            --cleanup-outcome "${{ steps.cleanup.outcome }}"
+      - name: Ensure live B2 final evidence exists
+        if: always()
+        run: |
+          set -euo pipefail
+          final_json="reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json"
+          mkdir -p reports/live-b2
+          if [[ -s "${final_json}" ]]; then
             exit 0
           fi
-          node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}"
+          status="configuration blocked"
+          reason="live B2 final evidence fallback created before matrix validation completed"
+          if [[ "${{ steps.cleanup.outcome }}" != "success" && "${{ steps.cleanup.outcome }}" != "skipped" ]]; then
+            status="cleanup failure"
+            reason="live B2 final evidence fallback created after cleanup did not complete successfully"
+          elif [[ "${{ steps.live_tests.outcome }}" != "success" && "${{ steps.live_tests.outcome }}" != "skipped" ]]; then
+            status="product failure"
+            reason="live B2 final evidence fallback created after tests did not complete successfully"
+          fi
+          generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          cat > "${final_json}" <<JSON
+          {
+            "schemaVersion": 1,
+            "issue": {
+              "number": 194,
+              "url": "https://github.com/backblaze-labs/b2-mcp/issues/194",
+              "title": "[b2-mcp] Publish live B2 isolation and cleanup evidence"
+            },
+            "generatedAt": "${generated_at}",
+            "phase": "final",
+            "status": "${status}",
+            "statusReason": "${reason}",
+            "outcomes": {
+              "preflight": "${{ steps.matrix_validation.outcome }}",
+              "tests": "${{ steps.live_tests.outcome }}",
+              "cleanup": "${{ steps.cleanup.outcome }}"
+            },
+            "sensitivity": {
+              "secretSafe": true,
+              "omitted": [
+                "key IDs",
+                "application keys",
+                "authorization headers",
+                "account IDs",
+                "bucket IDs",
+                "raw bucket names"
+              ]
+            }
+          }
+          JSON
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload live B2 isolation and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: live-b2-isolation-cleanup-node-${{ matrix.node-version }}
+          path: reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Require live B2 run success
+        if: always()
+        run: |
+          set -euo pipefail
+          failed=0
+          if [[ "${{ steps.matrix_validation.outcome }}" != "success" ]]; then
+            echo "::error::live B2 matrix validation outcome was ${{ steps.matrix_validation.outcome }}"
+            failed=1
+          fi
+          if [[ "${{ steps.live_tests.outcome }}" != "success" ]]; then
+            echo "::error::live B2 tests outcome was ${{ steps.live_tests.outcome }}"
+            failed=1
+          fi
+          if [[ "${{ steps.cleanup.outcome }}" != "success" ]]; then
+            echo "::error::live B2 cleanup outcome was ${{ steps.cleanup.outcome }}"
+            failed=1
+          fi
+          evidence_json="reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json"
+          evidence_status="$(
+            node -e '
+              const fs = require("node:fs");
+              const path = process.argv[1];
+              try {
+                const parsed = JSON.parse(fs.readFileSync(path, "utf8"));
+                console.log(typeof parsed.status === "string" ? parsed.status : "invalid");
+              } catch {
+                console.log("missing");
+              }
+            ' "${evidence_json}"
+          )"
+          if [[ "${evidence_status}" != "passed" ]]; then
+            echo "::error::live B2 evidence status was ${evidence_status}"
+            failed=1
+          fi
+          exit "$failed"

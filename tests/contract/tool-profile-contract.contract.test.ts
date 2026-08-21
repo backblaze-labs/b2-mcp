@@ -12,7 +12,6 @@ import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import type { CredentialProvider, CredentialResolution } from "../../src/credentials";
 import { readJson, root } from "./support";
 import {
-  CONTRACT_TEST_CONFIG,
   LEGACY_PROTOCOL_VERSION,
   PROFILE_NAMES,
   TOOL_BACKING_BY_NAME,
@@ -20,6 +19,7 @@ import {
   backingCategoryCounts,
   backingCategoryMapForNames,
   capabilitiesForProfile,
+  configForProfile,
   contractSdkVersions,
   countPrefixes,
   destructiveConfirmToolsFromTools,
@@ -57,7 +57,7 @@ function credentialProvider(profile: ProfileName): CredentialProvider {
     },
     resolve(): CredentialResolution {
       return {
-        config: CONTRACT_TEST_CONFIG,
+        config: configForProfile(profile),
         cacheKey: `tool-contract:${profile}`,
         capabilityCacheKey: `tool-contract:${profile}`,
       };
@@ -394,7 +394,7 @@ describe("MCP tool profile invariants", () => {
     expect(presignWriteTools).toEqual([]);
   });
 
-  it.each(["full", "phase1-default"] as const)(
+  it.each(["full", "live-b2-contract", "phase1-default"] as const)(
     "%s presigned URLs keep download and upload operations",
     (profile) => {
       const tool = getTool(fixtureFor(profile, "modern"), "s3_get_presigned_url");

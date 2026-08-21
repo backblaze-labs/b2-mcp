@@ -32,7 +32,12 @@ describe("local performance baseline", () => {
     expect(config.issue.url).toBe("https://github.com/backblaze-labs/b2-mcp/issues/199");
     expect(config.measurementPlan.localOnly).toBe(true);
     expect(config.measurementPlan.usesRealB2Credentials).toBe(false);
-    expect(config.reviewedBaseline.toolProfiles).toEqual(["full", "phase1-default", "read-only"]);
+    expect(config.reviewedBaseline.toolProfiles).toEqual([
+      "full",
+      "live-b2-contract",
+      "phase1-default",
+      "read-only",
+    ]);
     expect(Object.keys(config.runtimeApplicability).sort()).toEqual([
       "cloudflare-worker",
       "node-http",

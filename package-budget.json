@@ -11,18 +11,18 @@
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 469089,
-    "unpackedPackageBytes": 2104001,
-    "packedEntryCount": 248,
-    "cleanConsumerInstallFootprintBytes": 30820643
+    "packedTarballBytes": 489019,
+    "unpackedPackageBytes": 2253408,
+    "packedEntryCount": 250,
+    "cleanConsumerInstallFootprintBytes": 30970050
   },
   "limits": {
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
-    "packedTarballBytes": 470000,
-    "unpackedPackageBytes": 2105000,
+    "packedTarballBytes": 490000,
+    "unpackedPackageBytes": 2256000,
     "packedEntryCount": 250,
-    "cleanConsumerInstallFootprintBytes": 30822000
+    "cleanConsumerInstallFootprintBytes": 31000000
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {

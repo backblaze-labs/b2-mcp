@@ -487,7 +487,8 @@ For the integration and request-shape contract suites, use the
   (mapped to `B2_MASTER_KEY_ID`/`B2_MASTER_KEY`) for the Partner read paths, all
   wired through `.github/workflows/contract.yml`.
 - Variables: `B2_LIVE_TEST_ACCOUNT_ID`, `B2_REGION` (the account's S3 region,
-  e.g. `us-east-005`), `B2_LIVE_NOTIFICATION_BUCKET`, and the workflow-generated
+  e.g. `us-east-005`), `B2_LIVE_NOTIFICATION_BUCKET`,
+  `B2_MCP_EXPECTED_TOOL_PROFILE=live-b2-contract`, and the workflow-generated
   `B2_MCP_LIVE_RUN_PREFIX`.
 - Event Notifications (required): the notification write-shape contract runs
   against a pre-provisioned, notifications-enabled bucket. Create a bucket in the
@@ -501,6 +502,14 @@ For the integration and request-shape contract suites, use the
   non-master application key.
 - Use a dedicated, disposable key in an isolated test account. A bucket-creating
   key is account-wide, so the test account is the isolation boundary.
+- Evidence artifacts: each attempted protected live contract run uploads
+  `live-b2-preflight-isolation-cleanup` plus one
+  `live-b2-isolation-cleanup-node-*` artifact per Node matrix leg. The JSON
+  summaries classify `passed`, `product failure`, `configuration blocked`, and
+  `cleanup failure`; include run-prefix isolation, approved tool profile,
+  non-master capability policy, resource fingerprints, and cleanup counters; and
+  omit key IDs, application keys, authorization headers, raw account IDs, bucket
+  IDs, and raw bucket names outside the generated run prefix.
 
 For the deployed MCP smoke, use the `live-b2-smoke` GitHub Environment. This
 path needs a reviewed deployment from issue #137 before it can provide release
@@ -571,8 +580,11 @@ live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26.
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract
 workflow through `workflow_call` before npm publish. The caller passes only the
-reviewed checkout SHA. The called workflow's jobs bind `live-b2-contract` and
-resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and `B2_LIVE_TEST_ACCOUNT_ID` there;
-those values must not be duplicated or forwarded from repository or
-`npm-publish` secrets. GitHub Release publication events are not pre-release
-gates and are not used for live contract evidence.
+reviewed checkout SHA. The called workflow verifies that SHA is reachable from
+protected `ci-green`, bootstraps from protected `main` or `ci-green` refs, and
+detaches to the exact requested SHA before package code can run with live
+credentials. The called workflow's jobs bind
+`live-b2-contract` and resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and
+`B2_LIVE_TEST_ACCOUNT_ID` there; those values must not be duplicated or
+forwarded from repository or `npm-publish` secrets. GitHub Release publication
+events are not pre-release gates and are not used for live contract evidence.

@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
-import { join } from "path";
 import { createRequire } from "module";
+import { join } from "path";
 import { root } from "./support";
 
 const nodeRequire = createRequire(__filename);
@@ -24,9 +24,7 @@ const liveWorkflows = [
   {
     path: ".github/workflows/contract.yml",
     job: "contract",
-    // Release-workflow callers cannot bind a GitHub Environment, so the contract
-    // job no longer uses one; credentials arrive via named workflow_call secrets.
-    environment: null as string | null,
+    environment: "live-b2-contract",
     concurrency: "live-b2-contract-${{ github.repository }}-resources",
     cancelsInProgress: false,
     b2Secrets: ["LIVE_B2_KEY_ID", "LIVE_B2_KEY", "LIVE_B2_MASTER_KEY_ID", "LIVE_B2_MASTER_KEY"],
@@ -100,6 +98,7 @@ const liveToolCapabilities: Record<string, readonly string[]> = {
     "writeBuckets",
   ],
   b2_delete_bucket: ["deleteBuckets", "readBucketEncryption", "readBucketRetentions"],
+  b2_get_bucket_notification_rules: ["writeBucketNotifications"],
   b2_largest_files: ["listFiles"],
   b2_list_buckets: ["listBuckets", "readBucketEncryption", "readBucketRetentions"],
   b2_list_group_members: [],
@@ -227,9 +226,23 @@ describe("live secret workflow policy", () => {
     "$path checks out the guarded commit before running package code",
     ({ path }) => {
       const text = workflowText(path);
-      expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      if (path.endsWith("contract.yml")) {
+        expect(text).toContain(
+          "ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}",
+        );
+        expect(text).toContain("fetch-depth: 0");
+        expect(text).toContain("Check out trusted live-test commit");
+        expect(text).toContain("EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}");
+        expect(text).toContain('git checkout --detach "${EXPECTED_CHECKOUT_SHA}"');
+        expect(text).toContain('actual_sha="$(git rev-parse HEAD)"');
+        expect(text).toContain(
+          "live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}",
+        );
+        expect(text).not.toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      } else {
+        expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      }
       expect(text).not.toContain('checkout_ref="ci-green"');
-      expect(text).not.toContain("ref: ci-green");
       expect(text).not.toContain("github.event_name == 'release'");
       expect(text).not.toContain("startsWith(github.ref, 'refs/tags/v')");
     },
@@ -252,6 +265,7 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("refs/heads/ci-green");
     expect(text).toContain("git merge-base --is-ancestor");
     expect(text).toContain("workflow_call checkout-sha must be reachable from refs/heads/ci-green");
+    expect(text).toContain('checkout_sha="${WORKFLOW_CALL_CHECKOUT_SHA}"');
   });
 
   it("fails the live run when per-run cleanup leaks resources", () => {
@@ -262,10 +276,12 @@ describe("live secret workflow policy", () => {
     expect(text).not.toContain("node scripts/live-b2-janitor.mjs --prefix mcp-contract-");
     expect(text).toContain("Clean current live B2 run resources");
     expect(text).toContain("B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}");
-    expect(contractJob).toContain(
-      'node scripts/live-b2-janitor.mjs --prefix "${B2_MCP_LIVE_RUN_PREFIX}"',
-    );
+    expect(contractJob).toContain("node scripts/live-b2-janitor.mjs");
+    expect(contractJob).toContain('--prefix "${B2_MCP_LIVE_RUN_PREFIX}"');
+    expect(contractJob).toContain("--summary-json");
     expect(contractJob).not.toContain("--best-effort");
+    expect(contractJob).toContain("Require live B2 run success");
+    expect(contractJob).toContain("live B2 cleanup outcome was");
     expect(janitor).not.toMatch(/\.(?:listKeys|deleteKey)\s*\(/);
     expect(janitor).not.toContain("keys=");
     expect(text).toContain("B2_MCP_LIVE_RUN_PREFIX");
@@ -284,7 +300,7 @@ describe("live secret workflow policy", () => {
     const text = workflowText(".github/workflows/contract.yml");
     const contractJob = workflowJobBlock(text, "contract") ?? "";
 
-    expect(contractJob).toContain("needs: guard");
+    expect(contractJob).toContain("needs: [guard, preflight]");
     expect(contractJob).not.toContain("package-budget");
   });
 
@@ -292,6 +308,7 @@ describe("live secret workflow policy", () => {
     const text = workflowText(".github/workflows/contract.yml");
     expect(text).toContain("live-b2-janitor");
     expect(text).toContain("mcp-contract-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}");
+    expect(text).toContain("live-b2-isolation-cleanup-node-${{ matrix.node-version }}");
   });
 
   it("verifies the live test account before creating fixture buckets", () => {
@@ -301,12 +318,6 @@ describe("live secret workflow policy", () => {
     expect(text.indexOf("await assertLiveTestAccount(server)")).toBeLessThan(
       text.indexOf('callTool(server, "b2_create_bucket"'),
     );
-    const workflow = workflowText(".github/workflows/contract.yml");
-    expect(workflow).toContain("authorized account does not match B2_LIVE_TEST_ACCOUNT_ID");
-    expect(workflow).toContain("scripts/lib/live-b2-capabilities.cjs");
-    expect(workflow).toContain("LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES");
-    expect(workflow).toContain("LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES");
-    expect(workflow).toContain("live B2 contract key grants forbidden capability");
     const liveTests = [
       workflowText("tests/live/b2.integration.live.test.ts"),
       workflowText("tests/live/request-shape.contract.live.test.ts"),
@@ -345,12 +356,88 @@ describe("live secret workflow policy", () => {
     expect(contractJob).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
     expect(contractJob).toContain('B2_REQUIRE_LIVE_TESTS: "1"');
     expect(contractJob).toContain('B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"');
-    expect(contractJob).toContain(
-      "must set B2_REQUIRE_LIVE_TESTS=1 and B2_INTEGRATION_REQUIRE_CREDENTIALS=1 together",
-    );
+    expect(contractJob).toContain("B2_MCP_LIVE_RESOURCE_LEDGER");
+    expect(contractJob).toContain("Publish live B2 isolation and cleanup evidence");
     expect(contractJob).not.toContain(
       "B2_APPLICATION_KEY B2_LIVE_TEST_ACCOUNT_ID B2_REQUIRE_LIVE_TESTS B2_INTEGRATION_REQUIRE_CREDENTIALS B2_MCP_LIVE_RUN_PREFIX",
     );
+  });
+
+  it("validates live B2 configuration and expected profile before the Node matrix starts", () => {
+    const workflow = workflowText(".github/workflows/contract.yml");
+    const preflightJob = workflowJobBlock(workflow, "preflight") ?? "";
+    const contractJob = workflowJobBlock(workflow, "contract") ?? "";
+    const matrixValidation = workflowStepBlock(workflow, "Validate live B2 matrix leg");
+    const liveTests = workflowStepBlock(workflow, "Run live B2 contract and integration suites");
+    const finalizer = workflowStepBlock(workflow, "Publish live B2 isolation and cleanup evidence");
+    const preflightFallback = workflowStepBlock(
+      workflow,
+      "Ensure live B2 preflight evidence exists",
+    );
+    const finalFallback = workflowStepBlock(workflow, "Ensure live B2 final evidence exists");
+
+    expect(preflightJob).toContain("name: live B2 preflight");
+    expect(preflightJob).toContain("needs: guard");
+    expect(preflightJob).toContain("environment: live-b2-contract");
+    expect(preflightJob).toContain("Validate live B2 configuration before Node matrix");
+    expect(preflightJob).toContain(
+      "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
+    );
+    expect(preflightJob).toContain("node scripts/live-b2-evidence.mjs preflight");
+    expect(preflightJob).toContain("B2_REGION: ${{ vars.B2_REGION }}");
+    expect(preflightJob).toContain("live-b2-preflight-isolation-cleanup");
+    expect(preflightFallback).toContain("preflight did not reach live B2 validation");
+    expect(preflightFallback).toContain('status": "configuration blocked');
+    expect(preflightJob).toContain("if-no-files-found: error");
+    expect(preflightJob).toContain("if: always()");
+    expect(contractJob).toContain("needs: [guard, preflight]");
+    expect(contractJob).toContain("needs.preflight.result == 'success'");
+    expect(matrixValidation).toContain("id: matrix_validation");
+    expect(matrixValidation).toContain("continue-on-error: true");
+    expect(matrixValidation).toContain(
+      "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
+    );
+    expect(matrixValidation).toContain("B2_LIVE_NOTIFICATION_BUCKET");
+    expect(matrixValidation).toContain("node scripts/live-b2-evidence.mjs preflight");
+    expect(matrixValidation).toContain(
+      "reports/live-b2/validation-node-${{ matrix.node-version }}.json",
+    );
+    expect(liveTests).toContain("if: steps.matrix_validation.outcome == 'success'");
+    expect(liveTests).toContain(
+      "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
+    );
+    expect(finalizer).toContain("--validation-summary");
+    expect(finalizer).toContain("B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}");
+    expect(finalizer).toContain("B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}");
+    expect(finalizer).toContain("B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}");
+    expect(finalizer).toContain("B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}");
+    expect(finalizer).toContain("B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}");
+    expect(finalizer).toContain(
+      "B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}",
+    );
+    expect(finalizer).toContain("reports/live-b2/validation-node-${{ matrix.node-version }}.json");
+    expect(finalizer).toContain('--preflight-outcome "${{ steps.matrix_validation.outcome }}"');
+    expect(finalFallback).toContain("live B2 final evidence fallback");
+    expect(finalFallback).toContain("configuration blocked");
+    expect(finalFallback).toContain("cleanup failure");
+    expect(finalFallback).toContain("product failure");
+    expect(contractJob).toContain("live B2 matrix validation outcome was");
+    expect(contractJob).toContain("evidence_status=");
+    expect(contractJob).toContain("JSON.parse(fs.readFileSync");
+    expect(contractJob).toContain("live B2 evidence status was");
+  });
+
+  it("uploads only finalized secret-safe live B2 evidence artifacts", () => {
+    const workflow = workflowText(".github/workflows/contract.yml");
+    const upload = workflowStepBlock(workflow, "Upload live B2 isolation and cleanup evidence");
+
+    expect(upload).toContain(
+      "path: reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json",
+    );
+    expect(upload).toContain("if-no-files-found: error");
+    expect(upload).not.toContain("reports/live-b2/**");
+    expect(upload).not.toContain("path: reports/live-b2/resources-node-");
+    expect(upload).not.toContain("path: reports/live-b2/cleanup-node-");
   });
 
   it("pins the expected tool profile and required test bucket for live smoke", () => {

@@ -209,7 +209,13 @@ function loadDistModules() {
   };
 }
 
-function profileProvider(profile, contractTestConfig) {
+function profileProvider(profile, baseConfig, defaultMasterKeyId) {
+  // A profile whose config declares a master key distinct from the shared
+  // default (only live-b2-contract today) needs that distinct master key so
+  // its Partner/Groups tools register. Every other profile keeps master === app
+  // so its capability-filtered tool count matches the frozen contract.
+  const distinctMaster =
+    baseConfig.masterKeyId !== undefined && baseConfig.masterKeyId !== defaultMasterKeyId;
   return {
     name: `performance-${profile}`,
     validateConfiguration() {
@@ -218,13 +224,13 @@ function profileProvider(profile, contractTestConfig) {
     resolve() {
       return {
         config: {
-          ...contractTestConfig,
+          ...baseConfig,
           applicationKeyId: `performance-${profile}-key-id`,
           applicationKey: `performance-${profile}-key-secret`,
           appKeyId: `performance-${profile}-key-id`,
           appKey: `performance-${profile}-key-secret`,
-          masterKeyId: `performance-${profile}-key-id`,
-          masterKey: `performance-${profile}-key-secret`,
+          masterKeyId: distinctMaster ? baseConfig.masterKeyId : `performance-${profile}-key-id`,
+          masterKey: distinctMaster ? baseConfig.masterKey : `performance-${profile}-key-secret`,
         },
         cacheKey: `performance:${profile}`,
         capabilityCacheKey: `performance:${profile}`,
@@ -261,7 +267,11 @@ async function closeHandle(handle) {
 
 async function withProfileServer(profile, modules, contract, run) {
   const handle = modules.httpServer.buildHttpServer({
-    credentialProvider: profileProvider(profile, modules.toolContract.CONTRACT_TEST_CONFIG),
+    credentialProvider: profileProvider(
+      profile,
+      modules.toolContract.configForProfile(profile),
+      modules.toolContract.CONTRACT_TEST_CONFIG.masterKeyId,
+    ),
     fetchCapabilities: async () => contract.profiles[profile].capabilities,
     idleSweepMode: "request",
   });

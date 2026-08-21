@@ -30,6 +30,7 @@ import {
   redactedLiveResourceDetail,
   type ContractBucketRef,
 } from "./support/contract-buckets";
+import { liveB2Evidence } from "../support/live-b2-evidence-types";
 import { hasLiveB2Credentials, assertAndSelectLiveB2Test } from "../support/live-b2-test-guard";
 
 const HAS_CREDS = hasLiveB2Credentials();
@@ -89,21 +90,37 @@ describe("Contract: notification rules objectNamePrefix", () => {
       if (!bucketId) {
         failContractPrerequisite(`notification fixture bucket not found: ${NOTIFICATION_BUCKET}`);
       }
+      const ruleName = contractRuleName("notify-rule");
+      const existing = await callTool(server, "b2_get_bucket_notification_rules", { bucketId });
+      if (isError(existing)) {
+        failContractPrerequisite(
+          "could not read notification fixture rules",
+          liveErrorText(existing),
+        );
+      }
+      const retainedRules = (parseResult(existing).eventNotificationRules ?? []).filter(
+        (rule: { name?: string }) => rule.name !== ruleName,
+      );
+      if (retainedRules.length > 0) {
+        failContractPrerequisite(
+          "notification fixture bucket must not contain unrelated persistent rules",
+        );
+      }
+      const runRule = {
+        name: ruleName,
+        // objectNamePrefix deliberately omitted, so the tool must inject "".
+        eventTypes: ["b2:ObjectCreated:*"],
+        isEnabled: false,
+        targetConfiguration: {
+          targetType: "webhook",
+          url: "https://example.com/contract",
+        },
+      };
+      let cleanupFailure: string | undefined;
       try {
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
-          eventNotificationRules: [
-            {
-              name: contractRuleName("notify-rule"),
-              // objectNamePrefix deliberately omitted, so the tool must inject "".
-              eventTypes: ["b2:ObjectCreated:*"],
-              isEnabled: false,
-              targetConfiguration: {
-                targetType: "webhook",
-                url: "https://example.com/contract",
-              },
-            },
-          ],
+          eventNotificationRules: [runRule],
         });
         if (isError(res)) {
           const detail = liveErrorText(res);
@@ -112,13 +129,28 @@ describe("Contract: notification rules objectNamePrefix", () => {
           }
           throw new Error(`notification rules shape contract failed: ${detail}`);
         }
-        expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
+        liveB2Evidence.recordLiveResource({
+          type: "notification-rule",
+          label: "notify-rule",
+          name: ruleName,
+          id: bucketId,
+        });
+        const writtenRule = parseResult(res).eventNotificationRules?.find(
+          (rule: { name?: string }) => rule.name === ruleName,
+        );
+        expect(writtenRule?.objectNamePrefix).toBe("");
       } finally {
-        // Persistent fixture: clear only the rules we added; never delete the bucket.
-        await callTool(server, "b2_set_bucket_notification_rules", {
+        // Persistent fixture: restore the dedicated bucket to an empty rule set.
+        const cleanup = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
           eventNotificationRules: [],
         });
+        if (isError(cleanup)) {
+          cleanupFailure = liveErrorText(cleanup);
+        }
+      }
+      if (cleanupFailure) {
+        throw new Error(`notification rule cleanup failed: ${cleanupFailure}`);
       }
     },
     30_000,

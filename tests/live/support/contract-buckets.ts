@@ -1,6 +1,7 @@
 import type { McpServer } from "../../../src/mcp";
 import { callTool, parseResult } from "../../support/deterministic-fakes";
 import { liveB2Contract } from "../../support/live-b2-contract-types";
+import { liveB2Evidence } from "../../support/live-b2-evidence-types";
 
 export const CONTRACT_BUCKET_PREFIX = liveB2Contract.CONTRACT_BUCKET_PREFIX;
 export const CONTRACT_KEY_PREFIX_ENV = liveB2Contract.CONTRACT_KEY_PREFIX_ENV;
@@ -127,6 +128,12 @@ export function createContractBucketTracker(server: McpServer): ContractBucketTr
         );
       }
       const bucket = parseResult(created) as CreatedContractBucket;
+      liveB2Evidence.recordLiveResource({
+        type: "bucket",
+        label,
+        name: bucket.bucketName,
+        id: bucket.bucketId,
+      });
       tracker.track(bucket);
       return bucket;
     },

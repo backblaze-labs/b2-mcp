@@ -18,6 +18,7 @@ export type CleanupCallTool = (
 
 export interface CleanupStats {
   buckets: number;
+  notificationRules: number;
   objectVersions: number;
   multipartUploads: number;
   keys: number;
@@ -60,6 +61,11 @@ export interface LiveB2ContractModule {
     bucket: ContractBucketRefLike,
     options?: CleanupOptions,
   ): Promise<boolean>;
+  cleanupContractNotificationRulesWithTools(
+    callTool: CleanupCallTool,
+    bucket: ContractBucketRefLike,
+    options?: CleanupOptions,
+  ): Promise<boolean>;
   contractBucketName(label: string, options?: { prefix?: string; randomHex?: string }): string;
   contractObjectKey(label: string, leafName?: string, options?: { prefix?: string }): string;
   contractRuleName(label: string, options?: { prefix?: string }): string;
@@ -70,6 +76,7 @@ export interface LiveB2ContractModule {
   liveRunPrefix(env?: NodeJS.ProcessEnv): string;
   normalizeLivePrefix(value?: string): string;
   redactKnownLiveResourceDetails(value: unknown, options?: { prefix?: string }): string;
+  stableResourceFingerprint(value: string): string;
 }
 
 const nodeRequire = createRequire(__filename);
