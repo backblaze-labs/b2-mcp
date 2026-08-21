@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -9,13 +17,17 @@ const require = createRequire(import.meta.url);
 const { parseJsoncObject } = require("./lib/local-import-graph.cjs");
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const textOverrides = loadTextOverrides();
 const pkg = readJson("package.json");
+const { helpText, parseCliArgs } = loadBuiltCli();
 
 const releaseDocs = [
   "README.md",
   "deploy/vercel/README.md",
   "deploy/cloudflare-worker/README.md",
   "deploy/customer-hosted/README.md",
+  "docs/AUTHENTICATION.md",
+  "docs/CLIENTS.md",
   "docs/DEPLOY.md",
   "docs/deployment/aws.md",
   "docs/deployment/azure-container-apps.md",
@@ -31,7 +43,7 @@ const releaseDocs = [
 ];
 
 const validatedFenceManifest = [
-  ["README.md", 1, "json", "Claude Desktop JSON config"],
+  ["README.md", 1, "client-json", "Claude Desktop JSON config"],
   ["README.md", 2, "json", "fallback region env JSON"],
   ["README.md", 3, "shell", "source install commands"],
   ["README.md", 4, "shell", "skills validation command"],
@@ -61,12 +73,27 @@ const validatedFenceManifest = [
   ["docs/deployment/security-and-credentials.md", 3, "shell", "shared smoke commands"],
   ["docs/deployment/vercel.md", 2, "shell", "Vercel production env block"],
   ["docs/deployment/vercel.md", 3, "shell", "Vercel smoke commands"],
+  ["docs/CLIENTS.md", 1, "shell", "client source install commands"],
+  ["docs/CLIENTS.md", 2, "client-text", "universal npx client invocation"],
+  ["docs/CLIENTS.md", 3, "client-text", "source checkout client invocation"],
+  ["docs/CLIENTS.md", 4, "client-text", "client log-file env example"],
+  ["docs/CLIENTS.md", 5, "client-json", "mcpServers client JSON config"],
+  ["docs/CLIENTS.md", 6, "client-json", "VS Code client JSON config"],
+  ["docs/CLIENTS.md", 7, "client-json", "Zed client JSON config"],
+  ["docs/CLIENTS.md", 8, "client-text", "Continue YAML config"],
+  ["docs/CLIENTS.md", 9, "shell", "Goose configure commands"],
+  ["docs/CLIENTS.md", 10, "hosted-client-json", "mcp-remote hosted client JSON config"],
+  ["docs/CLIENTS.md", 11, "json", "hosted URL JSON config"],
+  ["docs/CLIENTS.md", 12, "json", "header compatibility JSON config"],
 ];
 
 const illustrativeFenceManifest = [
   ["README.md", 11, "toon output example"],
   ["deploy/vercel/README.md", 1, "architecture diagram"],
   ["deploy/customer-hosted/README.md", 4, "base-image inspection command with placeholder"],
+  ["docs/AUTHENTICATION.md", 1, "stdio credential-flow diagram"],
+  ["docs/AUTHENTICATION.md", 2, "server credential-flow diagram"],
+  ["docs/AUTHENTICATION.md", 3, "header credential-flow diagram"],
   ["docs/deployment/aws.md", 1, "architecture diagram"],
   ["docs/deployment/azure-container-apps.md", 1, "architecture diagram"],
   ["docs/deployment/cloudflare-containers.md", 1, "architecture diagram"],
@@ -87,6 +114,8 @@ const requiredProductionEnv = [
   "B2_ALLOWED_HOSTS",
   "B2_DESTRUCTIVE_POLICY",
   "B2_REGISTER_ALL_TOOLS",
+  "B2_SECRET_SINK",
+  "B2_ALLOW_INLINE_SECRETS",
   "B2_ALLOW_LOCAL_FILES",
   "B2_MCP_OUTPUT_FORMAT",
   "B2_MCP_PUBLIC_URL",
@@ -101,26 +130,60 @@ const requiredServerModeEnv = [
   "B2_ALLOWED_HOSTS",
   "B2_DESTRUCTIVE_POLICY",
   "B2_REGISTER_ALL_TOOLS",
+  "B2_SECRET_SINK",
+  "B2_ALLOW_INLINE_SECRETS",
   "B2_ALLOW_LOCAL_FILES",
 ];
 
-const requiredPublicPaths = [
-  "/mcp",
-  "/health",
-  "/.well-known/oauth-protected-resource",
-  "/.well-known/oauth-protected-resource/mcp",
-  "/.well-known/oauth-authorization-server",
-];
+const requiredSafeEnvByFence = new Map(
+  [
+    ["README.md", 5],
+    ["docs/deployment/security-and-credentials.md", 2],
+    ["docs/deployment/vercel.md", 2],
+  ].map(([file, fence]) => [manifestKey(file, fence), requiredServerModeEnv]),
+);
+
+const safeDeploymentEnvValues = {
+  B2_ALLOW_INLINE_SECRETS: "false",
+  B2_ALLOW_LOCAL_FILES: "false",
+  B2_DESTRUCTIVE_POLICY: "block",
+  B2_HTTP_CREDENTIAL_MODE: "server",
+  B2_REGISTER_ALL_TOOLS: "false",
+  B2_SECRET_SINK: "off",
+};
+
+const packageManagerNativeCommands = new Set([
+  "add",
+  "audit",
+  "ci",
+  "config",
+  "create",
+  "dlx",
+  "exec",
+  "help",
+  "init",
+  "install",
+  "link",
+  "list",
+  "login",
+  "logout",
+  "pack",
+  "publish",
+  "remove",
+  "unlink",
+  "update",
+  "version",
+  "view",
+  "whoami",
+]);
 
 const findings = [];
 const docs = new Map(releaseDocs.map((file) => [file, read(file)]));
-const cliSource = read("src/cli.ts");
-const cliTransports = extractCliTransports(cliSource);
 
+validateShippedDocCoverage();
 validateFenceClassification();
 validateDocReferences();
 validateStructuredConfigurationFiles();
-validateDeploymentSurface();
 
 if (findings.length > 0) {
   console.error("Documentation example validation failed:");
@@ -131,6 +194,7 @@ if (findings.length > 0) {
 console.log("doc-examples: supported documentation examples are validated");
 
 function read(relativePath) {
+  if (textOverrides.has(relativePath)) return textOverrides.get(relativePath);
   return readFileSync(join(root, relativePath), "utf8");
 }
 
@@ -142,8 +206,38 @@ function readJson(relativePath) {
   }
 }
 
+function loadTextOverrides() {
+  const overridePath = process.env.B2_MCP_DOC_EXAMPLE_TEXT_OVERRIDES;
+  if (!overridePath) return new Map();
+  const parsed = JSON.parse(readFileSync(overridePath, "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("B2_MCP_DOC_EXAMPLE_TEXT_OVERRIDES must point to a JSON object");
+  }
+  return new Map(Object.entries(parsed));
+}
+
+function loadBuiltCli() {
+  const cliPath = join(root, "dist/cli.js");
+  if (!existsSync(cliPath)) {
+    throw new Error("dist/cli.js is missing; run pnpm run build before check:doc-examples");
+  }
+  return require(cliPath);
+}
+
 function lineOfOffset(text, offset) {
   return text.slice(0, offset).split(/\r?\n/).length;
+}
+
+function inlineCodeSnippets(text) {
+  const snippets = [];
+  const pattern = /`([^`\n]+)`/g;
+  for (const match of text.matchAll(pattern)) {
+    snippets.push({
+      line: lineOfOffset(text, match.index ?? 0),
+      text: match[1],
+    });
+  }
+  return snippets;
 }
 
 function location(file, line) {
@@ -238,7 +332,48 @@ function validateFenceClassification() {
   }
 }
 
+function validateShippedDocCoverage() {
+  const coveredDocs = new Set(
+    [...validatedFenceManifest, ...illustrativeFenceManifest].map(([file]) => file),
+  );
+  for (const file of shippedMarkdownFiles()) {
+    if (listFences(file).length === 0) continue;
+    if (!coveredDocs.has(file)) {
+      findings.push(`${file}:1 shipped Markdown contains code fences but is not in the manifest`);
+    }
+  }
+}
+
+function shippedMarkdownFiles() {
+  const files = new Set();
+  for (const entry of pkg.files ?? []) {
+    if (entry.endsWith("*.md")) {
+      const dir = entry.slice(0, -"*.md".length).replace(/\/$/, "");
+      for (const file of listDirectoryMarkdown(dir)) files.add(file);
+      continue;
+    }
+    if (entry.endsWith(".md") && existsSync(join(root, entry))) files.add(entry);
+  }
+  return [...files].sort();
+}
+
+function listDirectoryMarkdown(relativeDir) {
+  const absoluteDir = join(root, relativeDir);
+  if (!existsSync(absoluteDir)) return [];
+  return readdirSync(absoluteDir)
+    .filter((file) => file.endsWith(".md"))
+    .map((file) => `${relativeDir}/${file}`);
+}
+
 function validateFence(file, number, fence, entry) {
+  if (entry.check === "client-json") {
+    parseJsonExample(file, fence, { expectedCommandPackage: pkg.name });
+    return;
+  }
+  if (entry.check === "hosted-client-json") {
+    parseJsonExample(file, fence, { expectedCommandPackage: "mcp-remote" });
+    return;
+  }
   if (entry.check === "json") {
     parseJsonExample(file, fence);
     return;
@@ -261,14 +396,22 @@ function validateFence(file, number, fence, entry) {
   }
   if (entry.check === "shell") {
     validateShellExample(file, fence);
+    requireSafeFenceEnv(file, number, fence);
+    return;
+  }
+  if (entry.check === "client-text") {
+    validateClientTextExample(file, fence);
     return;
   }
   addFinding(file, fence.line, `code fence #${number} uses unknown validator ${entry.check}`);
 }
 
-function parseJsonExample(file, fence) {
+function parseJsonExample(file, fence, options = {}) {
   try {
-    JSON.parse(fence.body);
+    const parsed = JSON.parse(fence.body);
+    if (options.expectedCommandPackage) {
+      validateJsonCommandConfigs(file, fence, parsed, options.expectedCommandPackage);
+    }
   } catch (error) {
     addFinding(file, fence.line, `contains invalid JSON: ${error.message}`);
   }
@@ -280,6 +423,83 @@ function parseJsoncFragment(file, fence) {
   } catch (error) {
     addFinding(file, fence.line, `contains invalid JSONC fragment: ${error.message}`);
   }
+}
+
+function validateJsonCommandConfigs(file, fence, value, expectedPackage) {
+  for (const commandConfig of findCommandConfigs(value)) {
+    validatePackageCommand(file, fence.line, commandConfig, expectedPackage);
+  }
+}
+
+function findCommandConfigs(value) {
+  const configs = [];
+
+  function visit(node) {
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+
+    const maybeCommand = node.command ?? node.path;
+    if (typeof maybeCommand === "string") {
+      configs.push({
+        args: node.args,
+        command: maybeCommand,
+      });
+    }
+    for (const child of Object.values(node)) visit(child);
+  }
+
+  visit(value);
+  return configs;
+}
+
+function validatePackageCommand(file, line, commandConfig, expectedPackage) {
+  const command = commandConfig.command.trim();
+  if (!["npx", "npm", "pnpm"].includes(command)) return;
+  const args = commandConfig.args;
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
+    addFinding(file, line, `${command} client config args must be an array of strings`);
+    return;
+  }
+
+  const packageName = packageExecutedByCommand(command, args);
+  if (packageName !== expectedPackage) {
+    addFinding(
+      file,
+      line,
+      `${command} client config executes ${packageName ?? "no package"}, expected ${expectedPackage}`,
+    );
+  }
+}
+
+function packageExecutedByCommand(command, args) {
+  if (command === "npx") return firstPackageArg(args);
+  if (command === "npm") {
+    const [subcommand, ...rest] = args;
+    if (subcommand !== "exec") return null;
+    return firstPackageArg(rest);
+  }
+  if (command === "pnpm") {
+    const [subcommand, ...rest] = args;
+    if (subcommand !== "dlx") return null;
+    return firstPackageArg(rest);
+  }
+  return null;
+}
+
+function firstPackageArg(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") continue;
+    if (arg === "-y" || arg === "--yes") continue;
+    if (arg.startsWith("--package=")) return arg.slice("--package=".length);
+    if (arg === "--package" || arg === "-p") return args[index + 1] ?? null;
+    if (arg.startsWith("-")) continue;
+    return arg;
+  }
+  return null;
 }
 
 function validateTypescriptPackageApi(file, fence) {
@@ -298,48 +518,62 @@ function validateTypescriptPackageApi(file, fence) {
   const examplePath = join(tempDir, "package-api.ts");
   const typeRoots = join(root, "node_modules/@types");
   writeFileSync(examplePath, `${fence.body}\n`, "utf8");
-  const result = spawnSync(
-    process.execPath,
-    [
-      join(root, "node_modules/typescript/bin/tsc"),
-      "--noEmit",
-      "--target",
-      "ES2020",
-      "--module",
-      "Node16",
-      "--moduleResolution",
-      "Node16",
-      "--strict",
-      "--esModuleInterop",
-      "--skipLibCheck",
-      "--ignoreConfig",
-      "--types",
-      "node",
-      "--typeRoots",
-      typeRoots,
-      examplePath,
-    ],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...process.env, NODE_PATH: join(root, "node_modules") },
-    },
-  );
-  rmSync(tempDir, { recursive: true, force: true });
+  let result;
+  try {
+    result = spawnSync(
+      process.execPath,
+      [
+        join(root, "node_modules/typescript/bin/tsc"),
+        "--noEmit",
+        "--target",
+        "ES2020",
+        "--module",
+        "Node16",
+        "--moduleResolution",
+        "Node16",
+        "--strict",
+        "--esModuleInterop",
+        "--skipLibCheck",
+        "--ignoreConfig",
+        "--types",
+        "node",
+        "--typeRoots",
+        typeRoots,
+        examplePath,
+      ],
+      {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, NODE_PATH: join(root, "node_modules") },
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 20_000,
+      },
+    );
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
 
-  if (result.status !== 0) {
+  if (result.error || result.signal || result.status !== 0) {
     addFinding(
       file,
       fence.line,
       `TypeScript package API example failed typecheck:\n${indent(
-        [result.stdout, result.stderr].filter(Boolean).join("\n").trim(),
+        [
+          result.error ? `error: ${result.error.message}` : "",
+          result.signal ? `signal: ${result.signal}` : "",
+          result.stdout,
+          result.stderr,
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .trim(),
       )}`,
     );
   }
 }
 
 function validateCliHelp(file, fence) {
-  const sourceHelp = extractHelpText(cliSource).split("\nExamples:", 1)[0];
+  const sourceHelp = helpText().split("\nExamples:", 1)[0];
   if (fence.body.trimEnd() !== sourceHelp.trimEnd()) {
     addFinding(file, fence.line, "CLI help example differs from src/cli.ts helpText()");
   }
@@ -349,26 +583,53 @@ function validateShellExample(file, fence) {
   if (fence.lang !== "bash") {
     addFinding(file, fence.line, `expected bash fence, got ${fence.lang || "no language"}`);
   }
-  validatePackageScriptReferences(file, fence.body, fence.line);
-  validatePackageNameReferences(file, fence.body, fence.line);
-  validateCliBinaryReferences(file, fence.body, fence.line);
-  validateTransportReferences(file, fence.body, fence.line);
-  validateDistEntrypointReferences(file, fence.body, fence.line);
-  validateEnvAssignments(file, fence.body, fence.line);
+  const bodyStartLine = fence.line + 1;
+  validatePackageScriptReferences(file, fence.body, bodyStartLine);
+  validatePackageNameReferences(file, fence.body, bodyStartLine);
+  validateCliBinaryReferences(file, fence.body, bodyStartLine);
+  validateTransportReferences(file, fence.body, bodyStartLine);
+  validateDistEntrypointReferences(file, fence.body, bodyStartLine);
+  validateEnvAssignments(file, fence.body, bodyStartLine);
+  validateSafeDeploymentEnvValues(file, fence.body, bodyStartLine);
+}
+
+function validateClientTextExample(file, fence) {
+  const bodyStartLine = fence.line + 1;
+  validatePackageScriptReferences(file, fence.body, bodyStartLine);
+  validatePackageNameReferences(file, fence.body, bodyStartLine);
+  validateCliBinaryReferences(file, fence.body, bodyStartLine);
+  validateTransportReferences(file, fence.body, bodyStartLine);
+  validateDistEntrypointReferences(file, fence.body, bodyStartLine);
+  validateEnvAssignments(file, fence.body, bodyStartLine);
 }
 
 function validateDocReferences() {
   for (const [file, text] of docs) {
-    validatePackageScriptReferences(file, text, 1);
-    validatePackageNameReferences(file, text, 1);
-    validateCliBinaryReferences(file, text, 1);
-    validateTransportReferences(file, text, 1);
+    for (const snippet of inlineCodeSnippets(text)) {
+      validatePackageScriptReferences(file, snippet.text, snippet.line);
+      validatePackageNameReferences(file, snippet.text, snippet.line);
+      validateCliBinaryReferences(file, snippet.text, snippet.line);
+      validateTransportReferences(file, snippet.text, snippet.line);
+      validateDistEntrypointReferences(file, snippet.text, snippet.line);
+      validateEnvAssignments(file, snippet.text, snippet.line);
+    }
   }
 }
 
 function validatePackageScriptReferences(file, text, startLine) {
   for (const match of text.matchAll(/\b(?:pnpm|npm) run\s+([a-z0-9:._-]+)/g)) {
     const script = match[1];
+    if (!pkg.scripts?.[script]) {
+      addFinding(
+        file,
+        startLine + lineOfOffset(text, match.index ?? 0) - 1,
+        `references missing package script ${script}`,
+      );
+    }
+  }
+  for (const match of text.matchAll(/(?:^|[ \t`])(?:pnpm|npm)[ \t]+([a-z0-9:._-]+)/gm)) {
+    const script = match[1];
+    if (script === "run" || packageManagerNativeCommands.has(script)) continue;
     if (!pkg.scripts?.[script]) {
       addFinding(
         file,
@@ -406,10 +667,19 @@ function validateCliBinaryReferences(file, text, startLine) {
   }
 }
 
+function cliAccepts(argv, env = {}) {
+  try {
+    parseCliArgs(argv, env);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function validateTransportReferences(file, text, startLine) {
   for (const match of text.matchAll(/--transport(?:=|\s+)([a-z0-9-]+)/g)) {
     const transport = match[1];
-    if (!cliTransports.has(transport)) {
+    if (!cliAccepts(["--transport", transport])) {
       addFinding(
         file,
         startLine + lineOfOffset(text, match.index ?? 0) - 1,
@@ -420,7 +690,7 @@ function validateTransportReferences(file, text, startLine) {
 
   for (const match of text.matchAll(/\bB2_MCP_TRANSPORT\s*=\s*([a-z0-9-]+)/g)) {
     const transport = match[1];
-    if (!cliTransports.has(transport)) {
+    if (!cliAccepts([], { B2_MCP_TRANSPORT: transport })) {
       addFinding(
         file,
         startLine + lineOfOffset(text, match.index ?? 0) - 1,
@@ -431,7 +701,7 @@ function validateTransportReferences(file, text, startLine) {
 
   for (const match of text.matchAll(/\b(?:b2-mcp|node\s+dist\/index\.js)\s+(stdio|http)\b/g)) {
     const transport = match[1];
-    if (!cliTransports.has(transport)) {
+    if (!cliAccepts([transport])) {
       addFinding(
         file,
         startLine + lineOfOffset(text, match.index ?? 0) - 1,
@@ -475,6 +745,40 @@ function validateEnvAssignments(file, text, startLine) {
   }
 }
 
+function validateSafeDeploymentEnvValues(file, text, startLine) {
+  for (const { name, value, line } of envAssignments(text)) {
+    const safeValue = safeDeploymentEnvValues[name];
+    if (safeValue !== undefined && value !== safeValue) {
+      addFinding(
+        file,
+        startLine + line - 1,
+        `${name} must be ${safeValue} in release-path deployment examples, got ${value}`,
+      );
+    }
+  }
+}
+
+function requireSafeFenceEnv(file, number, fence) {
+  const requiredNames = requiredSafeEnvByFence.get(manifestKey(file, number));
+  if (!requiredNames) return;
+  const assignments = envMapFromText(fence.body);
+  for (const name of requiredNames) {
+    if (!assignments.has(name)) {
+      addFinding(file, fence.line, `missing ${name} in release-path deployment example`);
+      continue;
+    }
+    const safeValue = safeDeploymentEnvValues[name];
+    const value = assignments.get(name);
+    if (safeValue !== undefined && value !== safeValue) {
+      addFinding(
+        file,
+        fence.line,
+        `${name} must be ${safeValue} in release-path deployment examples, got ${value}`,
+      );
+    }
+  }
+}
+
 function validateStructuredConfigurationFiles() {
   parseConfigJson("vercel.json");
   parseConfigJson("package.json");
@@ -485,6 +789,7 @@ function validateStructuredConfigurationFiles() {
   const customerHostedEnv = envMap("deploy/customer-hosted/b2-mcp.env.example");
 
   requireEnvNames("deploy/vercel/vercel.env.example", vercelEnv, requiredProductionEnv);
+  requireSafeEnvValues("deploy/vercel/vercel.env.example", vercelEnv);
   requireEnvNames("deploy/cloudflare-worker/cloudflare.env.example", workerSecrets, [
     "B2_APPLICATION_KEY_ID",
     "B2_APPLICATION_KEY",
@@ -495,6 +800,7 @@ function validateStructuredConfigurationFiles() {
     "B2_APPLICATION_KEY_FILE",
     ...requiredServerModeEnv.filter((name) => name !== "B2_HTTP_CREDENTIAL_MODE"),
   ]);
+  requireSafeEnvValues("deploy/customer-hosted/b2-mcp.env.example", customerHostedEnv);
 
   const wrangler = parseConfigJsonc("deploy/cloudflare-worker/wrangler.jsonc");
   const workerVars = wrangler.vars;
@@ -520,80 +826,12 @@ function validateStructuredConfigurationFiles() {
         "deploy/cloudflare-worker/wrangler.jsonc:1 vars.B2_MCP_PUBLIC_URL must end in /mcp",
       );
     }
-  }
-}
-
-function validateDeploymentSurface() {
-  const vercel = parseConfigJson("vercel.json");
-  const rewriteSources = new Set(
-    Array.isArray(vercel.rewrites)
-      ? vercel.rewrites.map((rewrite) => rewrite?.source).filter(Boolean)
-      : [],
-  );
-  for (const path of requiredPublicPaths) {
-    if (!rewriteSources.has(path)) {
-      findings.push(`vercel.json:1 missing rewrite source ${path}`);
-    }
-  }
-  for (const command of ["typecheck", "build"]) {
-    if (!vercel.buildCommand?.includes(`pnpm run ${command}`)) {
-      findings.push(`vercel.json:1 buildCommand must include pnpm run ${command}`);
-    }
-  }
-
-  const workerAdapter = read("deploy/cloudflare-worker/adapter.ts");
-  for (const path of [...requiredPublicPaths, "/api/mcp"]) {
-    if (!workerAdapter.includes(`"${path}"`)) {
-      findings.push(`deploy/cloudflare-worker/adapter.ts:1 missing route path ${path}`);
-    }
-  }
-
-  requireDocTerms("deploy/vercel/README.md", [
-    "POST /mcp",
-    "GET /health",
-    "GET /.well-known/oauth-protected-resource",
-    "GET /.well-known/oauth-protected-resource/mcp",
-    "GET /.well-known/oauth-authorization-server",
-    "B2_MCP_PUBLIC_URL",
-    "server",
-    "phase1-default",
-  ]);
-  requireDocTerms("docs/deployment/vercel.md", [
-    "/mcp",
-    "/health",
-    "/.well-known/oauth-protected-resource",
-    "/.well-known/oauth-protected-resource/mcp",
-    "/.well-known/oauth-authorization-server",
-    "B2_HTTP_CREDENTIAL_MODE=server",
-    "B2_MCP_PUBLIC_URL=https://mcp.example.com/mcp",
-  ]);
-  requireDocTerms("docs/deployment/cloudflare-workers.md", [
-    "/mcp",
-    "/health",
-    "/.well-known/oauth-protected-resource/mcp",
-    "B2_ALLOW_LOCAL_FILES=false",
-    "B2_HTTP_CREDENTIAL_MODE=server",
-    "phase1-default",
-  ]);
-
-  const readme = docs.get("README.md") ?? "";
-  for (const envName of [
-    "B2_APPLICATION_KEY_ID",
-    "B2_APPLICATION_KEY",
-    "B2_HTTP_CREDENTIAL_MODE",
-    "B2_ALLOWED_HOSTS",
-  ]) {
-    if (!readme.includes(envName)) {
-      findings.push(`README.md:1 missing documented deployment env ${envName}`);
-    }
-  }
-}
-
-function requireDocTerms(file, terms) {
-  const text = docs.get(file) ?? read(file);
-  for (const term of terms) {
-    if (!text.includes(term)) {
-      findings.push(`${file}:1 missing high-risk deployment example term ${term}`);
+    for (const [name, safeValue] of Object.entries(safeDeploymentEnvValues)) {
+      if (workerVars[name] !== safeValue) {
+        findings.push(
+          `deploy/cloudflare-worker/wrangler.jsonc:1 vars.${name} must be ${safeValue}, got ${workerVars[name]}`,
+        );
+      }
     }
   }
 }
@@ -623,22 +861,30 @@ function envAssignments(text) {
     const trimmed = lines[index].trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const exportPrefix = trimmed.startsWith("export ") ? "export " : "";
-    const match = trimmed
-      .slice(exportPrefix.length)
-      .match(/^([A-Z][A-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^#\s]+))/);
-    if (!match) continue;
-    assignments.push({
-      name: match[1],
-      value: match[2] ?? match[3] ?? match[4] ?? "",
-      line: index + 1,
-    });
+    const assignmentText = trimmed.slice(exportPrefix.length);
+    const match =
+      assignmentText.match(/^([A-Z][A-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^#\s\\]+))/) ??
+      assignmentText.match(
+        /^(?:-e|--env|--env-var|--set-env-vars)\s+([A-Z][A-Z0-9_]*)=(?:"([^"]*)"|'([^']*)'|([^#\s\\]+))/,
+      );
+    if (match) {
+      assignments.push({
+        name: match[1],
+        value: match[2] ?? match[3] ?? match[4] ?? "",
+        line: index + 1,
+      });
+    }
   }
   return assignments;
 }
 
 function envMap(file) {
+  return envMapFromText(read(file));
+}
+
+function envMapFromText(text) {
   const map = new Map();
-  for (const assignment of envAssignments(read(file))) {
+  for (const assignment of envAssignments(text)) {
     map.set(assignment.name, assignment.value);
   }
   return map;
@@ -650,23 +896,14 @@ function requireEnvNames(file, map, names) {
   }
 }
 
-function extractCliTransports(source) {
-  const match = source.match(/type\s+CliTransport\s*=\s*([^;]+);/);
-  if (!match) return new Set();
-  return new Set([...match[1].matchAll(/"([^"]+)"/g)].map((entry) => entry[1]));
-}
-
-function extractHelpText(source) {
-  const match = source.match(
-    /export function helpText\(\): string \{\s*return \[([\s\S]*?)\]\.join\("\\n"\);/,
-  );
-  if (!match) {
-    findings.push("src/cli.ts:1 unable to parse helpText()");
-    return "";
+function requireSafeEnvValues(file, map) {
+  for (const [name, safeValue] of Object.entries(safeDeploymentEnvValues)) {
+    if (!map.has(name)) continue;
+    const value = map.get(name);
+    if (value !== safeValue) {
+      findings.push(`${file}:1 ${name} must be ${safeValue}, got ${value}`);
+    }
   }
-  return [...match[1].matchAll(/^\s*"((?:[^"\\]|\\.)*)",?\s*$/gm)]
-    .map((line) => JSON.parse(`"${line[1]}"`))
-    .join("\n");
 }
 
 function indent(text) {

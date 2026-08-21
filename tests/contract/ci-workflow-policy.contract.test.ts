@@ -164,8 +164,12 @@ describe("CI workflow policy", () => {
     expect(qualityJob).not.toContain("actions/setup-python");
     expect(packageJson.scripts?.["validate:skills"]).toBe("node scripts/validate-pack.mjs");
     expect(packageJson.scripts?.["check:doc-examples"]).toBe("node scripts/check-doc-examples.mjs");
+    expect(packageJson.scripts?.["check:deployment-contracts"]).toBe(
+      "node scripts/check-deployment-contracts.mjs",
+    );
     expect(qualityJob).toContain("pnpm run verify");
     expect(packageJson.scripts?.verify).toContain("pnpm run check:doc-examples");
+    expect(packageJson.scripts?.verify).toContain("pnpm run check:deployment-contracts");
     expect(packageJson.scripts?.verify).not.toContain("pnpm run test:coverage");
     expect(qualityJob).not.toContain("pnpm run test:coverage");
     expect(qualityJob).toContain("primary-verify-reports");

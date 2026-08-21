@@ -61,6 +61,8 @@ B2_APPLICATION_KEY=your-application-key-secret
 B2_ALLOWED_HOSTS=mcp.example.com
 B2_DESTRUCTIVE_POLICY=block
 B2_REGISTER_ALL_TOOLS=false
+B2_SECRET_SINK=off
+B2_ALLOW_INLINE_SECRETS=false
 B2_ALLOW_LOCAL_FILES=false
 B2_MCP_PUBLIC_URL=https://mcp.example.com/mcp
 ```

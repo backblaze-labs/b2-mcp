@@ -150,6 +150,11 @@ docker run --rm --name b2-mcp \
   -e B2_APPLICATION_KEY_ID=your-application-key-id \
   -e B2_APPLICATION_KEY=your-application-key-secret \
   -e B2_ALLOWED_HOSTS=localhost,127.0.0.1 \
+  -e B2_DESTRUCTIVE_POLICY=block \
+  -e B2_REGISTER_ALL_TOOLS=false \
+  -e B2_SECRET_SINK=off \
+  -e B2_ALLOW_INLINE_SECRETS=false \
+  -e B2_ALLOW_LOCAL_FILES=false \
   "$B2_MCP_IMAGE"
 ```
 
