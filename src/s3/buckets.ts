@@ -5,16 +5,8 @@ import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
-// S3-compatible bucket tools are intentionally minimal: anything with a native
-// b2_* equivalent has been removed to keep the tool surface small. Only the two
-// tools below are kept because they cover capabilities with no native analogue:
-//   - s3_head_bucket          — S3-surface reachability probe (used by the
-//                               bucket/S3-compatibility validator skill)
-//   - s3_put_bucket_lifecycle — S3 AbortIncompleteMultipartUpload, which the
-//                               native lifecycle API does not express; empty
-//                               rules clear the S3 lifecycle configuration
-// A lifecycle rule carrying Expiration/NoncurrentVersionExpiration schedules
-// deletion of objects, so that variant is routed through the destructive gate.
+// Retained S3 bucket tools cover S3 reachability and lifecycle features that
+// lack native B2 equivalents. Expiration and empty-rules clearing are gated.
 export function registerS3BucketTools(
   server: ToolRegistrar,
   s3: B2S3PeerClient,
@@ -43,7 +35,7 @@ export function registerS3BucketTools(
     "s3_put_bucket_lifecycle",
     {
       description:
-        "Set S3 lifecycle rules on a B2 bucket, or pass an empty rules array to clear the S3 lifecycle configuration. Mainly for AbortIncompleteMultipartUpload (cancels incomplete multipart uploads — the native API can't). Also supports Expiration and NoncurrentVersionExpiration. Note: Transition/storage-class rules are NOT supported by B2.",
+        "Set S3 lifecycle rules on a B2 bucket; pass rules: [] to clear the S3 lifecycle configuration. Supports AbortIncompleteMultipartUpload, Expiration, and NoncurrentVersionExpiration. B2 does not support Transition/storage-class rules.",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         rules: z
@@ -84,12 +76,12 @@ export function registerS3BucketTools(
                 .optional(),
             }),
           )
-          .describe("Lifecycle rules to set. Pass an empty array to clear the configuration."),
+          .describe("Rules to set; [] clears the configuration."),
         confirm: z
           .boolean()
           .optional()
           .describe(
-            "Confirm clearing the lifecycle configuration or setting a lifecycle rule that schedules object deletion/expiration. Required when the server destructive policy is 'confirm' (the default). Not needed for abort-incomplete-upload-only rules.",
+            "Required under 'confirm' when rules is [] or rules expire objects. Not needed for abort-incomplete-upload-only rules.",
           ),
       },
     },

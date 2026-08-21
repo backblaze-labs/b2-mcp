@@ -70,7 +70,7 @@ const DETECTORS: Record<string, Detector> = {
   s3_put_bucket_lifecycle: (args) => {
     const rules = (args.rules as Array<Record<string, unknown>> | undefined) ?? [];
     if (rules.length === 0) {
-      return "clear the bucket's entire S3 lifecycle configuration, removing incomplete-multipart cleanup and expiration/retention governance";
+      return "clear the bucket's entire S3 lifecycle configuration, removing cleanup and expiration governance";
     }
     const deletes = rules.some(
       (r) => r.expiration != null || r.noncurrentVersionExpiration != null,
