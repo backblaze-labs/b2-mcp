@@ -2,6 +2,7 @@ import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
 import { abortError, timeoutError } from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
+import { isTestRuntime } from "./runtime.js";
 
 export const CIRCUIT_TIMEOUT_MS = 150_000;
 
@@ -49,12 +50,10 @@ export function isClientError(err: unknown): boolean {
  */
 type CircuitBreakerInstance = InstanceType<typeof CircuitBreaker>;
 
-let breaker: CircuitBreakerInstance | null = null;
-let longBreaker: CircuitBreakerInstance | null = null;
-let reportBreaker: CircuitBreakerInstance | null = null;
-let s3Breaker: CircuitBreakerInstance | null = null;
-let s3LongBreaker: CircuitBreakerInstance | null = null;
-let partnerBreaker: CircuitBreakerInstance | null = null;
+interface CircuitBreakerSlot {
+  instance: CircuitBreakerInstance | null;
+  create: () => CircuitBreakerInstance;
+}
 
 function createBreaker(
   name: string,
@@ -81,13 +80,62 @@ function createBreaker(
   return instance;
 }
 
+function breakerSlot(create: () => CircuitBreakerInstance): CircuitBreakerSlot {
+  return { instance: null, create };
+}
+
+const breakerSlots = {
+  native: breakerSlot(() =>
+    createBreaker("b2-api", CIRCUIT_TIMEOUT_MS, {
+      open: "circuit.open",
+      halfOpen: "circuit.halfOpen",
+      close: "circuit.close",
+    }),
+  ),
+  transfer: breakerSlot(() =>
+    createBreaker("b2-transfer", false, {
+      open: "circuit.transfer.open",
+      halfOpen: "circuit.transfer.halfOpen",
+      close: "circuit.transfer.close",
+    }),
+  ),
+  report: breakerSlot(() =>
+    createBreaker("b2-report-s3", CIRCUIT_TIMEOUT_MS, {
+      open: "circuit.reportS3.open",
+      halfOpen: "circuit.reportS3.halfOpen",
+      close: "circuit.reportS3.close",
+    }),
+  ),
+  s3: breakerSlot(() =>
+    createBreaker("b2-s3-api", CIRCUIT_TIMEOUT_MS, {
+      open: "circuit.s3.open",
+      halfOpen: "circuit.s3.halfOpen",
+      close: "circuit.s3.close",
+    }),
+  ),
+  s3Transfer: breakerSlot(() =>
+    createBreaker("b2-s3-transfer", false, {
+      open: "circuit.s3Transfer.open",
+      halfOpen: "circuit.s3Transfer.halfOpen",
+      close: "circuit.s3Transfer.close",
+    }),
+  ),
+  partner: breakerSlot(() =>
+    createBreaker("b2-partner-api", CIRCUIT_TIMEOUT_MS, {
+      open: "circuit.partner.open",
+      halfOpen: "circuit.partner.halfOpen",
+      close: "circuit.partner.close",
+    }),
+  ),
+} satisfies Record<string, CircuitBreakerSlot>;
+
+function getBreaker(slot: CircuitBreakerSlot): CircuitBreakerInstance {
+  slot.instance ??= slot.create();
+  return slot.instance;
+}
+
 function defaultBreaker(): CircuitBreakerInstance {
-  breaker ??= createBreaker("b2-api", CIRCUIT_TIMEOUT_MS, {
-    open: "circuit.open",
-    halfOpen: "circuit.halfOpen",
-    close: "circuit.close",
-  });
-  return breaker;
+  return getBreaker(breakerSlots.native);
 }
 
 /**
@@ -100,12 +148,7 @@ function defaultBreaker(): CircuitBreakerInstance {
  * Transfer health is governed by SDK/request timeouts and the retry layer instead.
  */
 function transferBreaker(): CircuitBreakerInstance {
-  longBreaker ??= createBreaker("b2-transfer", false, {
-    open: "circuit.transfer.open",
-    halfOpen: "circuit.transfer.halfOpen",
-    close: "circuit.transfer.close",
-  });
-  return longBreaker;
+  return getBreaker(breakerSlots.transfer);
 }
 
 /**
@@ -116,12 +159,7 @@ function transferBreaker(): CircuitBreakerInstance {
  * opening the native control-plane breaker used by bucket/key/Object Lock tools.
  */
 function usageReportBreaker(): CircuitBreakerInstance {
-  reportBreaker ??= createBreaker("b2-report-s3", CIRCUIT_TIMEOUT_MS, {
-    open: "circuit.reportS3.open",
-    halfOpen: "circuit.reportS3.halfOpen",
-    close: "circuit.reportS3.close",
-  });
-  return reportBreaker;
+  return getBreaker(breakerSlots.report);
 }
 
 /**
@@ -134,12 +172,7 @@ function usageReportBreaker(): CircuitBreakerInstance {
  * mitigate the incident.
  */
 function s3ApiBreaker(): CircuitBreakerInstance {
-  s3Breaker ??= createBreaker("b2-s3-api", CIRCUIT_TIMEOUT_MS, {
-    open: "circuit.s3.open",
-    halfOpen: "circuit.s3.halfOpen",
-    close: "circuit.s3.close",
-  });
-  return s3Breaker;
+  return getBreaker(breakerSlots.s3);
 }
 
 /**
@@ -148,12 +181,7 @@ function s3ApiBreaker(): CircuitBreakerInstance {
  * or SDK socket deadlines where an operation can stall after response headers.
  */
 function s3TransferBreaker(): CircuitBreakerInstance {
-  s3LongBreaker ??= createBreaker("b2-s3-transfer", false, {
-    open: "circuit.s3Transfer.open",
-    halfOpen: "circuit.s3Transfer.halfOpen",
-    close: "circuit.s3Transfer.close",
-  });
-  return s3LongBreaker;
+  return getBreaker(breakerSlots.s3Transfer);
 }
 
 /**
@@ -164,12 +192,7 @@ function s3TransferBreaker(): CircuitBreakerInstance {
  * native breaker operators use for storage administration.
  */
 function partnerApiBreaker(): CircuitBreakerInstance {
-  partnerBreaker ??= createBreaker("b2-partner-api", CIRCUIT_TIMEOUT_MS, {
-    open: "circuit.partner.open",
-    halfOpen: "circuit.partner.halfOpen",
-    close: "circuit.partner.close",
-  });
-  return partnerBreaker;
+  return getBreaker(breakerSlots.partner);
 }
 
 function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
@@ -275,3 +298,13 @@ export const reportCircuitBreaker = breakerProxy(usageReportBreaker);
 export const s3CircuitBreaker = breakerProxy(s3ApiBreaker);
 export const s3TransferCircuitBreaker = breakerProxy(s3TransferBreaker);
 export const partnerCircuitBreaker = breakerProxy(partnerApiBreaker);
+
+export function resetCircuitBreakersForTests(): void {
+  if (!isTestRuntime()) {
+    throw new Error("Circuit breaker reset is only available in tests.");
+  }
+  for (const slot of Object.values(breakerSlots)) {
+    slot.instance?.shutdown();
+    slot.instance = null;
+  }
+}

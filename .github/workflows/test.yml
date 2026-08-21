@@ -166,6 +166,39 @@ jobs:
             exit 1
           fi
 
+  reliability-resilience:
+    name: reliability/resilience
+    needs: runtime-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:reliability
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload reliability reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: reliability-resilience-node-22.23.1
+          path: |
+            reports/junit/reliability.xml
+            reports/vitest/reliability.json
+          if-no-files-found: error
+          retention-days: 7
+
   mcp-contract:
     name: MCP contract
     needs: runtime-policy
@@ -663,6 +696,7 @@ jobs:
       - format-lint-typecheck
       - docs-spelling-links
       - unit-coverage
+      - reliability-resilience
       - mcp-contract
       - protocol-transport
       - observability-logging
@@ -695,6 +729,7 @@ jobs:
           | Legacy MCP fallback | 2025-era stateless initialize compatibility |
           | Observability logging | Structured lifecycle, warning, failure, redaction, and stream-separation canaries |
           | Linux deterministic Node matrix | 22.23.1, 24, 26 |
+          | Deterministic dependency failures | B2/S3/OAuth outage suite |
           | Runtime engine floor | Node.js 22.3.0 package install smoke |
           | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
           | Package budget metrics | Uploaded as package-budget artifact |
@@ -711,6 +746,7 @@ jobs:
       - format-lint-typecheck
       - docs-spelling-links
       - unit-coverage
+      - reliability-resilience
       - mcp-contract
       - protocol-transport
       - observability-logging

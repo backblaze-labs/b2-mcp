@@ -106,6 +106,7 @@ describe("test layer naming", () => {
     const invalid = testFiles.filter(
       (path) =>
         !/^tests\/unit\/.+\.unit\.test\.ts$/.test(path) &&
+        !/^tests\/reliability\/.+\.reliability\.test\.ts$/.test(path) &&
         !/^tests\/contract\/.+\.contract\.test\.ts$/.test(path) &&
         !/^tests\/protocol\/.+\.(modern|legacy)-protocol\.test\.ts$/.test(path) &&
         !/^tests\/runtime-security\/.+\.runtime-security\.test\.ts$/.test(path) &&
