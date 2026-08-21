@@ -19,11 +19,12 @@ const {
 } = liveB2Capabilities;
 
 const {
-  ISSUE_194,
   classifyLiveRun,
-  readJsonIfPresent,
+  createFinalEvidence,
+  createPreflightEvidence,
+  readCleanupSummary,
   readResourceLedger,
-  workflowContext,
+  readValidationSummary,
   writeEvidenceJson,
 } = liveB2Evidence;
 
@@ -41,7 +42,7 @@ const REQUIRED_PREFLIGHT_ENV = Object.freeze([
 function usage(message) {
   if (message) console.error(message);
   console.error(
-    "Usage: node scripts/live-b2-evidence.mjs <preflight|finalize> --out <path> [--resource-ledger <path>] [--cleanup-summary <path>] [--preflight-outcome <outcome>] [--test-outcome <outcome>] [--cleanup-outcome <outcome>]",
+    "Usage: node scripts/live-b2-evidence.mjs <preflight|finalize> --out <path> [--resource-ledger <path>] [--cleanup-summary <path>] [--validation-summary <path>] [--preflight-outcome <outcome>] [--test-outcome <outcome>] [--cleanup-outcome <outcome>]",
   );
 }
 
@@ -81,76 +82,16 @@ function safeDetail(value, prefix) {
   );
 }
 
-function baseEvidence({ phase, status, statusReason, env = process.env }) {
-  const rawPrefix = env.B2_MCP_LIVE_RUN_PREFIX || "";
-  const normalizedPrefix = rawPrefix ? liveB2Contract.normalizeLivePrefix(rawPrefix) : "";
+function validationScope() {
+  return process.env.MATRIX_NODE_VERSION ? "matrix leg" : "preflight";
+}
+
+function basePreflightState(contract, expectedToolProfile) {
   return {
-    schemaVersion: 1,
-    issue: ISSUE_194,
-    generatedAt: new Date().toISOString(),
-    phase,
-    status,
-    statusReason,
-    workflow: workflowContext(env),
-    node: {
-      runtime: process.version,
-      matrixVersion: env.MATRIX_NODE_VERSION || null,
-    },
-    isolation: {
-      prefixEnv: liveB2Contract.CONTRACT_KEY_PREFIX_ENV,
-      runPrefix: normalizedPrefix || null,
-      safePrefix: normalizedPrefix ? liveB2Contract.isSafeLivePrefix(normalizedPrefix) : false,
-      sourceIncludesRunId:
-        Boolean(rawPrefix && env.GITHUB_RUN_ID && env.GITHUB_RUN_ATTEMPT) &&
-        rawPrefix.includes(env.GITHUB_RUN_ID) &&
-        rawPrefix.includes(env.GITHUB_RUN_ATTEMPT),
-    },
-    sensitivity: {
-      secretSafe: true,
-      omitted: [
-        "key IDs",
-        "application keys",
-        "authorization headers",
-        "account IDs",
-        "bucket IDs",
-        "raw bucket names outside the run prefix",
-      ],
-    },
-  };
-}
-
-function preflightBlocked(out, evidence, reason, details = {}) {
-  writeEvidenceJson(out, {
-    ...evidence,
-    status: "configuration blocked",
-    statusReason: reason,
-    ...details,
-  });
-}
-
-async function registeredToolProfile(capabilities) {
-  const serverModule = await import(pathToFileURL(join(root, "dist/server.js")).href);
-  const config = serverModule.loadConfig();
-  const server = serverModule.createServer({ ...config, destructivePolicy: "allow" }, capabilities);
-  const tools = serverModule.getRegisteredTools(server);
-  if (!tools) throw new Error("Built server did not expose registered tools.");
-  const names = Object.keys(tools).sort();
-  return { names, namesHash: namesHash(names) };
-}
-
-async function runPreflight(options) {
-  const contract = toolContract();
-  const expectedToolProfile = String(process.env.B2_MCP_EXPECTED_TOOL_PROFILE ?? "").trim();
-  const rawPrefix = process.env.B2_MCP_LIVE_RUN_PREFIX || "";
-  const prefix = rawPrefix ? liveB2Contract.normalizeLivePrefix(rawPrefix) : "";
-  const evidence = {
-    ...baseEvidence({
-      phase: "preflight",
-      status: "configuration blocked",
-      statusReason: "preflight has not completed",
-    }),
     configuration: {
-      validatedBeforeNodeMatrix: true,
+      validationScope: validationScope(),
+      validatedBeforeNodeMatrix: !process.env.MATRIX_NODE_VERSION,
+      validatesCurrentNodeRuntime: true,
       requiredEnv: REQUIRED_PREFLIGHT_ENV,
       missingEnv: REQUIRED_PREFLIGHT_ENV.filter((name) => !process.env[name]),
       liveFlags: {
@@ -172,117 +113,270 @@ async function runPreflight(options) {
       overbroadCredentialRejected: false,
     },
   };
+}
+
+function writePreflight(out, state, status, reason, details = {}) {
+  writeEvidenceJson(
+    out,
+    createPreflightEvidence({
+      status,
+      statusReason: reason,
+      configuration: state.configuration,
+      credentialPolicy: state.credentialPolicy,
+      target: details.target,
+      error: details.error,
+    }),
+  );
+}
+
+function preflightBlocked(out, state, reason, details = {}) {
+  writePreflight(out, state, "configuration blocked", reason, details);
+}
+
+async function validateNotificationBucket({ authManager, bucketName, toolProfile }) {
+  const clientModule = await import(pathToFileURL(join(root, "dist/b2/client.js")).href);
+  const b2Client = new clientModule.B2Client(authManager);
+  const result = await b2Client.listBuckets({ bucketName });
+  const bucket = (result.buckets ?? []).find((candidate) => candidate.bucketName === bucketName);
+  return {
+    notificationBucketConfigured: Boolean(bucketName),
+    notificationBucketValidated: Boolean(bucket),
+    notificationRuleToolRegistered: toolProfile.names.includes("b2_set_bucket_notification_rules"),
+    notificationBucketFingerprint: liveB2Contract.stableResourceFingerprint(bucketName),
+  };
+}
+
+function finalStatusReason(status) {
+  return status === "passed"
+    ? "live B2 validation, tests, and cleanup passed"
+    : status === "product failure"
+      ? "live B2 tests failed after matrix-leg validation and cleanup completed"
+      : status === "cleanup failure"
+        ? "cleanup failed or reported leftovers"
+        : "matrix-leg live B2 validation blocked tests before resource mutation";
+}
+
+function preflightPassedReason() {
+  return process.env.MATRIX_NODE_VERSION
+    ? "live B2 validation passed for this Node matrix leg"
+    : "live B2 preflight passed before Node matrix";
+}
+
+function preflightFailureExit(reason) {
+  console.error(`live-b2-evidence: ${reason}`);
+  process.exit(2);
+}
+
+function writeConfigurationBlocked(out, state, reason, details = {}) {
+  preflightBlocked(out, state, reason, details);
+  preflightFailureExit(reason);
+}
+
+function buildCredentialPolicy(evidence, capabilities) {
+  const missingRequiredCapabilities = requiredCapabilities.filter(
+    (capability) => !capabilities.includes(capability),
+  );
+  const forbiddenCapabilitiesGranted = forbiddenCapabilities.filter((capability) =>
+    capabilities.includes(capability),
+  );
+  return {
+    ...evidence.credentialPolicy,
+    requiredCapabilitiesPresent: requiredCapabilities.filter((capability) =>
+      capabilities.includes(capability),
+    ),
+    missingRequiredCapabilities,
+    forbiddenCapabilitiesGranted,
+    nonMasterApplicationKey: forbiddenCapabilitiesGranted.length === 0,
+    overbroadCredentialRejected: forbiddenCapabilitiesGranted.length > 0,
+  };
+}
+
+function buildActualToolProfile(toolProfile, expectedProfile) {
+  const missingExpectedTools = expectedProfile.names.filter(
+    (name) => !toolProfile.names.includes(name),
+  );
+  const unexpectedTools = toolProfile.names.filter((name) => !expectedProfile.names.includes(name));
+  return {
+    toolCount: toolProfile.names.length,
+    namesHash: toolProfile.namesHash,
+    matchesExpectedProfile: missingExpectedTools.length === 0 && unexpectedTools.length === 0,
+    missingExpectedTools,
+    unexpectedTools,
+  };
+}
+
+function statusFailureReasons({
+  accountMatches,
+  missingRequiredCapabilities,
+  forbiddenCapabilitiesGranted,
+  actualToolProfile,
+  notification,
+}) {
+  const configFailures = [];
+  if (!accountMatches) configFailures.push("authorized account mismatch");
+  if (missingRequiredCapabilities.length > 0) {
+    configFailures.push("required live B2 capabilities missing");
+  }
+  if (forbiddenCapabilitiesGranted.length > 0) {
+    configFailures.push("forbidden live B2 capabilities granted");
+  }
+  if (!actualToolProfile.matchesExpectedProfile) {
+    configFailures.push("registered tool surface does not match expected profile");
+  }
+  if (!notification.notificationBucketValidated) {
+    configFailures.push("live notification bucket is missing or not visible to authorized account");
+  }
+  if (!notification.notificationRuleToolRegistered) {
+    configFailures.push("notification rule tool is not registered for the expected profile");
+  }
+  return configFailures;
+}
+
+function safeTarget(auth, notification) {
+  return {
+    accountMatchedExpectedLiveTestAccount: auth.accountId === process.env.B2_LIVE_TEST_ACCOUNT_ID,
+    accountFingerprint: liveB2Contract.stableResourceFingerprint(auth.accountId),
+    expectedAccountFingerprint: liveB2Contract.stableResourceFingerprint(
+      process.env.B2_LIVE_TEST_ACCOUNT_ID,
+    ),
+    ...notification,
+  };
+}
+
+function writeFinalEvidence(options) {
+  const expectedPrefix = process.env.B2_MCP_LIVE_RUN_PREFIX || "";
+  const ledger = readResourceLedger(options.resourceLedger, { expectedPrefix });
+  const cleanupSummary = readCleanupSummary(options.cleanupSummary, {
+    expectedPrefix,
+    env: process.env,
+  });
+  const validationSummary = readValidationSummary(options.validationSummary, {
+    expectedPrefix,
+    env: process.env,
+  });
+  const rawPreflightOutcome = options.preflightOutcome || "success";
+  const rawCleanupOutcome = options.cleanupOutcome || "skipped";
+  const validationRequired = Boolean(options.validationSummary);
+  const validationTrusted =
+    !validationRequired ||
+    (validationSummary.present &&
+      !validationSummary.validationError &&
+      validationSummary.summary?.status === "passed");
+  const cleanupRequired = Boolean(options.cleanupSummary);
+  const cleanupTrusted =
+    !cleanupRequired ||
+    (cleanupSummary.present &&
+      !cleanupSummary.validationError &&
+      cleanupSummary.summary?.outcome !== "cleanup failure");
+  const status = classifyLiveRun({
+    preflightOutcome:
+      rawPreflightOutcome === "success" && validationTrusted ? "success" : "failure",
+    testOutcome: options.testOutcome || "skipped",
+    cleanupOutcome: rawCleanupOutcome === "success" && cleanupTrusted ? "success" : "failure",
+  });
+
+  writeEvidenceJson(
+    options.out,
+    createFinalEvidence({
+      status,
+      statusReason: finalStatusReason(status),
+      outcomes: {
+        preflight: options.preflightOutcome || "success",
+        tests: options.testOutcome || "skipped",
+        cleanup: options.cleanupOutcome || "skipped",
+      },
+      resourceLedger: ledger,
+      cleanupSummary,
+      validationSummary,
+      expectedToolProfile: process.env.B2_MCP_EXPECTED_TOOL_PROFILE || null,
+      env: process.env,
+    }),
+  );
+}
+
+async function registeredToolProfile(capabilities) {
+  const serverModule = await import(pathToFileURL(join(root, "dist/server.js")).href);
+  const config = serverModule.loadConfig();
+  const server = serverModule.createServer({ ...config, destructivePolicy: "allow" }, capabilities);
+  const tools = serverModule.getRegisteredTools(server);
+  if (!tools) throw new Error("Built server did not expose registered tools.");
+  const names = Object.keys(tools).sort();
+  return { names, namesHash: namesHash(names) };
+}
+
+async function runPreflight(options) {
+  const contract = toolContract();
+  const expectedToolProfile = String(process.env.B2_MCP_EXPECTED_TOOL_PROFILE ?? "").trim();
+  const rawPrefix = process.env.B2_MCP_LIVE_RUN_PREFIX || "";
+  const prefix = rawPrefix ? liveB2Contract.normalizeLivePrefix(rawPrefix) : "";
+  const evidence = basePreflightState(contract, expectedToolProfile);
 
   if (evidence.configuration.missingEnv.length > 0) {
-    preflightBlocked(options.out, evidence, "missing required live B2 configuration");
-    console.error(
-      `live-b2-evidence: missing required live B2 configuration: ${evidence.configuration.missingEnv.join(
-        ", ",
-      )}`,
+    writeConfigurationBlocked(
+      options.out,
+      evidence,
+      `missing required live B2 configuration: ${evidence.configuration.missingEnv.join(", ")}`,
     );
-    process.exit(2);
   }
 
   if (
     process.env.B2_REQUIRE_LIVE_TESTS !== "1" ||
     process.env.B2_INTEGRATION_REQUIRE_CREDENTIALS !== "1"
   ) {
-    preflightBlocked(options.out, evidence, "live test safety flags are not both enabled");
-    console.error("live-b2-evidence: live test safety flags are not both enabled");
-    process.exit(2);
+    writeConfigurationBlocked(options.out, evidence, "live test safety flags are not both enabled");
   }
 
   if (!evidence.configuration.expectedToolProfileApproved) {
-    preflightBlocked(options.out, evidence, "B2_MCP_EXPECTED_TOOL_PROFILE is not approved");
-    console.error("live-b2-evidence: B2_MCP_EXPECTED_TOOL_PROFILE is not approved");
-    process.exit(2);
+    writeConfigurationBlocked(
+      options.out,
+      evidence,
+      "B2_MCP_EXPECTED_TOOL_PROFILE is not approved",
+    );
   }
 
   if (!prefix || !liveB2Contract.isSafeLivePrefix(prefix)) {
-    preflightBlocked(options.out, evidence, "live B2 run prefix is missing or unsafe");
-    console.error("live-b2-evidence: live B2 run prefix is missing or unsafe");
-    process.exit(2);
+    writeConfigurationBlocked(options.out, evidence, "live B2 run prefix is missing or unsafe");
   }
 
   try {
     const authModule = await import(pathToFileURL(join(root, "dist/auth.js")).href);
     const serverModule = await import(pathToFileURL(join(root, "dist/server.js")).href);
     const config = serverModule.loadConfig();
-    const auth = await new authModule.B2AuthManager(config).getAuth();
+    const authManager = new authModule.B2AuthManager(config);
+    const auth = await authManager.getAuth();
     const capabilities = auth.capabilities ?? [];
-    const missingRequiredCapabilities = requiredCapabilities.filter(
-      (capability) => !capabilities.includes(capability),
-    );
-    const forbiddenCapabilitiesGranted = forbiddenCapabilities.filter((capability) =>
-      capabilities.includes(capability),
-    );
+    const credentialPolicy = buildCredentialPolicy(evidence, capabilities);
     const toolProfile = await registeredToolProfile(capabilities);
     const expectedProfile = contract.profiles[expectedToolProfile];
-    const missingExpectedTools = expectedProfile.names.filter(
-      (name) => !toolProfile.names.includes(name),
-    );
-    const unexpectedTools = toolProfile.names.filter(
-      (name) => !expectedProfile.names.includes(name),
-    );
+    const actualToolProfile = buildActualToolProfile(toolProfile, expectedProfile);
+    const notification = await validateNotificationBucket({
+      authManager,
+      bucketName: process.env.B2_LIVE_NOTIFICATION_BUCKET,
+      toolProfile,
+    });
     const accountMatches = auth.accountId === process.env.B2_LIVE_TEST_ACCOUNT_ID;
     const nextEvidence = {
-      ...evidence,
-      target: {
-        accountMatchedExpectedLiveTestAccount: accountMatches,
-        accountFingerprint: liveB2Contract.stableResourceFingerprint(auth.accountId),
-        expectedAccountFingerprint: liveB2Contract.stableResourceFingerprint(
-          process.env.B2_LIVE_TEST_ACCOUNT_ID,
-        ),
-        notificationBucketConfigured: Boolean(process.env.B2_LIVE_NOTIFICATION_BUCKET),
-        notificationBucketFingerprint: liveB2Contract.stableResourceFingerprint(
-          process.env.B2_LIVE_NOTIFICATION_BUCKET,
-        ),
-      },
+      target: safeTarget(auth, notification),
       configuration: {
         ...evidence.configuration,
-        actualToolProfile: {
-          toolCount: toolProfile.names.length,
-          namesHash: toolProfile.namesHash,
-          matchesExpectedProfile: missingExpectedTools.length === 0 && unexpectedTools.length === 0,
-          missingExpectedTools,
-          unexpectedTools,
-        },
+        actualToolProfile,
       },
-      credentialPolicy: {
-        ...evidence.credentialPolicy,
-        requiredCapabilitiesPresent: requiredCapabilities.filter((capability) =>
-          capabilities.includes(capability),
-        ),
-        missingRequiredCapabilities,
-        forbiddenCapabilitiesGranted,
-        nonMasterApplicationKey: forbiddenCapabilitiesGranted.length === 0,
-        overbroadCredentialRejected: forbiddenCapabilitiesGranted.length > 0,
-      },
+      credentialPolicy,
     };
 
-    const configFailures = [];
-    if (!accountMatches) configFailures.push("authorized account mismatch");
-    if (missingRequiredCapabilities.length > 0) {
-      configFailures.push("required live B2 capabilities missing");
-    }
-    if (forbiddenCapabilitiesGranted.length > 0) {
-      configFailures.push("forbidden live B2 capabilities granted");
-    }
-    if (missingExpectedTools.length > 0 || unexpectedTools.length > 0) {
-      configFailures.push("registered tool surface does not match expected profile");
-    }
+    const configFailures = statusFailureReasons({
+      accountMatches,
+      missingRequiredCapabilities: credentialPolicy.missingRequiredCapabilities,
+      forbiddenCapabilitiesGranted: credentialPolicy.forbiddenCapabilitiesGranted,
+      actualToolProfile,
+      notification,
+    });
 
     if (configFailures.length > 0) {
-      preflightBlocked(options.out, nextEvidence, configFailures.join("; "));
-      console.error(`live-b2-evidence: ${configFailures.join("; ")}`);
-      process.exit(2);
+      writeConfigurationBlocked(options.out, nextEvidence, configFailures.join("; "));
     }
 
-    writeEvidenceJson(options.out, {
-      ...nextEvidence,
-      status: "passed",
-      statusReason: "live B2 preflight passed before Node matrix",
-    });
+    writePreflight(options.out, nextEvidence, "passed", preflightPassedReason());
   } catch (err) {
     preflightBlocked(options.out, evidence, "live B2 preflight failed", {
       error: safeDetail(err?.message ?? err, prefix),
@@ -293,59 +387,7 @@ async function runPreflight(options) {
 }
 
 function runFinalize(options) {
-  const ledger = readResourceLedger(options.resourceLedger);
-  const cleanupSummary = readJsonIfPresent(options.cleanupSummary);
-  const status = classifyLiveRun({
-    preflightOutcome: options.preflightOutcome || "success",
-    testOutcome: options.testOutcome || "skipped",
-    cleanupOutcome: options.cleanupOutcome || "skipped",
-  });
-  const cleanup = cleanupSummary?.cleanup ?? null;
-  const resourceEntries = ledger.entries.map((entry) => ({
-    type: entry.type,
-    label: entry.label,
-    runPrefix: entry.runPrefix,
-    matchesRunPrefix: entry.matchesRunPrefix === true,
-    nameFingerprint: entry.nameFingerprint,
-    idFingerprint: entry.idFingerprint,
-  }));
-
-  writeEvidenceJson(options.out, {
-    ...baseEvidence({
-      phase: "final",
-      status,
-      statusReason:
-        status === "passed"
-          ? "live B2 tests and cleanup passed"
-          : status === "product failure"
-            ? "live B2 tests failed and cleanup completed"
-            : status === "cleanup failure"
-              ? "cleanup failed or reported leftovers"
-              : "preflight configuration blocked the live B2 matrix",
-    }),
-    outcomes: {
-      preflight: options.preflightOutcome || "success",
-      tests: options.testOutcome || "skipped",
-      cleanup: options.cleanupOutcome || "skipped",
-    },
-    configuration: {
-      expectedToolProfile: process.env.B2_MCP_EXPECTED_TOOL_PROFILE || null,
-    },
-    resources: {
-      ledgerPresent: Boolean(options.resourceLedger && ledger.entries.length > 0),
-      createdCount: resourceEntries.length,
-      truncated: ledger.truncated,
-      parseErrors: ledger.parseErrors,
-      created: resourceEntries,
-    },
-    cleanup: {
-      ranInAlwaysStep: true,
-      outcome: options.cleanupOutcome || "skipped",
-      summaryPresent: Boolean(cleanupSummary),
-      stats: cleanup,
-      leftoversVisible: Boolean(cleanup) && (cleanup.leakedBuckets > 0 || cleanup.errors > 0),
-    },
-  });
+  writeFinalEvidence(options);
 }
 
 try {

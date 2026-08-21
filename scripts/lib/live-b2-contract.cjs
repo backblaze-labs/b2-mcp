@@ -1,12 +1,9 @@
 "use strict";
 
 const { createHash, randomBytes } = require("node:crypto");
-const { appendFileSync, mkdirSync } = require("node:fs");
-const { dirname } = require("node:path");
 
 const CONTRACT_BUCKET_PREFIX = "mcp-contract-";
 const CONTRACT_KEY_PREFIX_ENV = "B2_MCP_LIVE_RUN_PREFIX";
-const LIVE_RESOURCE_LEDGER_ENV = "B2_MCP_LIVE_RESOURCE_LEDGER";
 const MAX_BUCKET_NAME_LENGTH = 50;
 const MAX_LIVE_PREFIX_LENGTH = 29;
 const CLEANUP_PAGINATION_GUARD_PAGES = 1000;
@@ -99,38 +96,6 @@ function isContractBucketName(bucketName, label, options = {}) {
   if (!bucketMatchesPrefix(bucketName, prefix)) return false;
   if (!label) return true;
   return String(bucketName).includes(`-${normalizeToken(label)}-`);
-}
-
-function liveResourceLedgerPath(env = process.env) {
-  return String(env[LIVE_RESOURCE_LEDGER_ENV] ?? "").trim();
-}
-
-function liveResourceEvidenceEntry(resource, options = {}) {
-  const prefix = normalizeLivePrefix(options.prefix || liveRunPrefix(options.env));
-  const name = resource?.name ?? resource?.bucketName ?? resource?.key ?? "";
-  const id = resource?.id ?? resource?.bucketId ?? resource?.fileId ?? "";
-  return {
-    schemaVersion: 1,
-    recordedAt: new Date().toISOString(),
-    type: fitToken(resource?.type || "resource", 32),
-    ...(resource?.label ? { label: fitToken(resource.label, 48) } : {}),
-    runPrefix: prefix,
-    matchesRunPrefix: name ? bucketMatchesPrefix(name, prefix) : false,
-    ...(name ? { nameFingerprint: stableResourceFingerprint(name) } : {}),
-    ...(id ? { idFingerprint: stableResourceFingerprint(id) } : {}),
-  };
-}
-
-function recordLiveResource(resource, options = {}) {
-  const ledgerPath = options.ledgerPath ?? liveResourceLedgerPath(options.env);
-  if (!ledgerPath) return null;
-  const entry = liveResourceEvidenceEntry(resource, options);
-  mkdirSync(dirname(ledgerPath), { recursive: true });
-  appendFileSync(ledgerPath, `${JSON.stringify(entry)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  return entry;
 }
 
 function escapeRegExp(value) {
@@ -396,7 +361,6 @@ module.exports = {
   CONTRACT_BUCKET_PREFIX,
   CONTRACT_KEY_PREFIX_ENV,
   LIVE_B2_RESOURCE_PATTERN,
-  LIVE_RESOURCE_LEDGER_ENV,
   MAX_BUCKET_NAME_LENGTH,
   MAX_LIVE_PREFIX_LENGTH,
   PRESIGNED_URL_PATTERN,
@@ -414,13 +378,10 @@ module.exports = {
   isError,
   isSafeLivePrefix,
   liveErrorText,
-  liveResourceEvidenceEntry,
-  liveResourceLedgerPath,
   liveRunPrefix,
   normalizeLivePrefix,
   normalizeToken,
   parseResult,
-  recordLiveResource,
   redactKnownLiveResourceDetails,
   stableResourceFingerprint,
   stableShortHash,

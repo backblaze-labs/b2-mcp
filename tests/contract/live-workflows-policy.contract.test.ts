@@ -304,12 +304,6 @@ describe("live secret workflow policy", () => {
     expect(text.indexOf("await assertLiveTestAccount(server)")).toBeLessThan(
       text.indexOf('callTool(server, "b2_create_bucket"'),
     );
-    const evidenceScript = workflowText("scripts/live-b2-evidence.mjs");
-    expect(evidenceScript).toContain("authorized account mismatch");
-    expect(evidenceScript).toContain("./lib/live-b2-capabilities.cjs");
-    expect(evidenceScript).toContain("LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES");
-    expect(evidenceScript).toContain("LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES");
-    expect(evidenceScript).toContain("forbidden live B2 capabilities granted");
     const liveTests = [
       workflowText("tests/live/b2.integration.live.test.ts"),
       workflowText("tests/live/request-shape.contract.live.test.ts"),
@@ -359,7 +353,9 @@ describe("live secret workflow policy", () => {
     const workflow = workflowText(".github/workflows/contract.yml");
     const preflightJob = workflowJobBlock(workflow, "preflight") ?? "";
     const contractJob = workflowJobBlock(workflow, "contract") ?? "";
-    const evidenceScript = workflowText("scripts/live-b2-evidence.mjs");
+    const matrixValidation = workflowStepBlock(workflow, "Validate live B2 matrix leg");
+    const liveTests = workflowStepBlock(workflow, "Run live B2 contract and integration suites");
+    const finalizer = workflowStepBlock(workflow, "Publish live B2 isolation and cleanup evidence");
 
     expect(preflightJob).toContain("name: live B2 preflight");
     expect(preflightJob).toContain("needs: guard");
@@ -372,14 +368,37 @@ describe("live secret workflow policy", () => {
     expect(preflightJob).toContain("if: always()");
     expect(contractJob).toContain("needs: [guard, preflight]");
     expect(contractJob).toContain("needs.preflight.result == 'success'");
-    expect(evidenceScript).toContain("validatedBeforeNodeMatrix: true");
-    expect(evidenceScript).toContain("B2_LIVE_NOTIFICATION_BUCKET");
-    expect(evidenceScript).toContain("B2_MCP_EXPECTED_TOOL_PROFILE");
-    expect(evidenceScript).toContain("nonMasterApplicationKey");
-    expect(evidenceScript).toContain("notificationBucketFingerprint");
-    expect(evidenceScript).toContain("configuration blocked");
-    expect(evidenceScript).toContain("product failure");
-    expect(evidenceScript).toContain("cleanup failure");
+    expect(matrixValidation).toContain("id: matrix_validation");
+    expect(matrixValidation).toContain("continue-on-error: true");
+    expect(matrixValidation).toContain(
+      "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
+    );
+    expect(matrixValidation).toContain("B2_LIVE_NOTIFICATION_BUCKET");
+    expect(matrixValidation).toContain("node scripts/live-b2-evidence.mjs preflight");
+    expect(matrixValidation).toContain(
+      "reports/live-b2/validation-node-${{ matrix.node-version }}.json",
+    );
+    expect(liveTests).toContain("if: steps.matrix_validation.outcome == 'success'");
+    expect(liveTests).toContain(
+      "B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}",
+    );
+    expect(finalizer).toContain("--validation-summary");
+    expect(finalizer).toContain("reports/live-b2/validation-node-${{ matrix.node-version }}.json");
+    expect(finalizer).toContain('--preflight-outcome "${{ steps.matrix_validation.outcome }}"');
+    expect(contractJob).toContain("live B2 matrix validation outcome was");
+  });
+
+  it("uploads only finalized secret-safe live B2 evidence artifacts", () => {
+    const workflow = workflowText(".github/workflows/contract.yml");
+    const upload = workflowStepBlock(workflow, "Upload live B2 isolation and cleanup evidence");
+
+    expect(upload).toContain(
+      "path: reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json",
+    );
+    expect(upload).toContain("if-no-files-found: error");
+    expect(upload).not.toContain("reports/live-b2/**");
+    expect(upload).not.toContain("path: reports/live-b2/resources-node-");
+    expect(upload).not.toContain("path: reports/live-b2/cleanup-node-");
   });
 
   it("pins the expected tool profile and required test bucket for live smoke", () => {

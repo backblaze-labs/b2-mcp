@@ -195,8 +195,27 @@ jobs:
       - run: pnpm run build
       - name: Prepare live B2 evidence directory
         run: mkdir -p reports/live-b2
+      - name: Validate live B2 matrix leg
+        id: matrix_validation
+        continue-on-error: true
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.LIVE_B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.LIVE_B2_KEY }}
+          B2_LIVE_TEST_ACCOUNT_ID: ${{ vars.B2_LIVE_TEST_ACCOUNT_ID }}
+          B2_REGION: ${{ vars.B2_REGION }}
+          B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
+          B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
+          B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
+          B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
+          B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
+        run: |
+          set -euo pipefail
+          node scripts/live-b2-evidence.mjs preflight \
+            --out "reports/live-b2/validation-node-${{ matrix.node-version }}.json"
       - name: Run live B2 contract and integration suites
         id: live_tests
+        if: steps.matrix_validation.outcome == 'success'
         continue-on-error: true
         timeout-minutes: 12
         env:
@@ -207,6 +226,7 @@ jobs:
           B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
           B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
           B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
           B2_MCP_LIVE_RESOURCE_LEDGER: ${{ env.B2_MCP_LIVE_RESOURCE_LEDGER }}
         run: pnpm run test:live:b2
@@ -222,6 +242,7 @@ jobs:
           B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
           B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
           B2_LIVE_NOTIFICATION_BUCKET: ${{ vars.B2_LIVE_NOTIFICATION_BUCKET }}
+          B2_MCP_EXPECTED_TOOL_PROFILE: ${{ vars.B2_MCP_EXPECTED_TOOL_PROFILE }}
           B2_MCP_LIVE_RUN_PREFIX: ${{ env.B2_MCP_LIVE_RUN_PREFIX }}
         run: |
           set -euo pipefail
@@ -246,7 +267,8 @@ jobs:
             --out "reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json" \
             --resource-ledger "${B2_MCP_LIVE_RESOURCE_LEDGER}" \
             --cleanup-summary "reports/live-b2/cleanup-node-${{ matrix.node-version }}.json" \
-            --preflight-outcome "${{ needs.preflight.result }}" \
+            --validation-summary "reports/live-b2/validation-node-${{ matrix.node-version }}.json" \
+            --preflight-outcome "${{ steps.matrix_validation.outcome }}" \
             --test-outcome "${{ steps.live_tests.outcome }}" \
             --cleanup-outcome "${{ steps.cleanup.outcome }}"
       # actions/upload-artifact v6, reviewed 2026-08-06.
@@ -255,14 +277,18 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: live-b2-isolation-cleanup-node-${{ matrix.node-version }}
-          path: reports/live-b2/**
-          if-no-files-found: warn
+          path: reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json
+          if-no-files-found: error
           retention-days: 14
       - name: Require live B2 run success
         if: always()
         run: |
           set -euo pipefail
           failed=0
+          if [[ "${{ steps.matrix_validation.outcome }}" != "success" ]]; then
+            echo "::error::live B2 matrix validation outcome was ${{ steps.matrix_validation.outcome }}"
+            failed=1
+          fi
           if [[ "${{ steps.live_tests.outcome }}" != "success" ]]; then
             echo "::error::live B2 tests outcome was ${{ steps.live_tests.outcome }}"
             failed=1

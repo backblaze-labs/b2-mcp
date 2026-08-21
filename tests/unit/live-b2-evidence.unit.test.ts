@@ -11,11 +11,50 @@ const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
     testOutcome?: string;
     cleanupOutcome?: string;
   }): "passed" | "product failure" | "configuration blocked" | "cleanup failure";
-  readResourceLedger(path: string): {
-    entries: unknown[];
+  createCleanupEvidence(args: {
+    options: { prefix: string; dryRun?: boolean; bestEffort?: boolean };
+    stats: Record<string, number>;
+    outcome: string;
+    error?: string;
+    missing?: string[];
+    env?: Record<string, string>;
+  }): unknown;
+  createFinalEvidence(args: {
+    status: "passed" | "product failure" | "configuration blocked" | "cleanup failure";
+    statusReason: string;
+    outcomes: { preflight: string; tests: string; cleanup: string };
+    resourceLedger: {
+      entries: unknown[];
+      truncated: boolean;
+      parseErrors: number;
+      invalidEntries: number;
+    };
+    cleanupSummary: { present: boolean; summary: unknown; validationError: string | null };
+    validationSummary: { present: boolean; summary: unknown; validationError: string | null };
+    expectedToolProfile?: string | null;
+    env?: Record<string, string>;
+  }): unknown;
+  readCleanupSummary(
+    path: string,
+    options?: { expectedPrefix?: string; env?: Record<string, string> },
+  ): { present: boolean; summary: unknown; validationError: string | null };
+  readResourceLedger(
+    path: string,
+    options?: { expectedPrefix?: string },
+  ): {
+    entries: Array<Record<string, unknown>>;
     truncated: boolean;
     parseErrors: number;
+    invalidEntries: number;
   };
+  recordLiveResource(
+    resource: { type?: string; label?: string; name?: string; id?: string },
+    options?: { ledgerPath?: string; prefix?: string; env?: Record<string, string> },
+  ): Record<string, unknown> | null;
+  validateCleanupSummary(
+    value: unknown,
+    options?: { expectedPrefix?: string; env?: Record<string, string> },
+  ): unknown;
   writeEvidenceJson(path: string, value: unknown, env?: Record<string, string>): void;
 };
 
@@ -99,17 +138,184 @@ describe("live B2 evidence", () => {
     }
   });
 
-  it("loads bounded resource ledger entries without raw secret material", () => {
-    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-ledger-"));
+  it("records live resource evidence without raw bucket names or ids", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-resource-"));
     try {
       const ledgerPath = join(dir, "resources.jsonl");
-      writeFileSync(ledgerPath, `${JSON.stringify({ ok: true })}\n`);
-      const ledger = evidence.readResourceLedger(ledgerPath);
-      expect(ledger.entries).toEqual([{ ok: true }]);
+      const entry = evidence.recordLiveResource(
+        {
+          type: "bucket",
+          label: "integration",
+          name: "mcp-contract-run1-integration-abc123",
+          id: "bucket-id-sensitive",
+        },
+        { ledgerPath, prefix: "mcp-contract-run1" },
+      );
+
+      expect(entry).toMatchObject({
+        type: "bucket",
+        label: "integration",
+        runPrefix: "mcp-contract-run1",
+        matchesRunPrefix: true,
+      });
+      const written = readFileSync(ledgerPath, "utf8");
+      expect(written).not.toContain("mcp-contract-run1-integration-abc123");
+      expect(written).not.toContain("bucket-id-sensitive");
+      expect(written).toContain('"nameFingerprint"');
+      expect(written).toContain('"idFingerprint"');
+
+      const ledger = evidence.readResourceLedger(ledgerPath, {
+        expectedPrefix: "mcp-contract-run1",
+      });
+      expect(ledger.entries).toHaveLength(1);
       expect(ledger.truncated).toBe(false);
       expect(ledger.parseErrors).toBe(0);
+      expect(ledger.invalidEntries).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("drops forged ledger and cleanup values before final evidence is written", () => {
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-forged-evidence-"));
+    const env = {
+      B2_MCP_LIVE_RUN_PREFIX: "mcp-contract-run1",
+      B2_MCP_EXPECTED_TOOL_PROFILE: "full",
+      B2_APPLICATION_KEY_ID: "forged-key-id-secret",
+      B2_APPLICATION_KEY: "forged-application-key-secret",
+      B2_LIVE_NOTIFICATION_BUCKET: "forged-notification-bucket-secret",
+    };
+    try {
+      const ledgerPath = join(dir, "resources.jsonl");
+      evidence.recordLiveResource(
+        {
+          type: "bucket",
+          label: "integration",
+          name: "mcp-contract-run1-integration-abc123",
+          id: "bucket-id-sensitive",
+        },
+        { ledgerPath, prefix: "mcp-contract-run1" },
+      );
+      writeFileSync(
+        ledgerPath,
+        `${JSON.stringify({
+          type: "forged-application-key-secret",
+          label: "forged-notification-bucket-secret",
+          runPrefix: "mcp-contract-run1",
+          matchesRunPrefix: true,
+          nameFingerprint: "forged-application-key-secret",
+          idFingerprint: "forged-key-id-secret",
+        })}\n`,
+        { flag: "a" },
+      );
+      writeFileSync(
+        ledgerPath,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          type: "bucket",
+          label: "forged-application-key-secret",
+          runPrefix: "mcp-contract-run1",
+          matchesRunPrefix: true,
+          nameFingerprint: "aaaaaaaaaaaa",
+          idFingerprint: "bbbbbbbbbbbb",
+        })}\n`,
+        { flag: "a" },
+      );
+      const cleanupPath = join(dir, "cleanup.json");
+      writeFileSync(
+        cleanupPath,
+        `${JSON.stringify({
+          prefix: "mcp-contract-run1",
+          outcome: "cleanup failure",
+          cleanup: {
+            buckets: 1,
+            objectVersions: "forged-application-key-secret",
+            multipartUploads: 0,
+            leakedBuckets: 0,
+            errors: 1,
+          },
+          error: "forged-key-id-secret",
+        })}\n`,
+      );
+
+      const finalEvidence = evidence.createFinalEvidence({
+        status: "cleanup failure",
+        statusReason: "cleanup failed",
+        outcomes: { preflight: "success", tests: "success", cleanup: "failure" },
+        resourceLedger: evidence.readResourceLedger(ledgerPath, {
+          expectedPrefix: "mcp-contract-run1",
+        }),
+        cleanupSummary: evidence.readCleanupSummary(cleanupPath, {
+          expectedPrefix: "mcp-contract-run1",
+          env,
+        }),
+        validationSummary: { present: false, summary: null, validationError: null },
+        expectedToolProfile: "full",
+        env,
+      }) as {
+        resources: { createdCount: number; invalidEntries: number };
+        cleanup: { stats: unknown; validationError: string | null };
+      };
+      const serialized = JSON.stringify(finalEvidence);
+
+      expect(finalEvidence.resources.createdCount).toBe(2);
+      expect(finalEvidence.resources.invalidEntries).toBe(1);
+      expect(finalEvidence.cleanup.stats).toBeNull();
+      expect(finalEvidence.cleanup.validationError).toBe(
+        "cleanup summary failed evidence schema validation",
+      );
+      expect(serialized).not.toContain("forged-key-id-secret");
+      expect(serialized).not.toContain("forged-application-key-secret");
+      expect(serialized).not.toContain("forged-notification-bucket-secret");
+      expect(serialized).not.toContain("bucket-id-sensitive");
+      expect(serialized).not.toContain("mcp-contract-run1-integration-abc123");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("validates cleanup summaries with finite counters and safe prefixes", () => {
+    const summary = evidence.createCleanupEvidence({
+      options: { prefix: "mcp-contract-run1" },
+      stats: {
+        buckets: 1,
+        objectVersions: 2,
+        multipartUploads: 0,
+        leakedBuckets: 0,
+        errors: 0,
+      },
+      outcome: "passed",
+    });
+
+    expect(
+      evidence.validateCleanupSummary(summary, { expectedPrefix: "mcp-contract-run1" }),
+    ).toMatchObject({
+      outcome: "passed",
+      prefix: "mcp-contract-run1",
+      cleanup: {
+        buckets: 1,
+        objectVersions: 2,
+        multipartUploads: 0,
+        leakedBuckets: 0,
+        errors: 0,
+      },
+    });
+    expect(() =>
+      evidence.validateCleanupSummary(
+        {
+          schemaVersion: 1,
+          prefix: "mcp-contract-run1",
+          outcome: "passed",
+          cleanup: {
+            buckets: Number.POSITIVE_INFINITY,
+            objectVersions: 0,
+            multipartUploads: 0,
+            leakedBuckets: 0,
+            errors: 0,
+          },
+        },
+        { expectedPrefix: "mcp-contract-run1" },
+      ),
+    ).toThrow(/finite non-negative integer/);
   });
 });

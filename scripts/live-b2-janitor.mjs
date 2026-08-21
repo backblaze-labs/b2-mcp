@@ -2,12 +2,11 @@
 
 /* global console, process */
 
-import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { b2CredentialPolicy, redactB2CredentialValues } from "./b2-credential-env.mjs";
 import liveB2Contract from "./lib/live-b2-contract.cjs";
+import liveB2Evidence from "./lib/live-b2-evidence.cjs";
 
 const {
   CONTRACT_BUCKET_PREFIX,
@@ -17,8 +16,11 @@ const {
   isSafeLivePrefix,
   normalizeLivePrefix,
 } = liveB2Contract;
+const { createCleanupEvidence, writeEvidenceJson } = liveB2Evidence;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+let activeOptions = null;
+let activeStats = createCleanupStats();
 
 function usage(message) {
   if (message) console.error(message);
@@ -71,7 +73,7 @@ function expectedLiveTestAccountId() {
 }
 
 function fingerprint(value) {
-  return createHash("sha256").update(String(value)).digest("hex").slice(0, 12);
+  return liveB2Contract.stableResourceFingerprint(value);
 }
 
 function redactDetail(value, prefix) {
@@ -81,40 +83,47 @@ function redactDetail(value, prefix) {
   );
 }
 
-function cleanupSummary(options, stats, extra = {}) {
-  return {
-    schemaVersion: 1,
-    issue: 194,
-    issueUrl: "https://github.com/backblaze-labs/b2-mcp/issues/194",
-    prefix: options.prefix,
-    dryRun: options.dryRun,
-    bestEffort: options.bestEffort,
-    cleanup: {
-      buckets: stats.buckets,
-      objectVersions: stats.objectVersions,
-      multipartUploads: stats.multipartUploads,
-      leakedBuckets: stats.leakedBuckets,
-      errors: stats.errors,
-    },
-    sensitiveFieldsOmitted: [
-      "application key IDs",
-      "application keys",
-      "authorization headers",
-      "account IDs",
-      "bucket IDs",
-      "raw bucket names",
-    ],
-    ...extra,
-  };
+export function writeJanitorSummary(options, stats, outcome, extra = {}) {
+  if (!options?.summaryJson) return;
+  writeEvidenceJson(
+    options.summaryJson,
+    createCleanupEvidence({
+      options,
+      stats,
+      outcome,
+      error: extra.error,
+      missing: extra.missing,
+    }),
+  );
 }
 
-function writeSummaryJson(summaryJson, summary) {
-  if (!summaryJson) return;
-  mkdirSync(dirname(summaryJson), { recursive: true });
-  writeFileSync(summaryJson, `${JSON.stringify(summary, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+function safeWriteJanitorSummary(options, stats, outcome, extra = {}) {
+  if (!options?.summaryJson) return;
+  try {
+    writeJanitorSummary(options, stats, outcome, extra);
+  } catch (err) {
+    console.error(
+      `live-b2-janitor: could not write cleanup summary: ${redactDetail(
+        err?.message ?? err,
+        options.prefix,
+      )}`,
+    );
+  }
+}
+
+function fallbackSummaryOptions(argv) {
+  const summaryIndex = argv.indexOf("--summary-json");
+  if (summaryIndex === -1 || !argv[summaryIndex + 1]) return null;
+  const prefixIndex = argv.indexOf("--prefix");
+  const prefix =
+    prefixIndex === -1 || !argv[prefixIndex + 1] ? CONTRACT_BUCKET_PREFIX : argv[prefixIndex + 1];
+  return {
+    prefix: normalizeLivePrefix(prefix),
+    excludePrefixes: [],
+    dryRun: argv.includes("--dry-run"),
+    bestEffort: argv.includes("--best-effort"),
+    summaryJson: argv[summaryIndex + 1],
+  };
 }
 
 async function loadRuntime() {
@@ -169,49 +178,43 @@ async function main() {
   try {
     options = parseArgs(process.argv.slice(2));
   } catch (err) {
+    safeWriteJanitorSummary(
+      fallbackSummaryOptions(process.argv.slice(2)),
+      createCleanupStats(),
+      "configuration blocked",
+      { error: err instanceof Error ? err.message : String(err) },
+    );
     usage(err instanceof Error ? err.message : String(err));
     process.exit(2);
   }
+  activeOptions = options;
+  activeStats = createCleanupStats();
 
   if (!isSafeLivePrefix(options.prefix)) {
-    writeSummaryJson(
-      options.summaryJson,
-      cleanupSummary(options, createCleanupStats(), {
-        outcome: "configuration blocked",
-        error: "unsafe live B2 janitor prefix",
-      }),
-    );
+    safeWriteJanitorSummary(options, activeStats, "configuration blocked", {
+      error: "unsafe live B2 janitor prefix",
+    });
     usage(`Refusing unsafe live B2 janitor prefix: ${options.prefix}`);
     process.exit(2);
   }
 
   const missing = exactSecretMissing();
   if (missing.length) {
-    writeSummaryJson(
-      options.summaryJson,
-      cleanupSummary(options, createCleanupStats(), {
-        outcome: "configuration blocked",
-        missing,
-      }),
-    );
+    safeWriteJanitorSummary(options, activeStats, "configuration blocked", { missing });
     console.error(`live-b2-janitor: missing required live B2 credentials: ${missing.join(", ")}`);
     process.exit(2);
   }
 
   const { authManager, b2Client, tools } = await loadRuntime();
-  const stats = createCleanupStats();
+  const stats = activeStats;
   try {
     await assertExpectedLiveTestAccount(authManager, expectedLiveTestAccountId(), {
       log: (message) => console.log(`live-b2-janitor: ${message}`),
     });
   } catch (err) {
-    writeSummaryJson(
-      options.summaryJson,
-      cleanupSummary(options, stats, {
-        outcome: "configuration blocked",
-        error: redactDetail(err?.message ?? err, options.prefix),
-      }),
-    );
+    safeWriteJanitorSummary(options, stats, "configuration blocked", {
+      error: redactDetail(err?.message ?? err, options.prefix),
+    });
     console.error(`live-b2-janitor: ${redactDetail(err?.message ?? err, options.prefix)}`);
     process.exit(2);
   }
@@ -220,13 +223,9 @@ async function main() {
   try {
     buckets = selectedBuckets((await b2Client.listBuckets({})).buckets ?? [], options);
   } catch (err) {
-    writeSummaryJson(
-      options.summaryJson,
-      cleanupSummary(options, stats, {
-        outcome: "cleanup failure",
-        error: redactDetail(err?.message ?? err, options.prefix),
-      }),
-    );
+    safeWriteJanitorSummary(options, stats, "cleanup failure", {
+      error: redactDetail(err?.message ?? err, options.prefix),
+    });
     console.error(
       `live-b2-janitor: could not list buckets: ${redactDetail(err?.message ?? err, options.prefix)}`,
     );
@@ -253,11 +252,10 @@ async function main() {
   console.log(
     `live-b2-janitor: summary buckets=${stats.buckets} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
   );
-  writeSummaryJson(
-    options.summaryJson,
-    cleanupSummary(options, stats, {
-      outcome: stats.errors || stats.leakedBuckets ? "cleanup failure" : "passed",
-    }),
+  safeWriteJanitorSummary(
+    options,
+    stats,
+    stats.errors || stats.leakedBuckets ? "cleanup failure" : "passed",
   );
   if (stats.errors || stats.leakedBuckets) {
     const annotation = options.bestEffort ? "warning" : "error";
@@ -271,6 +269,10 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
+    const options = activeOptions ?? fallbackSummaryOptions(process.argv.slice(2));
+    safeWriteJanitorSummary(options, activeStats, "cleanup failure", {
+      error: redactDetail(err?.message ?? err, options?.prefix || CONTRACT_BUCKET_PREFIX),
+    });
     console.error(`live-b2-janitor: ${redactB2CredentialValues(err?.message ?? err, process.env)}`);
     process.exit(1);
   });
