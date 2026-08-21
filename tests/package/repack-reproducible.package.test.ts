@@ -16,6 +16,11 @@ interface PackResult {
   integrity: string;
 }
 
+interface PackOptions {
+  cwd?: string;
+  ignoreScripts?: boolean;
+}
+
 function packageVersion(): string {
   return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version as string;
 }
@@ -32,18 +37,19 @@ function sha256(path: string): string {
 
 // Mirrors the publish workflow's pack flags (`npm pack --json --ignore-scripts`)
 // so this reproduces exactly what prepare/publish do.
-function pack(sourceArgs: string[], destDir: string): PackResult {
+function pack(sourceArgs: string[], destDir: string, options: PackOptions = {}): PackResult {
   mkdirSync(destDir, { recursive: true });
+  const ignoreScripts = options.ignoreScripts ?? true;
   const invocation = npmInvocation([
     "pack",
     ...sourceArgs,
     "--json",
-    "--ignore-scripts",
+    ...(ignoreScripts ? ["--ignore-scripts"] : []),
     "--pack-destination",
     destDir,
   ]);
   const stdout = execFileSync(invocation.command, invocation.args, {
-    cwd: root,
+    cwd: options.cwd ?? root,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
@@ -103,6 +109,14 @@ describe.skipIf(process.platform === "win32")("packed package reproducibility", 
 
         expect(secondSha256).toBe(firstSha256);
         expect(second.integrity).toBe(first.integrity);
+
+        const third = pack([], join(tmp, "third"), {
+          cwd: join(stageDir, "package"),
+          ignoreScripts: false,
+        });
+        expect(sha256(third.tarball)).toBe(firstSha256);
+        expect(third.integrity).toBe(first.integrity);
+        expect(existsSync(markerPath)).toBe(false);
       } finally {
         removeReleaseMarker();
         rmSync(tmp, { recursive: true, force: true });

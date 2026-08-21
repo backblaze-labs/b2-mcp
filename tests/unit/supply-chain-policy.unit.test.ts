@@ -626,7 +626,9 @@ describe("supply-chain audit policy", () => {
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
     expect(packageJson.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run release:stamp");
-    expect(packageJson.scripts.postpack).toBe("node scripts/write-release-version.mjs --clean");
+    expect(packageJson.scripts.postpack).toBe(
+      "node -e \"require('node:fs').rmSync('dist/release-version.json',{force:true})\"",
+    );
     expect(packageJson.scripts.test).toBe("pnpm run typecheck && pnpm run test:unit");
     expect(packageJson.scripts.pretest).toBeUndefined();
     expect(publishWorkflow).toContain("permissions:");
