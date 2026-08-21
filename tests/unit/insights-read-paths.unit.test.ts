@@ -459,10 +459,10 @@ describe("insight native bucket read paths", () => {
     );
   });
 
-  it("does not enumerate the key's scope when a scoped key requests an unrelated bucket", async () => {
+  it("reports out-of-scope without enumerating the key's scope for an unrelated bucket", async () => {
     // A bogus, fully-unrelated name must NOT echo the credential's whole bucket
     // scope back — that would let a server/principal HTTP caller enumerate every
-    // in-scope bucket with one request. Expect a plain "no match", no candidates.
+    // in-scope bucket with one request. Expect an out-of-scope note, no candidates.
     const nativeClient = createNativeClient({
       listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
     });
@@ -481,7 +481,11 @@ describe("insight native bucket read paths", () => {
 
     expect(result.error).toBe("bucket_not_uniquely_resolved");
     expect(result.candidates).toEqual([]);
-    expect(result.note).toBe("No bucket matches 'zzz-does-not-exist'.");
+    expect(result.note).toBe(
+      "Bucket 'zzz-does-not-exist' is not in the key's authorized scope (or does not exist).",
+    );
+    expect(result.note).not.toContain("photos");
+    expect(result.note).not.toContain("invoices");
     expect(nativeClient.listBuckets).not.toHaveBeenCalled();
   });
 

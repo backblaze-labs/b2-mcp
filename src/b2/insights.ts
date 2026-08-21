@@ -710,7 +710,7 @@ export function computeSnapshotGrowth(
 async function resolveFromAuthorizedScope(
   auth: B2AuthManager,
   input: string,
-): Promise<{ name?: string; id?: string; candidates?: string[] } | null> {
+): Promise<{ name?: string; id?: string; candidates?: string[]; outOfScope?: boolean } | null> {
   const { allowedBuckets } = await auth.getAuth();
   if (!allowedBuckets || allowedBuckets.length === 0) return null;
   const exact = allowedBuckets.find((b) => b.name === input || b.id === input);
@@ -718,14 +718,15 @@ async function resolveFromAuthorizedScope(
   // still have a usable id and fall back to the supplied input for display.
   if (exact) return { name: exact.name ?? input, id: exact.id };
   // No exact hit: surface only in-scope names that partially match the input,
-  // never the full scope. A fully-unrelated input yields {} → "No bucket matches",
-  // matching the unrestricted path's 'no match' vs 'ambiguous match' distinction.
+  // never the full scope. A fully-unrelated input flags outOfScope so the error
+  // explains the bucket is outside the key's authorized scope, without leaking
+  // any in-scope names — while a genuine substring ambiguity still lists matches.
   const subs = allowedBuckets.filter((b) => b.name?.includes(input));
   if (subs.length === 1 && subs[0].name) return { name: subs[0].name, id: subs[0].id };
   if (subs.length > 1) {
     return { candidates: subs.map((b) => b.name).filter((n): n is string => Boolean(n)) };
   }
-  return {};
+  return { outOfScope: true };
 }
 
 /** Resolve a bucket name/id pair from a name-or-bucketId input. */
@@ -733,7 +734,7 @@ async function resolveBucketName(
   b2Client: B2Client,
   auth: B2AuthManager,
   input: string,
-): Promise<{ name?: string; id?: string; candidates?: string[] }> {
+): Promise<{ name?: string; id?: string; candidates?: string[]; outOfScope?: boolean }> {
   const scoped = await resolveFromAuthorizedScope(auth, input);
   if (scoped) return scoped;
   const result = await b2Client.listBuckets();
@@ -750,7 +751,7 @@ async function resolveBucketName(
 
 function bucketResolutionError(
   input: string,
-  resolved: { name?: string; id?: string; candidates?: string[] },
+  resolved: { name?: string; id?: string; candidates?: string[]; outOfScope?: boolean },
 ): Record<string, unknown> | null {
   if (!resolved.name) {
     return {
@@ -758,7 +759,9 @@ function bucketResolutionError(
       candidates: resolved.candidates ?? [],
       note: resolved.candidates?.length
         ? "Multiple buckets match; pass an exact name or bucketId."
-        : `No bucket matches '${input}'.`,
+        : resolved.outOfScope
+          ? `Bucket '${input}' is not in the key's authorized scope (or does not exist).`
+          : `No bucket matches '${input}'.`,
     };
   }
   if (!resolved.id) {
