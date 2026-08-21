@@ -45,6 +45,15 @@ const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
     expectedToolProfile?: string | null;
     env?: Record<string, string>;
   }): unknown;
+  createPreflightEvidence(args: {
+    status: "passed" | "product failure" | "configuration blocked" | "cleanup failure";
+    statusReason: string;
+    configuration?: Record<string, unknown>;
+    credentialPolicy?: Record<string, unknown>;
+    target?: unknown;
+    error?: string;
+    env?: Record<string, string>;
+  }): unknown;
   readCleanupSummary(
     path: string,
     options?: { expectedPrefix?: string; env?: Record<string, string> },
@@ -333,6 +342,36 @@ describe("live B2 evidence", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("omits runtime authorization details from free-form evidence fields", () => {
+    expect(
+      evidence.createPreflightEvidence({
+        status: "configuration blocked",
+        statusReason: "preflight failed",
+        error: 'B2 error {"authorizationToken":"runtime-issued-token-secret","code":"bad"}',
+      }),
+    ).toMatchObject({
+      error: "[omitted unsafe detail]",
+    });
+
+    expect(
+      evidence.createCleanupEvidence({
+        options: { prefix: "mcp-contract-run1" },
+        stats: {
+          buckets: 0,
+          notificationRules: 0,
+          objectVersions: 0,
+          multipartUploads: 0,
+          leakedBuckets: 0,
+          errors: 1,
+        },
+        outcome: "cleanup failure",
+        error: "Authorization: Bearer runtime-issued-token-secret",
+      }),
+    ).toMatchObject({
+      error: "[omitted unsafe detail]",
+    });
   });
 
   it("records live resource evidence without raw bucket names or ids", () => {

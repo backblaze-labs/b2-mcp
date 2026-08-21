@@ -26,6 +26,11 @@ const SAFE_POLICY_TOKEN_PATTERN = /^[A-Za-z0-9_.:-]{1,96}$/;
 const SAFE_ENV_NAME_PATTERN = /^[A-Z0-9_]{1,96}$/;
 const FINGERPRINT_PATTERN = new RegExp(`^[a-f0-9]{${FINGERPRINT_HEX_LENGTH}}$`);
 const HASH_PATTERN = new RegExp(`^[a-f0-9]{${HASH_HEX_LENGTH}}$`);
+const UNSAFE_DETAIL_CREDENTIAL_FIELD_PATTERN =
+  /(?:^|[\s{,;])["']?(?:authorization|authorizationToken|authorizationHeader|uploadAuthToken|uploadAuthorizationToken|downloadAuthToken|downloadAuthorizationToken)["']?\s*[:=]\s*["']?[^"',\s}]+/i;
+const UNSAFE_DETAIL_BEARER_PATTERN = /\bBearer\s+[A-Za-z0-9._~+/=-]{6,}/i;
+const UNSAFE_DETAIL_AUTH_QUERY_PATTERN =
+  /[?&](?:Authorization|X-Amz-Credential|X-Amz-Signature|X-Amz-Security-Token)=/i;
 const MAX_LEDGER_ENTRIES = 100;
 const MAX_TOOL_DIFFS = 50;
 const LIVE_RESOURCE_TYPES = new Set(["bucket", "notification-rule"]);
@@ -181,6 +186,13 @@ function optionalSafeDetail(value, field, env = process.env, maxLength = 300) {
   const detail = String(value)
     .replace(/[^\t\n\r -~]/g, "?")
     .slice(0, maxLength);
+  if (
+    UNSAFE_DETAIL_CREDENTIAL_FIELD_PATTERN.test(detail) ||
+    UNSAFE_DETAIL_BEARER_PATTERN.test(detail) ||
+    UNSAFE_DETAIL_AUTH_QUERY_PATTERN.test(detail)
+  ) {
+    return "[omitted unsafe detail]";
+  }
   try {
     assertSecretSafe({ [field]: detail }, env);
   } catch {
