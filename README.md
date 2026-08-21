@@ -33,12 +33,7 @@ Destructive actions are gated, durable B2 secrets stay out of the model's contex
 
 The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary is `b2-mcp` (`b2-mcp-server` is a transition alias). The fastest setup runs it with `npx`, no clone or build.
 
-Before copying the config, check the account's B2 S3-compatible endpoint
-region. Accounts in the default `us-west-004` region can omit `B2_REGION` or
-set it to `us-west-004`. For any non-default account, add `B2_REGION` to the
-`env` block with the account's region, such as `us-east-005`; otherwise
-S3-compatible tools target `us-west-004`. See [Configuration](#configuration)
-for the full requirement.
+Before copying the config, check the account's B2 S3-compatible endpoint region. Accounts in the default `us-west-004` region can omit `B2_REGION` or set it to `us-west-004`. For any non-default account, add `B2_REGION` to the `env` block with the account's region, such as `us-east-005`; otherwise S3-compatible tools target `us-west-004`. See [Configuration](#configuration) for the full requirement.
 
 **Connect Claude Desktop** by editing `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -57,8 +52,7 @@ for the full requirement.
 }
 ```
 
-For a non-default-region account, include `B2_REGION` in the same `env` block
-before restarting Claude Desktop:
+For a non-default-region account, include `B2_REGION` in the same `env` block before restarting Claude Desktop:
 
 ```json
 {
@@ -216,10 +210,7 @@ the healthcheck probes the same port the server binds.
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
 | `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                 |
 
-`B2_REGION` is required for accounts outside the default `us-west-004` region
-until automatic region derivation is available. Use the region in your B2
-S3-compatible endpoint, such as `us-east-005`; the [Quick start](#quick-start)
-sample shows where to add it.
+`B2_REGION` is required for accounts outside the default `us-west-004` region until automatic region derivation is available. Use the region in your B2 S3-compatible endpoint, such as `us-east-005`; the [Quick start](#quick-start) sample shows where to add it.
 
 **Security / policy (safe defaults; override as needed):**
 
