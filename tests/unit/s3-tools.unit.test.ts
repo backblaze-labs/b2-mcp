@@ -284,7 +284,11 @@ describe("s3_put_object and s3_get_object", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/contentType/i);
+    const errorText = parseResult(result);
+    expect(errorText).toMatch(/contentType/i);
+    expect(errorText).toContain("HTTP 400");
+    expect(errorText).not.toContain("internal_error");
+    expect(errorText).not.toContain("HTTP 500");
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
@@ -1041,7 +1045,11 @@ describe("s3_get_presigned_url", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/contentType/i);
+    const errorText = parseResult(result);
+    expect(errorText).toMatch(/contentType/i);
+    expect(errorText).toContain("HTTP 400");
+    expect(errorText).not.toContain("internal_error");
+    expect(errorText).not.toContain("HTTP 500");
     expect(sendSpy).not.toHaveBeenCalled();
   });
 

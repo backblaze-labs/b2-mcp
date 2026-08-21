@@ -375,16 +375,20 @@ function normalizedMediaType(contentType: string | undefined): string | null {
   return mediaType ? mediaType : null;
 }
 
+function badRequest(message: string): Error & { status: 400; code: "bad_request" } {
+  return Object.assign(new Error(message), { status: 400 as const, code: "bad_request" as const });
+}
+
 export function assertSafeObjectContentType(
   contentType: string | undefined,
   context: string,
 ): void {
   const mediaType = normalizedMediaType(contentType);
   if (!mediaType) {
-    throw new Error(`${context} requires a signed contentType.`);
+    throw badRequest(`${context} requires a signed contentType.`);
   }
   if (BROWSER_EXECUTABLE_CONTENT_TYPE.test(mediaType)) {
-    throw new Error(`${context} rejects browser-executable content type '${contentType}'.`);
+    throw badRequest(`${context} rejects browser-executable content type '${contentType}'.`);
   }
 }
 
