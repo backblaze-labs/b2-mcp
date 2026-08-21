@@ -16,6 +16,7 @@ import { registerS3ObjectTools } from "../../src/s3/objects";
 import {
   circuitBreaker,
   resetCircuitBreakersForTests,
+  s3CircuitBreaker,
   withCircuit,
 } from "../../src/utils/circuit-breaker";
 import { parseErrorText } from "../../src/utils/errors";
@@ -31,7 +32,7 @@ import {
   testConfig,
   ToolHarness,
 } from "../support/deterministic-fakes";
-import { signedJwt } from "../support/oauth-jwks";
+import { jwksResponse, signedJwt } from "../support/oauth-jwks";
 import { installSdkTransport, StaticHttpResponse } from "../support/sdk-test-helpers";
 import {
   restoreB2SdkTransportForTests,
@@ -123,12 +124,16 @@ async function waitForB2Requests(
   expect(transport.requestsFor(endpoint)).toHaveLength(count);
 }
 
-function s3ClientWithHandler(handle: ReturnType<typeof vi.fn>): B2S3PeerClient {
+function s3ClientWithHandler(
+  handle: ReturnType<typeof vi.fn>,
+  options: { maxAttempts?: number } = {},
+): B2S3PeerClient {
   return new B2S3PeerClient({
     region: "us-west-004",
     endpoint: "https://s3.us-west-004.backblazeb2.com",
     credentials: { accessKeyId: "key-id", secretAccessKey: "key-secret" },
     forcePathStyle: true,
+    ...(options.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }),
     requestHandler: {
       handle,
       updateHttpClientConfig() {
@@ -176,7 +181,7 @@ function oauthRequest(): Request {
     iss: oauthJwksConfig.issuer,
     aud: oauthJwksConfig.audience,
     resource: oauthJwksConfig.resource,
-    exp: 2_000,
+    exp: 2_000_000_000,
     nbf: 900,
     token_type: "bearer",
     scope: "b2:read",
@@ -350,6 +355,58 @@ describe("deterministic dependency failure and recovery suite", () => {
     expect(transport.requestsFor("b2_list_buckets")).toHaveLength(3);
   });
 
+  it("opens, short-circuits, and recovers the S3 dependency circuit", async () => {
+    vi.useFakeTimers();
+    let handlerCalls = 0;
+    const handle = vi.fn(async () => {
+      handlerCalls += 1;
+      if (handlerCalls <= 10) {
+        throw s3ServiceError(
+          "InternalError",
+          "S3 transient outage",
+          500,
+          `s3-outage-${handlerCalls}`,
+        );
+      }
+      return { response: { statusCode: 200, headers: {}, body: Readable.from([]) } };
+    });
+    const s3 = s3ClientWithHandler(handle, { maxAttempts: 1 });
+    const tools = new ToolHarness();
+    registerS3BucketTools(tools, s3, reliabilityConfig);
+
+    try {
+      for (let i = 0; i < 10; i++) {
+        const result = await tools.call("s3_head_bucket", { bucket: "reliability-bucket" });
+        const text = expectMcpError(result, { status: 500, code: "InternalError" });
+        expect(text).toMatch(/S3 transient outage/);
+      }
+      expect(handle).toHaveBeenCalledTimes(10);
+      expect(s3CircuitBreaker.opened).toBe(true);
+
+      const shortCircuited = await tools.call("s3_head_bucket", {
+        bucket: "reliability-bucket",
+      });
+      const shortCircuitText = expectMcpError(shortCircuited, {
+        status: 500,
+        code: "EOPENBREAKER",
+      });
+      expect(shortCircuitText).toMatch(/Breaker is open/);
+      expect(handle).toHaveBeenCalledTimes(10);
+
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(s3CircuitBreaker.halfOpen).toBe(true);
+      const recovered = await tools.call("s3_head_bucket", { bucket: "reliability-bucket" });
+
+      expect(parseResult(recovered)).toBe("Bucket 'reliability-bucket' exists and is accessible.");
+      expect(handle).toHaveBeenCalledTimes(11);
+      expect(handlerCalls).toBe(11);
+      expect(s3CircuitBreaker.closed).toBe(true);
+    } finally {
+      s3.destroy();
+      s3CircuitBreaker.close();
+    }
+  });
+
   it("does not replay unsafe B2 or S3 mutations after a lost response", async () => {
     const native = new DeterministicB2NativeFake({ capabilities: ["writeBuckets"] }).respond(
       "b2_create_bucket",
@@ -371,7 +428,7 @@ describe("deterministic dependency failure and recovery suite", () => {
     expect(b2Text).toMatch(/lost response/i);
     const createRequests = native.requestsFor("b2_create_bucket");
     expect(createRequests).toHaveLength(1);
-    expect(createRequests[0].request.retry?.maxRetries).toBe(0);
+    expect(createRequests[0].attempt).toBe(1);
 
     const handle = vi.fn().mockResolvedValue({
       response: { statusCode: 500, headers: {}, body: Readable.from([]) },
@@ -492,7 +549,16 @@ describe("deterministic dependency failure and recovery suite", () => {
       b2ErrorResponse(500, "tenant_b_down", "tenant B dependency failed"),
     );
     setB2SdkClientFactoryForTests((config) => {
-      const transport = config.applicationKeyId === tenantA.applicationKeyId ? fakeA : fakeB;
+      let transport: DeterministicB2NativeFake;
+      if (config.applicationKeyId === tenantA.applicationKeyId) {
+        transport = fakeA;
+      } else if (config.applicationKeyId === tenantB.applicationKeyId) {
+        transport = fakeB;
+      } else {
+        throw new Error(
+          `Unexpected reliability tenant applicationKeyId: ${config.applicationKeyId}`,
+        );
+      }
       return {
         client: new SdkB2Client({
           applicationKeyId: config.applicationKeyId,
@@ -526,15 +592,19 @@ describe("deterministic dependency failure and recovery suite", () => {
     expect(fakeB.requestsFor("b2_list_buckets")).toHaveLength(1);
   });
 
-  it("fails closed and opens the JWKS circuit without exhausting fetches", async () => {
+  it("fails closed, short-circuits, and recovers the JWKS verifier", async () => {
     resetOAuthVerifierCacheForTests();
-    const fetchMock = vi.fn(async () =>
-      Response.json({ error: "jwks unavailable" }, { status: 503 }),
-    );
+    let now = 1_000;
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length <= 2) {
+        return Response.json({ error: "jwks unavailable" }, { status: 503 });
+      }
+      return jwksResponse();
+    });
 
     const first = await authenticateOAuthRequest(oauthRequest(), oauthJwksConfig, {
       fetch: fetchMock as typeof fetch,
-      nowSeconds: () => 1000,
+      nowSeconds: () => now,
     });
 
     expect(first).toBeInstanceOf(Response);
@@ -547,12 +617,25 @@ describe("deterministic dependency failure and recovery suite", () => {
 
     const second = await authenticateOAuthRequest(oauthRequest(), oauthJwksConfig, {
       fetch: fetchMock as typeof fetch,
-      nowSeconds: () => 1000,
+      nowSeconds: () => now,
     });
 
     expect(second).toBeInstanceOf(Response);
     expect((second as Response).status).toBe(503);
     expect((second as Response).headers.get("retry-after")).toBe("2");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    now = 1_003;
+    const recovered = await authenticateOAuthRequest(oauthRequest(), oauthJwksConfig, {
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => now,
+    });
+
+    expect(recovered).not.toBeInstanceOf(Response);
+    expect(recovered).toMatchObject({
+      clientId: "reliability-client",
+      scopes: ["b2:read"],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
