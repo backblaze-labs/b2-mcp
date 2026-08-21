@@ -507,6 +507,56 @@ describe("SDK 401 re-auth-and-retry", () => {
 });
 
 describe("b2_list_buckets", () => {
+  it("uses the authorized bucket scope when no bucket filter is supplied", async () => {
+    invalidateAuthManagerCache();
+    const auth = authorizeResponse(["listBuckets"]) as any;
+    auth.apiInfo.storageApi.allowed.buckets = [{ id: "bucket-1", name: "scoped-bucket" }];
+    auth.apiInfo.storageApi.allowed.bucketId = "bucket-1";
+    auth.apiInfo.storageApi.allowed.bucketName = "scoped-bucket";
+    const listBucketBodies: Record<string, unknown>[] = [];
+    const transport = new RecordingTransport((request) => {
+      const endpoint = b2EndpointName(request);
+      if (endpoint === "b2_authorize_account") return new StaticHttpResponse(200, auth);
+      if (endpoint === "b2_list_buckets") {
+        const body = requestJson(request);
+        listBucketBodies.push(body);
+        if (body.bucketId !== "bucket-1") {
+          return new StaticHttpResponse(401, {
+            status: 401,
+            code: "unauthorized",
+            message: "",
+          });
+        }
+        return new StaticHttpResponse(200, {
+          buckets: [
+            {
+              accountId: "test-account-123",
+              bucketId: "bucket-1",
+              bucketName: "scoped-bucket",
+              bucketType: "allPrivate",
+              bucketInfo: {},
+              corsRules: [],
+              lifecycleRules: [],
+              revision: 1,
+              options: [],
+            },
+          ],
+        });
+      }
+      return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+
+    const result = parseResult(await callTool(server, "b2_list_buckets", {}));
+
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0].bucketName).toBe("scoped-bucket");
+    expect(listBucketBodies).toEqual([
+      expect.objectContaining({ accountId: "test-account-123", bucketId: "bucket-1" }),
+    ]);
+  });
+
   it("returns buckets and supports bucketTypes filtering", async () => {
     await createBucket("private-bucket", BucketType.AllPrivate);
     await createBucket("public-bucket", BucketType.AllPublic);

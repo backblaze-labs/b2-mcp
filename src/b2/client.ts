@@ -637,6 +637,16 @@ function bucketIdFromAuthorizedScope(auth: B2AuthResponse, bucketName: string): 
   return null;
 }
 
+function implicitBucketIdFromAuthorizedScope(
+  auth: B2AuthResponse,
+  options: BucketFilters,
+): string | undefined {
+  if (options.bucketId || options.bucketName) return undefined;
+  const buckets = auth.allowedBuckets;
+  if (!buckets || buckets.length !== 1) return undefined;
+  return buckets[0]?.id || undefined;
+}
+
 async function resolveTrustedBucketId(
   client: SdkB2Client,
   auth: B2AuthResponse,
@@ -659,9 +669,10 @@ function maybeApplicationKeyId(value: string | undefined): ApplicationKeyId | un
 
 function toBucketFilters(auth: B2AuthResponse, options: BucketFilters): ListBucketsRequest {
   const requestedTypes = options.bucketTypes?.includes("all") ? ["all"] : options.bucketTypes;
+  const bucketIdValue = options.bucketId ?? implicitBucketIdFromAuthorizedScope(auth, options);
   return {
     accountId: accountId(auth.accountId),
-    bucketId: maybeBucketId(options.bucketId),
+    bucketId: maybeBucketId(bucketIdValue),
     bucketName: options.bucketName,
     // The native B2 API accepts the "all" wildcard, but the SDK type only
     // models concrete bucket types. Keep the compatibility cast isolated here.
