@@ -4,16 +4,20 @@
  */
 
 import { S3Client } from "@aws-sdk/client-s3";
-import { createServer } from "../../src/server";
+import { createServer, invalidateAuthManagerCache } from "../../src/server";
 import { B2Client } from "../../src/b2/client";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
+import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
+import { installAuthorizedS3Transport } from "../support/sdk-test-helpers";
 import type { MockInstance } from "vitest";
 
 let server: McpServer;
 let sendSpy: MockInstance;
 
 beforeEach(() => {
+  invalidateAuthManagerCache();
+  installAuthorizedS3Transport();
   sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   vi.spyOn(B2Client.prototype, "resolveS3FileVersion").mockImplementation(
     async ({ key, versionId }) => ({
@@ -50,6 +54,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.restoreAllMocks();
+  restoreB2SdkTransportForTests();
+  invalidateAuthManagerCache();
 });
 
 describe("S3 tool error paths (catch blocks)", () => {

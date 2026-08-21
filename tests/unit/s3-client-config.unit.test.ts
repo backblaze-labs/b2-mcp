@@ -50,6 +50,7 @@ import {
   expectedB2S3Endpoint,
   validateB2S3ApiUrl,
 } from "../../src/s3/client";
+import { logger } from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
 
 const config: B2Config = {
@@ -142,10 +143,12 @@ describe("B2 S3 client configuration", () => {
     const s3 = buildB2S3ClientConfig(config, {
       applicationKeyId: config.applicationKeyId,
       applicationKey: config.applicationKey,
-      authorizedS3ApiUrl: "https://s3.us-west-004.backblazeb2.com",
+      authorizedS3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
       surface: "b2-insights-reports",
     });
 
+    expect(s3.endpoint).toBe("https://s3.us-east-005.backblazeb2.com");
+    expect(s3.region).toBe("us-east-005");
     expect(s3.credentials).toEqual({
       accessKeyId: "principal-key-id",
       secretAccessKey: "principal-secret",
@@ -172,32 +175,124 @@ describe("B2 S3 client configuration", () => {
   });
 
   it("rejects injected authorize-account S3 endpoints", () => {
-    expect(validateB2S3ApiUrl("http://169.254.169.254/latest/meta-data", config.region)).toMatch(
-      /https/,
-    );
     expect(
-      validateB2S3ApiUrl("https://key:secret@s3.us-west-004.backblazeb2.com", config.region),
+      validateB2S3ApiUrl("http://169.254.169.254/latest/meta-data", {
+        mode: "exact-region",
+        region: config.region,
+      }),
+    ).toMatch(/https/);
+    expect(
+      validateB2S3ApiUrl("https://key:secret@s3.us-west-004.backblazeb2.com", {
+        mode: "exact-region",
+        region: config.region,
+      }),
     ).toContain("credentials");
-    expect(validateB2S3ApiUrl("https://attacker.example", config.region)).toContain(
-      "s3.us-west-004.backblazeb2.com",
-    );
     expect(
-      validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com:8443", config.region),
+      validateB2S3ApiUrl("https://attacker.example", {
+        mode: "exact-region",
+        region: config.region,
+      }),
+    ).toContain("s3.us-west-004.backblazeb2.com");
+    expect(
+      validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com:8443", {
+        mode: "exact-region",
+        region: config.region,
+      }),
     ).toContain("custom port");
     expect(
-      validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com/path", config.region),
+      validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com/path", {
+        mode: "exact-region",
+        region: config.region,
+      }),
     ).toContain("path");
-    expect(validateB2S3ApiUrl("not a url", config.region)).toContain("valid URL");
-    expect(validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com", config.region)).toBeNull();
+    expect(
+      validateB2S3ApiUrl("not a url", { mode: "exact-region", region: config.region }),
+    ).toContain("valid URL");
+    expect(
+      validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com", {
+        mode: "exact-region",
+        region: config.region,
+      }),
+    ).toBeNull();
   });
 
-  it("rejects mismatched authorized S3 endpoints while building report config", () => {
-    expect(() =>
+  it("keeps authorized endpoint validation confined to B2 S3 hosts", () => {
+    expect(
+      validateB2S3ApiUrl("https://s3.us-east-005.backblazeb2.com", {
+        mode: "authorized-region",
+      }),
+    ).toBeNull();
+    expect(validateB2S3ApiUrl("https://attacker.example", { mode: "authorized-region" })).toContain(
+      "s3.<region>.backblazeb2.com",
+    );
+    expect(
+      validateB2S3ApiUrl("http://169.254.169.254/latest/meta-data", {
+        mode: "authorized-region",
+      }),
+    ).toContain("https");
+  });
+
+  it.each([
+    [
+      "trailing suffix host",
+      "https://s3.us-west-004.backblazeb2.com.attacker.com",
+      "s3.<region>.backblazeb2.com",
+    ],
+    [
+      "embedded S3 host in path",
+      "https://attacker.com/s3.us-east-005.backblazeb2.com",
+      "s3.<region>.backblazeb2.com",
+    ],
+    ["embedded credentials", "https://user:pass@s3.us-east-005.backblazeb2.com", "credentials"],
+    ["custom port", "https://s3.us-east-005.backblazeb2.com:8443", "custom port"],
+  ])("rejects authorized endpoint hostname-confusion payloads: %s", (_name, raw, reason) => {
+    expect(validateB2S3ApiUrl(raw, { mode: "authorized-region" })).toContain(reason);
+  });
+
+  it("logs when the authorized S3 region overrides configured B2_REGION", () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
       buildB2S3ClientConfig(config, {
         authorizedS3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
         surface: "b2-insights-reports",
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        {
+          configuredRegion: "us-west-004",
+          authorizedRegion: "us-east-005",
+          authorizedEndpoint: "https://s3.us-east-005.backblazeb2.com",
+        },
+        "s3.authorized_region.override",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("derives the S3 signing region from authorized S3 endpoints", () => {
+    const s3 = buildB2S3ClientConfig(config, {
+      authorizedS3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
+      surface: "b2-insights-reports",
+    });
+
+    expect(s3.endpoint).toBe("https://s3.us-east-005.backblazeb2.com");
+    expect(s3.region).toBe("us-east-005");
+    expect(capturedS3ConfigInputs.at(-1)).toMatchObject({
+      region: "us-east-005",
+    });
+    expect(capturedS3ConfigInputs.at(-1)?.accountInfo.getS3ApiUrl()).toBe(
+      "https://s3.us-east-005.backblazeb2.com",
+    );
+  });
+
+  it("rejects non-B2 authorized S3 endpoints while building report config", () => {
+    expect(() =>
+      buildB2S3ClientConfig(config, {
+        authorizedS3ApiUrl: "https://attacker.example",
+        surface: "b2-insights-reports",
       }),
-    ).toThrow(/Authorized B2 S3 endpoint must match s3\.us-west-004\.backblazeb2\.com/);
+    ).toThrow(/Authorized B2 S3 endpoint must match s3\.<region>\.backblazeb2\.com/);
   });
 
   it("keeps the endpoint-only AccountInfo shim credential-free", () => {

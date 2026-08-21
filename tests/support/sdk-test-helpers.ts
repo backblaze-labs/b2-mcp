@@ -119,6 +119,51 @@ export function scopedAuthorizeResponse(
   };
 }
 
+export const S3_TOOL_CAPABILITIES = [
+  "listBuckets",
+  "listFiles",
+  "readFiles",
+  "writeFiles",
+  "deleteFiles",
+];
+
+export interface AuthorizedS3TransportOptions {
+  capabilities?: string[];
+  s3ApiUrl?: string;
+  authorizeError?: Error;
+}
+
+export function authorizeResponseWithS3ApiUrl(capabilities: string[], s3ApiUrl?: string) {
+  const response = authorizeResponse(capabilities);
+  if (!s3ApiUrl) return response;
+  return {
+    ...response,
+    apiInfo: {
+      storageApi: {
+        ...response.apiInfo.storageApi,
+        s3ApiUrl,
+      },
+    },
+  };
+}
+
+export function installAuthorizedS3Transport(
+  options: AuthorizedS3TransportOptions = {},
+): RecordingTransport {
+  const capabilities = options.capabilities ?? S3_TOOL_CAPABILITIES;
+  const transport = new RecordingTransport((request) => {
+    if (b2EndpointName(request) === "b2_authorize_account") {
+      if (options.authorizeError) throw options.authorizeError;
+      return new StaticHttpResponse(
+        200,
+        authorizeResponseWithS3ApiUrl(capabilities, options.s3ApiUrl),
+      );
+    }
+    return new StaticHttpResponse(200, {});
+  });
+  installSdkTransport(transport);
+  return transport;
+}
 export function installSdkTransport(
   transport: HttpTransport,
   retry: Partial<RetryOptions> = {
