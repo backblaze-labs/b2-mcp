@@ -23,6 +23,15 @@ export interface B2ApiError {
   extendedRequestId?: string;
 }
 
+/**
+ * Throw HTTP 400 bad_request.
+ *
+ * @throws A normalized B2 API error object.
+ */
+export function badRequest(message: string): never {
+  throw { status: 400, code: "bad_request", message } satisfies B2ApiError;
+}
+
 /** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */
 function headerRequestId(headers: unknown): string | undefined {
   if (typeof headers !== "object" || headers === null) return undefined;

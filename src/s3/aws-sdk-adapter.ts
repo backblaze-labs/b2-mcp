@@ -375,16 +375,21 @@ function normalizedMediaType(contentType: string | undefined): string | null {
   return mediaType ? mediaType : null;
 }
 
+// Local to keep the Worker S3 bundle under budget.
+function badRequest(message: string): never {
+  throw { status: 400, code: "bad_request", message };
+}
+
 export function assertSafeObjectContentType(
   contentType: string | undefined,
   context: string,
 ): void {
   const mediaType = normalizedMediaType(contentType);
   if (!mediaType) {
-    throw new Error(`${context} requires a signed contentType.`);
+    badRequest(`${context} requires a signed contentType.`);
   }
   if (BROWSER_EXECUTABLE_CONTENT_TYPE.test(mediaType)) {
-    throw new Error(`${context} rejects browser-executable content type '${contentType}'.`);
+    badRequest(`${context} rejects browser-executable content type '${contentType}'.`);
   }
 }
 
