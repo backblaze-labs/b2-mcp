@@ -200,6 +200,16 @@ describe("secret sanitizer canary policy", () => {
       value: () => CANARY,
     });
     const bytes = Buffer.from(CANARY);
+    let byteLengthReads = 0;
+    for (const key of ["byteLength", "length"] as const) {
+      Object.defineProperty(bytes, key, {
+        enumerable: true,
+        get() {
+          byteLengthReads++;
+          throw new Error(CANARY);
+        },
+      });
+    }
     Object.defineProperty(bytes, "toJSON", {
       enumerable: true,
       value: () => ({ applicationKey: CANARY }),
@@ -221,7 +231,28 @@ describe("secret sanitizer canary policy", () => {
     expect(safe.fn).toBe("[function]");
     expect(safe.createdAt).toBe("2026-08-21T00:00:00.000Z");
     expect(safe.bytes).toEqual({ type: "Buffer", byteLength: Buffer.byteLength(CANARY) });
+    expect(byteLengthReads).toBe(0);
     expect(JSON.stringify(safe)).not.toContain(CANARY);
+  });
+
+  it("sanitizes proxied log buffers without reading length traps", () => {
+    const bytes = Buffer.from(CANARY);
+    let lengthReads = 0;
+    const proxied = new Proxy(bytes, {
+      get(target, property, receiver) {
+        if (property === "byteLength" || property === "length") {
+          lengthReads++;
+          throw new Error(CANARY);
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(proxied);
+
+    expect(lengthReads).toBe(0);
+    expect(safe).toEqual({ type: "Buffer", byteLength: 0 });
+    expectNoCanary(safe);
   });
 
   it("keeps MCP output representations for callables and built-ins", () => {

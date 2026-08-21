@@ -5,6 +5,10 @@ export const LOG_SANITIZER_FAILURE = "[log_sanitizer_failed]";
 const ACCESSOR_VALUE = "[accessor]";
 const FUNCTION_VALUE = "[function]";
 const INVALID_DATE_VALUE = "[invalid_date]";
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  "byteLength",
+)?.get;
 
 const MIN_CONFIGURED_SECRET_LENGTH = 8;
 
@@ -314,8 +318,17 @@ function sanitizeDate(value: Date): string {
 function sanitizeBuffer(value: Buffer): { type: "Buffer"; byteLength: number } {
   return {
     type: "Buffer",
-    byteLength: value.length,
+    byteLength: safeBufferByteLength(value),
   };
+}
+
+function safeBufferByteLength(value: Buffer): number {
+  try {
+    const byteLength = TYPED_ARRAY_BYTE_LENGTH_GETTER?.call(value);
+    return Number.isSafeInteger(byteLength) && byteLength >= 0 ? byteLength : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function findPropertyDescriptor(value: object, key: string): PropertyDescriptor | undefined {
