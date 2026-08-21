@@ -15,9 +15,15 @@ RUN corepack enable pnpm \
 
 FROM dependencies AS build
 
+# Stable releases pass their semver as RELEASE_VERSION so the runtime marker is
+# stamped into dist; prereleases and untagged builds leave it empty and report
+# the `dev` channel. This keeps the image runtime channel in sync with the npm
+# tarball without shipping scripts/ into the build stage.
+ARG RELEASE_VERSION=""
 COPY tsconfig.json tsconfig.typecheck.json ./
 COPY src ./src
 RUN pnpm run build \
+  && RELEASE_VERSION="${RELEASE_VERSION}" node -e "const v=(process.env.RELEASE_VERSION||'').trim(); if(v){ if(!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(v)) throw new Error('RELEASE_VERSION must be a stable semver: '+v); const pkg=require('./package.json'); if(pkg.version!==v) throw new Error('RELEASE_VERSION '+v+' does not match package version '+pkg.version); require('node:fs').writeFileSync('dist/release-version.json', JSON.stringify({name:pkg.name,releaseChannel:'published',version:v},null,2)+'\n'); }" \
   && pnpm prune --prod
 
 # node:22.23.1-bookworm-slim, resolved and reviewed 2026-08-07.

@@ -300,6 +300,11 @@ function publish() {
   const versionRef = `${registryImage}:${version}`;
   const releaseRef = `${registryImage}:${publishTag}`;
   const baseImage = readDockerBaseImage();
+  // Stable releases stamp the runtime channel marker into the image; prereleases
+  // stay on the `dev` channel by omitting the build arg.
+  const releaseBuildArgs = /^\d+\.\d+\.\d+$/.test(version)
+    ? ["--build-arg", `RELEASE_VERSION=${version}`]
+    : [];
 
   run("docker", ["login", "ghcr.io", "-u", githubActor, "--password-stdin"], {
     input: ghcrToken,
@@ -348,6 +353,7 @@ function publish() {
       "build",
       "--platform",
       REQUIRED_PLATFORMS.join(","),
+      ...releaseBuildArgs,
       "--provenance=true",
       "--sbom=true",
       "--label",

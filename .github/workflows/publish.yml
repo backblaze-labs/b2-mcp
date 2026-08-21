@@ -521,7 +521,18 @@ jobs:
           ACTIONS_RUNTIME_TOKEN: ""
           ACTIONS_RUNTIME_URL: ""
           CHECKOUT_SHA: ${{ needs.prepare.outputs.checkout-sha }}
-        run: node scripts/smoke-container-image.mjs --build --image "b2-mcp-release-smoke:${CHECKOUT_SHA}"
+          PUBLISH_TAG: ${{ needs.prepare.outputs.publish-tag }}
+        run: |
+          set -euo pipefail
+          # Stable releases stamp and assert the published runtime channel;
+          # prereleases stay on the dev channel and skip the release-version arg.
+          version="${PUBLISH_TAG#refs/tags/}"
+          version="${version#v}"
+          args=(--build --image "b2-mcp-release-smoke:${CHECKOUT_SHA}")
+          if [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            args+=(--release-version "${version}")
+          fi
+          node scripts/smoke-container-image.mjs "${args[@]}"
       - name: Publish signed multi-platform GHCR image
         id: image
         env:
