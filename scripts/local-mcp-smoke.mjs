@@ -77,12 +77,21 @@ function assertBuiltArtifacts() {
 
 function buildIfNeeded() {
   if (process.env.B2_MCP_LOCAL_SMOKE_SKIP_BUILD === "true") return;
-  const command =
-    typeof process.env.npm_execpath === "string" && process.env.npm_execpath.includes("pnpm")
-      ? process.execPath
-      : "pnpm";
-  const args =
-    command === process.execPath ? [process.env.npm_execpath, "run", "build"] : ["run", "build"];
+  const execpath = process.env.npm_execpath;
+  let command;
+  let args;
+  if (typeof execpath === "string" && /\.[cm]?js$/.test(execpath)) {
+    // JS package-manager entry (e.g. the corepack pnpm shim): run it with Node.
+    command = process.execPath;
+    args = [execpath, "run", "build"];
+  } else if (typeof execpath === "string" && execpath.toLowerCase().includes("pnpm")) {
+    // Native pnpm executable (@pnpm/exe): invoke it directly, not via Node.
+    command = execpath;
+    args = ["run", "build"];
+  } else {
+    command = "pnpm";
+    args = ["run", "build"];
+  }
   const result = spawnSync(command, args, { cwd: root, stdio: "inherit" });
   if (result.error) throw result.error;
   if (result.status !== 0) {
