@@ -7,6 +7,13 @@ export const vitestLayerProjects = {
     public: true,
     coverage: true,
   },
+  reliability: {
+    include: ["tests/reliability/**/*.reliability.test.ts"],
+    live: false,
+    public: true,
+    coverage: true,
+    serial: true,
+  },
   contract: {
     include: ["tests/contract/**/*.contract.test.ts"],
     live: false,

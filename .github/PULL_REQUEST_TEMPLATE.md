@@ -30,6 +30,7 @@ Required CI check names for `main` protection:
 - [ ] `format/lint/typecheck`
 - [ ] `docs/spelling/links`
 - [ ] `unit/coverage`
+- [ ] `reliability/resilience`
 - [ ] `MCP contract`
 - [ ] `modern and legacy protocol/transport`
 - [ ] `observability/logging behavior`

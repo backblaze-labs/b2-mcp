@@ -2,6 +2,7 @@ import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
 import { abortError, timeoutError } from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
+import { isTestRuntime } from "./runtime.js";
 
 export const CIRCUIT_TIMEOUT_MS = 150_000;
 
@@ -275,3 +276,25 @@ export const reportCircuitBreaker = breakerProxy(usageReportBreaker);
 export const s3CircuitBreaker = breakerProxy(s3ApiBreaker);
 export const s3TransferCircuitBreaker = breakerProxy(s3TransferBreaker);
 export const partnerCircuitBreaker = breakerProxy(partnerApiBreaker);
+
+export function resetCircuitBreakersForTests(): void {
+  if (!isTestRuntime()) {
+    throw new Error("Circuit breaker reset is only available in tests.");
+  }
+  for (const instance of [
+    breaker,
+    longBreaker,
+    reportBreaker,
+    s3Breaker,
+    s3LongBreaker,
+    partnerBreaker,
+  ]) {
+    instance?.shutdown();
+  }
+  breaker = null;
+  longBreaker = null;
+  reportBreaker = null;
+  s3Breaker = null;
+  s3LongBreaker = null;
+  partnerBreaker = null;
+}

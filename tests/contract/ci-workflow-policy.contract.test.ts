@@ -40,6 +40,7 @@ const requiredJobNames = [
   "format/lint/typecheck",
   "docs/spelling/links",
   "unit/coverage",
+  "reliability/resilience",
   "MCP contract",
   "modern and legacy protocol/transport",
   "observability/logging behavior",
@@ -123,6 +124,7 @@ describe("CI workflow policy", () => {
       "format-lint-typecheck",
       "docs-spelling-links",
       "unit-coverage",
+      "reliability-resilience",
       "mcp-contract",
       "protocol-transport",
       "observability-logging",
@@ -182,6 +184,7 @@ describe("CI workflow policy", () => {
     const docsJob = workflowJob("docs-spelling-links");
     const coverageJob = workflowJob("unit-coverage-matrix");
     const coverageAggregateJob = workflowJob("unit-coverage");
+    const reliabilityJob = workflowJob("reliability-resilience");
     const contractJob = workflowJob("mcp-contract");
     const protocolJob = workflowJob("protocol-transport");
     const observabilityJob = workflowJob("observability-logging");
@@ -205,6 +208,9 @@ describe("CI workflow policy", () => {
     expect(coverageJob).toContain("retention-days: 7");
     expect(coverageAggregateJob).toContain("name: unit/coverage");
     expect(coverageAggregateJob).toContain("needs: unit-coverage-matrix");
+    expect(reliabilityJob).toContain("pnpm run test:reliability");
+    expect(reliabilityJob).toContain("reports/junit/reliability.xml");
+    expect(reliabilityJob).toContain("reports/vitest/reliability.json");
     expect(contractJob).toContain("pnpm run test:contract");
     expect(contractJob).toContain("docs/tool-profile-contract.json");
     expect(protocolJob).toContain("pnpm run test:protocol");
@@ -271,6 +277,7 @@ describe("CI workflow policy", () => {
       "Observability logging | Structured lifecycle, warning, failure, redaction, and stream-separation canaries",
     );
     expect(summaryJob).toContain("Linux deterministic Node matrix | 22.23.1, 24, 26");
+    expect(summaryJob).toContain("Deterministic dependency failures | B2/S3/OAuth outage suite");
     expect(summaryJob).toContain("Runtime engine floor | Node.js 22.3.0 package install smoke");
     expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
     expect(summaryJob).toContain("Vercel adapter budget | Uploaded as vercel-bundle artifact path");

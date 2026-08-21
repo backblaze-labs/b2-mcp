@@ -34,6 +34,7 @@
     "dev": "tsx src/index.ts",
     "test": "pnpm run typecheck && pnpm run test:unit",
     "test:unit": "node scripts/run-vitest-layer.mjs unit",
+    "test:reliability": "node scripts/run-vitest-layer.mjs reliability",
     "test:contract": "node scripts/run-vitest-layer.mjs contract",
     "test:protocol:modern": "node scripts/run-vitest-layer.mjs protocol-modern",
     "test:protocol:legacy": "node scripts/run-vitest-layer.mjs protocol-legacy",
