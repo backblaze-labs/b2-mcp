@@ -686,24 +686,18 @@ export function computeSnapshotGrowth(
 // ── Phase 2 helpers ─────────────────────────────────────────────────────────
 
 /**
- * Resolve the caller's authorized bucket scope directly from the authorize
- * response. A bucket-scoped key cannot call the unfiltered `listBuckets()`
- * (it lacks the `listBuckets` capability and B2 answers 401), yet the authorized
- * bucket's id — and usually its name — is already present in `allowedBuckets`.
- * Returns null when the key is unrestricted (no recorded scope), so the caller
- * falls back to a live listing.
+ * Resolve a bucket from the authorize response's `allowedBuckets` scope. A
+ * bucket-scoped key cannot call the unfiltered `listBuckets()` (no `listBuckets`
+ * capability -> 401), but its id (and usually name) is already in that scope.
+ * Returns null for unrestricted keys so the caller falls back to a live listing.
  *
- * Resolution reads the authorize scope cached by `B2AuthManager` (~23h TTL), so
- * after a bucket rename a lookup by the new name can briefly miss (falling to the
- * "no match" path) and a lookup by id can display the stale cached name. This is
- * self-healing within the token TTL and never targets the wrong bucket — object
- * operations always use the resolved `id`, which a rename does not change.
+ * The scope is read from `B2AuthManager`'s ~23h cache, so a rename can briefly
+ * miss by new name or display a stale name by id. This self-heals within the
+ * token TTL and never targets the wrong bucket (object ops use the resolved id).
  *
- * Matching mirrors the unrestricted `resolveBucketName()` path exactly: an exact
- * name/id hit, else a substring match against in-scope names. It never echoes the
- * whole scope on a miss — on the `server`/`principal` HTTP modes the remote caller
- * does not hold the key, so dumping every in-scope bucket name for an arbitrary
- * bogus input would let them enumerate the credential's full bucket namespace.
+ * Matching mirrors `resolveBucketName()`: exact name/id, else substring. It never
+ * echoes the whole scope on a miss, since a `server`/`principal` HTTP caller does
+ * not hold the key and could otherwise enumerate its full bucket namespace.
  *
  * @returns The resolved bucket, in-scope candidates, or null for unrestricted keys.
  */
@@ -713,18 +707,14 @@ async function resolveFromAuthorizedScope(
 ): Promise<{ name?: string; id?: string; candidates?: string[]; outOfScope?: boolean } | null> {
   const { allowedBuckets } = await auth.getAuth();
   if (!allowedBuckets || allowedBuckets.length === 0) return null;
-  // An empty/blank input substring-matches every bucket, so treat it as a miss
-  // rather than let `includes("")` enumerate the whole scope. The tool schemas
-  // reject empty bucket values too; this is defense in depth for the guarantee.
+  // Blank input substring-matches every bucket; treat it as a miss so
+  // `includes("")` cannot enumerate the scope (schemas also reject empty input).
   if (input.trim() === "") return { outOfScope: true };
   const exact = allowedBuckets.find((b) => b.name === input || b.id === input);
-  // A key restricted by name (not id) may report a null name; matched by id we
-  // still have a usable id and fall back to the supplied input for display.
+  // A name-restricted key may report a null name; matched by id, display the input.
   if (exact) return { name: exact.name ?? input, id: exact.id };
-  // No exact hit: surface only in-scope names that partially match the input,
-  // never the full scope. A fully-unrelated input flags outOfScope so the error
-  // explains the bucket is outside the key's authorized scope, without leaking
-  // any in-scope names — while a genuine substring ambiguity still lists matches.
+  // No exact hit: surface only partially-matching names, never the full scope. A
+  // fully-unrelated input flags outOfScope so the error says so without leaking names.
   const subs = allowedBuckets.filter((b) => b.name?.includes(input));
   if (subs.length === 1 && subs[0].name) return { name: subs[0].name, id: subs[0].id };
   if (subs.length > 1) {
