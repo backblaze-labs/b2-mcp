@@ -99,7 +99,7 @@ function normalizeCreateKeyBucketScope(args: { bucketId?: string; bucketIds?: st
   bucketIds?: string[];
 } {
   if (args.bucketId !== undefined && args.bucketIds !== undefined) {
-    throw clientInputError(
+    clientInputError(
       "invalid_bucket_scope",
       "b2_create_key accepts either bucketId or bucketIds, not both.",
     );

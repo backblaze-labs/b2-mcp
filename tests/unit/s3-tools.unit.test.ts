@@ -8,6 +8,7 @@ import { B2Client } from "../../src/b2/client";
 import type { B2S3FileVersionBinding } from "../../src/utils/types";
 import type { McpServer } from "../../src/mcp";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
+import { parseErrorText } from "../../src/utils/errors";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import type { MockInstance } from "vitest";
 
@@ -35,6 +36,13 @@ function bodyFromText(value: string): ReadableStream<Uint8Array> {
       controller.close();
     },
   });
+}
+
+function expectBadRequestToolError(result: unknown, message: RegExp): void {
+  const errorText = parseResult(result);
+  expect(errorText).toEqual(expect.any(String));
+  expect(errorText).toMatch(message);
+  expect(parseErrorText(errorText)).toMatchObject({ code: "bad_request", status: 400 });
 }
 
 beforeEach(() => {
@@ -284,11 +292,7 @@ describe("s3_put_object and s3_get_object", () => {
     });
 
     expect(result.isError).toBe(true);
-    const errorText = parseResult(result);
-    expect(errorText).toMatch(/contentType/i);
-    expect(errorText).toContain("HTTP 400");
-    expect(errorText).not.toContain("internal_error");
-    expect(errorText).not.toContain("HTTP 500");
+    expectBadRequestToolError(result, /contentType/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
@@ -1045,11 +1049,7 @@ describe("s3_get_presigned_url", () => {
     });
 
     expect(result.isError).toBe(true);
-    const errorText = parseResult(result);
-    expect(errorText).toMatch(/contentType/i);
-    expect(errorText).toContain("HTTP 400");
-    expect(errorText).not.toContain("internal_error");
-    expect(errorText).not.toContain("HTTP 500");
+    expectBadRequestToolError(result, /contentType/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
@@ -1092,11 +1092,7 @@ describe("s3_get_presigned_url", () => {
       });
 
       expect(result.isError).toBe(true);
-      const errorText = parseResult(result);
-      expect(errorText).toMatch(/browser-executable content type/i);
-      expect(errorText).toContain("HTTP 400");
-      expect(errorText).not.toContain("internal_error");
-      expect(errorText).not.toContain("HTTP 500");
+      expectBadRequestToolError(result, /browser-executable content type/i);
       expect(sendSpy).not.toHaveBeenCalled();
     },
   );

@@ -382,10 +382,10 @@ export function assertSafeObjectContentType(
 ): void {
   const mediaType = normalizedMediaType(contentType);
   if (!mediaType) {
-    throw badRequest(`${context} requires a signed contentType.`);
+    badRequest(`${context} requires a signed contentType.`);
   }
   if (BROWSER_EXECUTABLE_CONTENT_TYPE.test(mediaType)) {
-    throw badRequest(`${context} rejects browser-executable content type '${contentType}'.`);
+    badRequest(`${context} rejects browser-executable content type '${contentType}'.`);
   }
 }
 

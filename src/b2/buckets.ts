@@ -385,7 +385,7 @@ function corsRulesInputError(
 }
 
 function failB2InputValidation(message: string): never {
-  throw badRequest(message);
+  badRequest(message);
 }
 
 function validateBucketInfoInput(bucketInfo: Record<string, string> | undefined): void {
