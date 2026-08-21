@@ -80,18 +80,28 @@ export function expectedB2S3Endpoint(region: string): string {
   return `https://s3.${region}.backblazeb2.com`;
 }
 
-export function validateB2S3ApiUrl(raw: string, region: string): string | null {
+const B2_S3_ENDPOINT_HOST = /^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i;
+
+interface AuthorizedB2S3Endpoint {
+  endpoint: string;
+  region: string;
+}
+
+export function validateB2S3ApiUrl(raw: string, region?: string): string | null {
   let parsed: URL;
   try {
     parsed = new URL(raw);
   } catch {
     return "is not a valid URL";
   }
-  const expected = new URL(expectedB2S3Endpoint(region));
   if (parsed.protocol !== "https:") return "must use https://";
   if (parsed.username || parsed.password) return "must not include credentials";
-  if (parsed.hostname.toLowerCase() !== expected.hostname) {
-    return `must match ${expected.hostname}`;
+  const hostname = parsed.hostname.toLowerCase();
+  if (region !== undefined) {
+    const expected = new URL(expectedB2S3Endpoint(region));
+    if (hostname !== expected.hostname) return `must match ${expected.hostname}`;
+  } else if (!B2_S3_ENDPOINT_HOST.test(hostname)) {
+    return "must match s3.<region>.backblazeb2.com";
   }
   if (parsed.port) return "must not include a custom port";
   if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
@@ -100,9 +110,17 @@ export function validateB2S3ApiUrl(raw: string, region: string): string | null {
   return null;
 }
 
-function assertB2S3ApiUrl(raw: string, region: string): void {
-  const reason = validateB2S3ApiUrl(raw, region);
+function authorizedB2S3Endpoint(raw: string): AuthorizedB2S3Endpoint {
+  const reason = validateB2S3ApiUrl(raw);
   if (reason) throw new Error(`Authorized B2 S3 endpoint ${reason}.`);
+  const parsed = new URL(raw);
+  const hostname = parsed.hostname.toLowerCase();
+  const match = B2_S3_ENDPOINT_HOST.exec(hostname);
+  if (!match?.[1]) throw new Error("Authorized B2 S3 endpoint is missing a region.");
+  return {
+    endpoint: `https://${hostname}`,
+    region: match[1].toLowerCase(),
+  };
 }
 
 function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
@@ -119,6 +137,37 @@ interface B2S3ClientOptions {
   authorizedS3ApiUrl?: string;
   surface?: string;
 }
+
+interface B2S3AuthProvider {
+  getConfig(): B2Config;
+  getAuth(): Promise<B2AuthResponse>;
+}
+
+export type B2S3ClientFacade = Pick<
+  B2S3PeerClient,
+  | "destroy"
+  | "headBucket"
+  | "putBucketLifecycle"
+  | "getBucketLocation"
+  | "putObject"
+  | "getObject"
+  | "headObject"
+  | "deleteObject"
+  | "deleteObjects"
+  | "copyObject"
+  | "listObjectsV2"
+  | "listObjectVersions"
+  | "presignObjectUrl"
+  | "createMultipartUpload"
+  | "presignUploadPart"
+  | "completeMultipartUpload"
+  | "abortMultipartUpload"
+  | "listMultipartUploads"
+  | "listParts"
+  | "uploadPartCopy"
+  | "listReportObjectKeys"
+  | "downloadReportObject"
+>;
 
 function customUserAgent(
   config: B2Config,
@@ -143,13 +192,17 @@ export function buildB2S3ClientConfig(
   config: B2Config,
   options: B2S3ClientOptions = {},
 ): B2S3PeerClientConfig {
-  if (options.authorizedS3ApiUrl) assertB2S3ApiUrl(options.authorizedS3ApiUrl, config.region);
+  const endpoint = options.authorizedS3ApiUrl
+    ? authorizedB2S3Endpoint(options.authorizedS3ApiUrl)
+    : {
+        endpoint: expectedB2S3Endpoint(config.region),
+        region: config.region,
+      };
   const sdkS3Config = createS3ClientConfig({
-    accountInfo:
-      options.accountInfo ?? accountInfoForS3Endpoint(expectedB2S3Endpoint(config.region)),
+    accountInfo: options.accountInfo ?? accountInfoForS3Endpoint(endpoint.endpoint),
     applicationKeyId: options.applicationKeyId ?? config.appKeyId,
     applicationKey: options.applicationKey ?? config.appKey,
-    region: config.region,
+    region: endpoint.region,
   });
   return {
     ...sdkS3Config,
@@ -164,6 +217,115 @@ export function createS3Client(config: B2Config, options: B2S3ClientOptions = {}
 
 export function createS3ObjectClient(config: B2Config, surface: string): B2S3PeerClient {
   return createS3Client(config, { surface });
+}
+
+export function createAuthorizedS3Client(
+  auth: B2S3AuthProvider,
+  options: Pick<B2S3ClientOptions, "applicationKeyId" | "applicationKey" | "surface"> = {},
+): B2S3ClientFacade {
+  let client: B2S3PeerClient | null = null;
+  let inflight: Promise<B2S3PeerClient> | null = null;
+  let closed = false;
+
+  const getClient = async (): Promise<B2S3PeerClient> => {
+    if (client) return client;
+    if (!inflight) {
+      inflight = auth
+        .getAuth()
+        .then((authorized) => {
+          const config = auth.getConfig();
+          const next = createS3Client(config, {
+            applicationKeyId: options.applicationKeyId ?? config.applicationKeyId,
+            applicationKey: options.applicationKey ?? config.applicationKey,
+            authorizedS3ApiUrl: authorized.s3ApiUrl,
+            surface: options.surface,
+          });
+          if (closed) {
+            next.destroy();
+            throw new Error("B2 S3 client is closed.");
+          }
+          client = next;
+          return next;
+        })
+        .finally(() => {
+          inflight = null;
+        });
+    }
+    return inflight;
+  };
+
+  return {
+    destroy() {
+      closed = true;
+      const current = client;
+      client = null;
+      current?.destroy();
+      inflight?.then((pending) => pending.destroy()).catch(() => undefined);
+    },
+    async headBucket(bucket) {
+      return (await getClient()).headBucket(bucket);
+    },
+    async putBucketLifecycle(input) {
+      return (await getClient()).putBucketLifecycle(input);
+    },
+    async getBucketLocation(bucket) {
+      return (await getClient()).getBucketLocation(bucket);
+    },
+    async putObject(input) {
+      return (await getClient()).putObject(input);
+    },
+    async getObject(input) {
+      return (await getClient()).getObject(input);
+    },
+    async headObject(input) {
+      return (await getClient()).headObject(input);
+    },
+    async deleteObject(input) {
+      return (await getClient()).deleteObject(input);
+    },
+    async deleteObjects(input) {
+      return (await getClient()).deleteObjects(input);
+    },
+    async copyObject(input) {
+      return (await getClient()).copyObject(input);
+    },
+    async listObjectsV2(input) {
+      return (await getClient()).listObjectsV2(input);
+    },
+    async listObjectVersions(input) {
+      return (await getClient()).listObjectVersions(input);
+    },
+    async presignObjectUrl(input) {
+      return (await getClient()).presignObjectUrl(input);
+    },
+    async createMultipartUpload(input) {
+      return (await getClient()).createMultipartUpload(input);
+    },
+    async presignUploadPart(input) {
+      return (await getClient()).presignUploadPart(input);
+    },
+    async completeMultipartUpload(input) {
+      return (await getClient()).completeMultipartUpload(input);
+    },
+    async abortMultipartUpload(input) {
+      return (await getClient()).abortMultipartUpload(input);
+    },
+    async listMultipartUploads(input) {
+      return (await getClient()).listMultipartUploads(input);
+    },
+    async listParts(input) {
+      return (await getClient()).listParts(input);
+    },
+    async uploadPartCopy(input) {
+      return (await getClient()).uploadPartCopy(input);
+    },
+    async listReportObjectKeys(input) {
+      return (await getClient()).listReportObjectKeys(input);
+    },
+    async downloadReportObject(input) {
+      return (await getClient()).downloadReportObject(input);
+    },
+  };
 }
 
 export function createReportS3Client(config: B2Config, auth: B2AuthResponse): B2S3PeerClient {

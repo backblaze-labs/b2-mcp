@@ -22,7 +22,7 @@ import { flushLogsSync, logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
 import { B2Client } from "./b2/client.js";
 import { B2ReportClient } from "./b2/report-client.js";
-import { createS3Client } from "./s3/client.js";
+import { createAuthorizedS3Client } from "./s3/client.js";
 import {
   DURABLE_SECRET_PRODUCING_TOOLS,
   isToolAllowedByOAuthScopes,
@@ -234,7 +234,7 @@ export function createServer(
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth);
   const reportClient = new B2ReportClient(auth);
-  const s3Client = createS3Client(config, {
+  const s3Client = createAuthorizedS3Client(auth, {
     applicationKeyId: config.applicationKeyId,
     applicationKey: config.applicationKey,
   });

@@ -33,7 +33,7 @@ Destructive actions are gated, durable B2 secrets stay out of the model's contex
 
 The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary is `b2-mcp` (`b2-mcp-server` is a transition alias). The fastest setup runs it with `npx`, no clone or build.
 
-Before copying the config, check the account's B2 S3-compatible endpoint region. Accounts in the default `us-west-004` region can omit `B2_REGION` or set it to `us-west-004`. For any non-default account, add `B2_REGION` to the `env` block with the account's region, such as `us-east-005`; otherwise S3-compatible tools target `us-west-004`. See [Configuration](#configuration) for the full requirement.
+S3-compatible and report tools derive their endpoint region from the authorized B2 account response. `B2_REGION` is only a fallback for code paths that need a region before authorization or for explicit operator overrides.
 
 **Connect Claude Desktop** by editing `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -52,7 +52,7 @@ Before copying the config, check the account's B2 S3-compatible endpoint region.
 }
 ```
 
-For a non-default-region account, include `B2_REGION` in the same `env` block before restarting Claude Desktop:
+If you need an explicit fallback region before authorization, include `B2_REGION` in the same `env` block before restarting Claude Desktop:
 
 ```json
 {
@@ -197,7 +197,7 @@ the healthcheck probes the same port the server binds.
 | `B2_APPLICATION_KEY_ID`                                       | stdio / HTTP `server` | —                     | Application key ID (non-master) — the workhorse for native B2 and S3-compatible tools                                      |
 | `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                     |
 | `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master credential for SDK-backed Partner/Groups tools; required with Partner API entitlement for those operations          |
-| `B2_REGION`                                                   | non-default B2 regions | `us-west-004`         | Region for the S3-compatible endpoint                                                                                      |
+| `B2_REGION`                                                   | —                     | `us-west-004`         | Fallback S3-compatible endpoint region; authorized B2 responses override this for S3/report tools                           |
 | `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                               |
 | `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
@@ -210,7 +210,7 @@ the healthcheck probes the same port the server binds.
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
 | `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                 |
 
-`B2_REGION` is required for accounts outside the default `us-west-004` region until automatic region derivation is available. Use the region in your B2 S3-compatible endpoint, such as `us-east-005`; the [Quick start](#quick-start) sample shows where to add it.
+S3-compatible and report tools use the `s3ApiUrl` returned by `b2_authorize_account` when a tool call authorizes. `B2_REGION` remains available as a fallback/default region for initialization paths that do not have an authorize response yet.
 
 **Security / policy (safe defaults; override as needed):**
 

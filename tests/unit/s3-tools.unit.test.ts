@@ -10,6 +10,14 @@ import type { McpServer } from "../../src/mcp";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { parseErrorText } from "../../src/utils/errors";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
+import {
+  authorizeResponse,
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "../support/sdk-test-helpers";
+import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
 import type { MockInstance } from "vitest";
 
 let server: McpServer;
@@ -47,6 +55,17 @@ function expectBadRequestToolError(result: unknown, message: RegExp): void {
 
 beforeEach(() => {
   invalidateAuthManagerCache();
+  installSdkTransport(
+    new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(
+          200,
+          authorizeResponse(["listBuckets", "listFiles", "readFiles", "writeFiles", "deleteFiles"]),
+        );
+      }
+      return new StaticHttpResponse(200, {});
+    }),
+  );
   sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   vi.spyOn(B2Client.prototype, "resolveS3FileVersion").mockImplementation(
     async ({ key, versionId }) => matchingVersion({ fileName: key, fileId: versionId }),
@@ -66,6 +85,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  restoreB2SdkTransportForTests();
   circuitBreaker.close();
   s3CircuitBreaker.close();
   invalidateAuthManagerCache();

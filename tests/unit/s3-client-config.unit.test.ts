@@ -142,10 +142,12 @@ describe("B2 S3 client configuration", () => {
     const s3 = buildB2S3ClientConfig(config, {
       applicationKeyId: config.applicationKeyId,
       applicationKey: config.applicationKey,
-      authorizedS3ApiUrl: "https://s3.us-west-004.backblazeb2.com",
+      authorizedS3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
       surface: "b2-insights-reports",
     });
 
+    expect(s3.endpoint).toBe("https://s3.us-east-005.backblazeb2.com");
+    expect(s3.region).toBe("us-east-005");
     expect(s3.credentials).toEqual({
       accessKeyId: "principal-key-id",
       secretAccessKey: "principal-secret",
@@ -191,13 +193,29 @@ describe("B2 S3 client configuration", () => {
     expect(validateB2S3ApiUrl("https://s3.us-west-004.backblazeb2.com", config.region)).toBeNull();
   });
 
-  it("rejects mismatched authorized S3 endpoints while building report config", () => {
+  it("derives the S3 signing region from authorized S3 endpoints", () => {
+    const s3 = buildB2S3ClientConfig(config, {
+      authorizedS3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
+      surface: "b2-insights-reports",
+    });
+
+    expect(s3.endpoint).toBe("https://s3.us-east-005.backblazeb2.com");
+    expect(s3.region).toBe("us-east-005");
+    expect(capturedS3ConfigInputs.at(-1)).toMatchObject({
+      region: "us-east-005",
+    });
+    expect(capturedS3ConfigInputs.at(-1)?.accountInfo.getS3ApiUrl()).toBe(
+      "https://s3.us-east-005.backblazeb2.com",
+    );
+  });
+
+  it("rejects non-B2 authorized S3 endpoints while building report config", () => {
     expect(() =>
       buildB2S3ClientConfig(config, {
-        authorizedS3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
+        authorizedS3ApiUrl: "https://attacker.example",
         surface: "b2-insights-reports",
       }),
-    ).toThrow(/Authorized B2 S3 endpoint must match s3\.us-west-004\.backblazeb2\.com/);
+    ).toThrow(/Authorized B2 S3 endpoint must match s3\.<region>\.backblazeb2\.com/);
   });
 
   it("keeps the endpoint-only AccountInfo shim credential-free", () => {

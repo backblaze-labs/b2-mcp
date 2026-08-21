@@ -51,6 +51,11 @@ function reportAuth() {
   };
 }
 
+async function s3ClientRegion(client: S3Client): Promise<string> {
+  const region = client.config.region;
+  return typeof region === "function" ? await region() : String(region);
+}
+
 function reportCsv(
   accountId: string,
   date: string,
@@ -112,6 +117,35 @@ describe("insight report S3 endpoint validation", () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Authorized B2 S3 endpoint");
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["b2_usage_growth", { period: "month", limit: 1 }],
+    ["b2_egress_leaders", { by: "account", limit: 1 }],
+  ])("%s derives report S3 region from authorize", async (toolName, args) => {
+    const seenRegions: string[] = [];
+    sendSpy.mockImplementation(async function (this: S3Client) {
+      seenRegions.push(await s3ClientRegion(this));
+      return { Contents: [] };
+    });
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") {
+        return new StaticHttpResponse(
+          200,
+          maliciousAuthorizeResponse({
+            s3ApiUrl: "https://s3.us-east-005.backblazeb2.com",
+          }),
+        );
+      }
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    const server = createServer(ssrfConfig);
+
+    const result = await callTool(server, toolName, args);
+
+    expect(result.isError).not.toBe(true);
+    expect(seenRegions).toEqual(expect.arrayContaining(["us-east-005"]));
   });
 
   it("rejects an injected native B2 API endpoint before sending the bearer token", async () => {

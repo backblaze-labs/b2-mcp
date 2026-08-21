@@ -5,11 +5,16 @@ import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
+type B2S3BucketClient = Pick<
+  B2S3PeerClient,
+  "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle"
+>;
+
 // Retained S3 bucket tools cover S3 reachability and lifecycle features that
 // lack native B2 equivalents. Expiration and empty-rules clearing are gated.
 export function registerS3BucketTools(
   server: ToolRegistrar,
-  s3: B2S3PeerClient,
+  s3: B2S3BucketClient,
   config: B2Config,
 ): void {
   server.registerTool(
