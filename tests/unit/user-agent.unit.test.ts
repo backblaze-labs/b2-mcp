@@ -10,7 +10,7 @@ describe("buildUserAgent", () => {
 
   it("includes product, release channel, and transport", () => {
     const ua = buildUserAgent(cfg({ transport: "http" }));
-    expect(ua).toBe("backblaze-b2-mcp/dev (http)");
+    expect(ua).toBe("b2-mcp/dev (http)");
   });
 
   it("does not rebuild the SDK transport stack identity", () => {

@@ -1,4 +1,4 @@
-import { productVersion } from "../version.js";
+import { productToken } from "../version.js";
 import { B2Config } from "./types.js";
 
 /**
@@ -10,7 +10,7 @@ import { B2Config } from "./types.js";
  */
 export function buildUserAgent(config: B2Config): string {
   const transport = config.transport ?? "stdio";
-  const product = `backblaze-b2-mcp/${productVersion()} (${transport})`;
+  const product = `${productToken()} (${transport})`;
   const suffix = process.env.B2_MCP_UA_SUFFIX?.trim();
   return [product, suffix].filter(Boolean).join(" ");
 }
