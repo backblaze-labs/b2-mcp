@@ -32,6 +32,7 @@ Required CI check names for `main` protection:
 - [ ] `unit/coverage`
 - [ ] `MCP contract`
 - [ ] `modern and legacy protocol/transport`
+- [ ] `observability/logging behavior`
 - [ ] `package install smoke`
 - [ ] `runtime engine floor`
 - [ ] `production dependency audit`

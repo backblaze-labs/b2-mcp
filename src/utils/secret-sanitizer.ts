@@ -1,6 +1,14 @@
 import { AsyncLocalStorage } from "async_hooks";
 
 const REDACTED = "[redacted]";
+export const LOG_SANITIZER_FAILURE = "[log_sanitizer_failed]";
+const ACCESSOR_VALUE = "[accessor]";
+const FUNCTION_VALUE = "[function]";
+const INVALID_DATE_VALUE = "[invalid_date]";
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  "byteLength",
+)?.get;
 
 const MIN_CONFIGURED_SECRET_LENGTH = 8;
 
@@ -61,6 +69,10 @@ const LOGGER_SECRET_FIELD_NAMES = [
   "masterKeyId",
 ] as const;
 
+const LOGGER_SENSITIVE_FIELD_NAMES = new Set(
+  LOGGER_SECRET_FIELD_NAMES.map((name) => normalizeKey(name)),
+);
+
 export const LOGGER_SECRET_REDACTION_PATHS = redactionPaths(LOGGER_SECRET_FIELD_NAMES);
 
 export const TEXT_SECRET_LABELS = [
@@ -109,9 +121,10 @@ function redactionPaths(names: readonly string[]): string[] {
   ];
 }
 
-function isSensitiveField(key: string, path: readonly string[]): boolean {
+function isSensitiveField(key: string, path: readonly string[], mode: SanitizerMode): boolean {
   const normalized = normalizeKey(key);
   if (SENSITIVE_FIELD_NAMES.has(normalized)) return true;
+  if (mode === "log" && LOGGER_SENSITIVE_FIELD_NAMES.has(normalized)) return true;
   if (normalized.endsWith("secret") && normalized !== "secretname") return true;
   if (normalized.endsWith("token") && !NON_SECRET_TOKEN_FIELD_NAMES.has(normalized)) {
     return true;
@@ -135,6 +148,8 @@ export interface SanitizerOptions {
   secrets?: Iterable<unknown>;
   env?: NodeJS.ProcessEnv;
 }
+
+type SanitizerMode = "mcp" | "log";
 
 const sanitizerOptionsStorage = new AsyncLocalStorage<SanitizerOptions | undefined>();
 
@@ -215,7 +230,14 @@ export function sanitizeText(text: string, options: SanitizerOptions = {}): stri
 }
 
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
-  return sanitizeValue(value, [], new WeakSet<object>(), options);
+  return sanitizeValue(value, [], new WeakSet<object>(), options, "mcp");
+}
+
+export function sanitizeStructuredLogValue(
+  value: unknown,
+  options: SanitizerOptions = {},
+): unknown {
+  return sanitizeValue(value, [], new WeakSet<object>(), options, "log");
 }
 
 function sanitizeValue(
@@ -223,27 +245,132 @@ function sanitizeValue(
   path: string[],
   seen: WeakSet<object>,
   options: SanitizerOptions,
+  mode: SanitizerMode,
 ): unknown {
+  if (mode === "log" && value instanceof Error) {
+    if (seen.has(value)) return "[circular]";
+    seen.add(value);
+    return sanitizeErrorForLog(value, seen, options);
+  }
   if (typeof value === "string") {
     return sanitizeText(value, options);
   }
+  if (mode === "log" && typeof value === "function") return FUNCTION_VALUE;
   if (value === null || typeof value !== "object") return value;
-  if (value instanceof Date) return value;
-  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Date) return mode === "log" ? sanitizeDate(value) : value;
+  if (Buffer.isBuffer(value)) return mode === "log" ? sanitizeBuffer(value) : value;
   if (seen.has(value)) return "[circular]";
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value.map((item) => sanitizeValue(item, path, seen, options));
+    const output: unknown[] = [];
+    const outputRecord = output as unknown as Record<string, unknown>;
+    output.length = safeArrayLength(value);
+    for (const [key, descriptor] of enumerableDescriptors(value)) {
+      outputRecord[key] = isSensitiveField(key, path, mode)
+        ? REDACTED
+        : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
+    }
+    return output;
   }
 
   const output: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    output[key] = isSensitiveField(key, path)
+  for (const [key, descriptor] of enumerableDescriptors(value)) {
+    output[key] = isSensitiveField(key, path, mode)
       ? REDACTED
-      : sanitizeValue(child, [...path, key], seen, options);
+      : sanitizeDescriptorValue(descriptor, [...path, key], seen, options, mode);
   }
   return output;
+}
+
+function enumerableDescriptors(value: object): Array<[string, PropertyDescriptor]> {
+  return Object.entries(Object.getOwnPropertyDescriptors(value)).filter(
+    (entry): entry is [string, PropertyDescriptor] => entry[1].enumerable === true,
+  );
+}
+
+function safeArrayLength(value: unknown[]): number {
+  const descriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (!descriptor || !("value" in descriptor)) return 0;
+  const length = descriptor.value;
+  return Number.isSafeInteger(length) && length >= 0 ? length : 0;
+}
+
+function sanitizeDescriptorValue(
+  descriptor: PropertyDescriptor,
+  path: string[],
+  seen: WeakSet<object>,
+  options: SanitizerOptions,
+  mode: SanitizerMode,
+): unknown {
+  if (!("value" in descriptor)) return ACCESSOR_VALUE;
+  return sanitizeValue(descriptor.value, path, seen, options, mode);
+}
+
+function sanitizeDate(value: Date): string {
+  try {
+    return Date.prototype.toISOString.call(value);
+  } catch {
+    return INVALID_DATE_VALUE;
+  }
+}
+
+function sanitizeBuffer(value: Buffer): { type: "Buffer"; byteLength: number } {
+  return {
+    type: "Buffer",
+    byteLength: safeBufferByteLength(value),
+  };
+}
+
+function safeBufferByteLength(value: Buffer): number {
+  try {
+    const byteLength = TYPED_ARRAY_BYTE_LENGTH_GETTER?.call(value);
+    return Number.isSafeInteger(byteLength) && byteLength >= 0 ? byteLength : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function findPropertyDescriptor(value: object, key: string): PropertyDescriptor | undefined {
+  let current: object | null = value;
+  while (current) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, key);
+    if (descriptor) return descriptor;
+    current = Object.getPrototypeOf(current);
+  }
+  return undefined;
+}
+
+function sanitizeErrorStringField(
+  err: Error,
+  key: "message" | "name" | "stack",
+  options: SanitizerOptions,
+): string | undefined {
+  const descriptor = findPropertyDescriptor(err, key);
+  if (!descriptor) return undefined;
+  if (!("value" in descriptor)) return ACCESSOR_VALUE;
+  const value = descriptor.value;
+  if (typeof value === "string") return sanitizeText(value, options);
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return sanitizeText(String(value), options);
+  }
+  return ACCESSOR_VALUE;
+}
+
+function sanitizeErrorForLog(err: Error, seen: WeakSet<object>, options: SanitizerOptions): Error {
+  const safe = new Error(sanitizeErrorStringField(err, "message", options) ?? "");
+  safe.name = sanitizeErrorStringField(err, "name", options) ?? "Error";
+  const stack = sanitizeErrorStringField(err, "stack", options);
+  if (stack !== undefined) safe.stack = stack;
+  const safeRecord = safe as unknown as Record<string, unknown>;
+
+  for (const [key, descriptor] of enumerableDescriptors(err)) {
+    if (key === "message" || key === "name" || key === "stack") continue;
+    safeRecord[key] = isSensitiveField(key, [], "log")
+      ? REDACTED
+      : sanitizeDescriptorValue(descriptor, [key], seen, options, "log");
+  }
+  return safe;
 }
 
 export function sanitizeMcpResponse<T>(response: T, options: SanitizerOptions = {}): T {
@@ -252,15 +379,9 @@ export function sanitizeMcpResponse<T>(response: T, options: SanitizerOptions = 
 
 export function sanitizeError(err: unknown, options: SanitizerOptions = {}): Error {
   if (err instanceof Error) {
-    const safe = new Error(sanitizeText(err.message, options));
-    safe.name = sanitizeText(err.name, options);
-    if (err.stack) safe.stack = sanitizeText(err.stack, options);
-    const safeRecord = safe as unknown as Record<string, unknown>;
-    const errRecord = err as unknown as Record<string, unknown>;
-    for (const key of ["code", "status", "requestId"]) {
-      if (key in err) safeRecord[key] = sanitizeForMcpOutput(errRecord[key], options);
-    }
-    return safe;
+    const seen = new WeakSet<object>();
+    seen.add(err);
+    return sanitizeErrorForLog(err, seen, options);
   }
   return new Error(sanitizeText(String(err), options));
 }

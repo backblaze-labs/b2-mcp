@@ -1,9 +1,5 @@
-import {
-  LEGACY_PROTOCOL_VERSION,
-  RawStdioSession,
-  closeClient,
-  connectLegacyStdioClient,
-} from "./support/clients";
+import { LEGACY_PROTOCOL_VERSION, RawStdioSession } from "../support/protocol";
+import { closeClient, connectLegacyStdioClient } from "./support/clients";
 
 function resultOf(frame: any): any {
   expect(frame.error).toBeUndefined();

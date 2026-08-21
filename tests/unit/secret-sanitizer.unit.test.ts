@@ -4,8 +4,10 @@ import { toolError, toolJson } from "../../src/utils/errors";
 import {
   configuredSecretValuesFromConfig,
   LOGGER_SECRET_REDACTION_PATHS,
+  LOG_SANITIZER_FAILURE,
   sanitizeForMcpOutput,
   sanitizeError,
+  sanitizeStructuredLogValue,
   sanitizeText,
   SECRET_SANITIZER_REDACTION,
   STRUCTURED_SECRET_FIELD_NAMES,
@@ -116,6 +118,249 @@ describe("secret sanitizer canary policy", () => {
 
     expect(safe.message).not.toContain(CANARY);
     expect(safe.message).not.toContain(CONFIGURED_APP_KEY);
+  });
+
+  it("sanitizes log objects without invoking accessors", () => {
+    const payload: Record<string, unknown> = {};
+    let getterReads = 0;
+    Object.defineProperty(payload, "authorization", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+    Object.defineProperty(payload, "metadata", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(payload);
+
+    expect(getterReads).toBe(0);
+    expect(safe).toEqual({
+      authorization: SECRET_SANITIZER_REDACTION,
+      metadata: "[accessor]",
+    });
+    expectNoCanary(safe);
+  });
+
+  it("sanitizes log arrays without invoking accessors", () => {
+    const payload: unknown[] = [];
+    let getterReads = 0;
+    Object.defineProperty(payload, "0", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+    payload[1] = {
+      applicationKey: CANARY,
+    };
+
+    const safe = sanitizeStructuredLogValue(payload) as unknown[];
+
+    expect(getterReads).toBe(0);
+    expect(Array.isArray(safe)).toBe(true);
+    expect(safe[0]).toBe("[accessor]");
+    expect(safe[1]).toEqual({ applicationKey: SECRET_SANITIZER_REDACTION });
+    expectNoCanary(safe);
+  });
+
+  it("sanitizes proxied log arrays without reading length getters", () => {
+    const payload = [{ applicationKey: CANARY }];
+    let lengthReads = 0;
+    const proxied = new Proxy(payload, {
+      get(target, property, receiver) {
+        if (property === "length") {
+          lengthReads++;
+          throw new Error(CANARY);
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(proxied) as unknown[];
+
+    expect(lengthReads).toBe(0);
+    expect(Array.isArray(safe)).toBe(true);
+    expect(safe).toHaveLength(1);
+    expect(safe[0]).toEqual({ applicationKey: SECRET_SANITIZER_REDACTION });
+    expectNoCanary(safe);
+  });
+
+  it("returns inert log values for callables and built-ins", () => {
+    const createdAt = new Date("2026-08-21T00:00:00.000Z");
+    Object.defineProperty(createdAt, "toJSON", {
+      enumerable: true,
+      value: () => CANARY,
+    });
+    const bytes = Buffer.from(CANARY);
+    let byteLengthReads = 0;
+    for (const key of ["byteLength", "length"] as const) {
+      Object.defineProperty(bytes, key, {
+        enumerable: true,
+        get() {
+          byteLengthReads++;
+          throw new Error(CANARY);
+        },
+      });
+    }
+    Object.defineProperty(bytes, "toJSON", {
+      enumerable: true,
+      value: () => ({ applicationKey: CANARY }),
+    });
+
+    const safe = sanitizeStructuredLogValue({
+      toJSON: () => CANARY,
+      fn: () => CANARY,
+      createdAt,
+      bytes,
+    }) as {
+      bytes: { byteLength: number; type: string };
+      createdAt: string;
+      fn: string;
+      toJSON: string;
+    };
+
+    expect(safe.toJSON).toBe("[function]");
+    expect(safe.fn).toBe("[function]");
+    expect(safe.createdAt).toBe("2026-08-21T00:00:00.000Z");
+    expect(safe.bytes).toEqual({ type: "Buffer", byteLength: Buffer.byteLength(CANARY) });
+    expect(byteLengthReads).toBe(0);
+    expect(JSON.stringify(safe)).not.toContain(CANARY);
+  });
+
+  it("sanitizes proxied log buffers without reading length traps", () => {
+    const bytes = Buffer.from(CANARY);
+    let lengthReads = 0;
+    const proxied = new Proxy(bytes, {
+      get(target, property, receiver) {
+        if (property === "byteLength" || property === "length") {
+          lengthReads++;
+          throw new Error(CANARY);
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(proxied);
+
+    expect(lengthReads).toBe(0);
+    expect(safe).toEqual({ type: "Buffer", byteLength: 0 });
+    expectNoCanary(safe);
+  });
+
+  it("keeps MCP output representations for callables and built-ins", () => {
+    const safe = sanitizeForMcpOutput({
+      createdAt: new Date("2026-08-21T00:00:00.000Z"),
+      invalidDate: new Date(Number.NaN),
+      bytes: Buffer.from("ok"),
+      fn: () => "ignored",
+    }) as {
+      bytes: unknown;
+      createdAt: unknown;
+      fn?: unknown;
+      invalidDate: unknown;
+    };
+
+    expect(safe.createdAt).toBeInstanceOf(Date);
+    expect(safe.invalidDate).toBeInstanceOf(Date);
+    expect(Buffer.isBuffer(safe.bytes)).toBe(true);
+    expect(typeof safe.fn).toBe("function");
+    expect(JSON.stringify(safe)).toBe(
+      '{"createdAt":"2026-08-21T00:00:00.000Z","invalidDate":null,"bytes":{"type":"Buffer","data":[111,107]}}',
+    );
+  });
+
+  it("preserves safe Error metadata in structured logs", () => {
+    const err = Object.assign(new Error(`failed with ${CANARY}`), {
+      code: "ENOENT",
+      errno: -2,
+      syscall: "open",
+      path: "/tmp/b2-mcp-safe-metadata",
+      authorizationToken: CANARY,
+      details: {
+        applicationKey: CANARY,
+      },
+    });
+
+    const safe = sanitizeStructuredLogValue(err) as Error & {
+      authorizationToken?: unknown;
+      code?: unknown;
+      details?: { applicationKey?: unknown };
+      errno?: unknown;
+      path?: unknown;
+      syscall?: unknown;
+    };
+
+    expect(safe).toBeInstanceOf(Error);
+    expect(safe.message).toBe("failed with [redacted]");
+    expect(safe.code).toBe("ENOENT");
+    expect(safe.errno).toBe(-2);
+    expect(safe.syscall).toBe("open");
+    expect(safe.path).toBe("/tmp/b2-mcp-safe-metadata");
+    expect(safe.authorizationToken).toBe(SECRET_SANITIZER_REDACTION);
+    expect(safe.details?.applicationKey).toBe(SECRET_SANITIZER_REDACTION);
+    expectNoCanary(safe);
+  });
+
+  it("reads Error core fields without invoking accessors", () => {
+    const err = new Error("placeholder");
+    let getterReads = 0;
+    for (const key of ["message", "name", "stack"] as const) {
+      Object.defineProperty(err, key, {
+        configurable: true,
+        enumerable: true,
+        get() {
+          getterReads++;
+          throw new Error(CANARY);
+        },
+      });
+    }
+
+    const safe = sanitizeStructuredLogValue(err) as Error;
+
+    expect(getterReads).toBe(0);
+    expect(safe.message).toBe("[accessor]");
+    expect(safe.name).toBe("[accessor]");
+    expect(safe.stack).toBe("[accessor]");
+    expectNoCanary(safe);
+  });
+
+  it("redacts logger-only credential handles at arbitrary log depths", () => {
+    const safe = sanitizeStructuredLogValue({
+      outer: {
+        inner: {
+          details: {
+            accessKeyId: "safe-to-hide-access-key-id",
+            appKeyId: "safe-to-hide-app-key-id",
+            applicationKeyId: "safe-to-hide-application-key-id",
+            masterKeyId: "safe-to-hide-master-key-id",
+          },
+        },
+      },
+    });
+
+    expect(safe).toEqual({
+      outer: {
+        inner: {
+          details: {
+            accessKeyId: SECRET_SANITIZER_REDACTION,
+            appKeyId: SECRET_SANITIZER_REDACTION,
+            applicationKeyId: SECRET_SANITIZER_REDACTION,
+            masterKeyId: SECRET_SANITIZER_REDACTION,
+          },
+        },
+      },
+    });
+    expect(sanitizeForMcpOutput({ applicationKeyId: "key-id-is-non-secret" })).toEqual({
+      applicationKeyId: "key-id-is-non-secret",
+    });
   });
 
   it("leaves non-secret JSON-valued strings byte-for-byte unchanged", () => {
@@ -292,5 +537,6 @@ describe("secret sanitizer canary policy", () => {
     for (const field of STRUCTURED_SECRET_FIELD_NAMES) {
       expect(LOGGER_SECRET_REDACTION_PATHS).toContain(field);
     }
+    expect(LOG_SANITIZER_FAILURE).toBe("[log_sanitizer_failed]");
   });
 });

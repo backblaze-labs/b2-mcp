@@ -1,7 +1,13 @@
 import { closeSync } from "node:fs";
 import pino, { type DestinationStream } from "pino";
 import { VERSION } from "../version.js";
-import { LOGGER_SECRET_REDACTION_PATHS, SECRET_SANITIZER_REDACTION } from "./secret-sanitizer.js";
+import {
+  LOG_SANITIZER_FAILURE,
+  currentSanitizerOptions,
+  LOGGER_SECRET_REDACTION_PATHS,
+  SECRET_SANITIZER_REDACTION,
+  sanitizeStructuredLogValue,
+} from "./secret-sanitizer.js";
 import { openSecureAppendFile, secureAppendFileErrorDetail } from "./secure-append-file.js";
 
 const isTest = process.env.NODE_ENV === "test";
@@ -16,6 +22,20 @@ const options = {
   base: { service: "backblaze-b2-mcp", version: VERSION },
   formatters: {
     level: (label: string) => ({ level: label }),
+  },
+  hooks: {
+    logMethod(inputArgs: unknown[], method: (...args: unknown[]) => void) {
+      const safeArgs = inputArgs.map((arg) => {
+        try {
+          return sanitizeStructuredLogValue(arg, currentSanitizerOptions());
+        } catch {
+          return typeof arg === "string"
+            ? LOG_SANITIZER_FAILURE
+            : { logSanitizer: LOG_SANITIZER_FAILURE };
+        }
+      });
+      return method.apply(this, safeArgs);
+    },
   },
   redact: {
     paths: LOGGER_SECRET_REDACTION_PATHS,
