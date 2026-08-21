@@ -2,25 +2,34 @@
 /**
  * Deterministic local MCP runtime smoke.
  *
- * Bootstrap mode strips sensitive parent environment variables before importing
- * the MCP client SDK. Runner mode starts a local HTTP server worker from the
- * built dist/ artifacts, connects over 127.0.0.1, validates discovery and
- * tools/list, then verifies a missing-credential request returns a JSON-RPC
- * error instead of crashing.
+ * Bootstrap mode builds by default, then strips sensitive parent environment
+ * variables before starting the runner. Runner mode starts a local HTTP server
+ * worker from the built dist/ artifacts, connects over 127.0.0.1 with a minimal
+ * modern MCP HTTP client, validates discovery and tools/list, then verifies a
+ * missing-credential request returns a JSON-RPC error instead of crashing.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const require = createRequire(import.meta.url);
+const http = require("node:http");
+const https = require("node:https");
+const net = require("node:net");
+const tls = require("node:tls");
 const { sanitizedEnv, secretNamePattern } = require("./lib/sanitized-env.cjs");
-const { arraysEqual, evaluateProfileContract } = require("./lib/smoke-contract.cjs");
+const {
+  arraysEqual,
+  evaluateProfileContract,
+  toolContractSnapshot,
+} = require("./lib/smoke-contract.cjs");
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const scriptRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+const root = resolve(process.env.B2_MCP_LOCAL_SMOKE_ROOT ?? scriptRoot);
 const scriptPath = fileURLToPath(import.meta.url);
 const TARGET_PROTOCOL_VERSION = "2026-07-28";
 const EXPECTED_PROFILE = "full";
@@ -29,7 +38,7 @@ const MODE_ENV_NAME = "B2_MCP_LOCAL_SMOKE_MODE";
 const RUNNER_MODE = "runner";
 const SERVER_MODE = "server";
 const NETWORK_GUARD_SCRIPT = "scripts/no-network-guard.mjs";
-const NETWORK_GUARD_SIGNAL = "MCP_CLIENT_SMOKE_NETWORK_BLOCKED";
+export const NETWORK_GUARD_SIGNAL = "MCP_CLIENT_SMOKE_NETWORK_BLOCKED";
 const READY_TIMEOUT_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
@@ -40,6 +49,7 @@ const allowedSensitiveEnvNames = new Set([
   MODE_ENV_NAME,
   "B2_ALLOWED_HOSTS",
   "B2_HTTP_CREDENTIAL_MODE",
+  "B2_MCP_LOCAL_SMOKE_ROOT",
   "B2_REGISTER_ALL_TOOLS",
 ]);
 
@@ -60,8 +70,23 @@ function assertBuiltArtifacts() {
     throw new Error(
       `Missing built artifact(s): ${missing.join(
         ", ",
-      )}. Run pnpm run build before node scripts/local-mcp-smoke.mjs.`,
+      )}. Run pnpm run build before node scripts/local-mcp-smoke.mjs, or set B2_MCP_LOCAL_SMOKE_ROOT to a built package root.`,
     );
+  }
+}
+
+function buildIfNeeded() {
+  if (process.env.B2_MCP_LOCAL_SMOKE_SKIP_BUILD === "true") return;
+  const command =
+    typeof process.env.npm_execpath === "string" && process.env.npm_execpath.includes("pnpm")
+      ? process.execPath
+      : "pnpm";
+  const args =
+    command === process.execPath ? [process.env.npm_execpath, "run", "build"] : ["run", "build"];
+  const result = spawnSync(command, args, { cwd: root, stdio: "inherit" });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`pnpm run build failed with exit code ${result.status ?? "unknown"}`);
   }
 }
 
@@ -69,6 +94,7 @@ function createModeEnv(mode, extra = {}, sourceEnv = process.env) {
   return sanitizedEnv(
     {
       [MODE_ENV_NAME]: mode,
+      B2_MCP_LOCAL_SMOKE_ROOT: root,
       ...extra,
     },
     {
@@ -87,7 +113,7 @@ function createServerEnv(sourceEnv = process.env) {
       B2_REGISTER_ALL_TOOLS: "true",
       LOG_LEVEL: "silent",
       NO_COLOR: "1",
-      NODE_OPTIONS: `--import ${pathToFileURL(join(root, NETWORK_GUARD_SCRIPT)).href}`,
+      NODE_OPTIONS: `--import ${pathToFileURL(join(scriptRoot, NETWORK_GUARD_SCRIPT)).href}`,
     },
     sourceEnv,
   );
@@ -110,7 +136,7 @@ function assertEnvIsSanitized(env = process.env) {
   }
 }
 
-function createBoundedTextMonitor(maxTailBytes = STDERR_TAIL_BYTES) {
+export function createBoundedTextMonitor(maxTailBytes = STDERR_TAIL_BYTES) {
   let tail = "";
   let networkBlocked = false;
   return {
@@ -140,17 +166,6 @@ function loadContractHelpers() {
     throw new Error("dist/tool-contract.js does not export contract helpers");
   }
   return helpers;
-}
-
-function toolContractSnapshot(tools, helpers) {
-  const sortedTools = [...(tools ?? [])]
-    .filter((tool) => tool?.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const names = sortedTools.map((tool) => tool.name);
-  return {
-    names,
-    hash: helpers.fixtureHash({ names, tools: sortedTools.map(helpers.normalizeTool) }),
-  };
 }
 
 function modernBody(method, params = {}, id = 1) {
@@ -194,6 +209,114 @@ function assertLocalFetchTarget(input) {
 function localFetch(input, init) {
   assertLocalFetchTarget(input);
   return fetch(input, init);
+}
+
+function isLoopbackHostname(hostname) {
+  let normalized = String(hostname ?? "")
+    .trim()
+    .toLowerCase();
+  if (normalized.startsWith("[")) {
+    normalized = normalized.slice(1).replace(/\].*$/, "");
+  } else if ((normalized.match(/:/g) ?? []).length === 1) {
+    normalized = normalized.replace(/:\d+$/, "");
+  }
+  return (
+    normalized === "localhost" ||
+    normalized === "::1" ||
+    /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(normalized)
+  );
+}
+
+function hostFromHttpOptions(options) {
+  if (!options || typeof options !== "object") return "";
+  return options.hostname ?? options.host ?? "";
+}
+
+function hostFromHttpArgs(args) {
+  const [input, options] = args;
+  if (input instanceof URL) return input.hostname;
+  if (typeof input === "string") {
+    try {
+      return new URL(input).hostname;
+    } catch {
+      return hostFromHttpOptions(options);
+    }
+  }
+  return hostFromHttpOptions({ ...input, ...options });
+}
+
+function hostFromNetArgs(args) {
+  const [input, host] = args;
+  if (typeof input === "object" && input !== null) return input.host ?? input.hostname ?? "";
+  if (typeof input === "number") return typeof host === "string" ? host : "localhost";
+  return "";
+}
+
+function assertLoopbackOutbound(kind, host) {
+  if (isLoopbackHostname(host)) return;
+  throw new Error(`local smoke runner blocked outbound network: ${kind} ${host || "unknown"}`);
+}
+
+export function installRunnerOutboundGuard() {
+  const originalFetch = globalThis.fetch?.bind(globalThis);
+  const originals = {
+    fetch: globalThis.fetch,
+    httpGet: http.get,
+    httpRequest: http.request,
+    httpsGet: https.get,
+    httpsRequest: https.request,
+    netConnect: net.connect,
+    netCreateConnection: net.createConnection,
+    tlsConnect: tls.connect,
+  };
+
+  if (originalFetch) {
+    globalThis.fetch = (input, init) => {
+      const rawUrl =
+        input instanceof Request ? input.url : input instanceof URL ? input.href : String(input);
+      assertLoopbackOutbound("fetch", new URL(rawUrl).hostname);
+      return originalFetch(input, init);
+    };
+  }
+  http.request = function guardedHttpRequest(...args) {
+    assertLoopbackOutbound("http.request", hostFromHttpArgs(args));
+    return originals.httpRequest.apply(this, args);
+  };
+  http.get = function guardedHttpGet(...args) {
+    assertLoopbackOutbound("http.get", hostFromHttpArgs(args));
+    return originals.httpGet.apply(this, args);
+  };
+  https.request = function guardedHttpsRequest(...args) {
+    assertLoopbackOutbound("https.request", hostFromHttpArgs(args));
+    return originals.httpsRequest.apply(this, args);
+  };
+  https.get = function guardedHttpsGet(...args) {
+    assertLoopbackOutbound("https.get", hostFromHttpArgs(args));
+    return originals.httpsGet.apply(this, args);
+  };
+  net.connect = function guardedNetConnect(...args) {
+    assertLoopbackOutbound("net.connect", hostFromNetArgs(args));
+    return originals.netConnect.apply(this, args);
+  };
+  net.createConnection = function guardedNetCreateConnection(...args) {
+    assertLoopbackOutbound("net.createConnection", hostFromNetArgs(args));
+    return originals.netCreateConnection.apply(this, args);
+  };
+  tls.connect = function guardedTlsConnect(...args) {
+    assertLoopbackOutbound("tls.connect", hostFromNetArgs(args));
+    return originals.tlsConnect.apply(this, args);
+  };
+
+  return () => {
+    globalThis.fetch = originals.fetch;
+    http.get = originals.httpGet;
+    http.request = originals.httpRequest;
+    https.get = originals.httpsGet;
+    https.request = originals.httpsRequest;
+    net.connect = originals.netConnect;
+    net.createConnection = originals.netCreateConnection;
+    tls.connect = originals.tlsConnect;
+  };
 }
 
 function withTimeout(promise, label, timeoutMs) {
@@ -267,7 +390,7 @@ async function stopChild(child) {
   killTimer.unref?.();
   try {
     const [code, signal] = await withTimeout(
-      once(child, "exit"),
+      once(child, "close"),
       "local smoke server shutdown",
       SHUTDOWN_TIMEOUT_MS + 1_000,
     );
@@ -290,6 +413,31 @@ async function requestWithoutCredentials(endpoint) {
     });
     const body = await response.json();
     return { status: response.status, body };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+let nextMcpRequestId = 1;
+
+async function mcpRequest(endpoint, method, params = {}) {
+  const id = nextMcpRequestId++;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  timeout.unref?.();
+  try {
+    const response = await localFetch(endpoint, {
+      method: "POST",
+      headers: { ...fakeCredentialHeaders, ...modernHeaders(method, params.name) },
+      body: modernBody(method, params, id),
+      signal: controller.signal,
+    });
+    const body = await response.json();
+    if (!response.ok || body.error) {
+      const message = body?.error?.message ?? `HTTP ${response.status}`;
+      throw new Error(`${method} failed: ${message}`);
+    }
+    return body.result;
   } finally {
     clearTimeout(timeout);
   }
@@ -354,14 +502,11 @@ async function runServerWorker() {
 async function runRunner() {
   assertBuiltArtifacts();
   assertEnvIsSanitized();
+  installRunnerOutboundGuard();
   const helpers = loadContractHelpers();
   const expectedFixture = readJson(EXPECTED_FIXTURE);
   const toolContract = readJson("docs/tool-profile-contract.json");
-  const [{ Client, StreamableHTTPClientTransport }] = await Promise.all([
-    import("@modelcontextprotocol/client"),
-  ]);
   const checks = [];
-  let client;
   let primaryError = null;
   const server = spawn(process.execPath, [scriptPath], {
     cwd: root,
@@ -381,41 +526,22 @@ async function runRunner() {
       READY_TIMEOUT_MS,
     );
     const endpoint = new URL(`http://127.0.0.1:${port}/mcp`);
-    const transport = new StreamableHTTPClientTransport(endpoint, {
-      requestInit: { headers: fakeCredentialHeaders },
-      fetch: localFetch,
-    });
-    client = new Client(
-      { name: "b2-mcp-local-smoke", version: "1.0.0" },
-      {
-        versionNegotiation: { mode: { pin: TARGET_PROTOCOL_VERSION } },
-        defaultCacheTtlMs: 0,
-      },
-    );
+    const discover = await mcpRequest(endpoint, "server/discover");
+    const listed = await mcpRequest(endpoint, "tools/list");
+    const serverInfo =
+      discover?._meta?.["io.modelcontextprotocol/serverInfo"] ??
+      listed?._meta?.["io.modelcontextprotocol/serverInfo"];
 
-    await client.connect(transport, { timeoutMs: REQUEST_TIMEOUT_MS });
-    const era = client.getProtocolEra();
-    const protocolVersion = client.getNegotiatedProtocolVersion();
-    const serverVersion = client.getServerVersion();
-    const discover =
-      client.getDiscoverResult() ?? (await client.discover({ timeoutMs: REQUEST_TIMEOUT_MS }));
-
+    console.log(`  protocol=${TARGET_PROTOCOL_VERSION}`);
     console.log(
-      `  negotiatedEra=${era ?? "unknown"} negotiatedProtocol=${protocolVersion ?? "unknown"}`,
+      `  server=${serverInfo?.name ?? "unknown"}@${serverInfo?.version ?? "unknown"} port=${port}`,
     );
-    console.log(
-      `  server=${serverVersion?.name ?? "unknown"}@${
-        serverVersion?.version ?? "unknown"
-      } port=${port}`,
-    );
-
     recordCheck(checks, "server process reported local readiness", port > 0, `port=${port}`);
-    recordCheck(checks, "client negotiated modern protocol era", era === "modern", `era=${era}`);
     recordCheck(
       checks,
-      "client negotiated target protocol revision",
-      protocolVersion === TARGET_PROTOCOL_VERSION,
-      `protocol=${protocolVersion ?? "unknown"}`,
+      "local client connected over modern HTTP",
+      discover?.resultType === "complete" && Array.isArray(listed?.tools),
+      `protocol=${TARGET_PROTOCOL_VERSION}`,
     );
     recordCheck(
       checks,
@@ -431,14 +557,10 @@ async function runRunner() {
     recordCheck(
       checks,
       "server name/version is reported",
-      serverVersion?.name === "backblaze-b2" && typeof serverVersion.version === "string",
-      `server=${serverVersion?.name ?? "unknown"}@${serverVersion?.version ?? "unknown"}`,
+      serverInfo?.name === "backblaze-b2" && typeof serverInfo.version === "string",
+      `server=${serverInfo?.name ?? "unknown"}@${serverInfo?.version ?? "unknown"}`,
     );
 
-    const listed = await client.listTools(undefined, {
-      cacheMode: "refresh",
-      timeoutMs: REQUEST_TIMEOUT_MS,
-    });
     const snapshot = toolContractSnapshot(listed.tools, helpers);
     const profileResult = evaluateProfileContract({
       snapshot,
@@ -497,12 +619,9 @@ async function runRunner() {
         !missingText.includes("local-smoke-key") &&
         !missingText.includes("process.env"),
     );
-    await new Promise((resolve) => setImmediate(resolve));
-    recordCheck(checks, "startup avoided B2 network access", !stderrMonitor.networkBlocked);
   } catch (error) {
     primaryError = error;
   } finally {
-    await client?.close().catch(() => undefined);
     const stopped = await stopChild(server).catch((error) => {
       primaryError ??= error;
       return { code: null, signal: "cleanup-error" };
@@ -513,6 +632,8 @@ async function runRunner() {
       stopped.code === 0 && !stopped.signal,
       `code=${stopped.code ?? "null"} signal=${stopped.signal ?? "null"}`,
     );
+    await new Promise((resolve) => setImmediate(resolve));
+    recordCheck(checks, "server avoided B2 network access", !stderrMonitor.networkBlocked);
   }
 
   if (primaryError) {
@@ -530,6 +651,7 @@ async function runRunner() {
 }
 
 async function runBootstrap() {
+  buildIfNeeded();
   assertBuiltArtifacts();
   const child = spawn(process.execPath, [scriptPath], {
     cwd: root,

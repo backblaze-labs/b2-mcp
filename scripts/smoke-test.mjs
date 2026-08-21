@@ -36,7 +36,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { redactB2CredentialValues } from "./b2-credential-env.mjs";
 import smokeContract from "./lib/smoke-contract.cjs";
 
-const { evaluateProfileContract } = smokeContract;
+const { evaluateProfileContract, toolContractSnapshot } = smokeContract;
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const toolContract = JSON.parse(
@@ -184,14 +184,7 @@ export function sortedToolNames(tools) {
 }
 
 export function liveToolContractSnapshot(tools, helpers) {
-  const sortedTools = [...(tools ?? [])]
-    .filter((tool) => tool?.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const names = sortedTools.map((tool) => tool.name);
-  return {
-    names,
-    hash: helpers.fixtureHash({ names, tools: sortedTools.map(helpers.normalizeTool) }),
-  };
+  return toolContractSnapshot(tools, helpers);
 }
 
 function configureRequestContext() {

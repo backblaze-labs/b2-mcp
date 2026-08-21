@@ -446,6 +446,28 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
     });
   });
 
+  it("returns MCP-shaped errors for server-mode credential-header rejections", async () => {
+    process.env.B2_HTTP_CREDENTIAL_MODE = "server";
+    await replaceHandle();
+
+    const res = await request(port, "POST", "/mcp", {
+      headers: { ...creds, ...modernHeaders("tools/list") },
+      body: LIST_TOOLS,
+    });
+    const body = parsedJson(res.body);
+
+    expect(res.status).toBe(400);
+    expect(body).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: -32001,
+        message: "B2 credential headers are not accepted in this mode",
+        data: { code: "credential_headers_rejected", status: 400 },
+      },
+    });
+  });
+
   it("ignores Last-Event-ID on stateless POST requests and does not replay", async () => {
     const res = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list"), "last-event-id": "stale-event" },

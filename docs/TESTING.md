@@ -22,8 +22,8 @@ format check, spelling, and listener diagnostics across the fast non-live
 layers. Coverage, slow lifecycle, and packed-package installation evidence stay
 in distinct scripts and CI jobs so their failures do not mask each other.
 Use `pnpm run smoke:local` for deterministic runtime-startup evidence without a
-deployed endpoint or real B2 credentials; CI runs it on Node.js 22.23.1 after
-the primary verification gate.
+deployed endpoint or real B2 credentials; CI runs it after the primary
+verification gate and again on the Node.js 22.3.0 runtime floor.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
@@ -215,12 +215,12 @@ pnpm run smoke:local
 ```
 
 `smoke:local` builds `dist/`, starts the built HTTP MCP server in a sanitized
-child process bound to `127.0.0.1` on an ephemeral port, connects with the
-official MCP client SDK, validates `server/discover` and `tools/list` against
+child process bound to `127.0.0.1` on an ephemeral port, connects with a minimal
+modern HTTP MCP client, validates `server/discover` and `tools/list` against
 the frozen full profile, sends a missing-credential request and expects a
-JSON-RPC error, blocks outbound B2 network access in the server worker, and
-shuts the child process down with a bounded timeout. It does not read `MCP_URL`
-and does not require real Backblaze B2 credentials.
+JSON-RPC error, blocks non-loopback runner egress and outbound B2 network access
+in the server worker, and shuts the child process down with a bounded timeout.
+It does not read `MCP_URL` and does not require real Backblaze B2 credentials.
 
 ## Supplemental External Client Smoke
 
