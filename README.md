@@ -203,7 +203,7 @@ the healthcheck probes the same port the server binds.
 | `B2_APPLICATION_KEY`                                          | stdio / HTTP `server` | —                     | Application key secret                                                                                                     |
 | `B2_MASTER_KEY_ID` / `B2_MASTER_KEY`                          | —                     | falls back to app key | Master credential for SDK-backed Partner/Groups tools; required with Partner API entitlement for those operations          |
 | `B2_REGION`                                                   | —                     | `us-west-004`         | Fallback/default S3-compatible endpoint region; authorized B2 responses override this for S3/report tools                    |
-| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Token appended to the outbound User-Agent (tag a deployment)                                                               |
+| `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Optional operator token appended _after_ the built-in `b2-mcp/<version>` product token on the outbound User-Agent (tag a deployment) |
 | `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
 | `B2_LOG_FILE`                                                 | —                     | stderr                | Optional path for redacted structured JSON logs. When set, the file replaces stderr; stdout is never used for logs          |
@@ -214,6 +214,13 @@ the healthcheck probes the same port the server binds.
 | `B2_HTTP_CREDENTIAL_MODE`                                     | HTTP only             | `headers`             | `headers`, `server`, or `principal`; unset preserves existing header-based clients. Set explicitly for hosted deployments  |
 | `B2_PRINCIPAL_CREDENTIAL_MAP`                                 | HTTP `principal`      | —                     | JSON map from verified MCP principal to a customer-managed credential reference                                            |
 | `B2_CREDENTIAL_<REF>_APPLICATION_KEY_ID` / `_APPLICATION_KEY` | HTTP `principal`      | —                     | Env-backed secret-broker material for the mapped reference                                                                 |
+
+Every outbound B2 API call (native B2 SDK and the S3-compatible data plane) carries
+a `b2-mcp` product token on its User-Agent so the traffic is attributable to this
+server. A published release emits `b2-mcp/<version>` (for example `b2-mcp/0.1.2`);
+a source checkout, CI, or a dev/prerelease build emits `b2-mcp/dev`. `B2_MCP_UA_SUFFIX`
+appends an optional operator token _after_ that built-in product token and does not
+replace it.
 
 S3-compatible and report tools use the `s3ApiUrl` returned by `b2_authorize_account` when a tool call authorizes; setting `B2_REGION` does not override that authorized region. On a cold authorization cache, the first S3/report call attempts B2 authorization to learn the authoritative region. That wait is bounded, and if authorization is temporarily unavailable, S3 tools fall back to the `B2_REGION` endpoint for that operation so the S3 data plane can still be attempted with the configured default. Once authorization succeeds, the derived S3 endpoint is cached for the server process lifetime; restart the process to pick up a later account-region migration. Authorized S3 endpoints remain restricted to HTTPS `s3.<region>.backblazeb2.com` hosts with no credentials, custom port, path, query, or fragment.
 
