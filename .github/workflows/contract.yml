@@ -120,8 +120,26 @@ jobs:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.guard.outputs.checkout-sha }}
+          ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
           persist-credentials: false
+      - name: Verify trusted live-test checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${EVENT_NAME}" == "workflow_call" ]]; then
+            if ! git merge-base --is-ancestor "${EXPECTED_CHECKOUT_SHA}" HEAD; then
+              echo "::error::live B2 checkout ${actual_sha} does not contain expected ${EXPECTED_CHECKOUT_SHA}"
+              exit 1
+            fi
+            exit 0
+          fi
+          if [[ "${actual_sha}" != "${EXPECTED_CHECKOUT_SHA}" ]]; then
+            echo "::error::live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}"
+            exit 1
+          fi
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
@@ -214,8 +232,26 @@ jobs:
       # actions/checkout v6, reviewed 2026-08-06.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
-          ref: ${{ needs.guard.outputs.checkout-sha }}
+          ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
           persist-credentials: false
+      - name: Verify trusted live-test checkout
+        env:
+          EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${EVENT_NAME}" == "workflow_call" ]]; then
+            if ! git merge-base --is-ancestor "${EXPECTED_CHECKOUT_SHA}" HEAD; then
+              echo "::error::live B2 checkout ${actual_sha} does not contain expected ${EXPECTED_CHECKOUT_SHA}"
+              exit 1
+            fi
+            exit 0
+          fi
+          if [[ "${actual_sha}" != "${EXPECTED_CHECKOUT_SHA}" ]]; then
+            echo "::error::live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}"
+            exit 1
+          fi
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:

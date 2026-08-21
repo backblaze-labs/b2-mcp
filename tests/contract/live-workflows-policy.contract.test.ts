@@ -227,9 +227,25 @@ describe("live secret workflow policy", () => {
     "$path checks out the guarded commit before running package code",
     ({ path }) => {
       const text = workflowText(path);
-      expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      if (path.endsWith("contract.yml")) {
+        expect(text).toContain(
+          "ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}",
+        );
+        expect(text).toContain("Verify trusted live-test checkout");
+        expect(text).toContain("EXPECTED_CHECKOUT_SHA: ${{ needs.guard.outputs.checkout-sha }}");
+        expect(text).toContain("EVENT_NAME: ${{ github.event_name }}");
+        expect(text).toContain('actual_sha="$(git rev-parse HEAD)"');
+        expect(text).toContain(
+          "live B2 checkout ${actual_sha} does not contain expected ${EXPECTED_CHECKOUT_SHA}",
+        );
+        expect(text).toContain(
+          "live B2 checkout resolved ${actual_sha}, expected ${EXPECTED_CHECKOUT_SHA}",
+        );
+        expect(text).not.toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      } else {
+        expect(text).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+      }
       expect(text).not.toContain('checkout_ref="ci-green"');
-      expect(text).not.toContain("ref: ci-green");
       expect(text).not.toContain("github.event_name == 'release'");
       expect(text).not.toContain("startsWith(github.ref, 'refs/tags/v')");
     },
@@ -252,6 +268,7 @@ describe("live secret workflow policy", () => {
     expect(text).toContain("refs/heads/ci-green");
     expect(text).toContain("git merge-base --is-ancestor");
     expect(text).toContain("workflow_call checkout-sha must be reachable from refs/heads/ci-green");
+    expect(text).toContain('checkout_sha="${WORKFLOW_CALL_CHECKOUT_SHA}"');
   });
 
   it("fails the live run when per-run cleanup leaks resources", () => {

@@ -580,8 +580,11 @@ live matrix is serialized on Node.js 22.23.1, Node.js 24, and Node.js 26.
 Release publication uses `.github/workflows/publish.yml`, which resolves the
 publish tag against `ci-green` and then calls the protected live contract
 workflow through `workflow_call` before npm publish. The caller passes only the
-reviewed checkout SHA. The called workflow's jobs bind `live-b2-contract` and
-resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and `B2_LIVE_TEST_ACCOUNT_ID` there;
-those values must not be duplicated or forwarded from repository or
-`npm-publish` secrets. GitHub Release publication events are not pre-release
-gates and are not used for live contract evidence.
+reviewed checkout SHA. The called workflow verifies that SHA is reachable from
+protected `ci-green`, checks out only protected `main` or `ci-green` refs, and
+confirms the resolved checkout contains the requested SHA before package code
+can run with live credentials. The called workflow's jobs bind
+`live-b2-contract` and resolve `LIVE_B2_KEY_ID`, `LIVE_B2_KEY`, and
+`B2_LIVE_TEST_ACCOUNT_ID` there; those values must not be duplicated or
+forwarded from repository or `npm-publish` secrets. GitHub Release publication
+events are not pre-release gates and are not used for live contract evidence.
