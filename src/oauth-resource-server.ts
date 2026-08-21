@@ -1,19 +1,19 @@
-import { createHmac, createSecretKey, randomBytes, type JsonWebKey } from "node:crypto";
-import { compactVerify, importJWK, type JWK } from "jose";
+import { createHmac, createSecretKey, type JsonWebKey, randomBytes } from "node:crypto";
 import {
-  OAuthError,
-  OAuthErrorCode,
+  type AuthInfo,
+  type AuthMetadataOptions,
   bearerAuthChallengeResponse,
   buildOAuthProtectedResourceMetadata,
   getOAuthProtectedResourceMetadataUrl,
-  oauthMetadataResponse,
-  verifyBearerToken,
-  type AuthInfo,
-  type AuthMetadataOptions,
+  OAuthError,
+  OAuthErrorCode,
   type OAuthMetadata,
   type OAuthProtectedResourceMetadata,
   type OAuthTokenVerifier,
+  oauthMetadataResponse,
+  verifyBearerToken,
 } from "@modelcontextprotocol/server";
+import { compactVerify, importJWK, type JWK } from "jose";
 import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
 
@@ -1075,8 +1075,16 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
         method: "POST",
         headers,
         body,
+        redirect: "manual",
         signal: this.introspectionSignal(),
       });
+      if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+        throw new OAuthDependencyError(
+          "OAuth authorization server unavailable",
+          "introspection_redirect",
+          response.status || undefined,
+        );
+      }
       if (response.status === 429 || response.status >= 500) {
         const retryAfter = Number(response.headers.get("retry-after"));
         throw new OAuthDependencyError(
@@ -1454,7 +1462,7 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
       // The caller is already gone and will not attach a handler. Keep the shared
       // fetch promise handled so a later rejection cannot surface as an unhandled
       // rejection and crash the process (fail-closed must stay a 503, not a crash).
-      void request.catch(() => {});
+      void request.catch(() => undefined);
       return Promise.reject(
         new OAuthDependencyError("OAuth authorization server unavailable", "request_aborted"),
       );

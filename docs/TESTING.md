@@ -122,16 +122,17 @@ automated format gate.
 
 Test files must use these suffixes so scripts do not depend on accidental paths:
 
-| Suffix                                     | Command owner           |
-| ------------------------------------------ | ----------------------- |
-| `tests/unit/*.unit.test.ts`                | `test:unit`             |
-| `tests/contract/*.contract.test.ts`        | `test:contract`         |
-| `tests/protocol/*.modern-protocol.test.ts` | `test:protocol:modern`  |
-| `tests/protocol/*.legacy-protocol.test.ts` | `test:protocol:legacy`  |
-| `tests/slow/*.slow.test.ts`                | `test:slow`             |
-| `tests/package/*.package.test.ts`          | `test:package`          |
-| `tests/live/*.integration.live.test.ts`    | `test:live:b2-integration` |
-| `tests/live/*.contract.live.test.ts`       | `test:live:b2-contract`    |
+| Suffix                                                | Command owner               |
+| ----------------------------------------------------- | --------------------------- |
+| `tests/unit/*.unit.test.ts`                           | `test:unit`                 |
+| `tests/contract/*.contract.test.ts`                   | `test:contract`             |
+| `tests/protocol/*.modern-protocol.test.ts`            | `test:protocol:modern`      |
+| `tests/protocol/*.legacy-protocol.test.ts`            | `test:protocol:legacy`      |
+| `tests/runtime-security/*.runtime-security.test.ts`   | `test:runtime-security`     |
+| `tests/slow/*.slow.test.ts`                           | `test:slow`                 |
+| `tests/package/*.package.test.ts`                     | `test:package`              |
+| `tests/live/*.integration.live.test.ts`               | `test:live:b2-integration`  |
+| `tests/live/*.contract.live.test.ts`                  | `test:live:b2-contract`     |
 
 Do not put credential-free assertions in live files. Source unit tests must
 import `src/`; only the slow/package layers may build or inspect `dist/`.
@@ -185,6 +186,7 @@ Protocol tests cover the SDK v2 serving matrix used in production:
 | HTTP  | Stateless 2025-era `initialize` compatibility through `createMcpHandler(..., { legacy })`. |
 | HTTP  | Header/body validation for `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name`.           |
 | HTTP  | GET/DELETE rejection, ignored `Mcp-Session-Id`, no event replay from `Last-Event-ID`.      |
+| HTTP  | Runtime-security regressions in `pnpm run test:runtime-security` for issue #197.          |
 | stdio | `serveStdio` factory wiring, including degraded capability lookup behavior.                |
 
 The modern HTTP path uses one `createMcpHandler` wrapped once by the

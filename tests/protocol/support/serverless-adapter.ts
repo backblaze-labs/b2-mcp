@@ -22,17 +22,17 @@ interface AdapterProtocolHarnessOptions {
   adapterName: string;
   clientName: string;
   fetch(request: Request, context: AdapterFetchContext): Promise<Response>;
-  envOverrides?: Record<string, string>;
+  envOverrides?: NodeJS.ProcessEnv;
   remoteAddress: string;
   subject: string;
   url: string;
 }
 
-export function setAdapterProtocolEnv(
+export function adapterProtocolEnv(
   savedEnv: NodeJS.ProcessEnv,
   options: Pick<AdapterProtocolHarnessOptions, "envOverrides" | "subject" | "url">,
-): void {
-  process.env = {
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
     ...savedEnv,
     NODE_ENV: "test",
     B2_REGISTER_ALL_TOOLS: "true",
@@ -51,8 +51,19 @@ export function setAdapterProtocolEnv(
     B2_OAUTH_AUDIENCE: options.url,
     B2_OAUTH_ALLOWED_SUBJECTS: options.subject,
     B2_MCP_PUBLIC_URL: options.url,
-    ...(options.envOverrides ?? {}),
   };
+  for (const [name, value] of Object.entries(options.envOverrides ?? {})) {
+    if (value === undefined) delete env[name];
+    else env[name] = value;
+  }
+  return env;
+}
+
+export function setAdapterProtocolEnv(
+  savedEnv: NodeJS.ProcessEnv,
+  options: Pick<AdapterProtocolHarnessOptions, "envOverrides" | "subject" | "url">,
+): void {
+  process.env = adapterProtocolEnv(savedEnv, options);
 }
 
 function authInfo(url: string, subject: string): AuthInfo {
