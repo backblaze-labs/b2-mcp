@@ -173,7 +173,7 @@ function validCleanupSummary(
 
 function finalizeFixture(options: {
   cleanupSummary?: unknown;
-  ledger?: "valid" | "empty" | "nonmatching";
+  ledger?: "valid" | "empty" | "incomplete" | "nonmatching";
   testOutcome?: string;
   validationSummary?: unknown;
 }) {
@@ -213,6 +213,17 @@ function finalizeFixture(options: {
           matchesRunPrefix: false,
           nameFingerprint: HEX_12,
           idFingerprint: HEX_12,
+        })}\n`,
+      );
+    } else if (options.ledger === "incomplete") {
+      writeFileSync(
+        ledgerPath,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          type: "bucket",
+          label: "integration",
+          runPrefix: LIVE_PREFIX,
+          matchesRunPrefix: true,
         })}\n`,
       );
     } else {
@@ -589,6 +600,9 @@ describe("live B2 evidence", () => {
     const nonmatchingLedger = finalizeFixture({ ledger: "nonmatching" });
     expect(nonmatchingLedger.status).toBe("cleanup failure");
     expect(nonmatchingLedger.resources.invalidEntries).toBe(1);
+    const incompleteLedger = finalizeFixture({ ledger: "incomplete" });
+    expect(incompleteLedger.status).toBe("cleanup failure");
+    expect(incompleteLedger.resources.invalidEntries).toBe(1);
   });
 
   it("validates cleanup summaries with finite counters and safe prefixes", () => {

@@ -320,8 +320,9 @@ function validateResourceLedgerEntry(entry, options = {}) {
     throw validationError("ledger.type is not an allowed live resource type");
   }
   safeToken(entry.label, "ledger.label", { required: false, maxLength: 48 });
-  const nameFingerprint = safeFingerprint(entry.nameFingerprint, "ledger.nameFingerprint");
-  if (nameFingerprint) sanitized.nameFingerprint = nameFingerprint;
+  sanitized.nameFingerprint = safeFingerprint(entry.nameFingerprint, "ledger.nameFingerprint", {
+    required: true,
+  });
   const idFingerprint = safeFingerprint(entry.idFingerprint, "ledger.idFingerprint");
   if (idFingerprint) sanitized.idFingerprint = idFingerprint;
   return sanitized;

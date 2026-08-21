@@ -91,21 +91,30 @@ describe("Contract: notification rules objectNamePrefix", () => {
         failContractPrerequisite(`notification fixture bucket not found: ${NOTIFICATION_BUCKET}`);
       }
       const ruleName = contractRuleName("notify-rule");
+      const existing = await callTool(server, "b2_get_bucket_notification_rules", { bucketId });
+      if (isError(existing)) {
+        failContractPrerequisite(
+          "could not read notification fixture rules",
+          liveErrorText(existing),
+        );
+      }
+      const retainedRules = (parseResult(existing).eventNotificationRules ?? []).filter(
+        (rule: { name?: string }) => rule.name !== ruleName,
+      );
+      const runRule = {
+        name: ruleName,
+        // objectNamePrefix deliberately omitted, so the tool must inject "".
+        eventTypes: ["b2:ObjectCreated:*"],
+        isEnabled: false,
+        targetConfiguration: {
+          targetType: "webhook",
+          url: "https://example.com/contract",
+        },
+      };
       try {
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
-          eventNotificationRules: [
-            {
-              name: ruleName,
-              // objectNamePrefix deliberately omitted, so the tool must inject "".
-              eventTypes: ["b2:ObjectCreated:*"],
-              isEnabled: false,
-              targetConfiguration: {
-                targetType: "webhook",
-                url: "https://example.com/contract",
-              },
-            },
-          ],
+          eventNotificationRules: [...retainedRules, runRule],
         });
         if (isError(res)) {
           const detail = liveErrorText(res);
@@ -120,12 +129,15 @@ describe("Contract: notification rules objectNamePrefix", () => {
           name: ruleName,
           id: bucketId,
         });
-        expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
+        const writtenRule = parseResult(res).eventNotificationRules?.find(
+          (rule: { name?: string }) => rule.name === ruleName,
+        );
+        expect(writtenRule?.objectNamePrefix).toBe("");
       } finally {
-        // Persistent fixture: clear only the rules we added; never delete the bucket.
+        // Persistent fixture: restore only the rules that existed before this test.
         const cleanup = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
-          eventNotificationRules: [],
+          eventNotificationRules: retainedRules,
         });
         if (isError(cleanup)) {
           throw new Error(`notification rule cleanup failed: ${liveErrorText(cleanup)}`);
