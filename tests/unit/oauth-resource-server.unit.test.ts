@@ -341,6 +341,36 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain("access-token");
   });
 
+  it("fails closed on an opaque-redirect introspection response from an edge runtime", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const opaque = {
+      type: "opaqueredirect",
+      status: 0,
+      ok: false,
+      headers: new Headers(),
+      json: async () => ({}),
+    } as unknown as Response;
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.redirect).toBe("manual");
+      return opaque;
+    });
+    const verifier = verifierWithFetch(fetchMock, { introspectionMaxRetries: 0 });
+
+    await expect(verifier.verifyAccessToken("access-token")).rejects.toMatchObject({
+      reason: "introspection_redirect",
+      dependencyStatus: undefined,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dependency: "oauth_introspection",
+        reason: "introspection_redirect",
+        status: undefined,
+      }),
+      "oauth.introspection.dependency_failed",
+    );
+  });
+
   it("retries one transient introspection failure before accepting a token", async () => {
     const fetchMock = vi
       .fn()

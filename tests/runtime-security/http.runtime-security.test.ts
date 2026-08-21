@@ -21,7 +21,14 @@ import { logger } from "../../src/utils/logger";
 import { _resetRateLimiter } from "../../src/utils/rate-limiter";
 import { MODERN_PROTOCOL_VERSION, modernBody, modernHeaders } from "../protocol/support/clients";
 import { adapterProtocolEnv } from "../protocol/support/serverless-adapter";
-import { closeHttpServer, creds, JSON_HEADERS, listenOnLocalhost, request } from "../support/http";
+import {
+  closeHttpServer,
+  creds,
+  JSON_HEADERS,
+  listenOnLocalhost,
+  request,
+  type Resp,
+} from "../support/http";
 import { introspectionResponse } from "../support/oauth-introspection";
 import { signedJwt } from "../support/oauth-jwks";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
@@ -195,6 +202,23 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForInFlightRequests(expected: number): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  let lastProbe: Resp | null = null;
+  while (Date.now() < deadline) {
+    lastProbe = await request(port, "GET", "/health");
+    if (lastProbe.status === 200 && parseJson(lastProbe.body).inFlightRequests === expected) {
+      return;
+    }
+    await sleep(10);
+  }
+  throw new Error(
+    `${ISSUE}: health probe did not observe ${expected} in-flight request; last probe was ${
+      lastProbe ? `${lastProbe.status} ${lastProbe.body}` : "not sent"
+    }`,
+  );
+}
+
 beforeEach(() => {
   resetNodeEnv();
   _resetRateLimiter();
@@ -253,7 +277,7 @@ describe("HTTP runtime security regression suite (#197)", () => {
     expect(
       malformed.status,
       `${ISSUE}: ${nodeRuntime.runtime} malformed JSON-RPC must be rejected predictably`,
-    ).toBeGreaterThanOrEqual(400);
+    ).toBe(400);
     const batchBody = parseJson(batch.body);
     expect(
       Array.isArray(batchBody),
@@ -461,9 +485,13 @@ describe("HTTP runtime security regression suite (#197)", () => {
     });
 
     const slow = slowInvalidPost();
-    await sleep(50);
-    const inFlightLimited = await request(port, "GET", "/mcp");
-    slow.destroy();
+    let inFlightLimited: Resp;
+    try {
+      await waitForInFlightRequests(1);
+      inFlightLimited = await request(port, "GET", "/mcp");
+    } finally {
+      slow.destroy();
+    }
 
     expect(
       inFlightLimited.status,
