@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Renamed the outbound User-Agent product token from `backblaze-b2-mcp` to
+  `b2-mcp` (`b2-mcp/<version>` on a published release, `b2-mcp/dev` otherwise)
+  across every SDK that talks to the B2 API. **Operators must sequence this
+  with the analytics side:** expand any Backblaze-side dashboards, alerts, and
+  token-keyed rate-limiting to accept BOTH `backblaze-b2-mcp` and `b2-mcp`
+  before rolling the fleet, then retire the old token only after every pod has
+  cycled onto `b2-mcp`. During a rolling deploy both tokens are emitted
+  simultaneously, so a dashboard keyed solely on the old token would otherwise
+  decay toward zero and page as a false partial outage. (#236)
+
 ### Fixed
 - `s3_put_bucket_lifecycle` now clears the bucket's S3 lifecycle configuration
   when passed an empty `rules` array, routing the clear through the destructive

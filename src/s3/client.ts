@@ -124,6 +124,9 @@ function customUserAgent(
   surface?: string,
 ): B2S3PeerClientConfig["customUserAgent"] {
   const entries: Array<[string, string]> = [
+    // AWS's customUserAgent expects [name, version] tuples, so this path can't
+    // consume the joined productToken(); both sites still single-source
+    // PRODUCT_NAME, so a name change stays in one place.
     [PRODUCT_NAME, productVersion()],
     ["transport", config.transport ?? "stdio"],
   ];
