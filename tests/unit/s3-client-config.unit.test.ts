@@ -109,7 +109,7 @@ describe("B2 S3 client configuration", () => {
     ]);
   });
 
-  it("emits [\"b2-mcp\", \"<semver>\"] for a published release build", async () => {
+  it('emits ["b2-mcp", "<semver>"] for a published release build', async () => {
     vi.resetModules();
     vi.doMock("../../src/version.js", async (importOriginal) => ({
       ...(await importOriginal<typeof import("../../src/version.js")>()),
