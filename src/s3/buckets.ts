@@ -11,7 +11,8 @@ import { checkDestructive } from "../utils/destructive-gate.js";
 //   - s3_head_bucket          — S3-surface reachability probe (used by the
 //                               bucket/S3-compatibility validator skill)
 //   - s3_put_bucket_lifecycle — S3 AbortIncompleteMultipartUpload, which the
-//                               native lifecycle API does not express
+//                               native lifecycle API does not express; empty
+//                               rules clear the S3 lifecycle configuration
 // A lifecycle rule carrying Expiration/NoncurrentVersionExpiration schedules
 // deletion of objects, so that variant is routed through the destructive gate.
 export function registerS3BucketTools(
@@ -42,46 +43,48 @@ export function registerS3BucketTools(
     "s3_put_bucket_lifecycle",
     {
       description:
-        "Set S3 lifecycle rules on a B2 bucket. Mainly for AbortIncompleteMultipartUpload (cancels incomplete multipart uploads — the native API can't). Also supports Expiration and NoncurrentVersionExpiration. Note: Transition/storage-class rules are NOT supported by B2.",
+        "Set S3 lifecycle rules on a B2 bucket, or pass an empty rules array to clear the S3 lifecycle configuration. Mainly for AbortIncompleteMultipartUpload (cancels incomplete multipart uploads — the native API can't). Also supports Expiration and NoncurrentVersionExpiration. Note: Transition/storage-class rules are NOT supported by B2.",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
-        rules: z.array(
-          z.object({
-            id: z.string().describe("A unique identifier for the rule."),
-            status: z.enum(["Enabled", "Disabled"]),
-            filter: z
-              .object({
-                prefix: z.string().optional().describe("Only apply to objects with this prefix."),
-              })
-              .optional(),
-            expiration: z
-              .object({
-                days: z
-                  .number()
-                  .int()
-                  .optional()
-                  .describe("Number of days after creation to expire the object."),
-                expiredObjectDeleteMarker: z.boolean().optional(),
-              })
-              .optional(),
-            noncurrentVersionExpiration: z
-              .object({
-                noncurrentDays: z
-                  .number()
-                  .int()
-                  .describe("Days after becoming noncurrent to expire the version."),
-              })
-              .optional(),
-            abortIncompleteMultipartUpload: z
-              .object({
-                daysAfterInitiation: z
-                  .number()
-                  .int()
-                  .describe("Cancel incomplete multipart uploads after this many days."),
-              })
-              .optional(),
-          }),
-        ),
+        rules: z
+          .array(
+            z.object({
+              id: z.string().describe("A unique identifier for the rule."),
+              status: z.enum(["Enabled", "Disabled"]),
+              filter: z
+                .object({
+                  prefix: z.string().optional().describe("Only apply to objects with this prefix."),
+                })
+                .optional(),
+              expiration: z
+                .object({
+                  days: z
+                    .number()
+                    .int()
+                    .optional()
+                    .describe("Number of days after creation to expire the object."),
+                  expiredObjectDeleteMarker: z.boolean().optional(),
+                })
+                .optional(),
+              noncurrentVersionExpiration: z
+                .object({
+                  noncurrentDays: z
+                    .number()
+                    .int()
+                    .describe("Days after becoming noncurrent to expire the version."),
+                })
+                .optional(),
+              abortIncompleteMultipartUpload: z
+                .object({
+                  daysAfterInitiation: z
+                    .number()
+                    .int()
+                    .describe("Cancel incomplete multipart uploads after this many days."),
+                })
+                .optional(),
+            }),
+          )
+          .describe("Lifecycle rules to set. Pass an empty array to clear the configuration."),
         confirm: z
           .boolean()
           .optional()

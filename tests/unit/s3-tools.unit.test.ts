@@ -867,6 +867,18 @@ describe("s3_put_bucket_lifecycle", () => {
     expect(command.input.LifecycleConfiguration.Rules[0].Filter.Prefix).toBe("logs/");
     expect(command.input.LifecycleConfiguration.Rules[0].Expiration.Days).toBe(90);
   });
+
+  it("clears lifecycle configuration when rules is empty", async () => {
+    const result = await callTool(server, "s3_put_bucket_lifecycle", {
+      bucket: "my-bucket",
+      rules: [],
+    });
+
+    expect(result.isError).toBeFalsy();
+    const command = sendSpy.mock.calls[0][0];
+    expect(command.constructor.name).toBe("DeleteBucketLifecycleCommand");
+    expect(command.input).toMatchObject({ Bucket: "my-bucket" });
+  });
 });
 
 describe("s3_get_bucket_location", () => {

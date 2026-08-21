@@ -204,7 +204,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "6cf6387cb398b095081f9379e3c8c9610ebc6ee8cdb103c9c5dff02f53733dd8",
+      "hash": "4a2e8d84a3738ca402f39743524f767ba5a74a69e0e87ffbda95593bf5333f23",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -348,7 +348,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "d5bdcd66faa57a0aac0bb73599c0d16b72d5bee2e02de4cbeacbbba6af1da971",
+      "hash": "3b2148d8ba760ffafc92fd69142c85b10332f552591216b68049ce9f9df83d23",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"

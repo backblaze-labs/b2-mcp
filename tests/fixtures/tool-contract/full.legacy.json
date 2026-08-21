@@ -1828,7 +1828,7 @@
     },
     {
       "name": "s3_put_bucket_lifecycle",
-      "descriptionSha256": "c85754636636c43c7e9cd46a744a1c35438e8340bca6086fa7123cb7e4f425aa",
+      "descriptionSha256": "465f2a170a6a2290fbee09cf15ad8bc532965a735c9a9dbcc15a6cf24be6bc15",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1841,6 +1841,7 @@
             "type": "boolean"
           },
           "rules": {
+            "description": "Lifecycle rules to set. Pass an empty array to clear the configuration.",
             "items": {
               "properties": {
                 "abortIncompleteMultipartUpload": {
@@ -2028,5 +2029,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "6cf6387cb398b095081f9379e3c8c9610ebc6ee8cdb103c9c5dff02f53733dd8"
+  "hash": "4a2e8d84a3738ca402f39743524f767ba5a74a69e0e87ffbda95593bf5333f23"
 }
