@@ -103,10 +103,31 @@ describe("B2 S3 client configuration", () => {
       secretAccessKey: "principal-secret",
     });
     expect(s3.customUserAgent).toEqual([
-      ["backblaze-b2-mcp", "dev"],
+      ["b2-mcp", "dev"],
       ["transport", "stdio"],
       ["surface", "s3-object-tools"],
     ]);
+  });
+
+  it('emits ["b2-mcp", "<semver>"] for a published release build', async () => {
+    vi.resetModules();
+    vi.doMock("../../src/version.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../../src/version.js")>()),
+      PRODUCT_NAME: "b2-mcp",
+      productVersion: () => "1.2.3",
+    }));
+    try {
+      const { buildB2S3ClientConfig: released } = await import("../../src/s3/client");
+      const s3 = released(config, { surface: "s3-object-tools" });
+      expect(s3.customUserAgent).toEqual([
+        ["b2-mcp", "1.2.3"],
+        ["transport", "stdio"],
+        ["surface", "s3-object-tools"],
+      ]);
+    } finally {
+      vi.doUnmock("../../src/version.js");
+      vi.resetModules();
+    }
   });
 
   it("adds the optional user-agent suffix after the surface tag", () => {
@@ -119,7 +140,7 @@ describe("B2 S3 client configuration", () => {
       );
 
       expect(s3.customUserAgent).toEqual([
-        ["backblaze-b2-mcp", "dev"],
+        ["b2-mcp", "dev"],
         ["transport", "http"],
         ["surface", "s3-object-tools"],
         ["suffix", "tenant-a"],

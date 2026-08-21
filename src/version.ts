@@ -71,3 +71,19 @@ export function productVersion(): string {
   if (isPublishedRelease) return VERSION;
   return "dev";
 }
+
+/**
+ * The binary/package product name emitted on outbound User-Agent headers.
+ * Kept here so every SDK's UA construction derives the token from one place.
+ */
+export const PRODUCT_NAME = "b2-mcp";
+
+/**
+ * The outbound product token identifying this server to Backblaze:
+ * `b2-mcp/<version>` on a published release, `b2-mcp/dev` otherwise.
+ *
+ * @returns The single product token shared by every SDK User-Agent.
+ */
+export function productToken(): string {
+  return `${PRODUCT_NAME}/${productVersion()}`;
+}

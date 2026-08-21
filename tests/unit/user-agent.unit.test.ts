@@ -10,7 +10,22 @@ describe("buildUserAgent", () => {
 
   it("includes product, release channel, and transport", () => {
     const ua = buildUserAgent(cfg({ transport: "http" }));
-    expect(ua).toBe("backblaze-b2-mcp/dev (http)");
+    expect(ua).toBe("b2-mcp/dev (http)");
+  });
+
+  it("emits b2-mcp/<semver> for a published release build", async () => {
+    vi.resetModules();
+    vi.doMock("../../src/version.js", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("../../src/version.js")>()),
+      productToken: () => "b2-mcp/1.2.3",
+    }));
+    try {
+      const { buildUserAgent: released } = await import("../../src/utils/user-agent");
+      expect(released(cfg({ transport: "http" }))).toBe("b2-mcp/1.2.3 (http)");
+    } finally {
+      vi.doUnmock("../../src/version.js");
+      vi.resetModules();
+    }
   });
 
   it("does not rebuild the SDK transport stack identity", () => {

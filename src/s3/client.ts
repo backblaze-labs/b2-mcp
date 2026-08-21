@@ -4,7 +4,7 @@ import type { B2AuthResponse, B2Config } from "../utils/types.js";
 import { runWithMcpRequestSignal } from "../request-context.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
-import { productVersion } from "../version.js";
+import { PRODUCT_NAME, productVersion } from "../version.js";
 import {
   createB2S3PeerClient,
   type B2S3PeerClient,
@@ -124,7 +124,10 @@ function customUserAgent(
   surface?: string,
 ): B2S3PeerClientConfig["customUserAgent"] {
   const entries: Array<[string, string]> = [
-    ["backblaze-b2-mcp", productVersion()],
+    // AWS's customUserAgent expects [name, version] tuples, so this path can't
+    // consume the joined productToken(); both sites still single-source
+    // PRODUCT_NAME, so a name change stays in one place.
+    [PRODUCT_NAME, productVersion()],
     ["transport", config.transport ?? "stdio"],
   ];
   if (surface) entries.push(["surface", surface]);
