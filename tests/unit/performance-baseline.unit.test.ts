@@ -243,6 +243,8 @@ describe("local performance baseline", () => {
     expect(probe.tlsSocketConnectBlocked).toBe(true);
     expect(probe.esmNetConnectBlocked).toBe(true);
     expect(probe.esmSocketConnectBlocked).toBe(true);
+    expect(probe.malformedLoopbackBlocked).toBe(true);
+    expect(probe.zeroPaddedLoopbackBlocked).toBe(true);
   });
 
   it("rejects direct worker mode without sanitized launcher state", () => {

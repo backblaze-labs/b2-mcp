@@ -15,13 +15,23 @@ function normalizedHost(host) {
     .toLowerCase();
 }
 
+function isLoopbackIpv4(host) {
+  return net.isIP(host) === 4 && host.split(".")[0] === "127";
+}
+
+function isMappedLoopbackIpv4(host) {
+  const mapped = host.match(/^::ffff:(?<ipv4>.+)$/u)?.groups?.ipv4;
+  return mapped ? isLoopbackIpv4(mapped) : false;
+}
+
 function isLocalHost(host) {
   const normalized = normalizedHost(host);
   return (
     normalized === "localhost" ||
     normalized === "::1" ||
     normalized === "0:0:0:0:0:0:0:1" ||
-    /^(?:::ffff:)?127(?:\.\d{1,3}){3}$/.test(normalized)
+    isLoopbackIpv4(normalized) ||
+    isMappedLoopbackIpv4(normalized)
   );
 }
 

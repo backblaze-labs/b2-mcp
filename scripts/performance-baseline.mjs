@@ -642,6 +642,12 @@ async function runEnvProbe() {
   const esmSocketConnectBlocked = blockedNetworkCall(() =>
     new EsmSocket().connect({ host: "example.com", port: 443 }),
   );
+  const malformedLoopbackBlocked = blockedNetworkCall(() =>
+    new net.Socket().connect({ host: "127.999.999.999", port: 443 }),
+  );
+  const zeroPaddedLoopbackBlocked = blockedNetworkCall(() =>
+    new net.Socket().connect({ host: "127.000.000.001", port: 443 }),
+  );
   return {
     importedDependency: typeof SignJWT === "function",
     observedSentinelNames,
@@ -656,6 +662,8 @@ async function runEnvProbe() {
     tlsSocketConnectBlocked,
     esmNetConnectBlocked,
     esmSocketConnectBlocked,
+    malformedLoopbackBlocked,
+    zeroPaddedLoopbackBlocked,
   };
 }
 
@@ -757,7 +765,9 @@ function runSelfTestEnvSanitizer() {
     !payload.probe.netSocketConnectBlocked ||
     !payload.probe.tlsSocketConnectBlocked ||
     !payload.probe.esmNetConnectBlocked ||
-    !payload.probe.esmSocketConnectBlocked
+    !payload.probe.esmSocketConnectBlocked ||
+    !payload.probe.malformedLoopbackBlocked ||
+    !payload.probe.zeroPaddedLoopbackBlocked
     ? 1
     : 0;
 }
