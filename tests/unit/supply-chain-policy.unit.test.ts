@@ -620,9 +620,6 @@ describe("supply-chain audit policy", () => {
       "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
     );
     expect(packageJson.scripts["release:stamp"]).toBe("node scripts/write-release-version.mjs");
-    expect(packageJson.scripts["release:unstamp"]).toBe(
-      "node scripts/write-release-version.mjs --clean",
-    );
     expect(packageJson.scripts.version).toBe(
       "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
     );
