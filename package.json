@@ -42,6 +42,8 @@
     "test:slow": "node scripts/run-vitest-layer.mjs slow",
     "test:coverage": "pnpm run build && node scripts/run-vitest-layer.mjs coverage",
     "test:diagnostics": "pnpm run build && node scripts/run-leak-diagnostics.mjs",
+    "perf:baseline": "pnpm run build && node --expose-gc scripts/performance-baseline.mjs",
+    "perf:baseline:enforce": "pnpm run build && node --expose-gc scripts/performance-baseline.mjs --enforce",
     "test:integration": "node scripts/reject-live-alias.mjs integration",
     "test:contract:live": "node scripts/reject-live-alias.mjs contract",
     "test:integration:live": "node scripts/reject-live-alias.mjs integration",

@@ -41,6 +41,39 @@ The individual deterministic layers are:
 | `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners and open-handle warnings. |
 | `pnpm run smoke:local`  | Builds, starts local HTTP MCP on 127.0.0.1:0, validates discovery/tools, and stops.   |
 
+## Advisory Local Performance Baseline
+
+Issue
+[#199](https://github.com/backblaze-labs/b2-mcp/issues/199) tracks the local
+performance regression baseline. It is advisory first and is not part of
+`pnpm run verify` until repeated main-branch runs prove the budgets stable.
+
+Run it with:
+
+```bash
+pnpm run perf:baseline
+```
+
+The script builds the package, uses fake deterministic credentials, and writes:
+
+- Machine-readable artifact: `reports/performance/local-baseline.json`
+- Human-readable summary: `reports/performance/local-baseline-summary.md`
+
+The baseline measures local protocol overhead only: stdio startup-to-ready,
+`tools/list` latency and serialized response size for the `full`,
+`phase1-default`, and `read-only` profiles, modest concurrent
+`server/discover`, heap growth across repeated local `tools/list` requests, and
+fake OAuth/JWKS cold-cache and warm-cache verification. It does not use real B2
+credentials and does not claim to measure end-to-end Backblaze B2 latency.
+
+Budgets and runtime applicability decisions live in
+[`../performance-baseline.json`](../performance-baseline.json). Node stdio and
+Node HTTP are locally timed. Vercel and Cloudflare Worker adapters are covered
+by the shared OAuth/JWKS fake-path budget here; platform cold starts and edge
+placement latency stay outside this deterministic local baseline. Once the
+reviewed baseline is stable, `pnpm run perf:baseline:enforce` is the blocking
+form to promote into CI.
+
 Local scripts can call each deterministic layer independently. Required PR jobs
 keep the major evidence classes distinct so coverage regression, contract drift,
 protocol failure, production-audit findings, package-budget drift, and broken
