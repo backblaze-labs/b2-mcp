@@ -38,6 +38,7 @@
     "test:protocol:modern": "node scripts/run-vitest-layer.mjs protocol-modern",
     "test:protocol:legacy": "node scripts/run-vitest-layer.mjs protocol-legacy",
     "test:protocol": "pnpm run build && pnpm run test:protocol:modern && pnpm run test:protocol:legacy",
+    "test:runtime-security": "node scripts/run-vitest-layer.mjs protocol-modern -- tests/protocol/http.runtime-security.modern-protocol.test.ts",
     "test:slow": "node scripts/run-vitest-layer.mjs slow",
     "test:coverage": "pnpm run build && node scripts/run-vitest-layer.mjs coverage",
     "test:diagnostics": "pnpm run build && node scripts/run-leak-diagnostics.mjs",

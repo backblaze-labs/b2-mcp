@@ -185,6 +185,7 @@ Protocol tests cover the SDK v2 serving matrix used in production:
 | HTTP  | Stateless 2025-era `initialize` compatibility through `createMcpHandler(..., { legacy })`. |
 | HTTP  | Header/body validation for `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name`.           |
 | HTTP  | GET/DELETE rejection, ignored `Mcp-Session-Id`, no event replay from `Last-Event-ID`.      |
+| HTTP  | Runtime-security regressions in `pnpm run test:runtime-security` for issue #197.          |
 | stdio | `serveStdio` factory wiring, including degraded capability lookup behavior.                |
 
 The modern HTTP path uses one `createMcpHandler` wrapped once by the
