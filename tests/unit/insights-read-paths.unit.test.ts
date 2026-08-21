@@ -489,6 +489,28 @@ describe("insight native bucket read paths", () => {
     expect(nativeClient.listBuckets).not.toHaveBeenCalled();
   });
 
+  it("treats an empty scoped bucket input as a miss, not a full-scope enumeration", async () => {
+    // Every non-null name satisfies name.includes(""), so a blank input must be a
+    // miss rather than dump the whole authorized namespace back to the caller.
+    const nativeClient = createNativeClient({
+      listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),
+    });
+    const tools = registerTools(createPagedReportClient({}).client, nativeClient, [
+      { id: "bucket-1", name: "photos" },
+      { id: "bucket-2", name: "invoices" },
+    ]);
+
+    const result = parseResult(
+      await tools.call("b2_unfinished_uploads", { bucket: "", max_uploads: 10 }),
+    );
+
+    expect(result.error).toBe("bucket_not_uniquely_resolved");
+    expect(result.candidates).toEqual([]);
+    expect(result.note).not.toContain("photos");
+    expect(result.note).not.toContain("invoices");
+    expect(nativeClient.listBuckets).not.toHaveBeenCalled();
+  });
+
   it("surfaces only partially-matching in-scope names for an ambiguous scoped input", async () => {
     const nativeClient = createNativeClient({
       listBucketsError: Object.assign(new Error("unauthorized"), { status: 401 }),

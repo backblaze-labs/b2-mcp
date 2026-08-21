@@ -713,6 +713,10 @@ async function resolveFromAuthorizedScope(
 ): Promise<{ name?: string; id?: string; candidates?: string[]; outOfScope?: boolean } | null> {
   const { allowedBuckets } = await auth.getAuth();
   if (!allowedBuckets || allowedBuckets.length === 0) return null;
+  // An empty/blank input substring-matches every bucket, so treat it as a miss
+  // rather than let `includes("")` enumerate the whole scope. The tool schemas
+  // reject empty bucket values too; this is defense in depth for the guarantee.
+  if (input.trim() === "") return { outOfScope: true };
   const exact = allowedBuckets.find((b) => b.name === input || b.id === input);
   // A key restricted by name (not id) may report a null name; matched by id we
   // still have a usable id and fall back to the supplied input for display.
@@ -1015,7 +1019,7 @@ export function registerInsightTools(
       description:
         "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
       inputSchema: {
-        bucket: z.string().describe("Bucket name or bucketId to inspect."),
+        bucket: z.string().min(1).describe("Bucket name or bucketId to inspect."),
         limit: z
           .number()
           .int()
@@ -1142,7 +1146,7 @@ export function registerInsightTools(
       description:
         "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing, bounded by max_uploads and an internal time budget — on a very bloated bucket it returns a truncated result (and wasted_gb may be a lower bound) and recommends a lifecycle rule.",
       inputSchema: {
-        bucket: z.string().describe("Bucket name or bucketId to inspect."),
+        bucket: z.string().min(1).describe("Bucket name or bucketId to inspect."),
         older_than_days: z
           .number()
           .int()
