@@ -105,7 +105,7 @@ describe("smoke script release contract", () => {
     expect(smokeScript).toContain("B2_MCP_EXPECTED_TOOL_PROFILE");
     expect(smokeScript).toContain("B2_MCP_ALLOW_ANY_TOOL_PROFILE");
     expect(smokeScript).toContain("liveToolContractSnapshot");
-    expect(smokeScript).toContain("fixtureHash");
+    expect(`${smokeScript}\n${smokeContractScript}`).toContain("fixtureHash");
     expect(`${smokeScript}\n${smokeContractScript}`).toContain(
       "tools/list matches expected frozen profile contract",
     );

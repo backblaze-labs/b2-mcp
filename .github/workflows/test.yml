@@ -55,6 +55,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Run local verification entry point
         run: pnpm run verify
+      - name: Run local runtime smoke
+        run: pnpm run smoke:local
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload primary verification reports
         if: always()
@@ -305,6 +307,24 @@ jobs:
             exit 1
           fi
           node scripts/packed-consumer-smoke.mjs --tarball "$tarball"
+      - name: Run local runtime smoke on Node.js 22.3.0
+        run: |
+          set -euo pipefail
+          tarball="$(find reports/package-install-smoke -name '*.tgz' -type f -print -quit)"
+          if [[ -z "$tarball" ]]; then
+            echo "::error::package-install-smoke artifact did not contain a packed tarball"
+            exit 1
+          fi
+          tarball_path="$(realpath "$tarball")"
+          smoke_root="$(mktemp -d)"
+          (
+            cd "$smoke_root"
+            npm init -y >/dev/null
+            npm install --ignore-scripts --omit=dev --no-audit --no-fund "$tarball_path"
+          )
+          B2_MCP_LOCAL_SMOKE_ROOT="$smoke_root/node_modules/@backblaze-labs/b2-mcp" \
+            B2_MCP_LOCAL_SMOKE_SKIP_BUILD=true \
+            node scripts/local-mcp-smoke.mjs
 
   production-dependency-audit-matrix:
     name: production dependency audit / Node ${{ matrix.node-version }}

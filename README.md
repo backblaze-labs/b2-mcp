@@ -504,6 +504,7 @@ pnpm start                        # stdio transport
 pnpm run start:http --port 3000   # MCP 2026-07-28 HTTP transport
 b2-mcp --help                     # installed package CLI help after publish/install
 b2-mcp --transport http --port 3000 # installed package HTTP command after publish/install
+pnpm run smoke:local        # deterministic local MCP smoke; no endpoint or B2 credentials
 pnpm run smoke:client       # advisory SDK client smoke; requires existing dist/, no B2 calls
 pnpm run smoke:inspector    # advisory locked Inspector CLI smoke; requires existing dist/
 ```

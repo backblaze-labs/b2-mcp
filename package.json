@@ -52,6 +52,7 @@
     "verify": "pnpm run typecheck && pnpm run build && pnpm run check:doc-examples && pnpm run check:deployment-contracts && pnpm run lint && pnpm run lint:docs && pnpm run lint:links && pnpm run validate:skills && pnpm run format:check && pnpm run spell && pnpm run test:runtime-security && pnpm run test:diagnostics",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",
+    "smoke:local": "node scripts/local-mcp-smoke.mjs",
     "smoke:client": "node scripts/mcp-client-smoke.mjs",
     "smoke:inspector": "node scripts/mcp-inspector-smoke.mjs",
     "generate:tool-contract": "pnpm run build && node scripts/generate-tool-contract.mjs",

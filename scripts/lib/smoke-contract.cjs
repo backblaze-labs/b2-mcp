@@ -15,6 +15,17 @@ function candidateProfiles(toolContract, expectedProfile, allowAnyProfile) {
   return allowAnyProfile ? Object.entries(toolContract.profiles) : [];
 }
 
+function toolContractSnapshot(tools, helpers) {
+  const sortedTools = [...(tools ?? [])]
+    .filter((tool) => tool?.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const names = sortedTools.map((tool) => tool.name);
+  return {
+    names,
+    hash: helpers.fixtureHash({ names, tools: sortedTools.map(helpers.normalizeTool) }),
+  };
+}
+
 function profileMatchDetail(snapshot, nameMatchedProfile, matchedProfile) {
   const actualHash = snapshot.hash.slice(0, 12);
   if (matchedProfile) {
@@ -73,4 +84,5 @@ function evaluateProfileContract({
 module.exports = {
   arraysEqual,
   evaluateProfileContract,
+  toolContractSnapshot,
 };

@@ -395,10 +395,21 @@ describe("Cloudflare Worker adapter", () => {
       }),
       validAuthInfo,
     );
-    const body = (await response.json()) as { error: string };
+    const body = (await response.json()) as {
+      error: { message: string; data: { code: string; status: number } };
+      id: number;
+      jsonrpc: string;
+    };
 
     expect(response.status).toBe(400);
-    expect(body.error).toMatch(/not accepted/i);
+    expect(body).toMatchObject({
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        message: expect.stringMatching(/not accepted/i),
+        data: { code: "credential_headers_rejected", status: 400 },
+      },
+    });
   });
 
   it("fails closed when Worker header credential mode is not explicitly enabled", async () => {

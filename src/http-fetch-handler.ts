@@ -47,6 +47,7 @@ const DEFAULT_MAX_IN_FLIGHT_PER_KEY = 20;
 const STATELESS_ACTIVE_SESSIONS = 0;
 const STATELESS_OPEN_SUBSCRIPTIONS = 0;
 const MODERN_MCP_PROTOCOL_VERSION = "2026-07-28";
+const JSON_RPC_CREDENTIAL_RESOLUTION_FAILED = -32001;
 const JSON_RPC_HEADER_BODY_MISMATCH = -32020;
 const LOCALHOST_NAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -323,11 +324,26 @@ function runIdleSweep(): void {
   sweepAuthManagerCache(now);
 }
 
-function credentialErrorResponse(err: unknown): Response {
-  if (err instanceof CredentialResolutionError) {
-    return jsonResponse(err.status, { error: err.message });
+type CredentialErrorShape = { kind: "plain" } | { kind: "json-rpc"; id: string | number | null };
+
+const PLAIN_CREDENTIAL_ERROR: CredentialErrorShape = { kind: "plain" };
+
+function credentialErrorResponse(err: unknown, shape: CredentialErrorShape): Response {
+  const isCredentialError = err instanceof CredentialResolutionError;
+  const status = isCredentialError ? err.status : 500;
+  const message = isCredentialError ? err.message : "Credential resolution failed";
+  if (shape.kind === "json-rpc") {
+    return jsonResponse(
+      status,
+      jsonRpcErrorBody(
+        JSON_RPC_CREDENTIAL_RESOLUTION_FAILED,
+        message,
+        shape.id,
+        isCredentialError ? { code: err.code, status } : undefined,
+      ),
+    );
   }
-  return jsonResponse(500, { error: "Credential resolution failed" });
+  return jsonResponse(status, { error: message });
 }
 
 function internalMcpErrorResponse(): Response {
@@ -437,8 +453,13 @@ interface ProtocolRejection {
 
 interface ProtocolPreflight {
   protocolOnly: boolean;
+  credError: CredentialErrorShape;
   rejection?: ProtocolRejection;
   sdkHeaders?: Record<string, string | string[] | undefined>;
+}
+
+function plainPreflight(protocolOnly: boolean): ProtocolPreflight {
+  return { protocolOnly, credError: PLAIN_CREDENTIAL_ERROR };
 }
 
 function inferredModernHeaders(
@@ -461,13 +482,13 @@ function classifyProtocolPreflight(
   parsed: ParsedJsonBody,
 ): ProtocolPreflight {
   const httpMethod = request.method.toUpperCase();
-  if (httpMethod === "GET" || httpMethod === "DELETE") return { protocolOnly: true };
-  if (httpMethod !== "POST") return { protocolOnly: false };
+  if (httpMethod === "GET" || httpMethod === "DELETE") return plainPreflight(true);
+  if (httpMethod !== "POST") return plainPreflight(false);
   if (!isJsonContentType(headerValue(sanitizedHeaders, "content-type") ?? null)) {
-    return { protocolOnly: true };
+    return plainPreflight(true);
   }
 
-  if (!parsed.ok) return { protocolOnly: false };
+  if (!parsed.ok) return plainPreflight(false);
   const outcome = classifyInboundRequest({
     httpMethod,
     protocolVersionHeader: headerValue(sanitizedHeaders, "mcp-protocol-version"),
@@ -476,12 +497,16 @@ function classifyProtocolPreflight(
     body: parsed.body,
   });
 
-  if (outcome.kind === "reject") return { protocolOnly: true };
-  if (outcome.kind !== "modern") return { protocolOnly: false };
+  if (outcome.kind === "reject") return plainPreflight(true);
+  if (outcome.kind !== "modern") return plainPreflight(false);
   if (outcome.classification.revision !== MODERN_MCP_PROTOCOL_VERSION) {
-    return { protocolOnly: true };
+    return plainPreflight(true);
   }
 
+  const credError: CredentialErrorShape = {
+    kind: "json-rpc",
+    id: requestIdFromParsedBody(parsed.body),
+  };
   const sdkHeaders = inferredModernHeaders(
     sanitizedHeaders,
     outcome.classification.revision,
@@ -489,23 +514,23 @@ function classifyProtocolPreflight(
   );
   const headerName = headerValue(sanitizedHeaders, "mcp-name");
   const bodyMethod = requestMethodFromParsedBody(parsed.body);
-  if (bodyMethod !== "tools/call" || !headerName) return { protocolOnly: false, sdkHeaders };
-
   const bodyName = toolNameFromParsedBody(parsed.body);
-  if (headerName === bodyName) return { protocolOnly: false, sdkHeaders };
+  if (bodyMethod !== "tools/call" || !headerName || headerName === bodyName) {
+    return { protocolOnly: false, credError, sdkHeaders };
+  }
 
-  const requestId = requestIdFromParsedBody(parsed.body);
   return {
     protocolOnly: false,
+    credError,
     rejection: {
       status: 400,
       code: JSON_RPC_HEADER_BODY_MISMATCH,
       reason: "mcp-name-mismatch",
-      requestId,
+      requestId: credError.id,
       body: jsonRpcErrorBody(
         JSON_RPC_HEADER_BODY_MISMATCH,
         "Bad Request: Mcp-Name header does not match tool name",
-        requestId,
+        credError.id,
         { mismatch: { header: headerName, body: bodyName ?? null } },
       ),
     },
@@ -639,6 +664,7 @@ function publicCredentialHeaderRejection(
   provider: CredentialProvider,
   request: Request,
   authInfo: AuthInfo | null | undefined,
+  responseShape: CredentialErrorShape,
 ): Response | null {
   if (!shouldRejectPublicCredentialHeaders(provider)) return null;
   if (!hasCredentialHeaders(headersToIncoming(request.headers))) return null;
@@ -647,7 +673,7 @@ function publicCredentialHeaderRejection(
     return null;
   } catch (err) {
     logCredentialResolutionFailure(provider, request, authInfo, err);
-    return credentialErrorResponse(err);
+    return credentialErrorResponse(err, responseShape);
   }
 }
 
@@ -832,17 +858,9 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
         );
       }
 
-      const credentialHeaderRejection = publicCredentialHeaderRejection(
-        credentialProvider,
-        request,
-        authInfo,
-      );
-      if (credentialHeaderRejection) {
-        return responseWithCleanup(credentialHeaderRejection, () => finalize(limitKey, prepared));
-      }
-
       const sanitizedHeaders = sanitizedHeadersFromRequest(request);
-      const parsedBody = method === "POST" ? parsedJsonBody(rawBody) : ({ ok: true } as const);
+      const parsedBody =
+        method === "POST" ? parsedJsonBody(rawBody) : ({ ok: true, body: undefined } as const);
       const protocolPreflight = classifyProtocolPreflight(request, sanitizedHeaders, parsedBody);
       if (protocolPreflight.rejection) {
         logProtocolRejection(request, protocolPreflight.rejection);
@@ -850,6 +868,15 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
           jsonResponse(protocolPreflight.rejection.status, protocolPreflight.rejection.body),
           () => finalize(limitKey, prepared),
         );
+      }
+      const credentialHeaderRejection = publicCredentialHeaderRejection(
+        credentialProvider,
+        request,
+        authInfo,
+        protocolPreflight.credError,
+      );
+      if (credentialHeaderRejection) {
+        return responseWithCleanup(credentialHeaderRejection, () => finalize(limitKey, prepared));
       }
       if (protocolPreflight.protocolOnly) {
         const response = await dispatchToMcp(
@@ -867,7 +894,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
         resolved = credentialProvider.resolve({ req: credentialRequest });
       } catch (err) {
         logCredentialResolutionFailure(credentialProvider, request, authInfo, err);
-        return responseWithCleanup(credentialErrorResponse(err), () =>
+        return responseWithCleanup(credentialErrorResponse(err, protocolPreflight.credError), () =>
           finalize(limitKey, prepared),
         );
       }
@@ -901,7 +928,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
           resolved.cacheKey,
         );
       } catch (err) {
-        return responseWithCleanup(credentialErrorResponse(err), () =>
+        return responseWithCleanup(credentialErrorResponse(err, protocolPreflight.credError), () =>
           finalize(limitKey, prepared),
         );
       }
