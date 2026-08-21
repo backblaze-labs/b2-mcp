@@ -5,6 +5,9 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const nodeRequire = createRequire(__filename);
+const liveB2Capabilities = nodeRequire("../../scripts/lib/live-b2-capabilities.cjs") as {
+  LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: string[];
+};
 const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
   assertSecretSafe(value: unknown, env?: Record<string, string>): void;
   classifyLiveRun(outcomes: {
@@ -58,6 +61,176 @@ const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
   ): unknown;
   writeEvidenceJson(path: string, value: unknown, env?: Record<string, string>): void;
 };
+
+const LIVE_PREFIX = "mcp-contract-run1";
+const EXPECTED_PROFILE = "live-b2-contract";
+const HEX_12 = "a".repeat(12);
+const HASH_64 = "b".repeat(64);
+
+function validValidationSummary(
+  options: {
+    accountMatched?: boolean;
+    expectedToolProfile?: string;
+    expectedToolProfileApproved?: boolean;
+    forbiddenCapabilitiesGranted?: string[];
+    missingRequiredCapabilities?: string[];
+    notificationBucketValidated?: boolean;
+    toolProfileMatches?: boolean;
+  } = {},
+) {
+  const requiredCapabilities = liveB2Capabilities.LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES;
+  const missingRequiredCapabilities = options.missingRequiredCapabilities ?? [];
+  const forbiddenCapabilitiesGranted = options.forbiddenCapabilitiesGranted ?? [];
+  const toolProfileMatches = options.toolProfileMatches ?? true;
+  return {
+    schemaVersion: 1,
+    status: "passed",
+    statusReason: "live B2 validation passed for this Node matrix leg",
+    isolation: {
+      runPrefix: LIVE_PREFIX,
+      safePrefix: true,
+      sourceIncludesRunId: true,
+    },
+    configuration: {
+      expectedToolProfile: options.expectedToolProfile ?? EXPECTED_PROFILE,
+      expectedToolProfileApproved: options.expectedToolProfileApproved ?? true,
+      actualToolProfile: {
+        toolCount: 42,
+        namesHash: HASH_64,
+        matchesExpectedProfile: toolProfileMatches,
+        missingExpectedTools: toolProfileMatches ? [] : ["b2_list_buckets"],
+        unexpectedTools: [],
+      },
+    },
+    target: {
+      accountMatchedExpectedLiveTestAccount: options.accountMatched ?? true,
+      accountFingerprint: HEX_12,
+      expectedAccountFingerprint: HEX_12,
+      notificationBucketConfigured: true,
+      notificationBucketValidated: options.notificationBucketValidated ?? true,
+      notificationRuleToolRegistered: true,
+      notificationBucketFingerprint: HEX_12,
+    },
+    credentialPolicy: {
+      nonMasterApplicationKey: forbiddenCapabilitiesGranted.length === 0,
+      overbroadCredentialRejected: forbiddenCapabilitiesGranted.length > 0,
+      requiredCapabilitiesPresent: requiredCapabilities.filter(
+        (capability) => !missingRequiredCapabilities.includes(capability),
+      ),
+      missingRequiredCapabilities,
+      forbiddenCapabilitiesGranted,
+    },
+  };
+}
+
+function validCleanupSummary(
+  options: { dryRun?: boolean; errors?: number; leakedBuckets?: number; outcome?: string } = {},
+) {
+  return evidence.createCleanupEvidence({
+    options: { prefix: LIVE_PREFIX, dryRun: options.dryRun ?? false },
+    stats: {
+      buckets: 1,
+      objectVersions: 0,
+      multipartUploads: 0,
+      leakedBuckets: options.leakedBuckets ?? 0,
+      errors: options.errors ?? 0,
+    },
+    outcome: options.outcome ?? "passed",
+  });
+}
+
+function finalizeFixture(options: {
+  cleanupSummary?: unknown;
+  ledger?: "valid" | "empty" | "nonmatching";
+  testOutcome?: string;
+  validationSummary?: unknown;
+}) {
+  const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-finalize-"));
+  try {
+    const out = join(dir, "final.json");
+    const ledgerPath = join(dir, "resources.jsonl");
+    const cleanupPath = join(dir, "cleanup.json");
+    const validationPath = join(dir, "validation.json");
+    writeFileSync(
+      validationPath,
+      `${JSON.stringify(options.validationSummary ?? validValidationSummary())}\n`,
+    );
+    writeFileSync(
+      cleanupPath,
+      `${JSON.stringify(options.cleanupSummary ?? validCleanupSummary())}\n`,
+    );
+
+    if ((options.ledger ?? "valid") === "valid") {
+      evidence.recordLiveResource(
+        {
+          type: "bucket",
+          label: "integration",
+          name: `${LIVE_PREFIX}-integration-abc123`,
+          id: "bucket-id-sensitive",
+        },
+        { ledgerPath, prefix: LIVE_PREFIX },
+      );
+    } else if (options.ledger === "nonmatching") {
+      writeFileSync(
+        ledgerPath,
+        `${JSON.stringify({
+          schemaVersion: 1,
+          type: "bucket",
+          label: "integration",
+          runPrefix: LIVE_PREFIX,
+          matchesRunPrefix: false,
+          nameFingerprint: HEX_12,
+          idFingerprint: HEX_12,
+        })}\n`,
+      );
+    } else {
+      writeFileSync(ledgerPath, "");
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        "scripts/live-b2-evidence.mjs",
+        "finalize",
+        "--out",
+        out,
+        "--resource-ledger",
+        ledgerPath,
+        "--cleanup-summary",
+        cleanupPath,
+        "--validation-summary",
+        validationPath,
+        "--preflight-outcome",
+        "success",
+        "--test-outcome",
+        options.testOutcome ?? "success",
+        "--cleanup-outcome",
+        "success",
+      ],
+      {
+        cwd: join(__dirname, "../.."),
+        encoding: "utf8",
+        env: {
+          PATH: process.env.PATH ?? "",
+          B2_APPLICATION_KEY_ID: "fake-key-id-secret",
+          B2_APPLICATION_KEY: "fake-application-key-secret",
+          B2_LIVE_NOTIFICATION_BUCKET: "fake-notification-bucket",
+          B2_LIVE_TEST_ACCOUNT_ID: "fake-account-id",
+          B2_MCP_EXPECTED_TOOL_PROFILE: EXPECTED_PROFILE,
+          B2_MCP_LIVE_RUN_PREFIX: LIVE_PREFIX,
+        },
+      },
+    );
+    expect(result.status).toBe(0);
+    return JSON.parse(readFileSync(out, "utf8")) as {
+      status: string;
+      cleanup: { stats: { errors: number; leakedBuckets: number } | null };
+      resources: { createdCount: number; invalidEntries: number; parseErrors: number };
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 describe("live B2 evidence", () => {
   it("classifies configuration, product, and cleanup failures distinctly", () => {
@@ -273,6 +446,64 @@ describe("live B2 evidence", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("does not trust status-only validation summaries during finalization", () => {
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({ accountMatched: false }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({ expectedToolProfile: "full" }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({ forbiddenCapabilitiesGranted: ["writeKeys"] }),
+      }).status,
+    ).toBe("configuration blocked");
+    expect(
+      finalizeFixture({
+        validationSummary: validValidationSummary({
+          missingRequiredCapabilities: ["writeBucketNotifications"],
+        }),
+      }).status,
+    ).toBe("configuration blocked");
+  });
+
+  it("requires cleanup summaries to prove non-dry-run cleanup with no leftovers", () => {
+    expect(
+      finalizeFixture({
+        cleanupSummary: validCleanupSummary({ dryRun: true }),
+      }).status,
+    ).toBe("cleanup failure");
+    expect(
+      finalizeFixture({
+        cleanupSummary: validCleanupSummary({ errors: 1 }),
+      }).status,
+    ).toBe("cleanup failure");
+    expect(
+      finalizeFixture({
+        cleanupSummary: validCleanupSummary({ leakedBuckets: 1 }),
+      }).status,
+    ).toBe("cleanup failure");
+    expect(
+      finalizeFixture({
+        cleanupSummary: validCleanupSummary({ outcome: "configuration blocked" }),
+      }).status,
+    ).toBe("cleanup failure");
+  });
+
+  it("requires a successful run to publish isolated resource ledger evidence", () => {
+    const missingLedger = finalizeFixture({ ledger: "empty" });
+    expect(missingLedger.status).toBe("cleanup failure");
+    expect(missingLedger.resources.createdCount).toBe(0);
+
+    const nonmatchingLedger = finalizeFixture({ ledger: "nonmatching" });
+    expect(nonmatchingLedger.status).toBe("cleanup failure");
+    expect(nonmatchingLedger.resources.invalidEntries).toBe(1);
   });
 
   it("validates cleanup summaries with finite counters and safe prefixes", () => {

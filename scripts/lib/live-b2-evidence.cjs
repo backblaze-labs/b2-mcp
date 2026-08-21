@@ -290,6 +290,9 @@ function validateResourceLedgerEntry(entry, options = {}) {
   if (typeof entry.matchesRunPrefix !== "boolean") {
     throw validationError("ledger entry prefix match flag is invalid");
   }
+  if (entry.matchesRunPrefix !== true) {
+    throw validationError("ledger entry does not match this run prefix");
+  }
   const prefix = safeRunPrefix(entry.runPrefix);
   const expectedPrefix = options.expectedPrefix ? safeRunPrefix(options.expectedPrefix) : null;
   if (expectedPrefix && prefix !== expectedPrefix) {
@@ -458,6 +461,12 @@ function validateValidationSummary(value, options = {}) {
     statusReason:
       optionalSafeDetail(value.statusReason, "validationStatusReason", options.env) ?? null,
     expectedToolProfile,
+    expectedToolProfileApproved: configuration.expectedToolProfileApproved === true,
+    isolation: {
+      runPrefix: prefix,
+      safePrefix: isolation.safePrefix === true,
+      sourceIncludesRunId: isolation.sourceIncludesRunId === true,
+    },
     actualToolProfile: {
       toolCount: safeCounter(actualToolProfile.toolCount ?? 0, "actualToolProfile.toolCount"),
       namesHash: safeHash(actualToolProfile.namesHash, "actualToolProfile.namesHash"),
@@ -552,6 +561,78 @@ function readValidationSummary(path, options = {}) {
   }
 }
 
+function listIncludesAll(values, requiredValues) {
+  const valueSet = new Set(Array.isArray(values) ? values : []);
+  return requiredValues.every((value) => valueSet.has(value));
+}
+
+function validationSummaryProvesLiveB2Policy(validationSummary, options = {}) {
+  try {
+    if (!validationSummary?.present || validationSummary.validationError) return false;
+    const summary = validationSummary.summary;
+    if (!summary || summary.status !== "passed") return false;
+    const expectedToolProfile = safeToken(options.expectedToolProfile, "expectedToolProfile", {
+      required: false,
+    });
+    if (expectedToolProfile && summary.expectedToolProfile !== expectedToolProfile) return false;
+    const expectedPrefix = options.expectedPrefix ? safeRunPrefix(options.expectedPrefix) : null;
+    if (expectedPrefix) {
+      if (summary.isolation?.runPrefix !== expectedPrefix) return false;
+      if (summary.isolation?.safePrefix !== true) return false;
+      if (summary.isolation?.sourceIncludesRunId !== true) return false;
+    }
+    if (summary.expectedToolProfileApproved !== true) return false;
+    if (summary.actualToolProfile?.matchesExpectedProfile !== true) return false;
+    if (!summary.actualToolProfile?.namesHash) return false;
+    if (summary.actualToolProfile?.toolCount <= 0) return false;
+    if ((summary.actualToolProfile?.missingExpectedTools ?? []).length > 0) return false;
+    if ((summary.actualToolProfile?.unexpectedTools ?? []).length > 0) return false;
+    if (summary.target?.accountMatchedExpectedLiveTestAccount !== true) return false;
+    if (!summary.target?.accountFingerprint) return false;
+    if (!summary.target?.expectedAccountFingerprint) return false;
+    if (summary.target?.notificationBucketConfigured !== true) return false;
+    if (summary.target?.notificationBucketValidated !== true) return false;
+    if (summary.target?.notificationRuleToolRegistered !== true) return false;
+    if (!summary.target?.notificationBucketFingerprint) return false;
+    const credentialPolicy = summary.credentialPolicy ?? {};
+    if (credentialPolicy.nonMasterApplicationKey !== true) return false;
+    if (credentialPolicy.overbroadCredentialRejected === true) return false;
+    if ((credentialPolicy.missingRequiredCapabilities ?? []).length > 0) return false;
+    if ((credentialPolicy.forbiddenCapabilitiesGranted ?? []).length > 0) return false;
+    if (
+      !listIncludesAll(
+        credentialPolicy.requiredCapabilitiesPresent,
+        options.requiredCapabilities ?? [],
+      )
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cleanupSummaryProvesCleanup(cleanupSummary) {
+  if (!cleanupSummary?.present || cleanupSummary.validationError) return false;
+  const summary = cleanupSummary.summary;
+  if (!summary || summary.outcome !== "passed") return false;
+  if (summary.dryRun) return false;
+  const cleanup = summary.cleanup;
+  if (!cleanup) return false;
+  return cleanup.errors === 0 && cleanup.leakedBuckets === 0;
+}
+
+function resourceLedgerProvesIsolation(resourceLedger, options = {}) {
+  const ledger = resourceLedger ?? {};
+  if (ledger.truncated === true) return false;
+  if (Number(ledger.parseErrors ?? 0) > 0) return false;
+  if (Number(ledger.invalidEntries ?? 0) > 0) return false;
+  const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+  if (options.requireEntries && entries.length === 0) return false;
+  return entries.every((entry) => entry?.matchesRunPrefix === true);
+}
+
 function createFinalEvidence({
   status,
   statusReason,
@@ -640,6 +721,7 @@ module.exports = {
   createCleanupEvidence,
   createFinalEvidence,
   createPreflightEvidence,
+  cleanupSummaryProvesCleanup,
   liveResourceEvidenceEntry,
   liveResourceLedgerPath,
   normalizeOutcome,
@@ -649,9 +731,11 @@ module.exports = {
   readResourceLedger,
   readValidationSummary,
   recordLiveResource,
+  resourceLedgerProvesIsolation,
   validateCleanupSummary,
   validateResourceLedgerEntry,
   validateValidationSummary,
+  validationSummaryProvesLiveB2Policy,
   workflowContext,
   writeEvidenceJson,
 };

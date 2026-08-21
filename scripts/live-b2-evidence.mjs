@@ -20,11 +20,14 @@ const {
 
 const {
   classifyLiveRun,
+  cleanupSummaryProvesCleanup,
   createFinalEvidence,
   createPreflightEvidence,
   readCleanupSummary,
   readResourceLedger,
   readValidationSummary,
+  resourceLedgerProvesIsolation,
+  validationSummaryProvesLiveB2Policy,
   writeEvidenceJson,
 } = liveB2Evidence;
 
@@ -153,7 +156,7 @@ function finalStatusReason(status) {
     : status === "product failure"
       ? "live B2 tests failed after matrix-leg validation and cleanup completed"
       : status === "cleanup failure"
-        ? "cleanup failed or reported leftovers"
+        ? "cleanup failed, reported leftovers, or isolation evidence was incomplete"
         : "matrix-leg live B2 validation blocked tests before resource mutation";
 }
 
@@ -260,20 +263,23 @@ function writeFinalEvidence(options) {
   const validationRequired = Boolean(options.validationSummary);
   const validationTrusted =
     !validationRequired ||
-    (validationSummary.present &&
-      !validationSummary.validationError &&
-      validationSummary.summary?.status === "passed");
+    validationSummaryProvesLiveB2Policy(validationSummary, {
+      expectedPrefix,
+      expectedToolProfile: process.env.B2_MCP_EXPECTED_TOOL_PROFILE,
+      requiredCapabilities,
+      forbiddenCapabilities,
+    });
   const cleanupRequired = Boolean(options.cleanupSummary);
-  const cleanupTrusted =
-    !cleanupRequired ||
-    (cleanupSummary.present &&
-      !cleanupSummary.validationError &&
-      cleanupSummary.summary?.outcome !== "cleanup failure");
+  const cleanupTrusted = !cleanupRequired || cleanupSummaryProvesCleanup(cleanupSummary);
+  const ledgerTrusted = resourceLedgerProvesIsolation(ledger, {
+    requireEntries: options.testOutcome === "success",
+  });
   const status = classifyLiveRun({
     preflightOutcome:
       rawPreflightOutcome === "success" && validationTrusted ? "success" : "failure",
     testOutcome: options.testOutcome || "skipped",
-    cleanupOutcome: rawCleanupOutcome === "success" && cleanupTrusted ? "success" : "failure",
+    cleanupOutcome:
+      rawCleanupOutcome === "success" && cleanupTrusted && ledgerTrusted ? "success" : "failure",
   });
 
   writeEvidenceJson(
