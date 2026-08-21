@@ -42,6 +42,7 @@ const requiredJobNames = [
   "unit/coverage",
   "MCP contract",
   "modern and legacy protocol/transport",
+  "observability/logging behavior",
   "package install smoke",
   "runtime engine floor",
   "production dependency audit",
@@ -124,6 +125,7 @@ describe("CI workflow policy", () => {
       "unit-coverage",
       "mcp-contract",
       "protocol-transport",
+      "observability-logging",
       "package-install-smoke",
       "runtime-engine-floor",
       "production-dependency-audit",
@@ -176,12 +178,13 @@ describe("CI workflow policy", () => {
     expect(qualityJob).not.toContain("coverage/**");
   });
 
-  it("keeps docs, coverage, contract, protocol, package, audit, and slow gates distinct", () => {
+  it("keeps docs, coverage, contract, protocol, observability, package, audit, and slow gates distinct", () => {
     const docsJob = workflowJob("docs-spelling-links");
     const coverageJob = workflowJob("unit-coverage-matrix");
     const coverageAggregateJob = workflowJob("unit-coverage");
     const contractJob = workflowJob("mcp-contract");
     const protocolJob = workflowJob("protocol-transport");
+    const observabilityJob = workflowJob("observability-logging");
     const packageJob = workflowJob("package-install-smoke");
     const runtimeFloorJob = workflowJob("runtime-engine-floor");
     const auditJob = workflowJob("production-dependency-audit-matrix");
@@ -206,6 +209,10 @@ describe("CI workflow policy", () => {
     expect(contractJob).toContain("docs/tool-profile-contract.json");
     expect(protocolJob).toContain("pnpm run test:protocol");
     expect(protocolJob).toContain("protocol-*.json");
+    expect(observabilityJob).toContain("name: observability/logging behavior");
+    expect(observabilityJob).toContain("pnpm run test:observability");
+    expect(observabilityJob).toContain("reports/junit/observability.xml");
+    expect(observabilityJob).toContain("reports/vitest/observability.json");
     expect(packageJob).toContain("pnpm run test:package");
     expect(packageJob).toContain("npm-pack-manifest.json");
     expect(packageJob).toContain("runtime-floor-pack.json");
@@ -259,6 +266,9 @@ describe("CI workflow policy", () => {
     expect(summaryJob).toContain("Modern MCP protocol | 2026-07-28");
     expect(summaryJob).toContain(
       "Legacy MCP fallback | 2025-era stateless initialize compatibility",
+    );
+    expect(summaryJob).toContain(
+      "Observability logging | Structured lifecycle, warning, failure, redaction, and stream-separation canaries",
     );
     expect(summaryJob).toContain("Linux deterministic Node matrix | 22.23.1, 24, 26");
     expect(summaryJob).toContain("Runtime engine floor | Node.js 22.3.0 package install smoke");

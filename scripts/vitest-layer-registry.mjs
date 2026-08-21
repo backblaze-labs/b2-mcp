@@ -34,6 +34,13 @@ export const vitestLayerProjects = {
     coverage: true,
     serial: true,
   },
+  observability: {
+    include: ["tests/observability/**/*.observability.test.ts"],
+    live: false,
+    public: true,
+    coverage: true,
+    serial: true,
+  },
   slow: {
     include: ["tests/slow/**/*.slow.test.ts"],
     live: false,

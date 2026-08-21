@@ -218,6 +218,13 @@ export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions =
   return sanitizeValue(value, [], new WeakSet<object>(), options);
 }
 
+export function sanitizeStructuredLogValue(
+  value: unknown,
+  options: SanitizerOptions = {},
+): unknown {
+  return sanitizeLogValue(value, [], new WeakSet<object>(), options);
+}
+
 function sanitizeValue(
   value: unknown,
   path: string[],
@@ -242,6 +249,33 @@ function sanitizeValue(
     output[key] = isSensitiveField(key, path)
       ? REDACTED
       : sanitizeValue(child, [...path, key], seen, options);
+  }
+  return output;
+}
+
+function sanitizeLogValue(
+  value: unknown,
+  path: string[],
+  seen: WeakSet<object>,
+  options: SanitizerOptions,
+): unknown {
+  if (value instanceof Error) return sanitizeError(value, options);
+  if (typeof value === "string") return sanitizeText(value, options);
+  if (value === null || typeof value !== "object") return value;
+  if (value instanceof Date) return value;
+  if (Buffer.isBuffer(value)) return value;
+  if (seen.has(value)) return "[circular]";
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeLogValue(item, path, seen, options));
+  }
+
+  const output: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    output[key] = isSensitiveField(key, path)
+      ? REDACTED
+      : sanitizeLogValue(child, [...path, key], seen, options);
   }
   return output;
 }
