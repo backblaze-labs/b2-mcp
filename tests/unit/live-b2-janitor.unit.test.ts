@@ -20,6 +20,7 @@ interface JanitorModule {
     options: { prefix: string; dryRun?: boolean; bestEffort?: boolean; summaryJson: string },
     stats: {
       buckets: number;
+      notificationRules: number;
       objectVersions: number;
       multipartUploads: number;
       leakedBuckets: number;
@@ -97,6 +98,7 @@ describe("live B2 janitor", () => {
         { prefix: "mcp-contract-123", summaryJson },
         {
           buckets: 1,
+          notificationRules: 0,
           objectVersions: 0,
           multipartUploads: 0,
           leakedBuckets: 0,

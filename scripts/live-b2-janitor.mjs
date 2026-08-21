@@ -12,6 +12,7 @@ const {
   CONTRACT_BUCKET_PREFIX,
   bucketMatchesPrefix,
   cleanupContractBucketWithTools,
+  cleanupContractNotificationRulesWithTools,
   createCleanupStats,
   isSafeLivePrefix,
   normalizeLivePrefix,
@@ -70,6 +71,10 @@ function exactSecretMissing() {
 
 function expectedLiveTestAccountId() {
   return String(process.env.B2_LIVE_TEST_ACCOUNT_ID ?? "").trim();
+}
+
+function expectedNotificationBucketName() {
+  return String(process.env.B2_LIVE_NOTIFICATION_BUCKET ?? "").trim();
 }
 
 function fingerprint(value) {
@@ -173,6 +178,50 @@ function selectedBuckets(buckets, options) {
   );
 }
 
+async function cleanupNotificationFixtureRules(b2Client, tools, options, stats) {
+  const bucketName = expectedNotificationBucketName();
+  if (!bucketName) {
+    stats.errors++;
+    console.error("live-b2-janitor: B2_LIVE_NOTIFICATION_BUCKET is required for rule cleanup");
+    return;
+  }
+  let bucket;
+  try {
+    bucket = (await b2Client.listBuckets({ bucketName })).buckets?.find(
+      (candidate) => candidate.bucketName === bucketName,
+    );
+  } catch (err) {
+    stats.errors++;
+    console.error(
+      `live-b2-janitor: could not list notification bucket: ${redactDetail(
+        err?.message ?? err,
+        options.prefix,
+      )}`,
+    );
+    return;
+  }
+  if (!bucket?.bucketId) {
+    stats.errors++;
+    console.error(
+      `live-b2-janitor: notification bucket fingerprint=${fingerprint(bucketName)} is not visible`,
+    );
+    return;
+  }
+  await cleanupContractNotificationRulesWithTools(
+    (name, args) => callTool(tools, name, args),
+    bucket,
+    {
+      dryRun: options.dryRun,
+      error: (message) => console.error(`live-b2-janitor: ${message}`),
+      fingerprint,
+      log: (message) => console.log(`live-b2-janitor: ${message}`),
+      prefix: options.prefix,
+      redact: (message) => redactDetail(message, options.prefix),
+      stats,
+    },
+  );
+}
+
 async function main() {
   let options;
   try {
@@ -241,6 +290,7 @@ async function main() {
     redact: (message) => redactDetail(message, options.prefix),
     stats,
   };
+  await cleanupNotificationFixtureRules(b2Client, tools, options, stats);
   for (const bucket of buckets) {
     await cleanupContractBucketWithTools(
       (name, args) => callTool(tools, name, args),
@@ -250,7 +300,7 @@ async function main() {
   }
 
   console.log(
-    `live-b2-janitor: summary buckets=${stats.buckets} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
+    `live-b2-janitor: summary buckets=${stats.buckets} notificationRules=${stats.notificationRules} objectVersions=${stats.objectVersions} multipartUploads=${stats.multipartUploads} leakedBuckets=${stats.leakedBuckets} errors=${stats.errors}`,
   );
   safeWriteJanitorSummary(
     options,

@@ -30,6 +30,7 @@ import {
   redactedLiveResourceDetail,
   type ContractBucketRef,
 } from "./support/contract-buckets";
+import { liveB2Evidence } from "../support/live-b2-evidence-types";
 import { hasLiveB2Credentials, assertAndSelectLiveB2Test } from "../support/live-b2-test-guard";
 
 const HAS_CREDS = hasLiveB2Credentials();
@@ -89,12 +90,13 @@ describe("Contract: notification rules objectNamePrefix", () => {
       if (!bucketId) {
         failContractPrerequisite(`notification fixture bucket not found: ${NOTIFICATION_BUCKET}`);
       }
+      const ruleName = contractRuleName("notify-rule");
       try {
         const res = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
           eventNotificationRules: [
             {
-              name: contractRuleName("notify-rule"),
+              name: ruleName,
               // objectNamePrefix deliberately omitted, so the tool must inject "".
               eventTypes: ["b2:ObjectCreated:*"],
               isEnabled: false,
@@ -112,13 +114,22 @@ describe("Contract: notification rules objectNamePrefix", () => {
           }
           throw new Error(`notification rules shape contract failed: ${detail}`);
         }
+        liveB2Evidence.recordLiveResource({
+          type: "notification-rule",
+          label: "notify-rule",
+          name: ruleName,
+          id: bucketId,
+        });
         expect(parseResult(res).eventNotificationRules?.[0]?.objectNamePrefix).toBe("");
       } finally {
         // Persistent fixture: clear only the rules we added; never delete the bucket.
-        await callTool(server, "b2_set_bucket_notification_rules", {
+        const cleanup = await callTool(server, "b2_set_bucket_notification_rules", {
           bucketId,
           eventNotificationRules: [],
         });
+        if (isError(cleanup)) {
+          throw new Error(`notification rule cleanup failed: ${liveErrorText(cleanup)}`);
+        }
       }
     },
     30_000,

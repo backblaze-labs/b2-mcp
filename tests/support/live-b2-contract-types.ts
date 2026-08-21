@@ -18,6 +18,7 @@ export type CleanupCallTool = (
 
 export interface CleanupStats {
   buckets: number;
+  notificationRules: number;
   objectVersions: number;
   multipartUploads: number;
   keys: number;
@@ -56,6 +57,11 @@ export interface LiveB2ContractModule {
   };
   bucketMatchesPrefix(bucketName: string, prefix: string): boolean;
   cleanupContractBucketWithTools(
+    callTool: CleanupCallTool,
+    bucket: ContractBucketRefLike,
+    options?: CleanupOptions,
+  ): Promise<boolean>;
+  cleanupContractNotificationRulesWithTools(
     callTool: CleanupCallTool,
     bucket: ContractBucketRefLike,
     options?: CleanupOptions,

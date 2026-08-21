@@ -135,6 +135,7 @@ function parseResult(result) {
 function createCleanupStats() {
   return {
     buckets: 0,
+    notificationRules: 0,
     objectVersions: 0,
     multipartUploads: 0,
     keys: 0,
@@ -178,6 +179,80 @@ async function clearNotificationRules(callTool, bucket, options = {}) {
     options,
   );
   if (isError(result)) recordCleanupError(options, "notification-rule cleanup failed", result);
+}
+
+function notificationRulesFromResult(result) {
+  const parsed = parseResult(result);
+  return Array.isArray(parsed?.eventNotificationRules) ? parsed.eventNotificationRules : [];
+}
+
+function ruleMatchesPrefix(rule, prefix) {
+  return bucketMatchesPrefix(rule?.name, prefix);
+}
+
+async function cleanupContractNotificationRulesWithTools(callTool, bucket, options = {}) {
+  if (!bucket?.bucketId) return false;
+  const prefix = normalizeLivePrefix(options.prefix || liveRunPrefix());
+  const listed = await callOptional(
+    callTool,
+    "b2_get_bucket_notification_rules",
+    { bucketId: bucket.bucketId },
+    options,
+  );
+  if (isError(listed)) {
+    recordCleanupError(options, "notification-rule listing failed", listed);
+    return false;
+  }
+
+  const rules = notificationRulesFromResult(listed);
+  const runRules = rules.filter((rule) => ruleMatchesPrefix(rule, prefix));
+  if (runRules.length === 0) return false;
+  if (options.stats) options.stats.notificationRules += runRules.length;
+  if (options.log) {
+    options.log(
+      `cleaning notificationRules=${runRules.length} bucketFingerprint=${options.fingerprint?.(
+        bucket.bucketName || bucket.bucketId,
+      )}`,
+    );
+  }
+  if (options.dryRun) return false;
+
+  const retainedRules = rules.filter((rule) => !ruleMatchesPrefix(rule, prefix));
+  const updated = await callOptional(
+    callTool,
+    "b2_set_bucket_notification_rules",
+    {
+      bucketId: bucket.bucketId,
+      eventNotificationRules: retainedRules,
+      confirm: true,
+    },
+    options,
+  );
+  if (isError(updated)) {
+    recordCleanupError(options, "notification-rule cleanup failed", updated);
+    return false;
+  }
+
+  const verified = await callOptional(
+    callTool,
+    "b2_get_bucket_notification_rules",
+    { bucketId: bucket.bucketId },
+    options,
+  );
+  if (isError(verified)) {
+    recordCleanupError(options, "notification-rule verification failed", verified);
+    return false;
+  }
+  const leftovers = notificationRulesFromResult(verified).filter((rule) =>
+    ruleMatchesPrefix(rule, prefix),
+  );
+  if (leftovers.length > 0) {
+    if (options.stats) options.stats.errors++;
+    const error = options.error || (() => undefined);
+    error(`notification-rule cleanup left ${leftovers.length} run-prefixed rule(s)`);
+    return false;
+  }
+  return true;
 }
 
 async function abortMultipartUploads(callTool, bucketName, options = {}) {
@@ -368,6 +443,7 @@ module.exports = {
   abortMultipartUploads,
   bucketMatchesPrefix,
   cleanupContractBucketWithTools,
+  cleanupContractNotificationRulesWithTools,
   contractBucketName,
   contractObjectKey,
   contractRuleName,

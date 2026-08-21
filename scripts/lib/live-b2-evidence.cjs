@@ -28,7 +28,7 @@ const FINGERPRINT_PATTERN = new RegExp(`^[a-f0-9]{${FINGERPRINT_HEX_LENGTH}}$`);
 const HASH_PATTERN = new RegExp(`^[a-f0-9]{${HASH_HEX_LENGTH}}$`);
 const MAX_LEDGER_ENTRIES = 100;
 const MAX_TOOL_DIFFS = 50;
-const LIVE_RESOURCE_TYPES = new Set(["bucket"]);
+const LIVE_RESOURCE_TYPES = new Set(["bucket", "notification-rule"]);
 
 class EvidenceValidationError extends Error {
   constructor(message) {
@@ -347,6 +347,7 @@ function readResourceLedger(ledgerPath, optionsOrLimit = {}) {
 function cleanupStatsSnapshot(stats = {}) {
   return {
     buckets: safeCounter(stats.buckets ?? 0, "cleanup.buckets"),
+    notificationRules: safeCounter(stats.notificationRules ?? 0, "cleanup.notificationRules"),
     objectVersions: safeCounter(stats.objectVersions ?? 0, "cleanup.objectVersions"),
     multipartUploads: safeCounter(stats.multipartUploads ?? 0, "cleanup.multipartUploads"),
     leakedBuckets: safeCounter(stats.leakedBuckets ?? 0, "cleanup.leakedBuckets"),
