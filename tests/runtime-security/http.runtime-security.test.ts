@@ -8,6 +8,7 @@
 
 import * as http from "node:http";
 import { S3Client } from "@aws-sdk/client-s3";
+import type { HttpTransport } from "@backblaze-labs/b2-sdk";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
   closeCloudflareMcpHandlerForTests,
@@ -18,12 +19,24 @@ import { buildHttpServer, type HttpServerHandle } from "../../src/http-server";
 import { invalidateAuthManagerCache } from "../../src/server";
 import { logger } from "../../src/utils/logger";
 import { _resetRateLimiter } from "../../src/utils/rate-limiter";
+import { MODERN_PROTOCOL_VERSION, modernBody, modernHeaders } from "../protocol/support/clients";
+import { adapterProtocolEnv } from "../protocol/support/serverless-adapter";
 import { closeHttpServer, creds, JSON_HEADERS, listenOnLocalhost, request } from "../support/http";
 import { introspectionResponse } from "../support/oauth-introspection";
 import { signedJwt } from "../support/oauth-jwks";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { installSdkTransport } from "../support/sdk-test-helpers";
-import { MODERN_PROTOCOL_VERSION, modernBody, modernHeaders } from "./support/clients";
+import {
+  authorizeResponse,
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "../support/sdk-test-helpers";
+import {
+  runtimeApplicability,
+  serverlessRuntimeNames,
+  type ServerlessRuntimeName,
+} from "./support/applicability";
 
 const ISSUE = "issue-197-runtime-security";
 const SERVERLESS_URL = "https://mcp.example.com/mcp";
@@ -31,57 +44,18 @@ const CANARY_BODY = "B2_MCP_CANARY_SECRET_runtime_security_body";
 const CANARY_B2_SECRET = "runtime-b2-secret-value";
 const CANARY_BEARER = "runtime-bearer-token-value";
 const CANARY_APP_SECRET = "runtime-app-secret-value";
+const RUNTIME_SECURITY_SUBJECT = "subject";
 
 let handle: HttpServerHandle | null = null;
 let port = 0;
 
 const savedEnv = { ...process.env };
 
-const runtimeApplicability = [
-  {
-    runtime: "node-http",
-    adapter: "buildHttpServer",
-    decision: "required",
-    coverage: [
-      "malformed-json-rpc",
-      "oversized-json-rpc",
-      "host-origin-binding",
-      "rate-limit",
-      "in-flight-limit",
-      "secret-safe-errors-and-logs",
-      "destructive-gate",
-    ],
-  },
-  {
-    runtime: "vercel",
-    adapter: "vercelMcpFetch",
-    decision: "required-shared-serverless-runtime",
-    coverage: [
-      "oauth-token-fail-closed",
-      "resource-binding",
-      "introspection-redirect",
-      "jwks-redirect",
-      "unsafe-oauth-endpoint",
-    ],
-  },
-  {
-    runtime: "cloudflare-worker",
-    adapter: "cloudflareWorkerFetch",
-    decision: "required-shared-serverless-runtime",
-    coverage: [
-      "oauth-token-fail-closed",
-      "resource-binding",
-      "introspection-redirect",
-      "jwks-redirect",
-      "unsafe-oauth-endpoint",
-    ],
-  },
-] as const;
-
-type ServerlessRuntimeName = "vercel" | "cloudflare-worker";
+const nodeRuntime = runtimeApplicability["node-http"];
 
 interface ServerlessRuntime {
   readonly name: ServerlessRuntimeName;
+  readonly applicability: (typeof runtimeApplicability)[ServerlessRuntimeName];
   fetch(request: Request, envOverrides?: NodeJS.ProcessEnv): Promise<Response>;
 }
 
@@ -96,57 +70,41 @@ function resetNodeEnv(overrides: NodeJS.ProcessEnv = {}): void {
 }
 
 function serverlessEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {
-    ...savedEnv,
-    NODE_ENV: "test",
-    B2_REGISTER_ALL_TOOLS: "true",
-    B2_HTTP_CREDENTIAL_MODE: "server",
-    B2_APPLICATION_KEY_ID: "runtime-app-id",
-    B2_APPLICATION_KEY: CANARY_APP_SECRET,
-    B2_ALLOWED_HOSTS: "mcp.example.com",
-    B2_DESTRUCTIVE_POLICY: "block",
-    B2_OAUTH_ISSUER: "https://issuer.example.com/",
-    B2_OAUTH_AUTHORIZATION_ENDPOINT: "https://issuer.example.com/oauth2/authorize",
-    B2_OAUTH_TOKEN_ENDPOINT: "https://issuer.example.com/oauth2/token",
-    B2_OAUTH_INTROSPECTION_ENDPOINT: "https://issuer.example.com/oauth2/introspect",
-    B2_OAUTH_INTROSPECTION_CLIENT_ID: "client",
-    B2_OAUTH_INTROSPECTION_CLIENT_SECRET: "secret",
-    B2_OAUTH_INTROSPECTION_RETRIES: "0",
-    B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "250",
-    B2_OAUTH_RESOURCE: SERVERLESS_URL,
-    B2_OAUTH_AUDIENCE: SERVERLESS_URL,
-    B2_OAUTH_ALLOWED_SUBJECTS: "subject",
-    B2_MCP_PUBLIC_URL: SERVERLESS_URL,
-  };
-  for (const [name, value] of Object.entries(overrides ?? {})) {
-    if (value === undefined) delete env[name];
-    else env[name] = value;
-  }
-  return env;
+  return adapterProtocolEnv(savedEnv, {
+    subject: RUNTIME_SECURITY_SUBJECT,
+    url: SERVERLESS_URL,
+    envOverrides: {
+      B2_APPLICATION_KEY_ID: "runtime-app-id",
+      B2_APPLICATION_KEY: CANARY_APP_SECRET,
+      B2_OAUTH_INTROSPECTION_RETRIES: "0",
+      B2_OAUTH_INTROSPECTION_TIMEOUT_MS: "250",
+      ...overrides,
+    },
+  });
 }
 
-const serverlessRuntimes: ServerlessRuntime[] = [
-  {
-    name: "vercel",
-    async fetch(input, envOverrides = {}) {
-      process.env = serverlessEnv(envOverrides);
-      return vercelMcpFetch(input, { remoteAddress: "198.51.100.22" });
-    },
+const serverlessFetchers: Record<ServerlessRuntimeName, ServerlessRuntime["fetch"]> = {
+  async vercel(input, envOverrides = {}) {
+    process.env = serverlessEnv(envOverrides);
+    return vercelMcpFetch(input, { remoteAddress: "198.51.100.22" });
   },
-  {
-    name: "cloudflare-worker",
-    async fetch(input, envOverrides = {}) {
-      process.env = { ...savedEnv, NODE_ENV: "test" };
-      return cloudflareWorkerFetch(
-        input,
-        serverlessEnv({ B2_ALLOW_LOCAL_FILES: "false", ...envOverrides }),
-        {
-          remoteAddress: "198.51.100.23",
-        },
-      );
-    },
+  async "cloudflare-worker"(input, envOverrides = {}) {
+    process.env = { ...savedEnv, NODE_ENV: "test" };
+    return cloudflareWorkerFetch(
+      input,
+      serverlessEnv({ B2_ALLOW_LOCAL_FILES: "false", ...envOverrides }),
+      {
+        remoteAddress: "198.51.100.23",
+      },
+    );
   },
-];
+};
+
+const serverlessRuntimes: ServerlessRuntime[] = serverlessRuntimeNames.map((name) => ({
+  name,
+  applicability: runtimeApplicability[name],
+  fetch: serverlessFetchers[name],
+}));
 
 const tokenClaimCases: Array<{
   name: string;
@@ -172,11 +130,14 @@ function mcpRequest(
   });
 }
 
-async function startNode(overrides: NodeJS.ProcessEnv = {}): Promise<void> {
+async function startNode(
+  overrides: NodeJS.ProcessEnv = {},
+  transport?: HttpTransport,
+): Promise<void> {
   if (handle) await closeHttpServer(handle);
   resetNodeEnv(overrides);
   const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-  installSdkTransport(simulator.transport());
+  installSdkTransport(transport ?? simulator.transport());
   handle = buildHttpServer();
   port = await listenOnLocalhost(handle);
 }
@@ -259,26 +220,30 @@ afterEach(async () => {
 });
 
 describe("HTTP runtime security regression suite (#197)", () => {
-  it("records explicit runtime applicability decisions", () => {
-    expect(
-      runtimeApplicability.map((entry) => entry.runtime),
-      `${ISSUE}: every supported HTTP runtime needs an explicit applicability entry`,
-    ).toEqual(["node-http", "vercel", "cloudflare-worker"]);
-    expect(
-      runtimeApplicability.every((entry) => entry.coverage.length > 0),
-      `${ISSUE}: applicability entries must name their covered security properties`,
-    ).toBe(true);
-  });
-
   it("rejects malformed, batched, and oversized JSON-RPC bodies on Node HTTP", async () => {
-    await startNode();
+    const batchTransport = new RecordingTransport((sdkRequest) => {
+      const endpoint = b2EndpointName(sdkRequest);
+      if (endpoint === "b2_authorize_account") {
+        return new StaticHttpResponse(200, authorizeResponse(["listBuckets"]));
+      }
+      if (endpoint === "b2_list_buckets") {
+        return new StaticHttpResponse(200, { buckets: [] });
+      }
+      return new StaticHttpResponse(500, {
+        code: "unexpected_runtime_security_endpoint",
+        endpoint,
+      });
+    });
+    await startNode({}, batchTransport);
     const malformed = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...modernHeaders("tools/list") },
       body: `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"canary":"${CANARY_BODY}"`,
     });
     const batch = await request(port, "POST", "/mcp", {
-      headers: { ...creds, ...modernHeaders("tools/list") },
-      body: JSON.stringify([JSON.parse(modernBody("tools/list"))]),
+      headers: { ...creds, ...modernHeaders("tools/call", "b2_list_buckets") },
+      body: JSON.stringify([
+        JSON.parse(modernBody("tools/call", { name: "b2_list_buckets", arguments: {} }, 2)),
+      ]),
     });
     const oversized = await request(port, "POST", "/mcp", {
       headers: { ...creds, ...JSON_HEADERS },
@@ -287,13 +252,29 @@ describe("HTTP runtime security regression suite (#197)", () => {
 
     expect(
       malformed.status,
-      `${ISSUE}: malformed JSON-RPC must be rejected predictably`,
+      `${ISSUE}: ${nodeRuntime.runtime} malformed JSON-RPC must be rejected predictably`,
     ).toBeGreaterThanOrEqual(400);
+    const batchBody = parseJson(batch.body);
     expect(
-      parseJson(batch.body).result,
-      `${ISSUE}: JSON-RPC batch requests must not produce a result`,
-    ).toBeUndefined();
-    expect(oversized.status, `${ISSUE}: oversized JSON-RPC must return the body cap`).toBe(413);
+      Array.isArray(batchBody),
+      `${ISSUE}: ${nodeRuntime.runtime} JSON-RPC batch rejection must not be a batch response`,
+    ).toBe(false);
+    expect(
+      batchBody.error,
+      `${ISSUE}: ${nodeRuntime.runtime} JSON-RPC batch requests must return an error`,
+    ).toBeDefined();
+    expect(
+      batch.status >= 400 || batchBody.error,
+      `${ISSUE}: ${nodeRuntime.runtime} JSON-RPC batch requests must be rejected`,
+    ).toBeTruthy();
+    expect(
+      batchTransport.requests.map(b2EndpointName),
+      `${ISSUE}: ${nodeRuntime.runtime} rejected JSON-RPC batch must not execute b2_list_buckets`,
+    ).not.toContain("b2_list_buckets");
+    expect(
+      oversized.status,
+      `${ISSUE}: ${nodeRuntime.runtime} oversized JSON-RPC must return the body cap`,
+    ).toBe(413);
     assertNoSensitiveMaterial(malformed.body, `${ISSUE}: malformed body rejection`);
     assertNoSensitiveMaterial(oversized.body, `${ISSUE}: oversized body rejection`);
   });
