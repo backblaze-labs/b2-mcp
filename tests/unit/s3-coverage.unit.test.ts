@@ -9,13 +9,7 @@ import { B2Client } from "../../src/b2/client";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
-import {
-  authorizeResponse,
-  b2EndpointName,
-  installSdkTransport,
-  RecordingTransport,
-  StaticHttpResponse,
-} from "../support/sdk-test-helpers";
+import { installAuthorizedS3Transport } from "../support/sdk-test-helpers";
 import type { MockInstance } from "vitest";
 
 let server: McpServer;
@@ -23,17 +17,7 @@ let sendSpy: MockInstance;
 
 beforeEach(() => {
   invalidateAuthManagerCache();
-  installSdkTransport(
-    new RecordingTransport((request) => {
-      if (b2EndpointName(request) === "b2_authorize_account") {
-        return new StaticHttpResponse(
-          200,
-          authorizeResponse(["listBuckets", "listFiles", "readFiles", "writeFiles", "deleteFiles"]),
-        );
-      }
-      return new StaticHttpResponse(200, {});
-    }),
-  );
+  installAuthorizedS3Transport();
   sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   vi.spyOn(B2Client.prototype, "resolveS3FileVersion").mockImplementation(
     async ({ key, versionId }) => ({

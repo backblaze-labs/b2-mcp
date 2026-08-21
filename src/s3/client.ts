@@ -6,6 +6,9 @@ import type {
 } from "@backblaze-labs/b2-sdk";
 import { createS3ClientConfig } from "@backblaze-labs/b2-sdk/s3";
 import type { B2AuthResponse, B2Config } from "../utils/types.js";
+import { runWithMcpRequestSignal } from "../request-context.js";
+import { logger } from "../utils/logger.js";
+import { timeoutError } from "../utils/named-error.js";
 import { VERSION } from "../version.js";
 import {
   createB2S3PeerClient,
@@ -81,13 +84,18 @@ export function expectedB2S3Endpoint(region: string): string {
 }
 
 const B2_S3_ENDPOINT_HOST = /^s3\.([a-z0-9-]+)\.backblazeb2\.com$/i;
+const DEFAULT_S3_AUTHORIZE_TIMEOUT_MS = 10_000;
 
 interface AuthorizedB2S3Endpoint {
   endpoint: string;
   region: string;
 }
 
-export function validateB2S3ApiUrl(raw: string, region?: string): string | null {
+export type B2S3ApiUrlValidation =
+  | { mode: "exact-region"; region: string }
+  | { mode: "authorized-region" };
+
+export function validateB2S3ApiUrl(raw: string, validation: B2S3ApiUrlValidation): string | null {
   let parsed: URL;
   try {
     parsed = new URL(raw);
@@ -97,8 +105,8 @@ export function validateB2S3ApiUrl(raw: string, region?: string): string | null 
   if (parsed.protocol !== "https:") return "must use https://";
   if (parsed.username || parsed.password) return "must not include credentials";
   const hostname = parsed.hostname.toLowerCase();
-  if (region !== undefined) {
-    const expected = new URL(expectedB2S3Endpoint(region));
+  if (validation.mode === "exact-region") {
+    const expected = new URL(expectedB2S3Endpoint(validation.region));
     if (hostname !== expected.hostname) return `must match ${expected.hostname}`;
   } else if (!B2_S3_ENDPOINT_HOST.test(hostname)) {
     return "must match s3.<region>.backblazeb2.com";
@@ -111,7 +119,7 @@ export function validateB2S3ApiUrl(raw: string, region?: string): string | null 
 }
 
 function authorizedB2S3Endpoint(raw: string): AuthorizedB2S3Endpoint {
-  const reason = validateB2S3ApiUrl(raw);
+  const reason = validateB2S3ApiUrl(raw, { mode: "authorized-region" });
   if (reason) throw new Error(`Authorized B2 S3 endpoint ${reason}.`);
   const parsed = new URL(raw);
   const hostname = parsed.hostname.toLowerCase();
@@ -138,36 +146,43 @@ interface B2S3ClientOptions {
   surface?: string;
 }
 
+type B2S3ClientBuildOptions = Pick<
+  B2S3ClientOptions,
+  "applicationKeyId" | "applicationKey" | "surface"
+>;
+
 interface B2S3AuthProvider {
   getConfig(): B2Config;
   getAuth(): Promise<B2AuthResponse>;
 }
 
-export type B2S3ClientFacade = Pick<
-  B2S3PeerClient,
-  | "destroy"
-  | "headBucket"
-  | "putBucketLifecycle"
-  | "getBucketLocation"
-  | "putObject"
-  | "getObject"
-  | "headObject"
-  | "deleteObject"
-  | "deleteObjects"
-  | "copyObject"
-  | "listObjectsV2"
-  | "listObjectVersions"
-  | "presignObjectUrl"
-  | "createMultipartUpload"
-  | "presignUploadPart"
-  | "completeMultipartUpload"
-  | "abortMultipartUpload"
-  | "listMultipartUploads"
-  | "listParts"
-  | "uploadPartCopy"
-  | "listReportObjectKeys"
-  | "downloadReportObject"
->;
+const B2_S3_CLIENT_METHODS = [
+  "headBucket",
+  "putBucketLifecycle",
+  "getBucketLocation",
+  "putObject",
+  "getObject",
+  "headObject",
+  "deleteObject",
+  "deleteObjects",
+  "copyObject",
+  "listObjectsV2",
+  "listObjectVersions",
+  "presignObjectUrl",
+  "createMultipartUpload",
+  "presignUploadPart",
+  "completeMultipartUpload",
+  "abortMultipartUpload",
+  "listMultipartUploads",
+  "listParts",
+  "uploadPartCopy",
+  "listReportObjectKeys",
+  "downloadReportObject",
+] as const satisfies readonly (keyof B2S3PeerClient)[];
+
+type B2S3ClientMethod = (typeof B2_S3_CLIENT_METHODS)[number];
+
+export type B2S3ClientFacade = Pick<B2S3PeerClient, "destroy" | B2S3ClientMethod>;
 
 function customUserAgent(
   config: B2Config,
@@ -181,6 +196,47 @@ function customUserAgent(
   const suffix = process.env.B2_MCP_UA_SUFFIX?.trim();
   if (suffix) entries.push(["suffix", suffix]);
   return entries;
+}
+
+function unrefTimer(timer: ReturnType<typeof setTimeout>): void {
+  const maybeUnref = (timer as { unref?: unknown }).unref;
+  if (typeof maybeUnref === "function") maybeUnref.call(timer);
+}
+
+async function withS3AuthorizeTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(timeoutError(`B2 authorize timed out after ${DEFAULT_S3_AUTHORIZE_TIMEOUT_MS} ms.`)),
+      DEFAULT_S3_AUTHORIZE_TIMEOUT_MS,
+    );
+    unrefTimer(timer);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } catch (err) {
+    promise.catch(() => undefined);
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function logAuthorizedS3RegionOverride(config: B2Config, endpoint: AuthorizedB2S3Endpoint): void {
+  if (endpoint.region === config.region) return;
+  logger.warn(
+    {
+      configuredRegion: config.region,
+      authorizedRegion: endpoint.region,
+      authorizedEndpoint: endpoint.endpoint,
+    },
+    "s3.authorized_region.override",
+  );
+}
+
+function fallbackS3AuthorizeMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -198,6 +254,7 @@ export function buildB2S3ClientConfig(
         endpoint: expectedB2S3Endpoint(config.region),
         region: config.region,
       };
+  if (options.authorizedS3ApiUrl) logAuthorizedS3RegionOverride(config, endpoint);
   const sdkS3Config = createS3ClientConfig({
     accountInfo: options.accountInfo ?? accountInfoForS3Endpoint(endpoint.endpoint),
     applicationKeyId: options.applicationKeyId ?? config.appKeyId,
@@ -221,111 +278,111 @@ export function createS3ObjectClient(config: B2Config, surface: string): B2S3Pee
 
 export function createAuthorizedS3Client(
   auth: B2S3AuthProvider,
-  options: Pick<B2S3ClientOptions, "applicationKeyId" | "applicationKey" | "surface"> = {},
+  options: B2S3ClientBuildOptions = {},
 ): B2S3ClientFacade {
   let client: B2S3PeerClient | null = null;
   let inflight: Promise<B2S3PeerClient> | null = null;
   let closed = false;
+  const transientClients = new Set<B2S3PeerClient>();
 
-  const getClient = async (): Promise<B2S3PeerClient> => {
-    if (client) return client;
-    if (!inflight) {
-      inflight = auth
-        .getAuth()
-        .then((authorized) => {
-          const config = auth.getConfig();
-          const next = createS3Client(config, {
-            applicationKeyId: options.applicationKeyId ?? config.applicationKeyId,
-            applicationKey: options.applicationKey ?? config.applicationKey,
-            authorizedS3ApiUrl: authorized.s3ApiUrl,
-            surface: options.surface,
-          });
-          if (closed) {
-            next.destroy();
-            throw new Error("B2 S3 client is closed.");
-          }
-          client = next;
-          return next;
-        })
-        .finally(() => {
-          inflight = null;
-        });
+  const buildClient = (config: B2Config, authorizedS3ApiUrl?: string): B2S3PeerClient =>
+    createS3Client(config, {
+      applicationKeyId: options.applicationKeyId ?? config.applicationKeyId,
+      applicationKey: options.applicationKey ?? config.applicationKey,
+      ...(authorizedS3ApiUrl ? { authorizedS3ApiUrl } : {}),
+      surface: options.surface,
+    });
+
+  const buildAuthorizedClient = async (): Promise<B2S3PeerClient> => {
+    const authorized = await withS3AuthorizeTimeout(
+      runWithMcpRequestSignal(undefined, () => auth.getAuth()),
+    );
+    const next = buildClient(auth.getConfig(), authorized.s3ApiUrl);
+    if (closed) {
+      next.destroy();
+      throw new Error("B2 S3 client is closed.");
     }
-    return inflight;
+    client = next;
+    return next;
   };
 
-  return {
+  const getClient = async (): Promise<{ client: B2S3PeerClient; cached: boolean }> => {
+    if (closed) throw new Error("B2 S3 client is closed.");
+    if (client) return { client, cached: true };
+    if (!inflight) {
+      inflight = buildAuthorizedClient().finally(() => {
+        inflight = null;
+      });
+    }
+
+    try {
+      return { client: await inflight, cached: true };
+    } catch (err) {
+      if (closed) throw err;
+      const config = auth.getConfig();
+      logger.warn(
+        {
+          configuredRegion: config.region,
+          fallbackEndpoint: expectedB2S3Endpoint(config.region),
+          err: fallbackS3AuthorizeMessage(err),
+        },
+        "s3.authorize.fallback",
+      );
+      const fallbackClient = buildClient(config);
+      transientClients.add(fallbackClient);
+      return { client: fallbackClient, cached: false };
+    }
+  };
+
+  const releaseClient = (lease: { client: B2S3PeerClient; cached: boolean }): void => {
+    if (lease.cached) return;
+    if (!transientClients.delete(lease.client)) return;
+    lease.client.destroy();
+  };
+
+  const withClient = async <T>(operation: (client: B2S3PeerClient) => Promise<T>): Promise<T> => {
+    const lease = await getClient();
+    try {
+      return await operation(lease.client);
+    } finally {
+      releaseClient(lease);
+    }
+  };
+
+  const facade: Partial<B2S3ClientFacade> = {
     destroy() {
       closed = true;
       const current = client;
       client = null;
       current?.destroy();
-      inflight?.then((pending) => pending.destroy()).catch(() => undefined);
-    },
-    async headBucket(bucket) {
-      return (await getClient()).headBucket(bucket);
-    },
-    async putBucketLifecycle(input) {
-      return (await getClient()).putBucketLifecycle(input);
-    },
-    async getBucketLocation(bucket) {
-      return (await getClient()).getBucketLocation(bucket);
-    },
-    async putObject(input) {
-      return (await getClient()).putObject(input);
-    },
-    async getObject(input) {
-      return (await getClient()).getObject(input);
-    },
-    async headObject(input) {
-      return (await getClient()).headObject(input);
-    },
-    async deleteObject(input) {
-      return (await getClient()).deleteObject(input);
-    },
-    async deleteObjects(input) {
-      return (await getClient()).deleteObjects(input);
-    },
-    async copyObject(input) {
-      return (await getClient()).copyObject(input);
-    },
-    async listObjectsV2(input) {
-      return (await getClient()).listObjectsV2(input);
-    },
-    async listObjectVersions(input) {
-      return (await getClient()).listObjectVersions(input);
-    },
-    async presignObjectUrl(input) {
-      return (await getClient()).presignObjectUrl(input);
-    },
-    async createMultipartUpload(input) {
-      return (await getClient()).createMultipartUpload(input);
-    },
-    async presignUploadPart(input) {
-      return (await getClient()).presignUploadPart(input);
-    },
-    async completeMultipartUpload(input) {
-      return (await getClient()).completeMultipartUpload(input);
-    },
-    async abortMultipartUpload(input) {
-      return (await getClient()).abortMultipartUpload(input);
-    },
-    async listMultipartUploads(input) {
-      return (await getClient()).listMultipartUploads(input);
-    },
-    async listParts(input) {
-      return (await getClient()).listParts(input);
-    },
-    async uploadPartCopy(input) {
-      return (await getClient()).uploadPartCopy(input);
-    },
-    async listReportObjectKeys(input) {
-      return (await getClient()).listReportObjectKeys(input);
-    },
-    async downloadReportObject(input) {
-      return (await getClient()).downloadReportObject(input);
+      for (const transient of transientClients) {
+        transient.destroy();
+        transientClients.delete(transient);
+      }
+      // If destroy races an authorization, buildAuthorizedClient either closes
+      // the newly-created peer itself or returns it here for teardown. Rejections
+      // are logged so shutdown diagnostics keep the original failure visible.
+      inflight
+        ?.then((pending) => pending.destroy())
+        .catch((err) =>
+          logger.debug(
+            { err: fallbackS3AuthorizeMessage(err) },
+            "s3.inflight_client_destroy.failed",
+          ),
+        );
     },
   };
+
+  for (const method of B2_S3_CLIENT_METHODS) {
+    const delegate = async (...args: unknown[]) =>
+      withClient(async (s3) => {
+        const fn = s3[method] as (...methodArgs: unknown[]) => unknown;
+        return (await fn.apply(s3, args)) as unknown;
+      });
+    (facade as Record<B2S3ClientMethod, unknown>)[method] = delegate;
+  }
+
+  return facade as B2S3ClientFacade;
 }
 
 export function createReportS3Client(config: B2Config, auth: B2AuthResponse): B2S3PeerClient {

@@ -7,15 +7,18 @@ import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "..
 import { B2Client } from "../../src/b2/client";
 import type { B2S3FileVersionBinding } from "../../src/utils/types";
 import type { McpServer } from "../../src/mcp";
+import { runWithMcpRequestSignal } from "../../src/request-context";
+import { abortError } from "../../src/utils/named-error";
 import { circuitBreaker, s3CircuitBreaker } from "../../src/utils/circuit-breaker";
 import { parseErrorText } from "../../src/utils/errors";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
 import {
-  authorizeResponse,
   b2EndpointName,
+  installAuthorizedS3Transport,
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
+  authorizeResponseWithS3ApiUrl,
 } from "../support/sdk-test-helpers";
 import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
 import type { MockInstance } from "vitest";
@@ -53,19 +56,24 @@ function expectBadRequestToolError(result: unknown, message: RegExp): void {
   expect(parseErrorText(errorText)).toMatchObject({ code: "bad_request", status: 400 });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+async function s3ClientRegion(client: S3Client): Promise<string> {
+  const region = client.config.region;
+  return typeof region === "function" ? await region() : String(region);
+}
+
 beforeEach(() => {
   invalidateAuthManagerCache();
-  installSdkTransport(
-    new RecordingTransport((request) => {
-      if (b2EndpointName(request) === "b2_authorize_account") {
-        return new StaticHttpResponse(
-          200,
-          authorizeResponse(["listBuckets", "listFiles", "readFiles", "writeFiles", "deleteFiles"]),
-        );
-      }
-      return new StaticHttpResponse(200, {});
-    }),
-  );
+  installAuthorizedS3Transport();
   sendSpy = vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({} as any);
   vi.spyOn(B2Client.prototype, "resolveS3FileVersion").mockImplementation(
     async ({ key, versionId }) => matchingVersion({ fileName: key, fileId: versionId }),
@@ -97,6 +105,86 @@ describe("s3_head_bucket", () => {
     const result = await callTool(server, "s3_head_bucket", { bucket: "existing-bucket" });
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("existing-bucket");
+  });
+
+  it("derives the S3 signing region from non-default authorize responses", async () => {
+    restoreB2SdkTransportForTests();
+    invalidateAuthManagerCache();
+    installAuthorizedS3Transport({ s3ApiUrl: "https://s3.us-east-005.backblazeb2.com" });
+    server = createServer(testConfig);
+    const seenRegions: string[] = [];
+    sendSpy.mockImplementation(async function (this: S3Client) {
+      seenRegions.push(await s3ClientRegion(this));
+      return {};
+    });
+
+    const result = await callTool(server, "s3_head_bucket", { bucket: "existing-bucket" });
+
+    expect(result.isError).toBeFalsy();
+    expect(seenRegions).toEqual(["us-east-005"]);
+  });
+
+  it("falls back to configured B2_REGION when authorize is unavailable", async () => {
+    restoreB2SdkTransportForTests();
+    invalidateAuthManagerCache();
+    installAuthorizedS3Transport({ authorizeError: new Error("native authorize unavailable") });
+    server = createServer(testConfig);
+    const seenRegions: string[] = [];
+    sendSpy.mockImplementation(async function (this: S3Client) {
+      seenRegions.push(await s3ClientRegion(this));
+      return {};
+    });
+
+    const result = await callTool(server, "s3_head_bucket", { bucket: "existing-bucket" });
+
+    expect(result.isError).toBeFalsy();
+    expect(seenRegions).toEqual(["us-west-004"]);
+  });
+
+  it("keeps concurrent cold S3 authorization independent of the first caller abort", async () => {
+    restoreB2SdkTransportForTests();
+    invalidateAuthManagerCache();
+    const pendingAuth = deferred<StaticHttpResponse>();
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) === "b2_authorize_account") return pendingAuth.promise;
+      return new StaticHttpResponse(200, {});
+    });
+    installSdkTransport(transport);
+    server = createServer(testConfig);
+    const firstAbort = new AbortController();
+    const secondAbort = new AbortController();
+    const seenActiveRegions: string[] = [];
+    sendSpy.mockImplementation(async function (this: S3Client, _command, options) {
+      const signal = (options as { abortSignal?: AbortSignal } | undefined)?.abortSignal;
+      if (signal?.aborted) throw abortError();
+      seenActiveRegions.push(await s3ClientRegion(this));
+      return {};
+    });
+
+    const first = runWithMcpRequestSignal(firstAbort.signal, () =>
+      callTool(server, "s3_head_bucket", { bucket: "first-bucket" }),
+    );
+    await vi.waitFor(() => expect(transport.requests).toHaveLength(1));
+    const second = runWithMcpRequestSignal(secondAbort.signal, () =>
+      callTool(server, "s3_head_bucket", { bucket: "second-bucket" }),
+    );
+
+    firstAbort.abort(abortError());
+    pendingAuth.resolve(
+      new StaticHttpResponse(
+        200,
+        authorizeResponseWithS3ApiUrl(
+          ["listBuckets", "listFiles", "readFiles", "writeFiles", "deleteFiles"],
+          "https://s3.us-east-005.backblazeb2.com",
+        ),
+      ),
+    );
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(firstResult.isError).toBe(true);
+    expect(secondResult.isError).toBeFalsy();
+    expect(seenActiveRegions).toEqual(["us-east-005"]);
   });
 
   it("returns isError for a missing bucket", async () => {
