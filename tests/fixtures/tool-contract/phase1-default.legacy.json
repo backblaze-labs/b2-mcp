@@ -441,6 +441,7 @@
         "properties": {
           "bucket": {
             "description": "Bucket name or bucketId to inspect.",
+            "minLength": 1,
             "type": "string"
           },
           "limit": {
@@ -653,6 +654,7 @@
         "properties": {
           "bucket": {
             "description": "Bucket name or bucketId to inspect.",
+            "minLength": 1,
             "type": "string"
           },
           "max_uploads": {
@@ -1923,5 +1925,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "11be52cf8f077a208b7f6ecaa7335323f03a01360a8ce377f6e8d531498d10f4"
+  "hash": "c5aeb288ab6e0377d7c2da3582caadd0b3312c7bd8a27cb4a06adbc7c6f539ca"
 }

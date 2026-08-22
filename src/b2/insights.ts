@@ -685,11 +685,52 @@ export function computeSnapshotGrowth(
 
 // ── Phase 2 helpers ─────────────────────────────────────────────────────────
 
+/**
+ * Resolve a bucket from the authorize response's `allowedBuckets` scope. A
+ * bucket-scoped key cannot call the unfiltered `listBuckets()` (no `listBuckets`
+ * capability, so B2 answers 401), but its id (and usually name) is in scope.
+ * Returns null for unrestricted keys so the caller falls back to a live listing.
+ *
+ * The scope is read from `B2AuthManager`'s ~23h cache, so a rename can briefly
+ * miss by new name or display a stale name by id. This self-heals within the
+ * token TTL and never targets the wrong bucket (object ops use the resolved id).
+ *
+ * Matching mirrors `resolveBucketName()`: exact name/id, else substring. It never
+ * echoes the whole scope on a miss, since a `server`/`principal` HTTP caller does
+ * not hold the key and could otherwise enumerate its full bucket namespace.
+ *
+ * @returns The resolved bucket, in-scope candidates, or null for unrestricted keys.
+ */
+async function resolveFromAuthorizedScope(
+  auth: B2AuthManager,
+  input: string,
+): Promise<{ name?: string; id?: string; candidates?: string[]; outOfScope?: boolean } | null> {
+  const { allowedBuckets } = await auth.getAuth();
+  if (!allowedBuckets || allowedBuckets.length === 0) return null;
+  // Blank input substring-matches every bucket; treat it as a miss so
+  // `includes("")` cannot enumerate the scope (schemas also reject empty input).
+  if (input.trim() === "") return { outOfScope: true };
+  const exact = allowedBuckets.find((b) => b.name === input || b.id === input);
+  // A name-restricted key may report a null name; matched by id, display the input.
+  if (exact) return { name: exact.name ?? input, id: exact.id };
+  // No exact hit: surface only partially-matching names, never the full scope. A
+  // fully-unrelated input flags outOfScope so the error says so without leaking names.
+  const subs = allowedBuckets.filter((b) => b.name?.includes(input));
+  if (subs.length === 1 && subs[0].name) return { name: subs[0].name, id: subs[0].id };
+  if (subs.length > 1) {
+    return { candidates: subs.map((b) => b.name).filter((n): n is string => Boolean(n)) };
+  }
+  return { outOfScope: true };
+}
+
 /** Resolve a bucket name/id pair from a name-or-bucketId input. */
 async function resolveBucketName(
   b2Client: B2Client,
+  auth: B2AuthManager,
   input: string,
-): Promise<{ name?: string; id?: string; candidates?: string[] }> {
+): Promise<{ name?: string; id?: string; candidates?: string[]; outOfScope?: boolean }> {
+  const scoped = await resolveFromAuthorizedScope(auth, input);
+  if (scoped) return scoped;
   const result = await b2Client.listBuckets();
   const buckets = result.buckets ?? [];
   const exact = buckets.find((b) => b.bucketName === input || b.bucketId === input);
@@ -704,7 +745,7 @@ async function resolveBucketName(
 
 function bucketResolutionError(
   input: string,
-  resolved: { name?: string; id?: string; candidates?: string[] },
+  resolved: { name?: string; id?: string; candidates?: string[]; outOfScope?: boolean },
 ): Record<string, unknown> | null {
   if (!resolved.name) {
     return {
@@ -712,7 +753,9 @@ function bucketResolutionError(
       candidates: resolved.candidates ?? [],
       note: resolved.candidates?.length
         ? "Multiple buckets match; pass an exact name or bucketId."
-        : `No bucket matches '${input}'.`,
+        : resolved.outOfScope
+          ? `Bucket '${input}' is not in the key's authorized scope (or does not exist).`
+          : `No bucket matches '${input}'.`,
     };
   }
   if (!resolved.id) {
@@ -966,7 +1009,7 @@ export function registerInsightTools(
       description:
         "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
       inputSchema: {
-        bucket: z.string().describe("Bucket name or bucketId to inspect."),
+        bucket: z.string().min(1).describe("Bucket name or bucketId to inspect."),
         limit: z
           .number()
           .int()
@@ -990,7 +1033,7 @@ export function registerInsightTools(
     },
     async (args) => {
       try {
-        const resolved = await resolveBucketName(b2Client, args.bucket);
+        const resolved = await resolveBucketName(b2Client, auth, args.bucket);
         const resolutionError = bucketResolutionError(args.bucket, resolved);
         if (resolutionError) return toolJson(resolutionError);
         const resolvedBucketName = resolved.name!;
@@ -1093,7 +1136,7 @@ export function registerInsightTools(
       description:
         "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing, bounded by max_uploads and an internal time budget — on a very bloated bucket it returns a truncated result (and wasted_gb may be a lower bound) and recommends a lifecycle rule.",
       inputSchema: {
-        bucket: z.string().describe("Bucket name or bucketId to inspect."),
+        bucket: z.string().min(1).describe("Bucket name or bucketId to inspect."),
         older_than_days: z
           .number()
           .int()
@@ -1114,7 +1157,7 @@ export function registerInsightTools(
     },
     async (args) => {
       try {
-        const resolved = await resolveBucketName(b2Client, args.bucket);
+        const resolved = await resolveBucketName(b2Client, auth, args.bucket);
         const resolutionError = bucketResolutionError(args.bucket, resolved);
         if (resolutionError) return toolJson(resolutionError);
         const resolvedBucketName = resolved.name!;
