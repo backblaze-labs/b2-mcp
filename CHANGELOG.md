@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scope `b2_list_buckets` to authorized bucket IDs for bucket-scoped keys when
   no bucketId/bucketName filter is supplied, and reject out-of-scope explicit
   bucket filters before calling B2 (fixes #211).
+- Resolve `b2_largest_files` and `b2_unfinished_uploads` through the authorized
+  bucket scope instead of an unfiltered `listBuckets()`, so bucket-scoped keys
+  no longer receive HTTP 401; out-of-scope input is reported clearly without
+  enumerating the key's bucket namespace. (#212)
+- Return a stable 400 `bad_request` instead of HTTP 500 when `s3_get_presigned_url`
+  PutObject (or inline `s3_put_object`) is called without a valid signed
+  `contentType`. (#213)
+- Validate and document the reserved `bucketInfo` key and `corsRuleName` naming
+  constraints so invalid inputs are rejected with a clear message. (#215)
+- Align the server-issued skills instructions with the shipped skills pack so
+  clients are pointed at the tools that are actually available. (#205)
 - Classify destructive confirmation/policy refusals as stable non-500 tool
   outcomes: `destructive_confirmation_required` and
   `destructive_confirmation_refused` as HTTP 409, and
