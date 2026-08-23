@@ -1,6 +1,6 @@
 {
   "name": "@backblaze-labs/b2-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server for Backblaze B2 with frozen Phase 1 B2 and S3-compatible tool profiles",
   "packageManager": "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
   "main": "dist/index.js",
