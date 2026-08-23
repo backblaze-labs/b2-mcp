@@ -24,6 +24,7 @@ cosign
 cspell
 CycloneDX
 envrc
+evals
 flyctl
 workerd
 GHCR
