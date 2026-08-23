@@ -16,6 +16,7 @@
     "src/**/*",
     "tests/**/*",
     "evals/**/*",
+    "test-support/**/*",
     "api/**/*",
     "deploy/vercel/**/*",
     "deploy/cloudflare-worker/**/*"

@@ -10,6 +10,7 @@ pnpm run typecheck      # type-check src + ALL tests, no emit (tsconfig.typechec
 pnpm test               # runs `typecheck` first, then unit tests, no credentials needed
 pnpm run test:contract  # deterministic MCP/schema/workflow contracts
 pnpm run test:protocol  # deterministic modern + legacy MCP protocol behavior
+pnpm run evals          # build + eval harness; provider cases gate on RUN_LLM_EVALS=1 + provider key
 pnpm run test:integration:live  # live tests, requires real B2 credentials in env
 pnpm run start          # stdio transport (local Claude Desktop use)
 pnpm run start:http     # Streamable HTTP transport, add --port 3000
@@ -32,6 +33,17 @@ Run a single test by name:
 ```bash
 pnpm exec vitest run --config vitest.config.mts --project=unit --testNamePattern="should cache the token"
 ```
+
+Eval harness tests:
+
+```bash
+pnpm run evals
+```
+
+The deterministic harness self-tests run without provider credentials. Provider
+adapters should gate real LLM-backed eval cases on `RUN_LLM_EVALS=1` plus their
+own provider key env var (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`)
+so normal CI remains key-free.
 
 Integration tests require env vars. The live suite exercises native, S3, key
 management, event notifications, and the Partner API with no opt-in skips, so it

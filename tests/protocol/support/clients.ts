@@ -13,6 +13,7 @@ import {
   protocolEnv,
   requireBuiltEntrypoints,
 } from "../../support/protocol";
+import { stringifySpawnEnv } from "../../../test-support/mcp-server-process";
 export {
   LEGACY_PROTOCOL_VERSION,
   MODERN_META,
@@ -34,11 +35,7 @@ export const JSON_HEADERS = {
 };
 
 function stdioEnv(extra: NodeJS.ProcessEnv = {}): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(protocolEnv(extra)).filter((entry): entry is [string, string] => {
-      return entry[1] !== undefined;
-    }),
-  );
+  return stringifySpawnEnv(protocolEnv(extra));
 }
 
 export function modernBody(
