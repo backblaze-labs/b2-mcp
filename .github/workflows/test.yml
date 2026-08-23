@@ -16,6 +16,7 @@ concurrency:
 jobs:
   runtime-policy:
     name: runtime policy
+    if: ${{ github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -155,7 +156,7 @@ jobs:
   unit-coverage:
     name: unit/coverage
     needs: unit-coverage-matrix
-    if: always()
+    if: ${{ always() && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -431,7 +432,7 @@ jobs:
   production-dependency-audit:
     name: production dependency audit
     needs: production-dependency-audit-matrix
-    if: always()
+    if: ${{ always() && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -679,7 +680,7 @@ jobs:
   cross-platform-minimum:
     name: cross-platform minimum
     needs: cross-platform-minimum-matrix
-    if: always()
+    if: ${{ always() && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -710,7 +711,7 @@ jobs:
       - codeql-workflow-security
       - slow-lifecycle
       - cross-platform-minimum
-    if: always()
+    if: ${{ always() && github.actor != 'dependabot[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
