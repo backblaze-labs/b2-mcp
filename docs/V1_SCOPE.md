@@ -181,10 +181,12 @@ actual registrations agree; any drift must fail CI.
 full-surface contract generation, administrative review, and regression
 detection. It is not the default user profile.
 
-Three `b2_*` names in `full` are unavailable compatibility stubs: the durable
-secret-producing names `b2_create_key`, `b2_create_group_member`, and
-`b2_reserve_trial_create_account`. That is an availability annotation; all
-three remain in the Native B2 SDK backing category. Partner/Groups read/eject/list
+Three `b2_*` names in `full` are durable-secret producers whose availability is
+sink-gated: `b2_create_key` and `b2_create_group_member` are available when a
+reviewed out-of-band secret sink is active (`B2_SECRET_SINK=file`, the stdio
+default, or `inline`), and `b2_reserve_trial_create_account` only under `inline`;
+otherwise they register as non-secret compatibility stubs. That is an
+availability annotation; all three remain in the Native B2 SDK backing category. Partner/Groups read/eject/list
 tools are SDK-backed native B2 operations in the full profile.
 
 `b2_*` tools in `full`:
@@ -248,9 +250,10 @@ operations through the Partner API:
 - `b2_list_groups`
 
 The durable-secret-producing names `b2_create_key`, `b2_create_group_member`,
-and `b2_reserve_trial_create_account` are included only as unavailable
-compatibility stubs. Their real handlers are excluded because they produce
-durable credential material, but their backing category remains Native B2 SDK.
+and `b2_reserve_trial_create_account` are sink-gated: their real handlers run
+only when a reviewed out-of-band secret sink is active (`B2_SECRET_SINK=file` or
+`inline`; Reserve Trial requires `inline`), and they register as non-secret
+compatibility stubs otherwise. Their backing category remains Native B2 SDK.
 
 `b2_*` tools in `phase1-default`:
 
@@ -352,8 +355,9 @@ These tools are classified as durable-secret-producing:
 - `b2_reserve_trial_create_account`
 
 Their secret-producing handlers are excluded from `phase1-default` and
-`read-only`. The current implementation has no out-of-band secret sink, so these
-tool names are registered only as compatibility stubs that return a structured
+`read-only`. In `full`, those handlers run only when a reviewed out-of-band
+secret sink is active (`B2_SECRET_SINK=file`, the stdio default, or `inline`);
+without a sink they register as compatibility stubs that return a structured
 non-secret unavailable error.
 
 Sensitive response fields and structures inventoried for the Phase 1 sanitizer:

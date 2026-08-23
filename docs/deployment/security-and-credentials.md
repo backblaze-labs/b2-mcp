@@ -3,8 +3,8 @@
 This file is the production contract for every hosted deployment guide. A
 provider guide may add stricter controls, but it must not weaken these rules.
 
-Last verified: 2026-08-14. Repository baseline commit: `197d781`. Package
-version: `0.1.0`. MCP revision: 2026-07-28. Documentation owner: Gonza.
+Last verified: 2026-08-23. Repository baseline commit: `89e911d`. Package
+version: `0.1.1`. MCP revision: 2026-07-28. Documentation owner: Gonza.
 
 ## Credential Contract
 
@@ -138,7 +138,7 @@ pruning, deleting, or vaulting the plaintext ledger. Treat the ledger as a
 credential store: protect it with owner-only permissions, rotate or revoke keys
 after use, and rotate, prune, delete, or vault old records under the same policy
 used for `B2_APPLICATION_KEY`.
-The server does not impose a built-in size cap or retention window in 0.1.0, so
+The server does not impose a built-in size cap or retention window, so
 operators must monitor and manage the ledger before it becomes an unbounded
 plaintext secret store. For
 local stdio this is no more exposed than the B2 credentials already present on

@@ -220,8 +220,8 @@ lockfile-backed `vercel@59.1.3` CLI and `@vercel/node@5.10.1` builder. It
 also rejects any Vercel builder TypeScript diagnostics before the generated
 artifact can be scanned as clean. The `vercel-build` hook performs the same
 typecheck/build gate on real Vercel deploys before the JavaScript launchers are
-traced.
-writes the child process a minimal non-secret environment only: process path
+traced. The scan job also writes the child process a minimal non-secret
+environment only: process path
 variables, CI/color/temp knobs, `NODE_OPTIONS`, a temp `HOME`/`USERPROFILE`,
 disabled Vercel telemetry, an empty `VERCEL_TOKEN`, and deterministic scanner
 canaries. Generic caller tokens such as npm, GitHub Actions, AWS, Sentry, and

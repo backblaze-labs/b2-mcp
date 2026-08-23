@@ -39,7 +39,8 @@ docker pull "$B2_MCP_IMAGE"
 Use Docker secrets, read-only mounted files under `/run/secrets`, or a provider
 secret manager. Do not bake credentials into the image. Set
 `B2_HTTP_CREDENTIAL_MODE=server`, `B2_ALLOW_LOCAL_FILES=false`,
-`B2_ALLOWED_HOSTS=mcp.example.com`, and `B2_DESTRUCTIVE_POLICY=block`.
+`B2_ALLOWED_HOSTS=mcp.example.com`, `B2_DESTRUCTIVE_POLICY=block`, and
+`B2_REGISTER_ALL_TOOLS=false`.
 
 ## Deployment
 
@@ -142,9 +143,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-08-14
-- Repository baseline commit: `197d781`
-- Package version: `0.1.0`
+- Last verified: 2026-08-23
+- Repository baseline commit: `89e911d`
+- Package version: `0.1.1`
 - MCP revision: 2026-07-28
 - Runtime: container image with Node `22.23.1`
 - Documentation owner: Gonza

@@ -41,7 +41,8 @@ container. Do not create provider-specific forks of `b2-mcp`.
 Inject B2 credentials into the container with Cloudflare container secrets or a
 reviewed secret broker. The client sends only OAuth bearer tokens. Set
 `B2_HTTP_CREDENTIAL_MODE=server`, `B2_ALLOW_LOCAL_FILES=false`,
-`B2_ALLOWED_HOSTS=mcp.example.com`, and `B2_DESTRUCTIVE_POLICY=block`.
+`B2_ALLOWED_HOSTS=mcp.example.com`, `B2_DESTRUCTIVE_POLICY=block`, and
+`B2_REGISTER_ALL_TOOLS=false`.
 
 ## Deployment
 
@@ -126,9 +127,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-08-14
-- Repository baseline commit: `197d781`
-- Package version: `0.1.0`
+- Last verified: 2026-08-23
+- Repository baseline commit: `89e911d`
+- Package version: `0.1.1`
 - MCP revision: 2026-07-28
 - Runtime: Worker isolate plus Cloudflare Container, `linux/amd64` image
 - Documentation owner: Gonza

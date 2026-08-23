@@ -32,8 +32,11 @@ B2 keys.
 
 ## Secrets
 
-Use Container Apps secrets or Key Vault references. Set `B2_ALLOW_LOCAL_FILES=false`
-and put only non-secret values in normal env configuration.
+Use Container Apps secrets or Key Vault references. Set `B2_HTTP_CREDENTIAL_MODE=server`
+(so the server-held B2 key is used; the default `headers` mode ignores stored
+secrets), `B2_ALLOW_LOCAL_FILES=false`, `B2_DESTRUCTIVE_POLICY=block`, and
+`B2_REGISTER_ALL_TOOLS=false`, and put only non-secret values in normal env
+configuration.
 
 ## Deployment
 
@@ -116,9 +119,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-08-14
-- Repository baseline commit: `197d781`
-- Package version: `0.1.0`
+- Last verified: 2026-08-23
+- Repository baseline commit: `89e911d`
+- Package version: `0.1.1`
 - MCP revision: 2026-07-28
 - Runtime: Azure Container Apps container revision
 - Documentation owner: Gonza

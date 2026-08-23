@@ -120,9 +120,9 @@ Use the shared security contract first:
 
 ## Verification Record
 
-- Last verified: 2026-08-14
-- Repository baseline commit: `197d781`
-- Package version: `0.1.0`
+- Last verified: 2026-08-23
+- Repository baseline commit: `89e911d`
+- Package version: `0.1.1`
 - MCP revision: 2026-07-28
 - Runtime: Fly Machine container
 - Documentation owner: Gonza

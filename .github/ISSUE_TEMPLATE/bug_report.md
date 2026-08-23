@@ -25,7 +25,7 @@ labels: bug
 **Environment**
 
 - Server version (`/health` endpoint or `package.json`):
-- Transport: stdio / HTTP+SSE
+- Transport: stdio / HTTP (Streamable)
 - Node version:
 - OS:
 - MCP client (Claude Desktop, Cursor, etc.):

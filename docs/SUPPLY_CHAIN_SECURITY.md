@@ -23,8 +23,9 @@ direct doc-lint packages are exact-pinned in `package.json`; the lockfile
 snapshot above remains unchanged after reintroducing that narrow ESLint path.
 Reviewer-owned dependency overrides live only in
 [`../pnpm-workspace.yaml`](../pnpm-workspace.yaml), where the current entries
-pin reviewed transitive fixes for `@hono/node-server`, `brace-expansion`,
-`eslint-visitor-keys`, and `js-yaml` without duplicating override policy in
+pin reviewed transitive fixes for packages including `@hono/node-server`,
+`brace-expansion`, `eslint-visitor-keys`, and `js-yaml` (alongside the reviewed
+Vercel build-toolchain pins) without duplicating override policy in
 `package.json`.
 
 Those are not the denied malicious versions recorded in the checked-in Wiz IOC
