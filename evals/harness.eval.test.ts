@@ -34,6 +34,14 @@ function oneStepDriver(name: string, toolCalls: EvalToolCall[]): Driver {
   return new ScriptedDriver(name, [{ text: `${name} step`, toolCalls }]);
 }
 
+const EVAL_SIGNALS = ["SIGINT", "SIGTERM"] as const;
+
+function signalListenerCounts(): Record<(typeof EVAL_SIGNALS)[number], number> {
+  return Object.fromEntries(
+    EVAL_SIGNALS.map((signal) => [signal, process.listenerCount(signal)]),
+  ) as Record<(typeof EVAL_SIGNALS)[number], number>;
+}
+
 describe("LLM eval harness", () => {
   it("runs a bounded tool loop against the built stdio server", async () => {
     const run = await runEval({
@@ -52,6 +60,19 @@ describe("LLM eval harness", () => {
     expect(run.toolResults[0].isError).toBe(true);
     expect(JSON.stringify(run.toolResults[0])).toContain("destructive_policy_blocked");
     expect(run.text).toContain("destructive-block step");
+  });
+
+  it("removes process signal handlers after normal completion", async () => {
+    const before = signalListenerCounts();
+
+    await runEval({
+      prompt: "Finish without tools.",
+      toolNames: ["b2_create_key"],
+      driver: new ScriptedDriver("no-tools", [{ text: "Done." }]),
+      maxSteps: 1,
+    });
+
+    expect(signalListenerCounts()).toEqual(before);
   });
 
   it("rejects B2 credential overrides before spawning the eval server", () => {
@@ -156,6 +177,7 @@ describe("LLM eval harness", () => {
   });
 
   it("times out stalled driver steps with a phase-specific error", async () => {
+    const before = signalListenerCounts();
     const stalledDriver: Driver = {
       name: "stalled",
       async complete() {
@@ -172,6 +194,7 @@ describe("LLM eval harness", () => {
         timeouts: { driverStepMs: 10 },
       }),
     ).rejects.toThrow(/Timed out during driver step 1/);
+    expect(signalListenerCounts()).toEqual(before);
   });
 
   it("keeps provider key requirements outside the shared gate default", () => {

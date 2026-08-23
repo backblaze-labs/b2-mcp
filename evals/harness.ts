@@ -127,16 +127,20 @@ function installSignalHandlers(): void {
   for (const signal of SIGNALS) {
     const handler = () => {
       void closeActiveEvalTransports().finally(() => {
-        for (const [registeredSignal, registeredHandler] of signalHandlers) {
-          process.removeListener(registeredSignal, registeredHandler);
-        }
-        signalHandlers.clear();
+        uninstallSignalHandlers();
         process.kill(process.pid, signal);
       });
     };
     signalHandlers.set(signal, handler);
     process.once(signal, handler);
   }
+}
+
+function uninstallSignalHandlers(): void {
+  for (const [signal, handler] of signalHandlers) {
+    process.removeListener(signal, handler);
+  }
+  signalHandlers.clear();
 }
 
 function trackTransport(transport: StdioClientTransport): void {
@@ -146,6 +150,9 @@ function trackTransport(transport: StdioClientTransport): void {
 
 function untrackTransport(transport: StdioClientTransport): void {
   activeEvalTransports.delete(transport);
+  if (activeEvalTransports.size === 0) {
+    uninstallSignalHandlers();
+  }
 }
 
 async function closeActiveEvalTransports(): Promise<void> {
@@ -246,19 +253,26 @@ async function withTimeout<T>(
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   let timedOut = false;
+  let timeoutCleanup: Promise<void> | undefined;
   try {
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => {
         timedOut = true;
         controller.abort();
-        void onTimeout?.();
-        reject(new EvalTimeoutError(phase, timeoutMs));
+        timeoutCleanup = Promise.resolve(onTimeout?.()).catch(() => undefined);
+        void timeoutCleanup.then(() => {
+          reject(new EvalTimeoutError(phase, timeoutMs));
+        });
       }, timeoutMs);
       timer.unref();
     });
     return await Promise.race([operation(controller.signal), timeout]);
   } catch (err) {
-    if (timedOut) throw new EvalTimeoutError(phase, timeoutMs, err);
+    if (timedOut) {
+      await timeoutCleanup;
+      if (err instanceof EvalTimeoutError) throw err;
+      throw new EvalTimeoutError(phase, timeoutMs, err);
+    }
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
@@ -291,16 +305,17 @@ async function connectEvalServer(
   trackTransport(transport);
   const stderrTail = captureStderrTail(transport, stderrTailBytes);
   const client = createClient();
-  let closed = false;
+  let closePromise: Promise<void> | undefined;
   const connection = {
     client,
     stderrTail,
     close: async () => {
-      if (closed) return;
-      closed = true;
-      untrackTransport(transport);
-      await client.close().catch(() => undefined);
-      await transport.close().catch(() => undefined);
+      closePromise ??= (async () => {
+        untrackTransport(transport);
+        await client.close().catch(() => undefined);
+        await transport.close().catch(() => undefined);
+      })();
+      await closePromise;
     },
   };
   try {
