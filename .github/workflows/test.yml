@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 30
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -76,7 +76,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -104,7 +104,7 @@ jobs:
         node-version: [22.23.1, 24, 26]
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -173,7 +173,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -206,7 +206,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -242,7 +242,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -275,7 +275,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -308,7 +308,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -352,7 +352,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # actions/setup-node v7, reviewed 2026-08-06.
@@ -403,7 +403,7 @@ jobs:
         node-version: [22.23.1, 24, 26]
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # actions/setup-node v7, reviewed 2026-08-06.
@@ -449,7 +449,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -486,7 +486,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -527,7 +527,7 @@ jobs:
     timeout-minutes: 15
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Build and smoke Docker image
@@ -540,7 +540,7 @@ jobs:
     timeout-minutes: 10
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -577,7 +577,7 @@ jobs:
       security-events: write
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # github/codeql-action/init v4.37.6, reviewed 2026-08-06.
@@ -622,7 +622,7 @@ jobs:
       VITEST_MIN_WORKERS: 1
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -660,7 +660,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -715,7 +715,7 @@ jobs:
     timeout-minutes: 5
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Publish Phase 1 conformance summary
@@ -769,7 +769,7 @@ jobs:
       contents: write
     steps:
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: true
       - name: Advance owned ci-green marker if main is current

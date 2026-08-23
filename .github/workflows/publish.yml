@@ -60,7 +60,7 @@ jobs:
           fi
           echo "tag=${PUBLISH_TAG}" >> "${GITHUB_OUTPUT}"
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: refs/heads/ci-green
           persist-credentials: false
@@ -94,7 +94,7 @@ jobs:
             --wait-for-ci-green-timeout-ms 1200000 \
             --wait-for-ci-green-interval-ms 30000
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ steps.ref.outputs.checkout_sha }}
           fetch-depth: 0
@@ -489,7 +489,7 @@ jobs:
       # hard-pin to the validated release commit below. This keeps the checkout
       # off attacker-influenced refs in a packages:write/id-token:write context.
       # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: refs/heads/ci-green
           fetch-depth: 0
