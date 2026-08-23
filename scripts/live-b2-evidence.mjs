@@ -127,7 +127,11 @@ function writePreflight(out, state, status, reason, details = {}) {
       statusReason: reason,
       configuration: state.configuration,
       credentialPolicy: state.credentialPolicy,
-      target: details.target,
+      // Only a "passed" preflight persists the account/notification proof the
+      // finalizer reads; it carries the computed target on `state`. Blocked/
+      // error paths must omit it, so they only honor an explicit `details.target`
+      // even when `state` (e.g. post-authorization evidence) already holds one.
+      target: status === "passed" ? (state.target ?? details.target) : details.target,
       error: details.error,
     }),
   );
@@ -402,11 +406,19 @@ function runFinalize(options) {
   writeFinalEvidence(options);
 }
 
-try {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.command === "preflight") await runPreflight(options);
-  else runFinalize(options);
-} catch (err) {
-  usage(err instanceof Error ? err.message : String(err));
-  process.exit(2);
+export { writePreflight, safeTarget };
+
+const invokedAsScript = process.argv[1]
+  ? pathToFileURL(process.argv[1]).href === import.meta.url
+  : false;
+
+if (invokedAsScript) {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.command === "preflight") await runPreflight(options);
+    else runFinalize(options);
+  } catch (err) {
+    usage(err instanceof Error ? err.message : String(err));
+    process.exit(2);
+  }
 }

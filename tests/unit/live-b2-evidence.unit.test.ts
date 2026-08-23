@@ -8,6 +8,7 @@ import { join } from "path";
 const nodeRequire = createRequire(__filename);
 const liveB2Capabilities = nodeRequire("../../scripts/lib/live-b2-capabilities.cjs") as {
   LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES: string[];
+  LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES: string[];
 };
 const liveB2Contract = nodeRequire("../../scripts/lib/live-b2-contract.cjs") as {
   stableResourceFingerprint(value: string): string;
@@ -76,6 +77,22 @@ const evidence = nodeRequire("../../scripts/lib/live-b2-evidence.cjs") as {
     options?: { expectedPrefix?: string; env?: Record<string, string> },
   ): unknown;
   writeEvidenceJson(path: string, value: unknown, env?: Record<string, string>): void;
+  readValidationSummary(
+    path: string,
+    options?: { expectedPrefix?: string; env?: Record<string, string> },
+  ): { present: boolean; summary: unknown; validationError: string | null };
+  validationSummaryProvesLiveB2Policy(
+    validationSummary: { present: boolean; summary: unknown; validationError: string | null },
+    options?: {
+      expectedPrefix?: string;
+      expectedToolProfile?: string;
+      expectedToolCount?: number;
+      expectedNamesHash?: string;
+      requiredCapabilities?: string[];
+      forbiddenCapabilities?: string[];
+      env?: Record<string, string>;
+    },
+  ): boolean;
 };
 
 const LIVE_PREFIX = "mcp-contract-run1";
@@ -682,6 +699,132 @@ describe("live B2 evidence", () => {
       expect(written.status).toBe("configuration blocked");
       expect(written.configuration.missingEnv).toContain("B2_REGION");
       expect(JSON.stringify(written)).not.toContain("fake-application-key");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists the passing-path preflight target so finalize can prove policy (regression)", async () => {
+    // The matrix leg's preflight validates in-memory and exits 0, but finalize
+    // re-derives trust solely from the written validation summary. A passing
+    // preflight that drops the `target` block makes finalize read all-false
+    // account/notification proof and stamp the run "configuration blocked",
+    // failing "Require live B2 run success" even though tests and cleanup passed.
+    const evidenceCli = (await import("../../scripts/live-b2-evidence.mjs")) as unknown as {
+      writePreflight(
+        out: string,
+        state: unknown,
+        status: string,
+        reason: string,
+        details?: { target?: unknown; error?: unknown },
+      ): void;
+    };
+
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-preflight-"));
+    try {
+      const out = join(dir, "validation.json");
+      const requiredCapabilities = liveB2Capabilities.LIVE_B2_CONTRACT_REQUIRED_CAPABILITIES;
+      const forbiddenCapabilities = liveB2Capabilities.LIVE_B2_CONTRACT_FORBIDDEN_CAPABILITIES;
+
+      // Mirrors the object runPreflight() builds on the passing path: the computed
+      // target lives on `state`, and writePreflight() is invoked with no details arg.
+      const target = {
+        accountMatchedExpectedLiveTestAccount: true,
+        accountFingerprint: EXPECTED_ACCOUNT_FINGERPRINT,
+        expectedAccountFingerprint: EXPECTED_ACCOUNT_FINGERPRINT,
+        notificationBucketConfigured: true,
+        notificationBucketValidated: true,
+        notificationRuleToolRegistered: true,
+        notificationBucketFingerprint: EXPECTED_NOTIFICATION_BUCKET_FINGERPRINT,
+      };
+      const state = {
+        configuration: {
+          expectedToolProfile: EXPECTED_PROFILE,
+          expectedToolProfileApproved: true,
+          actualToolProfile: {
+            toolCount: EXPECTED_PROFILE_NAMES.length,
+            namesHash: EXPECTED_PROFILE_HASH,
+            matchesExpectedProfile: true,
+            missingExpectedTools: [],
+            unexpectedTools: [],
+          },
+        },
+        credentialPolicy: {
+          nonMasterApplicationKey: true,
+          overbroadCredentialRejected: false,
+          requiredCapabilitiesPresent: [...requiredCapabilities],
+          missingRequiredCapabilities: [],
+          forbiddenCapabilitiesGranted: [],
+        },
+        target,
+      };
+
+      evidenceCli.writePreflight(
+        out,
+        state,
+        "passed",
+        "live B2 validation passed for this Node matrix leg",
+      );
+
+      // Direct: the writer must persist the state target it was given.
+      const written = JSON.parse(readFileSync(out, "utf8")) as { target?: unknown };
+      expect(written.target).toEqual(target);
+
+      // End-to-end: the finalizer must accept the summary the writer produced.
+      const proven = evidence.validationSummaryProvesLiveB2Policy(
+        evidence.readValidationSummary(out, {}),
+        {
+          expectedToolProfile: EXPECTED_PROFILE,
+          expectedToolCount: EXPECTED_PROFILE_NAMES.length,
+          expectedNamesHash: EXPECTED_PROFILE_HASH,
+          requiredCapabilities,
+          forbiddenCapabilities,
+          env: {
+            B2_LIVE_TEST_ACCOUNT_ID: EXPECTED_ACCOUNT_ID,
+            B2_LIVE_NOTIFICATION_BUCKET: EXPECTED_NOTIFICATION_BUCKET,
+          },
+        },
+      );
+      expect(proven).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("omits the target on a blocked preflight even when state carries one", async () => {
+    // The post-authorization blocked path passes the same state object that
+    // already holds a computed target. Blocked evidence must still omit target,
+    // so the state fallback only applies to a "passed" status.
+    const evidenceCli = (await import("../../scripts/live-b2-evidence.mjs")) as unknown as {
+      writePreflight(
+        out: string,
+        state: unknown,
+        status: string,
+        reason: string,
+        details?: { target?: unknown; error?: unknown },
+      ): void;
+    };
+
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-preflight-blocked-"));
+    try {
+      const out = join(dir, "validation.json");
+      const state = {
+        configuration: {},
+        credentialPolicy: {},
+        target: {
+          accountMatchedExpectedLiveTestAccount: false,
+          accountFingerprint: null,
+        },
+      };
+
+      evidenceCli.writePreflight(out, state, "configuration blocked", "some config failure");
+
+      const written = JSON.parse(readFileSync(out, "utf8")) as {
+        status?: string;
+        target?: unknown;
+      };
+      expect(written.status).toBe("configuration blocked");
+      expect(written.target).toBeUndefined();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
