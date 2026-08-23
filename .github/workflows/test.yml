@@ -581,12 +581,12 @@ jobs:
         with:
           persist-credentials: false
       # github/codeql-action/init v4.37.6, reviewed 2026-08-06.
-      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
           languages: javascript-typescript
           build-mode: none
       # github/codeql-action/analyze v4.37.6, reviewed 2026-08-06.
-      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
           category: "/language:javascript-typescript"
           upload: never
