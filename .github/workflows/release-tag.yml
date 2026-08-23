@@ -42,7 +42,7 @@ jobs:
           printf '%s\n' "${REQUEST_TAG}" > release-request/tag.txt
           echo "Release publish requested for ${REQUEST_TAG}"
       # actions/upload-artifact v6, reviewed 2026-08-06.
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: release-tag-request
           path: release-request/tag.txt

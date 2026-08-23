@@ -60,7 +60,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload primary verification reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: primary-verify-reports
           path: |
@@ -142,7 +142,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload coverage and test reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: coverage-and-tests-node-${{ matrix.node-version }}
           path: |
@@ -190,7 +190,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload reliability reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: reliability-resilience-node-22.23.1
           path: |
@@ -224,7 +224,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload contract artifacts and reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: mcp-contract-node-22.23.1
           path: |
@@ -259,7 +259,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload protocol reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: protocol-transport-node-22.23.1
           path: |
@@ -292,7 +292,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload observability logging reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: observability-logging
           path: |
@@ -333,7 +333,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload package manifest and reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: package-install-smoke
           path: |
@@ -469,7 +469,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload package budget reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: package-budget
           path: |
@@ -512,7 +512,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload Vercel build scan reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: vercel-build-output-scan
           path: |
@@ -640,7 +640,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload slow lifecycle reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: slow-lifecycle
           path: |

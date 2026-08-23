@@ -295,7 +295,7 @@ jobs:
             publish-package/release-tools/
           cp scripts/lib/release-utils.mjs publish-package/release-tools/lib/
       # actions/upload-artifact v6, reviewed 2026-08-06.
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: npm-package
           path: |

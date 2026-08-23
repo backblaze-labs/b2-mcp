@@ -197,7 +197,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload live B2 preflight evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: live-b2-preflight-isolation-cleanup
           path: reports/live-b2/preflight.json
@@ -390,7 +390,7 @@ jobs:
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload live B2 isolation and cleanup evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: live-b2-isolation-cleanup-node-${{ matrix.node-version }}
           path: reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json
