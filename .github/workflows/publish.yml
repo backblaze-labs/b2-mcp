@@ -42,7 +42,7 @@ jobs:
       release-notes-sha256: ${{ steps.notes.outputs.release_notes_sha256 }}
     steps:
       # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           run-id: ${{ github.event.workflow_run.id }}
           name: release-tag-request
@@ -333,7 +333,7 @@ jobs:
       id-token: write
     steps:
       # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: npm-package
           path: publish-package
@@ -558,7 +558,7 @@ jobs:
       contents: write
     steps:
       # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: npm-package
           path: publish-package
