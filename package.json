@@ -107,7 +107,7 @@
     "@aws-sdk/s3-request-presigner": "3.1103.0",
     "@backblaze-labs/b2-sdk": "0.3.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "@smithy/types": "4.16.1",
+    "@smithy/types": "4.17.2",
     "jose": "6.2.8",
     "opossum": "10.0.0",
     "pino": "10.3.1",
