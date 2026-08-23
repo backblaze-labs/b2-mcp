@@ -790,4 +790,43 @@ describe("live B2 evidence", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("omits the target on a blocked preflight even when state carries one", async () => {
+    // The post-authorization blocked path passes the same state object that
+    // already holds a computed target. Blocked evidence must still omit target,
+    // so the state fallback only applies to a "passed" status.
+    const evidenceCli = (await import("../../scripts/live-b2-evidence.mjs")) as unknown as {
+      writePreflight(
+        out: string,
+        state: unknown,
+        status: string,
+        reason: string,
+        details?: { target?: unknown; error?: unknown },
+      ): void;
+    };
+
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-live-preflight-blocked-"));
+    try {
+      const out = join(dir, "validation.json");
+      const state = {
+        configuration: {},
+        credentialPolicy: {},
+        target: {
+          accountMatchedExpectedLiveTestAccount: false,
+          accountFingerprint: null,
+        },
+      };
+
+      evidenceCli.writePreflight(out, state, "configuration blocked", "some config failure");
+
+      const written = JSON.parse(readFileSync(out, "utf8")) as {
+        status?: string;
+        target?: unknown;
+      };
+      expect(written.status).toBe("configuration blocked");
+      expect(written.target).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

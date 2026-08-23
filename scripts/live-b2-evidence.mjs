@@ -127,10 +127,11 @@ function writePreflight(out, state, status, reason, details = {}) {
       statusReason: reason,
       configuration: state.configuration,
       credentialPolicy: state.credentialPolicy,
-      // The passing path carries the computed target on `state`; blocked/error
-      // paths pass it (or nothing) via `details`. Prefer state so a "passed"
-      // preflight persists the account/notification proof the finalizer reads.
-      target: state.target ?? details.target,
+      // Only a "passed" preflight persists the account/notification proof the
+      // finalizer reads; it carries the computed target on `state`. Blocked/
+      // error paths must omit it, so they only honor an explicit `details.target`
+      // even when `state` (e.g. post-authorization evidence) already holds one.
+      target: status === "passed" ? (state.target ?? details.target) : details.target,
       error: details.error,
     }),
   );
