@@ -1,8 +1,14 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "child_process";
 import { once } from "events";
-import { existsSync } from "fs";
-import { join } from "path";
 import type { JSONRPCMessage } from "@modelcontextprotocol/client";
+import {
+  DIST_HTTP,
+  DIST_INDEX,
+  ROOT,
+  SIMULATOR_ENTRYPOINT,
+  requireBuiltFiles,
+  safeSpawnEnv,
+} from "../../test-support/mcp-server-process";
 
 export const MODERN_PROTOCOL_VERSION = "2026-07-28";
 export const LEGACY_PROTOCOL_VERSION = "2025-11-25";
@@ -13,48 +19,25 @@ export const MODERN_META = {
   "io.modelcontextprotocol/clientInfo": { name: "b2-mcp-protocol-test", version: "1.0.0" },
 };
 
-export const ROOT = join(__dirname, "../..");
-const DIST_INDEX = join(ROOT, "dist/index.js");
-const DIST_HTTP = join(ROOT, "dist/http-server.js");
-export const SIMULATOR_ENTRYPOINT = join(ROOT, "tests/protocol/support/simulator-entrypoint.mjs");
+export { ROOT, SIMULATOR_ENTRYPOINT };
 const REQUEST_TIMEOUT_MS = process.platform === "win32" ? 15_000 : 10_000;
-const SAFE_ENV_NAMES = [
-  "PATH",
-  "Path",
-  "SystemRoot",
-  "COMSPEC",
-  "PATHEXT",
-  "HOME",
-  "USERPROFILE",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-];
 
 export function requireBuiltEntrypoints(): void {
-  if (!existsSync(DIST_INDEX) || !existsSync(DIST_HTTP) || !existsSync(SIMULATOR_ENTRYPOINT)) {
-    throw new Error("Protocol transport tests require built dist entry points. Run npm run build.");
-  }
+  requireBuiltFiles(
+    [DIST_INDEX, DIST_HTTP, SIMULATOR_ENTRYPOINT],
+    "Protocol transport tests require built dist entry points. Run npm run build.",
+  );
 }
 
 export function protocolEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const inherited = Object.fromEntries(
-    SAFE_ENV_NAMES.flatMap((name) =>
-      process.env[name] === undefined ? [] : [[name, process.env[name] as string]],
-    ),
-  );
-  const env: NodeJS.ProcessEnv = {
-    ...inherited,
+  return safeSpawnEnv({
     NODE_ENV: "test",
     B2_REGISTER_ALL_TOOLS: "true",
     B2_APPLICATION_KEY_ID: "protocol-key-id",
     B2_APPLICATION_KEY: "protocol-key-secret",
     B2_HTTP_CREDENTIAL_MODE: "headers",
     ...extra,
-  };
-  delete env.FORCE_COLOR;
-  delete env.NO_COLOR;
-  return env;
+  });
 }
 
 export class RawStdioSession {
