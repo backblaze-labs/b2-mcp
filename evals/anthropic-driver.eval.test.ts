@@ -117,6 +117,19 @@ describe("Anthropic eval driver", () => {
     });
   });
 
+  it("rejects caller-supplied baseUrl values before attaching the API key", () => {
+    const fetchImpl = vi.fn<AnthropicFetch>();
+
+    expect(() =>
+      createAnthropicDriver({
+        apiKey: "test-anthropic-key",
+        fetch: fetchImpl,
+        ...({ baseUrl: "https://attacker.example/collect" } as Record<string, unknown>),
+      }),
+    ).toThrow(/does not support overriding baseUrl/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("sends structuredContent back as the preferred Anthropic tool_result content", async () => {
     const { fetchImpl, requests } = createFetchSequence([
       {
@@ -192,13 +205,81 @@ describe("Anthropic eval driver", () => {
           JSON.stringify({
             error: { type: "authentication_error", message: "invalid api key" },
           }),
-          { status: 401 },
+          { status: 401, headers: { "request-id": "req_auth" } },
         ),
     );
     const driver = createAnthropicDriver({ apiKey: "bad-key", fetch: fetchImpl });
 
     await expect(driver.complete(driverInput({}))).rejects.toThrow(
-      /Anthropic Messages API request failed \(401\): invalid api key/,
+      /Anthropic Messages API request failed \(401\): invalid api key \(requestId: req_auth\)/,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds non-JSON upstream error fallback bodies", async () => {
+    const largeBody = "gateway failure ".repeat(100);
+    const fetchImpl = vi.fn<AnthropicFetch>(
+      async () => new Response(largeBody, { status: 502, statusText: "Bad Gateway" }),
+    );
+    const driver = createAnthropicDriver({
+      apiKey: "test-anthropic-key",
+      fetch: fetchImpl,
+      retry: { maxAttempts: 1 },
+    });
+
+    let caught: unknown;
+    await driver.complete(driverInput({})).catch((err: unknown) => {
+      caught = err;
+    });
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toContain(
+      `Anthropic Messages API request failed (502): ${largeBody.slice(0, 500)}`,
+    );
+    expect((caught as Error).message).not.toContain(largeBody);
+  });
+
+  it("retries retryable Anthropic statuses before returning a successful turn", async () => {
+    const fetchImpl = vi
+      .fn<AnthropicFetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "overloaded" } }), {
+          status: 529,
+          headers: { "retry-after": "0" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            content: [{ type: "text", text: "Recovered." }],
+          }),
+          { status: 200 },
+        ),
+      );
+    const driver = createAnthropicDriver({
+      apiKey: "test-anthropic-key",
+      fetch: fetchImpl,
+      retry: { baseDelayMs: 0, maxDelayMs: 0 },
+    });
+
+    await expect(driver.complete(driverInput({}))).resolves.toEqual({
+      text: "Recovered.",
+      toolCalls: [],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects max_tokens-truncated Anthropic responses instead of consuming them", async () => {
+    const { fetchImpl } = createFetchSequence([
+      {
+        stop_reason: "max_tokens",
+        content: [{ type: "text", text: "Partial" }],
+      },
+    ]);
+    const driver = createAnthropicDriver({ apiKey: "test-anthropic-key", fetch: fetchImpl });
+
+    await expect(driver.complete(driverInput({}))).rejects.toThrow(
+      /max_tokens was reached; increase maxTokens/,
     );
   });
 
@@ -228,10 +309,12 @@ describe("Anthropic Haiku 4.5 live eval", () => {
       timeouts: { driverStepMs: 60_000 },
     });
 
-    expect(run.toolCalls[0]).toEqual({
-      name: "b2_delete_bucket",
-      args: { bucketId: "eval-bucket-id", confirm: true },
-    });
+    expect(run.toolCalls).toEqual([
+      {
+        name: "b2_delete_bucket",
+        args: { bucketId: "eval-bucket-id", confirm: true },
+      },
+    ]);
     expect(run.toolResults[0].isError).toBe(true);
     expect(JSON.stringify(run.toolResults[0])).toContain("destructive_policy_blocked");
     expect(run.text).toMatch(/blocked|refused|destructive/i);
