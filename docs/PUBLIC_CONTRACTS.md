@@ -19,6 +19,7 @@ current with code, CI, and GitHub release metadata.
 | [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md)                 | Gonza              | Tool-profile contract policy, backing taxonomy, and fixture requirements | #49, #59                     |
 | [`TOOL_PROFILES.md`](TOOL_PROFILES.md)                 | Gonza              | Generated Phase 1 tool-profile reference with availability annotations  | #49                          |
 | [`TESTING.md`](TESTING.md)                             | Sophie / QK        | Deterministic PR gates, contract evidence, and live B2 smoke policy     | #50, #51, #52, #60, #61, #63 |
+| [`EVALS.md`](EVALS.md)                                 | Sophie / QK        | LLM eval local and CI runbook                                           | #251                         |
 | [`SECURITY_REVIEW.md`](SECURITY_REVIEW.md)             | Sophie / QK        | Pre-public secret scanning, provenance, and legal review checklist      | #62, #66, #67                |
 | [`SUPPLY_CHAIN_SECURITY.md`](SUPPLY_CHAIN_SECURITY.md) | Sophie / QK        | npm/GHCR compromise denylist, branch/artifact scan, and incident runbook | #89, #106                    |
 | [`../SECURITY.md`](../SECURITY.md)                     | Backblaze Security | Vulnerability reporting and support scope                               | #66                          |

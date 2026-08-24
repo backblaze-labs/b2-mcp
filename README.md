@@ -507,6 +507,8 @@ pnpm run verify             # fast no-credential quality gate
 pnpm run test:live:b2-integration # live B2 tests; requires B2_APPLICATION_KEY_ID / B2_APPLICATION_KEY
 pnpm run test:live:b2-contract    # live B2 request-shape checks; requires B2 credentials
 pnpm run test:live:b2             # both protected live B2 suites
+pnpm run evals                    # deterministic LLM eval harness; live provider cases skip by default
+pnpm run evals:provider-comparison # opt-in Claude vs OpenAI pass-rate comparison; requires provider keys
 pnpm start                        # stdio transport
 pnpm run start:http --port 3000   # MCP 2026-07-28 HTTP transport
 b2-mcp --help                     # installed package CLI help after publish/install
@@ -532,6 +534,7 @@ committed lockfile and a sanitized temporary environment.
 - [`docs/TOOL_CONTRACT.md`](docs/TOOL_CONTRACT.md) — Phase 1 tool-contract policy
 - [`docs/TOOL_PROFILES.md`](docs/TOOL_PROFILES.md) — generated tool-profile reference
 - [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
+- [`docs/EVALS.md`](docs/EVALS.md) — LLM eval local and CI runbook
 - [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md) — pre-public security and provenance review checklist
 - [`RELEASE.md`](RELEASE.md) — release process and `[Unreleased]` discipline
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
