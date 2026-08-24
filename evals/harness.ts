@@ -260,9 +260,7 @@ async function withTimeout<T>(
         timedOut = true;
         controller.abort();
         timeoutCleanup = Promise.resolve(onTimeout?.()).catch(() => undefined);
-        void timeoutCleanup.then(() => {
-          reject(new EvalTimeoutError(phase, timeoutMs));
-        });
+        reject(new EvalTimeoutError(phase, timeoutMs));
       }, timeoutMs);
       timer.unref();
     });
