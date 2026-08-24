@@ -429,7 +429,9 @@ describe("provider pass-rate comparison", () => {
           caseName: "comparison case",
           status: "errored" as const,
           passed: false as const,
-          error: "request failed for sk-proj-secret123456789",
+          error:
+            "request failed with toolCalls=[raw] text=raw model text " +
+            "eval-application-key-secret sk-proj-secret123456789",
         },
       ],
     };
@@ -483,7 +485,7 @@ describe("provider pass-rate comparison", () => {
     expect(report.results[2]).toMatchObject({
       provider: "OpenAI",
       status: "errored",
-      error: "request failed for [REDACTED_SECRET]",
+      error: "Case errored during evaluation; raw model and tool payloads omitted.",
     });
   });
 

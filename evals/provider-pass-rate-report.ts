@@ -6,8 +6,6 @@ import type {
   ProviderCaseResult,
   ProviderPassRateComparison,
 } from "./provider-comparison";
-import { providerSecretValues } from "./provider-secrets";
-import { sanitizeProviderErrorMessage } from "./provider-utils";
 
 export const PROVIDER_COMPARISON_CASE_LIMIT_ENV = "LLM_EVAL_CASE_LIMIT";
 export const PROVIDER_COMPARISON_CASE_SET_ENV = "LLM_EVAL_CASE_SET";
@@ -76,7 +74,6 @@ export function createProviderPassRateReport(args: {
   now?: Date;
 }): ProviderPassRateReport {
   const env = args.env ?? process.env;
-  const secretValues = providerSecretValues(env);
   const modelByProvider = new Map(
     args.providers.map((provider) => [provider.name, provider.model(env)]),
   );
@@ -93,9 +90,7 @@ export function createProviderPassRateReport(args: {
       return { ...rate, model };
     }),
     summary: args.comparison.summary,
-    results: args.comparison.results.map((result) =>
-      sanitizeProviderCaseResult(result, secretValues),
-    ),
+    results: args.comparison.results.map((result) => sanitizeProviderCaseResult(result)),
     sensitivity: {
       secretSafe: true,
       omitted: [
@@ -113,10 +108,7 @@ export function writeProviderPassRateReport(path: string, report: ProviderPassRa
   writeFileSync(path, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }
 
-function sanitizeProviderCaseResult(
-  result: ProviderCaseResult,
-  secretValues: readonly string[],
-): SanitizedProviderCaseResult {
+function sanitizeProviderCaseResult(result: ProviderCaseResult): SanitizedProviderCaseResult {
   const base = {
     provider: result.provider,
     caseName: result.caseName,
@@ -132,7 +124,7 @@ function sanitizeProviderCaseResult(
   if (result.status === "errored") {
     return {
       ...base,
-      error: sanitizeProviderErrorMessage(result.error, secretValues),
+      error: "Case errored during evaluation; raw model and tool payloads omitted.",
     };
   }
   return base;

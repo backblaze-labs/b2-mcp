@@ -121,7 +121,7 @@ describe("eval pass-rate report script", () => {
     expect(validation.stderr).toMatch(/passRate must equal passed \/ total|total must equal/);
   });
 
-  it("rejects reports that include raw run payload fields", () => {
+  it("rejects reports with unknown raw payload fields", () => {
     const path = tempReportPath();
     writeFileSync(
       path,
@@ -150,7 +150,7 @@ describe("eval pass-rate report script", () => {
               status: "failed",
               passed: false,
               failure: "failed",
-              toolCalls: [{ name: "b2_list_buckets", args: {} }],
+              response: { toolCalls: [{ name: "b2_list_buckets", args: {} }] },
             },
           ],
         }),
@@ -161,6 +161,79 @@ describe("eval pass-rate report script", () => {
     const validation = runScript("validate", path);
 
     expect(validation.status).not.toBe(0);
-    expect(validation.stderr).toContain("raw payload field");
+    expect(validation.stderr).toContain("report.results[1].response is not allowed");
+  });
+
+  it("rejects raw diagnostics in allowed result fields", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          providers: [
+            {
+              provider: "Claude",
+              model: "claude-haiku-4-5-20251001",
+              passed: 1,
+              total: 1,
+              passRate: 1,
+            },
+            { provider: "OpenAI", model: "gpt-5-nano", passed: 0, total: 1, passRate: 0 },
+          ],
+          results: [
+            {
+              provider: "Claude",
+              caseName: "passed case",
+              status: "passed",
+              passed: true,
+            },
+            {
+              provider: "OpenAI",
+              caseName: "errored case",
+              status: "errored",
+              passed: false,
+              error: "raw model text and tool payload",
+            },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+
+    expect(validation.status).not.toBe(0);
+    expect(validation.stderr).toContain("bounded errored diagnostic");
+  });
+
+  it("requires result passed flags to match status", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          results: [
+            {
+              provider: "Claude",
+              caseName: "blocked delete bucket",
+              status: "passed",
+              passed: true,
+            },
+            {
+              provider: "OpenAI",
+              caseName: "blocked delete bucket",
+              status: "passed",
+              passed: false,
+            },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+
+    expect(validation.status).not.toBe(0);
+    expect(validation.stderr).toContain("passed must equal whether status is passed");
   });
 });

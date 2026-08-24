@@ -3,9 +3,26 @@ import { pathToFileURL } from "node:url";
 
 const PROVIDER_SECRET_ENV_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 const EXPECTED_PROVIDER_NAMES = ["Claude", "OpenAI"];
-const RAW_PAYLOAD_KEYS = new Set(["run", "toolCalls", "toolResults", "text"]);
 const RESULT_STATUSES = new Set(["passed", "failed", "errored"]);
 const PASS_RATE_TOLERANCE = 1e-12;
+const REPORT_KEYS = new Set([
+  "schemaVersion",
+  "generatedAt",
+  "caseCount",
+  "providers",
+  "summary",
+  "results",
+  "sensitivity",
+]);
+const PROVIDER_KEYS = new Set(["provider", "model", "passed", "total", "passRate"]);
+const FAILED_RESULT_FAILURE = "Case failed validation; raw model and tool payloads omitted.";
+const ERRORED_RESULT_ERROR = "Case errored during evaluation; raw model and tool payloads omitted.";
+const RESULT_KEYS_BY_STATUS = {
+  passed: new Set(["provider", "caseName", "status", "passed"]),
+  failed: new Set(["provider", "caseName", "status", "passed", "failure"]),
+  errored: new Set(["provider", "caseName", "status", "passed", "error"]),
+};
+const SENSITIVITY_KEYS = new Set(["secretSafe", "omitted"]);
 
 function fail(message) {
   throw new Error(message);
@@ -29,23 +46,10 @@ function assertPassRate(value, path) {
   }
 }
 
-function findRawPayloadField(value, path = "$") {
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const found = findRawPayloadField(value[index], `${path}[${index}]`);
-      if (found) return found;
-    }
-    return null;
+function assertAllowedKeys(value, allowedKeys, path) {
+  for (const key of Object.keys(value)) {
+    if (!allowedKeys.has(key)) fail(`${path}.${key} is not allowed`);
   }
-  if (!isRecord(value)) return null;
-
-  for (const [key, child] of Object.entries(value)) {
-    const childPath = `${path}.${key}`;
-    if (RAW_PAYLOAD_KEYS.has(key)) return childPath;
-    const found = findRawPayloadField(child, childPath);
-    if (found) return found;
-  }
-  return null;
 }
 
 export function readReportFile(path) {
@@ -65,6 +69,7 @@ export function assertNoProviderSecrets(raw, secretValues) {
 
 export function validateProviderPassRateReport(report) {
   if (!isRecord(report)) fail("report must be an object");
+  assertAllowedKeys(report, REPORT_KEYS, "report");
   if (report.schemaVersion !== 1) fail("report.schemaVersion must be 1");
   assertString(report.generatedAt, "report.generatedAt");
   assertNonNegativeInteger(report.caseCount, "report.caseCount");
@@ -80,6 +85,7 @@ export function validateProviderPassRateReport(report) {
   for (const [index, provider] of report.providers.entries()) {
     const path = `report.providers[${index}]`;
     if (!isRecord(provider)) fail(`${path} must be an object`);
+    assertAllowedKeys(provider, PROVIDER_KEYS, path);
     assertString(provider.provider, `${path}.provider`);
     if (!providerCounts.has(provider.provider)) {
       fail(`${path}.provider must be Claude or OpenAI`);
@@ -112,14 +118,24 @@ export function validateProviderPassRateReport(report) {
     if (!providerResultCounts) fail(`${path}.provider must be Claude or OpenAI`);
     assertString(result.caseName, `${path}.caseName`);
     if (!RESULT_STATUSES.has(result.status)) fail(`${path}.status is invalid`);
+    assertAllowedKeys(result, RESULT_KEYS_BY_STATUS[result.status], path);
     if (typeof result.passed !== "boolean") fail(`${path}.passed must be boolean`);
+    if (result.passed !== (result.status === "passed")) {
+      fail(`${path}.passed must equal whether status is passed`);
+    }
     providerResultCounts.total += 1;
     if (result.passed) providerResultCounts.passed += 1;
     if (result.status === "failed" && typeof result.failure !== "string") {
       fail(`${path}.failure must be present for failed results`);
     }
+    if (result.status === "failed" && result.failure !== FAILED_RESULT_FAILURE) {
+      fail(`${path}.failure must be the bounded failed diagnostic`);
+    }
     if (result.status === "errored" && typeof result.error !== "string") {
       fail(`${path}.error must be present for errored results`);
+    }
+    if (result.status === "errored" && result.error !== ERRORED_RESULT_ERROR) {
+      fail(`${path}.error must be the bounded errored diagnostic`);
     }
   }
   for (const provider of report.providers) {
@@ -133,6 +149,7 @@ export function validateProviderPassRateReport(report) {
   }
 
   if (!isRecord(report.sensitivity)) fail("report.sensitivity must be an object");
+  assertAllowedKeys(report.sensitivity, SENSITIVITY_KEYS, "report.sensitivity");
   if (report.sensitivity.secretSafe !== true) fail("report.sensitivity.secretSafe must be true");
   if (
     !Array.isArray(report.sensitivity.omitted) ||
@@ -141,9 +158,6 @@ export function validateProviderPassRateReport(report) {
   ) {
     fail("report.sensitivity.omitted must be a non-empty string array");
   }
-
-  const rawField = findRawPayloadField(report);
-  if (rawField) fail(`pass-rate report includes raw payload field ${rawField}`);
   return report;
 }
 
