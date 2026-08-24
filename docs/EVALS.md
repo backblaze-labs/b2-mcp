@@ -72,9 +72,11 @@ failures in this mode.
 
 The Claude vs OpenAI comparison has a separate gate so ordinary live provider
 runs do not automatically re-run the comparison matrix. To run the CI-shaped
-bounded comparison locally:
+bounded comparison locally, build first so the harness evaluates the current
+`dist/index.js` output:
 
 ```bash
+pnpm run build
 RUN_LLM_EVALS=1 \
 RUN_LLM_PROVIDER_COMPARISON=1 \
 ANTHROPIC_API_KEY=your-anthropic-api-key \
@@ -93,7 +95,8 @@ For a full local comparison, omit `LLM_EVAL_CASE_SET` and
 `LLM_EVAL_BLOCK_SERVER_NETWORK=1` unless you are debugging the eval server's
 network boundary; it imports [`../scripts/no-network-guard.mjs`](../scripts/no-network-guard.mjs)
 inside the server child process while still allowing provider API calls from the
-test runner.
+test runner. Re-run `pnpm run build` after source changes before collecting
+provider comparison evidence.
 
 ## Required Environment
 
@@ -170,7 +173,9 @@ and fails the job if the comparison command did not succeed.
 
 The full-profile coverage guard is
 [`../tests/contract/eval-coverage.contract.test.ts`](../tests/contract/eval-coverage.contract.test.ts).
-It runs in `pnpm run test:contract` and therefore in `pnpm run verify`.
+It runs in `pnpm run test:contract`, which is a distinct deterministic layer and
+not part of `pnpm run verify`; run `pnpm run test:contract` explicitly to
+exercise the guard.
 
 The guard checks that:
 

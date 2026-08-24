@@ -508,7 +508,7 @@ pnpm run test:live:b2-integration # live B2 tests; requires B2_APPLICATION_KEY_I
 pnpm run test:live:b2-contract    # live B2 request-shape checks; requires B2 credentials
 pnpm run test:live:b2             # both protected live B2 suites
 pnpm run evals                    # deterministic LLM eval harness; live provider cases skip by default
-pnpm run evals:provider-comparison # opt-in Claude vs OpenAI pass-rate comparison; requires provider keys
+pnpm run evals:provider-comparison # opt-in Claude vs OpenAI comparison; requires provider keys and current dist/
 pnpm start                        # stdio transport
 pnpm run start:http --port 3000   # MCP 2026-07-28 HTTP transport
 b2-mcp --help                     # installed package CLI help after publish/install
