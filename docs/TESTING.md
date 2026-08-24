@@ -41,6 +41,32 @@ The individual deterministic layers are:
 | `pnpm run test:diagnostics` | Builds first, then checks unit/protocol layers for MaxListeners and open-handle warnings. |
 | `pnpm run smoke:local`  | Builds, starts local HTTP MCP on 127.0.0.1:0, validates discovery/tools, and stops.   |
 
+## LLM Eval Harness
+
+`pnpm run evals` builds the stdio server, then runs the deterministic eval
+harness and provider-adapter tests under `evals/`. These tests do not require
+real B2 credentials. The harness starts b2-mcp with marker B2 credentials,
+`B2_ALLOW_LOCAL_FILES=false`, `B2_SECRET_SINK=off`, and a non-`allow`
+destructive policy so provider drivers can exercise MCP tool calls without
+touching a live B2 account.
+
+Real LLM-backed eval cases are opt-in. Leave `RUN_LLM_EVALS` unset for normal PR
+work; provider-backed cases skip and deterministic adapter tests still run.
+Set `RUN_LLM_EVALS=1` plus the relevant provider key to run live evidence:
+
+| Provider path              | Required environment                                                       |
+| -------------------------- | -------------------------------------------------------------------------- |
+| Anthropic driver           | `RUN_LLM_EVALS=1` and `ANTHROPIC_API_KEY`                                  |
+| OpenAI driver              | `RUN_LLM_EVALS=1` and `OPENAI_API_KEY`                                     |
+| Claude-vs-OpenAI comparison | `RUN_LLM_EVALS=1`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`              |
+
+The OpenAI Chat Completions eval driver defaults to `gpt-5-nano`, the current
+lowest-cost GPT-5 model documented by OpenAI for Chat Completions. Override it
+for a refresh or model investigation with `OPENAI_EVAL_MODEL=<model-id>`. The
+Claude-vs-OpenAI comparison runs the shared eval case set against both providers
+and fails the gated live test if any provider errors, any case fails, or the
+provider pass rate drops below 100%.
+
 ## Advisory Local Performance Baseline
 
 Issue

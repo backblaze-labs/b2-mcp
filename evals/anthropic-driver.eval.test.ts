@@ -7,7 +7,7 @@ import {
   DEFAULT_ANTHROPIC_MODEL,
   type AnthropicFetch,
 } from "./anthropic-driver";
-import { SHARED_EVAL_CASES } from "./cases";
+import { SHARED_EVAL_CASES, evalCaseRunOptions } from "./cases";
 import { runEval, type EvalMessage, type EvalToolCall } from "./harness";
 
 interface CapturedRequest {
@@ -324,18 +324,17 @@ describe("Anthropic eval driver", () => {
 });
 
 const liveGate = anthropicEvalGate();
+const LIVE_PROVIDER_TIMEOUT_MS = 180_000;
 
 describe("Anthropic Haiku 4.5 live eval", () => {
-  it.skipIf(!liveGate.enabled)("runs the shared gated tool-use eval end to end", async () => {
-    const evalCase = SHARED_EVAL_CASES[0];
-    const run = await runEval({
-      prompt: evalCase.prompt,
-      toolNames: [...evalCase.toolNames],
-      driver: createAnthropicDriver(),
-      maxSteps: evalCase.maxSteps,
-      timeouts: evalCase.timeouts,
-    });
+  it.skipIf(!liveGate.enabled)(
+    "runs the shared gated tool-use eval end to end",
+    async () => {
+      const evalCase = SHARED_EVAL_CASES[0];
+      const run = await runEval(evalCaseRunOptions(evalCase, createAnthropicDriver()));
 
-    expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
-  });
+      expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
+    },
+    LIVE_PROVIDER_TIMEOUT_MS,
+  );
 });

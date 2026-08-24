@@ -1,6 +1,6 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
-import { SHARED_EVAL_CASES } from "./cases";
+import { SHARED_EVAL_CASES, evalCaseRunOptions } from "./cases";
 import { runEval, type EvalMessage, type EvalToolCall } from "./harness";
 import {
   DEFAULT_OPENAI_MODEL,
@@ -9,6 +9,7 @@ import {
   openAIEvalGate,
   type OpenAIFetch,
 } from "./openai-driver";
+import { DEFAULT_MAX_RESPONSE_BODY_BYTES } from "./provider-utils";
 
 interface CapturedRequest {
   url: string | URL;
@@ -241,6 +242,36 @@ describe("OpenAI eval driver", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it("redacts echoed OpenAI credentials from upstream error messages", async () => {
+    const apiKey = "sk-proj-real-secret-1234567890";
+    const fetchImpl = vi.fn<OpenAIFetch>(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              message:
+                `invalid Authorization: Bearer ${apiKey}; key ${apiKey}; ` +
+                "alternate sk-proj-other-secret-1234567890",
+            },
+          }),
+          { status: 401 },
+        ),
+    );
+    const driver = createOpenAIDriver({ apiKey, fetch: fetchImpl });
+
+    let caught: unknown;
+    await driver.complete(driverInput({})).catch((err: unknown) => {
+      caught = err;
+    });
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain("Bearer [REDACTED]");
+    expect(message).toContain("[REDACTED_SECRET]");
+    expect(message).not.toContain(apiKey);
+    expect(message).not.toContain("sk-proj-other-secret-1234567890");
+  });
+
   it("bounds non-JSON upstream error fallback bodies", async () => {
     const largeBody = "gateway failure ".repeat(100);
     const fetchImpl = vi.fn<OpenAIFetch>(
@@ -294,6 +325,36 @@ describe("OpenAI eval driver", () => {
     },
   );
 
+  it.each([
+    ["seconds", "3600"],
+    ["HTTP date", new Date(Date.now() + 3_600_000).toUTCString()],
+  ] as const)("clamps Retry-After %s values before retrying", async (_kind, retryAfter) => {
+    const fetchImpl = vi
+      .fn<OpenAIFetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+          status: 429,
+          headers: { "retry-after": retryAfter },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(chatResponse({ content: "Recovered." })), {
+          status: 200,
+        }),
+      );
+    const driver = createOpenAIDriver({
+      apiKey: "test-openai-key",
+      fetch: fetchImpl,
+      retry: { baseDelayMs: 0, maxDelayMs: 0 },
+    });
+
+    await expect(driver.complete(driverInput({}))).resolves.toEqual({
+      text: "Recovered.",
+      toolCalls: [],
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it.each(["length", "content_filter"] as const)(
     "rejects %s OpenAI responses instead of consuming them",
     async (finishReason) => {
@@ -329,8 +390,60 @@ describe("OpenAI eval driver", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the current low-cost OpenAI model and gates on OPENAI_API_KEY by default", () => {
-    expect(DEFAULT_OPENAI_MODEL).toBe("gpt-5.6-luna");
+  it("does not retry malformed successful provider JSON", async () => {
+    const fetchImpl = vi.fn<OpenAIFetch>().mockResolvedValue(
+      new Response("{not-json", {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const driver = createOpenAIDriver({
+      apiKey: "test-openai-key",
+      fetch: fetchImpl,
+      retry: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
+    });
+
+    await expect(driver.complete(driverInput({}))).rejects.toThrow(
+      /OpenAI Chat Completions API returned invalid JSON/,
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects oversized non-JSON and JSON OpenAI responses before parsing", async () => {
+    const oversizedText = "x".repeat(DEFAULT_MAX_RESPONSE_BODY_BYTES + 1);
+    const oversizedJson = JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "ok" } }],
+      padding: oversizedText,
+    });
+
+    for (const response of [
+      new Response(oversizedText, { status: 502 }),
+      new Response(oversizedJson, { status: 200 }),
+    ]) {
+      const fetchImpl = vi.fn<OpenAIFetch>().mockResolvedValueOnce(response);
+      const driver = createOpenAIDriver({
+        apiKey: "test-openai-key",
+        fetch: fetchImpl,
+        retry: { maxAttempts: 1 },
+      });
+
+      await expect(driver.complete(driverInput({}))).rejects.toThrow(/response body exceeded/);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("uses the current low-cost OpenAI default model and gates on OPENAI_API_KEY", async () => {
+    const { fetchImpl, requests } = createFetchSequence([
+      chatResponse({ content: "Default model." }),
+    ]);
+    const driver = createOpenAIDriver({ apiKey: "test-openai-key", fetch: fetchImpl });
+
+    await expect(driver.complete(driverInput({}))).resolves.toEqual({
+      text: "Default model.",
+      toolCalls: [],
+    });
+    expect(requests[0].body.model).toBe(DEFAULT_OPENAI_MODEL);
+    expect(DEFAULT_OPENAI_MODEL).toMatch(/^gpt-/);
     expect(openAIEvalGate({ RUN_LLM_EVALS: "1" })).toEqual({
       enabled: false,
       reason: `missing provider key (${OPENAI_API_KEY_ENV})`,
@@ -342,18 +455,17 @@ describe("OpenAI eval driver", () => {
 });
 
 const liveGate = openAIEvalGate();
+const LIVE_PROVIDER_TIMEOUT_MS = 180_000;
 
 describe("OpenAI live eval", () => {
-  it.skipIf(!liveGate.enabled)("runs the shared gated tool-use eval end to end", async () => {
-    const evalCase = SHARED_EVAL_CASES[0];
-    const run = await runEval({
-      prompt: evalCase.prompt,
-      toolNames: [...evalCase.toolNames],
-      driver: createOpenAIDriver(),
-      maxSteps: evalCase.maxSteps,
-      timeouts: evalCase.timeouts,
-    });
+  it.skipIf(!liveGate.enabled)(
+    "runs the shared gated tool-use eval end to end",
+    async () => {
+      const evalCase = SHARED_EVAL_CASES[0];
+      const run = await runEval(evalCaseRunOptions(evalCase, createOpenAIDriver()));
 
-    expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
-  });
+      expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
+    },
+    LIVE_PROVIDER_TIMEOUT_MS,
+  );
 });

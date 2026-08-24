@@ -1,5 +1,5 @@
 import { ANTHROPIC_API_KEY_ENV, createAnthropicDriver } from "./anthropic-driver";
-import type { EvalCase } from "./cases";
+import { evalCaseRunOptions, type EvalCase } from "./cases";
 import { OPENAI_API_KEY_ENV, createOpenAIDriver } from "./openai-driver";
 import {
   llmEvalGate,
@@ -15,14 +15,33 @@ export interface EvalProvider {
   createDriver(): Driver;
 }
 
-export interface ProviderCaseResult {
+interface ProviderCaseBase {
   readonly provider: string;
   readonly caseName: string;
-  readonly passed: boolean;
-  readonly run?: EvalRun;
-  readonly error?: string;
-  readonly failure?: string;
 }
+
+export type ProviderCaseResult =
+  | (ProviderCaseBase & {
+      readonly status: "passed";
+      readonly passed: true;
+      readonly run: EvalRun;
+      readonly error?: never;
+      readonly failure?: never;
+    })
+  | (ProviderCaseBase & {
+      readonly status: "failed";
+      readonly passed: false;
+      readonly run: EvalRun;
+      readonly failure: string;
+      readonly error?: never;
+    })
+  | (ProviderCaseBase & {
+      readonly status: "errored";
+      readonly passed: false;
+      readonly error: string;
+      readonly run?: never;
+      readonly failure?: never;
+    });
 
 export interface ProviderPassRate {
   readonly provider: string;
@@ -35,6 +54,10 @@ export interface ProviderPassRateComparison {
   readonly results: readonly ProviderCaseResult[];
   readonly passRates: readonly ProviderPassRate[];
   readonly summary: string;
+}
+
+export interface PassRateAssertionOptions {
+  readonly minPassRate?: number;
 }
 
 export type EvalRunner = (options: RunEvalOptions) => Promise<EvalRun>;
@@ -79,26 +102,32 @@ export async function runProviderPassRateComparison(options: {
     for (const provider of options.providers) {
       try {
         const run = await runEvalImpl({
-          prompt: evalCase.prompt,
-          toolNames: [...evalCase.toolNames],
-          driver: provider.createDriver(),
-          maxSteps: evalCase.maxSteps,
-          maxToolCallsPerStep: evalCase.maxToolCallsPerStep,
-          maxToolCallsTotal: evalCase.maxToolCallsTotal,
-          timeouts: evalCase.timeouts,
+          ...evalCaseRunOptions(evalCase, provider.createDriver()),
         });
         const passed = evalCase.passed(run);
-        results.push({
-          provider: provider.name,
-          caseName: evalCase.name,
-          passed,
-          run,
-          ...(passed ? {} : { failure: evalCase.failureSummary(run) }),
-        });
+        if (passed) {
+          results.push({
+            provider: provider.name,
+            caseName: evalCase.name,
+            status: "passed",
+            passed: true,
+            run,
+          });
+        } else {
+          results.push({
+            provider: provider.name,
+            caseName: evalCase.name,
+            status: "failed",
+            passed: false,
+            run,
+            failure: evalCase.failureSummary(run),
+          });
+        }
       } catch (err) {
         results.push({
           provider: provider.name,
           caseName: evalCase.name,
+          status: "errored",
           passed: false,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -125,6 +154,26 @@ export async function runProviderPassRateComparison(options: {
   };
 }
 
+export function assertProviderPassRateComparison(
+  comparison: ProviderPassRateComparison,
+  options: PassRateAssertionOptions = {},
+): void {
+  const minPassRate = options.minPassRate ?? 1;
+  const failedResults = comparison.results.filter((result) => result.status !== "passed");
+  const missedRates = comparison.passRates.filter((rate) => rate.passRate < minPassRate);
+  if (failedResults.length === 0 && missedRates.length === 0) return;
+
+  const details = [
+    ...failedResults.map(formatProviderCaseFailure),
+    ...missedRates.map(
+      (rate) =>
+        `${rate.provider} pass rate ${(rate.passRate * 100).toFixed(1)}% is below ` +
+        `${(minPassRate * 100).toFixed(1)}%`,
+    ),
+  ];
+  throw new Error(`${comparison.summary}\n${details.join("\n")}`);
+}
+
 export function formatPassRateSummary(
   passRates: readonly ProviderPassRate[],
   caseCount: number,
@@ -137,4 +186,12 @@ export function formatPassRateSummary(
     )
     .join("; ");
   return `Pass-rate comparison (${providerList}) across ${caseCount} shared case(s): ${rates}.`;
+}
+
+function formatProviderCaseFailure(result: ProviderCaseResult): string {
+  if (result.status === "passed") return `${result.provider} ${result.caseName}: passed`;
+  if (result.status === "failed") {
+    return `${result.provider} ${result.caseName}: ${result.failure}`;
+  }
+  return `${result.provider} ${result.caseName}: ${result.error}`;
 }

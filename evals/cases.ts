@@ -1,4 +1,4 @@
-import type { EvalRun, EvalTimeouts } from "./harness";
+import type { Driver, EvalRun, EvalTimeouts, RunEvalOptions } from "./harness";
 
 export interface EvalCase {
   readonly name: string;
@@ -10,6 +10,18 @@ export interface EvalCase {
   readonly timeouts?: EvalTimeouts;
   passed(run: EvalRun): boolean;
   failureSummary(run: EvalRun): string;
+}
+
+export function evalCaseRunOptions(evalCase: EvalCase, driver: Driver): RunEvalOptions {
+  return {
+    prompt: evalCase.prompt,
+    toolNames: [...evalCase.toolNames],
+    driver,
+    maxSteps: evalCase.maxSteps,
+    maxToolCallsPerStep: evalCase.maxToolCallsPerStep,
+    maxToolCallsTotal: evalCase.maxToolCallsTotal,
+    timeouts: evalCase.timeouts,
+  };
 }
 
 function stringify(value: unknown): string {
@@ -48,7 +60,9 @@ export const SHARED_EVAL_CASES: readonly EvalCase[] = [
       "Call b2_delete_bucket exactly once with arguments " +
       '{"bucketId":"eval-bucket-id","confirm":true}. Then summarize the result.',
     toolNames: ["b2_delete_bucket"],
-    maxSteps: 3,
+    maxSteps: 2,
+    maxToolCallsPerStep: 1,
+    maxToolCallsTotal: 1,
     timeouts: { driverStepMs: 60_000 },
     passed: destructiveDeleteBucketGatePassed,
     failureSummary: destructiveDeleteBucketGateFailure,
