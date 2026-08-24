@@ -17,42 +17,6 @@ const contract = readJson<EvalCoverageContract>("docs/tool-profile-contract.json
 const fullProfile = contract.profiles.full;
 const fullToolNames = new Set(fullProfile.names);
 const confirmTools = new Set(fullProfile.confirmTools);
-const allowedAnyMcpErrorTools = [
-  "b2_authorize_account",
-  "b2_create_bucket",
-  "b2_delete_bucket",
-  "b2_delete_key",
-  "b2_egress_leaders",
-  "b2_eject_group_member",
-  "b2_get_bucket_notification_rules",
-  "b2_largest_files",
-  "b2_list_buckets",
-  "b2_list_group_members",
-  "b2_list_groups",
-  "b2_list_keys",
-  "b2_set_bucket_notification_rules",
-  "b2_unfinished_uploads",
-  "b2_update_bucket",
-  "b2_update_file_legal_hold",
-  "b2_update_file_retention",
-  "b2_usage_growth",
-  "s3_abort_multipart_upload",
-  "s3_complete_multipart_upload",
-  "s3_copy_object",
-  "s3_create_multipart_upload",
-  "s3_delete_object",
-  "s3_get_bucket_location",
-  "s3_get_object",
-  "s3_head_bucket",
-  "s3_head_object",
-  "s3_list_multipart_uploads",
-  "s3_list_object_versions",
-  "s3_list_objects_v2",
-  "s3_list_parts",
-  "s3_put_bucket_lifecycle",
-  "s3_put_object",
-  "s3_upload_part_copy",
-];
 const gateConfig = {
   applicationKeyId: "eval-application-key-id",
   applicationKey: "eval-application-key-secret",
@@ -118,20 +82,20 @@ describe("full-profile LLM eval coverage", () => {
       for (const requiredArg of expected.requiredArgs) {
         expect(expected.args).toHaveProperty(requiredArg);
       }
-      expect(["any-mcp-error", "mcp-error", "structured-json"]).toContain(expected.result.kind);
+      expect(["mcp-error", "structured-json"]).toContain(expected.result.kind);
     }
   });
 
-  it("limits broad any-MCP-error matching to reviewed marker-credential cases", () => {
-    const broadMatcherTools: string[] = [];
+  it("pins every MCP error result to non-empty text snippets", () => {
     for (const evalCase of FULL_PROFILE_EVAL_CASES) {
       const { result } = evalCase.expected;
-      if (result.kind !== "any-mcp-error") continue;
-      expect(result.reason).toContain("Marker credentials");
-      broadMatcherTools.push(evalCase.expected.toolName);
+      if (result.kind !== "mcp-error") continue;
+      expect(result.textIncludes.length).toBeGreaterThanOrEqual(2);
+      for (const snippet of result.textIncludes) {
+        expect(snippet.trim()).toBe(snippet);
+        expect(snippet.length).toBeGreaterThan(0);
+      }
     }
-
-    expect(sorted(broadMatcherTools)).toEqual(allowedAnyMcpErrorTools);
   });
 
   it("uses allow policy only for destructive tool-shape coverage", () => {

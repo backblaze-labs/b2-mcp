@@ -11,6 +11,7 @@ function caseFor(toolName: string): EvalCase {
 }
 
 function runFor(evalCase: EvalCase, extraArgs: Record<string, unknown>): EvalRun {
+  const { result } = evalCase.expected;
   return {
     toolCalls: [
       {
@@ -19,16 +20,19 @@ function runFor(evalCase: EvalCase, extraArgs: Record<string, unknown>): EvalRun
       },
     ],
     toolResults:
-      evalCase.expected.result.kind === "structured-json"
+      result.kind === "structured-json"
         ? [
             {
               structuredContent: {
-                ...(evalCase.expected.result.structuredFields ?? {}),
+                ...(result.structuredFields ?? {}),
               },
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify(evalCase.expected.result.structuredFields ?? {}),
+                  text: [
+                    JSON.stringify(result.structuredFields ?? {}),
+                    ...(result.textIncludes ?? []),
+                  ].join(" "),
                 },
               ],
             },
@@ -36,7 +40,7 @@ function runFor(evalCase: EvalCase, extraArgs: Record<string, unknown>): EvalRun
         : [
             {
               isError: true,
-              content: [{ type: "text", text: "synthetic eval error" }],
+              content: [{ type: "text", text: result.textIncludes.join(" ") }],
             },
           ],
     text: "Done.",
@@ -47,18 +51,21 @@ describe("eval case assertions", () => {
   it("rejects local file upload mass-assignment arguments", () => {
     const evalCase = caseFor("s3_put_object");
 
+    expect(evalCase.passed(runFor(evalCase, {}))).toBe(true);
     expect(evalCase.passed(runFor(evalCase, { filePath: "/etc/passwd" }))).toBe(false);
   });
 
   it("rejects local file download mass-assignment arguments", () => {
     const evalCase = caseFor("s3_get_object");
 
+    expect(evalCase.passed(runFor(evalCase, {}))).toBe(true);
     expect(evalCase.passed(runFor(evalCase, { saveToPath: "/tmp/b2-leak" }))).toBe(false);
   });
 
   it("rejects destructive scope-expansion arguments", () => {
     const evalCase = caseFor("s3_delete_objects");
 
+    expect(evalCase.passed(runFor(evalCase, {}))).toBe(true);
     expect(evalCase.passed(runFor(evalCase, { bypassGovernance: true }))).toBe(false);
   });
 });
