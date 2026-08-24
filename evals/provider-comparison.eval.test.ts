@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { EvalCase } from "./cases";
 import {
-  SHARED_EVAL_CASES,
+  FULL_PROFILE_EVAL_CASES,
   destructiveDeleteBucketGateFailure,
   destructiveDeleteBucketGatePassed,
 } from "./cases";
 import type { Driver, DriverInput, DriverOutput, EvalRun, RunEvalOptions } from "./harness";
 import {
   CLAUDE_OPENAI_PROVIDERS,
+  PROVIDER_COMPARISON_EVAL_ENV,
   assertProviderPassRateComparison,
   claudeOpenAIComparisonEvalGate,
   formatPassRateSummary,
@@ -53,8 +54,15 @@ function failingRun(): EvalRun {
 
 const comparisonCase = {
   name: "comparison case",
+  category: "native-control-plane",
   prompt: "Use the tool.",
   toolNames: ["b2_delete_bucket"],
+  expected: {
+    toolName: "b2_delete_bucket",
+    args: { bucketId: "eval-bucket-id", confirm: true },
+    requiredArgs: ["bucketId"],
+    result: { kind: "mcp-error", textIncludes: ["destructive_policy_blocked"] },
+  },
   maxSteps: 2,
   maxToolCallsPerStep: 1,
   maxToolCallsTotal: 1,
@@ -212,12 +220,31 @@ describe("provider pass-rate comparison", () => {
   });
 
   it("requires both provider keys for the Claude-vs-OpenAI live comparison gate", () => {
-    expect(claudeOpenAIComparisonEvalGate({ RUN_LLM_EVALS: "1" })).toEqual({
+    expect(
+      claudeOpenAIComparisonEvalGate({
+        RUN_LLM_EVALS: "1",
+        ANTHROPIC_API_KEY: "test-key",
+        OPENAI_API_KEY: "test-key",
+      }),
+    ).toEqual({
+      enabled: false,
+      reason: `${PROVIDER_COMPARISON_EVAL_ENV} is not 1`,
+    });
+    expect(
+      claudeOpenAIComparisonEvalGate({
+        RUN_LLM_EVALS: "1",
+        [PROVIDER_COMPARISON_EVAL_ENV]: "1",
+      }),
+    ).toEqual({
       enabled: false,
       reason: "missing provider key(s) (ANTHROPIC_API_KEY, OPENAI_API_KEY)",
     });
     expect(
-      claudeOpenAIComparisonEvalGate({ RUN_LLM_EVALS: "1", ANTHROPIC_API_KEY: "test-key" }),
+      claudeOpenAIComparisonEvalGate({
+        RUN_LLM_EVALS: "1",
+        [PROVIDER_COMPARISON_EVAL_ENV]: "1",
+        ANTHROPIC_API_KEY: "test-key",
+      }),
     ).toEqual({
       enabled: false,
       reason: "missing provider key(s) (OPENAI_API_KEY)",
@@ -225,6 +252,7 @@ describe("provider pass-rate comparison", () => {
     expect(
       claudeOpenAIComparisonEvalGate({
         RUN_LLM_EVALS: "1",
+        [PROVIDER_COMPARISON_EVAL_ENV]: "1",
         ANTHROPIC_API_KEY: "test-key",
         OPENAI_API_KEY: "test-key",
       }).enabled,
@@ -232,33 +260,65 @@ describe("provider pass-rate comparison", () => {
   });
 
   it("uses the shared live case set for the Claude and OpenAI providers", () => {
-    expect(SHARED_EVAL_CASES.map((evalCase) => evalCase.name)).toEqual([
-      "destructive delete bucket gate",
-    ]);
+    expect(FULL_PROFILE_EVAL_CASES).toHaveLength(40);
+    expect(FULL_PROFILE_EVAL_CASES.map((evalCase) => evalCase.expected.toolName).sort()).toContain(
+      "b2_delete_bucket",
+    );
     expect(CLAUDE_OPENAI_PROVIDERS.map((provider) => provider.name)).toEqual(["Claude", "OpenAI"]);
+  });
+
+  it("stops calling a provider after repeated errors", async () => {
+    let failingProviderCalls = 0;
+    const comparison = await runProviderPassRateComparison({
+      cases: [
+        comparisonCase,
+        { ...comparisonCase, name: "case two" },
+        { ...comparisonCase, name: "case three" },
+      ],
+      providers: [
+        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
+        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
+      ],
+      comparison: { maxProviderErrors: 1 },
+      async runEvalImpl(options) {
+        if (options.driver.name === "openai") {
+          failingProviderCalls += 1;
+          throw new Error("Timed out during driver step 1");
+        }
+        return passingRun();
+      },
+    });
+
+    expect(failingProviderCalls).toBe(1);
+    expect(comparison.results.filter((result) => result.provider === "OpenAI")).toHaveLength(3);
+    expect(
+      comparison.results.filter((result) =>
+        /Skipped after 1 provider error/.test(result.error ?? ""),
+      ),
+    ).toHaveLength(2);
   });
 });
 
 const comparisonGate = claudeOpenAIComparisonEvalGate();
-const LIVE_COMPARISON_TIMEOUT_MS = 420_000;
+const LIVE_COMPARISON_TIMEOUT_MS = 600_000;
 
 describe("Claude vs OpenAI live eval comparison", () => {
   it.skipIf(!comparisonGate.enabled)(
     "runs shared cases and emits a pass-rate comparison",
     async () => {
       const comparison = await runProviderPassRateComparison({
-        cases: SHARED_EVAL_CASES,
+        cases: FULL_PROFILE_EVAL_CASES,
         providers: CLAUDE_OPENAI_PROVIDERS,
       });
 
       console.info(comparison.summary);
       assertProviderPassRateComparison(comparison);
       expect(comparison.results).toHaveLength(
-        SHARED_EVAL_CASES.length * CLAUDE_OPENAI_PROVIDERS.length,
+        FULL_PROFILE_EVAL_CASES.length * CLAUDE_OPENAI_PROVIDERS.length,
       );
       for (const provider of CLAUDE_OPENAI_PROVIDERS) {
         expect(comparison.passRates.find((rate) => rate.provider === provider.name)?.total).toBe(
-          SHARED_EVAL_CASES.length,
+          FULL_PROFILE_EVAL_CASES.length,
         );
       }
       expect(comparison.summary).toMatch(/Claude vs OpenAI/);

@@ -83,12 +83,22 @@ describe("LLM eval harness", () => {
     ).toThrow(/non-marker B2 credential/);
   });
 
-  it("rejects unsafe eval server policy overrides", () => {
+  it("allows explicit destructive-policy eval coverage only through the typed option", () => {
+    expect(createEvalServerEnv({ destructivePolicy: "allow" }).B2_DESTRUCTIVE_POLICY).toBe("allow");
     expect(() =>
       createEvalServerEnv({
         env: { B2_DESTRUCTIVE_POLICY: "allow" },
       }),
-    ).toThrow(/B2_DESTRUCTIVE_POLICY=allow/);
+    ).toThrow(/requires B2_DESTRUCTIVE_POLICY=block/);
+    expect(() =>
+      createEvalServerEnv({
+        destructivePolicy: "confirm",
+        env: { B2_DESTRUCTIVE_POLICY: "allow" },
+      }),
+    ).toThrow(/requires B2_DESTRUCTIVE_POLICY=confirm/);
+  });
+
+  it("rejects unsafe eval server filesystem and secret-sink overrides", () => {
     expect(() =>
       createEvalServerEnv({
         env: { B2_ALLOW_LOCAL_FILES: "true" },

@@ -1,6 +1,6 @@
 import type { CallToolResult, Tool } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
-import { SHARED_EVAL_CASES, evalCaseRunOptions } from "./cases";
+import { FULL_PROFILE_EVAL_CASES, evalCaseRunOptions } from "./cases";
 import { runEval, type EvalMessage, type EvalToolCall } from "./harness";
 import {
   DEFAULT_OPENAI_MODEL,
@@ -487,14 +487,15 @@ const liveGate = openAIEvalGate();
 const LIVE_PROVIDER_TIMEOUT_MS = 180_000;
 
 describe("OpenAI live eval", () => {
-  it.skipIf(!liveGate.enabled)(
-    "runs the shared gated tool-use eval end to end",
-    async () => {
-      const evalCase = SHARED_EVAL_CASES[0];
-      const run = await runEval(evalCaseRunOptions(evalCase, createOpenAIDriver()));
+  for (const evalCase of FULL_PROFILE_EVAL_CASES) {
+    it.skipIf(!liveGate.enabled)(
+      `runs ${evalCase.name}`,
+      async () => {
+        const run = await runEval(evalCaseRunOptions(evalCase, createOpenAIDriver()));
 
-      expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
-    },
-    LIVE_PROVIDER_TIMEOUT_MS,
-  );
+        expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
+      },
+      LIVE_PROVIDER_TIMEOUT_MS,
+    );
+  }
 });

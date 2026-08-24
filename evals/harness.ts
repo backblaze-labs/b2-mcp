@@ -66,7 +66,7 @@ export interface Driver {
 
 export interface EvalServerOptions {
   registerAllTools?: boolean;
-  destructivePolicy?: "block" | "confirm";
+  destructivePolicy?: "allow" | "block" | "confirm";
   env?: NodeJS.ProcessEnv;
 }
 
@@ -198,7 +198,7 @@ function resolveTimeouts(timeouts: EvalTimeouts | undefined): ResolvedEvalTimeou
   };
 }
 
-function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv): void {
+function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv, options: EvalServerOptions): void {
   const unsafeCredentials = Object.entries(EVAL_CREDENTIAL_MARKERS)
     .filter(([name, marker]) => env[name] !== marker)
     .map(([name]) => name);
@@ -207,8 +207,11 @@ function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv): void {
       `Eval server refused non-marker B2 credential env vars: ${unsafeCredentials.join(", ")}`,
     );
   }
-  if (env.B2_DESTRUCTIVE_POLICY === "allow") {
-    throw new Error("Eval server refused B2_DESTRUCTIVE_POLICY=allow.");
+  const expectedDestructivePolicy = options.destructivePolicy ?? "block";
+  if (env.B2_DESTRUCTIVE_POLICY !== expectedDestructivePolicy) {
+    throw new Error(
+      `Eval server requires B2_DESTRUCTIVE_POLICY=${expectedDestructivePolicy} from the typed destructivePolicy option.`,
+    );
   }
   if (env.B2_ALLOW_LOCAL_FILES !== "false") {
     throw new Error("Eval server requires B2_ALLOW_LOCAL_FILES=false.");
@@ -228,7 +231,7 @@ export function createEvalServerEnv(options: EvalServerOptions = {}): Record<str
     B2_SECRET_SINK: "off",
     ...options.env,
   });
-  assertSafeEvalServerEnv(env);
+  assertSafeEvalServerEnv(env, options);
   return stringifySpawnEnv(env);
 }
 
