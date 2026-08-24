@@ -26,7 +26,7 @@ export function evalCaseRunOptions(evalCase: EvalCase, driver: Driver): RunEvalO
 
 function stringify(value: unknown): string {
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? String(value);
   } catch {
     return String(value);
   }

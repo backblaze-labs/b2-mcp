@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { sendProviderJsonRequest, type EvalFetch } from "./provider-utils";
+import {
+  sendProviderJsonRequest,
+  stringifyToolResultPayload,
+  type EvalFetch,
+} from "./provider-utils";
 
 function abortSignal(): AbortSignal {
   return new AbortController().signal;
 }
 
 describe("provider retry transport", () => {
+  it("falls back when JSON serialization does not produce a string", () => {
+    expect(stringifyToolResultPayload(undefined)).toBe("undefined");
+  });
+
   it("retries fetch TypeError transport failures", async () => {
     const fetchImpl = vi
       .fn<EvalFetch>()

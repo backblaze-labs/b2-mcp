@@ -158,7 +158,7 @@ export function assertProviderPassRateComparison(
   comparison: ProviderPassRateComparison,
   options: PassRateAssertionOptions = {},
 ): void {
-  const minPassRate = options.minPassRate ?? 1;
+  const minPassRate = resolveMinPassRate(options.minPassRate);
   const erroredResults = comparison.results.filter((result) => result.status === "errored");
   const failedResults = comparison.results.filter((result) => result.status === "failed");
   const missedRates = comparison.passRates.filter((rate) => rate.passRate < minPassRate);
@@ -179,6 +179,14 @@ export function assertProviderPassRateComparison(
     ),
   ];
   throw new Error(`${comparison.summary}\n${details.join("\n")}`);
+}
+
+function resolveMinPassRate(value: number | undefined): number {
+  const minPassRate = value ?? 1;
+  if (!Number.isFinite(minPassRate) || minPassRate < 0 || minPassRate > 1) {
+    throw new Error("minPassRate must be a finite number between 0 and 1.");
+  }
+  return minPassRate;
 }
 
 export function formatPassRateSummary(

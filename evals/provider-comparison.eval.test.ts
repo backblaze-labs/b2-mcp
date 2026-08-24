@@ -167,6 +167,35 @@ describe("provider pass-rate comparison", () => {
     );
   });
 
+  it.each([Number.NaN, -0.1, 1.1, Number.POSITIVE_INFINITY] as const)(
+    "rejects invalid minPassRate values",
+    (minPassRate) => {
+      expect(() =>
+        assertProviderPassRateComparison(
+          {
+            results: [],
+            passRates: [{ provider: "OpenAI", passed: 0, total: 1, passRate: 0 }],
+            summary: "summary",
+          },
+          { minPassRate },
+        ),
+      ).toThrow(/minPassRate must be a finite number between 0 and 1/);
+    },
+  );
+
+  it("handles missing destructive-gate tool results as a failed case", () => {
+    const run = {
+      toolCalls: [
+        { name: "b2_delete_bucket", args: { bucketId: "eval-bucket-id", confirm: true } },
+      ],
+      toolResults: [],
+      text: "Done.",
+    } satisfies EvalRun;
+
+    expect(destructiveDeleteBucketGatePassed(run)).toBe(false);
+    expect(destructiveDeleteBucketGateFailure(run)).toContain("toolCalls=");
+  });
+
   it("formats a compact comparison summary", () => {
     expect(
       formatPassRateSummary(
