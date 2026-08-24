@@ -10,6 +10,9 @@ import {
   type RunEvalOptions,
 } from "./harness";
 
+export const PROVIDER_COMPARISON_EVAL_ENV = "RUN_LLM_PROVIDER_COMPARISON";
+export const DEFAULT_MAX_PROVIDER_ERRORS = 3;
+
 export interface EvalProvider {
   readonly name: string;
   createDriver(): Driver;
@@ -60,6 +63,10 @@ export interface PassRateAssertionOptions {
   readonly minPassRate?: number;
 }
 
+export interface ProviderPassRateComparisonOptions {
+  readonly maxProviderErrors?: number;
+}
+
 export type EvalRunner = (options: RunEvalOptions) => Promise<EvalRun>;
 
 export const CLAUDE_OPENAI_PROVIDERS: readonly EvalProvider[] = [
@@ -70,6 +77,9 @@ export const CLAUDE_OPENAI_PROVIDERS: readonly EvalProvider[] = [
 export function claudeOpenAIComparisonEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGate {
   const sharedGate = llmEvalGate(env);
   if (!sharedGate.enabled) return sharedGate;
+  if (env[PROVIDER_COMPARISON_EVAL_ENV] !== "1") {
+    return { enabled: false, reason: `${PROVIDER_COMPARISON_EVAL_ENV} is not 1` };
+  }
 
   const missingProviderKeys = [ANTHROPIC_API_KEY_ENV, OPENAI_API_KEY_ENV].filter(
     (name) => !env[name],
@@ -87,6 +97,7 @@ export async function runProviderPassRateComparison(options: {
   cases: readonly EvalCase[];
   providers: readonly EvalProvider[];
   runEvalImpl?: EvalRunner;
+  comparison?: ProviderPassRateComparisonOptions;
 }): Promise<ProviderPassRateComparison> {
   if (options.cases.length === 0) {
     throw new Error("Provider comparison requires at least one eval case.");
@@ -97,9 +108,24 @@ export async function runProviderPassRateComparison(options: {
 
   const runEvalImpl = options.runEvalImpl ?? runEval;
   const results: ProviderCaseResult[] = [];
+  const maxProviderErrors = resolveMaxProviderErrors(options.comparison?.maxProviderErrors);
+  const providerErrors = new Map(options.providers.map((provider) => [provider.name, 0]));
 
   for (const evalCase of options.cases) {
     for (const provider of options.providers) {
+      const errorsSoFar = providerErrors.get(provider.name) ?? 0;
+      if (errorsSoFar >= maxProviderErrors) {
+        results.push({
+          provider: provider.name,
+          caseName: evalCase.name,
+          status: "errored",
+          passed: false,
+          error:
+            `Skipped after ${errorsSoFar} provider error(s); ` +
+            `maxProviderErrors=${maxProviderErrors}.`,
+        });
+        continue;
+      }
       try {
         const run = await runEvalImpl({
           ...evalCaseRunOptions(evalCase, provider.createDriver()),
@@ -124,6 +150,7 @@ export async function runProviderPassRateComparison(options: {
           });
         }
       } catch (err) {
+        providerErrors.set(provider.name, errorsSoFar + 1);
         results.push({
           provider: provider.name,
           caseName: evalCase.name,
@@ -152,6 +179,14 @@ export async function runProviderPassRateComparison(options: {
     passRates,
     summary: formatPassRateSummary(passRates, options.cases.length),
   };
+}
+
+function resolveMaxProviderErrors(value: number | undefined): number {
+  const maxProviderErrors = value ?? DEFAULT_MAX_PROVIDER_ERRORS;
+  if (!Number.isInteger(maxProviderErrors) || maxProviderErrors < 1) {
+    throw new Error("maxProviderErrors must be a positive integer.");
+  }
+  return maxProviderErrors;
 }
 
 export function assertProviderPassRateComparison(

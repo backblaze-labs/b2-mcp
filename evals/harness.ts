@@ -198,26 +198,19 @@ function resolveTimeouts(timeouts: EvalTimeouts | undefined): ResolvedEvalTimeou
   };
 }
 
-function assertNoUnsafeEvalEnvOverrides(env: NodeJS.ProcessEnv | undefined): void {
-  const unsafeOverrides = [
-    "B2_DESTRUCTIVE_POLICY",
-    "B2_ALLOW_LOCAL_FILES",
-    "B2_SECRET_SINK",
-  ].filter((name) => env?.[name] !== undefined);
-  if (unsafeOverrides.length) {
-    throw new Error(
-      `Eval server refused direct safety env overrides: ${unsafeOverrides.join(", ")}`,
-    );
-  }
-}
-
-function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv): void {
+function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv, options: EvalServerOptions): void {
   const unsafeCredentials = Object.entries(EVAL_CREDENTIAL_MARKERS)
     .filter(([name, marker]) => env[name] !== marker)
     .map(([name]) => name);
   if (unsafeCredentials.length) {
     throw new Error(
       `Eval server refused non-marker B2 credential env vars: ${unsafeCredentials.join(", ")}`,
+    );
+  }
+  const expectedDestructivePolicy = options.destructivePolicy ?? "block";
+  if (env.B2_DESTRUCTIVE_POLICY !== expectedDestructivePolicy) {
+    throw new Error(
+      `Eval server requires B2_DESTRUCTIVE_POLICY=${expectedDestructivePolicy} from the typed destructivePolicy option.`,
     );
   }
   if (env.B2_ALLOW_LOCAL_FILES !== "false") {
@@ -229,7 +222,6 @@ function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv): void {
 }
 
 export function createEvalServerEnv(options: EvalServerOptions = {}): Record<string, string> {
-  assertNoUnsafeEvalEnvOverrides(options.env);
   const env = safeSpawnEnv({
     NODE_ENV: "test",
     B2_REGISTER_ALL_TOOLS: options.registerAllTools === false ? "false" : "true",
@@ -239,7 +231,7 @@ export function createEvalServerEnv(options: EvalServerOptions = {}): Record<str
     B2_SECRET_SINK: "off",
     ...options.env,
   });
-  assertSafeEvalServerEnv(env);
+  assertSafeEvalServerEnv(env, options);
   return stringifySpawnEnv(env);
 }
 

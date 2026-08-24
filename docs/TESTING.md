@@ -46,9 +46,14 @@ The individual deterministic layers are:
 `pnpm run evals` builds the stdio server, then runs the deterministic eval
 harness and provider-adapter tests under `evals/`. These tests do not require
 real B2 credentials. The harness starts b2-mcp with marker B2 credentials,
-`B2_ALLOW_LOCAL_FILES=false`, `B2_SECRET_SINK=off`, and a non-`allow`
+`B2_ALLOW_LOCAL_FILES=false`, `B2_SECRET_SINK=off`, and the default `block`
 destructive policy so provider drivers can exercise MCP tool calls without
-touching a live B2 account.
+touching a live B2 account. Individual full-profile tool-shape cases may opt
+into `destructivePolicy: "allow"` only through typed `EvalServerOptions`; the
+merged child-process environment is still validated before spawn, and marker
+credentials plus local-files-off keep those cases side-effect free. Separate
+contract coverage pins the default `block` and `confirm` outcomes for every
+destructive `confirmTools` entry.
 
 Real LLM-backed eval cases are opt-in. Leave `RUN_LLM_EVALS` unset for normal PR
 work; provider-backed cases skip and deterministic adapter tests still run.
@@ -58,14 +63,18 @@ Set `RUN_LLM_EVALS=1` plus the relevant provider key to run live evidence:
 | -------------------------- | -------------------------------------------------------------------------- |
 | Anthropic driver           | `RUN_LLM_EVALS=1` and `ANTHROPIC_API_KEY`                                  |
 | OpenAI driver              | `RUN_LLM_EVALS=1` and `OPENAI_API_KEY`                                     |
-| Claude-vs-OpenAI comparison | `RUN_LLM_EVALS=1`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY`              |
+| Claude-vs-OpenAI comparison | `RUN_LLM_EVALS=1`, `RUN_LLM_PROVIDER_COMPARISON=1`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` |
 
 The OpenAI Chat Completions eval driver defaults to `gpt-5-nano`, the current
 lowest-cost GPT-5 model documented by OpenAI for Chat Completions. Override it
 for a refresh or model investigation with `OPENAI_EVAL_MODEL=<model-id>`. The
 Claude-vs-OpenAI comparison runs the shared eval case set against both providers
 and fails the gated live test if any provider errors, any case fails, or the
-provider pass rate drops below 100%.
+provider pass rate drops below 100%. The comparison has its own explicit gate so
+ordinary single-provider live eval runs do not re-run the full profile matrix,
+uses a fixed 10-minute wall-clock timeout, and stops calling a provider after
+three provider errors to fail fast on bad credentials, rate limits, or repeated
+timeouts.
 
 ## Advisory Local Performance Baseline
 

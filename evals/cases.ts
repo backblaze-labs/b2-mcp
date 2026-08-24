@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import toolProfileContract from "../docs/tool-profile-contract.json";
 import type { Driver, EvalRun, EvalServerOptions, EvalTimeouts, RunEvalOptions } from "./harness";
 
@@ -9,8 +10,12 @@ export type EvalCaseCategory =
 
 export type ExpectedEvalResult =
   | {
+      readonly kind: "any-mcp-error";
+      readonly reason: string;
+    }
+  | {
       readonly kind: "mcp-error";
-      readonly textIncludes?: readonly string[];
+      readonly textIncludes: readonly [string, ...string[]];
     }
   | {
       readonly kind: "structured-json";
@@ -21,6 +26,7 @@ export interface ExpectedToolEval {
   readonly toolName: string;
   readonly args: Readonly<Record<string, unknown>>;
   readonly requiredArgs: readonly string[];
+  readonly allowedExtraArgs?: readonly string[];
   readonly result: ExpectedEvalResult;
 }
 
@@ -98,19 +104,8 @@ export function destructiveDeleteBucketGateFailure(run: EvalRun): string {
   );
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === undefined) return "undefined";
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
-    .join(",")}}`;
-}
-
 function sameValue(left: unknown, right: unknown): boolean {
-  return canonicalJson(left) === canonicalJson(right);
+  return isDeepStrictEqual(left, right);
 }
 
 function textContent(result: EvalRun["toolResults"][number] | undefined): string {
@@ -128,6 +123,12 @@ function hasExpectedToolCall(run: EvalRun, expected: ExpectedToolEval): boolean 
   for (const requiredArg of expected.requiredArgs) {
     if (!(requiredArg in call.args)) return false;
   }
+  const allowedArgNames = new Set([
+    ...Object.keys(expected.args),
+    ...(expected.allowedExtraArgs ?? []),
+  ]);
+  const unexpectedArgNames = Object.keys(call.args).filter((name) => !allowedArgNames.has(name));
+  if (unexpectedArgNames.length > 0) return false;
   for (const [key, value] of Object.entries(expected.args)) {
     if (!sameValue(call.args[key], value)) return false;
   }
@@ -139,10 +140,11 @@ function hasTypedResult(run: EvalRun, expected: ExpectedEvalResult): boolean {
   const result = run.toolResults[0];
   if (!result) return false;
 
-  if (expected.kind === "mcp-error") {
+  if (expected.kind === "any-mcp-error" || expected.kind === "mcp-error") {
     if (result.isError !== true) return false;
     const text = textContent(result);
     if (!text) return false;
+    if (expected.kind === "any-mcp-error") return true;
     return (expected.textIncludes ?? []).every((snippet) => text.includes(snippet));
   }
 
@@ -172,7 +174,7 @@ function promptFor(toolName: string, args: Readonly<Record<string, unknown>>, re
   return (
     `${request}\n\n` +
     `Call ${toolName} exactly once with these arguments: ${JSON.stringify(args)}. ` +
-    "Do not call any other tool. Then summarize the typed MCP result."
+    "Do not call any other tool."
   );
 }
 
@@ -208,7 +210,11 @@ function evalToolCase(input: {
   };
 }
 
-const networkError = { kind: "mcp-error" } as const satisfies ExpectedEvalResult;
+const anyToolError = {
+  kind: "any-mcp-error",
+  reason:
+    "Marker credentials intentionally reach the B2 or S3 SDK boundary; provider/network error details are not stable enough to pin for this tool-shape eval.",
+} as const satisfies ExpectedEvalResult;
 const unavailableStubError = {
   kind: "mcp-error",
   textIncludes: ["tool_unavailable"],
@@ -221,7 +227,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_authorize_account",
     args: {},
     request: "Verify the configured Backblaze B2 account authorization.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "create private bucket",
@@ -229,7 +235,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_create_bucket",
     args: { bucketName: "eval-private-bucket", bucketType: "allPrivate" },
     request: "Create a private Backblaze B2 bucket for an evaluation fixture.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "delete bucket with allow policy",
@@ -237,7 +243,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_delete_bucket",
     args: { bucketId: "eval-bucket-id", confirm: true },
     request: "Delete the Backblaze B2 bucket identified by eval-bucket-id.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -246,7 +252,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_get_bucket_notification_rules",
     args: { bucketId: "eval-bucket-id" },
     request: "Read the event notification rules for a Backblaze B2 bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "list buckets",
@@ -254,7 +260,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_list_buckets",
     args: {},
     request: "List Backblaze B2 buckets available to the configured key.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "set empty bucket notification rules",
@@ -262,7 +268,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_set_bucket_notification_rules",
     args: { bucketId: "eval-bucket-id", eventNotificationRules: [], confirm: true },
     request: "Replace a bucket's event notification rules with an empty rule set.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -271,7 +277,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_update_bucket",
     args: { bucketId: "eval-bucket-id", bucketType: "allPublic", confirm: true },
     request: "Update a Backblaze B2 bucket so its type is allPublic.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -285,7 +291,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
       confirm: true,
     },
     request: "Clear the legal hold on a Backblaze B2 file version.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -300,7 +306,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
       confirm: true,
     },
     request: "Clear Object Lock retention from a Backblaze B2 file version.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -318,7 +324,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_delete_key",
     args: { applicationKeyId: "eval-application-key-to-delete", confirm: true },
     request: "Delete a Backblaze B2 application key.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -327,7 +333,7 @@ export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_list_keys",
     args: {},
     request: "List Backblaze B2 application keys for the configured account.",
-    result: networkError,
+    result: anyToolError,
   }),
 ];
 
@@ -352,7 +358,7 @@ export const PARTNER_GROUPS_EVAL_CASES: readonly EvalCase[] = [
       confirm: true,
     },
     request: "Eject a member from a Backblaze Partner group.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -361,7 +367,7 @@ export const PARTNER_GROUPS_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_list_group_members",
     args: { adminAccountId: "eval-admin-account-id", groupId: "eval-group-id" },
     request: "List active members for a Backblaze Partner group.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "list groups",
@@ -369,7 +375,7 @@ export const PARTNER_GROUPS_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_list_groups",
     args: { adminAccountId: "eval-admin-account-id" },
     request: "List Backblaze Partner groups for an admin account.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "reserve trial account compatibility stub",
@@ -389,7 +395,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_usage_growth",
     args: {},
     request: "Analyze Backblaze B2 storage usage growth from usage reports.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "egress leaders analytics",
@@ -397,7 +403,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_egress_leaders",
     args: {},
     request: "Find the Backblaze B2 accounts or buckets with the highest egress.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "largest files analytics",
@@ -405,7 +411,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_largest_files",
     args: { bucket: "eval-bucket" },
     request: "Find the largest files in a Backblaze B2 bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "unfinished uploads analytics",
@@ -413,7 +419,7 @@ export const CUSTOM_ANALYTICS_EVAL_CASES: readonly EvalCase[] = [
     toolName: "b2_unfinished_uploads",
     args: { bucket: "eval-bucket" },
     request: "Find unfinished large file uploads in a Backblaze B2 bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
 ];
 
@@ -429,7 +435,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       confirm: true,
     },
     request: "Abort an in-progress S3-compatible multipart upload.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -443,7 +449,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       parts: [{ partNumber: 1, etag: '"eval-etag-1"' }],
     },
     request: "Complete an S3-compatible multipart upload.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "copy object",
@@ -456,7 +462,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       destinationKey: "copied/source.txt",
     },
     request: "Copy an object between two Backblaze B2 S3-compatible buckets.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "create multipart upload",
@@ -464,7 +470,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_create_multipart_upload",
     args: { bucket: "eval-bucket", key: "large.bin" },
     request: "Initiate an S3-compatible multipart upload.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "delete object",
@@ -472,7 +478,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_delete_object",
     args: { bucket: "eval-bucket", key: "obsolete.txt", confirm: true },
     request: "Delete one object from a Backblaze B2 S3-compatible bucket.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -485,7 +491,10 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       confirm: true,
     },
     request: "Delete multiple objects from a Backblaze B2 S3-compatible bucket.",
-    result: networkError,
+    result: {
+      kind: "structured-json",
+      structuredFields: { attempted: 2, aborted: false, maxConcurrency: 2 },
+    },
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -494,7 +503,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_get_bucket_location",
     args: { bucket: "eval-bucket" },
     request: "Get the S3-compatible location constraint for a Backblaze B2 bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "get object",
@@ -502,7 +511,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_get_object",
     args: { bucket: "eval-bucket", key: "manifest.json" },
     request: "Read a small object from a Backblaze B2 S3-compatible bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "get put-object presigned url",
@@ -529,7 +538,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_head_bucket",
     args: { bucket: "eval-bucket" },
     request: "Check S3-compatible reachability for a Backblaze B2 bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "head object",
@@ -537,7 +546,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_head_object",
     args: { bucket: "eval-bucket", key: "manifest.json" },
     request: "Read metadata for a Backblaze B2 S3-compatible object.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "list multipart uploads",
@@ -545,7 +554,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_list_multipart_uploads",
     args: { bucket: "eval-bucket" },
     request: "List in-progress S3-compatible multipart uploads for a bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "list object versions",
@@ -553,7 +562,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_list_object_versions",
     args: { bucket: "eval-bucket" },
     request: "List S3-compatible object versions for a Backblaze B2 bucket.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "list objects v2",
@@ -561,7 +570,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_list_objects_v2",
     args: { bucket: "eval-bucket" },
     request: "List objects in a Backblaze B2 bucket through the S3-compatible API.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "list multipart upload parts",
@@ -569,7 +578,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     toolName: "s3_list_parts",
     args: { bucket: "eval-bucket", key: "large.bin", uploadId: "eval-upload-id" },
     request: "List uploaded parts for an S3-compatible multipart upload.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "presign upload parts",
@@ -605,7 +614,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       confirm: true,
     },
     request: "Set a bucket lifecycle rule that expires temporary objects.",
-    result: networkError,
+    result: anyToolError,
     server: destructiveEvalServer,
   }),
   evalToolCase({
@@ -619,7 +628,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       contentType: "application/json",
     },
     request: "Upload a small inline JSON object through the S3-compatible API.",
-    result: networkError,
+    result: anyToolError,
   }),
   evalToolCase({
     name: "upload part copy",
@@ -633,7 +642,7 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
       copySource: "eval-source-bucket/source.bin",
     },
     request: "Copy an existing object range into a multipart upload part.",
-    result: networkError,
+    result: anyToolError,
   }),
 ];
 
@@ -643,5 +652,3 @@ export const FULL_PROFILE_EVAL_CASES: readonly EvalCase[] = [
   ...CUSTOM_ANALYTICS_EVAL_CASES,
   ...S3_DATA_PLANE_EVAL_CASES,
 ];
-
-export const SHARED_EVAL_CASES = FULL_PROFILE_EVAL_CASES;
