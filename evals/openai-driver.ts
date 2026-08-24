@@ -138,12 +138,12 @@ function parseToolCalls(value: unknown): PendingToolCall[] {
       typeof item.id !== "string" ||
       item.type !== "function" ||
       !isRecord(item.function) ||
-      typeof item.function.name !== "string"
+      typeof item.function.name !== "string" ||
+      typeof item.function.arguments !== "string"
     ) {
       throw new Error("OpenAI response included an invalid tool call.");
     }
-    const argumentsJson =
-      typeof item.function.arguments === "string" ? item.function.arguments : "";
+    const argumentsJson = item.function.arguments;
     const providerCall: OpenAIToolCall = {
       id: item.id,
       type: "function",

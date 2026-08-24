@@ -166,6 +166,32 @@ describe("OpenAI eval driver", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("rejects non-string OpenAI tool-call arguments", async () => {
+    const { fetchImpl } = createFetchSequence([
+      chatResponse({
+        toolCalls: [
+          {
+            id: "call_bad_args",
+            type: "function",
+            function: {
+              name: "b2_delete_bucket",
+              arguments: { bucketId: "bucket-id", confirm: true },
+            },
+          },
+        ],
+      }),
+    ]);
+    const driver = createOpenAIDriver({
+      apiKey: "test-openai-key",
+      fetch: fetchImpl,
+      retry: { maxAttempts: 1 },
+    });
+
+    await expect(driver.complete(driverInput({}))).rejects.toThrow(
+      /OpenAI response included an invalid tool call/,
+    );
+  });
+
   it("sends structuredContent back as OpenAI tool message content", async () => {
     const { fetchImpl, requests } = createFetchSequence([
       chatResponse({ toolCalls: [toolCall({ id: "call_delete" })] }),
