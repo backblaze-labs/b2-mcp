@@ -2,8 +2,10 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const PROVIDER_SECRET_ENV_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
+const EXPECTED_PROVIDER_NAMES = ["Claude", "OpenAI"];
 const RAW_PAYLOAD_KEYS = new Set(["run", "toolCalls", "toolResults", "text"]);
 const RESULT_STATUSES = new Set(["passed", "failed", "errored"]);
+const PASS_RATE_TOLERANCE = 1e-12;
 
 function fail(message) {
   throw new Error(message);
@@ -68,33 +70,65 @@ export function validateProviderPassRateReport(report) {
   assertNonNegativeInteger(report.caseCount, "report.caseCount");
   assertString(report.summary, "report.summary");
 
-  if (!Array.isArray(report.providers) || report.providers.length === 0) {
-    fail("report.providers must be a non-empty array");
+  if (!Array.isArray(report.providers)) {
+    fail("report.providers must be an array");
   }
+  if (report.providers.length !== EXPECTED_PROVIDER_NAMES.length) {
+    fail("report.providers must contain exactly one Claude and one OpenAI entry");
+  }
+  const providerCounts = new Map(EXPECTED_PROVIDER_NAMES.map((provider) => [provider, 0]));
   for (const [index, provider] of report.providers.entries()) {
     const path = `report.providers[${index}]`;
     if (!isRecord(provider)) fail(`${path} must be an object`);
     assertString(provider.provider, `${path}.provider`);
+    if (!providerCounts.has(provider.provider)) {
+      fail(`${path}.provider must be Claude or OpenAI`);
+    }
+    providerCounts.set(provider.provider, providerCounts.get(provider.provider) + 1);
     assertString(provider.model, `${path}.model`);
     assertNonNegativeInteger(provider.passed, `${path}.passed`);
     assertNonNegativeInteger(provider.total, `${path}.total`);
     if (provider.passed > provider.total) fail(`${path}.passed must not exceed total`);
+    if (provider.total !== report.caseCount) fail(`${path}.total must equal report.caseCount`);
     assertPassRate(provider.passRate, `${path}.passRate`);
+    const expectedPassRate = provider.total === 0 ? 0 : provider.passed / provider.total;
+    if (Math.abs(provider.passRate - expectedPassRate) > PASS_RATE_TOLERANCE) {
+      fail(`${path}.passRate must equal passed / total`);
+    }
+  }
+  for (const [provider, count] of providerCounts) {
+    if (count !== 1) fail(`report.providers must contain exactly one ${provider} entry`);
   }
 
   if (!Array.isArray(report.results)) fail("report.results must be an array");
+  const resultCountsByProvider = new Map(
+    EXPECTED_PROVIDER_NAMES.map((provider) => [provider, { passed: 0, total: 0 }]),
+  );
   for (const [index, result] of report.results.entries()) {
     const path = `report.results[${index}]`;
     if (!isRecord(result)) fail(`${path} must be an object`);
     assertString(result.provider, `${path}.provider`);
+    const providerResultCounts = resultCountsByProvider.get(result.provider);
+    if (!providerResultCounts) fail(`${path}.provider must be Claude or OpenAI`);
     assertString(result.caseName, `${path}.caseName`);
     if (!RESULT_STATUSES.has(result.status)) fail(`${path}.status is invalid`);
     if (typeof result.passed !== "boolean") fail(`${path}.passed must be boolean`);
+    providerResultCounts.total += 1;
+    if (result.passed) providerResultCounts.passed += 1;
     if (result.status === "failed" && typeof result.failure !== "string") {
       fail(`${path}.failure must be present for failed results`);
     }
     if (result.status === "errored" && typeof result.error !== "string") {
       fail(`${path}.error must be present for errored results`);
+    }
+  }
+  for (const provider of report.providers) {
+    const resultCounts = resultCountsByProvider.get(provider.provider);
+    if (resultCounts.total !== provider.total) {
+      fail(`report.results total for ${provider.provider} must equal provider.total`);
+    }
+    if (resultCounts.passed !== provider.passed) {
+      fail(`report.results passed count for ${provider.provider} must equal provider.passed`);
     }
   }
 

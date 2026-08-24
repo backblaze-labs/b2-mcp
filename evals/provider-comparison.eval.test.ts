@@ -25,6 +25,10 @@ import {
   formatPassRateSummary,
   runProviderPassRateComparison,
 } from "./provider-comparison";
+import {
+  PROVIDER_COMPARISON_ASSERTION_FAILURE_MESSAGE,
+  assertProviderPassRateComparisonForCli,
+} from "./provider-comparison-cli";
 
 class ScriptedDriver implements Driver {
   readonly name: string;
@@ -201,6 +205,33 @@ describe("provider pass-rate comparison", () => {
     expect(() => assertProviderPassRateComparison(comparison, { minPassRate: 1 })).toThrow(
       /expected one blocked b2_delete_bucket call/,
     );
+  });
+
+  it("prints a fixed CLI failure instead of raw failed-case payloads", () => {
+    expect(() =>
+      assertProviderPassRateComparisonForCli({
+        summary: "summary",
+        passRates: [{ provider: "OpenAI", passed: 0, total: 1, passRate: 0 }],
+        results: [
+          {
+            provider: "OpenAI",
+            caseName: "raw failure",
+            status: "failed",
+            passed: false,
+            run: {
+              toolCalls: [
+                { name: "b2_list_buckets", args: { marker: "eval-application-key-secret" } },
+              ],
+              toolResults: [{ content: [{ type: "text", text: "secret tool result" }] }],
+              text: "raw model text",
+            },
+            failure:
+              'toolCalls=[{"args":{"marker":"eval-application-key-secret"}}] ' +
+              "toolResults=[secret] text=raw model text",
+          },
+        ],
+      }),
+    ).toThrow(PROVIDER_COMPARISON_ASSERTION_FAILURE_MESSAGE);
   });
 
   it.each([Number.NaN, -0.1, 1.1, Number.POSITIVE_INFINITY] as const)(

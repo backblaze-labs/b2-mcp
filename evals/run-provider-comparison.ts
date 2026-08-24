@@ -1,10 +1,10 @@
 import { CI_PROVIDER_COMPARISON_EVAL_CASES, FULL_PROFILE_EVAL_CASES } from "./cases";
 import {
   CLAUDE_OPENAI_PROVIDERS,
-  assertProviderPassRateComparison,
   claudeOpenAIComparisonEvalGate,
   runProviderPassRateComparison,
 } from "./provider-comparison";
+import { assertProviderPassRateComparisonForCli } from "./provider-comparison-cli";
 import {
   PROVIDER_PASS_RATE_REPORT_ENV,
   createProviderPassRateReport,
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   );
 
   console.info(comparison.summary);
-  assertProviderPassRateComparison(comparison);
+  assertProviderPassRateComparisonForCli(comparison);
 }
 
 main().catch((err) => {

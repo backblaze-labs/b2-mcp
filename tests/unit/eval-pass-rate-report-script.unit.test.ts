@@ -74,13 +74,76 @@ describe("eval pass-rate report script", () => {
     expect(validation.stderr).not.toContain("sk-proj-secret123456789");
   });
 
+  it("requires exactly one Claude and one OpenAI provider", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          providers: [
+            { provider: "Other", model: "other-model", passed: 1, total: 1, passRate: 1 },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+
+    expect(validation.status).not.toBe(0);
+    expect(validation.stderr).toContain("exactly one Claude and one OpenAI");
+  });
+
+  it("rejects provider rates that do not match case totals", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          providers: [
+            {
+              provider: "Claude",
+              model: "claude-haiku-4-5-20251001",
+              passed: 0,
+              total: 1,
+              passRate: 1,
+            },
+            { provider: "OpenAI", model: "gpt-5-nano", passed: 1, total: 2, passRate: 0.5 },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+
+    expect(validation.status).not.toBe(0);
+    expect(validation.stderr).toMatch(/passRate must equal passed \/ total|total must equal/);
+  });
+
   it("rejects reports that include raw run payload fields", () => {
     const path = tempReportPath();
     writeFileSync(
       path,
       `${JSON.stringify(
         report({
+          providers: [
+            {
+              provider: "Claude",
+              model: "claude-haiku-4-5-20251001",
+              passed: 1,
+              total: 1,
+              passRate: 1,
+            },
+            { provider: "OpenAI", model: "gpt-5-nano", passed: 0, total: 1, passRate: 0 },
+          ],
           results: [
+            {
+              provider: "Claude",
+              caseName: "passed case",
+              status: "passed",
+              passed: true,
+            },
             {
               provider: "OpenAI",
               caseName: "failed case",
