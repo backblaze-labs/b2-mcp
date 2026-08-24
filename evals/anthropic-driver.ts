@@ -15,7 +15,8 @@ const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MAX_TOKENS = 1024;
 const MAX_ERROR_FALLBACK_CHARS = 500;
-const RETRYABLE_HTTP_STATUSES = new Set([429, 500, 502, 503, 504, 529]);
+const RETRYABLE_HTTP_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504, 529]);
+const TRUNCATED_STOP_REASONS = new Set(["max_tokens", "model_context_window_exceeded"]);
 const DEFAULT_RETRY_POLICY = {
   maxAttempts: 3,
   baseDelayMs: 250,
@@ -297,9 +298,14 @@ async function readAnthropicResponse(response: Response): Promise<unknown> {
 }
 
 function rejectTruncatedResponse(payload: unknown): void {
-  if (isRecord(payload) && payload.stop_reason === "max_tokens") {
+  if (
+    isRecord(payload) &&
+    typeof payload.stop_reason === "string" &&
+    TRUNCATED_STOP_REASONS.has(payload.stop_reason)
+  ) {
     throw new Error(
-      "Anthropic response stopped because max_tokens was reached; increase maxTokens for this eval.",
+      `Anthropic response stopped with ${payload.stop_reason}; increase maxTokens or reduce ` +
+        "the eval context before treating this run as complete.",
     );
   }
 }

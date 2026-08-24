@@ -239,48 +239,75 @@ describe("Anthropic eval driver", () => {
     expect((caught as Error).message).not.toContain(largeBody);
   });
 
-  it("retries retryable Anthropic statuses before returning a successful turn", async () => {
-    const fetchImpl = vi
-      .fn<AnthropicFetch>()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: { message: "overloaded" } }), {
-          status: 529,
-          headers: { "retry-after": "0" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            content: [{ type: "text", text: "Recovered." }],
+  it.each([408, 409, 529] as const)(
+    "retries retryable Anthropic status %i before returning a successful turn",
+    async (status) => {
+      const fetchImpl = vi
+        .fn<AnthropicFetch>()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ error: { message: "transient failure" } }), {
+            status,
+            headers: { "retry-after": "0" },
           }),
-          { status: 200 },
-        ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              content: [{ type: "text", text: "Recovered." }],
+            }),
+            { status: 200 },
+          ),
+        );
+      const driver = createAnthropicDriver({
+        apiKey: "test-anthropic-key",
+        fetch: fetchImpl,
+        retry: { baseDelayMs: 0, maxDelayMs: 0 },
+      });
+
+      await expect(driver.complete(driverInput({}))).resolves.toEqual({
+        text: "Recovered.",
+        toolCalls: [],
+      });
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each(["max_tokens", "model_context_window_exceeded"] as const)(
+    "rejects %s-truncated Anthropic responses instead of consuming them",
+    async (stopReason) => {
+      const { fetchImpl } = createFetchSequence([
+        {
+          stop_reason: stopReason,
+          content: [{ type: "text", text: "Partial" }],
+        },
+      ]);
+      const driver = createAnthropicDriver({ apiKey: "test-anthropic-key", fetch: fetchImpl });
+
+      await expect(driver.complete(driverInput({}))).rejects.toThrow(
+        new RegExp(`stopped with ${stopReason}`),
       );
+    },
+  );
+
+  it("does not retry non-retryable authentication failures", async () => {
+    const fetchImpl = vi.fn<AnthropicFetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          error: { type: "authentication_error", message: "invalid api key" },
+        }),
+        { status: 401 },
+      ),
+    );
     const driver = createAnthropicDriver({
-      apiKey: "test-anthropic-key",
+      apiKey: "bad-key",
       fetch: fetchImpl,
-      retry: { baseDelayMs: 0, maxDelayMs: 0 },
+      retry: { maxAttempts: 3, baseDelayMs: 0, maxDelayMs: 0 },
     });
-
-    await expect(driver.complete(driverInput({}))).resolves.toEqual({
-      text: "Recovered.",
-      toolCalls: [],
-    });
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-  });
-
-  it("rejects max_tokens-truncated Anthropic responses instead of consuming them", async () => {
-    const { fetchImpl } = createFetchSequence([
-      {
-        stop_reason: "max_tokens",
-        content: [{ type: "text", text: "Partial" }],
-      },
-    ]);
-    const driver = createAnthropicDriver({ apiKey: "test-anthropic-key", fetch: fetchImpl });
 
     await expect(driver.complete(driverInput({}))).rejects.toThrow(
-      /max_tokens was reached; increase maxTokens/,
+      /Anthropic Messages API request failed \(401\): invalid api key/,
     );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("uses the Haiku 4.5 model and gates on ANTHROPIC_API_KEY by default", () => {
