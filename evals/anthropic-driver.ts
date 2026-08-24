@@ -25,6 +25,7 @@ import {
 } from "./provider-utils";
 
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
+export const ANTHROPIC_EVAL_MODEL_ENV = "ANTHROPIC_EVAL_MODEL";
 export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -202,7 +203,7 @@ class AnthropicMessagesDriver implements Driver {
       options.apiKey ?? process.env[ANTHROPIC_API_KEY_ENV],
       ANTHROPIC_API_KEY_ENV,
     );
-    this.model = options.model ?? DEFAULT_ANTHROPIC_MODEL;
+    this.model = options.model ?? process.env[ANTHROPIC_EVAL_MODEL_ENV] ?? DEFAULT_ANTHROPIC_MODEL;
     this.maxTokens = requirePositiveInteger(options.maxTokens ?? DEFAULT_MAX_TOKENS, "maxTokens");
     this.system = options.system ?? DEFAULT_SYSTEM_PROMPT;
     this.retry = resolveRetryOptions(options.retry);

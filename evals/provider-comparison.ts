@@ -1,6 +1,7 @@
 import { ANTHROPIC_API_KEY_ENV, createAnthropicDriver } from "./anthropic-driver";
 import { evalCaseRunOptions, type EvalCase } from "./cases";
 import { OPENAI_API_KEY_ENV, createOpenAIDriver } from "./openai-driver";
+import { sanitizeProviderErrorMessage } from "./provider-utils";
 import {
   llmEvalGate,
   runEval,
@@ -151,12 +152,13 @@ export async function runProviderPassRateComparison(options: {
         }
       } catch (err) {
         providerErrors.set(provider.name, errorsSoFar + 1);
+        const message = err instanceof Error ? err.message : String(err);
         results.push({
           provider: provider.name,
           caseName: evalCase.name,
           status: "errored",
           passed: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: sanitizeProviderErrorMessage(message, providerSecretValues()),
         });
       }
     }
@@ -187,6 +189,12 @@ function resolveMaxProviderErrors(value: number | undefined): number {
     throw new Error("maxProviderErrors must be a positive integer.");
   }
   return maxProviderErrors;
+}
+
+function providerSecretValues(env: NodeJS.ProcessEnv = process.env): string[] {
+  return [env[ANTHROPIC_API_KEY_ENV], env[OPENAI_API_KEY_ENV]].filter((value): value is string =>
+    Boolean(value),
+  );
 }
 
 export function assertProviderPassRateComparison(

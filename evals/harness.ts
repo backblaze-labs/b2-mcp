@@ -1,5 +1,7 @@
 import { Client, type CallToolResult, type Tool } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { join } from "path";
+import { pathToFileURL } from "url";
 import {
   DIST_INDEX,
   ROOT,
@@ -15,6 +17,8 @@ const DEFAULT_TOOL_CALL_TIMEOUT_MS = 30_000;
 const DEFAULT_STDERR_TAIL_BYTES = 8_192;
 const DEFAULT_MAX_TOOL_CALLS_PER_STEP = 8;
 const DEFAULT_MAX_TOOL_CALLS_TOTAL = 32;
+
+export const EVAL_SERVER_NETWORK_GUARD_ENV = "LLM_EVAL_BLOCK_SERVER_NETWORK";
 
 const EVAL_CREDENTIAL_MARKERS: Record<string, string> = {
   B2_APPLICATION_KEY_ID: "eval-application-key-id",
@@ -222,6 +226,17 @@ function assertSafeEvalServerEnv(env: NodeJS.ProcessEnv, options: EvalServerOpti
 }
 
 export function createEvalServerEnv(options: EvalServerOptions = {}): Record<string, string> {
+  const networkGuardEnabled =
+    process.env[EVAL_SERVER_NETWORK_GUARD_ENV] === "1" ||
+    options.env?.[EVAL_SERVER_NETWORK_GUARD_ENV] === "1";
+  const nodeOptions = networkGuardEnabled
+    ? [
+        options.env?.NODE_OPTIONS,
+        `--import ${pathToFileURL(join(ROOT, "scripts/no-network-guard.mjs")).href}`,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : options.env?.NODE_OPTIONS;
   const env = safeSpawnEnv({
     NODE_ENV: "test",
     B2_REGISTER_ALL_TOOLS: options.registerAllTools === false ? "false" : "true",
@@ -230,6 +245,7 @@ export function createEvalServerEnv(options: EvalServerOptions = {}): Record<str
     B2_ALLOW_LOCAL_FILES: "false",
     B2_SECRET_SINK: "off",
     ...options.env,
+    ...(nodeOptions ? { NODE_OPTIONS: nodeOptions } : {}),
   });
   assertSafeEvalServerEnv(env, options);
   return stringifySpawnEnv(env);

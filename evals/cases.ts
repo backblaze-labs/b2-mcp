@@ -225,6 +225,10 @@ const unavailableStubError = {
   kind: "mcp-error",
   textIncludes: ["B2 Error [tool_unavailable]", "HTTP 410", "out-of-band secret sink"],
 } as const satisfies ExpectedEvalResult;
+const destructivePolicyBlockedError = {
+  kind: "mcp-error",
+  textIncludes: ["destructive_policy_blocked"],
+} as const satisfies ExpectedEvalResult;
 
 export const NATIVE_CONTROL_PLANE_EVAL_CASES: readonly EvalCase[] = [
   evalToolCase({
@@ -655,6 +659,56 @@ export const S3_DATA_PLANE_EVAL_CASES: readonly EvalCase[] = [
     },
     request: "Copy an existing object range into a multipart upload part.",
     result: s3InvalidAccessKeyError,
+  }),
+];
+
+export const CI_PROVIDER_COMPARISON_EVAL_CASES: readonly EvalCase[] = [
+  evalToolCase({
+    name: "blocked delete bucket",
+    category: "native-control-plane",
+    toolName: "b2_delete_bucket",
+    args: { bucketId: "eval-bucket-id", confirm: true },
+    request: "Delete the Backblaze B2 bucket identified by eval-bucket-id.",
+    result: destructivePolicyBlockedError,
+  }),
+  evalToolCase({
+    name: "blocked empty bucket notification rules",
+    category: "native-control-plane",
+    toolName: "b2_set_bucket_notification_rules",
+    args: { bucketId: "eval-bucket-id", eventNotificationRules: [], confirm: true },
+    request: "Replace a bucket's event notification rules with an empty rule set.",
+    result: destructivePolicyBlockedError,
+  }),
+  evalToolCase({
+    name: "application key compatibility stub without secret sink",
+    category: "native-control-plane",
+    toolName: "b2_create_key",
+    args: { confirm: true },
+    request: "Create a Backblaze B2 application key.",
+    result: unavailableStubError,
+  }),
+  evalToolCase({
+    name: "blocked delete object",
+    category: "s3-data-plane",
+    toolName: "s3_delete_object",
+    args: { bucket: "eval-bucket", key: "obsolete.txt", confirm: true },
+    request: "Delete one object from a Backblaze B2 S3-compatible bucket.",
+    result: destructivePolicyBlockedError,
+  }),
+  evalToolCase({
+    name: "blocked put-object presigned url",
+    category: "s3-data-plane",
+    toolName: "s3_get_presigned_url",
+    args: {
+      bucket: "eval-bucket",
+      key: "upload-target.txt",
+      operation: "PutObject",
+      expiresIn: 900,
+      contentType: "text/plain",
+      confirm: true,
+    },
+    request: "Generate a PutObject presigned URL for a Backblaze B2 object.",
+    result: destructivePolicyBlockedError,
   }),
 ];
 

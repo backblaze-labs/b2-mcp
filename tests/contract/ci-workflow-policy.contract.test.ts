@@ -34,6 +34,7 @@ const workflowPaths = [
   ".github/workflows/test.yml",
   ".github/workflows/contract.yml",
   ".github/workflows/smoke.yml",
+  ".github/workflows/evals.yml",
   ".github/workflows/publish.yml",
 ];
 const requiredJobNames = [
@@ -56,8 +57,18 @@ const requiredJobNames = [
   "cross-platform minimum",
 ];
 
+const topLevelMappingEntry = (key: string, childKey: string, value: string) =>
+  new RegExp(
+    `^${key}:\\s*\\n(?:\\s*#.*\\n)*\\s+${childKey}:\\s*${value.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&",
+    )}\\s*$`,
+    "m",
+  );
+
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
+  const evals = readFileSync(join(root, ".github/workflows/evals.yml"), "utf8");
   const publish = readFileSync(join(root, ".github/workflows/publish.yml"), "utf8");
   const qualityKeeper = readFileSync(join(root, ".github/workflows/quality-keeper.yml"), "utf8");
 
@@ -367,6 +378,69 @@ describe("CI workflow policy", () => {
     expect(crossPlatformJob).toContain("os: [ubuntu-latest, windows-latest, macos-latest]");
     expect(crossPlatformJob).toContain("node-version: 22.23.1");
     expect(crossPlatformJob).toContain("pnpm run test:cross-platform");
+  });
+
+  it("runs provider evals only from trusted scheduled or manual main refs", () => {
+    const guard = workflowJobBlock(evals, "guard") ?? "";
+    const skipped = workflowJobBlock(evals, "skipped") ?? "";
+    const evalJob = workflowJobBlock(evals, "evals") ?? "";
+
+    expect(evals).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
+    expect(evals).toMatch(/^\s{2}workflow_dispatch:\s*$/m);
+    expect(evals).toMatch(/^\s{2}schedule:\s*$/m);
+    expect(evals).not.toMatch(/^\s{2}pull_request:\s*$/m);
+    expect(evals).not.toMatch(/^\s{2}push:\s*$/m);
+    expect(evals).toContain('cron: "37 10 * * 2"');
+    expect(evals).toContain(
+      "group: llm-evals-${{ github.repository }}-${{ github.ref_name || github.run_id }}",
+    );
+    expect(evals).toContain("cancel-in-progress: false");
+
+    expect(guard).toContain("if: github.repository == 'backblaze-labs/b2-mcp'");
+    expect(guard).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
+    expect(guard).toContain("skip-reason: ${{ steps.ref.outputs.skip_reason }}");
+    expect(guard).toContain("workflow_dispatch|schedule");
+    expect(guard).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
+    expect(guard).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
+    expect(guard).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    expect(guard).toContain("::add-mask::");
+    expect(guard).toContain("should_run=false");
+    expect(guard).toContain("missing provider secret(s)");
+    expect(guard).not.toContain("environment:");
+
+    expect(skipped).toContain("needs.guard.outputs.should-run != 'true'");
+    expect(skipped).toContain("LLM evals skipped");
+    expect(evalJob).toContain("needs.guard.outputs.should-run == 'true'");
+    expect(evalJob).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
+    expect(evalJob).toContain("persist-credentials: false");
+  });
+
+  it("uploads bounded Claude-vs-OpenAI pass-rate artifacts without B2 secrets", () => {
+    const evalJob = workflowJobBlock(evals, "evals") ?? "";
+    const secretRefs = [...evals.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
+
+    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+    expect(evalJob).not.toContain("LIVE_B2_");
+    expect(evalJob).not.toContain("B2_APPLICATION_KEY");
+    expect(evalJob).not.toContain("B2_MASTER_KEY");
+    expect(evalJob).toContain('RUN_LLM_EVALS: "1"');
+    expect(evalJob).toContain('RUN_LLM_PROVIDER_COMPARISON: "1"');
+    expect(evalJob).toContain("ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001");
+    expect(evalJob).toContain("OPENAI_EVAL_MODEL: gpt-5-nano");
+    expect(evalJob).toContain("LLM_EVAL_CASE_SET: ci-no-b2");
+    expect(evalJob).toContain('LLM_EVAL_CASE_LIMIT: "5"');
+    expect(evalJob).toContain('LLM_EVAL_BLOCK_SERVER_NETWORK: "1"');
+    expect(evalJob).toContain("LLM_EVAL_PASS_RATE_REPORT: reports/evals/provider-pass-rates.json");
+    expect(evalJob).toContain("evals/provider-comparison.eval.test.ts");
+    expect(evalJob).toContain(
+      '--testNamePattern "runs shared cases and emits a pass-rate comparison"',
+    );
+    expect(evalJob).not.toContain("pnpm run evals");
+    expect(evalJob).toContain("Claude vs OpenAI pass rates");
+    expect(evalJob).toContain("claude-openai-pass-rate-report");
+    expect(evalJob).toContain("path: reports/evals/provider-pass-rates.json");
+    expect(evalJob).toContain("if-no-files-found: warn");
+    expect(evalJob).not.toContain("path: reports/evals/**");
   });
 
   it("blocks publishing until the live contract suite passes for the publish ref", () => {

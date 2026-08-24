@@ -3,6 +3,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { describe, expect, it } from "vitest";
 import {
+  EVAL_SERVER_NETWORK_GUARD_ENV,
   createEvalServerEnv,
   llmEvalGate,
   runEval,
@@ -109,6 +110,23 @@ describe("LLM eval harness", () => {
         env: { B2_SECRET_SINK: "file" },
       }),
     ).toThrow(/B2_SECRET_SINK=off/);
+  });
+
+  it("can block outbound network in the eval server child process", () => {
+    const previous = process.env[EVAL_SERVER_NETWORK_GUARD_ENV];
+    process.env[EVAL_SERVER_NETWORK_GUARD_ENV] = "1";
+    try {
+      const env = createEvalServerEnv();
+
+      expect(env.NODE_OPTIONS).toContain("--import");
+      expect(env.NODE_OPTIONS).toContain("scripts/no-network-guard.mjs");
+    } finally {
+      if (previous === undefined) {
+        delete process.env[EVAL_SERVER_NETWORK_GUARD_ENV];
+      } else {
+        process.env[EVAL_SERVER_NETWORK_GUARD_ENV] = previous;
+      }
+    }
   });
 
   it("rejects unexposed tool calls before execution", async () => {

@@ -1,0 +1,155 @@
+name: LLM Evals
+
+# Cost-controlled provider eval evidence. This workflow intentionally avoids
+# pull_request events so provider secrets never run against unreviewed fork code.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "37 10 * * 2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-evals-${{ github.repository }}-${{ github.ref_name || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    outputs:
+      should-run: ${{ steps.ref.outputs.should_run }}
+      checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
+      skip-reason: ${{ steps.ref.outputs.skip_reason }}
+    steps:
+      - name: Resolve trusted eval ref and provider secrets
+        id: ref
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set -euo pipefail
+          should_run=true
+          checkout_sha="${GITHUB_SHA}"
+          skip_reason=""
+
+          case "${EVENT_NAME}" in
+            workflow_dispatch|schedule)
+              if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+                echo "::error::${EVENT_NAME} eval runs must target main; got ${GITHUB_REF}"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::unsupported eval event: ${EVENT_NAME}"
+              exit 1
+              ;;
+          esac
+
+          for value in "${ANTHROPIC_API_KEY:-}" "${OPENAI_API_KEY:-}"; do
+            if [[ -n "$value" ]]; then echo "::add-mask::$value"; fi
+          done
+
+          missing=()
+          if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then missing+=("ANTHROPIC_API_KEY"); fi
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then missing+=("OPENAI_API_KEY"); fi
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            should_run=false
+            checkout_sha=""
+            skip_reason="missing provider secret(s): ${missing[*]}"
+          fi
+
+          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
+          echo "checkout_sha=${checkout_sha}" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=${skip_reason}" >> "$GITHUB_OUTPUT"
+
+  skipped:
+    name: LLM evals skipped
+    needs: guard
+    if: ${{ always() && needs.guard.result == 'success' && needs.guard.outputs.should-run != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report skipped evals
+        run: |
+          echo "LLM evals skipped: ${{ needs.guard.outputs.skip-reason }}" >> "$GITHUB_STEP_SUMMARY"
+
+  evals:
+    name: Claude vs OpenAI pass rates
+    needs: guard
+    if: needs.guard.outputs.should-run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # actions/checkout v6, reviewed 2026-08-06.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.guard.outputs.checkout-sha }}
+          persist-credentials: false
+      # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          run_install: false
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Run Claude vs OpenAI eval comparison
+        env:
+          RUN_LLM_EVALS: "1"
+          RUN_LLM_PROVIDER_COMPARISON: "1"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001
+          OPENAI_EVAL_MODEL: gpt-5-nano
+          LLM_EVAL_CASE_SET: ci-no-b2
+          LLM_EVAL_CASE_LIMIT: "5"
+          LLM_EVAL_BLOCK_SERVER_NETWORK: "1"
+          LLM_EVAL_PASS_RATE_REPORT: reports/evals/provider-pass-rates.json
+        run: |
+          set -euo pipefail
+          mkdir -p reports/evals
+          pnpm exec vitest run --config evals/vitest.config.mts \
+            evals/provider-comparison.eval.test.ts \
+            --testNamePattern "runs shared cases and emits a pass-rate comparison"
+      - name: Publish pass-rate summary
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ ! -s reports/evals/provider-pass-rates.json ]]; then
+            echo "Provider pass-rate report was not produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const report = JSON.parse(fs.readFileSync("reports/evals/provider-pass-rates.json", "utf8"));
+          const lines = [
+            "## Claude vs OpenAI pass rates",
+            "",
+            report.summary,
+            "",
+            "| Provider | Model | Passed | Total | Pass rate |",
+            "| --- | --- | ---: | ---: | ---: |",
+            ...report.providers.map((provider) => {
+              const pct = `${(provider.passRate * 100).toFixed(1)}%`;
+              return `| ${provider.provider} | ${provider.model} | ${provider.passed} | ${provider.total} | ${pct} |`;
+            }),
+            "",
+          ];
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
+          NODE
+      # actions/upload-artifact v6, reviewed 2026-08-06.
+      - name: Upload Claude vs OpenAI pass-rate report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: claude-openai-pass-rate-report
+          path: reports/evals/provider-pass-rates.json
+          if-no-files-found: warn
+          retention-days: 14

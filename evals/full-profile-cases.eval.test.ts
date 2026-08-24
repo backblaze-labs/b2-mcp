@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { FULL_PROFILE_EVAL_CASES, type EvalCase } from "./cases";
+import { CI_PROVIDER_COMPARISON_EVAL_CASES, FULL_PROFILE_EVAL_CASES, type EvalCase } from "./cases";
 import type { Driver, DriverInput, DriverOutput, EvalRun } from "./harness";
 import { B2S3PeerClient } from "../src/s3/aws-sdk-adapter";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../src/server";
@@ -183,6 +183,17 @@ describe("full-profile scripted eval cases", () => {
     async (evalCase) => {
       const run = await runScriptedCase(evalCase);
 
+      expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
+    },
+    30_000,
+  );
+
+  it.each(CI_PROVIDER_COMPARISON_EVAL_CASES)(
+    "$name accepts the scripted no-B2 CI tool call",
+    async (evalCase) => {
+      const run = await runScriptedCase(evalCase);
+
+      expect(evalCase.server?.destructivePolicy).not.toBe("allow");
       expect(evalCase.passed(run), evalCase.failureSummary(run)).toBe(true);
     },
     30_000,

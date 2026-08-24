@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
 import type { EvalCase } from "./cases";
 import {
+  CI_PROVIDER_COMPARISON_EVAL_CASES,
   FULL_PROFILE_EVAL_CASES,
   destructiveDeleteBucketGateFailure,
   destructiveDeleteBucketGatePassed,
 } from "./cases";
 import type { Driver, DriverInput, DriverOutput, EvalRun, RunEvalOptions } from "./harness";
+import {
+  PROVIDER_COMPARISON_CASE_LIMIT_ENV,
+  PROVIDER_COMPARISON_CASE_SET_ENV,
+  PROVIDER_PASS_RATE_REPORT_ENV,
+  createProviderPassRateReport,
+  selectBoundedProviderComparisonCases,
+  selectProviderComparisonCases,
+  writeProviderPassRateReport,
+} from "./provider-pass-rate-report";
 import {
   CLAUDE_OPENAI_PROVIDERS,
   PROVIDER_COMPARISON_EVAL_ENV,
@@ -145,6 +155,27 @@ describe("provider pass-rate comparison", () => {
 
     expect(() => assertProviderPassRateComparison(comparison, { minPassRate: 0 })).toThrow(
       /model_not_found/,
+    );
+  });
+
+  it("sanitizes provider errors before assertions can print them", async () => {
+    const comparison = await runProviderPassRateComparison({
+      cases: [comparisonCase],
+      providers: [
+        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
+        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
+      ],
+      async runEvalImpl(options) {
+        if (options.driver.name === "openai") {
+          throw new Error("provider echoed sk-proj-secret123456789");
+        }
+        return passingRun();
+      },
+    });
+
+    expect(JSON.stringify(comparison)).not.toContain("sk-proj-secret123456789");
+    expect(() => assertProviderPassRateComparison(comparison, { minPassRate: 0 })).toThrow(
+      /provider echoed \[REDACTED_SECRET\]/,
     );
   });
 
@@ -297,6 +328,105 @@ describe("provider pass-rate comparison", () => {
       ),
     ).toHaveLength(2);
   });
+
+  it("selects a bounded CI case set from the full provider comparison suite", () => {
+    expect(selectBoundedProviderComparisonCases([comparisonCase], {})).toEqual([comparisonCase]);
+    expect(
+      selectBoundedProviderComparisonCases(
+        [comparisonCase, { ...comparisonCase, name: "case two" }],
+        { [PROVIDER_COMPARISON_CASE_LIMIT_ENV]: "1" },
+      ),
+    ).toEqual([comparisonCase]);
+    expect(() =>
+      selectBoundedProviderComparisonCases([comparisonCase], {
+        [PROVIDER_COMPARISON_CASE_LIMIT_ENV]: "0",
+      }),
+    ).toThrow(/LLM_EVAL_CASE_LIMIT must be a positive integer/);
+    expect(
+      selectProviderComparisonCases(
+        { full: [comparisonCase], "ci-no-b2": CI_PROVIDER_COMPARISON_EVAL_CASES },
+        {
+          [PROVIDER_COMPARISON_CASE_SET_ENV]: "ci-no-b2",
+          [PROVIDER_COMPARISON_CASE_LIMIT_ENV]: "2",
+        },
+      ).map((evalCase) => evalCase.name),
+    ).toEqual(["blocked delete bucket", "blocked empty bucket notification rules"]);
+    expect(() =>
+      selectProviderComparisonCases(
+        { full: [comparisonCase] },
+        {
+          [PROVIDER_COMPARISON_CASE_SET_ENV]: "missing",
+        },
+      ),
+    ).toThrow(/LLM_EVAL_CASE_SET must be one of: full/);
+  });
+
+  it("builds a secret-safe pass-rate report without raw runs", () => {
+    const comparison = {
+      summary:
+        "Pass-rate comparison (Claude vs OpenAI) across 1 shared case(s): " +
+        "Claude: 1/1 (100.0%); OpenAI: 0/1 (0.0%).",
+      passRates: [
+        { provider: "Claude", passed: 1, total: 1, passRate: 1 },
+        { provider: "OpenAI", passed: 0, total: 1, passRate: 0 },
+      ],
+      results: [
+        {
+          provider: "Claude",
+          caseName: "comparison case",
+          status: "passed" as const,
+          passed: true as const,
+          run: passingRun(),
+        },
+        {
+          provider: "OpenAI",
+          caseName: "comparison case",
+          status: "errored" as const,
+          passed: false as const,
+          error: "request failed for sk-proj-secret123456789",
+        },
+      ],
+    };
+
+    const report = createProviderPassRateReport({
+      comparison,
+      cases: [comparisonCase],
+      providers: CLAUDE_OPENAI_PROVIDERS,
+      env: {
+        ANTHROPIC_API_KEY: "anthropic-secret",
+        OPENAI_API_KEY: "sk-proj-secret123456789",
+        OPENAI_EVAL_MODEL: "gpt-5-nano",
+        ANTHROPIC_EVAL_MODEL: "claude-haiku-4-5-20251001",
+      },
+      now: new Date("2026-08-24T00:00:00.000Z"),
+    });
+
+    expect(report.issue.number).toBe(250);
+    expect(report.caseCount).toBe(1);
+    expect(report.providers).toEqual([
+      {
+        provider: "Claude",
+        model: "claude-haiku-4-5-20251001",
+        passed: 1,
+        total: 1,
+        passRate: 1,
+      },
+      {
+        provider: "OpenAI",
+        model: "gpt-5-nano",
+        passed: 0,
+        total: 1,
+        passRate: 0,
+      },
+    ]);
+    expect(JSON.stringify(report)).not.toContain("sk-proj-secret123456789");
+    expect(JSON.stringify(report)).not.toContain("toolResults");
+    expect(report.results[1]).toMatchObject({
+      provider: "OpenAI",
+      status: "errored",
+      error: "request failed for [REDACTED_SECRET]",
+    });
+  });
 });
 
 const comparisonGate = claudeOpenAIComparisonEvalGate();
@@ -306,19 +436,34 @@ describe("Claude vs OpenAI live eval comparison", () => {
   it.skipIf(!comparisonGate.enabled)(
     "runs shared cases and emits a pass-rate comparison",
     async () => {
+      const liveComparisonCases = selectProviderComparisonCases({
+        full: FULL_PROFILE_EVAL_CASES,
+        "ci-no-b2": CI_PROVIDER_COMPARISON_EVAL_CASES,
+      });
       const comparison = await runProviderPassRateComparison({
-        cases: FULL_PROFILE_EVAL_CASES,
+        cases: liveComparisonCases,
         providers: CLAUDE_OPENAI_PROVIDERS,
       });
 
       console.info(comparison.summary);
+      const reportPath = process.env[PROVIDER_PASS_RATE_REPORT_ENV];
+      if (reportPath) {
+        writeProviderPassRateReport(
+          reportPath,
+          createProviderPassRateReport({
+            comparison,
+            cases: liveComparisonCases,
+            providers: CLAUDE_OPENAI_PROVIDERS,
+          }),
+        );
+      }
       assertProviderPassRateComparison(comparison);
       expect(comparison.results).toHaveLength(
-        FULL_PROFILE_EVAL_CASES.length * CLAUDE_OPENAI_PROVIDERS.length,
+        liveComparisonCases.length * CLAUDE_OPENAI_PROVIDERS.length,
       );
       for (const provider of CLAUDE_OPENAI_PROVIDERS) {
         expect(comparison.passRates.find((rate) => rate.provider === provider.name)?.total).toBe(
-          FULL_PROFILE_EVAL_CASES.length,
+          liveComparisonCases.length,
         );
       }
       expect(comparison.summary).toMatch(/Claude vs OpenAI/);
