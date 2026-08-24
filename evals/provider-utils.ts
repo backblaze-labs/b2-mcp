@@ -207,8 +207,13 @@ export function requestIdFromHeaders(
   return undefined;
 }
 
-export function messageWithRequestId(message: string, requestId: string | undefined): string {
-  return requestId ? `${message} (requestId: ${requestId})` : message;
+export function messageWithRequestId(
+  message: string,
+  requestId: string | undefined,
+  secretValues: readonly string[] = [],
+): string {
+  const fullMessage = requestId ? `${message} (requestId: ${requestId})` : message;
+  return sanitizeProviderErrorMessage(fullMessage, secretValues);
 }
 
 export async function readBoundedResponseText(args: {
@@ -284,6 +289,7 @@ export async function readProviderJsonResponse(args: {
           messageWithRequestId(
             message,
             requestIdFromHeaders(args.response.headers, args.requestIdHeaderNames),
+            args.secretValues,
           ),
           args.response.status,
           retryAfterMsFromHeaders(args.response.headers),
@@ -310,6 +316,7 @@ export async function readProviderJsonResponse(args: {
       messageWithRequestId(
         message,
         requestIdFromHeaders(args.response.headers, args.requestIdHeaderNames),
+        args.secretValues,
       ),
       args.response.status,
       retryAfterMsFromHeaders(args.response.headers),
