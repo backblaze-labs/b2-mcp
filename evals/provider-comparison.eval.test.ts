@@ -53,8 +53,15 @@ function failingRun(): EvalRun {
 
 const comparisonCase = {
   name: "comparison case",
+  category: "native-control-plane",
   prompt: "Use the tool.",
   toolNames: ["b2_delete_bucket"],
+  expected: {
+    toolName: "b2_delete_bucket",
+    args: { bucketId: "eval-bucket-id", confirm: true },
+    requiredArgs: ["bucketId"],
+    result: { kind: "mcp-error", textIncludes: ["destructive_policy_blocked"] },
+  },
   maxSteps: 2,
   maxToolCallsPerStep: 1,
   maxToolCallsTotal: 1,
@@ -232,15 +239,17 @@ describe("provider pass-rate comparison", () => {
   });
 
   it("uses the shared live case set for the Claude and OpenAI providers", () => {
-    expect(SHARED_EVAL_CASES.map((evalCase) => evalCase.name)).toEqual([
-      "destructive delete bucket gate",
-    ]);
+    expect(SHARED_EVAL_CASES).toHaveLength(40);
+    expect(SHARED_EVAL_CASES.map((evalCase) => evalCase.expected.toolName).sort()).toContain(
+      "b2_delete_bucket",
+    );
     expect(CLAUDE_OPENAI_PROVIDERS.map((provider) => provider.name)).toEqual(["Claude", "OpenAI"]);
   });
 });
 
 const comparisonGate = claudeOpenAIComparisonEvalGate();
-const LIVE_COMPARISON_TIMEOUT_MS = 420_000;
+const LIVE_COMPARISON_TIMEOUT_MS =
+  SHARED_EVAL_CASES.length * CLAUDE_OPENAI_PROVIDERS.length * 180_000;
 
 describe("Claude vs OpenAI live eval comparison", () => {
   it.skipIf(!comparisonGate.enabled)(
