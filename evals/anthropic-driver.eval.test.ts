@@ -2,6 +2,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/client";
 import { describe, expect, it, vi } from "vitest";
 import {
   ANTHROPIC_API_KEY_ENV,
+  ANTHROPIC_EVAL_MODEL_ENV,
   anthropicEvalGate,
   createAnthropicDriver,
   DEFAULT_ANTHROPIC_MODEL,
@@ -320,6 +321,32 @@ describe("Anthropic eval driver", () => {
     expect(
       anthropicEvalGate({ RUN_LLM_EVALS: "1", [ANTHROPIC_API_KEY_ENV]: "test-key" }).enabled,
     ).toBe(true);
+  });
+
+  it("lets CI pin the Anthropic eval model through the environment", async () => {
+    const previous = process.env[ANTHROPIC_EVAL_MODEL_ENV];
+    process.env[ANTHROPIC_EVAL_MODEL_ENV] = "claude-env-model";
+    try {
+      const { fetchImpl, requests } = createFetchSequence([
+        { content: [{ type: "text", text: "Env model." }] },
+      ]);
+      const driver = createAnthropicDriver({
+        apiKey: "test-anthropic-key",
+        fetch: fetchImpl,
+      });
+
+      await expect(driver.complete(driverInput({}))).resolves.toEqual({
+        text: "Env model.",
+        toolCalls: [],
+      });
+      expect(requests[0].body.model).toBe("claude-env-model");
+    } finally {
+      if (previous === undefined) {
+        delete process.env[ANTHROPIC_EVAL_MODEL_ENV];
+      } else {
+        process.env[ANTHROPIC_EVAL_MODEL_ENV] = previous;
+      }
+    }
   });
 });
 

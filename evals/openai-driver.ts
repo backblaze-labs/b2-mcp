@@ -94,6 +94,10 @@ export function openAIEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGate {
   return llmEvalGate(env, { providerKeyEnvNames: [OPENAI_API_KEY_ENV] });
 }
 
+export function openAIEvalModel(env: NodeJS.ProcessEnv = process.env): string {
+  return env[OPENAI_EVAL_MODEL_ENV] ?? DEFAULT_OPENAI_MODEL;
+}
+
 export function createOpenAIDriver(options: OpenAIDriverOptions = {}): Driver {
   return new OpenAIChatCompletionsDriver(options);
 }
@@ -206,7 +210,7 @@ class OpenAIChatCompletionsDriver implements Driver {
       options.apiKey ?? process.env[OPENAI_API_KEY_ENV],
       OPENAI_API_KEY_ENV,
     );
-    this.model = options.model ?? process.env[OPENAI_EVAL_MODEL_ENV] ?? DEFAULT_OPENAI_MODEL;
+    this.model = options.model ?? openAIEvalModel();
     this.maxCompletionTokens = requirePositiveInteger(
       options.maxCompletionTokens ?? DEFAULT_MAX_COMPLETION_TOKENS,
       "maxCompletionTokens",

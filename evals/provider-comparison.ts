@@ -1,6 +1,12 @@
-import { ANTHROPIC_API_KEY_ENV, createAnthropicDriver } from "./anthropic-driver";
+import {
+  ANTHROPIC_API_KEY_ENV,
+  anthropicEvalModel,
+  createAnthropicDriver,
+} from "./anthropic-driver";
 import { evalCaseRunOptions, type EvalCase } from "./cases";
-import { OPENAI_API_KEY_ENV, createOpenAIDriver } from "./openai-driver";
+import { OPENAI_API_KEY_ENV, createOpenAIDriver, openAIEvalModel } from "./openai-driver";
+import { providerSecretValues } from "./provider-secrets";
+import { sanitizeProviderErrorMessage } from "./provider-utils";
 import {
   llmEvalGate,
   runEval,
@@ -15,6 +21,7 @@ export const DEFAULT_MAX_PROVIDER_ERRORS = 3;
 
 export interface EvalProvider {
   readonly name: string;
+  model(env?: NodeJS.ProcessEnv): string;
   createDriver(): Driver;
 }
 
@@ -70,8 +77,8 @@ export interface ProviderPassRateComparisonOptions {
 export type EvalRunner = (options: RunEvalOptions) => Promise<EvalRun>;
 
 export const CLAUDE_OPENAI_PROVIDERS: readonly EvalProvider[] = [
-  { name: "Claude", createDriver: createAnthropicDriver },
-  { name: "OpenAI", createDriver: createOpenAIDriver },
+  { name: "Claude", model: anthropicEvalModel, createDriver: createAnthropicDriver },
+  { name: "OpenAI", model: openAIEvalModel, createDriver: createOpenAIDriver },
 ];
 
 export function claudeOpenAIComparisonEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGate {
@@ -151,12 +158,13 @@ export async function runProviderPassRateComparison(options: {
         }
       } catch (err) {
         providerErrors.set(provider.name, errorsSoFar + 1);
+        const message = err instanceof Error ? err.message : String(err);
         results.push({
           provider: provider.name,
           caseName: evalCase.name,
           status: "errored",
           passed: false,
-          error: err instanceof Error ? err.message : String(err),
+          error: sanitizeProviderErrorMessage(message, providerSecretValues()),
         });
       }
     }

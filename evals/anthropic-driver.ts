@@ -25,6 +25,7 @@ import {
 } from "./provider-utils";
 
 export const ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY";
+export const ANTHROPIC_EVAL_MODEL_ENV = "ANTHROPIC_EVAL_MODEL";
 export const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
@@ -93,6 +94,10 @@ interface PendingToolUse {
 
 export function anthropicEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGate {
   return llmEvalGate(env, { providerKeyEnvNames: [ANTHROPIC_API_KEY_ENV] });
+}
+
+export function anthropicEvalModel(env: NodeJS.ProcessEnv = process.env): string {
+  return env[ANTHROPIC_EVAL_MODEL_ENV] ?? DEFAULT_ANTHROPIC_MODEL;
 }
 
 export function createAnthropicDriver(options: AnthropicDriverOptions = {}): Driver {
@@ -202,7 +207,7 @@ class AnthropicMessagesDriver implements Driver {
       options.apiKey ?? process.env[ANTHROPIC_API_KEY_ENV],
       ANTHROPIC_API_KEY_ENV,
     );
-    this.model = options.model ?? DEFAULT_ANTHROPIC_MODEL;
+    this.model = options.model ?? anthropicEvalModel();
     this.maxTokens = requirePositiveInteger(options.maxTokens ?? DEFAULT_MAX_TOKENS, "maxTokens");
     this.system = options.system ?? DEFAULT_SYSTEM_PROMPT;
     this.retry = resolveRetryOptions(options.retry);
