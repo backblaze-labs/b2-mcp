@@ -43,6 +43,9 @@ The individual deterministic layers are:
 
 ## LLM Eval Harness
 
+Detailed local, CI, model-selection, coverage-guard, and pass-rate reporting
+instructions are in [`EVALS.md`](EVALS.md).
+
 `pnpm run evals` builds the stdio server, then runs the deterministic eval
 harness and provider-adapter tests under `evals/`. These tests do not require
 real B2 credentials. The harness starts b2-mcp with marker B2 credentials,
