@@ -159,12 +159,19 @@ export function assertProviderPassRateComparison(
   options: PassRateAssertionOptions = {},
 ): void {
   const minPassRate = options.minPassRate ?? 1;
-  const failedResults = comparison.results.filter((result) => result.status !== "passed");
+  const erroredResults = comparison.results.filter((result) => result.status === "errored");
+  const failedResults = comparison.results.filter((result) => result.status === "failed");
   const missedRates = comparison.passRates.filter((rate) => rate.passRate < minPassRate);
-  if (failedResults.length === 0 && missedRates.length === 0) return;
+  if (erroredResults.length === 0 && missedRates.length === 0) return;
+
+  const missedRateProviders = new Set(missedRates.map((rate) => rate.provider));
+  const thresholdFailedResults = failedResults.filter((result) =>
+    missedRateProviders.has(result.provider),
+  );
 
   const details = [
-    ...failedResults.map(formatProviderCaseFailure),
+    ...erroredResults.map(formatProviderCaseFailure),
+    ...thresholdFailedResults.map(formatProviderCaseFailure),
     ...missedRates.map(
       (rate) =>
         `${rate.provider} pass rate ${(rate.passRate * 100).toFixed(1)}% is below ` +

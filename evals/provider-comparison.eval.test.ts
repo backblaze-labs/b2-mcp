@@ -122,7 +122,7 @@ describe("provider pass-rate comparison", () => {
     expect(comparison.results.map((result) => result.status)).toEqual(["passed", "failed"]);
   });
 
-  it("fails gating assertions for provider errors and missed pass rates", async () => {
+  it("fails gating assertions for provider errors even with a relaxed pass rate", async () => {
     const comparison = await runProviderPassRateComparison({
       cases: [comparisonCase],
       providers: [
@@ -135,7 +135,36 @@ describe("provider pass-rate comparison", () => {
       },
     });
 
-    expect(() => assertProviderPassRateComparison(comparison)).toThrow(/model_not_found/);
+    expect(() => assertProviderPassRateComparison(comparison, { minPassRate: 0 })).toThrow(
+      /model_not_found/,
+    );
+  });
+
+  it("lets minPassRate govern ordinary case failures", async () => {
+    const secondCase = {
+      ...comparisonCase,
+      name: "comparison case two",
+      prompt: "Use the tool again.",
+    } satisfies EvalCase;
+
+    const comparison = await runProviderPassRateComparison({
+      cases: [comparisonCase, secondCase],
+      providers: [
+        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
+        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
+      ],
+      async runEvalImpl(options) {
+        if (options.driver.name === "openai" && options.prompt === comparisonCase.prompt) {
+          return failingRun();
+        }
+        return passingRun();
+      },
+    });
+
+    expect(() => assertProviderPassRateComparison(comparison, { minPassRate: 0.5 })).not.toThrow();
+    expect(() => assertProviderPassRateComparison(comparison, { minPassRate: 1 })).toThrow(
+      /expected one blocked b2_delete_bucket call/,
+    );
   });
 
   it("formats a compact comparison summary", () => {

@@ -336,13 +336,24 @@ export async function sendProviderJsonRequest(args: {
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= args.retry.maxAttempts; attempt += 1) {
+    let response: Response;
     try {
-      const response = await args.fetchImpl(args.url, {
+      response = await args.fetchImpl(args.url, {
         method: "POST",
         signal: args.signal,
         headers: args.headers,
         body: requestBody,
       });
+    } catch (err) {
+      lastError = err;
+      if (!shouldRetryProviderError(err, attempt, args.retry, args.retryableStatuses, true)) {
+        throw err;
+      }
+      await sleep(retryDelayMs(err, attempt, args.retry), args.signal);
+      continue;
+    }
+
+    try {
       return await args.readResponse(response, args.signal);
     } catch (err) {
       lastError = err;
@@ -399,9 +410,11 @@ function shouldRetryProviderError(
   attempt: number,
   retry: EvalRetryOptions,
   retryableStatuses: ReadonlySet<number>,
+  transportError = false,
 ): boolean {
   if (attempt >= retry.maxAttempts || isAbortError(err)) return false;
   if (err instanceof EvalProviderApiError) return retryableStatuses.has(err.status);
+  if (transportError && err instanceof TypeError) return true;
   return false;
 }
 

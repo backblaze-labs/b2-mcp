@@ -166,7 +166,10 @@ describe("OpenAI eval driver", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("rejects non-string OpenAI tool-call arguments", async () => {
+  it.each([
+    ["non-string", { bucketId: "bucket-id", confirm: true }],
+    ["missing", undefined],
+  ] as const)("rejects %s OpenAI tool-call arguments", async (_caseName, argumentsValue) => {
     const { fetchImpl } = createFetchSequence([
       chatResponse({
         toolCalls: [
@@ -175,7 +178,7 @@ describe("OpenAI eval driver", () => {
             type: "function",
             function: {
               name: "b2_delete_bucket",
-              arguments: { bucketId: "bucket-id", confirm: true },
+              ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
             },
           },
         ],
