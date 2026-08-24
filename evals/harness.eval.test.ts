@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
+import { spawnSync } from "child_process";
 import { describe, expect, it } from "vitest";
 import {
   EVAL_SERVER_NETWORK_GUARD_ENV,
@@ -120,6 +121,27 @@ describe("LLM eval harness", () => {
 
       expect(env.NODE_OPTIONS).toContain("--import");
       expect(env.NODE_OPTIONS).toContain("scripts/no-network-guard.mjs");
+
+      const blocked = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", 'await fetch("https://example.com")'],
+        { env, encoding: "utf8" },
+      );
+      expect(blocked.status).not.toBe(0);
+      expect(blocked.stderr).toContain("MCP_CLIENT_SMOKE_NETWORK_BLOCKED:fetch");
+
+      const missingGuard = spawnSync(process.execPath, ["-e", 'console.log("unguarded")'], {
+        env: {
+          ...env,
+          NODE_OPTIONS: env.NODE_OPTIONS.replace(
+            "scripts/no-network-guard.mjs",
+            "scripts/missing-no-network-guard.mjs",
+          ),
+        },
+        encoding: "utf8",
+      });
+      expect(missingGuard.status).not.toBe(0);
+      expect(missingGuard.stdout).not.toContain("unguarded");
     } finally {
       if (previous === undefined) {
         delete process.env[EVAL_SERVER_NETWORK_GUARD_ENV];

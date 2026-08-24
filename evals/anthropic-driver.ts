@@ -96,6 +96,10 @@ export function anthropicEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGat
   return llmEvalGate(env, { providerKeyEnvNames: [ANTHROPIC_API_KEY_ENV] });
 }
 
+export function anthropicEvalModel(env: NodeJS.ProcessEnv = process.env): string {
+  return env[ANTHROPIC_EVAL_MODEL_ENV] ?? DEFAULT_ANTHROPIC_MODEL;
+}
+
 export function createAnthropicDriver(options: AnthropicDriverOptions = {}): Driver {
   return new AnthropicMessagesDriver(options);
 }
@@ -203,7 +207,7 @@ class AnthropicMessagesDriver implements Driver {
       options.apiKey ?? process.env[ANTHROPIC_API_KEY_ENV],
       ANTHROPIC_API_KEY_ENV,
     );
-    this.model = options.model ?? process.env[ANTHROPIC_EVAL_MODEL_ENV] ?? DEFAULT_ANTHROPIC_MODEL;
+    this.model = options.model ?? anthropicEvalModel();
     this.maxTokens = requirePositiveInteger(options.maxTokens ?? DEFAULT_MAX_TOKENS, "maxTokens");
     this.system = options.system ?? DEFAULT_SYSTEM_PROMPT;
     this.retry = resolveRetryOptions(options.retry);

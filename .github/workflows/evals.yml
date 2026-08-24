@@ -19,6 +19,7 @@ jobs:
   guard:
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       should-run: ${{ steps.ref.outputs.should_run }}
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
@@ -74,8 +75,10 @@ jobs:
     timeout-minutes: 2
     steps:
       - name: Report skipped evals
+        env:
+          SKIP_REASON: ${{ needs.guard.outputs.skip-reason }}
         run: |
-          echo "LLM evals skipped: ${{ needs.guard.outputs.skip-reason }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "LLM evals skipped: ${SKIP_REASON}" >> "$GITHUB_STEP_SUMMARY"
 
   evals:
     name: Claude vs OpenAI pass rates
@@ -101,6 +104,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Run Claude vs OpenAI eval comparison
+        id: run_evals
+        continue-on-error: true
         env:
           RUN_LLM_EVALS: "1"
           RUN_LLM_PROVIDER_COMPARISON: "1"
@@ -115,41 +120,32 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p reports/evals
-          pnpm exec vitest run --config evals/vitest.config.mts \
-            evals/provider-comparison.eval.test.ts \
-            --testNamePattern "runs shared cases and emits a pass-rate comparison"
-      - name: Publish pass-rate summary
+          pnpm run evals:provider-comparison
+      - name: Validate pass-rate report
+        id: validate_report
         if: always()
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          if [[ ! -s reports/evals/provider-pass-rates.json ]]; then
-            echo "Provider pass-rate report was not produced." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          node - <<'NODE'
-          const fs = require("node:fs");
-          const report = JSON.parse(fs.readFileSync("reports/evals/provider-pass-rates.json", "utf8"));
-          const lines = [
-            "## Claude vs OpenAI pass rates",
-            "",
-            report.summary,
-            "",
-            "| Provider | Model | Passed | Total | Pass rate |",
-            "| --- | --- | ---: | ---: | ---: |",
-            ...report.providers.map((provider) => {
-              const pct = `${(provider.passRate * 100).toFixed(1)}%`;
-              return `| ${provider.provider} | ${provider.model} | ${provider.passed} | ${provider.total} | ${pct} |`;
-            }),
-            "",
-          ];
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n"));
-          NODE
+          node scripts/eval-pass-rate-report.mjs validate reports/evals/provider-pass-rates.json
+      - name: Publish pass-rate summary
+        if: ${{ always() && steps.validate_report.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          node scripts/eval-pass-rate-report.mjs summary reports/evals/provider-pass-rates.json >> "$GITHUB_STEP_SUMMARY"
       # actions/upload-artifact v6, reviewed 2026-08-06.
       - name: Upload Claude vs OpenAI pass-rate report
-        if: always()
+        if: ${{ always() && steps.validate_report.outcome == 'success' }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: claude-openai-pass-rate-report
           path: reports/evals/provider-pass-rates.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
+      - name: Require eval comparison success
+        if: ${{ always() && steps.run_evals.outcome != 'success' }}
+        run: |
+          echo "::error::Claude vs OpenAI eval comparison failed"
+          exit 1

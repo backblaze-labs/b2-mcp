@@ -66,6 +66,14 @@ const topLevelMappingEntry = (key: string, childKey: string, value: string) =>
     "m",
   );
 
+function workflowStepBlock(text: string, stepName: string): string {
+  const marker = `- name: ${stepName}`;
+  const start = text.indexOf(marker);
+  if (start === -1) return "";
+  const next = text.indexOf("\n      - name:", start + marker.length);
+  return text.slice(start, next === -1 ? undefined : next);
+}
+
 describe("CI workflow policy", () => {
   const ci = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
   const evals = readFileSync(join(root, ".github/workflows/evals.yml"), "utf8");
@@ -399,6 +407,7 @@ describe("CI workflow policy", () => {
     expect(guard).toContain("if: github.repository == 'backblaze-labs/b2-mcp'");
     expect(guard).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
     expect(guard).toContain("skip-reason: ${{ steps.ref.outputs.skip_reason }}");
+    expect(guard).toContain("timeout-minutes: 5");
     expect(guard).toContain("workflow_dispatch|schedule");
     expect(guard).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
     expect(guard).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
@@ -410,6 +419,9 @@ describe("CI workflow policy", () => {
 
     expect(skipped).toContain("needs.guard.outputs.should-run != 'true'");
     expect(skipped).toContain("LLM evals skipped");
+    expect(skipped).toContain("SKIP_REASON: ${{ needs.guard.outputs.skip-reason }}");
+    expect(skipped).toContain('echo "LLM evals skipped: ${SKIP_REASON}"');
+    expect(skipped).not.toContain("LLM evals skipped: ${{");
     expect(evalJob).toContain("needs.guard.outputs.should-run == 'true'");
     expect(evalJob).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
     expect(evalJob).toContain("persist-credentials: false");
@@ -417,29 +429,54 @@ describe("CI workflow policy", () => {
 
   it("uploads bounded Claude-vs-OpenAI pass-rate artifacts without B2 secrets", () => {
     const evalJob = workflowJobBlock(evals, "evals") ?? "";
+    const run = workflowStepBlock(evals, "Run Claude vs OpenAI eval comparison");
+    const validate = workflowStepBlock(evals, "Validate pass-rate report");
+    const summary = workflowStepBlock(evals, "Publish pass-rate summary");
+    const upload = workflowStepBlock(evals, "Upload Claude vs OpenAI pass-rate report");
+    const requireSuccess = workflowStepBlock(evals, "Require eval comparison success");
     const secretRefs = [...evals.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
 
     expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+    expect(packageJson.scripts?.["evals:provider-comparison"]).toBe(
+      "tsx evals/run-provider-comparison.ts",
+    );
     expect(evalJob).not.toContain("LIVE_B2_");
     expect(evalJob).not.toContain("B2_APPLICATION_KEY");
     expect(evalJob).not.toContain("B2_MASTER_KEY");
-    expect(evalJob).toContain('RUN_LLM_EVALS: "1"');
-    expect(evalJob).toContain('RUN_LLM_PROVIDER_COMPARISON: "1"');
-    expect(evalJob).toContain("ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001");
-    expect(evalJob).toContain("OPENAI_EVAL_MODEL: gpt-5-nano");
-    expect(evalJob).toContain("LLM_EVAL_CASE_SET: ci-no-b2");
-    expect(evalJob).toContain('LLM_EVAL_CASE_LIMIT: "5"');
-    expect(evalJob).toContain('LLM_EVAL_BLOCK_SERVER_NETWORK: "1"');
-    expect(evalJob).toContain("LLM_EVAL_PASS_RATE_REPORT: reports/evals/provider-pass-rates.json");
-    expect(evalJob).toContain("evals/provider-comparison.eval.test.ts");
-    expect(evalJob).toContain(
-      '--testNamePattern "runs shared cases and emits a pass-rate comparison"',
+    expect(run).toContain("id: run_evals");
+    expect(run).toContain("continue-on-error: true");
+    expect(run).toContain('RUN_LLM_EVALS: "1"');
+    expect(run).toContain('RUN_LLM_PROVIDER_COMPARISON: "1"');
+    expect(run).toContain("ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001");
+    expect(run).toContain("OPENAI_EVAL_MODEL: gpt-5-nano");
+    expect(run).toContain("LLM_EVAL_CASE_SET: ci-no-b2");
+    expect(run).toContain('LLM_EVAL_CASE_LIMIT: "5"');
+    expect(run).toContain('LLM_EVAL_BLOCK_SERVER_NETWORK: "1"');
+    expect(run).toContain("LLM_EVAL_PASS_RATE_REPORT: reports/evals/provider-pass-rates.json");
+    expect(run).toContain("pnpm run evals:provider-comparison");
+    expect(evalJob).not.toContain("evals/provider-comparison.eval.test.ts");
+    expect(evalJob).not.toContain("--testNamePattern");
+    expect(evalJob).not.toMatch(/^\s+pnpm run evals\s*$/m);
+    expect(evalJob).not.toContain("node - <<");
+
+    expect(validate).toContain("id: validate_report");
+    expect(validate).toContain("if: always()");
+    expect(validate).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
+    expect(validate).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    expect(validate).toContain(
+      "node scripts/eval-pass-rate-report.mjs validate reports/evals/provider-pass-rates.json",
     );
-    expect(evalJob).not.toContain("pnpm run evals");
+    expect(summary).toContain("steps.validate_report.outcome == 'success'");
+    expect(summary).toContain(
+      'node scripts/eval-pass-rate-report.mjs summary reports/evals/provider-pass-rates.json >> "$GITHUB_STEP_SUMMARY"',
+    );
     expect(evalJob).toContain("Claude vs OpenAI pass rates");
-    expect(evalJob).toContain("claude-openai-pass-rate-report");
-    expect(evalJob).toContain("path: reports/evals/provider-pass-rates.json");
-    expect(evalJob).toContain("if-no-files-found: warn");
+    expect(upload).toContain("steps.validate_report.outcome == 'success'");
+    expect(upload).toContain("claude-openai-pass-rate-report");
+    expect(upload).toContain("path: reports/evals/provider-pass-rates.json");
+    expect(upload).toContain("if-no-files-found: error");
+    expect(requireSuccess).toContain("steps.run_evals.outcome != 'success'");
+    expect(requireSuccess).toContain("exit 1");
     expect(evalJob).not.toContain("path: reports/evals/**");
   });
 

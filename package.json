@@ -54,6 +54,7 @@
     "test:live:b2": "pnpm run test:live:b2-contract && pnpm run test:live:b2-integration",
     "test:package": "pnpm run build && node scripts/run-vitest-layer.mjs package",
     "evals": "pnpm run build && vitest run --config evals/vitest.config.mts",
+    "evals:provider-comparison": "tsx evals/run-provider-comparison.ts",
     "verify": "pnpm run typecheck && pnpm run build && pnpm run check:doc-examples && pnpm run check:deployment-contracts && pnpm run lint && pnpm run lint:docs && pnpm run lint:links && pnpm run validate:skills && pnpm run format:check && pnpm run spell && pnpm run test:runtime-security && pnpm run test:diagnostics",
     "test:cross-platform": "node scripts/run-cross-platform-tests.mjs",
     "smoke": "node scripts/smoke-test.mjs",

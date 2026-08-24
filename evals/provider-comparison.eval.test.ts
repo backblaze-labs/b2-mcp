@@ -18,6 +18,7 @@ import {
 } from "./provider-pass-rate-report";
 import {
   CLAUDE_OPENAI_PROVIDERS,
+  type EvalProvider,
   PROVIDER_COMPARISON_EVAL_ENV,
   assertProviderPassRateComparison,
   claudeOpenAIComparisonEvalGate,
@@ -80,6 +81,14 @@ const comparisonCase = {
   failureSummary: destructiveDeleteBucketGateFailure,
 } satisfies EvalCase;
 
+function scriptedProvider(name: string, driverName: string): EvalProvider {
+  return {
+    name,
+    model: () => `${driverName}-model`,
+    createDriver: () => new ScriptedDriver(driverName, {}),
+  };
+}
+
 describe("provider pass-rate comparison", () => {
   it("runs the same cases for each provider and summarizes pass rates", async () => {
     const observed: Array<{
@@ -102,10 +111,7 @@ describe("provider pass-rate comparison", () => {
 
     const comparison = await runProviderPassRateComparison({
       cases: [comparisonCase],
-      providers: [
-        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
-        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
-      ],
+      providers: [scriptedProvider("Claude", "anthropic"), scriptedProvider("OpenAI", "openai")],
       runEvalImpl,
     });
 
@@ -143,10 +149,7 @@ describe("provider pass-rate comparison", () => {
   it("fails gating assertions for provider errors even with a relaxed pass rate", async () => {
     const comparison = await runProviderPassRateComparison({
       cases: [comparisonCase],
-      providers: [
-        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
-        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
-      ],
+      providers: [scriptedProvider("Claude", "anthropic"), scriptedProvider("OpenAI", "openai")],
       async runEvalImpl(options) {
         if (options.driver.name === "openai") throw new Error("model_not_found");
         return passingRun();
@@ -161,10 +164,7 @@ describe("provider pass-rate comparison", () => {
   it("sanitizes provider errors before assertions can print them", async () => {
     const comparison = await runProviderPassRateComparison({
       cases: [comparisonCase],
-      providers: [
-        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
-        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
-      ],
+      providers: [scriptedProvider("Claude", "anthropic"), scriptedProvider("OpenAI", "openai")],
       async runEvalImpl(options) {
         if (options.driver.name === "openai") {
           throw new Error("provider echoed sk-proj-secret123456789");
@@ -188,10 +188,7 @@ describe("provider pass-rate comparison", () => {
 
     const comparison = await runProviderPassRateComparison({
       cases: [comparisonCase, secondCase],
-      providers: [
-        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
-        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
-      ],
+      providers: [scriptedProvider("Claude", "anthropic"), scriptedProvider("OpenAI", "openai")],
       async runEvalImpl(options) {
         if (options.driver.name === "openai" && options.prompt === comparisonCase.prompt) {
           return failingRun();
@@ -306,10 +303,7 @@ describe("provider pass-rate comparison", () => {
         { ...comparisonCase, name: "case two" },
         { ...comparisonCase, name: "case three" },
       ],
-      providers: [
-        { name: "Claude", createDriver: () => new ScriptedDriver("anthropic", {}) },
-        { name: "OpenAI", createDriver: () => new ScriptedDriver("openai", {}) },
-      ],
+      providers: [scriptedProvider("Claude", "anthropic"), scriptedProvider("OpenAI", "openai")],
       comparison: { maxProviderErrors: 1 },
       async runEvalImpl(options) {
         if (options.driver.name === "openai") {
@@ -380,6 +374,27 @@ describe("provider pass-rate comparison", () => {
         },
         {
           provider: "OpenAI",
+          caseName: "failed comparison case",
+          status: "failed" as const,
+          passed: false as const,
+          run: {
+            toolCalls: [
+              { name: "b2_list_buckets", args: { marker: "eval-application-key-secret" } },
+            ],
+            toolResults: [
+              {
+                isError: true,
+                content: [{ type: "text", text: "raw tool result sk-proj-secret123456789" }],
+              },
+            ],
+            text: "raw model text sk-proj-secret123456789",
+          } satisfies EvalRun,
+          failure:
+            'expected one call; toolCalls=[{"marker":"eval-application-key-secret"}] ' +
+            "toolResults=[secret] text=raw model text sk-proj-secret123456789",
+        },
+        {
+          provider: "OpenAI",
           caseName: "comparison case",
           status: "errored" as const,
           passed: false as const,
@@ -401,8 +416,9 @@ describe("provider pass-rate comparison", () => {
       now: new Date("2026-08-24T00:00:00.000Z"),
     });
 
-    expect(report.issue.number).toBe(250);
     expect(report.caseCount).toBe(1);
+    expect("caseLimit" in report).toBe(false);
+    expect("issue" in report).toBe(false);
     expect(report.providers).toEqual([
       {
         provider: "Claude",
@@ -420,12 +436,38 @@ describe("provider pass-rate comparison", () => {
       },
     ]);
     expect(JSON.stringify(report)).not.toContain("sk-proj-secret123456789");
+    expect(JSON.stringify(report)).not.toContain("eval-application-key-secret");
+    expect(JSON.stringify(report)).not.toContain("raw model text");
+    expect(JSON.stringify(report)).not.toContain("toolCalls");
     expect(JSON.stringify(report)).not.toContain("toolResults");
     expect(report.results[1]).toMatchObject({
+      provider: "OpenAI",
+      status: "failed",
+      failure: "Case failed validation; raw model and tool payloads omitted.",
+    });
+    expect(report.results[1]).toMatchObject({
+      provider: "OpenAI",
+      status: "failed",
+    });
+    expect(report.results[2]).toMatchObject({
       provider: "OpenAI",
       status: "errored",
       error: "request failed for [REDACTED_SECRET]",
     });
+  });
+
+  it("fails report generation when provider model metadata is missing", () => {
+    expect(() =>
+      createProviderPassRateReport({
+        comparison: {
+          summary: "summary",
+          passRates: [{ provider: "Missing", passed: 0, total: 1, passRate: 0 }],
+          results: [],
+        },
+        cases: [comparisonCase],
+        providers: [scriptedProvider("Claude", "anthropic")],
+      }),
+    ).toThrow(/Missing provider model metadata for Missing/);
   });
 });
 
