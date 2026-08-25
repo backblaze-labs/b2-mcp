@@ -59,12 +59,12 @@ export async function startStdio(): Promise<void> {
   logger.info({ transport: "stdio" }, "server.started");
 }
 
-async function startHttpTransport(options: { port?: number }): Promise<void> {
+export async function startHttpTransport(options: { port?: number }): Promise<void> {
   const { startHttp } = await import("./http-server.js");
   await startHttp({ port: options.port });
 }
 
-async function runCli(argv = process.argv.slice(2)): Promise<void> {
+export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   const options = parseCliArgs(argv);
   if (options.action === "help") {
     process.stdout.write(`${helpText()}\n`);
@@ -83,18 +83,24 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
   await startStdio();
 }
 
+/**
+ * Report a bootstrap failure and terminate: usage errors exit 2 with help,
+ * anything else exits 1 and is recorded as a fatal server event.
+ */
+export function exitOnFatalError(err: unknown): never {
+  if (err instanceof CliUsageError || err instanceof PortUsageError) {
+    process.stderr.write(`b2-mcp: ${err.message}\n\n${helpText()}\n`);
+    flushLogsSync();
+    process.exit(2);
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`b2-mcp: ${message}\n`);
+  logger.fatal({ err: message }, "server.fatal");
+  flushLogsSync();
+  process.exit(1);
+}
+
 // Only run when invoked directly (not when imported by tests).
 if (require.main === module) {
-  runCli().catch((err) => {
-    if (err instanceof CliUsageError || err instanceof PortUsageError) {
-      process.stderr.write(`b2-mcp: ${err.message}\n\n${helpText()}\n`);
-      flushLogsSync();
-      process.exit(2);
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`b2-mcp: ${message}\n`);
-    logger.fatal({ err: message }, "server.fatal");
-    flushLogsSync();
-    process.exit(1);
-  });
+  runCli().catch(exitOnFatalError);
 }
