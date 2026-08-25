@@ -644,6 +644,49 @@ describe("HTTP server lifecycle", () => {
     });
   });
 
+  it("does not rethrow when writing the response fails with a non-Error value", async () => {
+    const secret = "s7write";
+    // Object.create(null) throws when coerced via String(err); the write catch
+    // must reuse the sanitized message instead of re-coercing the raw value.
+    const failure = Object.create(null) as never;
+    const body = new ReadableStream({
+      pull(controller: ReadableStreamDefaultController<Uint8Array>) {
+        controller.error(failure);
+      },
+    });
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(async () => new Response(body as never, { status: 200 })),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } }).catch(
+          () => undefined,
+        );
+
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: expect.any(String) },
+          "mcp.http.failed",
+        );
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
   it("redacts overlapping header secrets as merged spans", async () => {
     const firstSecret = "abcdefgh";
     const suffix = String.fromCharCode(105, 106);

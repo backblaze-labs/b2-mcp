@@ -118,8 +118,9 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
       await writeWebResponse(response, res, abortController.signal);
     } catch (err) {
       if (!abortController.signal.aborted && !res.destroyed) {
-        logger.warn({ err: safeErrorText(err, nodeRequestSecrets(req)) }, "mcp.http.failed");
-        res.destroy(err instanceof Error ? err : new Error(String(err)));
+        const sanitized = safeErrorText(err, nodeRequestSecrets(req));
+        logger.warn({ err: sanitized }, "mcp.http.failed");
+        res.destroy(err instanceof Error ? err : new Error(sanitized));
       }
     } finally {
       finished = true;
