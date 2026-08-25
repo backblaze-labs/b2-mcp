@@ -154,6 +154,12 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
   return Object.prototype.toString.call(body);
 }
 
+function rfc850Year(twoDigitYear: string): number {
+  const currentYear = new Date(Date.now()).getUTCFullYear();
+  const year = Math.floor(currentYear / 100) * 100 + Number(twoDigitYear);
+  return year - currentYear > 50 ? year - 100 : year;
+}
+
 function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   const h = "Retry-After";
   const v = r.headers.get(h)?.trim();
@@ -161,7 +167,7 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
 
   const m = RETRY_AFTER_HTTP_DATE.exec(v);
   const s = m
-    ? `${m[1] ?? m[5] ?? m[10]?.replace(" ", "0")} ${m[2] ?? m[6] ?? m[9]} ${m[3] ?? m[12] ?? new Date(Date.parse(v)).toUTCString().slice(12, 16)} ${m[4] ?? m[8] ?? m[11]}`
+    ? `${m[1] ?? m[5] ?? m[10]?.replace(" ", "0")} ${m[2] ?? m[6] ?? m[9]} ${m[3] ?? m[12] ?? rfc850Year(m[7])} ${m[4] ?? m[8] ?? m[11]}`
     : "";
   let ms = Date.parse(`${s} GMT`);
   const utc = new Date(ms).toUTCString();

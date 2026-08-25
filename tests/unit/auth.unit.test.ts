@@ -613,6 +613,13 @@ describe("B2AuthManager", () => {
       expectedDelayMs: 5000,
     },
     {
+      name: "RFC850 rolling year clamp",
+      retryAfter: "Wednesday, 01-Jan-76 00:00:03 GMT",
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 4000,
+      expectedDelayMs: 4000,
+    },
+    {
       name: "invalid asctime date fallback",
       retryAfter: "Sun Feb 31 00:00:00 2027",
       initialRetryDelayMs: 5000,
