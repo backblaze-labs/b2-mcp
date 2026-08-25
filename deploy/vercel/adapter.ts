@@ -125,11 +125,22 @@ function verifiedOAuthClientClaims(authInfo: AuthInfo): string[] {
     .map((value) => value.trim());
 }
 
+function hasVerifiedOAuthSubject(authInfo: AuthInfo): boolean {
+  const extra = authInfo.extra ?? {};
+  return ["sub", "subject", "principal"].some((key) => {
+    const value = extra[key];
+    return typeof value === "string" && !!value.trim();
+  });
+}
+
 function validateVercelAdmittedAuthInfo(
   authInfo: AuthInfo,
   oauthConfig: OAuthResourceServerConfig,
 ): void {
   if (!subjectlessIssuerAdmissionEnabled(oauthConfig)) return;
+  if (!hasVerifiedOAuthSubject(authInfo)) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "OAuth subject is required");
+  }
   const allowed = new Set(allowedOAuthClientIds());
   const clientClaims = verifiedOAuthClientClaims(authInfo);
   if (clientClaims.length > 0 && clientClaims.every((clientId) => allowed.has(clientId))) return;

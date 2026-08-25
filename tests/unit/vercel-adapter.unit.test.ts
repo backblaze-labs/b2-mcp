@@ -323,6 +323,39 @@ describe("Vercel adapter", () => {
     );
   });
 
+  it("rejects subjectless Okta admission without a verified subject", async () => {
+    setSubjectlessOktaEnv();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const introspection = vi.fn(async () =>
+      oktaIntrospectionResponse({ sub: undefined, subject: undefined, principal: undefined }),
+    );
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: {
+          ...modernHeaders("server/discover"),
+          Authorization: "Bearer okta-access-token",
+        },
+        body: modernBody("server/discover"),
+      }),
+      { remoteAddress: "203.0.113.42" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(introspection).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(OKTA_CONNECTOR_CLIENT_ID);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "authenticated_admission_policy",
+        oauthClient: expect.stringMatching(/^[a-f0-9]{16}$/),
+        scopeCount: 2,
+      }),
+      "vercel.oauth.admission_rejected",
+    );
+  });
+
   it.each([
     ["wrong issuer", { iss: "https://attacker.okta.example/oauth2/default/" }],
     ["wrong audience", { aud: ["https://other.example.com/mcp"] }],

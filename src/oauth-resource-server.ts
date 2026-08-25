@@ -435,6 +435,18 @@ function stringClaim(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
+function optionalStringClaim(
+  claims: Record<string, unknown>,
+  claimName: string,
+): string | undefined {
+  const value = claims[claimName];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, `Token ${claimName} is not accepted`);
+  }
+  return value.trim();
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new OAuthError(OAuthErrorCode.InvalidToken, "Invalid introspection response");
@@ -610,10 +622,9 @@ function authInfoFromVerifiedClaims(
       ? stringClaim(claims.principal)
       : undefined;
   const verifiedSubject = subject ?? subjectAlias ?? principalAlias;
-  const clientId =
-    stringClaim(claims.client_id) ?? stringClaim(claims.azp) ?? verifiedSubject ?? "unknown-client";
-  const oauthClientId = stringClaim(claims.client_id);
-  const authorizedParty = stringClaim(claims.azp);
+  const oauthClientId = optionalStringClaim(claims, "client_id");
+  const authorizedParty = optionalStringClaim(claims, "azp");
+  const clientId = oauthClientId ?? authorizedParty ?? verifiedSubject ?? "unknown-client";
   return {
     token: `verified:${tokenLabel(token)}`,
     clientId,
@@ -1686,6 +1697,8 @@ export function validatePreverifiedOAuthAuthInfo(
   assertTimeWindow({ exp: authInfo.expiresAt, nbf: extra.nbf }, nowSeconds());
   assertTokenType(extra, config.allowedTokenTypes);
   assertTokenAlgorithm(extra, config.allowedAlgorithms);
+  optionalStringClaim(extra, "client_id");
+  optionalStringClaim(extra, "azp");
   assertDeploymentScope(authInfo.scopes);
   assertRequiredScopes(authInfo.scopes, config.requiredScopes);
   assertAllowedSubject(extra, issuer, config.allowedSubjects, "introspection");
