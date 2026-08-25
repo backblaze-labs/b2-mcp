@@ -20,92 +20,18 @@
  *   }
  */
 
-// Namespace imports keep ESM bootstrap dependencies spy-able in tests without
-// exporting dependency-injection seams from the package root.
-import * as stdioTransport from "@modelcontextprotocol/server/stdio";
-import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
-import { CredentialResolutionError } from "./credentials.js";
-import * as serverModule from "./server.js";
-import { PortUsageError } from "./utils/config.js";
-import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
-import { bootstrapErrorMessage } from "./utils/secret-sanitizer.js";
-import { VERSION } from "./version.js";
+import { main } from "./cli-runner.js";
 
-export async function startStdio(): Promise<void> {
-  initLogging();
-  const config = serverModule.loadConfig();
-  // Right-size the surface to the key's capabilities (null → full surface).
-  let capabilities: string[] | null;
-  try {
-    capabilities = await serverModule.fetchCapabilities(config);
-  } catch (err) {
-    if (
-      !(err instanceof CredentialResolutionError) ||
-      err.code !== "capability_upstream_unavailable"
-    ) {
-      throw err;
-    }
-    logger.warn(
-      {
-        code: err.code,
-      },
-      "capability.fetch.stdio_degraded",
-    );
-    capabilities = null;
-  }
-  stdioTransport.serveStdio(() => serverModule.createServer(config, capabilities), {
-    onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
-  });
+export { startStdio } from "./stdio-entry.js";
 
-  logger.info({ transport: "stdio" }, "server.started");
+function isDirectlyInvoked(): boolean {
+  return require.main === module;
 }
 
-async function startHttpTransport(options: { port?: number }): Promise<void> {
-  const { startHttp } = await import("./http-server.js");
-  await startHttp({ port: options.port });
-}
-
-export async function runCli(argv = process.argv.slice(2)): Promise<void> {
-  const options = parseCliArgs(argv);
-  if (options.action === "help") {
-    process.stdout.write(`${helpText()}\n`);
-    return;
-  }
-  if (options.action === "version") {
-    process.stdout.write(`${VERSION}\n`);
-    return;
-  }
-
-  if (options.transport === "http") {
-    await startHttpTransport({ port: options.port });
-    return;
-  }
-
-  await startStdio();
-}
-
-function handleCliError(err: unknown): never {
-  const message = bootstrapErrorMessage(err);
-  if (err instanceof CliUsageError || err instanceof PortUsageError) {
-    process.stderr.write(`b2-mcp: ${message}\n\n${helpText()}\n`);
-    flushLogsSync();
-    process.exit(2);
-  }
-  process.stderr.write(`b2-mcp: ${message}\n`);
-  logger.fatal({ err: message }, "server.fatal");
-  flushLogsSync();
-  process.exit(1);
-}
-
-export async function main(argv = process.argv.slice(2)): Promise<void> {
-  try {
-    await runCli(argv);
-  } catch (err) {
-    handleCliError(err);
-  }
-}
+const isDirectInvocation = isDirectlyInvoked();
 
 // Only run when invoked directly (not when imported by tests).
-if (require.main === module) {
+/* v8 ignore next 3 -- direct execution is covered by spawned entrypoint tests. */
+if (isDirectInvocation) {
   void main();
 }

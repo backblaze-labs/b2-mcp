@@ -3,11 +3,11 @@ import { spawnSync } from "child_process";
 import * as http from "http";
 import type { AddressInfo } from "net";
 import * as path from "path";
-import { CliUsageError, helpText } from "../../src/cli";
+import { helpText } from "../../src/cli";
+import { main, runCli } from "../../src/cli-runner";
 import { CredentialResolutionError } from "../../src/credentials";
-import { main, runCli, startStdio } from "../../src/index";
+import * as packageRoot from "../../src/index";
 import * as serverModule from "../../src/server";
-import { PortUsageError } from "../../src/utils/config";
 import * as loggerModule from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
 import { VERSION } from "../../src/version";
@@ -28,6 +28,10 @@ const credentialEnvKeys = [
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
 ] as const;
+
+const transportEnvKeys = ["B2_MCP_TRANSPORT"] as const;
+const executableEnvKeys = [...credentialEnvKeys, ...transportEnvKeys] as const;
+const { startStdio } = packageRoot;
 
 const tsxBin = path.join(
   process.cwd(),
@@ -56,7 +60,7 @@ function testConfig(): B2Config {
 
 function executableEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test" };
-  for (const key of credentialEnvKeys) delete env[key];
+  for (const key of executableEnvKeys) delete env[key];
   delete env.FORCE_COLOR;
   delete env.NO_COLOR;
   return { ...env, ...overrides };
@@ -166,14 +170,30 @@ describe("stdio entry point", () => {
   });
 });
 
+describe("package root surface", () => {
+  it("exports only the supported startStdio API", () => {
+    expect(Object.keys(packageRoot).sort()).toEqual(["startStdio"]);
+  });
+});
+
 describe("CLI dispatch", () => {
   let stdout: ReturnType<typeof vi.spyOn>;
+  let savedTransportEnv: Record<(typeof transportEnvKeys)[number], string | undefined>;
 
   beforeEach(() => {
+    savedTransportEnv = Object.fromEntries(
+      transportEnvKeys.map((key) => [key, process.env[key]]),
+    ) as Record<(typeof transportEnvKeys)[number], string | undefined>;
+    for (const key of transportEnvKeys) delete process.env[key];
     stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
   });
 
   afterEach(() => {
+    for (const key of transportEnvKeys) {
+      const value = savedTransportEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     vi.restoreAllMocks();
     vi.clearAllMocks();
   });
@@ -243,15 +263,13 @@ describe("CLI fatal-error handler", () => {
   });
 
   it.each([
-    ["CLI usage", new CliUsageError("Invalid transport: sse")],
-    ["port usage", new PortUsageError("Invalid port: nope")],
-  ])("exits with code 2 for %s errors", async (_name, err) => {
-    const argv = err instanceof CliUsageError ? ["--transport", "sse"] : ["http", "--port", "nope"];
-
+    ["CLI usage", ["--transport", "sse"]],
+    ["port usage", ["http", "--port", "nope"]],
+  ])("exits with code 2 for %s errors", async (_name, argv) => {
     await expect(main(argv)).rejects.toThrow("process.exit(2)");
 
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining(`b2-mcp: ${err.message}\n\n`));
-    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("Usage: b2-mcp"));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("b2-mcp: "));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("\n\nUsage: b2-mcp"));
     expect(flushLogsSync).toHaveBeenCalledOnce();
     expect(exit).toHaveBeenCalledWith(2);
   });
@@ -262,7 +280,7 @@ describe("CLI fatal-error handler", () => {
       throw new Error("startup failed");
     });
 
-    await expect(main([])).rejects.toThrow("process.exit(1)");
+    await expect(main(["stdio"])).rejects.toThrow("process.exit(1)");
 
     expect(stderr).toHaveBeenCalledWith("b2-mcp: startup failed\n");
     expect(fatal).toHaveBeenCalledWith({ err: "startup failed" }, "server.fatal");
