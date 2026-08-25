@@ -372,6 +372,8 @@ describe("S3 object tools with deterministic handler fake", () => {
     const large = await tools.call("s3_get_object", { bucket: "b", key: "large.bin" });
     expect(large.isError).toBe(true);
     expect(largeCanceled).toBe(1);
+    expect(parseResult(large)).toMatch(/s3_get_presigned_url/);
+    expect(parseResult(large)).toMatch(/saveToPath/);
   });
 
   it("streams saveToPath downloads to disk and reports unknown length", async () => {
