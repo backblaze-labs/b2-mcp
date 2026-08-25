@@ -167,7 +167,8 @@ function rfc850DateStamps(
   const cutoff = new Date(now.getTime());
   cutoff.setUTCFullYear(currentYear + 50);
   const retryYear = Date.parse(`${validationStamp} GMT`) > cutoff.getTime() ? year - 100 : year;
-  return { retryStamp: `${day} ${month} ${retryYear} ${time}`, validationStamp };
+  const retryStamp = `${day} ${month} ${retryYear} ${time}`;
+  return { retryStamp, validationStamp: retryStamp };
 }
 
 function withRetryAfterHeader(r: HttpResponse): HttpResponse {

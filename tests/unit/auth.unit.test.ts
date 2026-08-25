@@ -622,7 +622,7 @@ describe("B2AuthManager", () => {
     },
     {
       name: "RFC850 past rolling year fallback",
-      retryAfter: "Thursday, 31-Dec-76 00:00:00 GMT",
+      retryAfter: "Friday, 31-Dec-76 00:00:00 GMT",
       initialRetryDelayMs: 1,
       maxRetryDelayMs: 4000,
       expectedDelayMs: 1,
@@ -676,6 +676,31 @@ describe("B2AuthManager", () => {
       await expect(pending).resolves.toMatchObject({ status: 200 });
     },
   );
+
+  test.each([
+    ["Friday, 31-Dec-76 00:00:00 GMT", "0"],
+    ["Thursday, 31-Dec-76 00:00:00 GMT", null],
+  ])("validates rolled RFC850 Retry-After date %s", async (retryAfter, expected) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    const inner = new RecordingTransport(
+      () => new StaticHttpResponse(200, {}, { "Retry-After": retryAfter }),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 0,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(response.headers.get("Retry-After")).toBe(expected);
+  });
 
   it("does not retain retry attempts after an inner abort error", async () => {
     _resetRetryBudget();
