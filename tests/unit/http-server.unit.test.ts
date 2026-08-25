@@ -5,8 +5,12 @@
 
 import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { spawnSync } from "child_process";
+import { mkdtempSync, readFileSync, rmSync } from "fs";
 import * as http from "http";
 import type { AddressInfo } from "net";
+import { tmpdir } from "os";
+import { join } from "path";
 import {
   type AuthenticatedIncomingMessage,
   validateHttpCredentialConfiguration,
@@ -30,6 +34,58 @@ type ShutdownSignal = "SIGTERM" | "SIGINT";
 
 const { logger } = loggerModule;
 const shutdownSignals: readonly ShutdownSignal[] = ["SIGTERM", "SIGINT"];
+const credentialEnvKeys = [
+  "B2_APPLICATION_KEY_ID",
+  "B2_APPLICATION_KEY",
+  "B2_APP_KEY_ID",
+  "B2_APP_KEY",
+  "B2_MASTER_KEY_ID",
+  "B2_MASTER_KEY",
+] as const;
+
+const tsxBin = join(
+  process.cwd(),
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "tsx.cmd" : "tsx",
+);
+
+function executableEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test", LOG_LEVEL: "info" };
+  for (const key of credentialEnvKeys) delete env[key];
+  for (const key of [
+    "B2_ALLOW_LOCAL_FILES",
+    "B2_HTTP_CREDENTIAL_MODE",
+    "B2_LOG_FILE",
+    "B2_MCP_OUTPUT_FORMAT",
+    "B2_SECRET_SINK",
+    "B2_SECRET_SINK_FILE",
+    "FORCE_COLOR",
+    "NO_COLOR",
+    "PORT",
+  ]) {
+    delete env[key];
+  }
+  return { ...env, ...overrides };
+}
+
+function runHttpEntrypoint(args: string[], env: NodeJS.ProcessEnv = {}) {
+  return spawnSync(tsxBin, ["src/http-server.ts", ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: executableEnv(env),
+    timeout: 10_000,
+  });
+}
+
+function parseLogLine(text: string): Record<string, unknown> {
+  const line = text
+    .trim()
+    .split("\n")
+    .find((entry) => entry.trim().length > 0);
+  expect(line).toBeTruthy();
+  return JSON.parse(line as string);
+}
 
 function signalListeners(signal: ShutdownSignal): NodeJS.SignalsListener[] {
   return process.listeners(signal) as NodeJS.SignalsListener[];
@@ -776,6 +832,32 @@ describe("HTTP server lifecycle", () => {
     } finally {
       if (savedSecret === undefined) delete process.env.B2_APPLICATION_KEY;
       else process.env.B2_APPLICATION_KEY = savedSecret;
+    }
+  });
+
+  it("runs direct HTTP bootstrap fatal handling with sanitized output and logs", () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-http-bootstrap-"));
+    const logFile = join(dir, "server.log");
+    const secret = "direct-http-bootstrap-secret-value";
+
+    try {
+      const result = runHttpEntrypoint(["--port", secret], {
+        B2_APPLICATION_KEY: secret,
+        B2_LOG_FILE: logFile,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("b2-mcp: Invalid port: [redacted]");
+      expect(result.stderr).not.toContain(secret);
+
+      const line = parseLogLine(readFileSync(logFile, "utf8"));
+      expect(line.msg).toBe("server.fatal");
+      expect(line.err).toBe("Invalid port: [redacted]");
+      expect(JSON.stringify(line)).not.toContain(secret);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
