@@ -318,12 +318,14 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
-  it("handles configured secret edge values and already masked text inputs", () => {
+  it("handles configured secret edge values and non-string text inputs", () => {
     const secret = "configured-edge-secret";
     const longerSecret = `${secret}-extended`;
 
     const sanitized = sanitizeText(
-      `applicationKey=${longerSecret} ${secret} appKey=[redacted] not-json-token`,
+      {
+        toString: () => `applicationKey=${longerSecret} ${secret} appKey=[redacted] not-json-token`,
+      },
       {
         secrets: [undefined, "", "   ", "short", SECRET_SANITIZER_REDACTION, secret, longerSecret],
       },
@@ -335,6 +337,7 @@ describe("secret sanitizer canary policy", () => {
     expect(sanitizeText("applicationKey=[redacted]")).toBe(
       `applicationKey=${SECRET_SANITIZER_REDACTION}`,
     );
+    expect(sanitizeText(404)).toBe("404");
     expect(sanitizeError({ toString: () => `failed ${CANARY}` }).message).not.toContain(CANARY);
   });
 

@@ -221,7 +221,7 @@ describe("secret sink configuration", () => {
   });
 
   it("preflights sink files when the runtime has no getuid helper", () => {
-    const originalGetuid = process.getuid;
+    const originalGetuidDescriptor = Object.getOwnPropertyDescriptor(process, "getuid");
     const file = join(tempDir(), "secrets.jsonl");
     Object.defineProperty(process, "getuid", { configurable: true, value: undefined });
 
@@ -233,7 +233,11 @@ describe("secret sink configuration", () => {
         }),
       ).toEqual({ mode: "file", filePath: file });
     } finally {
-      Object.defineProperty(process, "getuid", { configurable: true, value: originalGetuid });
+      if (originalGetuidDescriptor) {
+        Object.defineProperty(process, "getuid", originalGetuidDescriptor);
+      } else {
+        delete (process as NodeJS.Process & { getuid?: unknown }).getuid;
+      }
     }
   });
 
