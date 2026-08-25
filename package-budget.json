@@ -5,24 +5,24 @@
     "planningId": "P1-RUNTIME-02"
   },
   "reviewedBaseline": {
-    "date": "2026-08-21",
-    "nodeVersions": ["22.3.0", "24", "26"],
+    "date": "2026-08-25",
+    "nodeVersions": ["22.23.1", "24", "26"],
     "primaryB2Transport": "@backblaze-labs/b2-sdk@0.3.0",
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 492507,
-    "unpackedPackageBytes": 2266060,
-    "packedEntryCount": 251,
-    "cleanConsumerInstallFootprintBytes": 30982702
+    "packedTarballBytes": 495587,
+    "unpackedPackageBytes": 2282006,
+    "packedEntryCount": 250,
+    "cleanConsumerInstallFootprintBytes": 30999584
   },
   "limits": {
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
-    "packedTarballBytes": 493500,
-    "unpackedPackageBytes": 2268000,
+    "packedTarballBytes": 496500,
+    "unpackedPackageBytes": 2283000,
     "packedEntryCount": 251,
-    "cleanConsumerInstallFootprintBytes": 31000000
+    "cleanConsumerInstallFootprintBytes": 31020000
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {
