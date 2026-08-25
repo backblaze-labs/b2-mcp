@@ -23,12 +23,13 @@
 // Namespace imports keep ESM bootstrap dependencies spy-able in tests without
 // exporting dependency-injection seams from the package root.
 import * as stdioTransport from "@modelcontextprotocol/server/stdio";
-import * as serverModule from "./server.js";
+import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { CredentialResolutionError } from "./credentials.js";
+import * as serverModule from "./server.js";
+import { bootstrapErrorMessage } from "./utils/bootstrap-errors.js";
+import { PortUsageError } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import { VERSION } from "./version.js";
-import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
-import { PortUsageError } from "./utils/config.js";
 
 export async function startStdio(): Promise<void> {
   initLogging();
@@ -86,12 +87,12 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
 // Only run when invoked directly (not when imported by tests).
 if (require.main === module) {
   runCli().catch((err) => {
+    const message = bootstrapErrorMessage(err);
     if (err instanceof CliUsageError || err instanceof PortUsageError) {
-      process.stderr.write(`b2-mcp: ${err.message}\n\n${helpText()}\n`);
+      process.stderr.write(`b2-mcp: ${message}\n\n${helpText()}\n`);
       flushLogsSync();
       process.exit(2);
     }
-    const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`b2-mcp: ${message}\n`);
     logger.fatal({ err: message }, "server.fatal");
     flushLogsSync();

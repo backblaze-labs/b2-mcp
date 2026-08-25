@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /*
  * Backblaze B2 MCP Server - HTTP transport entry point.
  *
@@ -7,8 +8,23 @@
  * processing is delegated to the runtime-neutral fetch handler.
  */
 
-import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import * as http from "http";
+import {
+  type AuthenticatedIncomingMessage,
+  configFromHttpHeaders,
+  validateHttpStartupConfiguration,
+} from "./credentials.js";
+import {
+  type B2McpFetchHandler,
+  createB2McpFetchHandler,
+  createInFlightLimiter,
+  createPreparedMcpServerFactory,
+  deriveRateKey,
+  type HttpPipelineOptions,
+  type PreparedMcpRequest,
+} from "./http-fetch-handler.js";
+import { bootstrapErrorMessage } from "./utils/bootstrap-errors.js";
 import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import {
@@ -16,20 +32,6 @@ import {
   resumeUnreadRequest,
   writeWebResponse,
 } from "./utils/node-web-bridge.js";
-import {
-  configFromHttpHeaders,
-  validateHttpStartupConfiguration,
-  type AuthenticatedIncomingMessage,
-} from "./credentials.js";
-import {
-  createB2McpFetchHandler,
-  createInFlightLimiter,
-  createPreparedMcpServerFactory,
-  deriveRateKey,
-  type B2McpFetchHandler,
-  type HttpPipelineOptions,
-  type PreparedMcpRequest,
-} from "./http-fetch-handler.js";
 import { sanitizeText } from "./utils/secret-sanitizer.js";
 import type { B2Config } from "./utils/types.js";
 
@@ -235,7 +237,7 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
 }
 
 export function httpBootstrapFatalMessage(err: unknown): string {
-  return safeErrorText(err);
+  return bootstrapErrorMessage(err);
 }
 
 function handleHttpBootstrapFatal(err: unknown): never {

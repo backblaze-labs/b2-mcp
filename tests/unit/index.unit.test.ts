@@ -1,8 +1,8 @@
+import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import { spawnSync } from "child_process";
 import * as http from "http";
 import type { AddressInfo } from "net";
 import * as path from "path";
-import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import { CredentialResolutionError } from "../../src/credentials";
 import { startStdio } from "../../src/index";
 import * as serverModule from "../../src/server";
@@ -47,19 +47,19 @@ function testConfig(): B2Config {
   };
 }
 
-function executableEnv(): NodeJS.ProcessEnv {
+function executableEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test" };
   for (const key of credentialEnvKeys) delete env[key];
   delete env.FORCE_COLOR;
   delete env.NO_COLOR;
-  return env;
+  return { ...env, ...overrides };
 }
 
-function runEntrypoint(args: string[]) {
+function runEntrypoint(args: string[], env: NodeJS.ProcessEnv = {}) {
   return spawnSync(tsxBin, ["src/index.ts", ...args], {
     cwd: process.cwd(),
     encoding: "utf8",
-    env: executableEnv(),
+    env: executableEnv(env),
     timeout: 10_000,
   });
 }
@@ -176,5 +176,14 @@ describe("executable CLI entry point", () => {
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
+  });
+
+  it("redacts configured secrets from HTTP entrypoint startup errors", () => {
+    const secret = "http-entrypoint-secret-value";
+    const result = runEntrypoint(["http"], { B2_APPLICATION_KEY: secret, PORT: secret });
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("b2-mcp: Invalid port: [redacted]");
+    expect(result.stderr).not.toContain(secret);
   });
 });

@@ -3,10 +3,15 @@
  * Covers configFromHeaders parsing and getPort validation.
  */
 
+import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import * as http from "http";
 import type { AddressInfo } from "net";
-import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
+import {
+  type AuthenticatedIncomingMessage,
+  validateHttpCredentialConfiguration,
+} from "../../src/credentials";
+import { type B2McpFetchHandler, createB2McpFetchHandler } from "../../src/http-fetch-handler";
 import {
   buildHttpServer,
   configFromHeaders,
@@ -16,15 +21,10 @@ import {
   httpBootstrapFatalMessage,
   startHttp,
 } from "../../src/http-server";
-import { createB2McpFetchHandler, type B2McpFetchHandler } from "../../src/http-fetch-handler";
-import {
-  validateHttpCredentialConfiguration,
-  type AuthenticatedIncomingMessage,
-} from "../../src/credentials";
-import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
 import * as loggerModule from "../../src/utils/logger";
-import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
+import { _resetRateLimiter, allowRequest, rateLimiterConfig } from "../../src/utils/rate-limiter";
+import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 
 type ShutdownSignal = "SIGTERM" | "SIGINT";
 
@@ -595,6 +595,7 @@ describe("HTTP server lifecycle", () => {
       exitCodes.push(code);
       return undefined as never;
     }) as typeof process.exit);
+    const loggerInfo = vi.spyOn(logger, "info").mockImplementation(() => undefined);
     let listener: NodeJS.SignalsListener | undefined;
 
     try {
@@ -605,7 +606,9 @@ describe("HTTP server lifecycle", () => {
       // A repeated shutdown signal must be ignored after the first drain starts.
       listener?.(signal);
 
-      await vi.waitFor(() => expect(exitCodes).toContain(0));
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledTimes(1));
+      expect(exitCodes).toEqual([0]);
+      expect(loggerInfo.mock.calls.filter((call) => call[1] === "server.shutdown")).toHaveLength(1);
       expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
       expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
     } finally {
