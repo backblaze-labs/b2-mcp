@@ -234,7 +234,6 @@ export function createServer(
   // application-key client, so a single non-master key needs no extra wiring.
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth);
-  const completionClient = new B2Client(new B2AuthManager(config));
   const reportClient = new B2ReportClient(auth);
   const s3Client = createAuthorizedS3Client(auth, {
     applicationKeyId: config.applicationKeyId,
@@ -316,7 +315,7 @@ export function createServer(
   }
 
   const toolCount = registrar.commit();
-  registerToolCompletionHandler(server, completionClient, config);
+  registerToolCompletionHandler(server, b2Client, config);
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
 
   const originalClose = server.close.bind(server);

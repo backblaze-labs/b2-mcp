@@ -4,25 +4,64 @@ import { getRegisteredTools } from "./mcp.js";
 import type { B2Client, BucketInfoResult } from "./b2/client.js";
 import type { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
-import { verificationFingerprintConfig } from "./credentials.js";
-import { runWithMcpRequestSignal } from "./request-context.js";
+import { fingerprintConfig, verificationFingerprintConfig } from "./credentials.js";
+import { parseB2Error } from "./utils/errors.js";
+import { logger } from "./utils/logger.js";
+import { abortError } from "./utils/named-error.js";
+import {
+  sanitizeError,
+  sanitizerOptionsFromConfig,
+  sanitizeProviderCode,
+  sanitizeProviderRequestId,
+} from "./utils/secret-sanitizer.js";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 
 const DEFAULT_COMPLETION_CACHE_TTL_MS = 15_000;
 const DEFAULT_COMPLETION_CACHE_MAX_ENTRIES = 10_000;
 const MAX_COMPLETION_VALUES = 100;
+const KEY_COMPLETION_PAGE_SIZE = 1000;
+const KEY_COMPLETION_MAX_PAGES = 20;
 
-const BUCKET_NAME_ARGUMENTS = new Set([
-  "bucket",
-  "bucketName",
-  "sourceBucket",
-  "destinationBucket",
-]);
-const BUCKET_ID_ARGUMENTS = new Set(["bucketId", "bucketIds"]);
-const APPLICATION_KEY_ID_ARGUMENTS = new Set(["applicationKeyId", "startApplicationKeyId"]);
-const NEW_RESOURCE_ARGUMENTS = new Set(["b2_create_bucket:bucketName"]);
+type CompletionKind = "bucket-name" | "bucket-id" | "application-key-id";
+
+const TOOL_ARGUMENT_COMPLETIONS = {
+  b2_create_key: { bucketId: "bucket-id", bucketIds: "bucket-id" },
+  b2_delete_bucket: { bucketId: "bucket-id" },
+  b2_delete_key: { applicationKeyId: "application-key-id" },
+  b2_get_bucket_notification_rules: { bucketId: "bucket-id" },
+  b2_largest_files: { bucket: "bucket-name" },
+  b2_list_buckets: { bucketId: "bucket-id", bucketName: "bucket-name" },
+  b2_list_keys: { startApplicationKeyId: "application-key-id" },
+  b2_set_bucket_notification_rules: { bucketId: "bucket-id" },
+  b2_unfinished_uploads: { bucket: "bucket-name" },
+  b2_update_bucket: { bucketId: "bucket-id" },
+  s3_abort_multipart_upload: { bucket: "bucket-name" },
+  s3_complete_multipart_upload: { bucket: "bucket-name" },
+  s3_copy_object: { destinationBucket: "bucket-name", sourceBucket: "bucket-name" },
+  s3_create_multipart_upload: { bucket: "bucket-name" },
+  s3_delete_object: { bucket: "bucket-name" },
+  s3_delete_objects: { bucket: "bucket-name" },
+  s3_get_bucket_location: { bucket: "bucket-name" },
+  s3_get_object: { bucket: "bucket-name" },
+  s3_get_presigned_url: { bucket: "bucket-name" },
+  s3_head_bucket: { bucket: "bucket-name" },
+  s3_head_object: { bucket: "bucket-name" },
+  s3_list_multipart_uploads: { bucket: "bucket-name" },
+  s3_list_object_versions: { bucket: "bucket-name" },
+  s3_list_objects_v2: { bucket: "bucket-name" },
+  s3_list_parts: { bucket: "bucket-name" },
+  s3_presign_upload_part: { bucket: "bucket-name" },
+  s3_put_bucket_lifecycle: { bucket: "bucket-name" },
+  s3_put_object: { bucket: "bucket-name" },
+  s3_upload_part_copy: { bucket: "bucket-name" },
+} as const satisfies Record<string, Record<string, CompletionKind>>;
+
+const TOOL_ARGUMENT_COMPLETION_DENY = {
+  b2_create_bucket: ["bucketName"],
+} as const satisfies Record<string, readonly string[]>;
 
 interface CompletionCacheEntry<T> {
-  value: T;
+  value: CompletionFetchResult<T>;
   expiresAt: number;
 }
 
@@ -31,10 +70,35 @@ interface BucketCompletionSource {
   bucketName: string;
 }
 
+interface CompletionFetchResult<T> {
+  values: T;
+  degraded: boolean;
+  truncated: boolean;
+}
+
+interface CompletionFetchSuccess<T> {
+  values: T;
+  truncated?: boolean;
+}
+
+interface CompletionAudit {
+  candidateCount: number;
+  degraded: boolean;
+  truncated: boolean;
+}
+
+interface CompletionComputation {
+  response: CompletionResult;
+  audit: CompletionAudit;
+}
+
 const bucketCompletionCache = new Map<string, CompletionCacheEntry<BucketCompletionSource[]>>();
-const bucketCompletionInflight = new Map<string, Promise<BucketCompletionSource[]>>();
+const bucketCompletionInflight = new Map<
+  string,
+  Promise<CompletionFetchResult<BucketCompletionSource[]>>
+>();
 const keyCompletionCache = new Map<string, CompletionCacheEntry<string[]>>();
-const keyCompletionInflight = new Map<string, Promise<string[]>>();
+const keyCompletionInflight = new Map<string, Promise<CompletionFetchResult<string[]>>>();
 
 const ToolCompletionParamsSchema = z.object({
   ref: z
@@ -111,27 +175,40 @@ export function sweepCompletionCache(now = Date.now()): void {
   }
 }
 
-export function completionCacheSizeForTests(): number {
-  return bucketCompletionCache.size + keyCompletionCache.size;
-}
-
 function credentialCompletionCacheKey(config: B2Config, kind: "buckets" | "keys"): string {
   const caller = config.callerFingerprint ? `caller:${config.callerFingerprint}` : "caller:none";
   return `${kind}:${verificationFingerprintConfig(config)}:${caller}`;
+}
+
+function completionCredentialFingerprint(config: B2Config): string {
+  return config.credentialFingerprint ?? fingerprintConfig(config);
 }
 
 function emptyCompletion(): CompletionResult {
   return { completion: { values: [], total: 0, hasMore: false } };
 }
 
-function completionFromCandidates(candidates: readonly string[], value: string): CompletionResult {
+function completionFromCandidates(
+  candidates: readonly string[],
+  value: string,
+  audit: Pick<CompletionAudit, "degraded" | "truncated">,
+): CompletionComputation {
   const uniqueSorted = [...new Set(candidates)].sort();
   const matching = uniqueSorted.filter((candidate) => candidate.startsWith(value));
+  const values = matching.slice(0, MAX_COMPLETION_VALUES);
+  const hasMore = matching.length > MAX_COMPLETION_VALUES || audit.truncated;
   return {
-    completion: {
-      values: matching.slice(0, MAX_COMPLETION_VALUES),
-      total: matching.length,
-      hasMore: matching.length > MAX_COMPLETION_VALUES,
+    response: {
+      completion: {
+        values,
+        ...(!audit.truncated && { total: matching.length }),
+        hasMore,
+      },
+    },
+    audit: {
+      candidateCount: uniqueSorted.length,
+      degraded: audit.degraded,
+      truncated: audit.truncated,
     },
   };
 }
@@ -148,94 +225,267 @@ function hasRegisteredTool(server: McpServer, name: string): boolean {
   return getRegisteredTools(server)?.[name] !== undefined;
 }
 
+function completionKindForToolArgument(
+  toolName: string,
+  argumentName: string,
+): CompletionKind | null {
+  const completions = (TOOL_ARGUMENT_COMPLETIONS as Record<string, Record<string, CompletionKind>>)[
+    toolName
+  ];
+  return completions?.[argumentName] ?? null;
+}
+
+function isExplicitlyDeniedToolArgument(toolName: string, argumentName: string): boolean {
+  return (
+    (TOOL_ARGUMENT_COMPLETION_DENY as Record<string, readonly string[]>)[toolName] ?? []
+  ).includes(argumentName);
+}
+
+export function completionContractForTests(): Record<string, Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(TOOL_ARGUMENT_COMPLETIONS).map(([toolName, args]) => [toolName, { ...args }]),
+  );
+}
+
 function toBucketCompletionSource(bucket: BucketInfoResult): BucketCompletionSource | null {
   if (!bucket.bucketId || !bucket.bucketName) return null;
   return { bucketId: bucket.bucketId, bucketName: bucket.bucketName };
 }
 
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? abortError();
+}
+
+function raceWithCallerAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (err) => {
+        cleanup();
+        reject(err);
+      },
+    );
+  });
+}
+
+function logCompletionFetchFailure(
+  kind: CompletionKind,
+  config: B2Config,
+  err: unknown,
+  durationMs: number,
+): void {
+  const sanitizerOptions = sanitizerOptionsFromConfig(config);
+  const parsed = parseB2Error(err);
+  const requestId = sanitizeProviderRequestId(parsed.requestId, sanitizerOptions);
+  logger.warn(
+    {
+      completionKind: kind,
+      credential: completionCredentialFingerprint(config),
+      ...(config.callerFingerprint && { caller: config.callerFingerprint }),
+      durationMs,
+      status: parsed.status,
+      code: sanitizeProviderCode(parsed.code, sanitizerOptions),
+      ...(requestId && { requestId }),
+      degraded: true,
+      degradeReason:
+        parsed.status === 401 || parsed.status === 403 ? "permission_denied" : "upstream_error",
+    },
+    "completion.lookup.degraded",
+  );
+}
+
+async function cachedPerCredential<T>(
+  cache: Map<string, CompletionCacheEntry<T>>,
+  inflight: Map<string, Promise<CompletionFetchResult<T>>>,
+  options: {
+    cacheKey: string;
+    kind: CompletionKind;
+    config: B2Config;
+    empty: () => T;
+    fetch: () => Promise<CompletionFetchSuccess<T>>;
+  },
+): Promise<CompletionFetchResult<T>> {
+  const now = Date.now();
+  sweepCompletionCache(now);
+  const cached = cache.get(options.cacheKey);
+  if (cached && cached.expiresAt > now) {
+    cache.delete(options.cacheKey);
+    cache.set(options.cacheKey, cached);
+    return cached.value;
+  }
+
+  const callerSignal = currentMcpRequestSignal();
+  const existing = inflight.get(options.cacheKey);
+  if (existing) return raceWithCallerAbort(existing, callerSignal);
+
+  const fetch = runWithMcpRequestSignal(undefined, async () => {
+    const startedAt = Date.now();
+    try {
+      const fetched = await options.fetch();
+      const value: CompletionFetchResult<T> = {
+        values: fetched.values,
+        degraded: false,
+        truncated: fetched.truncated === true,
+      };
+      const ttl = completionCacheTtlMs();
+      if (ttl > 0) {
+        cache.set(options.cacheKey, { value, expiresAt: Date.now() + ttl });
+        enforceCacheMax(cache, completionCacheMaxEntries());
+      }
+      return value;
+    } catch (err) {
+      logCompletionFetchFailure(options.kind, options.config, err, Date.now() - startedAt);
+      return { values: options.empty(), degraded: true, truncated: false };
+    } finally {
+      inflight.delete(options.cacheKey);
+    }
+  });
+  inflight.set(options.cacheKey, fetch);
+  return raceWithCallerAbort(fetch, callerSignal);
+}
+
 async function cachedBucketCompletionSources(
   client: B2Client,
   config: B2Config,
-): Promise<BucketCompletionSource[]> {
-  const key = credentialCompletionCacheKey(config, "buckets");
-  const now = Date.now();
-  sweepCompletionCache(now);
-  const cached = bucketCompletionCache.get(key);
-  if (cached && cached.expiresAt > now) {
-    bucketCompletionCache.delete(key);
-    bucketCompletionCache.set(key, cached);
-    return cached.value;
-  }
-
-  const existing = bucketCompletionInflight.get(key);
-  if (existing) return existing;
-
-  const fetch = (async () => {
-    try {
+): Promise<CompletionFetchResult<BucketCompletionSource[]>> {
+  return cachedPerCredential(bucketCompletionCache, bucketCompletionInflight, {
+    cacheKey: credentialCompletionCacheKey(config, "buckets"),
+    kind: "bucket-name",
+    config,
+    empty: () => [],
+    fetch: async () => {
       const result = await client.listBuckets({});
-      const buckets = result.buckets.flatMap((bucket) => {
-        const source = toBucketCompletionSource(bucket);
-        return source ? [source] : [];
-      });
-      const ttl = completionCacheTtlMs();
-      if (ttl > 0) {
-        bucketCompletionCache.set(key, { value: buckets, expiresAt: Date.now() + ttl });
-        enforceCacheMax(bucketCompletionCache, completionCacheMaxEntries());
-      }
-      return buckets;
-    } catch {
-      return [];
-    } finally {
-      bucketCompletionInflight.delete(key);
-    }
-  })();
-  bucketCompletionInflight.set(key, fetch);
-  return fetch;
+      return {
+        values: result.buckets.flatMap((bucket) => {
+          const source = toBucketCompletionSource(bucket);
+          return source ? [source] : [];
+        }),
+      };
+    },
+  });
 }
 
-async function cachedApplicationKeyIds(client: B2Client, config: B2Config): Promise<string[]> {
-  const key = credentialCompletionCacheKey(config, "keys");
-  const now = Date.now();
-  sweepCompletionCache(now);
-  const cached = keyCompletionCache.get(key);
-  if (cached && cached.expiresAt > now) {
-    keyCompletionCache.delete(key);
-    keyCompletionCache.set(key, cached);
-    return cached.value;
+async function cachedApplicationKeyIds(
+  client: B2Client,
+  config: B2Config,
+): Promise<CompletionFetchResult<string[]>> {
+  return cachedPerCredential(keyCompletionCache, keyCompletionInflight, {
+    cacheKey: credentialCompletionCacheKey(config, "keys"),
+    kind: "application-key-id",
+    config,
+    empty: () => [],
+    fetch: async () => {
+      const ids: string[] = [];
+      let startApplicationKeyId: string | undefined;
+      let truncated = false;
+      for (let page = 0; page < KEY_COMPLETION_MAX_PAGES; page++) {
+        const result = await client.listKeys({
+          maxKeyCount: KEY_COMPLETION_PAGE_SIZE,
+          ...(startApplicationKeyId && { startApplicationKeyId }),
+        });
+        ids.push(...result.keys.map((key) => key.applicationKeyId).filter(Boolean));
+        const next = result.nextApplicationKeyId ?? undefined;
+        if (!next) {
+          startApplicationKeyId = undefined;
+          break;
+        }
+        startApplicationKeyId = next;
+      }
+      if (startApplicationKeyId) truncated = true;
+      return { values: ids, truncated };
+    },
+  });
+}
+
+function logCompletionAudit(
+  config: B2Config,
+  details: {
+    tool: string;
+    argument: string;
+    kind: CompletionKind;
+    durationMs: number;
+    response?: CompletionResult;
+    audit?: CompletionAudit;
+    err?: unknown;
+  },
+): void {
+  const base = {
+    tool: details.tool,
+    argument: details.argument,
+    completionKind: details.kind,
+    credential: completionCredentialFingerprint(config),
+    ...(config.callerFingerprint && { caller: config.callerFingerprint }),
+    durationMs: details.durationMs,
+  };
+  if (!details.err) {
+    logger.info(
+      {
+        ...base,
+        error: false,
+        values: details.response?.completion.values.length ?? 0,
+        total: details.response?.completion.total,
+        hasMore: details.response?.completion.hasMore ?? false,
+        candidateCount: details.audit?.candidateCount ?? 0,
+        degraded: details.audit?.degraded ?? false,
+        truncated: details.audit?.truncated ?? false,
+      },
+      "completion.call",
+    );
+    return;
   }
 
-  const existing = keyCompletionInflight.get(key);
-  if (existing) return existing;
+  const sanitizerOptions = sanitizerOptionsFromConfig(config);
+  const parsed = parseB2Error(details.err);
+  const requestId = sanitizeProviderRequestId(parsed.requestId, sanitizerOptions);
+  logger.warn(
+    {
+      ...base,
+      error: true,
+      err: sanitizeError(details.err, sanitizerOptions).message,
+      status: parsed.status,
+      code: sanitizeProviderCode(parsed.code, sanitizerOptions),
+      ...(requestId && { requestId }),
+    },
+    "completion.call",
+  );
+}
 
-  const fetch = (async () => {
-    try {
-      const result = await client.listKeys({ maxKeyCount: 1000 });
-      const ids = result.keys.map((key) => key.applicationKeyId).filter(Boolean);
-      const ttl = completionCacheTtlMs();
-      if (ttl > 0) {
-        keyCompletionCache.set(key, { value: ids, expiresAt: Date.now() + ttl });
-        enforceCacheMax(keyCompletionCache, completionCacheMaxEntries());
-      }
-      return ids;
-    } catch {
-      return [];
-    } finally {
-      keyCompletionInflight.delete(key);
+function requiredBackingTool(kind: CompletionKind): string {
+  switch (kind) {
+    case "application-key-id":
+      return "b2_list_keys";
+    case "bucket-id":
+    case "bucket-name":
+      return "b2_list_buckets";
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
     }
-  })();
-  keyCompletionInflight.set(key, fetch);
-  return fetch;
+  }
 }
 
 async function completeBucketNames(
   client: B2Client,
   config: B2Config,
   value: string,
-): Promise<CompletionResult> {
+): Promise<CompletionComputation> {
   const buckets = await cachedBucketCompletionSources(client, config);
   return completionFromCandidates(
-    buckets.map((bucket) => bucket.bucketName),
+    buckets.values.map((bucket) => bucket.bucketName),
     value,
+    { degraded: buckets.degraded, truncated: buckets.truncated },
   );
 }
 
@@ -243,11 +493,12 @@ async function completeBucketIds(
   client: B2Client,
   config: B2Config,
   value: string,
-): Promise<CompletionResult> {
+): Promise<CompletionComputation> {
   const buckets = await cachedBucketCompletionSources(client, config);
   return completionFromCandidates(
-    buckets.map((bucket) => bucket.bucketId),
+    buckets.values.map((bucket) => bucket.bucketId),
     value,
+    { degraded: buckets.degraded, truncated: buckets.truncated },
   );
 }
 
@@ -255,9 +506,12 @@ async function completeApplicationKeyIds(
   client: B2Client,
   config: B2Config,
   value: string,
-): Promise<CompletionResult> {
+): Promise<CompletionComputation> {
   const keyIds = await cachedApplicationKeyIds(client, config);
-  return completionFromCandidates(keyIds, value);
+  return completionFromCandidates(keyIds.values, value, {
+    degraded: keyIds.degraded,
+    truncated: keyIds.truncated,
+  });
 }
 
 async function completeToolArgument(
@@ -269,24 +523,51 @@ async function completeToolArgument(
   if (params.ref.type !== "ref/tool" || !params.ref.name) return emptyCompletion();
   const tool = getRegisteredTools(server)?.[params.ref.name];
   if (!tool || !toolHasArgument(tool, params.argument.name)) return emptyCompletion();
-  if (NEW_RESOURCE_ARGUMENTS.has(`${params.ref.name}:${params.argument.name}`)) {
+  if (isExplicitlyDeniedToolArgument(params.ref.name, params.argument.name)) {
     return emptyCompletion();
   }
 
-  if (BUCKET_NAME_ARGUMENTS.has(params.argument.name)) {
-    if (!hasRegisteredTool(server, "b2_list_buckets")) return emptyCompletion();
-    return completeBucketNames(client, config, params.argument.value);
-  }
-  if (BUCKET_ID_ARGUMENTS.has(params.argument.name)) {
-    if (!hasRegisteredTool(server, "b2_list_buckets")) return emptyCompletion();
-    return completeBucketIds(client, config, params.argument.value);
-  }
-  if (APPLICATION_KEY_ID_ARGUMENTS.has(params.argument.name)) {
-    if (!hasRegisteredTool(server, "b2_list_keys")) return emptyCompletion();
-    return completeApplicationKeyIds(client, config, params.argument.value);
-  }
+  const kind = completionKindForToolArgument(params.ref.name, params.argument.name);
+  if (!kind) return emptyCompletion();
+  if (!hasRegisteredTool(server, requiredBackingTool(kind))) return emptyCompletion();
 
-  return emptyCompletion();
+  const startedAt = Date.now();
+  try {
+    let completion: CompletionComputation;
+    switch (kind) {
+      case "bucket-name":
+        completion = await completeBucketNames(client, config, params.argument.value);
+        break;
+      case "bucket-id":
+        completion = await completeBucketIds(client, config, params.argument.value);
+        break;
+      case "application-key-id":
+        completion = await completeApplicationKeyIds(client, config, params.argument.value);
+        break;
+      default: {
+        const exhaustive: never = kind;
+        return exhaustive;
+      }
+    }
+    logCompletionAudit(config, {
+      tool: params.ref.name,
+      argument: params.argument.name,
+      kind,
+      durationMs: Date.now() - startedAt,
+      response: completion.response,
+      audit: completion.audit,
+    });
+    return completion.response;
+  } catch (err) {
+    logCompletionAudit(config, {
+      tool: params.ref.name,
+      argument: params.argument.name,
+      kind,
+      durationMs: Date.now() - startedAt,
+      err,
+    });
+    throw sanitizeError(err, sanitizerOptionsFromConfig(config));
+  }
 }
 
 export function registerToolCompletionHandler(
