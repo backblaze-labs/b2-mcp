@@ -30,6 +30,7 @@ import {
   type HttpPipelineOptions,
   type PreparedMcpRequest,
 } from "./http-fetch-handler.js";
+import { sanitizeText } from "./utils/secret-sanitizer.js";
 import type { B2Config } from "./utils/types.js";
 
 export {
@@ -42,6 +43,16 @@ export {
 const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
 const SHUTDOWN_DRAIN_MS = 10 * 1000;
+const SECRET_REQUEST_HEADERS = [
+  "authorization",
+  "cookie",
+  "x-b2-app-key",
+  "x-b2-key",
+  "x-b2-master-key",
+  "x-b2-mcp-app-key",
+  "x-b2-mcp-key",
+  "x-b2-mcp-master-key",
+] as const;
 
 export interface HttpServerHandle {
   server: http.Server;
@@ -54,8 +65,6 @@ export interface HttpServerHandle {
 export interface HttpServerOptions extends HttpPipelineOptions {
   /** Hook for customer middleware/tests to attach verified MCP authInfo. */
   getAuthInfo?: (req: AuthenticatedIncomingMessage) => AuthInfo | null | undefined;
-  /** Hook for tests/custom hosts that need to replace the full fetch pipeline. */
-  fetchHandler?: B2McpFetchHandler;
 }
 
 export interface HttpListenOptions {
@@ -84,6 +93,20 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+function requestSecretHeaderValues(req: http.IncomingMessage): string[] {
+  return SECRET_REQUEST_HEADERS.flatMap((name) => {
+    const value = req.headers[name];
+    if (Array.isArray(value)) return value;
+    return value ? [value] : [];
+  });
+}
+
+function safeErrorText(err: unknown, req?: http.IncomingMessage): string {
+  const text = err instanceof Error ? err.message : String(err);
+  const secrets = req ? requestSecretHeaderValues(req) : [];
+  return sanitizeText(text, { secrets });
+}
+
 function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOptions): http.Server {
   return http.createServer(async (req, res) => {
     const abortController = new AbortController();
@@ -105,7 +128,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
         allowLoopbackHealthProbe: true,
       });
     } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+      logger.warn({ err: safeErrorText(err, req) }, "mcp.http.failed");
       response = jsonResponse(500, { error: "Internal server error" });
     }
 
@@ -114,7 +137,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
       await writeWebResponse(response, res, abortController.signal);
     } catch (err) {
       if (!abortController.signal.aborted && !res.destroyed) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+        logger.warn({ err: safeErrorText(err, req) }, "mcp.http.failed");
         res.destroy(err instanceof Error ? err : new Error(String(err)));
       }
     } finally {
@@ -124,7 +147,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
 }
 
 export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHandle {
-  const pipeline = options.fetchHandler ?? createB2McpFetchHandler(options);
+  const pipeline = createB2McpFetchHandler(options);
   const httpServer = createNodeServer(pipeline, options);
   httpServer.requestTimeout = intEnv("B2_HTTP_REQUEST_TIMEOUT_MS", DEFAULT_HTTP_REQUEST_TIMEOUT_MS);
   httpServer.headersTimeout = Math.min(
@@ -135,7 +158,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   return {
     server: httpServer,
     sessions: pipeline.sessions,
-    drain: pipeline.drain,
+    drain: () => pipeline.drain(),
   };
 }
 
@@ -211,8 +234,12 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   process.on("SIGINT", onSigint);
 }
 
-export function handleHttpBootstrapFatal(err: unknown): never {
-  const message = err instanceof Error ? err.message : String(err);
+export function httpBootstrapFatalMessage(err: unknown): string {
+  return safeErrorText(err);
+}
+
+function handleHttpBootstrapFatal(err: unknown): never {
+  const message = httpBootstrapFatalMessage(err);
   process.stderr.write(`b2-mcp: ${message}\n`);
   logger.fatal({ err: message }, "server.fatal");
   flushLogsSync();
