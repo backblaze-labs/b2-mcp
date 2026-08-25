@@ -495,9 +495,7 @@ function assertTokenAlgorithm(
 ): string | undefined {
   if (allowedAlgorithms.length === 0) return undefined;
   const algorithm = stringClaim(claims.alg ?? claims.jwt_alg ?? claims.token_alg);
-  if (!algorithm) {
-    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
-  }
+  if (!algorithm) return undefined;
   assertAllowedAlgorithm(algorithm, allowedAlgorithms);
   return algorithm;
 }
@@ -607,6 +605,8 @@ function authInfoFromVerifiedClaims(
   const verifiedSubject = subject ?? subjectAlias ?? principalAlias;
   const clientId =
     stringClaim(claims.client_id) ?? stringClaim(claims.azp) ?? verifiedSubject ?? "unknown-client";
+  const oauthClientId = stringClaim(claims.client_id);
+  const authorizedParty = stringClaim(claims.azp);
   return {
     token: `verified:${tokenLabel(token)}`,
     clientId,
@@ -619,6 +619,8 @@ function authInfoFromVerifiedClaims(
       ...(subjectAlias && { subject: subjectAlias }),
       ...(principalAlias && { principal: principalAlias }),
       ...(acceptedAlgorithm && { alg: acceptedAlgorithm }),
+      ...(oauthClientId && { client_id: oauthClientId }),
+      ...(authorizedParty && { azp: authorizedParty }),
       aud: values(claims.aud),
       resource: values(claims.resource),
       token_hash: tokenLabel(token),

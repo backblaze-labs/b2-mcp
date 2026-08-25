@@ -1,4 +1,4 @@
-import type { AuthInfo } from "@modelcontextprotocol/server";
+import { OAuthError, OAuthErrorCode, type AuthInfo } from "@modelcontextprotocol/server";
 import {
   getHttpCredentialMode,
   validateHttpCredentialConfiguration,
@@ -15,6 +15,8 @@ import { logger } from "../../src/utils/logger.js";
 const ALLOW_HEADER_MODE_FLAG = "B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE";
 const ALLOW_PREVIEW_B2_CREDENTIALS_FLAG = "B2_VERCEL_ALLOW_PREVIEW_B2_CREDENTIALS";
 const ALLOW_SHARED_SERVER_CREDENTIAL_FLAG = "B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL";
+const ADMIT_ALL_ISSUER_SUBJECTS_FLAG = "B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS";
+const ALLOWED_OAUTH_CLIENT_IDS_ENV = "B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS";
 const PREVIEW_B2_CREDENTIAL_ENV_PATTERN =
   /^B2_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$|^B2_CREDENTIAL_[A-Z0-9_]+_(?:APPLICATION_KEY|APP_KEY|MASTER_KEY)(?:_ID)?$/;
 
@@ -46,6 +48,25 @@ function validatePreviewCredentialCustody(): void {
   }
 }
 
+function csvEnv(name: string): string[] {
+  return (process.env[name] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function allowedOAuthClientIds(): string[] {
+  return csvEnv(ALLOWED_OAUTH_CLIENT_IDS_ENV);
+}
+
+function subjectlessIssuerAdmissionEnabled(oauthConfig: OAuthResourceServerConfig): boolean {
+  return (
+    getHttpCredentialMode() === "server" &&
+    oauthConfig.allowedSubjects.length === 0 &&
+    process.env[ADMIT_ALL_ISSUER_SUBJECTS_FLAG] === "true"
+  );
+}
+
 export function validateVercelStaticConfiguration(): OAuthResourceServerConfig {
   validateVercelCredentialMode();
   validatePreviewCredentialCustody();
@@ -53,9 +74,37 @@ export function validateVercelStaticConfiguration(): OAuthResourceServerConfig {
   if (getHttpCredentialMode() === "server") {
     const sharedServerCredentialAllowed =
       process.env[ALLOW_SHARED_SERVER_CREDENTIAL_FLAG] === "true";
+    const subjectlessIssuerAdmissionAllowed =
+      process.env[ADMIT_ALL_ISSUER_SUBJECTS_FLAG] === "true";
+    // Vercel has a reviewed Okta internal-testing profile that intentionally
+    // admits all issuer subjects. Cloudflare Workers keep the stricter
+    // subject-allowlist requirement for server mode.
+    if (oauthConfig.allowedSubjects.length === 0 && !subjectlessIssuerAdmissionAllowed) {
+      throw new Error(
+        `Vercel server mode requires B2_OAUTH_ALLOWED_SUBJECTS or ${ADMIT_ALL_ISSUER_SUBJECTS_FLAG}=true for subjectless issuer admission`,
+      );
+    }
     if (oauthConfig.allowedSubjects.length === 0 && !sharedServerCredentialAllowed) {
       throw new Error(
-        `Vercel server mode requires B2_OAUTH_ALLOWED_SUBJECTS or ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true for issuer/audience/scope admission`,
+        `Vercel subjectless issuer admission requires ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true`,
+      );
+    }
+    if (
+      oauthConfig.allowedSubjects.length === 0 &&
+      subjectlessIssuerAdmissionAllowed &&
+      oauthConfig.requiredScopes.length === 0
+    ) {
+      throw new Error(
+        "Vercel subjectless issuer admission requires non-empty B2_OAUTH_REQUIRED_SCOPES",
+      );
+    }
+    if (
+      oauthConfig.allowedSubjects.length === 0 &&
+      subjectlessIssuerAdmissionAllowed &&
+      allowedOAuthClientIds().length === 0
+    ) {
+      throw new Error(
+        `Vercel subjectless issuer admission requires ${ALLOWED_OAUTH_CLIENT_IDS_ENV}`,
       );
     }
     if (oauthConfig.allowedSubjects.length > 1 && !sharedServerCredentialAllowed) {
@@ -68,6 +117,24 @@ export function validateVercelStaticConfiguration(): OAuthResourceServerConfig {
   return oauthConfig;
 }
 
+function verifiedOAuthClientClaims(authInfo: AuthInfo): string[] {
+  const extra = authInfo.extra ?? {};
+  return ["client_id", "azp"]
+    .map((key) => extra[key])
+    .filter((value): value is string => typeof value === "string" && !!value.trim())
+    .map((value) => value.trim());
+}
+
+function validateVercelAdmittedAuthInfo(
+  authInfo: AuthInfo,
+  oauthConfig: OAuthResourceServerConfig,
+): void {
+  if (!subjectlessIssuerAdmissionEnabled(oauthConfig)) return;
+  const allowed = new Set(allowedOAuthClientIds());
+  if (verifiedOAuthClientClaims(authInfo).some((clientId) => allowed.has(clientId))) return;
+  throw new OAuthError(OAuthErrorCode.InvalidToken, "OAuth client is not accepted");
+}
+
 function isVercelMcpFetchContext(
   input: AuthInfo | VercelMcpFetchContext,
 ): input is VercelMcpFetchContext {
@@ -78,10 +145,13 @@ const runtime = createServerlessAdapterRuntime<VercelMcpFetchContext>({
   configurationErrorMessage: "Vercel MCP deployment is not configured",
   configurationInvalidEvent: "vercel.config.invalid",
   admissionRejectedEvent: "vercel.oauth.admission_rejected",
+  admissionAcceptedEvent: "vercel.oauth.admission_accepted",
   validateStaticConfiguration: validateVercelStaticConfiguration,
+  validateAdmittedAuthInfo: validateVercelAdmittedAuthInfo,
   validateInjectedAuthInfo: true,
   oauthAdmissionKey: (_request, context) =>
     `vercel-oauth:${context.remoteAddress?.trim() || "unknown"}`,
+  info: (fields, message) => logger.info(fields, message),
   warn: (fields, message) => logger.warn(fields, message),
 });
 

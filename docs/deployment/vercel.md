@@ -71,6 +71,8 @@ B2_OAUTH_TOKEN_ENDPOINT=https://issuer.example.com/oauth2/token
 B2_OAUTH_INTROSPECTION_ENDPOINT=https://issuer.example.com/oauth2/introspect
 B2_OAUTH_RESOURCE=https://mcp.example.com/mcp
 B2_OAUTH_AUDIENCE=https://mcp.example.com/mcp
+B2_OAUTH_ALLOWED_SUBJECTS=issuer-subject-for-this-single-tenant-deployment
+B2_OAUTH_REQUIRED_SCOPES=b2-mcp:internal
 B2_OAUTH_INTROSPECTION_CLIENT_ID=resource-server-client-id
 B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 ```
@@ -78,7 +80,15 @@ B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 Use `deploy/vercel/vercel.env.example` as the checklist. Do not set Production
 B2 credentials on untrusted Preview deployments. Protected Preview smoke may
 use `x-vercel-protection-bypass` only from a protected GitHub Environment
-secret.
+secret. For the reviewed Okta shared-credential profile, replace the
+single-subject selector with:
+
+```bash
+B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true
+B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true
+B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS=okta-claude-connector-client-id
+# omit B2_OAUTH_ALLOWED_SUBJECTS only after old Vercel instances are drained
+```
 
 ## Deployment
 
@@ -104,8 +114,12 @@ opaque tokens through introspection and signed JWT access tokens through
 `B2_OAUTH_JWKS_URI` when JWKS-only mode is selected. If both are configured,
 introspection remains authoritative for revocation and JWT-shaped opaque-token
 compatibility. Server mode is single-tenant by default and requires one
-`B2_OAUTH_ALLOWED_SUBJECTS` value unless
-`B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` is separately reviewed.
+`B2_OAUTH_ALLOWED_SUBJECTS` value. Multi-subject allowlists additionally
+require `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true`; subjectless Okta
+issuer admission additionally requires
+`B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true`,
+`B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS`, and non-empty
+`B2_OAUTH_REQUIRED_SCOPES`.
 
 For the Backblaze internal-testing deployment, Okta is the authorization server
 and Okta app plus group assignment is the access gate. Set the Okta custom
@@ -113,13 +127,34 @@ Authorization Server audience to the final public `/mcp` URL, assign the OIDC
 app to the employee or `b2-mcp-users` group, configure authorization-code plus
 PKCE for the Claude.ai connector redirect URI, and store the Okta issuer,
 authorization endpoint, token endpoint, introspection endpoint, introspection
-client id/secret, resource URL, and audience in Vercel Production environment
-variables. In that reviewed profile, set
-`B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` and omit
-`B2_OAUTH_ALLOWED_SUBJECTS`; the adapter admits any active Okta token with the
-configured issuer, audience/resource, and required scopes. Every admitted Okta
-user shares the one server-held B2 key and its capabilities, with
-`B2_DESTRUCTIVE_POLICY=block` still preventing destructive operations.
+client id/secret, resource URL, audience, approved connector client id, and
+deployment-specific required scope in Vercel Production environment variables.
+In that reviewed profile, set `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true`
+and `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true`, configure
+`B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS`, and omit `B2_OAUTH_ALLOWED_SUBJECTS`
+only after the old adapter is drained. The adapter admits active Okta tokens
+from the reviewed connector client when issuer, audience/resource, and required
+scopes match.
+
+Every admitted Okta user shares the one server-held B2 key and its
+capabilities. OAuth scopes filter the MCP tool surface but do not narrow the B2
+application key itself, so use a dedicated read-only or otherwise narrowly
+scoped B2 key for this internal-testing deployment and keep
+`B2_DESTRUCTIVE_POLICY=block`.
+
+Roll out with expand/contract semantics: deploy the new code while keeping
+`B2_OAUTH_ALLOWED_SUBJECTS` populated for one tester, wait for old Vercel
+instances to drain, then remove the subject allowlist and enable subjectless
+admission in a later config-only promotion. Rollbacks to old code require the
+subject allowlist to be restored first.
+
+The shared-key audit trail uses redacted fingerprints, not raw identities.
+Successful admission logs `vercel.oauth.admission_accepted` with a principal
+fingerprint and OAuth client fingerprint; rejected authenticated admissions log
+`vercel.oauth.admission_rejected`; `tool.call`, `tool.error`, credential
+resolution, and capability failures include a per-caller fingerprint when a
+verified subject is present. Use those MCP logs with Okta sign-in logs to map a
+shared B2-key action back to an employee.
 
 ## Health Checks
 
@@ -203,6 +238,9 @@ Use the shared security contract first:
 - Repository baseline commit: `89e911d`
 - Package version: `0.1.1`
 - MCP revision: 2026-07-28
+- Okta shared-credential profile: documentation and deterministic adapter
+  coverage added after this baseline; production Vercel/Okta verification is
+  pending final Backblaze team deployment and secrets.
 - Node runtime: Vercel Node Functions built by locked `@vercel/node@5.10.2`
   with `vercel.json` explicitly pinning the reviewed `nodejs24.x` Function
   runtime; CI validates generated `.vercel/output` runtime configs against

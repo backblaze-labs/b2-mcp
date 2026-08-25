@@ -87,7 +87,10 @@ describe("getRegisteredTools", () => {
 describe("createAuditedToolCallback", () => {
   it("logs tool.call on success and preserves the result", async () => {
     const original = vi.fn().mockResolvedValue({ isError: false, ok: true });
-    const wrapped = createAuditedToolCallback("t", original, cfg);
+    const wrapped = createAuditedToolCallback("t", original, {
+      ...cfg,
+      callerFingerprint: "caller-fingerprint",
+    } as B2Config);
 
     const result = await wrapped({ bucketId: "b" }, {});
     expect(result).toEqual({ isError: false, ok: true });
@@ -95,6 +98,7 @@ describe("createAuditedToolCallback", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: "t",
+        caller: "caller-fingerprint",
         outputFormat: "json",
         argKeys: ["bucketId"],
         error: false,
@@ -163,11 +167,14 @@ describe("createAuditedToolCallback", () => {
 
   it("logs tool.error and rethrows when the handler throws", async () => {
     const original = vi.fn().mockRejectedValue(new Error("boom"));
-    const wrapped = createAuditedToolCallback("t", original, cfg);
+    const wrapped = createAuditedToolCallback("t", original, {
+      ...cfg,
+      callerFingerprint: "caller-fingerprint",
+    } as B2Config);
 
     await expect(wrapped({}, {})).rejects.toThrow("boom");
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ tool: "t", err: "boom" }),
+      expect.objectContaining({ tool: "t", caller: "caller-fingerprint", err: "boom" }),
       "tool.error",
     );
   });

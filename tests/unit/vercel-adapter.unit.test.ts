@@ -85,6 +85,33 @@ function modernHeaders(method: string, name?: string): Record<string, string> {
   });
 }
 
+const OKTA_ISSUER = "https://backblaze.okta.example/oauth2/b2-mcp/";
+const OKTA_CONNECTOR_CLIENT_ID = "okta-claude-connector";
+const OKTA_REQUIRED_SCOPE = "b2-mcp:internal";
+
+function setSubjectlessOktaEnv() {
+  delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
+  process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
+  process.env.B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS = "true";
+  process.env.B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS = OKTA_CONNECTOR_CLIENT_ID;
+  process.env.B2_OAUTH_REQUIRED_SCOPES = OKTA_REQUIRED_SCOPE;
+  process.env.B2_OAUTH_ISSUER = OKTA_ISSUER;
+  process.env.B2_OAUTH_AUTHORIZATION_ENDPOINT = `${OKTA_ISSUER}v1/authorize`;
+  process.env.B2_OAUTH_TOKEN_ENDPOINT = `${OKTA_ISSUER}v1/token`;
+  process.env.B2_OAUTH_INTROSPECTION_ENDPOINT = `${OKTA_ISSUER}v1/introspect`;
+}
+
+function oktaIntrospectionResponse(overrides: Record<string, unknown> = {}): Response {
+  return introspectionResponse({
+    iss: OKTA_ISSUER,
+    sub: "employee-123",
+    client_id: OKTA_CONNECTOR_CLIENT_ID,
+    scope: `b2:read ${OKTA_REQUIRED_SCOPE}`,
+    alg: undefined,
+    ...overrides,
+  });
+}
+
 function legacyInitializeBody(protocolVersion = "2025-06-18"): string {
   return JSON.stringify({
     jsonrpc: "2.0",
@@ -221,22 +248,10 @@ describe("Vercel adapter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("admits any Okta-issued subject when shared server credentials are enabled", async () => {
-    delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
-    process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
-    process.env.B2_OAUTH_ISSUER = "https://backblaze.okta.example/oauth2/b2-mcp/";
-    process.env.B2_OAUTH_AUTHORIZATION_ENDPOINT =
-      "https://backblaze.okta.example/oauth2/b2-mcp/v1/authorize";
-    process.env.B2_OAUTH_TOKEN_ENDPOINT = "https://backblaze.okta.example/oauth2/b2-mcp/v1/token";
-    process.env.B2_OAUTH_INTROSPECTION_ENDPOINT =
-      "https://backblaze.okta.example/oauth2/b2-mcp/v1/introspect";
-    const introspection = vi.fn(async () =>
-      introspectionResponse({
-        iss: "https://backblaze.okta.example/oauth2/b2-mcp/",
-        sub: "employee-123",
-        scope: "b2:read",
-      }),
-    );
+  it("admits an Okta connector token when subjectless issuer admission is enabled", async () => {
+    setSubjectlessOktaEnv();
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const introspection = vi.fn(async () => oktaIntrospectionResponse());
     vi.stubGlobal("fetch", introspection);
 
     const response = await vercelMcpFetch(
@@ -253,6 +268,77 @@ describe("Vercel adapter", () => {
     const body = await rpcJson(response);
 
     expect(body.result?.supportedVersions).toContain("2026-07-28");
+    expect(introspection).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(info.mock.calls)).not.toContain("employee-123");
+    expect(JSON.stringify(info.mock.calls)).not.toContain(OKTA_CONNECTOR_CLIENT_ID);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        principal: expect.stringMatching(/^[a-f0-9]{16}$/),
+        oauthClient: expect.stringMatching(/^[a-f0-9]{16}$/),
+        scopeCount: 2,
+      }),
+      "vercel.oauth.admission_accepted",
+    );
+  });
+
+  it.each([
+    ["unapproved client", { client_id: "unreviewed-okta-app" }],
+    ["missing client claim", { client_id: undefined, azp: undefined }],
+  ])("rejects subjectless Okta admission for %s", async (_name, overrides) => {
+    setSubjectlessOktaEnv();
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const introspection = vi.fn(async () => oktaIntrospectionResponse(overrides));
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: {
+          ...modernHeaders("server/discover"),
+          Authorization: "Bearer okta-access-token",
+        },
+        body: modernBody("server/discover"),
+      }),
+      { remoteAddress: "203.0.113.42" },
+    );
+
+    expect(response.status).toBe(401);
+    expect(introspection).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("employee-123");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("unreviewed-okta-app");
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "authenticated_admission_policy",
+        principal: expect.stringMatching(/^[a-f0-9]{16}$/),
+      }),
+      "vercel.oauth.admission_rejected",
+    );
+  });
+
+  it.each([
+    ["wrong issuer", { iss: "https://attacker.okta.example/oauth2/default/" }],
+    ["wrong audience", { aud: ["https://other.example.com/mcp"] }],
+    ["missing audience", { aud: undefined }],
+    ["missing resource", { resource: undefined }],
+    ["missing B2 deployment scope", { scope: OKTA_REQUIRED_SCOPE }],
+  ])("keeps subjectless Okta admission closed for %s", async (_name, overrides) => {
+    setSubjectlessOktaEnv();
+    const introspection = vi.fn(async () => oktaIntrospectionResponse(overrides));
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: {
+          ...modernHeaders("server/discover"),
+          Authorization: "Bearer okta-access-token",
+        },
+        body: modernBody("server/discover"),
+      }),
+      { remoteAddress: "203.0.113.42" },
+    );
+
+    expect([401, 403]).toContain(response.status);
     expect(introspection).toHaveBeenCalledTimes(1);
   });
 
@@ -626,9 +712,43 @@ describe("Vercel adapter", () => {
     expect(body.error).toMatch(/not configured/i);
   });
 
-  it("allows issuer/audience/scope admission when shared server credentials are enabled", async () => {
+  it("still requires an allowed subject when only shared server credentials are enabled", async () => {
     delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
     process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+    const body = (await response.json()) as { code: string; error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("configuration_error");
+    expect(body.error).toMatch(/not configured/i);
+  });
+
+  it.each([
+    ["missing shared credential acknowledgement", { B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL: "" }],
+    ["missing required scope", { B2_OAUTH_REQUIRED_SCOPES: "" }],
+    ["missing allowed OAuth client", { B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS: "" }],
+  ])("rejects subjectless issuer admission with %s", async (_name, overrides) => {
+    setSubjectlessOktaEnv();
+    for (const [name, value] of Object.entries(overrides)) {
+      if (value) process.env[name] = value;
+      else delete process.env[name];
+    }
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+    const body = (await response.json()) as { code: string; error: string };
+
+    expect(response.status).toBe(503);
+    expect(body.code).toBe("configuration_error");
+    expect(body.error).toMatch(/not configured/i);
+  });
+
+  it("allows subjectless issuer admission only with explicit Okta profile gates", async () => {
+    setSubjectlessOktaEnv();
 
     const response = await vercelHealthFetch(
       new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),

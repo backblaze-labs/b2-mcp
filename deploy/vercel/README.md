@@ -65,7 +65,7 @@ not match that pin. Change the region only after reviewing latency to your B2
 account region; Vercel function region selection does not change B2 data
 residency.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_JWKS_URI,B2_OAUTH_JWKS_CACHE_TTL_SECONDS,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_JWKS_URI,B2_OAUTH_JWKS_CACHE_TTL_SECONDS,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_REQUIRED_SCOPES,B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL,B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS,B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
 
 Set these in Vercel Project Settings, not in source:
 
@@ -74,6 +74,8 @@ Set these in Vercel Project Settings, not in source:
 | `B2_HTTP_CREDENTIAL_MODE` | `server` |
 | `B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE` | Omit unless intentionally enabling legacy header mode |
 | `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | `true` only for a reviewed multi-user deployment that accepts sharing one B2 key across admitted subjects |
+| `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS` | `true` only for the reviewed subjectless Okta profile; this is separate from multi-subject allowlists |
+| `B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS` | Required for subjectless Okta admission; comma-separated approved Okta `client_id` / `azp` values |
 | `B2_APPLICATION_KEY_ID` | Production-only encrypted environment value |
 | `B2_APPLICATION_KEY` | Production-only encrypted environment value |
 | `B2_ALLOWED_HOSTS` | Exact Vercel/custom hostname without wildcards |
@@ -84,7 +86,8 @@ Set these in Vercel Project Settings, not in source:
 | `B2_MCP_OUTPUT_FORMAT` | `json` until every client validates `toon` |
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
-| `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for default single-subject `server` mode; omit only when the shared-credential flag is enabled and issuer/audience/scope admission is reviewed |
+| `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for default single-subject `server` mode; omit only for the reviewed subjectless Okta profile |
+| `B2_OAUTH_REQUIRED_SCOPES` | Non-empty deployment-specific scope for subjectless Okta admission |
 | OAuth verifier settings | Configure introspection credentials for opaque tokens, `B2_OAUTH_JWKS_URI` for JWT-only verification, or both when introspection should remain authoritative |
 | Rate/concurrency values | Explicit reviewed per-warm-instance values |
 
@@ -108,14 +111,21 @@ authorization. Use `principal` mode when different verified principals need
 distinct B2 credentials.
 
 The Backblaze internal-testing deployment uses Okta as the authorization server
-and Okta app plus group assignment as the employee access gate. For that
-deployment, set `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` and omit
-`B2_OAUTH_ALLOWED_SUBJECTS`; the adapter then admits any active Okta token that
-matches `B2_OAUTH_ISSUER`, `B2_OAUTH_RESOURCE`, `B2_OAUTH_AUDIENCE`, and the
-required `b2:*`/`B2_OAUTH_REQUIRED_SCOPES` policy. This is an explicit
-shared-credential model: every assigned Okta user can use everything allowed by
-the one server-held B2 key, with OAuth scopes, B2 key capabilities, and the
-destructive policy still applying.
+and Okta app plus group assignment as the employee access gate. Subjectless
+admission is a separate opt-in from multi-subject allowlists: set both
+`B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true` and
+`B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true`, configure
+`B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS` with the reviewed Claude connector Okta
+client id, configure a non-empty deployment-specific
+`B2_OAUTH_REQUIRED_SCOPES`, and omit `B2_OAUTH_ALLOWED_SUBJECTS` only after old
+Vercel instances are drained. The adapter then admits active Okta tokens from
+that reviewed client when issuer, resource, audience, and scopes match.
+
+This is an explicit shared-credential model: every admitted Okta user can use
+everything allowed by the one server-held B2 key, with the destructive policy
+still applying. OAuth scopes filter the MCP tool surface but do not narrow the
+B2 application key itself, so use a dedicated read-only or otherwise narrowly
+scoped B2 key for the internal-testing deployment.
 
 Set the Backblaze Okta custom Authorization Server `audience` to the final MCP
 resource URL, normally the same value as `B2_MCP_PUBLIC_URL`,
@@ -124,6 +134,19 @@ PKCE for the Claude.ai connector app, assign the app to the employee or
 `b2-mcp-users` Okta group, and use an introspection client id/secret in Vercel
 Production environment variables. A one-tester rollout before the shared
 credential review can keep the single `B2_OAUTH_ALLOWED_SUBJECTS` value instead.
+For expand/contract rollout, deploy this code while keeping
+`B2_OAUTH_ALLOWED_SUBJECTS` populated, wait for old Vercel instances to drain,
+then remove the allowlist and enable the subjectless flags in a later
+configuration promotion. Roll back to old adapter code only with the subject
+allowlist restored.
+
+The shared B2 key means B2 account-side logs see one application key. MCP logs
+therefore emit stable redacted fingerprints for attribution: successful
+admissions log `vercel.oauth.admission_accepted`, authenticated admission
+rejects log `vercel.oauth.admission_rejected`, and `tool.call`, `tool.error`,
+credential resolution, and capability failures include a per-caller fingerprint
+when a verified subject is present. Use those fingerprints with Okta sign-in
+and application logs to map activity back to an employee.
 
 Token validation uses the authorization server's RFC 7662 introspection
 endpoint for opaque tokens, or local JWT verification when `B2_OAUTH_JWKS_URI`
@@ -153,8 +176,9 @@ The adapter additionally checks:
 - a JWT header `kid` identifying the JWKS signing key; local JWT verification
   rejects tokens without a `kid`, so the issuer must include one (common
   providers do)
-- token signing algorithm from the JWT header or introspection `alg`,
-  `jwt_alg`, or `token_alg`, matched against `B2_OAUTH_ALLOWED_ALGORITHMS`
+- token signing algorithm from the JWT header, or optional introspection `alg`,
+  `jwt_alg`, or `token_alg` when returned, matched against
+  `B2_OAUTH_ALLOWED_ALGORITHMS`
 - at least one of `b2:read`, `b2:write`, or `b2:admin`
 - a subject listed in `B2_OAUTH_ALLOWED_SUBJECTS`, when configured
 - any scopes listed in `B2_OAUTH_REQUIRED_SCOPES`

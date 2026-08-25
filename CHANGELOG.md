@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Split Vercel subjectless Okta admission from the shared-server-credential
+  allowlist relaxation: `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true` now
+  requires approved OAuth client IDs and non-empty required scopes before
+  omitting `B2_OAUTH_ALLOWED_SUBJECTS` for the internal testing deployment
+  (#137, #285).
+
 ## [0.1.2] - 2026-08-23
 
 ### Changed

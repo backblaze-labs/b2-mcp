@@ -137,6 +137,9 @@ export function validateCloudflareWorkerStaticConfiguration(): OAuthResourceServ
   validateCloudflareWorkerCredentialMode();
   const oauthConfig = loadValidatedOAuthConfiguration();
   if (getHttpCredentialMode() === "server") {
+    // Workers intentionally do not implement Vercel's subjectless Okta
+    // internal-testing profile. Server mode must keep at least one verified
+    // subject unless a reviewed multi-subject allowlist shares one B2 key.
     if (oauthConfig.allowedSubjects.length === 0) {
       throw new Error("Worker server mode requires at least one B2_OAUTH_ALLOWED_SUBJECTS value");
     }

@@ -1,4 +1,5 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { authInfoPrincipalFingerprint, credentialFingerprint } from "./credentials.js";
 import {
   createB2McpFetchHandler,
   createInFlightLimiter,
@@ -37,15 +38,24 @@ export interface NormalizedServerlessMcpFetchContext {
 const SERVERLESS_MCP_CONTEXT_KEYS = ["authInfo", "oauthFetch", "remoteAddress"] as const;
 
 export type ServerlessWarnLogger = (fields: Record<string, unknown>, message: string) => void;
+export type ServerlessInfoLogger = (fields: Record<string, unknown>, message: string) => void;
 
 export interface ServerlessAdapterRuntimeOptions<Context extends ServerlessMcpFetchContext> {
   configurationErrorMessage: string;
   configurationInvalidEvent: string;
   admissionRejectedEvent: string;
+  admissionAcceptedEvent?: string;
   validateStaticConfiguration(): OAuthResourceServerConfig;
+  validateAdmittedAuthInfo?(
+    authInfo: AuthInfo,
+    oauthConfig: OAuthResourceServerConfig,
+    request: Request,
+    context: Context,
+  ): void;
   oauthAdmissionKey(request: Request, context: Context): string;
   createHandlerOptions?: HttpPipelineOptions;
   validateInjectedAuthInfo?: boolean;
+  info?: ServerlessInfoLogger;
   warn?: ServerlessWarnLogger;
 }
 
@@ -119,6 +129,24 @@ function defaultWarn(fields: Record<string, unknown>, message: string): void {
   console.warn(JSON.stringify({ level: "warn", message, ...fields }));
 }
 
+function authInfoClientFingerprint(authInfo: AuthInfo): string | undefined {
+  const extra = authInfo.extra ?? {};
+  for (const key of ["client_id", "azp"]) {
+    const value = extra[key];
+    if (typeof value === "string" && value.trim()) {
+      return credentialFingerprint(`oauth-client:${value.trim()}`);
+    }
+  }
+  const clientId = authInfo.clientId?.trim();
+  if (
+    clientId === "unknown-client" ||
+    ["sub", "subject", "principal"].some((key) => extra[key] === clientId)
+  ) {
+    return undefined;
+  }
+  return clientId ? credentialFingerprint(`oauth-client:${clientId}`) : undefined;
+}
+
 async function requestWithCappedBody(request: Request): Promise<Request | Response> {
   if (request.method.toUpperCase() !== "POST") return request;
 
@@ -142,6 +170,7 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
   let oauthAdmissionLimiter: InFlightLimiter | null = null;
   let staticConfigurationState: StaticConfigurationState = { status: "unchecked" };
   const warn = options.warn ?? defaultWarn;
+  const info = options.info;
 
   function getMcpHandler(): B2McpFetchHandler {
     mcpHandler ??= createB2McpFetchHandler(options.createHandlerOptions);
@@ -185,6 +214,43 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
   ): Response {
     warn({ reason, status, rateKey: deriveRateKey(limitKey) }, options.admissionRejectedEvent);
     return jsonResponse(status, body, { "Retry-After": "1" });
+  }
+
+  function authenticatedAdmissionFields(authInfo: AuthInfo): Record<string, unknown> {
+    const principal = authInfoPrincipalFingerprint(authInfo);
+    const oauthClient = authInfoClientFingerprint(authInfo);
+    return {
+      ...(principal && { principal }),
+      ...(oauthClient && { oauthClient }),
+      scopeCount: authInfo.scopes.length,
+    };
+  }
+
+  function validateAdmittedAuthInfo(
+    authInfo: AuthInfo,
+    oauthConfig: OAuthResourceServerConfig,
+    request: Request,
+    context: Context,
+  ): Response | null {
+    try {
+      options.validateAdmittedAuthInfo?.(authInfo, oauthConfig, request, context);
+      return null;
+    } catch (error) {
+      warn(
+        {
+          reason: "authenticated_admission_policy",
+          status: 401,
+          ...authenticatedAdmissionFields(authInfo),
+        },
+        options.admissionRejectedEvent,
+      );
+      return oauthRejectionResponse(error, oauthConfig);
+    }
+  }
+
+  function logAdmittedAuthInfo(authInfo: AuthInfo): void {
+    if (!options.admissionAcceptedEvent || !info) return;
+    info(authenticatedAdmissionFields(authInfo), options.admissionAcceptedEvent);
   }
 
   async function runWithAdmissionLimit<T>(
@@ -240,6 +306,9 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
           return oauthRejectionResponse(error, oauthConfig);
         }
       }
+      const admitted = validateAdmittedAuthInfo(context.authInfo, oauthConfig, request, context);
+      if (admitted) return admitted;
+      logAdmittedAuthInfo(context.authInfo);
       const boundedRequest = await requestWithCappedBody(request);
       if (boundedRequest instanceof Response) return boundedRequest;
       return getMcpHandler().fetch(rewritePath(boundedRequest, "/mcp"), {
@@ -255,6 +324,9 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
         fetch: context.oauthFetch,
       });
       if (auth instanceof Response) return auth;
+      const admitted = validateAdmittedAuthInfo(auth, oauthConfig, boundedRequest, context);
+      if (admitted) return admitted;
+      logAdmittedAuthInfo(auth);
       return { auth, boundedRequest };
     });
     if (prepared instanceof Response) return prepared;

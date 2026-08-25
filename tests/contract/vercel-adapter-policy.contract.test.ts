@@ -113,7 +113,12 @@ describe("Vercel adapter policy", () => {
 
     expect(guide).toContain("B2_OAUTH_ALLOWED_SUBJECTS");
     expect(guide).toContain("B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL");
+    expect(guide).toContain("B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS");
+    expect(guide).toContain("B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS");
+    expect(guide).toContain("subjectless Okta profile");
     expect(envExample).toContain("B2_OAUTH_ALLOWED_SUBJECTS=");
+    expect(envExample).toContain("B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true");
+    expect(envExample).toContain("B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS=");
   });
 
   it("keeps Vercel runtime sources in reviewed TypeScript projects", () => {

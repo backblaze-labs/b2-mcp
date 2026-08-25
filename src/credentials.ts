@@ -393,6 +393,14 @@ function principalFromAuthInfo(authInfo: AuthInfo): string | null {
   return null;
 }
 
+export function authInfoPrincipalFingerprint(
+  authInfo: AuthInfo | null | undefined,
+): string | undefined {
+  if (!authInfo) return undefined;
+  const subject = principalFromAuthInfo(authInfo);
+  return subject ? credentialFingerprint(subject) : undefined;
+}
+
 function rateLimitPrincipalFromAuthInfo(authInfo: AuthInfo | undefined): string | null {
   if (!authInfo) return null;
   const subject = principalFromAuthInfo(authInfo);

@@ -550,7 +550,14 @@ function throwCapabilityResolutionError(
   credentialLogKey: string,
 ): never {
   const details = capabilityFailureDetails(err, config);
-  logger.warn({ credential: credentialLogKey, ...details.log }, "capability.fetch.failed");
+  logger.warn(
+    {
+      credential: credentialLogKey,
+      ...(config.callerFingerprint && { caller: config.callerFingerprint }),
+      ...details.log,
+    },
+    "capability.fetch.failed",
+  );
   throw new CredentialResolutionError(details.message, details.status, details.code);
 }
 
@@ -609,6 +616,7 @@ export function createAuditedToolCallback(
   contextProviders?: DestructiveElicitationContextProviders,
 ): ToolCallback {
   const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
+  const callerFingerprint = config.callerFingerprint;
 
   return async function auditedToolCallback(args: any, extra: any) {
     const start = Date.now();
@@ -659,6 +667,7 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
+          ...(callerFingerprint && { caller: callerFingerprint }),
           outputFormat,
           argKeys,
           durationMs,
@@ -688,6 +697,7 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
+          ...(callerFingerprint && { caller: callerFingerprint }),
           outputFormat: config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT,
           argKeys,
           durationMs,

@@ -85,9 +85,11 @@ must be selected explicitly with `B2_HTTP_CREDENTIAL_MODE=server`. OAuth scopes,
 B2 key capabilities, and tool-profile filtering are cumulative restrictions.
 Hosted adapters may require a subject allowlist before a shared server-held B2
 key is used. The Vercel adapter also supports a reviewed Okta internal-testing
-profile where `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` admits any token
-from the configured issuer, audience/resource, and scope policy without
-enumerating individual subjects.
+profile where `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true` and
+`B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` admit tokens from approved
+OAuth client ids under the configured issuer, audience/resource, and required
+scope policy without enumerating individual subjects. OAuth scopes filter the
+MCP tool surface but do not narrow the B2 application key itself.
 
 ### HTTP Client-Supplied Credential Compatibility
 
@@ -137,9 +139,11 @@ are public metadata and are cacheable for a short period.
 | `B2_OAUTH_AUDIENCE` | Exact audience expected for this MCP deployment. |
 | `B2_OAUTH_REQUIRED_SCOPES` | Additional scopes required beyond one `b2:*` deployment scope. |
 | `B2_OAUTH_ALLOWED_SUBJECTS` | Optional comma-separated subject allowlist. Values may be `sub` or `issuer#sub`. |
-| `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | Vercel-only reviewed opt-in that allows issuer/audience/scope admission without `B2_OAUTH_ALLOWED_SUBJECTS` in server mode. |
+| `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | Vercel-only reviewed opt-in that allows more than one verified subject to share the server B2 key. |
+| `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS` | Vercel-only reviewed opt-in for subjectless issuer admission; requires the shared-credential flag, non-empty `B2_OAUTH_REQUIRED_SCOPES`, and approved OAuth client ids. |
+| `B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS` | Comma-separated Okta `client_id` / `azp` values admitted by Vercel subjectless issuer mode. |
 | `B2_OAUTH_ALLOWED_TOKEN_TYPES` | Accepted token types when introspection returns `token_type`. |
-| `B2_OAUTH_ALLOWED_ALGORITHMS` | Accepted introspection algorithm claims and JWKS algorithms. |
+| `B2_OAUTH_ALLOWED_ALGORITHMS` | Accepted optional introspection algorithm claims and required JWKS algorithms. |
 | `B2_OAUTH_INTROSPECTION_ENDPOINT` | RFC 7662 introspection endpoint for opaque or authoritative token checks. |
 | `B2_OAUTH_INTROSPECTION_CLIENT_ID` | Client ID for authenticated introspection. |
 | `B2_OAUTH_INTROSPECTION_CLIENT_SECRET` | Client secret for authenticated introspection. |
@@ -184,7 +188,8 @@ The verifier fails closed unless the token satisfies the implemented checks:
 - JWT `aud` or `resource` binds to the configured deployment
 - token is active and within `exp` / `nbf` / JWT `iat` windows
 - token type is allowed when present
-- token algorithm is allowed
+- optional introspection token algorithm is allowed when present
+- JWT header algorithm is allowed
 - JWT header `typ` is accepted for access tokens
 - JWT header `kid` selects a JWKS key for local verification
 - scopes include at least one of `b2:read`, `b2:write`, or `b2:admin`
