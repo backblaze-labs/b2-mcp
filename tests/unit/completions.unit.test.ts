@@ -5,6 +5,7 @@ import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "..
 import type { McpServer } from "../../src/mcp";
 import { completionContractForTests, invalidateCompletionCache } from "../../src/completions";
 import { logger } from "../../src/utils/logger";
+import { abortError } from "../../src/utils/named-error";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { DeterministicB2NativeFake, testConfig } from "../support/deterministic-fakes";
 import { installSdkTransport, StaticHttpResponse } from "../support/sdk-test-helpers";
@@ -55,6 +56,10 @@ function bucketFixture(bucketName: string, bucketId = `id-${bucketName}`) {
     fileLockConfiguration: { isFileLockEnabled: false },
     replicationConfiguration: null,
   };
+}
+
+async function waitForRequestDispatch(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function seedClient(sim: B2Simulator): Promise<SdkB2Client> {
@@ -347,6 +352,7 @@ describe("MCP tool argument completion", () => {
     });
     await fetchStarted;
     const second = completeToolArgument(connected.client, "s3_get_object", "bucket", "abort-");
+    await waitForRequestDispatch();
 
     controller.abort();
     releaseFetch();
@@ -356,5 +362,53 @@ describe("MCP tool argument completion", () => {
     expect(secondResult.completion.values).toEqual(["abort-shared-bucket"]);
     expect(native.requestsFor("b2_list_buckets")).toHaveLength(1);
     expect(native.requestsFor("b2_list_buckets")[0].aborted).toBe(false);
+  });
+
+  it("cancels a shared completion fetch after all waiters abort", async () => {
+    const native = new DeterministicB2NativeFake({ capabilities: ["listBuckets", "readFiles"] });
+    let markFetchStarted!: () => void;
+    let sharedSignal: AbortSignal | undefined;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const sharedAborted = new Promise<void>((resolve) => {
+      native.respond("b2_list_buckets", async (captured) => {
+        sharedSignal = captured.request.signal;
+        markFetchStarted();
+        if (!sharedSignal) throw new Error("Expected completion lookup signal");
+        if (!sharedSignal.aborted) {
+          await new Promise<void>((abortResolve) =>
+            sharedSignal?.addEventListener("abort", () => abortResolve(), { once: true }),
+          );
+        }
+        resolve();
+        throw sharedSignal.reason ?? abortError();
+      });
+    });
+    installSdkTransport(native, sdkTestRetry);
+
+    connected = await connect(createServer(testConfig, ["listBuckets", "readFiles"]));
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    const first = completeToolArgument(connected.client, "s3_get_object", "bucket", "abort-", {
+      signal: firstController.signal,
+    }).catch((err) => err);
+    await fetchStarted;
+    const second = completeToolArgument(connected.client, "s3_get_object", "bucket", "abort-", {
+      signal: secondController.signal,
+    }).catch((err) => err);
+    await waitForRequestDispatch();
+
+    firstController.abort(abortError("first caller left"));
+    const firstErr = await first;
+    expect(String(firstErr)).toContain("first caller left");
+    expect(sharedSignal?.aborted).toBe(false);
+
+    secondController.abort(abortError("second caller left"));
+    const [secondErr] = await Promise.all([second, sharedAborted]);
+
+    expect(String(secondErr)).toContain("second caller left");
+    expect(sharedSignal?.aborted).toBe(true);
+    expect(native.requestsFor("b2_list_buckets")).toHaveLength(1);
   });
 });

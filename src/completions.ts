@@ -7,7 +7,7 @@ import { parseIntEnv } from "./utils/config.js";
 import { fingerprintConfig, verificationFingerprintConfig } from "./credentials.js";
 import { parseB2Error } from "./utils/errors.js";
 import { logger } from "./utils/logger.js";
-import { abortError } from "./utils/named-error.js";
+import { abortError, isAbortError } from "./utils/named-error.js";
 import {
   sanitizeError,
   sanitizerOptionsFromConfig,
@@ -92,13 +92,20 @@ interface CompletionComputation {
   audit: CompletionAudit;
 }
 
+interface CompletionInflightEntry<T> {
+  controller: AbortController;
+  promise: Promise<CompletionFetchResult<T>>;
+  settled: boolean;
+  waiters: number;
+}
+
 const bucketCompletionCache = new Map<string, CompletionCacheEntry<BucketCompletionSource[]>>();
 const bucketCompletionInflight = new Map<
   string,
-  Promise<CompletionFetchResult<BucketCompletionSource[]>>
+  CompletionInflightEntry<BucketCompletionSource[]>
 >();
 const keyCompletionCache = new Map<string, CompletionCacheEntry<string[]>>();
-const keyCompletionInflight = new Map<string, Promise<CompletionFetchResult<string[]>>>();
+const keyCompletionInflight = new Map<string, CompletionInflightEntry<string[]>>();
 
 const ToolCompletionParamsSchema = z.object({
   ref: z
@@ -152,17 +159,27 @@ function enforceCacheMax<T>(cache: Map<string, T>, maxEntries: number): void {
   }
 }
 
+function abortInflightEntry<T>(entry: CompletionInflightEntry<T> | undefined): void {
+  if (entry && !entry.settled) {
+    entry.controller.abort(abortError("Completion lookup cancelled"));
+  }
+}
+
 export function invalidateCompletionCache(cacheKey?: string): void {
   if (cacheKey) {
     bucketCompletionCache.delete(cacheKey);
+    abortInflightEntry(bucketCompletionInflight.get(cacheKey));
     bucketCompletionInflight.delete(cacheKey);
     keyCompletionCache.delete(cacheKey);
+    abortInflightEntry(keyCompletionInflight.get(cacheKey));
     keyCompletionInflight.delete(cacheKey);
     return;
   }
   bucketCompletionCache.clear();
+  for (const entry of bucketCompletionInflight.values()) abortInflightEntry(entry);
   bucketCompletionInflight.clear();
   keyCompletionCache.clear();
+  for (const entry of keyCompletionInflight.values()) abortInflightEntry(entry);
   keyCompletionInflight.clear();
 }
 
@@ -280,6 +297,23 @@ function raceWithCallerAbort<T>(promise: Promise<T>, signal: AbortSignal | undef
   });
 }
 
+function waitForCompletionInflight<T>(
+  entry: CompletionInflightEntry<T>,
+  callerSignal: AbortSignal | undefined,
+): Promise<CompletionFetchResult<T>> {
+  entry.waiters++;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    entry.waiters = Math.max(0, entry.waiters - 1);
+    if (entry.waiters === 0 && !entry.settled) {
+      entry.controller.abort(abortError("No active completion waiters"));
+    }
+  };
+  return raceWithCallerAbort(entry.promise, callerSignal).finally(release);
+}
+
 function logCompletionFetchFailure(
   kind: CompletionKind,
   config: B2Config,
@@ -308,7 +342,7 @@ function logCompletionFetchFailure(
 
 async function cachedPerCredential<T>(
   cache: Map<string, CompletionCacheEntry<T>>,
-  inflight: Map<string, Promise<CompletionFetchResult<T>>>,
+  inflight: Map<string, CompletionInflightEntry<T>>,
   options: {
     cacheKey: string;
     kind: CompletionKind;
@@ -328,9 +362,16 @@ async function cachedPerCredential<T>(
 
   const callerSignal = currentMcpRequestSignal();
   const existing = inflight.get(options.cacheKey);
-  if (existing) return raceWithCallerAbort(existing, callerSignal);
+  if (existing) return waitForCompletionInflight(existing, callerSignal);
 
-  const fetch = runWithMcpRequestSignal(undefined, async () => {
+  const controller = new AbortController();
+  const entry: CompletionInflightEntry<T> = {
+    controller,
+    promise: Promise.resolve({ values: options.empty(), degraded: true, truncated: false }),
+    settled: false,
+    waiters: 0,
+  };
+  entry.promise = runWithMcpRequestSignal(controller.signal, async () => {
     const startedAt = Date.now();
     try {
       const fetched = await options.fetch();
@@ -346,14 +387,19 @@ async function cachedPerCredential<T>(
       }
       return value;
     } catch (err) {
-      logCompletionFetchFailure(options.kind, options.config, err, Date.now() - startedAt);
+      if (!isAbortError(err)) {
+        logCompletionFetchFailure(options.kind, options.config, err, Date.now() - startedAt);
+      }
       return { values: options.empty(), degraded: true, truncated: false };
     } finally {
-      inflight.delete(options.cacheKey);
+      entry.settled = true;
+      if (inflight.get(options.cacheKey) === entry) {
+        inflight.delete(options.cacheKey);
+      }
     }
   });
-  inflight.set(options.cacheKey, fetch);
-  return raceWithCallerAbort(fetch, callerSignal);
+  inflight.set(options.cacheKey, entry);
+  return waitForCompletionInflight(entry, callerSignal);
 }
 
 async function cachedBucketCompletionSources(
