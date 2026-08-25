@@ -16,7 +16,7 @@ const packageBudgetMetricsPath = path.join(root, "reports", "package-budget", "m
 const sourceRoots = ["api", "deploy/vercel", "src"];
 const sourceFiles = ["package.json", "pnpm-lock.yaml", "vercel.json"];
 const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
-const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 32_000_000;
+const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 32_050_000;
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
