@@ -547,26 +547,44 @@ describe("B2AuthManager", () => {
     {
       name: "seconds",
       retryAfter: "2",
+      initialRetryDelayMs: 1,
       maxRetryDelayMs: 10_000,
       expectedDelayMs: 2000,
     },
     {
       name: "HTTP-date",
       retryAfter: () => new Date(Date.now() + 3000).toUTCString(),
+      initialRetryDelayMs: 1,
       maxRetryDelayMs: 10_000,
       expectedDelayMs: 3000,
     },
     {
       name: "clamped seconds",
       retryAfter: "60",
+      initialRetryDelayMs: 1,
       maxRetryDelayMs: 4000,
       expectedDelayMs: 4000,
     },
+    {
+      name: "malformed numeric-prefix fallback",
+      retryAfter: "1e6",
+      initialRetryDelayMs: 5000,
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 5000,
+    },
+    {
+      name: "fractional-seconds fallback",
+      retryAfter: "2.5",
+      initialRetryDelayMs: 5000,
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 5000,
+    },
   ])(
-    "honors Retry-After $name delays before retrying through the SDK transport",
-    async ({ retryAfter, maxRetryDelayMs, expectedDelayMs }) => {
+    "uses the $name Retry-After retry boundary through the SDK transport",
+    async ({ retryAfter, initialRetryDelayMs, maxRetryDelayMs, expectedDelayMs }) => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      vi.spyOn(Math, "random").mockReturnValue(0);
       _resetRetryBudget();
       const header = typeof retryAfter === "function" ? retryAfter() : retryAfter;
       let calls = 0;
@@ -583,7 +601,7 @@ describe("B2AuthManager", () => {
       });
       const transport = createMcpHttpTransport(inner, {
         maxRetries: 1,
-        initialRetryDelayMs: 1,
+        initialRetryDelayMs,
         maxRetryDelayMs,
         requestTimeoutMs: 30_000,
       });

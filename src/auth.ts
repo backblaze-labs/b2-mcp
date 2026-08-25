@@ -144,6 +144,7 @@ function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
 }
 
 const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);
+const RETRY_AFTER_HTTP_DATE = /^[A-Z][a-z]+(?:, | [A-Z][a-z]{2} )/;
 
 function bodyBudgetKey(body: HttpRequest["body"]): string {
   if (body === undefined || body === null) return "";
@@ -155,10 +156,15 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
 }
 
 function retryAfterSeconds(value: string): number | null {
-  const numeric = Number.parseInt(value, 10);
-  if (Number.isFinite(numeric)) return numeric;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const numeric = Number.parseInt(trimmed, 10);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
 
-  const retryAtMs = Date.parse(value);
+  if (!RETRY_AFTER_HTTP_DATE.test(trimmed)) return null;
+
+  const retryAtMs = Date.parse(trimmed);
   if (!Number.isFinite(retryAtMs)) return null;
 
   return Math.max(0, Math.ceil((retryAtMs - Date.now()) / 1000));
@@ -166,15 +172,17 @@ function retryAfterSeconds(value: string): number | null {
 
 function withNormalizedRetryAfterHeader(response: HttpResponse): HttpResponse {
   const retryAfter = response.headers.get("Retry-After");
-  if (!retryAfter) return response;
+  if (retryAfter === null) return response;
 
   const seconds = retryAfterSeconds(retryAfter);
-  if (seconds === null || retryAfter === String(seconds)) return response;
+  if (seconds !== null && retryAfter === String(seconds)) return response;
 
-  // RetryTransport currently consumes Retry-After as seconds; accept HTTP-date
-  // values at the MCP transport boundary and let the SDK keep applying clamps.
   const headers = new Headers(response.headers);
-  headers.set("Retry-After", String(seconds));
+  if (seconds === null) {
+    headers.delete("Retry-After");
+  } else {
+    headers.set("Retry-After", String(seconds));
+  }
 
   return {
     status: response.status,
