@@ -4,7 +4,10 @@
  * 2026-07-28 envelope and assert protocol behavior stays sessionless.
  */
 
+import { S3Client } from "@aws-sdk/client-s3";
+import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import {
+  type AuthInfo,
   CLIENT_CAPABILITIES_META_KEY,
   CLIENT_INFO_META_KEY,
   PROTOCOL_VERSION_META_KEY,
@@ -15,27 +18,25 @@ import {
   type HttpServerOptions,
 } from "../../src/http-server";
 import { invalidateAuthManagerCache } from "../../src/server";
-import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { S3Client } from "@aws-sdk/client-s3";
 import {
-  JSON_HEADERS,
   closeHttpServer,
   creds,
+  JSON_HEADERS,
   listenOnLocalhost,
   request,
   restoreEnv,
   saveEnv,
   setDefaultHttpTestEnv,
 } from "../support/http";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport } from "../support/sdk-test-helpers";
 import {
-  MODERN_PROTOCOL_VERSION,
   closeClient,
   connectHttpClient,
+  MODERN_PROTOCOL_VERSION,
   modernBody,
   modernHeaders,
 } from "./support/clients";
-import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { installSdkTransport } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -85,8 +86,16 @@ function parsedJson(body: string): any {
   return JSON.parse(body);
 }
 
+function parseResourceContent(result: any): any {
+  return JSON.parse(result.contents[0].text);
+}
+
 function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
   return modernBody("tools/call", { name, arguments: args }, id);
+}
+
+function readResourceBody(uri: string, id = 1): string {
+  return modernBody("resources/read", { uri }, id);
 }
 
 function elicitationCallToolBody(
@@ -172,6 +181,159 @@ describe("HTTP handler (MCP 2026-07-28)", () => {
       expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
     } finally {
       await closeClient(client);
+    }
+  });
+
+  it("right-sizes resources for stateless HTTP capabilities and OAuth scopes", async () => {
+    const bucketName = "protocol-http-resources";
+    const creator = await connectHttpClient(port, {
+      era: "modern",
+      headers: creds,
+      cachePartition: "resource-creator",
+    });
+    try {
+      expect(
+        (
+          await creator.client.callTool({
+            name: "b2_create_bucket",
+            arguments: { bucketName, bucketType: "allPrivate" },
+          })
+        ).isError,
+      ).not.toBe(true);
+    } finally {
+      await closeClient(creator.client);
+    }
+
+    const scopesFromHeader = (value: string | string[] | undefined): string[] =>
+      (Array.isArray(value) ? value.join(" ") : (value ?? ""))
+        .split(/[,\s]+/)
+        .map((scope) => scope.trim())
+        .filter(Boolean);
+    const authInfoForRequest = (
+      req: Parameters<NonNullable<HttpServerOptions["getAuthInfo"]>>[0],
+    ): AuthInfo => {
+      const tenant = String(req.headers["x-b2-key-id"] ?? "unknown");
+      return {
+        token: `token-${tenant}`,
+        clientId: `client-${tenant}`,
+        scopes: scopesFromHeader(req.headers["x-test-scopes"]),
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        extra: { iss: "https://issuer.example", sub: tenant },
+      };
+    };
+    const capabilitiesByKey: Record<string, string[]> = {
+      "tenant-read": ["listBuckets"],
+      "tenant-no-list": ["readFiles"],
+      "tenant-denied-scope": ["listBuckets"],
+    };
+    await replaceHandle({
+      getAuthInfo: authInfoForRequest,
+      fetchCapabilities: vi.fn(async (config) => capabilitiesByKey[config.applicationKeyId] ?? []),
+    });
+
+    const readHeaders = {
+      "x-b2-key-id": "tenant-read",
+      "x-b2-key": "tenant-read-secret",
+      "x-test-scopes": "b2:read",
+    };
+    const noListHeaders = {
+      "x-b2-key-id": "tenant-no-list",
+      "x-b2-key": "tenant-no-list-secret",
+      "x-test-scopes": "b2:read",
+    };
+    const deniedScopeHeaders = {
+      "x-b2-key-id": "tenant-denied-scope",
+      "x-b2-key": "tenant-denied-scope-secret",
+      "x-test-scopes": "openid profile",
+    };
+    const clients: Awaited<ReturnType<typeof connectHttpClient>>[] = [];
+    try {
+      const readClient = await connectHttpClient(port, {
+        era: "modern",
+        headers: readHeaders,
+        cachePartition: "tenant-read",
+      });
+      clients.push(readClient);
+      const readResources = await readClient.client.listResources(undefined, {
+        cacheMode: "refresh",
+      });
+      expect(readResources.resources.map((resource) => resource.uri).sort()).toEqual([
+        "b2://capabilities",
+        "b2://server/configuration",
+        "b2://server/destructive-policy",
+        "b2://server/tool-profile",
+      ]);
+      const readTemplates = await readClient.client.listResourceTemplates(undefined, {
+        cacheMode: "refresh",
+      });
+      expect(readTemplates.resourceTemplates).toContainEqual(
+        expect.objectContaining({
+          name: "b2_bucket_config",
+          uriTemplate: "b2://bucket/{bucketName}",
+          mimeType: "application/json",
+        }),
+      );
+      const readCapabilities = parseResourceContent(
+        await readClient.client.readResource(
+          { uri: "b2://capabilities" },
+          { cacheMode: "refresh" },
+        ),
+      );
+      expect(readCapabilities).toMatchObject({
+        resource: "capability-summary",
+        capabilities: ["listBuckets"],
+      });
+      const bucketConfig = parseResourceContent(
+        await readClient.client.readResource(
+          { uri: `b2://bucket/${bucketName}` },
+          { cacheMode: "refresh" },
+        ),
+      );
+      expect(bucketConfig.bucket).toMatchObject({
+        bucketName,
+        bucketType: "allPrivate",
+        visibility: "private",
+      });
+
+      const noListClient = await connectHttpClient(port, {
+        era: "modern",
+        headers: noListHeaders,
+        cachePartition: "tenant-no-list",
+      });
+      clients.push(noListClient);
+      const noListTemplates = await noListClient.client.listResourceTemplates(undefined, {
+        cacheMode: "refresh",
+      });
+      expect(noListTemplates.resourceTemplates).not.toContainEqual(
+        expect.objectContaining({ name: "b2_bucket_config" }),
+      );
+      const noListRead = await request(port, "POST", "/mcp", {
+        headers: { ...noListHeaders, ...modernHeaders("resources/read") },
+        body: readResourceBody(`b2://bucket/${bucketName}`),
+      });
+      expect(noListRead.status).toBe(400);
+      expect(parsedJson(noListRead.body).error).toBeDefined();
+
+      const deniedResources = await request(port, "POST", "/mcp", {
+        headers: { ...deniedScopeHeaders, ...modernHeaders("resources/list") },
+        body: modernBody("resources/list"),
+      });
+      const deniedTemplates = await request(port, "POST", "/mcp", {
+        headers: { ...deniedScopeHeaders, ...modernHeaders("resources/templates/list") },
+        body: modernBody("resources/templates/list"),
+      });
+      expect(deniedResources.status).toBe(404);
+      expect(deniedTemplates.status).toBe(404);
+      expect(parsedJson(deniedResources.body).error).toBeDefined();
+      expect(parsedJson(deniedTemplates.body).error).toBeDefined();
+      const deniedRead = await request(port, "POST", "/mcp", {
+        headers: { ...deniedScopeHeaders, ...modernHeaders("resources/read") },
+        body: readResourceBody("b2://capabilities"),
+      });
+      expect(deniedRead.status).toBe(400);
+      expect(parsedJson(deniedRead.body).error).toBeDefined();
+    } finally {
+      await Promise.all(clients.map(({ client }) => closeClient(client)));
     }
   });
 
