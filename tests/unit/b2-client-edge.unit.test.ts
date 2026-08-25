@@ -608,6 +608,58 @@ describe("B2Client native edge branches", () => {
           },
         },
       };
+      const normalizedBucketOptions = {
+        bucketInfo: { env: "test" },
+        corsRules: [
+          {
+            corsRuleName: "rule-one",
+            allowedOrigins: ["https://example.com"],
+            allowedHeaders: null,
+            allowedOperations: ["b2_download_file_by_name"],
+            exposeHeaders: null,
+            maxAgeSeconds: 3600,
+          },
+          {
+            corsRuleName: "rule-two",
+            allowedOrigins: ["https://ops.example.com"],
+            allowedHeaders: ["authorization"],
+            allowedOperations: ["b2_upload_file"],
+            exposeHeaders: ["x-bz-file-id"],
+            maxAgeSeconds: 60,
+          },
+        ],
+        defaultServerSideEncryption: { mode: "none" },
+        defaultRetention: { mode: "none", period: null },
+        fileLockEnabled: false,
+        lifecycleRules: [
+          {
+            fileNamePrefix: "tmp/",
+            daysFromHidingToDeleting: null,
+            daysFromUploadingToHiding: 3,
+            daysFromStartingToCancelingUnfinishedLargeFiles: null,
+          },
+        ],
+        replicationConfiguration: {
+          asReplicationSource: {
+            sourceApplicationKeyId: "source-key-id",
+            replicationRules: [
+              {
+                replicationRuleName: "copy-all",
+                destinationBucketId: "dest-bucket-id",
+                fileNamePrefix: "",
+                includeExistingFiles: false,
+                isEnabled: true,
+                priority: 1,
+              },
+            ],
+          },
+          asReplicationDestination: {
+            sourceToDestinationKeyMapping: {
+              "source-key-id": "destination-key-id",
+            },
+          },
+        },
+      };
 
       await expect(
         client.createBucket({
@@ -625,60 +677,18 @@ describe("B2Client native edge branches", () => {
         }),
       ).resolves.toMatchObject({ bucketName: "updated-bucket" });
 
-      expect(createBucket).toHaveBeenCalledWith(
-        expect.objectContaining({
-          bucketInfo: { env: "test" },
-          corsRules: [
-            expect.objectContaining({ allowedHeaders: null, exposeHeaders: null }),
-            expect.objectContaining({
-              allowedHeaders: ["authorization"],
-              exposeHeaders: ["x-bz-file-id"],
-            }),
-          ],
-          defaultServerSideEncryption: { mode: "none" },
-          defaultRetention: { mode: "none", period: null },
-          fileLockEnabled: false,
-          lifecycleRules: [
-            expect.objectContaining({
-              fileNamePrefix: "tmp/",
-              daysFromHidingToDeleting: null,
-              daysFromUploadingToHiding: 3,
-              daysFromStartingToCancelingUnfinishedLargeFiles: null,
-            }),
-          ],
-          replicationConfiguration: {
-            asReplicationSource: {
-              sourceApplicationKeyId: "source-key-id",
-              replicationRules: [
-                {
-                  replicationRuleName: "copy-all",
-                  destinationBucketId: "dest-bucket-id",
-                  fileNamePrefix: "",
-                  includeExistingFiles: false,
-                  isEnabled: true,
-                  priority: 1,
-                },
-              ],
-            },
-            asReplicationDestination: {
-              sourceToDestinationKeyMapping: {
-                "source-key-id": "destination-key-id",
-              },
-            },
-          },
-        }),
-      );
-      expect(updateBucket).toHaveBeenCalledWith(
-        "https://api005.backblazeb2.com",
-        "native-token",
-        expect.objectContaining({
-          accountId: "test-account-123",
-          bucketId: "bucket-1",
-          bucketType: "allPublic",
-          ifRevisionIs: 7,
-          replicationConfiguration: expect.any(Object),
-        }),
-      );
+      expect(createBucket).toHaveBeenCalledWith({
+        bucketName: "created-bucket",
+        bucketType: "allPrivate",
+        ...normalizedBucketOptions,
+      });
+      expect(updateBucket).toHaveBeenCalledWith("https://api005.backblazeb2.com", "native-token", {
+        accountId: "test-account-123",
+        bucketId: "bucket-1",
+        bucketType: "allPublic",
+        ...normalizedBucketOptions,
+        ifRevisionIs: 7,
+      });
     });
 
     it("normalizes nullable multi-bucket key scopes", async () => {
