@@ -703,6 +703,9 @@
     "discover": {
       "supportedVersions": ["2026-07-28"],
       "capabilities": {
+        "prompts": {
+          "listChanged": true
+        },
         "tools": {
           "listChanged": true
         }

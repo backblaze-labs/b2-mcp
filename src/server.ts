@@ -2,12 +2,13 @@ import {
   createMcpServer,
   getMcpClientCapabilities,
   getMcpNegotiatedProtocolVersion,
+  PromptRegistrationAdapter,
   ToolRegistrationAdapter,
   type McpServer,
   type ToolCallback,
   type ToolRegistrar,
 } from "./mcp.js";
-export { getRegisteredTools } from "./mcp.js";
+export { getRegisteredPrompts, getRegisteredTools } from "./mcp.js";
 import { z } from "zod";
 import type { B2Config, SecretSinkConfig } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
@@ -64,6 +65,7 @@ import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
 import { isDestructiveTool } from "./utils/destructive-gate.js";
+import { isWorkflowPromptEnabled, registerB2WorkflowPrompts } from "./prompts.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
@@ -196,6 +198,7 @@ export function createServer(
       ].join("\n"),
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
+        "prompts/list": { ttlMs: 30_000, cacheScope: "private" },
         "tools/list": { ttlMs: 30_000, cacheScope: "private" },
       },
       requestState: {
@@ -216,6 +219,9 @@ export function createServer(
   const capsSet = filterActive ? new Set(capabilities) : null;
   const oauthAllowsRead = oauthScopesAllowOperation(oauthScopes, "read");
   const oauthAllowsWrite = oauthScopesAllowOperation(oauthScopes, "write");
+  const promptRegistrar = new PromptRegistrationAdapter(server, {
+    shouldRegister: (name) => isWorkflowPromptEnabled(name, capsSet, oauthScopes),
+  });
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) =>
       isToolEnabled(name, capsSet) && isToolAllowedByOAuthScopes(name, oauthScopes),
@@ -296,6 +302,9 @@ export function createServer(
   // Phase 2 is live per-bucket S3 listing.
   registerInsightTools(registrar, b2Client, auth, reportClient);
 
+  // ── MCP prompts — thin guided workflow entry points ──────────────────────
+  registerB2WorkflowPrompts(promptRegistrar);
+
   // Rolling deploy compatibility: clients can cache tools/list entries for
   // durable-secret-producing tools. In off mode keep those names callable with
   // a stable non-secret unavailable error. File mode keeps filtered durable
@@ -313,8 +322,9 @@ export function createServer(
     );
   }
 
+  const promptCount = promptRegistrar.commit();
   const toolCount = registrar.commit();
-  logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
+  logger.info({ toolCount, promptCount, version: VERSION, outputFormat }, "server.ready");
 
   const originalClose = server.close.bind(server);
   let cleanedUp = false;
