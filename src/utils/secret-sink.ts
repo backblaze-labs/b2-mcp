@@ -31,6 +31,7 @@ export const secretSinkFileOpsForTests = {
   fsyncSync: fs.fsyncSync,
   unlinkSync: fs.unlinkSync,
   renameSync: fs.renameSync,
+  writeSync: fs.writeSync,
 };
 
 let inlineWarningEmitted = false;
@@ -274,7 +275,7 @@ function writeAll(fd: number, line: string): void {
   const buffer = new TextEncoder().encode(line);
   let offset = 0;
   while (offset < buffer.length) {
-    const written = fs.writeSync(fd, buffer, offset, buffer.length - offset);
+    const written = secretSinkFileOpsForTests.writeSync(fd, buffer, offset, buffer.length - offset);
     if (written <= 0) {
       throw new Error(`${SECRET_SINK_FILE_ENV} write made no progress`);
     }
