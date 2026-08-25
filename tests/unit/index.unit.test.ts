@@ -4,7 +4,6 @@ import * as http from "http";
 import type { AddressInfo } from "net";
 import * as path from "path";
 import { helpText } from "../../src/cli";
-import { main, runCli } from "../../src/cli-runner";
 import { CredentialResolutionError } from "../../src/credentials";
 import * as packageRoot from "../../src/index";
 import * as serverModule from "../../src/server";
@@ -32,6 +31,26 @@ const credentialEnvKeys = [
 const transportEnvKeys = ["B2_MCP_TRANSPORT"] as const;
 const executableEnvKeys = [...credentialEnvKeys, ...transportEnvKeys] as const;
 const { startStdio } = packageRoot;
+
+type IndexTestSeams = {
+  runCli(argv?: string[]): Promise<void>;
+  handleCliError(err: unknown): never;
+};
+
+function indexTestSeams(): IndexTestSeams {
+  const seams = (globalThis as typeof globalThis & { __b2McpIndexTestSeams?: IndexTestSeams })
+    .__b2McpIndexTestSeams;
+  if (!seams) throw new Error("index test seams were not installed");
+  return seams;
+}
+
+async function runMain(argv: string[]): Promise<void> {
+  try {
+    await indexTestSeams().runCli(argv);
+  } catch (err) {
+    indexTestSeams().handleCliError(err);
+  }
+}
 
 const tsxBin = path.join(
   process.cwd(),
@@ -201,7 +220,7 @@ describe("CLI dispatch", () => {
   it("prints help without starting a transport", async () => {
     const loadConfig = vi.spyOn(serverModule, "loadConfig");
 
-    await runCli(["--help"]);
+    await indexTestSeams().runCli(["--help"]);
 
     expect(stdout).toHaveBeenCalledWith(`${helpText()}\n`);
     expect(loadConfig).not.toHaveBeenCalled();
@@ -210,7 +229,7 @@ describe("CLI dispatch", () => {
   it("prints the package version without starting a transport", async () => {
     const loadConfig = vi.spyOn(serverModule, "loadConfig");
 
-    await runCli(["--version"]);
+    await indexTestSeams().runCli(["--version"]);
 
     expect(stdout).toHaveBeenCalledWith(`${VERSION}\n`);
     expect(loadConfig).not.toHaveBeenCalled();
@@ -220,7 +239,7 @@ describe("CLI dispatch", () => {
     const httpServer = await import("../../src/http-server.js");
     const startHttp = vi.mocked(httpServer.startHttp).mockResolvedValue(undefined);
 
-    await runCli(["http", "--port", "4321"]);
+    await indexTestSeams().runCli(["http", "--port", "4321"]);
 
     expect(startHttp).toHaveBeenCalledWith({ port: 4321 });
   });
@@ -238,7 +257,7 @@ describe("CLI dispatch", () => {
         }) as ReturnType<typeof stdioTransport.serveStdio>,
     );
 
-    await runCli([]);
+    await indexTestSeams().runCli([]);
 
     expect(stdioTransport.serveStdio).toHaveBeenCalledOnce();
   });
@@ -266,7 +285,7 @@ describe("CLI fatal-error handler", () => {
     ["CLI usage", ["--transport", "sse"]],
     ["port usage", ["http", "--port", "nope"]],
   ])("exits with code 2 for %s errors", async (_name, argv) => {
-    await expect(main(argv)).rejects.toThrow("process.exit(2)");
+    await expect(runMain(argv)).rejects.toThrow("process.exit(2)");
 
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining("b2-mcp: "));
     expect(stderr).toHaveBeenCalledWith(expect.stringContaining("\n\nUsage: b2-mcp"));
@@ -280,7 +299,7 @@ describe("CLI fatal-error handler", () => {
       throw new Error("startup failed");
     });
 
-    await expect(main(["stdio"])).rejects.toThrow("process.exit(1)");
+    await expect(runMain(["stdio"])).rejects.toThrow("process.exit(1)");
 
     expect(stderr).toHaveBeenCalledWith("b2-mcp: startup failed\n");
     expect(fatal).toHaveBeenCalledWith({ err: "startup failed" }, "server.fatal");
