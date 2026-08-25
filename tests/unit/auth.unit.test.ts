@@ -566,6 +566,13 @@ describe("B2AuthManager", () => {
       expectedDelayMs: 4000,
     },
     {
+      name: "huge seconds clamp",
+      retryAfter: "1000000000000000000000",
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 4000,
+      expectedDelayMs: 4000,
+    },
+    {
       name: "malformed numeric-prefix fallback",
       retryAfter: "1e6",
       initialRetryDelayMs: 5000,

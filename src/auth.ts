@@ -155,33 +155,30 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
   return Object.prototype.toString.call(body);
 }
 
-function retryAfterSeconds(value: string): number | null {
+function normalizedRetryAfter(value: string): string | null {
   const trimmed = value.trim();
-  if (/^\d+$/.test(trimmed)) {
-    const numeric = Number.parseInt(trimmed, 10);
-    return Number.isFinite(numeric) ? numeric : null;
-  }
+  if (/^\d+$/.test(trimmed)) return trimmed;
 
   if (!RETRY_AFTER_HTTP_DATE.test(trimmed)) return null;
 
   const retryAtMs = Date.parse(trimmed);
   if (!Number.isFinite(retryAtMs)) return null;
 
-  return Math.max(0, Math.ceil((retryAtMs - Date.now()) / 1000));
+  return String(Math.max(0, Math.ceil((retryAtMs - Date.now()) / 1000)));
 }
 
 function withNormalizedRetryAfterHeader(response: HttpResponse): HttpResponse {
   const retryAfter = response.headers.get("Retry-After");
   if (retryAfter === null) return response;
 
-  const seconds = retryAfterSeconds(retryAfter);
-  if (seconds !== null && retryAfter === String(seconds)) return response;
+  const normalized = normalizedRetryAfter(retryAfter);
+  if (normalized !== null && retryAfter === normalized) return response;
 
   const headers = new Headers(response.headers);
-  if (seconds === null) {
+  if (normalized === null) {
     headers.delete("Retry-After");
   } else {
-    headers.set("Retry-After", String(seconds));
+    headers.set("Retry-After", normalized);
   }
 
   return {
