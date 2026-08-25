@@ -116,6 +116,23 @@ describe("MCP resources", () => {
     ).toBeUndefined();
   });
 
+  it("redacts caller-controlled resource URIs in audit logs", async () => {
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
+    const server = createServer(resourceTestConfig, ["listBuckets"]);
+    const registry = getRegisteredResources(server);
+    const resource = registry?.resources.b2_capability_summary;
+    expect(resource).toBeDefined();
+
+    await resource?.read(new URL(`b2://capabilities/${CANARY}`), {} as any);
+
+    const audit = infoSpy.mock.calls.find(([, message]) => message === "resource.read")?.[0];
+    expect(audit).toMatchObject({
+      resource: "b2_capability_summary",
+      uri: "b2://capabilities/[redacted]",
+    });
+    expect(JSON.stringify(infoSpy.mock.calls)).not.toContain(CANARY);
+  });
+
   it("reads bucket control-plane JSON without exposing notification secrets", async () => {
     const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const fake = new DeterministicB2NativeFake({

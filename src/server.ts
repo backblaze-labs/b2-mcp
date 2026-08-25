@@ -3,45 +3,26 @@ import {
   getMcpClientCapabilities,
   getMcpNegotiatedProtocolVersion,
   getRegisteredTools,
-  ResourceRegistrationAdapter,
-  ToolRegistrationAdapter,
   type McpServer,
   type ResourceReadCallback,
+  ResourceRegistrationAdapter,
   type ResourceTemplateReadCallback,
   type ToolCallback,
   type ToolRegistrar,
+  ToolRegistrationAdapter,
 } from "./mcp.js";
+
 export { getRegisteredResources, getRegisteredTools } from "./mcp.js";
+
 import { z } from "zod";
-import type { B2Config, SecretSinkConfig } from "./utils/types.js";
-import { parseIntEnv } from "./utils/config.js";
-import { isSanitizedMcpResponse, parseB2Error, parseErrorText, toolError } from "./utils/errors.js";
-import {
-  DEFAULT_MCP_OUTPUT_FORMAT,
-  outputFormatInstructions,
-  runWithResultSerializationOptions,
-} from "./utils/result-serializer.js";
-import { VERSION } from "./version.js";
-import { flushLogsSync, logger } from "./utils/logger.js";
 import { B2AuthManager } from "./auth.js";
+import { registerBucketTools } from "./b2/buckets.js";
 import { B2Client } from "./b2/client.js";
+import { registerInsightTools } from "./b2/insights.js";
+import { registerKeyTools } from "./b2/keys.js";
+import { registerObjectLockTools } from "./b2/object-lock.js";
+import { registerPartnerTools } from "./b2/partner.js";
 import { B2ReportClient } from "./b2/report-client.js";
-import { createAuthorizedS3Client } from "./s3/client.js";
-import {
-  DURABLE_SECRET_PRODUCING_TOOLS,
-  isToolAllowedByOAuthScopes,
-  isToolEnabled,
-  oauthScopesAllowOperation,
-} from "./utils/tool-capabilities.js";
-import {
-  sanitizeError,
-  sanitizeMcpResponse,
-  sanitizerOptionsFromConfig,
-  sanitizeProviderCode,
-  sanitizeProviderRequestId,
-  sanitizeText,
-  runWithSanitizerOptions,
-} from "./utils/secret-sanitizer.js";
 import {
   CredentialResolutionError,
   fingerprintConfig,
@@ -50,29 +31,48 @@ import {
 } from "./credentials.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import {
-  createDestructiveElicitationRequestStateCodec,
-  maybeRequireDestructiveElicitation,
-  type DestructiveElicitationAuditEvent,
-  type DestructiveElicitationContextProviders,
-} from "./utils/destructive-elicitation.js";
-
-import { registerBucketTools } from "./b2/buckets.js";
-import { registerKeyTools } from "./b2/keys.js";
-import { registerObjectLockTools } from "./b2/object-lock.js";
-import { registerPartnerTools } from "./b2/partner.js";
-import { registerInsightTools } from "./b2/insights.js";
-
-import { registerS3BucketTools } from "./s3/buckets.js";
-import { registerS3ObjectTools } from "./s3/objects.js";
-import { registerS3MultipartTools } from "./s3/multipart.js";
-import { registerS3PresignedTools } from "./s3/presigned.js";
-import { registerS3ExtraTools } from "./s3/extras.js";
-import { isDestructiveTool } from "./utils/destructive-gate.js";
-import {
   isResourceAllowedByOAuthScopes,
   isResourceEnabled,
   registerB2Resources,
 } from "./resources.js";
+import { registerS3BucketTools } from "./s3/buckets.js";
+import { createAuthorizedS3Client } from "./s3/client.js";
+import { registerS3ExtraTools } from "./s3/extras.js";
+import { registerS3MultipartTools } from "./s3/multipart.js";
+import { registerS3ObjectTools } from "./s3/objects.js";
+import { registerS3PresignedTools } from "./s3/presigned.js";
+import { parseIntEnv } from "./utils/config.js";
+import {
+  createDestructiveElicitationRequestStateCodec,
+  type DestructiveElicitationAuditEvent,
+  type DestructiveElicitationContextProviders,
+  maybeRequireDestructiveElicitation,
+} from "./utils/destructive-elicitation.js";
+import { isDestructiveTool } from "./utils/destructive-gate.js";
+import { isSanitizedMcpResponse, parseB2Error, parseErrorText, toolError } from "./utils/errors.js";
+import { flushLogsSync, logger } from "./utils/logger.js";
+import {
+  DEFAULT_MCP_OUTPUT_FORMAT,
+  outputFormatInstructions,
+  runWithResultSerializationOptions,
+} from "./utils/result-serializer.js";
+import {
+  runWithSanitizerOptions,
+  sanitizeError,
+  sanitizeMcpResponse,
+  sanitizeProviderCode,
+  sanitizeProviderRequestId,
+  sanitizerOptionsFromConfig,
+  sanitizeText,
+} from "./utils/secret-sanitizer.js";
+import {
+  DURABLE_SECRET_PRODUCING_TOOLS,
+  isToolAllowedByOAuthScopes,
+  isToolEnabled,
+  oauthScopesAllowOperation,
+} from "./utils/tool-capabilities.js";
+import type { B2Config, SecretSinkConfig } from "./utils/types.js";
+import { VERSION } from "./version.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
@@ -655,9 +655,9 @@ export function createAuditedResourceCallback<TCallback extends AnyResourceCallb
 
   return async function auditedResourceCallback(this: unknown, ...args: unknown[]) {
     const start = Date.now();
-    const uri = resourceUriFromArgs(args);
     const extra = args[args.length - 1] as any;
     const sanitizerOptions = sanitizerOptionsFromConfig(config);
+    const uri = sanitizeText(resourceUriFromArgs(args), sanitizerOptions);
     const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
     try {
       if (signal?.aborted) {
