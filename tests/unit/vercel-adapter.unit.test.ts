@@ -283,6 +283,14 @@ describe("Vercel adapter", () => {
 
   it.each([
     ["unapproved client", { client_id: "unreviewed-okta-app" }],
+    [
+      "conflicting client claims",
+      { client_id: OKTA_CONNECTOR_CLIENT_ID, azp: "unreviewed-okta-app" },
+    ],
+    [
+      "conflicting authorized-party claims",
+      { client_id: "unreviewed-okta-app", azp: OKTA_CONNECTOR_CLIENT_ID },
+    ],
     ["missing client claim", { client_id: undefined, azp: undefined }],
   ])("rejects subjectless Okta admission for %s", async (_name, overrides) => {
     setSubjectlessOktaEnv();

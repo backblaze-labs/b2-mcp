@@ -276,6 +276,7 @@ describe("OAuthIntrospectionVerifier", () => {
     ["null token algorithm", { alg: null }, /algorithm/i],
     ["empty token algorithm", { alg: "" }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
+    ["mixed token algorithm aliases", { alg: "RS256", token_alg: "HS256" }, /algorithm/i],
     ["missing deployment scope", { scope: "profile" }, /deployment scope/i],
   ])("rejects %s tokens", async (_name, overrides, message) => {
     const { verifier } = verifierFor(claims(overrides));
@@ -1698,6 +1699,7 @@ describe("validatePreverifiedOAuthAuthInfo", () => {
     ["null token algorithm", { alg: null }, /algorithm/i],
     ["empty token algorithm", { alg: "" }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
+    ["mixed token algorithm aliases", { alg: "RS256", token_alg: "HS256" }, /algorithm/i],
   ])("rejects preverified AuthInfo with %s", (_name, extraOverrides, message) => {
     expect(() =>
       validatePreverifiedOAuthAuthInfo(

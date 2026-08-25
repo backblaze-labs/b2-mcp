@@ -131,7 +131,8 @@ function validateVercelAdmittedAuthInfo(
 ): void {
   if (!subjectlessIssuerAdmissionEnabled(oauthConfig)) return;
   const allowed = new Set(allowedOAuthClientIds());
-  if (verifiedOAuthClientClaims(authInfo).some((clientId) => allowed.has(clientId))) return;
+  const clientClaims = verifiedOAuthClientClaims(authInfo);
+  if (clientClaims.length > 0 && clientClaims.every((clientId) => allowed.has(clientId))) return;
   throw new OAuthError(OAuthErrorCode.InvalidToken, "OAuth client is not accepted");
 }
 
