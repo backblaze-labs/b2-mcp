@@ -502,25 +502,11 @@ export function destructiveConfirmToolsFromTools(
     .sort();
 }
 
-export function fixtureHash(
-  fixture: Pick<
-    ToolFixture,
-    | "names"
-    | "resourceNames"
-    | "resourceTemplateNames"
-    | "resourceTemplates"
-    | "resources"
-    | "tools"
-  >,
-): string {
+export function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {
   return sha256(
     JSON.stringify({
       names: fixture.names,
       tools: fixture.tools,
-      resourceNames: fixture.resourceNames,
-      resources: fixture.resources,
-      resourceTemplateNames: fixture.resourceTemplateNames,
-      resourceTemplates: fixture.resourceTemplates,
     }),
   );
 }
