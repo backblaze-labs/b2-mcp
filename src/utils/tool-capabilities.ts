@@ -297,7 +297,7 @@ export const B2_WORKFLOW_PROMPT_REQUIREMENTS = {
   },
   "b2-provision-object-lock-bucket": {
     requiredTools: ["b2_create_bucket", "b2_update_bucket", "b2_list_buckets"],
-    allCapabilities: ["writeBucketRetentions"],
+    allCapabilities: ["writeBucketRetentions", "readBucketRetentions"],
     oauthOperation: "admin",
   },
   "b2-review-event-notifications": {

@@ -225,6 +225,8 @@ export function createServer(
   const oauthAllowsWrite = oauthScopesAllowOperation(oauthScopes, "write");
   const promptRegistrar = new PromptRegistrationAdapter(server, {
     shouldRegister: (name) => isWorkflowPromptEnabled(name, capsSet, oauthScopes),
+    wrapCallback: (_name, callback) => (args, extra) =>
+      runWithSanitizerOptions(sanitizerOptionsFromConfig(config), () => callback(args, extra)),
   });
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: (name) =>

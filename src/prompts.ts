@@ -1,5 +1,10 @@
 import { z } from "zod";
 import type { PromptRegistrar } from "./mcp.js";
+import {
+  currentSanitizerOptions,
+  sanitizeText,
+  SECRET_SANITIZER_REDACTION,
+} from "./utils/secret-sanitizer.js";
 
 export {
   B2_WORKFLOW_PROMPT_NAMES,
@@ -28,10 +33,10 @@ const SAFETY_CONSTRAINTS = [
 const SKILLS_COORDINATION_NOTE =
   "Guided workflow note: MCP prompts are thin client-invocable entry points for common B2 workflows. The optional Backblaze B2 skills pack remains the deeper operating playbook; keep prompt guidance high-level and aligned with those maintained skills instead of forking long procedures here.";
 
-const secretAssignmentPattern =
-  /\b(applicationKey|masterKey|secret|token|password|hmacSha256SigningSecret|authorization|api[_-]?key|x-bz-info-[a-z0-9_-]+)(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi;
+const b2ApplicationKeySecretPattern =
+  /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]{32}(?![A-Za-z0-9_-]))(?=[A-Za-z0-9_-]*(?:[_-]|[A-Z]))(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*(?:[_-]|[0-9]))[A-Za-z0-9_-]{32}(?![A-Za-z0-9_-])/g;
 const highEntropySecretPattern =
-  /\b(?:sk-[A-Za-z0-9_-]{16,}|sk-proj-[A-Za-z0-9_-]{16,}|[A-Za-z0-9+/]{40,}={0,2})\b/g;
+  /\b(?:sk-proj-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|[A-Za-z0-9+/_-]{40,}={0,2})\b/g;
 
 const bucketNameArg = z.string().min(1).max(ARG_LIMITS.bucketName);
 const requiredShortTextArg = z.string().min(1).max(ARG_LIMITS.shortText);
@@ -64,9 +69,9 @@ function workflowPrompt(description: string, text: string) {
 }
 
 function redactSecretLikeText(value: string): string {
-  return value
-    .replace(secretAssignmentPattern, "$1$2<redacted>")
-    .replace(highEntropySecretPattern, "<redacted-secret-like-value>");
+  return sanitizeText(value, currentSanitizerOptions())
+    .replace(b2ApplicationKeySecretPattern, SECRET_SANITIZER_REDACTION)
+    .replace(highEntropySecretPattern, SECRET_SANITIZER_REDACTION);
 }
 
 function safeArgValue(value: string | undefined, fallback: string, maxLength: number): string {
@@ -267,7 +272,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
           "Follow this sequence:",
           "1. Confirm the requested bucket name, retention mode, and duration. For compliance mode, state that retention cannot be shortened or removed after objects are protected.",
           "2. Call b2_create_bucket with bucketName, bucketType allPrivate, and fileLockEnabled true.",
-          "3. From the create result, take bucketId and call b2_update_bucket with fileLockEnabled true and defaultRetention { mode, period: { duration, unit } }.",
+          "3. From the create result, take bucketId and call b2_update_bucket with fileLockEnabled true and defaultRetention { mode, period: { duration: Number(retentionDuration), unit: retentionUnit } } using the caller data block values.",
           "4. If b2_update_bucket asks for destructive confirmation because the requested change weakens protection or changes another high-impact setting, stop for MCP elicitation or explicit user approval.",
           "5. Call b2_list_buckets filtered to the bucket name or ID and summarize bucket type, fileLockEnabled, defaultRetention, and revision.",
         ),

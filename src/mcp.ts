@@ -89,6 +89,7 @@ interface ToolRegistrationAdapterOptions {
 
 interface PromptRegistrationAdapterOptions {
   shouldRegister?: (name: string) => boolean;
+  wrapCallback?: (name: string, cb: PromptCallback) => PromptCallback;
 }
 
 const REGISTERED_TOOLS = Symbol("b2-mcp.registeredTools");
@@ -222,7 +223,8 @@ export class PromptRegistrationAdapter implements PromptRegistrar {
     if (this.options.shouldRegister && !this.options.shouldRegister(name)) return;
 
     const argsSchema = z.object(config.argsSchema ?? {});
-    const callback = cb as PromptCallback;
+    const callback =
+      this.options.wrapCallback?.(name, cb as PromptCallback) ?? (cb as PromptCallback);
     this.state.add(
       name,
       {
