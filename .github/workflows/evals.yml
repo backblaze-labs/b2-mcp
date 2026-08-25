@@ -3,9 +3,8 @@ name: LLM Evals
 # Cost-controlled provider eval evidence. This workflow intentionally avoids
 # pull_request events so provider secrets never run against unreviewed fork code.
 #
-# OpenAI is temporarily disabled (the account has no API credits), so scheduled
-# runs cover Anthropic only. Re-enable OpenAI by restoring OPENAI_API_KEY to the
-# guard's required secrets and to the eval step env below.
+# Scheduled/manual runs are canonical-main only. Missing provider secrets are a
+# repository misconfiguration and fail in the guard job.
 
 on:
   workflow_dispatch:
@@ -25,20 +24,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      should-run: ${{ steps.ref.outputs.should_run }}
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
-      skip-reason: ${{ steps.ref.outputs.skip_reason }}
     steps:
       - name: Resolve trusted eval ref and provider secrets
         id: ref
         env:
           EVENT_NAME: ${{ github.event_name }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
-          should_run=true
           checkout_sha="${GITHUB_SHA}"
-          skip_reason=""
 
           case "${EVENT_NAME}" in
             workflow_dispatch|schedule)
@@ -53,39 +49,23 @@ jobs:
               ;;
           esac
 
-          for value in "${ANTHROPIC_API_KEY:-}"; do
+          for value in "${ANTHROPIC_API_KEY:-}" "${OPENAI_API_KEY:-}"; do
             if [[ -n "$value" ]]; then echo "::add-mask::$value"; fi
           done
 
           missing=()
           if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then missing+=("ANTHROPIC_API_KEY"); fi
+          if [[ -z "${OPENAI_API_KEY:-}" ]]; then missing+=("OPENAI_API_KEY"); fi
           if [[ "${#missing[@]}" -gt 0 ]]; then
-            should_run=false
-            checkout_sha=""
-            skip_reason="missing provider secret(s): ${missing[*]}"
+            echo "::error::missing provider secret(s): ${missing[*]}"
+            exit 1
           fi
 
-          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
           echo "checkout_sha=${checkout_sha}" >> "$GITHUB_OUTPUT"
-          echo "skip_reason=${skip_reason}" >> "$GITHUB_OUTPUT"
-
-  skipped:
-    name: LLM evals skipped
-    needs: guard
-    if: ${{ always() && needs.guard.result == 'success' && needs.guard.outputs.should-run != 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - name: Report skipped evals
-        env:
-          SKIP_REASON: ${{ needs.guard.outputs.skip-reason }}
-        run: |
-          echo "LLM evals skipped: ${SKIP_REASON}" >> "$GITHUB_STEP_SUMMARY"
 
   evals:
-    name: Claude pass rates
+    name: Provider pass rates
     needs: guard
-    if: needs.guard.outputs.should-run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -105,13 +85,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - name: Run Claude eval pass rates
+      - name: Run provider eval pass rates
         id: run_evals
         continue-on-error: true
         env:
           RUN_LLM_EVALS: "1"
           RUN_LLM_PROVIDER_COMPARISON: "1"
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001
           LLM_EVAL_CASE_SET: ci-no-b2
           LLM_EVAL_CASE_LIMIT: "5"
@@ -126,6 +107,7 @@ jobs:
         if: always()
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           set -euo pipefail
           node scripts/eval-pass-rate-report.mjs validate reports/evals/provider-pass-rates.json
@@ -135,11 +117,11 @@ jobs:
           set -euo pipefail
           node scripts/eval-pass-rate-report.mjs summary reports/evals/provider-pass-rates.json >> "$GITHUB_STEP_SUMMARY"
       # actions/upload-artifact v7, reviewed 2026-08-25.
-      - name: Upload Claude pass-rate report
+      - name: Upload provider pass-rate report
         if: ${{ always() && steps.validate_report.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: claude-pass-rate-report
+          name: provider-pass-rate-report
           path: reports/evals/provider-pass-rates.json
           if-no-files-found: error
           retention-days: 14

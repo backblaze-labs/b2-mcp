@@ -390,7 +390,7 @@ describe("CI workflow policy", () => {
 
   it("runs provider evals only from trusted scheduled or manual main refs", () => {
     const guard = workflowJobBlock(evals, "guard") ?? "";
-    const skipped = workflowJobBlock(evals, "skipped") ?? "";
+    const skipped = workflowJobBlock(evals, "skipped");
     const evalJob = workflowJobBlock(evals, "evals") ?? "";
 
     expect(evals).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
@@ -406,40 +406,37 @@ describe("CI workflow policy", () => {
 
     expect(guard).toContain("if: github.repository == 'backblaze-labs/b2-mcp'");
     expect(guard).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
-    expect(guard).toContain("skip-reason: ${{ steps.ref.outputs.skip_reason }}");
+    expect(guard).not.toContain("should-run:");
+    expect(guard).not.toContain("skip-reason:");
     expect(guard).toContain("timeout-minutes: 5");
     expect(guard).toContain("workflow_dispatch|schedule");
     expect(guard).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
     expect(guard).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    // OpenAI is temporarily disabled (no account credits); the guard requires
-    // Anthropic only and must not reference the OpenAI secret.
-    expect(guard).not.toContain("OPENAI_API_KEY");
+    expect(guard).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
     expect(guard).toContain("::add-mask::");
-    expect(guard).toContain("should_run=false");
-    expect(guard).toContain("missing provider secret(s)");
+    expect(guard).toContain('missing+=("ANTHROPIC_API_KEY")');
+    expect(guard).toContain('missing+=("OPENAI_API_KEY")');
+    expect(guard).toContain('echo "::error::missing provider secret(s): ${missing[*]}"');
+    expect(guard).toContain("exit 1");
     expect(guard).not.toContain("environment:");
 
-    expect(skipped).toContain("needs.guard.outputs.should-run != 'true'");
-    expect(skipped).toContain("LLM evals skipped");
-    expect(skipped).toContain("SKIP_REASON: ${{ needs.guard.outputs.skip-reason }}");
-    expect(skipped).toContain('echo "LLM evals skipped: ${SKIP_REASON}"');
-    expect(skipped).not.toContain("LLM evals skipped: ${{");
-    expect(evalJob).toContain("needs.guard.outputs.should-run == 'true'");
+    expect(skipped).toBeNull();
+    expect(evals).not.toContain("LLM evals skipped");
+    expect(evalJob).not.toContain("needs.guard.outputs.should-run");
     expect(evalJob).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
     expect(evalJob).toContain("persist-credentials: false");
   });
 
-  it("uploads bounded Claude pass-rate artifacts without B2 secrets", () => {
+  it("uploads bounded provider pass-rate artifacts without B2 secrets", () => {
     const evalJob = workflowJobBlock(evals, "evals") ?? "";
-    const run = workflowStepBlock(evals, "Run Claude eval pass rates");
+    const run = workflowStepBlock(evals, "Run provider eval pass rates");
     const validate = workflowStepBlock(evals, "Validate pass-rate report");
     const summary = workflowStepBlock(evals, "Publish pass-rate summary");
-    const upload = workflowStepBlock(evals, "Upload Claude pass-rate report");
+    const upload = workflowStepBlock(evals, "Upload provider pass-rate report");
     const requireSuccess = workflowStepBlock(evals, "Require eval pass-rate success");
     const secretRefs = [...evals.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
 
-    // OpenAI disabled (no account credits): Anthropic is the only provider secret.
-    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY"]);
+    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
     expect(packageJson.scripts?.["evals:provider-comparison"]).toBe(
       "tsx evals/run-provider-comparison.ts",
     );
@@ -450,8 +447,9 @@ describe("CI workflow policy", () => {
     expect(run).toContain("continue-on-error: true");
     expect(run).toContain('RUN_LLM_EVALS: "1"');
     expect(run).toContain('RUN_LLM_PROVIDER_COMPARISON: "1"');
+    expect(run).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
+    expect(run).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
     expect(run).toContain("ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001");
-    expect(run).not.toContain("OPENAI");
     expect(run).toContain("LLM_EVAL_CASE_SET: ci-no-b2");
     expect(run).toContain('LLM_EVAL_CASE_LIMIT: "5"');
     expect(run).toContain('LLM_EVAL_BLOCK_SERVER_NETWORK: "1"');
@@ -465,7 +463,7 @@ describe("CI workflow policy", () => {
     expect(validate).toContain("id: validate_report");
     expect(validate).toContain("if: always()");
     expect(validate).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    expect(validate).not.toContain("OPENAI_API_KEY");
+    expect(validate).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
     expect(validate).toContain(
       "node scripts/eval-pass-rate-report.mjs validate reports/evals/provider-pass-rates.json",
     );
@@ -473,9 +471,9 @@ describe("CI workflow policy", () => {
     expect(summary).toContain(
       'node scripts/eval-pass-rate-report.mjs summary reports/evals/provider-pass-rates.json >> "$GITHUB_STEP_SUMMARY"',
     );
-    expect(evalJob).toContain("Claude pass rates");
+    expect(evalJob).toContain("Provider pass rates");
     expect(upload).toContain("steps.validate_report.outcome == 'success'");
-    expect(upload).toContain("claude-pass-rate-report");
+    expect(upload).toContain("provider-pass-rate-report");
     expect(upload).toContain("path: reports/evals/provider-pass-rates.json");
     expect(upload).toContain("if-no-files-found: error");
     expect(requireSuccess).toContain("steps.run_evals.outcome != 'success'");

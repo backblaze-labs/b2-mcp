@@ -146,23 +146,19 @@ must not run against unreviewed code. It runs only on:
 - Manual `workflow_dispatch` runs on `main`.
 - The scheduled weekly run on `main`.
 
-> **OpenAI is temporarily disabled.** The OpenAI account has no API credits, so
-> scheduled and manual runs cover Anthropic only. The pass-rate runner degrades
-> to whichever provider keys are configured (`evals/run-provider-comparison.ts`
-> via `providersWithConfiguredKeys`). Re-enable OpenAI by restoring
-> `OPENAI_API_KEY` to the guard's required secrets and to the eval step env in
-> [`../.github/workflows/evals.yml`](../.github/workflows/evals.yml); no code
-> change is needed.
-
 The guard job checks that the repository is `backblaze-labs/b2-mcp`, the ref is
-`refs/heads/main`, and the `ANTHROPIC_API_KEY` repository secret is present.
-Missing provider secrets produce a skipped summary instead of a failed eval job.
+`refs/heads/main`, and the `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` repository
+secrets are present. Missing provider secrets produce a masked GitHub Actions
+`::error::` annotation and fail the guard job so scheduled/manual
+misconfigurations do not skip green.
 
 The eval job installs with the pinned package manager, builds once, then runs:
 
 ```bash
 RUN_LLM_EVALS=1 \
 RUN_LLM_PROVIDER_COMPARISON=1 \
+ANTHROPIC_API_KEY=... \
+OPENAI_API_KEY=... \
 ANTHROPIC_EVAL_MODEL=claude-haiku-4-5-20251001 \
 LLM_EVAL_CASE_SET=ci-no-b2 \
 LLM_EVAL_CASE_LIMIT=5 \
@@ -172,7 +168,7 @@ pnpm run evals:provider-comparison
 ```
 
 The workflow validates the JSON report, writes a Markdown summary to the GitHub
-step summary, uploads the `claude-pass-rate-report` artifact for 14 days, and
+step summary, uploads the `provider-pass-rate-report` artifact for 14 days, and
 fails the job if the pass-rate command did not succeed.
 
 ## Coverage Guard

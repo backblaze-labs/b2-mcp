@@ -18,8 +18,8 @@ async function main(): Promise<void> {
     throw new Error(`Provider pass-rate gate disabled: ${gate.reason}`);
   }
 
-  // Run whichever providers have a key configured. OpenAI is currently unconfigured
-  // (no account credits), so this resolves to an Anthropic-only run until it returns.
+  // Run whichever providers have a key configured. The scheduled workflow guard
+  // requires both provider secrets; ad-hoc runs can still exercise a subset.
   const providers = providersWithConfiguredKeys();
   const cases = selectProviderComparisonCases({
     full: FULL_PROFILE_EVAL_CASES,
