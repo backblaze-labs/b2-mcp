@@ -231,6 +231,18 @@ describe("OAuthIntrospectionVerifier", () => {
     expect(authInfo.extra?.alg).toBeUndefined();
   });
 
+  it("accepts introspection responses bound by audience without resource metadata", async () => {
+    const verifier = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ resource: undefined }))),
+    );
+
+    const authInfo = await verifier.verifyAccessToken("access-token");
+
+    expect(authInfo.clientId).toBe("mcp-client");
+    expect(authInfo.resource?.href).toBe(baseConfig.resource);
+    expect(authInfo.extra?.resource).toBeUndefined();
+  });
+
   it("rejects tokens that lack configured required scopes", async () => {
     const verifier = verifierWithFetch(
       vi.fn(async () => Response.json(claims())),
@@ -269,7 +281,6 @@ describe("OAuthIntrospectionVerifier", () => {
     ["missing issuer", { iss: undefined }, /issuer/i],
     ["wrong issuer", { iss: "http://localhost:9001/" }, /issuer/i],
     ["wrong audience", { aud: "other" }, /audience/i],
-    ["missing resource", { resource: undefined }, /resource/i],
     ["wrong resource", { resource: "other" }, /resource/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
     ["malformed client id", { client_id: 123, azp: "mcp-client" }, /client_id/i],

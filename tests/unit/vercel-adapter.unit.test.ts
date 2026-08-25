@@ -107,6 +107,7 @@ function oktaIntrospectionResponse(overrides: Record<string, unknown> = {}): Res
     sub: "employee-123",
     client_id: OKTA_CONNECTOR_CLIENT_ID,
     scope: `b2:read ${OKTA_REQUIRED_SCOPE}`,
+    resource: undefined,
     alg: undefined,
     ...overrides,
   });
@@ -360,7 +361,7 @@ describe("Vercel adapter", () => {
     ["wrong issuer", { iss: "https://attacker.okta.example/oauth2/default/" }],
     ["wrong audience", { aud: ["https://other.example.com/mcp"] }],
     ["missing audience", { aud: undefined }],
-    ["missing resource", { resource: undefined }],
+    ["wrong resource", { resource: ["https://other.example.com/mcp"] }],
     ["missing B2 deployment scope", { scope: OKTA_REQUIRED_SCOPE }],
   ])("keeps subjectless Okta admission closed for %s", async (_name, overrides) => {
     setSubjectlessOktaEnv();

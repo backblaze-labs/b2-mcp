@@ -87,9 +87,9 @@ Hosted adapters may require a subject allowlist before a shared server-held B2
 key is used. The Vercel adapter also supports a reviewed Okta internal-testing
 profile where `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true` and
 `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` admit tokens from approved
-OAuth client ids under the configured issuer, audience/resource, and required
-scope policy without enumerating individual subjects. OAuth scopes filter the
-MCP tool surface but do not narrow the B2 application key itself.
+OAuth client ids under the configured issuer, audience, optional resource, and
+required scope policy without enumerating individual subjects. OAuth scopes
+filter the MCP tool surface but do not narrow the B2 application key itself.
 
 ### HTTP Client-Supplied Credential Compatibility
 
@@ -178,13 +178,15 @@ are public metadata and are cacheable for a short period.
 Hosted OAuth verification accepts either RFC 7662 introspection or local JWT
 verification through JWKS. If both are configured, introspection is
 authoritative so revocation and opaque-token behavior stay available during
-rollout.
+rollout. Okta introspection commonly binds access tokens with `aud` and omits
+an RFC 8707 `resource` member; when `resource` is present it must still match
+exactly.
 
 The verifier fails closed unless the token satisfies the implemented checks:
 
 - trusted `iss` exactly matches `B2_OAUTH_ISSUER`
-- introspection `resource` exactly matches `B2_OAUTH_RESOURCE`
 - introspection `aud` exactly matches `B2_OAUTH_AUDIENCE`
+- introspection `resource`, when present, exactly matches `B2_OAUTH_RESOURCE`
 - JWT `aud` or `resource` binds to the configured deployment
 - token is active and within `exp` / `nbf` / JWT `iat` windows
 - token type is allowed when present

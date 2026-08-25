@@ -133,8 +133,10 @@ In that reviewed profile, set `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true`
 and `B2_VERCEL_ADMIT_ALL_ISSUER_SUBJECTS=true`, configure
 `B2_VERCEL_ALLOWED_OAUTH_CLIENT_IDS`, and omit `B2_OAUTH_ALLOWED_SUBJECTS`
 only after the old adapter is drained. The adapter admits active Okta tokens
-from the reviewed connector client when issuer, audience/resource, and required
-scopes match.
+from the reviewed connector client when issuer, audience, optional resource,
+and required scopes match. Okta introspection commonly omits the optional RFC
+8707 `resource` member; if Okta returns `resource`, it must match
+`B2_OAUTH_RESOURCE`.
 
 Every admitted Okta user shares the one server-held B2 key and its
 capabilities. OAuth scopes filter the MCP tool surface but do not narrow the B2

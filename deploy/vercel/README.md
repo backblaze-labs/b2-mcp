@@ -119,7 +119,9 @@ admission is a separate opt-in from multi-subject allowlists: set both
 client id, configure a non-empty deployment-specific
 `B2_OAUTH_REQUIRED_SCOPES`, and omit `B2_OAUTH_ALLOWED_SUBJECTS` only after old
 Vercel instances are drained. The adapter then admits active Okta tokens from
-that reviewed client when issuer, resource, audience, and scopes match.
+that reviewed client when issuer, audience, optional resource, and scopes
+match. Okta introspection commonly omits the optional RFC 8707 `resource`
+member; if Okta returns `resource`, it must match `B2_OAUTH_RESOURCE`.
 
 This is an explicit shared-credential model: every admitted Okta user can use
 everything allowed by the one server-held B2 key, with the destructive policy
@@ -166,7 +168,8 @@ The adapter additionally checks:
 
 - active token response
 - exact `iss`
-- exact `resource` and `aud` for introspection
+- exact `aud` for introspection
+- exact `resource` for introspection when that optional claim is present
 - JWT `aud` or `resource` binding to this deployment
 - `exp`, `nbf`, and JWT `iat` with bounded `B2_OAUTH_JWT_CLOCK_SKEW_SECONDS`
 - token type, when returned

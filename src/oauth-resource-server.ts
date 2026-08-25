@@ -581,6 +581,17 @@ function assertJwtDeploymentBinding(
   }
 }
 
+function assertIntrospectionDeploymentBinding(
+  claims: Record<string, unknown>,
+  config: OAuthResourceServerConfig,
+): void {
+  requireMatch(claims.aud, config.audience, "audience");
+  const resourceValues = values(claims.resource);
+  if (claims.resource !== undefined && !resourceValues.includes(config.resource)) {
+    throw new OAuthError(OAuthErrorCode.InvalidToken, "Token resource is not accepted");
+  }
+}
+
 function authInfoFromVerifiedClaims(
   token: string,
   claims: Record<string, unknown>,
@@ -598,8 +609,7 @@ function authInfoFromVerifiedClaims(
   if (verification.source === "jwt") {
     assertJwtDeploymentBinding(claims, config);
   } else {
-    requireMatch(claims.resource, config.resource, "resource");
-    requireMatch(claims.aud, config.audience, "audience");
+    assertIntrospectionDeploymentBinding(claims, config);
   }
   const expiresAt =
     verification.source === "jwt"
@@ -640,7 +650,7 @@ function authInfoFromVerifiedClaims(
       ...(oauthClientId && { client_id: oauthClientId }),
       ...(authorizedParty && { azp: authorizedParty }),
       aud: values(claims.aud),
-      resource: values(claims.resource),
+      ...(values(claims.resource).length > 0 && { resource: values(claims.resource) }),
       token_hash: tokenLabel(token),
     },
   };
