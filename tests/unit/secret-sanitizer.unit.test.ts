@@ -1,18 +1,20 @@
 import { createAuditedToolCallback } from "../../src/server";
-import { logger } from "../../src/utils/logger";
 import { toolError, toolJson } from "../../src/utils/errors";
+import { logger } from "../../src/utils/logger";
 import {
+  bootstrapErrorMessage,
   configuredSecretValuesFromConfig,
-  LOGGER_SECRET_REDACTION_PATHS,
   LOG_SANITIZER_FAILURE,
-  sanitizeForMcpOutput,
-  sanitizeError,
+  LOGGER_SECRET_REDACTION_PATHS,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
-  sanitizeStructuredLogValue,
-  sanitizeText,
   SECRET_SANITIZER_REDACTION,
   STRUCTURED_SECRET_FIELD_NAMES,
+  safeErrorText,
+  sanitizeError,
+  sanitizeForMcpOutput,
+  sanitizeStructuredLogValue,
+  sanitizeText,
   TEXT_SECRET_LABELS,
 } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
@@ -110,6 +112,22 @@ describe("secret sanitizer canary policy", () => {
     expect(sanitizeText(json)).toBe(
       `{"applicationKey":"${SECRET_SANITIZER_REDACTION}","authorizationToken":"${SECRET_SANITIZER_REDACTION}","metadata":"keep"}`,
     );
+  });
+
+  it("redacts overlapping configured secret values as merged spans", () => {
+    const firstSecret = "abcdefgh";
+    const suffix = String.fromCharCode(105, 106);
+    const secondSecret = `${firstSecret.slice(2)}${suffix}`;
+    const overlappingText = `${firstSecret}${suffix}`;
+
+    expect(
+      sanitizeText(`fatal ${overlappingText}`, {
+        env: {
+          B2_APPLICATION_KEY: firstSecret,
+          B2_MASTER_KEY: secondSecret,
+        },
+      }),
+    ).toBe(`fatal ${SECRET_SANITIZER_REDACTION}`);
   });
 
   it("redacts JSON-formatted sensitive fields from sanitized Error objects", () => {
@@ -681,5 +699,62 @@ describe("secret sanitizer canary policy", () => {
       expect(LOGGER_SECRET_REDACTION_PATHS).toContain(field);
     }
     expect(LOG_SANITIZER_FAILURE).toBe("[log_sanitizer_failed]");
+  });
+
+  it("redacts request-header secrets from error text", () => {
+    expect(safeErrorText(new Error(`boom ${CANARY}`), [CANARY])).toBe(
+      `boom ${SECRET_SANITIZER_REDACTION}`,
+    );
+    expect(safeErrorText("short s7 leak", ["s7"])).toBe(`short ${SECRET_SANITIZER_REDACTION} leak`);
+  });
+
+  it("returns the sanitizer-failure sentinel when coercion throws", () => {
+    const nullProto = Object.create(null) as object;
+    expect(safeErrorText(nullProto, [])).toBe(LOG_SANITIZER_FAILURE);
+  });
+
+  it("redacts configured key-ID env values in logs but keeps them in MCP output", () => {
+    const keyId = "005abcdef0000000000000010";
+    const env = { B2_APPLICATION_KEY_ID: keyId };
+    const credentialEnv = { B2_CREDENTIAL_TENANT_MASTER_KEY_ID: keyId };
+
+    // Log-mode text redacts the configured key-ID value.
+    expect(sanitizeStructuredLogValue(`startup failed for ${keyId}`, { env })).toBe(
+      `startup failed for ${SECRET_SANITIZER_REDACTION}`,
+    );
+    expect(sanitizeStructuredLogValue(`credential ${keyId}`, { env: credentialEnv })).toBe(
+      `credential ${SECRET_SANITIZER_REDACTION}`,
+    );
+
+    // MCP output keeps key IDs (b2_list_keys returns them); default text too.
+    expect(sanitizeForMcpOutput(`key ${keyId}`, { env })).toBe(`key ${keyId}`);
+    expect(sanitizeText(`key ${keyId}`, { env })).toBe(`key ${keyId}`);
+  });
+
+  it("redacts configured key-ID env values from bootstrap fatal text", () => {
+    const keyId = "005masterkeyid0000000001";
+    const previous = process.env.B2_MASTER_KEY_ID;
+    process.env.B2_MASTER_KEY_ID = keyId;
+    try {
+      expect(bootstrapErrorMessage(new Error(`fatal ${keyId}`))).toBe(
+        `fatal ${SECRET_SANITIZER_REDACTION}`,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.B2_MASTER_KEY_ID;
+      else process.env.B2_MASTER_KEY_ID = previous;
+    }
+  });
+
+  it("returns the sentinel when bootstrap message coercion throws", () => {
+    const nullProto = Object.create(null) as object;
+    expect(bootstrapErrorMessage(nullProto)).toBe(LOG_SANITIZER_FAILURE);
+
+    const throwingMessage = new Error("placeholder");
+    Object.defineProperty(throwingMessage, "message", {
+      get() {
+        throw new Error("message accessor failed");
+      },
+    });
+    expect(bootstrapErrorMessage(throwingMessage)).toBe(LOG_SANITIZER_FAILURE);
   });
 });

@@ -3,31 +3,89 @@
  * Covers configFromHeaders parsing and getPort validation.
  */
 
+import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import { spawnSync } from "child_process";
+import { mkdtempSync, readFileSync, rmSync } from "fs";
 import * as http from "http";
 import type { AddressInfo } from "net";
-import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
+import { tmpdir } from "os";
+import { join } from "path";
+import {
+  type AuthenticatedIncomingMessage,
+  validateHttpCredentialConfiguration,
+} from "../../src/credentials";
+import { type B2McpFetchHandler, createB2McpFetchHandler } from "../../src/http-fetch-handler";
 import {
   buildHttpServer,
   configFromHeaders,
   createInFlightLimiter,
   deriveRateKey,
   getPort,
+  httpBootstrapFatalMessage,
   startHttp,
 } from "../../src/http-server";
-import { createB2McpFetchHandler } from "../../src/http-fetch-handler";
-import {
-  validateHttpCredentialConfiguration,
-  type AuthenticatedIncomingMessage,
-} from "../../src/credentials";
-import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 import { getDestructivePolicy } from "../../src/utils/destructive-gate";
-import { logger } from "../../src/utils/logger";
-import { allowRequest, rateLimiterConfig, _resetRateLimiter } from "../../src/utils/rate-limiter";
+import * as loggerModule from "../../src/utils/logger";
+import { _resetRateLimiter, allowRequest, rateLimiterConfig } from "../../src/utils/rate-limiter";
+import { closeHttpServer, listenOnLocalhost, request } from "../support/http";
 
 type ShutdownSignal = "SIGTERM" | "SIGINT";
 
+const { logger } = loggerModule;
 const shutdownSignals: readonly ShutdownSignal[] = ["SIGTERM", "SIGINT"];
+const credentialEnvKeys = [
+  "B2_APPLICATION_KEY_ID",
+  "B2_APPLICATION_KEY",
+  "B2_APP_KEY_ID",
+  "B2_APP_KEY",
+  "B2_MASTER_KEY_ID",
+  "B2_MASTER_KEY",
+] as const;
+
+const tsxBin = join(
+  process.cwd(),
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "tsx.cmd" : "tsx",
+);
+
+function executableEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test", LOG_LEVEL: "info" };
+  for (const key of credentialEnvKeys) delete env[key];
+  for (const key of [
+    "B2_ALLOW_LOCAL_FILES",
+    "B2_HTTP_CREDENTIAL_MODE",
+    "B2_LOG_FILE",
+    "B2_MCP_OUTPUT_FORMAT",
+    "B2_SECRET_SINK",
+    "B2_SECRET_SINK_FILE",
+    "FORCE_COLOR",
+    "NO_COLOR",
+    "PORT",
+  ]) {
+    delete env[key];
+  }
+  return { ...env, ...overrides };
+}
+
+function runHttpEntrypoint(args: string[], env: NodeJS.ProcessEnv = {}) {
+  return spawnSync(tsxBin, ["src/http-server.ts", ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: executableEnv(env),
+    timeout: 10_000,
+  });
+}
+
+function parseLogLine(text: string): Record<string, unknown> {
+  const line = text
+    .trim()
+    .split("\n")
+    .find((entry) => entry.trim().length > 0);
+  expect(line).toBeTruthy();
+  return JSON.parse(line as string);
+}
 
 function signalListeners(signal: ShutdownSignal): NodeJS.SignalsListener[] {
   return process.listeners(signal) as NodeJS.SignalsListener[];
@@ -62,6 +120,60 @@ function removeNewSignalListeners(
       process.off(signal, registeredListener);
     }
   }
+}
+
+async function withMockedFetchPipeline<T>(
+  pipeline: B2McpFetchHandler,
+  run: (modules: { buildHttpServer: typeof buildHttpServer; logger: typeof logger }) => Promise<T>,
+): Promise<T> {
+  vi.resetModules();
+  vi.doMock("../../src/http-fetch-handler.js", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../src/http-fetch-handler")>();
+    return {
+      ...actual,
+      createB2McpFetchHandler: vi.fn(() => pipeline),
+    };
+  });
+
+  try {
+    const freshLoggerModule = await import("../../src/utils/logger");
+    const freshHttpServerModule = await import("../../src/http-server");
+    return await run({
+      buildHttpServer: freshHttpServerModule.buildHttpServer,
+      logger: freshLoggerModule.logger,
+    });
+  } finally {
+    vi.doUnmock("../../src/http-fetch-handler.js");
+    vi.resetModules();
+  }
+}
+
+async function startHttpCapturingServer(options: { port?: number } = {}): Promise<{
+  server: http.Server;
+  signalSnapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>;
+}> {
+  const signalSnapshot = snapshotSignalListeners();
+  const originalListen = http.Server.prototype.listen;
+  let startedServer: http.Server | undefined;
+  const listenSpy = vi.spyOn(http.Server.prototype, "listen").mockImplementation(function (
+    this: http.Server,
+    ...args: unknown[]
+  ) {
+    startedServer = this;
+    return Reflect.apply(originalListen, this, args) as http.Server;
+  } as typeof http.Server.prototype.listen);
+
+  try {
+    await startHttp(options);
+  } finally {
+    listenSpy.mockRestore();
+  }
+
+  if (!startedServer) {
+    removeNewSignalListeners(signalSnapshot);
+    throw new Error("HTTP server was not captured");
+  }
+  return { server: startedServer, signalSnapshot };
 }
 
 describe("configFromHeaders", () => {
@@ -322,6 +434,18 @@ describe("HTTP server lifecycle", () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(startupTimers.at(-1));
   });
 
+  it("normalizes non-Error synchronous listen failures during startup", async () => {
+    const listenSpy = vi.spyOn(http.Server.prototype, "listen").mockImplementation((() => {
+      throw "raw listen failure";
+    }) as typeof http.Server.prototype.listen);
+
+    try {
+      await expect(startHttp({ port: 3000 })).rejects.toThrow("raw listen failure");
+    } finally {
+      listenSpy.mockRestore();
+    }
+  });
+
   it("drains in-flight requests before closing the MCP handler", async () => {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     const close = vi.fn(async () => undefined);
@@ -403,7 +527,368 @@ describe("HTTP server lifecycle", () => {
     }
   });
 
+  it("does not let stray fetchHandler options bypass the hardened pipeline", async () => {
+    const bypassFetch = vi.fn(async () => new Response("bypassed", { status: 200 }));
+    const handle = buildHttpServer({
+      fetchHandler: {
+        sessions: new Map<string, never>(),
+        fetch: bypassFetch,
+        drain: vi.fn(),
+      },
+    } as never);
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/mcp", { headers: { host: "evil.example" } });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toContain("Host/Origin not allowed");
+      expect(bypassFetch).not.toHaveBeenCalled();
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("preserves the fetch pipeline receiver when exposing drain", async () => {
+    class StatefulPipeline implements B2McpFetchHandler {
+      sessions = new Map<string, never>();
+      drained = false;
+
+      async fetch(): Promise<Response> {
+        return new Response(null, { status: 204 });
+      }
+
+      drain(): void {
+        this.drained = true;
+      }
+
+      async close(): Promise<void> {
+        return undefined;
+      }
+    }
+    const pipeline = new StatefulPipeline();
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer }) => {
+      const handle = buildHttpServer();
+
+      handle.drain();
+
+      expect(pipeline.drained).toBe(true);
+    });
+  });
+
+  it("returns a sanitized 500 when the Node fetch pipeline throws", async () => {
+    const secret = "B2_MCP_CANARY_SECRET_outer_500";
+    const pipelineError = new Error(`pipeline failed with ${secret}`);
+    pipelineError.stack = `Error: pipeline failed with ${secret}\n    at secret-stack-frame`;
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(async () => {
+        throw pipelineError;
+      }),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp");
+
+        expect(res.status).toBe(500);
+        expect(JSON.parse(res.body)).toEqual({ error: "Internal server error" });
+        expect(res.body).not.toContain(secret);
+        expect(res.body).not.toContain("secret-stack-frame");
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "pipeline failed with [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret);
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
+  it("returns a sanitized 500 when the Node fetch pipeline rejects non-Error values", async () => {
+    const secret = "s7";
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(() => Promise.reject(`string failure with ${secret}`)),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } });
+
+        expect(res.status).toBe(500);
+        expect(JSON.parse(res.body)).toEqual({ error: "Internal server error" });
+        expect(res.body).not.toContain(secret);
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "string failure with [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret);
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
+  it("does not rethrow when writing the response fails with a non-Error value", async () => {
+    const secret = "s7write";
+    // Object.create(null) throws when coerced via String(err); the write catch
+    // must reuse the sanitized message instead of re-coercing the raw value.
+    const failure = Object.create(null) as never;
+    const body = new ReadableStream({
+      pull(controller: ReadableStreamDefaultController<Uint8Array>) {
+        controller.error(failure);
+      },
+    });
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(async () => new Response(body as never, { status: 200 })),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } }).catch(
+          () => undefined,
+        );
+
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(warnSpy).toHaveBeenCalledWith({ err: expect.any(String) }, "mcp.http.failed");
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
+  it("redacts overlapping header secrets as merged spans", async () => {
+    const firstSecret = "abcdefgh";
+    const suffix = String.fromCharCode(105, 106);
+    const secondSecret = `${firstSecret.slice(2)}${suffix}`;
+    const overlappingText = `${firstSecret}${suffix}`;
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(() => Promise.reject(`string failure with ${overlappingText}`)),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp", {
+          headers: {
+            "x-b2-app-key": firstSecret,
+            "x-b2-key": secondSecret,
+          },
+        });
+
+        expect(res.status).toBe(500);
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "string failure with [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(firstSecret);
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secondSecret);
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(suffix);
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
+  it("redacts authorization credentials and cookie values from fallback logs", async () => {
+    const authorizationCredential = "tok7";
+    const cookieValue = "ck7";
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(() =>
+        Promise.reject(`string failure with ${authorizationCredential} and ${cookieValue}`),
+      ),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp", {
+          headers: {
+            authorization: `Bearer ${authorizationCredential}`,
+            cookie: `session="${cookieValue}"; theme=light`,
+          },
+        });
+
+        expect(res.status).toBe(500);
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "string failure with [redacted] and [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(authorizationCredential);
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(cookieValue);
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
+  it("redacts key-id credential handles from fallback logs", async () => {
+    const keyId = "005id7";
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(() => Promise.reject(`string failure with ${keyId}`)),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key-id": keyId } });
+
+        expect(res.status).toBe(500);
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "string failure with [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(keyId);
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
+  it("sanitizes header secrets when the mcpHandler rejects inside the pipeline", async () => {
+    const secret = "s7short";
+    const fetch = vi.fn(async () => {
+      throw new Error(`handler failed with ${secret}`);
+    });
+    const handle = buildHttpServer({
+      idleSweepMode: "request",
+      mcpHandler: { fetch, close: vi.fn(async () => undefined) },
+    });
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(500);
+      expect(res.body).not.toContain(secret);
+      expect(warnSpy).toHaveBeenCalledWith(
+        { err: "handler failed with [redacted]" },
+        "mcp.http.failed",
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret);
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
+  it("sanitizes header secrets in the outer pipeline catch", async () => {
+    const secret = "s7outer";
+    const pipeline = createB2McpFetchHandler();
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error(`body read failed with ${secret}`));
+        },
+      });
+      const request = new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { host: "localhost", "content-type": "application/json", "x-b2-key": secret },
+        body: body as unknown as RequestInit["body"],
+        duplex: "half",
+      } as RequestInit & { duplex: "half" });
+
+      const res = await pipeline.fetch(request);
+
+      expect(res.status).toBe(500);
+      expect(warnSpy).toHaveBeenCalledWith(
+        { err: "body read failed with [redacted]" },
+        "mcp.http.failed",
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret);
+    } finally {
+      await pipeline.close();
+    }
+  });
+
   it.each(["SIGTERM", "SIGINT"] as const)("handles %s by draining and closing", async (signal) => {
+    const signalSnapshot = snapshotSignalListeners();
+    const exitCodes: Array<string | number | null | undefined> = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      exitCodes.push(code);
+      return undefined as never;
+    }) as typeof process.exit);
+    const loggerInfo = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    let listener: NodeJS.SignalsListener | undefined;
+
+    try {
+      await startHttp({ port: 0 });
+      listener = findNewSignalListener(signal, signalSnapshot);
+      expect(listener).toBeTypeOf("function");
+      listener?.(signal);
+      // A repeated shutdown signal must be ignored after the first drain starts.
+      listener?.(signal);
+
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledTimes(1));
+      expect(exitCodes).toEqual([0]);
+      expect(loggerInfo.mock.calls.filter((call) => call[1] === "server.shutdown")).toHaveLength(1);
+      expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
+      expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
+    } finally {
+      if (listener && !exitCodes.includes(0)) {
+        listener(signal);
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      }
+      removeNewSignalListeners(signalSnapshot);
+      exitSpy.mockRestore();
+    }
+  });
+
+  it("resolves PORT from the environment when no explicit port is provided", async () => {
+    const savedPort = process.env.PORT;
+    const blocker = http.createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, resolve));
+    const port = (blocker.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    process.env.PORT = String(port);
     const signalSnapshot = snapshotSignalListeners();
     const exitCodes: Array<string | number | null | undefined> = [];
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
@@ -413,18 +898,90 @@ describe("HTTP server lifecycle", () => {
     let listener: NodeJS.SignalsListener | undefined;
 
     try {
-      await startHttp({ port: 0 });
-      listener = findNewSignalListener(signal, signalSnapshot);
+      await startHttp();
+      listener = findNewSignalListener("SIGTERM", signalSnapshot);
       expect(listener).toBeTypeOf("function");
-      listener?.(signal);
+      listener?.("SIGTERM");
 
       await vi.waitFor(() => expect(exitCodes).toContain(0));
+    } finally {
+      if (listener && !exitCodes.includes(0)) {
+        listener("SIGTERM");
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      }
+      removeNewSignalListeners(signalSnapshot);
+      exitSpy.mockRestore();
+      if (savedPort === undefined) delete process.env.PORT;
+      else process.env.PORT = savedPort;
+    }
+  });
+
+  it("handles close callbacks that run before a drain timer is assigned", async () => {
+    const flushSpy = vi.spyOn(loggerModule, "flushLogsSync").mockImplementation(() => undefined);
+    vi.spyOn(process, "exit").mockImplementation(((code) => {
+      throw new Error(`process.exit(${code})`);
+    }) as typeof process.exit);
+    const { server, signalSnapshot } = await startHttpCapturingServer({ port: 0 });
+    let closeSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+    try {
+      closeSpy = vi.spyOn(server, "close").mockImplementation(function (
+        this: http.Server,
+        callback?: (err?: Error) => void,
+      ) {
+        callback?.();
+        return this;
+      } as typeof server.close);
+      const listener = findNewSignalListener("SIGTERM", signalSnapshot);
+      expect(listener).toBeTypeOf("function");
+
+      expect(() => listener?.("SIGTERM")).toThrow("process.exit(0)");
+      expect(flushSpy).toHaveBeenCalledTimes(1);
       expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
       expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
     } finally {
-      if (listener && !exitCodes.includes(0)) {
-        listener(signal);
-        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      closeSpy?.mockRestore();
+      if (server.listening) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+      removeNewSignalListeners(signalSnapshot);
+    }
+  });
+
+  it("exits non-zero when graceful shutdown exceeds the drain timeout", async () => {
+    const exitCodes: Array<string | number | null | undefined> = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      exitCodes.push(code);
+      return undefined as never;
+    }) as typeof process.exit);
+    const loggerError = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    const flushSpy = vi.spyOn(loggerModule, "flushLogsSync").mockImplementation(() => undefined);
+    const { server, signalSnapshot } = await startHttpCapturingServer({ port: 0 });
+    let signalListener: NodeJS.SignalsListener | undefined;
+    let closeSpy: ReturnType<typeof vi.spyOn> | undefined;
+
+    try {
+      signalListener = findNewSignalListener("SIGTERM", signalSnapshot);
+      expect(signalListener).toBeTypeOf("function");
+      closeSpy = vi.spyOn(server, "close").mockImplementation(function (this: http.Server) {
+        return this;
+      } as typeof server.close);
+
+      vi.useFakeTimers();
+      signalListener?.("SIGTERM");
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(loggerError).toHaveBeenCalledWith("server.drainTimeout");
+      expect(flushSpy).toHaveBeenCalledTimes(1);
+      expect(exitCodes).toContain(1);
+      expect(newSignalListeners("SIGTERM", signalSnapshot)).toEqual([]);
+      expect(newSignalListeners("SIGINT", signalSnapshot)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+      closeSpy?.mockRestore();
+      if (server.listening) {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
       }
       removeNewSignalListeners(signalSnapshot);
       exitSpy.mockRestore();
@@ -464,6 +1021,48 @@ describe("HTTP server lifecycle", () => {
       }
       removeNewSignalListeners(signalSnapshot);
       exitSpy.mockRestore();
+    }
+  });
+
+  it("formats HTTP bootstrap fatal messages without leaking known secrets", () => {
+    const savedSecret = process.env.B2_APPLICATION_KEY;
+    const secret = "fatal-startup-secret-value";
+    process.env.B2_APPLICATION_KEY = secret;
+
+    try {
+      expect(httpBootstrapFatalMessage(new Error(`fatal ${secret}`))).toBe("fatal [redacted]");
+      expect(httpBootstrapFatalMessage(`fatal x-b2-key=${secret}`)).toBe(
+        "fatal x-b2-key=[redacted]",
+      );
+    } finally {
+      if (savedSecret === undefined) delete process.env.B2_APPLICATION_KEY;
+      else process.env.B2_APPLICATION_KEY = savedSecret;
+    }
+  });
+
+  it("runs direct HTTP bootstrap fatal handling with sanitized output and logs", () => {
+    if (process.platform === "win32") return;
+    const dir = mkdtempSync(join(tmpdir(), "b2-mcp-http-bootstrap-"));
+    const logFile = join(dir, "server.log");
+    const secret = "direct-http-bootstrap-secret-value";
+
+    try {
+      const result = runHttpEntrypoint(["--port", secret], {
+        B2_APPLICATION_KEY: secret,
+        B2_LOG_FILE: logFile,
+      });
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("b2-mcp: Invalid port: [redacted]");
+      expect(result.stderr).not.toContain(secret);
+
+      const line = parseLogLine(readFileSync(logFile, "utf8"));
+      expect(line.msg).toBe("server.fatal");
+      expect(line.err).toBe("Invalid port: [redacted]");
+      expect(JSON.stringify(line)).not.toContain(secret);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+
 /*
  * Backblaze B2 MCP Server - HTTP transport entry point.
  *
@@ -7,8 +8,22 @@
  * processing is delegated to the runtime-neutral fetch handler.
  */
 
-import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import * as http from "http";
+import {
+  type AuthenticatedIncomingMessage,
+  configFromHttpHeaders,
+  validateHttpStartupConfiguration,
+} from "./credentials.js";
+import {
+  type B2McpFetchHandler,
+  createB2McpFetchHandler,
+  createInFlightLimiter,
+  createPreparedMcpServerFactory,
+  deriveRateKey,
+  type HttpPipelineOptions,
+  type PreparedMcpRequest,
+} from "./http-fetch-handler.js";
 import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import {
@@ -17,19 +32,10 @@ import {
   writeWebResponse,
 } from "./utils/node-web-bridge.js";
 import {
-  configFromHttpHeaders,
-  validateHttpStartupConfiguration,
-  type AuthenticatedIncomingMessage,
-} from "./credentials.js";
-import {
-  createB2McpFetchHandler,
-  createInFlightLimiter,
-  createPreparedMcpServerFactory,
-  deriveRateKey,
-  type B2McpFetchHandler,
-  type HttpPipelineOptions,
-  type PreparedMcpRequest,
-} from "./http-fetch-handler.js";
+  bootstrapErrorMessage,
+  nodeRequestSecrets,
+  safeErrorText,
+} from "./utils/secret-sanitizer.js";
 import type { B2Config } from "./utils/types.js";
 
 export {
@@ -103,7 +109,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
         allowLoopbackHealthProbe: true,
       });
     } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+      logger.warn({ err: safeErrorText(err, nodeRequestSecrets(req)) }, "mcp.http.failed");
       response = jsonResponse(500, { error: "Internal server error" });
     }
 
@@ -112,8 +118,9 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
       await writeWebResponse(response, res, abortController.signal);
     } catch (err) {
       if (!abortController.signal.aborted && !res.destroyed) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
-        res.destroy(err instanceof Error ? err : new Error(String(err)));
+        const sanitized = safeErrorText(err, nodeRequestSecrets(req));
+        logger.warn({ err: sanitized }, "mcp.http.failed");
+        res.destroy(err instanceof Error ? err : new Error(sanitized));
       }
     } finally {
       finished = true;
@@ -133,7 +140,7 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   return {
     server: httpServer,
     sessions: pipeline.sessions,
-    drain: pipeline.drain,
+    drain: () => pipeline.drain(),
   };
 }
 
@@ -209,12 +216,16 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   process.on("SIGINT", onSigint);
 }
 
+export const httpBootstrapFatalMessage = bootstrapErrorMessage;
+
+function handleHttpBootstrapFatal(err: unknown): never {
+  const message = httpBootstrapFatalMessage(err);
+  process.stderr.write(`b2-mcp: ${message}\n`);
+  logger.fatal({ err: message }, "server.fatal");
+  flushLogsSync();
+  process.exit(1);
+}
+
 if (require.main === module) {
-  startHttp().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`b2-mcp: ${message}\n`);
-    logger.fatal({ err: message }, "server.fatal");
-    flushLogsSync();
-    process.exit(1);
-  });
+  startHttp().catch(handleHttpBootstrapFatal);
 }

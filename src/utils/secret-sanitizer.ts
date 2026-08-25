@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "async_hooks";
+import type * as http from "http";
 
 const REDACTED = "[redacted]";
 export const LOG_SANITIZER_FAILURE = "[log_sanitizer_failed]";
@@ -57,6 +58,15 @@ const SECRET_ENV_VAR_NAMES = new Set([
   "B2_APP_KEY",
   "B2_APPLICATION_KEY",
   "B2_MASTER_KEY",
+]);
+
+// Key-ID env values are credential handles: redacted from logs and the
+// bootstrap fatal path (like LOGGER_SECRET_FIELD_NAMES), but intentionally
+// preserved in MCP output, where tools such as b2_list_keys return key IDs.
+const SECRET_KEY_ID_ENV_VAR_NAMES = new Set([
+  "B2_APP_KEY_ID",
+  "B2_APPLICATION_KEY_ID",
+  "B2_MASTER_KEY_ID",
 ]);
 
 const LOGGER_SECRET_FIELD_NAMES = [
@@ -150,6 +160,10 @@ export interface SanitizerOptions {
 }
 
 type SanitizerMode = "mcp" | "log";
+interface TextSpan {
+  start: number;
+  end: number;
+}
 
 const sanitizerOptionsStorage = new AsyncLocalStorage<SanitizerOptions | undefined>();
 
@@ -183,11 +197,37 @@ function isSecretEnvName(name: string): boolean {
   );
 }
 
+function isSecretKeyIdEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return (
+    SECRET_KEY_ID_ENV_VAR_NAMES.has(upper) ||
+    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)_ID$/.test(upper)
+  );
+}
+
 function configuredSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
   return Object.entries(env)
     .filter(([name]) => isSecretEnvName(name))
     .map(([, value]) => secretCandidate(value))
     .filter((value): value is string => value !== null);
+}
+
+/** Configured key-ID env values, for log-only and bootstrap exact redaction. */
+function keyIdSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  return Object.entries(env)
+    .filter(([name]) => isSecretKeyIdEnvName(name))
+    .map(([, value]) => secretCandidate(value))
+    .filter((value): value is string => value !== null);
+}
+
+/** Add configured key-ID env values to options for log/bootstrap sanitization. */
+function withKeyIdLogSecrets(options: SanitizerOptions): SanitizerOptions {
+  const keyIds = keyIdSecretValuesFromEnv(options.env);
+  if (keyIds.length === 0) return options;
+  return {
+    ...options,
+    secrets: [...(options.secrets ? [...options.secrets] : []), ...keyIds],
+  };
 }
 
 export function configuredSecretValuesFromConfig(config?: SanitizerSecretConfig): string[] {
@@ -211,7 +251,7 @@ function configuredSecretValues(options: SanitizerOptions): string[] {
   ]
     .map(secretCandidate)
     .filter((value): value is string => value !== null);
-  return [...new Set(values)];
+  return [...new Set(values)].sort((a, b) => b.length - a.length);
 }
 
 export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): SanitizerOptions {
@@ -219,14 +259,55 @@ export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): Sani
 }
 
 export function sanitizeText(text: unknown, options: SanitizerOptions = {}): string {
-  let safe = String(text);
-  for (const secret of configuredSecretValues(options).sort((a, b) => b.length - a.length)) {
-    safe = safe.split(secret).join(REDACTED);
-  }
+  const safe = redactExactTextSecrets(typeof text === "string" ? text : String(text), [
+    ...configuredSecretValues(options),
+  ]);
   return safe
     .replace(CANARY_SECRET, REDACTED)
     .replace(BEARER_OR_BASIC, `$1${REDACTED}`)
     .replace(LABELED_SECRET, `$1${REDACTED}`);
+}
+
+export function redactExactTextSecrets(text: string, secrets: readonly string[]): string {
+  const spans: TextSpan[] = [];
+  for (const secret of new Set(secrets)) {
+    if (!secret.trim() || secret === REDACTED) continue;
+    let start = 0;
+    while (start < text.length) {
+      const index = text.indexOf(secret, start);
+      if (index === -1) break;
+      spans.push({ start: index, end: index + secret.length });
+      start = index + 1;
+    }
+  }
+  if (spans.length === 0) return text;
+
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: TextSpan[] = [];
+  for (const span of spans) {
+    const previous = merged.at(-1);
+    if (previous && span.start <= previous.end) {
+      previous.end = Math.max(previous.end, span.end);
+    } else {
+      merged.push({ ...span });
+    }
+  }
+
+  let safe = "";
+  let offset = 0;
+  for (const span of merged) {
+    safe += `${text.slice(offset, span.start)}${REDACTED}`;
+    offset = span.end;
+  }
+  return safe + text.slice(offset);
+}
+
+export function bootstrapErrorMessage(err: unknown): string {
+  try {
+    return sanitizeText(err instanceof Error ? err.message : String(err), withKeyIdLogSecrets({}));
+  } catch {
+    return LOG_SANITIZER_FAILURE;
+  }
 }
 
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
@@ -237,7 +318,7 @@ export function sanitizeStructuredLogValue(
   value: unknown,
   options: SanitizerOptions = {},
 ): unknown {
-  return sanitizeValue(value, [], new WeakSet<object>(), options, "log");
+  return sanitizeValue(value, [], new WeakSet<object>(), withKeyIdLogSecrets(options), "log");
 }
 
 function sanitizeValue(
@@ -378,12 +459,13 @@ export function sanitizeMcpResponse<T>(response: T, options: SanitizerOptions = 
 }
 
 export function sanitizeError(err: unknown, options: SanitizerOptions = {}): Error {
+  const logOptions = withKeyIdLogSecrets(options);
   if (err instanceof Error) {
     const seen = new WeakSet<object>();
     seen.add(err);
-    return sanitizeErrorForLog(err, seen, options);
+    return sanitizeErrorForLog(err, seen, logOptions);
   }
-  return new Error(sanitizeText(String(err), options));
+  return new Error(sanitizeText(String(err), logOptions));
 }
 
 function sanitizedIdentifier(
@@ -414,3 +496,103 @@ export function sanitizeProviderRequestId(
 }
 
 export const SECRET_SANITIZER_REDACTION = REDACTED;
+
+/*
+ * Request-header secret extraction for HTTP error sanitization. Both the Node
+ * standalone server and the runtime-neutral fetch pipeline log failure messages
+ * that can echo request-header credentials. Extracting the sensitive header
+ * values here keeps the redaction identical across runtimes, so a thrown
+ * mcpHandler rejection is sanitized whether it is caught inside the pipeline
+ * (Node + serverless) or escapes to the Node server.
+ */
+
+const SECRET_REQUEST_HEADERS = [
+  "authorization",
+  "cookie",
+  "x-b2-app-key",
+  "x-b2-app-key-id",
+  "x-b2-key",
+  "x-b2-key-id",
+  "x-b2-master-key",
+  "x-b2-master-key-id",
+  "x-b2-mcp-app-key",
+  "x-b2-mcp-app-key-id",
+  "x-b2-mcp-key",
+  "x-b2-mcp-key-id",
+  "x-b2-mcp-master-key",
+  "x-b2-mcp-master-key-id",
+] as const;
+
+type SecretHeaderName = (typeof SECRET_REQUEST_HEADERS)[number];
+type HeaderLookup = (name: SecretHeaderName) => string | string[] | undefined;
+
+function authorizationCredentialValues(value: string): string[] {
+  const match = /^\S+\s+(.+)$/.exec(value.trim());
+  const credential = match?.[1]?.trim();
+  return credential ? [credential] : [];
+}
+
+function cookieSecretValues(value: string): string[] {
+  return value.split(";").flatMap((part) => {
+    const cookie = part.trim();
+    if (!cookie) return [];
+    const equalsIndex = cookie.indexOf("=");
+    if (equalsIndex === -1) return [cookie];
+    const cookieValue = cookie.slice(equalsIndex + 1).trim();
+    const unquotedValue = /^"(.*)"$/.exec(cookieValue)?.[1];
+    return cookieValue
+      ? [cookie, cookieValue, ...(unquotedValue ? [unquotedValue] : [])]
+      : [cookie];
+  });
+}
+
+function secretHeaderValues(name: SecretHeaderName, value: string): string[] {
+  if (name === "authorization") return [value, ...authorizationCredentialValues(value)];
+  if (name === "cookie") return [value, ...cookieSecretValues(value)];
+  return [value];
+}
+
+function requestSecretHeaderValues(lookup: HeaderLookup): string[] {
+  return SECRET_REQUEST_HEADERS.flatMap((name) => {
+    const value = lookup(name);
+    const values = Array.isArray(value) ? value : value ? [value] : [];
+    return values.flatMap((headerValue) => secretHeaderValues(name, headerValue));
+  });
+}
+
+/**
+ * Extract the secret values carried on a Node request's headers.
+ *
+ * @returns The sensitive header values, including derived credential/cookie parts.
+ */
+export function nodeRequestSecrets(req: http.IncomingMessage): string[] {
+  return requestSecretHeaderValues((name) => req.headers[name]);
+}
+
+/**
+ * Extract the secret values carried on a Web request's headers.
+ *
+ * @returns The sensitive header values, including derived credential/cookie parts.
+ */
+export function webRequestSecrets(headers: Headers): string[] {
+  return requestSecretHeaderValues((name) => headers.get(name) ?? undefined);
+}
+
+/**
+ * Render an error message with the given request-header secrets redacted. Exact
+ * redaction covers short values the generic sanitizer skips; the sanitizer then
+ * handles configured env secrets and labeled/bearer patterns. Any failure while
+ * coercing or sanitizing the error text returns the sanitizer-failure sentinel
+ * so the HTTP catch blocks that call this cannot throw a secondary exception.
+ *
+ * @returns The redacted error text, or the sanitizer-failure sentinel on error.
+ */
+export function safeErrorText(err: unknown, secrets: readonly string[]): string {
+  try {
+    const text = err instanceof Error ? err.message : String(err);
+    const exact = secrets.filter((secret) => secret !== REDACTED);
+    return sanitizeText(redactExactTextSecrets(text, exact), { secrets: exact });
+  } catch {
+    return LOG_SANITIZER_FAILURE;
+  }
+}
