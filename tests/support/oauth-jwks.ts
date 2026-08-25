@@ -51,7 +51,7 @@ export const ed25519PublicJwk = {
   key_ops: ["verify"],
 } satisfies JsonWebKey;
 
-function base64Url(input: Buffer | string): string {
+export function base64Url(input: Buffer | string): string {
   return (Buffer.isBuffer(input) ? input : Buffer.from(input))
     .toString("base64")
     .replace(/=/g, "")

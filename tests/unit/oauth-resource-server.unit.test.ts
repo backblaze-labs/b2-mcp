@@ -3,7 +3,9 @@ import {
   OAuthDependencyError,
   OAuthBearerTokenVerifier,
   OAuthIntrospectionVerifier,
+  type OAuthIntrospectionOnlyConfig,
   OAuthJwtVerifier,
+  type OAuthJwtOnlyConfig,
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
   oauthMetadataOptions,
@@ -16,6 +18,7 @@ import {
 } from "../../src/oauth-resource-server";
 import { logger } from "../../src/utils/logger";
 import {
+  base64Url,
   ecPublicJwk,
   ed25519PublicJwk,
   jwtClaims,
@@ -137,6 +140,8 @@ function bearerChallenge(response: Response) {
   const header = response.headers.get("www-authenticate");
   expect(header).toBeTruthy();
   expect(header).toMatch(/^Bearer /);
+  // Parse an RFC 7235 Bearer challenge: auth-params are comma-separated,
+  // while quoted-string values may contain commas, equals signs, or escapes.
   const parts: string[] = [];
   let current = "";
   let quoted = false;
@@ -163,8 +168,14 @@ function bearerChallenge(response: Response) {
   if (current) parts.push(current.trim());
   const params = new Map(
     parts.map((part) => {
-      const [name, quotedValue] = part.split("=");
-      return [name, quotedValue?.replace(/^"|"$/g, "") ?? ""];
+      const equals = part.indexOf("=");
+      const name = equals >= 0 ? part.slice(0, equals).trim() : part.trim();
+      const rawValue = equals >= 0 ? part.slice(equals + 1).trim() : "";
+      const value =
+        rawValue.startsWith('"') && rawValue.endsWith('"')
+          ? rawValue.slice(1, -1).replace(/\\(.)/g, "$1")
+          : rawValue;
+      return [name, value];
     }),
   );
   return { header, params };
@@ -219,14 +230,6 @@ function stubOAuthEnv(overrides: Record<string, string> = {}) {
   })) {
     vi.stubEnv(name, value);
   }
-}
-
-function testBase64Url(value: unknown): string {
-  return Buffer.from(typeof value === "string" ? value : JSON.stringify(value))
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
 }
 
 describe("OAuthIntrospectionVerifier", () => {
@@ -891,20 +894,75 @@ function jwksOnlyConfig(overrides: Partial<typeof baseConfig> = {}) {
   };
 }
 
-function pureJwksOnlyConfig(overrides: Partial<ReturnType<typeof jwksOnlyConfig>> = {}) {
-  const {
-    introspectionEndpoint: _introspectionEndpoint,
-    introspectionClientId: _introspectionClientId,
-    introspectionClientSecret: _introspectionClientSecret,
-    introspectionBearerToken: _introspectionBearerToken,
-    ...config
-  } = jwksOnlyConfig(overrides);
-  return config;
+function pureJwksOnlyConfig(overrides: Partial<OAuthJwtOnlyConfig> = {}): OAuthJwtOnlyConfig {
+  return {
+    issuer: baseConfig.issuer,
+    resource: baseConfig.resource,
+    audience: baseConfig.audience,
+    publicUrl: baseConfig.publicUrl,
+    authorizationEndpoint: baseConfig.authorizationEndpoint,
+    tokenEndpoint: baseConfig.tokenEndpoint,
+    serviceDocumentationUrl: baseConfig.serviceDocumentationUrl,
+    requiredScopes: baseConfig.requiredScopes,
+    allowedSubjects: baseConfig.allowedSubjects,
+    allowedTokenTypes: baseConfig.allowedTokenTypes,
+    allowedAlgorithms: baseConfig.allowedAlgorithms,
+    allowedJwtAlgorithms: baseConfig.allowedJwtAlgorithms,
+    allowedJwtTypes: baseConfig.allowedJwtTypes,
+    dangerouslyAllowInsecureIssuerUrl: baseConfig.dangerouslyAllowInsecureIssuerUrl,
+    dangerouslyAllowUnauthenticatedIntrospection:
+      baseConfig.dangerouslyAllowUnauthenticatedIntrospection,
+    tokenCacheMaxEntries: baseConfig.tokenCacheMaxEntries,
+    tokenCacheTtlSeconds: baseConfig.tokenCacheTtlSeconds,
+    tokenCacheSkewSeconds: baseConfig.tokenCacheSkewSeconds,
+    jwksUri: "http://localhost:9000/oauth2/jwks",
+    jwksCacheTtlSeconds: baseConfig.jwksCacheTtlSeconds,
+    jwksCacheMinTtlSeconds: baseConfig.jwksCacheMinTtlSeconds,
+    jwksTimeoutMs: baseConfig.jwksTimeoutMs,
+    jwksMaxRetries: baseConfig.jwksMaxRetries,
+    jwksRetryDelayMs: baseConfig.jwksRetryDelayMs,
+    jwksCircuitFailures: baseConfig.jwksCircuitFailures,
+    jwksCircuitOpenMs: baseConfig.jwksCircuitOpenMs,
+    jwksRefreshCooldownMs: baseConfig.jwksRefreshCooldownMs,
+    jwtClockSkewSeconds: baseConfig.jwtClockSkewSeconds,
+    ...overrides,
+  };
 }
 
-function pureIntrospectionConfig(overrides: Partial<typeof baseConfig> = {}) {
-  const { jwksUri: _jwksUri, ...config } = { ...baseConfig, ...overrides };
-  return config;
+function pureIntrospectionConfig(
+  overrides: Partial<OAuthIntrospectionOnlyConfig> = {},
+): OAuthIntrospectionOnlyConfig {
+  return {
+    issuer: baseConfig.issuer,
+    resource: baseConfig.resource,
+    audience: baseConfig.audience,
+    publicUrl: baseConfig.publicUrl,
+    authorizationEndpoint: baseConfig.authorizationEndpoint,
+    tokenEndpoint: baseConfig.tokenEndpoint,
+    serviceDocumentationUrl: baseConfig.serviceDocumentationUrl,
+    requiredScopes: baseConfig.requiredScopes,
+    allowedSubjects: baseConfig.allowedSubjects,
+    allowedTokenTypes: baseConfig.allowedTokenTypes,
+    allowedAlgorithms: baseConfig.allowedAlgorithms,
+    allowedJwtAlgorithms: baseConfig.allowedJwtAlgorithms,
+    allowedJwtTypes: baseConfig.allowedJwtTypes,
+    dangerouslyAllowInsecureIssuerUrl: baseConfig.dangerouslyAllowInsecureIssuerUrl,
+    dangerouslyAllowUnauthenticatedIntrospection:
+      baseConfig.dangerouslyAllowUnauthenticatedIntrospection,
+    tokenCacheMaxEntries: baseConfig.tokenCacheMaxEntries,
+    tokenCacheTtlSeconds: baseConfig.tokenCacheTtlSeconds,
+    tokenCacheSkewSeconds: baseConfig.tokenCacheSkewSeconds,
+    introspectionEndpoint: baseConfig.introspectionEndpoint,
+    introspectionClientId: baseConfig.introspectionClientId,
+    introspectionClientSecret: baseConfig.introspectionClientSecret,
+    introspectionBearerToken: baseConfig.introspectionBearerToken,
+    introspectionTimeoutMs: baseConfig.introspectionTimeoutMs,
+    introspectionMaxRetries: baseConfig.introspectionMaxRetries,
+    introspectionRetryDelayMs: baseConfig.introspectionRetryDelayMs,
+    introspectionCircuitFailures: baseConfig.introspectionCircuitFailures,
+    introspectionCircuitOpenMs: baseConfig.introspectionCircuitOpenMs,
+    ...overrides,
+  };
 }
 
 function standardJwtClaims(overrides: Record<string, unknown> = {}) {
@@ -1322,14 +1380,16 @@ describe("OAuthJwtVerifier", () => {
 
     await expect(
       verifier.verifyAccessToken(
-        `${testBase64Url([])}.${testBase64Url(standardJwtClaims())}.${validSignature}`,
+        `${base64Url(JSON.stringify([]))}.${base64Url(
+          JSON.stringify(standardJwtClaims()),
+        )}.${validSignature}`,
       ),
     ).rejects.toThrow(/malformed/i);
     await expect(
       verifier.verifyAccessToken(
-        `${testBase64Url({ alg: "RS256", typ: "at+jwt", kid: rsaPublicJwk.kid })}.${testBase64Url(
-          [],
-        )}.${validSignature}`,
+        `${base64Url(
+          JSON.stringify({ alg: "RS256", typ: "at+jwt", kid: rsaPublicJwk.kid }),
+        )}.${base64Url(JSON.stringify([]))}.${validSignature}`,
       ),
     ).rejects.toThrow(/malformed/i);
     expect(fetchMock).not.toHaveBeenCalled();
