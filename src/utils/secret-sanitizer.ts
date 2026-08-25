@@ -218,9 +218,9 @@ export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): Sani
   return { secrets: configuredSecretValuesFromConfig(config) };
 }
 
-export function sanitizeText(text: string, options: SanitizerOptions = {}): string {
-  let safe = typeof text === "string" ? text : String(text);
-  for (const secret of configuredSecretValues(options)) {
+export function sanitizeText(text: unknown, options: SanitizerOptions = {}): string {
+  let safe = String(text);
+  for (const secret of configuredSecretValues(options).sort((a, b) => b.length - a.length)) {
     safe = safe.split(secret).join(REDACTED);
   }
   return safe
@@ -397,7 +397,10 @@ function sanitizedIdentifier(
   return allowed.test(value) ? value : REDACTED;
 }
 
-export function sanitizeProviderCode(code: string, options: SanitizerOptions = {}): string {
+export function sanitizeProviderCode(
+  code: string | undefined,
+  options: SanitizerOptions = {},
+): string {
   return (
     sanitizedIdentifier(code, /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/, options) ?? "unknown_error"
   );

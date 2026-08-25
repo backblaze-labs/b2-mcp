@@ -33,6 +33,19 @@ export const secretSinkFileOpsForTests = {
   renameSync: fs.renameSync,
 };
 
+type SinkWrite = (fd: number, buffer: Uint8Array, offset: number, length: number) => number;
+
+let secretSinkWrite: SinkWrite = fs.writeSync;
+
+export function setSinkWriteForTests(writeSync: SinkWrite): SinkWrite {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("test only");
+  }
+  const previous = secretSinkWrite;
+  secretSinkWrite = writeSync;
+  return previous;
+}
+
 let inlineWarningEmitted = false;
 
 export interface ResolveSecretSinkOptions {
@@ -274,7 +287,7 @@ function writeAll(fd: number, line: string): void {
   const buffer = new TextEncoder().encode(line);
   let offset = 0;
   while (offset < buffer.length) {
-    const written = fs.writeSync(fd, buffer, offset, buffer.length - offset);
+    const written = secretSinkWrite(fd, buffer, offset, buffer.length - offset);
     if (written <= 0) {
       throw new Error(`${SECRET_SINK_FILE_ENV} write made no progress`);
     }

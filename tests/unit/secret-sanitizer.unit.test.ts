@@ -7,6 +7,8 @@ import {
   LOG_SANITIZER_FAILURE,
   sanitizeForMcpOutput,
   sanitizeError,
+  sanitizeProviderCode,
+  sanitizeProviderRequestId,
   sanitizeStructuredLogValue,
   sanitizeText,
   SECRET_SANITIZER_REDACTION,
@@ -171,6 +173,67 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
+  it("redacts nested MCP output values without invoking hostile accessors", () => {
+    const overlappingSecret = "configured-overlap-secret";
+    const longerOverlappingSecret = `${overlappingSecret}-extended`;
+    const payload: Record<string, unknown> = {
+      headers: {
+        cookie: longerOverlappingSecret,
+        "set-cookie": "session=configured-cookie-secret",
+        "x-b2-key": "configured-header-secret",
+      },
+      nested: {
+        secretName: "public-secret-name",
+        temporarySecret: CANARY,
+        uploadToken: "configured-upload-token-secret",
+        nextToken: "page-token",
+      },
+    };
+    const arrayPayload = [longerOverlappingSecret, { note: CANARY }];
+    Object.defineProperty(arrayPayload, "authorization", {
+      enumerable: true,
+      value: "Bearer configured-array-token-secret",
+    });
+    payload.arrayPayload = arrayPayload;
+    payload.self = payload;
+    let getterReads = 0;
+    Object.defineProperty(payload, "hostile", {
+      enumerable: true,
+      get() {
+        getterReads++;
+        throw new Error(CANARY);
+      },
+    });
+    Object.defineProperty(payload, "nonEnumerableSecret", {
+      enumerable: false,
+      value: CANARY,
+    });
+
+    const safe = sanitizeForMcpOutput(payload, {
+      secrets: [
+        overlappingSecret,
+        longerOverlappingSecret,
+        "configured-cookie-secret",
+        "configured-header-secret",
+        "configured-upload-token-secret",
+        "configured-array-token-secret",
+      ],
+    }) as Record<string, any>;
+
+    expect(getterReads).toBe(0);
+    expect(safe.hostile).toBe("[accessor]");
+    expect(safe.self).toBe("[circular]");
+    expect(safe.nested.secretName).toBe("public-secret-name");
+    expect(safe.nested.temporarySecret).toBe(SECRET_SANITIZER_REDACTION);
+    expect(safe.nested.uploadToken).toBe(SECRET_SANITIZER_REDACTION);
+    expect(safe.nested.nextToken).toBe("page-token");
+    expect(safe.arrayPayload.authorization).toBe(SECRET_SANITIZER_REDACTION);
+    expect(safe.arrayPayload[0]).toBe(SECRET_SANITIZER_REDACTION);
+    expectNoCanary(safe);
+    expect(JSON.stringify(safe)).not.toContain(overlappingSecret);
+    expect(JSON.stringify(safe)).not.toContain(longerOverlappingSecret);
+  });
+
   it("sanitizes proxied log arrays without reading length getters", () => {
     const payload = [{ applicationKey: CANARY }];
     let lengthReads = 0;
@@ -255,6 +318,29 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
+  it("handles configured secret edge values and non-string text inputs", () => {
+    const secret = "configured-edge-secret";
+    const longerSecret = `${secret}-extended`;
+
+    const sanitized = sanitizeText(
+      {
+        toString: () => `applicationKey=${longerSecret} ${secret} appKey=[redacted] not-json-token`,
+      },
+      {
+        secrets: [undefined, "", "   ", "short", SECRET_SANITIZER_REDACTION, secret, longerSecret],
+      },
+    );
+
+    expect(sanitized).not.toContain(secret);
+    expect(sanitized).not.toContain(longerSecret);
+    expect(sanitized).toContain(`appKey=${SECRET_SANITIZER_REDACTION}`);
+    expect(sanitizeText("applicationKey=[redacted]")).toBe(
+      `applicationKey=${SECRET_SANITIZER_REDACTION}`,
+    );
+    expect(sanitizeText(404)).toBe("404");
+    expect(sanitizeError({ toString: () => `failed ${CANARY}` }).message).not.toContain(CANARY);
+  });
+
   it("keeps MCP output representations for callables and built-ins", () => {
     const safe = sanitizeForMcpOutput({
       createdAt: new Date("2026-08-21T00:00:00.000Z"),
@@ -330,6 +416,50 @@ describe("secret sanitizer canary policy", () => {
     expect(safe.name).toBe("[accessor]");
     expect(safe.stack).toBe("[accessor]");
     expectNoCanary(safe);
+  });
+
+  it("sanitizes circular Error metadata and non-string Error core fields", () => {
+    const err = new Error("placeholder");
+    Object.defineProperty(err, "message", {
+      configurable: true,
+      enumerable: true,
+      value: 404,
+    });
+    Object.defineProperty(err, "name", {
+      configurable: true,
+      enumerable: true,
+      value: true,
+    });
+    Object.defineProperty(err, "stack", {
+      configurable: true,
+      enumerable: true,
+      value: 123n,
+    });
+    (err as any).self = err;
+    const circularDetails: Record<string, unknown> = {};
+    circularDetails.self = circularDetails;
+    (err as any).details = circularDetails;
+
+    const safe = sanitizeStructuredLogValue(err) as Error & {
+      details?: { self?: unknown };
+      self?: unknown;
+    };
+
+    expect(safe.message).toBe("404");
+    expect(safe.name).toBe("true");
+    expect(safe.stack).toBe("123");
+    expect(safe.self).toBe("[circular]");
+    expect(safe.details?.self).toBe("[circular]");
+  });
+
+  it("keeps constructor stack fallback when the original Error stack is missing", () => {
+    const err = new Error("no stack");
+    delete err.stack;
+
+    const safe = sanitizeStructuredLogValue(err) as Error;
+
+    expect(safe.message).toBe("no stack");
+    expect(safe.stack).toContain("Error: no stack");
   });
 
   it("redacts logger-only credential handles at arbitrary log depths", () => {
@@ -531,6 +661,19 @@ describe("secret sanitizer canary policy", () => {
       CONFIGURED_APP_KEY,
       CONFIGURED_MASTER_KEY,
     ]);
+    expect(configuredSecretValuesFromConfig()).toEqual([]);
+  });
+
+  it("sanitizes provider identifiers by configured secrets and allowed shapes", () => {
+    expect(sanitizeProviderCode("valid.code-1")).toBe("valid.code-1");
+    expect(sanitizeProviderCode("bad code")).toBe(SECRET_SANITIZER_REDACTION);
+    expect(
+      sanitizeProviderCode(CONFIGURED_APPLICATION_KEY, { secrets: [CONFIGURED_APPLICATION_KEY] }),
+    ).toBe(SECRET_SANITIZER_REDACTION);
+    expect(sanitizeProviderCode(undefined)).toBe("unknown_error");
+    expect(sanitizeProviderRequestId("request/id:1")).toBe("request/id:1");
+    expect(sanitizeProviderRequestId(undefined)).toBeUndefined();
+    expect(sanitizeProviderRequestId(`request-${CANARY}`)).toBe(SECRET_SANITIZER_REDACTION);
   });
 
   it("keeps sanitizer and logger secret field vocabularies aligned", () => {
