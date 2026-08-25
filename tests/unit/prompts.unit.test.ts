@@ -199,6 +199,76 @@ describe("B2 workflow MCP prompts", () => {
     expect(text).toContain("[redacted]");
   });
 
+  it("preserves resource identifiers that resemble unlabeled secret shapes", async () => {
+    const server = createServer(testConfig);
+    const prompts = getRegisteredPrompts(server) ?? {};
+    const longBucketName = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const b2KeyShapedBucketName = "customer-assets-archive-2026-prd";
+    const longBucketId = "bucketId_0123456789ABCDEFGHIJKLMNOPQRSTUV";
+    const longPrefix = "archive/2026/customer-billing-history-000000/";
+    const applicationKeyId = "keyId_0123456789ABCDEFGHIJKLMNOPQRSTUVWX";
+
+    const auditText = promptText(
+      await prompts["b2-audit-public-exposure"].execute(
+        {
+          ...sampleArgs["b2-audit-public-exposure"],
+          bucketName: b2KeyShapedBucketName,
+        },
+        {},
+      ),
+    );
+    const lifecycleText = promptText(
+      await prompts["b2-configure-lifecycle-cost-optimization"].execute(
+        {
+          ...sampleArgs["b2-configure-lifecycle-cost-optimization"],
+          bucketName: longBucketName,
+          prefix: longPrefix,
+        },
+        {},
+      ),
+    );
+    const notificationText = promptText(
+      await prompts["b2-review-event-notifications"].execute(
+        {
+          ...sampleArgs["b2-review-event-notifications"],
+          bucketName: b2KeyShapedBucketName,
+          bucketId: longBucketId,
+        },
+        {},
+      ),
+    );
+    const rotationText = promptText(
+      await prompts["b2-rotate-application-key"].execute(
+        {
+          ...sampleArgs["b2-rotate-application-key"],
+          oldApplicationKeyId: applicationKeyId,
+        },
+        {},
+      ),
+    );
+
+    expect(auditText).toContain(b2KeyShapedBucketName);
+    expect(lifecycleText).toContain(longBucketName);
+    expect(lifecycleText).toContain(longPrefix);
+    expect(notificationText).toContain(b2KeyShapedBucketName);
+    expect(notificationText).toContain(longBucketId);
+    expect(rotationText).toContain(applicationKeyId);
+  });
+
+  it("requires notification bucket IDs to match the resolved bucket name", async () => {
+    const server = createServer(testConfig);
+    const prompts = getRegisteredPrompts(server) ?? {};
+    const result: any = await prompts["b2-review-event-notifications"].execute(
+      sampleArgs["b2-review-event-notifications"],
+      {},
+    );
+    const text = promptText(result);
+
+    expect(text).toContain("Always call b2_list_buckets");
+    expect(text).toContain("does not match the exact bucket");
+    expect(text).toContain("use only the resolved bucketId");
+  });
+
   it("validates positive integer retention duration strings", () => {
     const server = createServer(testConfig);
     const prompt = getRegisteredPrompts(server)?.["b2-provision-object-lock-bucket"];

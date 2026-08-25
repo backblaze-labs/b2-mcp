@@ -68,19 +68,30 @@ function workflowPrompt(description: string, text: string) {
   };
 }
 
-function redactSecretLikeText(value: string): string {
-  return sanitizeText(value, currentSanitizerOptions())
+interface PromptArgumentRenderOptions {
+  redactUnlabeledSecrets?: boolean;
+}
+
+function redactSecretLikeText(value: string, options: PromptArgumentRenderOptions = {}): string {
+  const sanitized = sanitizeText(value, currentSanitizerOptions());
+  if (options.redactUnlabeledSecrets === false) return sanitized;
+  return sanitized
     .replace(b2ApplicationKeySecretPattern, SECRET_SANITIZER_REDACTION)
     .replace(highEntropySecretPattern, SECRET_SANITIZER_REDACTION);
 }
 
-function safeArgValue(value: string | undefined, fallback: string, maxLength: number): string {
+function safeArgValue(
+  value: string | undefined,
+  fallback: string,
+  maxLength: number,
+  options: PromptArgumentRenderOptions = {},
+): string {
   const trimmed = value?.trim();
   const selected = trimmed && trimmed.length > 0 ? trimmed : fallback;
   if (selected.length > maxLength) {
     throw new Error(`Prompt argument exceeds ${maxLength} characters`);
   }
-  return redactSecretLikeText(selected);
+  return redactSecretLikeText(selected, options);
 }
 
 function dataLines(value: string): string[] {
@@ -93,6 +104,7 @@ function callerDataBlock(
     value: string | undefined;
     fallback: string;
     maxLength: number;
+    redactUnlabeledSecrets?: boolean;
   }>,
 ): string {
   const lines = [
@@ -101,7 +113,13 @@ function callerDataBlock(
   ];
   for (const entry of entries) {
     lines.push(`${entry.label}:`);
-    lines.push(...dataLines(safeArgValue(entry.value, entry.fallback, entry.maxLength)));
+    lines.push(
+      ...dataLines(
+        safeArgValue(entry.value, entry.fallback, entry.maxLength, {
+          redactUnlabeledSecrets: entry.redactUnlabeledSecrets,
+        }),
+      ),
+    );
   }
   lines.push("END_CALLER_SUPPLIED_DATA");
   return lines.join("\n");
@@ -137,6 +155,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
               value: bucketName,
               fallback: "all buckets visible to this credential",
               maxLength: ARG_LIMITS.bucketName,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "riskContext",
@@ -184,6 +203,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
               value: bucketName,
               fallback: "missing bucket name",
               maxLength: ARG_LIMITS.bucketName,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "costGoal",
@@ -196,6 +216,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
               value: prefix,
               fallback: "entire bucket",
               maxLength: ARG_LIMITS.prefix,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "retentionRequirement",
@@ -248,6 +269,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
               value: bucketName,
               fallback: "missing bucket name",
               maxLength: ARG_LIMITS.bucketName,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "mode",
@@ -288,7 +310,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
       argsSchema: {
         bucketName: bucketNameArg.describe("B2 bucket name to review."),
         bucketId: optionalBucketIdArg.describe(
-          "Optional B2 bucket ID. Use b2_list_buckets to resolve it when absent.",
+          "Optional B2 bucket ID. It is validated against the exact bucket name before use.",
         ),
         desiredChange: optionalShortTextArg.describe(
           "Optional requested notification change or review focus.",
@@ -305,12 +327,14 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
               value: bucketName,
               fallback: "missing bucket name",
               maxLength: ARG_LIMITS.bucketName,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "bucketId",
               value: bucketId,
               fallback: "resolve from bucket name",
               maxLength: ARG_LIMITS.bucketId,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "desiredChange",
@@ -321,8 +345,8 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
           ]),
           "",
           "Follow this sequence:",
-          "1. If bucketId is absent, call b2_list_buckets with the bucketName from the caller data block and copy the bucketId from the exact match.",
-          "2. Call b2_get_bucket_notification_rules with the bucketId. Treat returned webhook URLs and signing data as redacted summaries only.",
+          "1. Always call b2_list_buckets with the bucketName from the caller data block and copy the bucketId from the exact match. If the caller supplied bucketId, stop if it does not match the exact bucket; use only the resolved bucketId.",
+          "2. Call b2_get_bucket_notification_rules with the resolved bucketId. Treat returned webhook URLs and signing data as redacted summaries only.",
           "3. Summarize rule names, prefixes, event types, enabled status, target host, and any coverage gaps or overly broad matches.",
           "4. Propose a complete replacement rule set only when changes are needed, because b2_set_bucket_notification_rules replaces the bucket's persistent notification rules.",
           "5. Before calling b2_set_bucket_notification_rules, get approval for the full replacement list, target URLs, event types, prefixes, and secret-handling plan. Let the destructive gate or MCP elicitation enforce approval.",
@@ -358,6 +382,7 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
               value: oldApplicationKeyId,
               fallback: "missing old application key ID",
               maxLength: ARG_LIMITS.applicationKeyId,
+              redactUnlabeledSecrets: false,
             },
             {
               label: "workloadName",
