@@ -12,7 +12,10 @@ import {
   s3CircuitBreaker,
   s3TransferCircuitBreaker,
 } from "../../src/utils/circuit-breaker";
+import { parseErrorText } from "../../src/utils/errors";
 import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
+
+const MAX_INLINE_OBJECT_BYTES = 1024 * 1024;
 
 function streamFrom(
   chunks: Uint8Array[],
@@ -63,12 +66,22 @@ function notFound(message = "Object not found") {
   return Object.assign(new Error(message), { status: 404, code: "not_found" });
 }
 
+function s3Error(name: string, status: number, message: string, requestId = `${name}-request`) {
+  return Object.assign(new Error(message), {
+    name,
+    $metadata: { httpStatusCode: status, requestId },
+  });
+}
+
 describe("S3 object tools with deterministic handler fake", () => {
   let tools: ToolHarness;
   let calls: Array<{ operation: string; input: any }> = [];
   let nextDownload: B2S3DownloadedObject = downloadedObject();
   let currentVersion: B2S3FileVersionBinding | null = null;
   let nextHeadObjectError: unknown = null;
+  let nextCurrentVersionError: unknown = null;
+  let nextBulkVersionLookupError: unknown = null;
+  let operationErrors = new Map<string, unknown>();
   const versions = new Map<string, B2S3FileVersionBinding>();
   const bucketIds = new Map([["b", "bucket-id"]]);
   let bulkVersionLookups: Array<{
@@ -87,6 +100,9 @@ describe("S3 object tools with deterministic handler fake", () => {
     nextDownload = downloadedObject();
     currentVersion = null;
     nextHeadObjectError = null;
+    nextCurrentVersionError = null;
+    nextBulkVersionLookupError = null;
+    operationErrors = new Map();
     versions.clear();
     bulkVersionLookups = [];
     nextListObjects = {
@@ -98,16 +114,20 @@ describe("S3 object tools with deterministic handler fake", () => {
     const s3 = {
       async putObject(input: any) {
         calls.push({ operation: "putObject", input });
+        if (operationErrors.has("putObject")) throw operationErrors.get("putObject");
       },
       async getObject(input: any) {
         calls.push({ operation: "getObject", input });
+        if (operationErrors.has("getObject")) throw operationErrors.get("getObject");
         return nextDownload;
       },
       async deleteObject(input: any) {
         calls.push({ operation: "deleteObject", input });
+        if (operationErrors.has("deleteObject")) throw operationErrors.get("deleteObject");
       },
       async deleteObjects(input: any) {
         calls.push({ operation: "deleteObjects", input });
+        if (operationErrors.has("deleteObjects")) throw operationErrors.get("deleteObjects");
         return {
           deleted: input.quiet ? [] : input.objects.map((object: any) => ({ Key: object.key })),
           errors: [],
@@ -118,6 +138,7 @@ describe("S3 object tools with deterministic handler fake", () => {
       },
       async headObject(input: any) {
         calls.push({ operation: "headObject", input });
+        if (operationErrors.has("headObject")) throw operationErrors.get("headObject");
         if (nextHeadObjectError) throw nextHeadObjectError;
         return {
           ...downloadedObject(),
@@ -127,13 +148,17 @@ describe("S3 object tools with deterministic handler fake", () => {
       },
       async copyObject(input: any) {
         calls.push({ operation: "copyObject", input });
+        if (operationErrors.has("copyObject")) throw operationErrors.get("copyObject");
       },
       async listObjectsV2(input: any) {
         calls.push({ operation: "listObjectsV2", input });
+        if (operationErrors.has("listObjectsV2")) throw operationErrors.get("listObjectsV2");
         return nextListObjects;
       },
       async listObjectVersions(input: any) {
         calls.push({ operation: "listObjectVersions", input });
+        if (operationErrors.has("listObjectVersions"))
+          throw operationErrors.get("listObjectVersions");
         return {
           versions: [],
           deleteMarkers: [],
@@ -158,6 +183,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         bucket: string;
         objects: Array<{ key: string; versionId?: string }>;
       }) {
+        if (nextBulkVersionLookupError) throw nextBulkVersionLookupError;
         bulkVersionLookups.push(input);
         return input.objects.map((object) => {
           if (object.versionId === undefined) return { object, version: null };
@@ -177,6 +203,7 @@ describe("S3 object tools with deterministic handler fake", () => {
         });
       },
       async getCurrentS3FileVersion() {
+        if (nextCurrentVersionError) throw nextCurrentVersionError;
         return currentVersion;
       },
     };
@@ -212,6 +239,47 @@ describe("S3 object tools with deterministic handler fake", () => {
       },
     });
     expect(Buffer.from(calls[0].input.body).toString()).toBe("hello");
+  });
+
+  it("requires an inline upload source before calling S3", async () => {
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "empty.txt",
+      contentType: "text/plain",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/Either filePath or content/);
+    expect(calls).toEqual([]);
+  });
+
+  it("uploads a small local file through the inline filePath branch", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-inline-put-"));
+    const filePath = path.join(dir, "manifest.json");
+    try {
+      fs.writeFileSync(filePath, '{"ok":true}');
+
+      const result = await tools.call("s3_put_object", {
+        bucket: "b",
+        key: "manifest.json",
+        filePath,
+        contentType: "application/json",
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(calls[0]).toMatchObject({
+        operation: "putObject",
+        input: {
+          bucket: "b",
+          key: "manifest.json",
+          contentLength: 11,
+          contentType: "application/json",
+        },
+      });
+      expect(Buffer.from(calls[0].input.body).toString()).toBe('{"ok":true}');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("returns small inline objects and forwards list pagination arguments", async () => {
@@ -252,6 +320,73 @@ describe("S3 object tools with deterministic handler fake", () => {
     });
   });
 
+  it("reads inline objects from node and transformToWebStream bodies", async () => {
+    nextDownload = downloadedObject({
+      contentLength: 5,
+      body: Readable.from(["hello"]) as B2S3DownloadedObject["body"],
+    });
+    const nodeResult = parseResult(
+      await tools.call("s3_get_object", { bucket: "b", key: "node.txt" }),
+    );
+
+    nextDownload = downloadedObject({
+      contentLength: 13,
+      body: {
+        transformToWebStream: () =>
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("via-transform"));
+              controller.close();
+            },
+          }),
+      } as unknown as B2S3DownloadedObject["body"],
+    });
+    const transformResult = parseResult(
+      await tools.call("s3_get_object", { bucket: "b", key: "transform.txt" }),
+    );
+
+    expect(nodeResult.content).toBe(Buffer.from("hello").toString("base64"));
+    expect(transformResult.content).toBe(Buffer.from("via-transform").toString("base64"));
+  });
+
+  it("enforces the inline cap while reading an oversized node body", async () => {
+    const body = Readable.from([Buffer.alloc(MAX_INLINE_OBJECT_BYTES + 1)]);
+    const destroySpy = vi.spyOn(body, "destroy");
+    nextDownload = downloadedObject({
+      contentLength: 1,
+      body: body as B2S3DownloadedObject["body"],
+    });
+
+    const result = await tools.call("s3_get_object", { bucket: "b", key: "lying.bin" });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/inline read limit|exceeded/i);
+    expect(destroySpy).toHaveBeenCalled();
+  });
+
+  it("reports missing get-object bodies for inline and saveToPath reads", async () => {
+    nextDownload = downloadedObject({ contentLength: 0, body: undefined });
+    const inline = await tools.call("s3_get_object", { bucket: "b", key: "empty-body.txt" });
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-missing-body-"));
+    const target = path.join(dir, "out.txt");
+    try {
+      nextDownload = downloadedObject({ contentLength: 0, body: undefined });
+      const saved = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "empty-body.txt",
+        saveToPath: target,
+      });
+
+      expect(inline.isError).toBe(true);
+      expect(saved.isError).toBe(true);
+      expect(parseResult(inline)).toMatch(/readable body/i);
+      expect(parseResult(saved)).toMatch(/readable body/i);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("cancels inline reads with invalid or oversized content lengths", async () => {
     let invalidCanceled = 0;
     nextDownload = downloadedObject({
@@ -270,6 +405,37 @@ describe("S3 object tools with deterministic handler fake", () => {
     const large = await tools.call("s3_get_object", { bucket: "b", key: "large.bin" });
     expect(large.isError).toBe(true);
     expect(largeCanceled).toBe(1);
+  });
+
+  it("streams saveToPath downloads to disk and reports unknown length", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-save-ok-"));
+    const target = path.join(dir, "nested", "out.txt");
+    nextDownload = downloadedObject({
+      contentLength: undefined,
+      body: {
+        transformToWebStream: () =>
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("saved through stream"));
+              controller.close();
+            },
+          }),
+      } as unknown as B2S3DownloadedObject["body"],
+    });
+
+    try {
+      const result = await tools.call("s3_get_object", {
+        bucket: "b",
+        key: "hello.txt",
+        saveToPath: target,
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(parseResult(result)).toContain("unknown bytes");
+      expect(fs.readFileSync(target, "utf8")).toBe("saved through stream");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("destroys the body when inline reading aborts after headers", async () => {
@@ -367,6 +533,59 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(parseResult(result)).toMatch(/client disconnected|aborted/i);
     expect(reader.cancel).toHaveBeenCalled();
     expect(reader.releaseLock).toHaveBeenCalled();
+  });
+
+  it("preserves unversioned deletes when bulk version validation throws", async () => {
+    nextBulkVersionLookupError = Object.assign(new Error("version lookup failed"), {
+      status: 503,
+      code: "version_lookup_failed",
+      requestId: "rq-version-lookup",
+    });
+
+    const result = parseResult(
+      await tools.call("s3_delete_objects", {
+        bucket: "b",
+        objects: [{ key: "latest.txt" }, { key: "old.txt", versionId: "v1" }],
+        quiet: false,
+        confirm: true,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      deleted: [{ Key: "latest.txt" }],
+      attempted: 2,
+      errors: [
+        {
+          Key: "old.txt",
+          VersionId: "v1",
+          Code: "version_lookup_failed",
+          Message: "version lookup failed",
+          RequestId: "rq-version-lookup",
+        },
+      ],
+    });
+    expect(calls.find((call) => call.operation === "deleteObjects")?.input.objects).toEqual([
+      { key: "latest.txt" },
+    ]);
+  });
+
+  it("returns an empty deleteObjects result without calling S3", async () => {
+    const result = parseResult(
+      await tools.call("s3_delete_objects", {
+        bucket: "b",
+        objects: [],
+        confirm: true,
+      }),
+    );
+
+    expect(result).toMatchObject({
+      deleted: [],
+      errors: [],
+      attempted: 0,
+      aborted: false,
+      maxConcurrency: 0,
+    });
+    expect(calls.some((call) => call.operation === "deleteObjects")).toBe(false);
   });
 
   it("enforces destructive confirmation on object delete calls", async () => {
@@ -536,4 +755,111 @@ describe("S3 object tools with deterministic handler fake", () => {
     });
     expect(calls.filter((call) => call.operation === "headObject")).toHaveLength(1);
   });
+
+  it("preserves the S3 head error when delete-marker fallback cannot synthesize one", async () => {
+    nextHeadObjectError = Object.assign(s3Error("NoSuchKey", 404, "missing", "rq-head"), {
+      DeleteMarker: true,
+    });
+    currentVersion = fileVersion({ action: "upload" });
+
+    const uploadVersion = await tools.call("s3_head_object", { bucket: "b", key: "hello.txt" });
+
+    nextCurrentVersionError = new Error("native version lookup failed");
+    const fallbackFailure = await tools.call("s3_head_object", {
+      bucket: "b",
+      key: "hello.txt",
+    });
+
+    expect(uploadVersion.isError).toBe(true);
+    expect(fallbackFailure.isError).toBe(true);
+    expect(parseErrorText(parseResult(uploadVersion))).toMatchObject({
+      code: "NoSuchKey",
+      status: 404,
+      requestId: "rq-head",
+    });
+    expect(parseErrorText(parseResult(fallbackFailure))).toMatchObject({
+      code: "NoSuchKey",
+      status: 404,
+      requestId: "rq-head",
+    });
+  });
+
+  it.each([
+    {
+      tool: "s3_put_object",
+      operation: "putObject",
+      args: {
+        bucket: "b",
+        key: "put.txt",
+        content: Buffer.from("hello").toString("base64"),
+        contentType: "text/plain",
+      },
+      error: s3Error("AccessDenied", 403, "denied", "rq-put"),
+      expected: { code: "AccessDenied", status: 403, requestId: "rq-put" },
+    },
+    {
+      tool: "s3_get_object",
+      operation: "getObject",
+      args: { bucket: "b", key: "missing.txt" },
+      error: s3Error("NoSuchKey", 404, "missing", "rq-get"),
+      expected: { code: "NoSuchKey", status: 404, requestId: "rq-get" },
+    },
+    {
+      tool: "s3_delete_object",
+      operation: "deleteObject",
+      args: { bucket: "b", key: "locked.txt", confirm: true },
+      error: s3Error("AccessDenied", 403, "delete denied", "rq-delete"),
+      expected: { code: "AccessDenied", status: 403, requestId: "rq-delete" },
+    },
+    {
+      tool: "s3_delete_objects",
+      operation: "deleteObjects",
+      args: { bucket: "b", objects: [{ key: "locked.txt" }], confirm: true },
+      error: s3Error("AccessDenied", 403, "bulk delete denied", "rq-delete-many"),
+      expected: { code: "AccessDenied", status: 403, requestId: "rq-delete-many" },
+    },
+    {
+      tool: "s3_head_object",
+      operation: "headObject",
+      args: { bucket: "b", key: "missing.txt" },
+      error: s3Error("NoSuchKey", 404, "missing", "rq-head-mapping"),
+      expected: { code: "NoSuchKey", status: 404, requestId: "rq-head-mapping" },
+    },
+    {
+      tool: "s3_copy_object",
+      operation: "copyObject",
+      args: {
+        sourceBucket: "b",
+        sourceKey: "source.txt",
+        destinationBucket: "b",
+        destinationKey: "dest.txt",
+      },
+      error: s3Error("PreconditionFailed", 412, "condition failed", "rq-copy"),
+      expected: { code: "PreconditionFailed", status: 412, requestId: "rq-copy" },
+    },
+    {
+      tool: "s3_list_objects_v2",
+      operation: "listObjectsV2",
+      args: { bucket: "b" },
+      error: s3Error("AccessDenied", 403, "list denied", "rq-list"),
+      expected: { code: "AccessDenied", status: 403, requestId: "rq-list" },
+    },
+    {
+      tool: "s3_list_object_versions",
+      operation: "listObjectVersions",
+      args: { bucket: "b" },
+      error: s3Error("AccessDenied", 403, "versions denied", "rq-versions"),
+      expected: { code: "AccessDenied", status: 403, requestId: "rq-versions" },
+    },
+  ])(
+    "maps $tool S3 errors into MCP error text",
+    async ({ tool, operation, args, error, expected }) => {
+      operationErrors.set(operation, error);
+
+      const result = await tools.call(tool, args);
+
+      expect(result.isError).toBe(true);
+      expect(parseErrorText(parseResult(result))).toMatchObject(expected);
+    },
+  );
 });
