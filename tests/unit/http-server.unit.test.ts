@@ -721,6 +721,34 @@ describe("HTTP server lifecycle", () => {
     });
   });
 
+  it("sanitizes header secrets when the mcpHandler rejects inside the pipeline", async () => {
+    const secret = "s7short";
+    const fetch = vi.fn(async () => {
+      throw new Error(`handler failed with ${secret}`);
+    });
+    const handle = buildHttpServer({
+      idleSweepMode: "request",
+      mcpHandler: { fetch, close: vi.fn(async () => undefined) },
+    });
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const port = await listenOnLocalhost(handle);
+      const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key": secret } });
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(res.status).toBe(500);
+      expect(res.body).not.toContain(secret);
+      expect(warnSpy).toHaveBeenCalledWith(
+        { err: "handler failed with [redacted]" },
+        "mcp.http.failed",
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret);
+    } finally {
+      await closeHttpServer(handle);
+    }
+  });
+
   it.each(["SIGTERM", "SIGINT"] as const)("handles %s by draining and closing", async (signal) => {
     const signalSnapshot = snapshotSignalListeners();
     const exitCodes: Array<string | number | null | undefined> = [];

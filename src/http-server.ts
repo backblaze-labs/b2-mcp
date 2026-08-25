@@ -33,9 +33,8 @@ import {
 } from "./utils/node-web-bridge.js";
 import {
   bootstrapErrorMessage,
-  redactExactTextSecrets,
-  SECRET_SANITIZER_REDACTION,
-  sanitizeText,
+  nodeRequestSecrets,
+  safeErrorText,
 } from "./utils/secret-sanitizer.js";
 import type { B2Config } from "./utils/types.js";
 
@@ -49,16 +48,6 @@ export {
 const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
 const SHUTDOWN_DRAIN_MS = 10 * 1000;
-const SECRET_REQUEST_HEADERS = [
-  "authorization",
-  "cookie",
-  "x-b2-app-key",
-  "x-b2-key",
-  "x-b2-master-key",
-  "x-b2-mcp-app-key",
-  "x-b2-mcp-key",
-  "x-b2-mcp-master-key",
-] as const;
 
 export interface HttpServerHandle {
   server: http.Server;
@@ -99,56 +88,6 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function authorizationCredentialValues(value: string): string[] {
-  const match = /^\S+\s+(.+)$/.exec(value.trim());
-  const credential = match?.[1]?.trim();
-  return credential ? [credential] : [];
-}
-
-function cookieSecretValues(value: string): string[] {
-  return value.split(";").flatMap((part) => {
-    const cookie = part.trim();
-    if (!cookie) return [];
-    const equalsIndex = cookie.indexOf("=");
-    if (equalsIndex === -1) return [cookie];
-    const cookieValue = cookie.slice(equalsIndex + 1).trim();
-    const unquotedValue = /^"(.*)"$/.exec(cookieValue)?.[1];
-    return cookieValue
-      ? [cookie, cookieValue, ...(unquotedValue ? [unquotedValue] : [])]
-      : [cookie];
-  });
-}
-
-function secretHeaderValues(
-  name: (typeof SECRET_REQUEST_HEADERS)[number],
-  value: string,
-): string[] {
-  if (name === "authorization") return [value, ...authorizationCredentialValues(value)];
-  if (name === "cookie") return [value, ...cookieSecretValues(value)];
-  return [value];
-}
-
-function requestSecretHeaderValues(req: http.IncomingMessage): string[] {
-  return SECRET_REQUEST_HEADERS.flatMap((name) => {
-    const value = req.headers[name];
-    const values = Array.isArray(value) ? value : value ? [value] : [];
-    return values.flatMap((headerValue) => secretHeaderValues(name, headerValue));
-  });
-}
-
-function redactExactSecrets(text: string, secrets: readonly string[]): string {
-  return redactExactTextSecrets(
-    text,
-    secrets.filter((secret) => secret !== SECRET_SANITIZER_REDACTION),
-  );
-}
-
-function safeErrorText(err: unknown, req?: http.IncomingMessage): string {
-  const text = err instanceof Error ? err.message : String(err);
-  const secrets = req ? requestSecretHeaderValues(req) : [];
-  return sanitizeText(redactExactSecrets(text, secrets), { secrets });
-}
-
 function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOptions): http.Server {
   return http.createServer(async (req, res) => {
     const abortController = new AbortController();
@@ -170,7 +109,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
         allowLoopbackHealthProbe: true,
       });
     } catch (err) {
-      logger.warn({ err: safeErrorText(err, req) }, "mcp.http.failed");
+      logger.warn({ err: safeErrorText(err, nodeRequestSecrets(req)) }, "mcp.http.failed");
       response = jsonResponse(500, { error: "Internal server error" });
     }
 
@@ -179,7 +118,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
       await writeWebResponse(response, res, abortController.signal);
     } catch (err) {
       if (!abortController.signal.aborted && !res.destroyed) {
-        logger.warn({ err: safeErrorText(err, req) }, "mcp.http.failed");
+        logger.warn({ err: safeErrorText(err, nodeRequestSecrets(req)) }, "mcp.http.failed");
         res.destroy(err instanceof Error ? err : new Error(String(err)));
       }
     } finally {

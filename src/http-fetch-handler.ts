@@ -28,6 +28,7 @@ import { logger } from "./utils/logger.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
 import { parseIntEnv } from "./utils/config.js";
 import { readCappedBodyBytes } from "./utils/http-body-limit.js";
+import { safeErrorText, webRequestSecrets } from "./utils/secret-sanitizer.js";
 import {
   type AuthenticatedIncomingMessage,
   type CredentialProvider,
@@ -787,7 +788,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
     try {
       return await mcpHandler.fetch(sdkRequest, requestOptions);
     } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+      logger.warn({ err: safeErrorText(err, webRequestSecrets(request.headers)) }, "mcp.http.failed");
       return internalMcpErrorResponse();
     }
   }
@@ -944,7 +945,7 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
       );
       return responseWithCleanup(response, () => finalize(limitKey, prepared));
     } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, "mcp.http.failed");
+      logger.warn({ err: safeErrorText(err, webRequestSecrets(request.headers)) }, "mcp.http.failed");
       return responseWithCleanup(jsonResponse(500, { error: "Internal server error" }), () =>
         finalize(limitKey, prepared),
       );

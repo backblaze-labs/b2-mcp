@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "async_hooks";
+import type * as http from "http";
 
 const REDACTED = "[redacted]";
 export const LOG_SANITIZER_FAILURE = "[log_sanitizer_failed]";
@@ -455,3 +456,81 @@ export function sanitizeProviderRequestId(
 }
 
 export const SECRET_SANITIZER_REDACTION = REDACTED;
+
+/*
+ * Request-header secret extraction for HTTP error sanitization. Both the Node
+ * standalone server and the runtime-neutral fetch pipeline log failure messages
+ * that can echo request-header credentials. Extracting the sensitive header
+ * values here keeps the redaction identical across runtimes, so a thrown
+ * mcpHandler rejection is sanitized whether it is caught inside the pipeline
+ * (Node + serverless) or escapes to the Node server.
+ */
+
+const SECRET_REQUEST_HEADERS = [
+  "authorization",
+  "cookie",
+  "x-b2-app-key",
+  "x-b2-key",
+  "x-b2-master-key",
+  "x-b2-mcp-app-key",
+  "x-b2-mcp-key",
+  "x-b2-mcp-master-key",
+] as const;
+
+type SecretHeaderName = (typeof SECRET_REQUEST_HEADERS)[number];
+type HeaderLookup = (name: SecretHeaderName) => string | string[] | undefined;
+
+function authorizationCredentialValues(value: string): string[] {
+  const match = /^\S+\s+(.+)$/.exec(value.trim());
+  const credential = match?.[1]?.trim();
+  return credential ? [credential] : [];
+}
+
+function cookieSecretValues(value: string): string[] {
+  return value.split(";").flatMap((part) => {
+    const cookie = part.trim();
+    if (!cookie) return [];
+    const equalsIndex = cookie.indexOf("=");
+    if (equalsIndex === -1) return [cookie];
+    const cookieValue = cookie.slice(equalsIndex + 1).trim();
+    const unquotedValue = /^"(.*)"$/.exec(cookieValue)?.[1];
+    return cookieValue
+      ? [cookie, cookieValue, ...(unquotedValue ? [unquotedValue] : [])]
+      : [cookie];
+  });
+}
+
+function secretHeaderValues(name: SecretHeaderName, value: string): string[] {
+  if (name === "authorization") return [value, ...authorizationCredentialValues(value)];
+  if (name === "cookie") return [value, ...cookieSecretValues(value)];
+  return [value];
+}
+
+function requestSecretHeaderValues(lookup: HeaderLookup): string[] {
+  return SECRET_REQUEST_HEADERS.flatMap((name) => {
+    const value = lookup(name);
+    const values = Array.isArray(value) ? value : value ? [value] : [];
+    return values.flatMap((headerValue) => secretHeaderValues(name, headerValue));
+  });
+}
+
+/** Secret values carried on a Node request's headers. */
+export function nodeRequestSecrets(req: http.IncomingMessage): string[] {
+  return requestSecretHeaderValues((name) => req.headers[name]);
+}
+
+/** Secret values carried on a Web request's headers. */
+export function webRequestSecrets(headers: Headers): string[] {
+  return requestSecretHeaderValues((name) => headers.get(name) ?? undefined);
+}
+
+/**
+ * Render an error message with the given request-header secrets redacted. Exact
+ * redaction covers short values the generic sanitizer skips; the sanitizer then
+ * handles configured env secrets and labeled/bearer patterns.
+ */
+export function safeErrorText(err: unknown, secrets: readonly string[]): string {
+  const text = err instanceof Error ? err.message : String(err);
+  const exact = secrets.filter((secret) => secret !== REDACTED);
+  return sanitizeText(redactExactTextSecrets(text, exact), { secrets: exact });
+}
