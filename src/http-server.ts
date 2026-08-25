@@ -54,6 +54,8 @@ export interface HttpServerHandle {
 export interface HttpServerOptions extends HttpPipelineOptions {
   /** Hook for customer middleware/tests to attach verified MCP authInfo. */
   getAuthInfo?: (req: AuthenticatedIncomingMessage) => AuthInfo | null | undefined;
+  /** Hook for tests/custom hosts that need to replace the full fetch pipeline. */
+  fetchHandler?: B2McpFetchHandler;
 }
 
 export interface HttpListenOptions {
@@ -122,7 +124,7 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
 }
 
 export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHandle {
-  const pipeline = createB2McpFetchHandler(options);
+  const pipeline = options.fetchHandler ?? createB2McpFetchHandler(options);
   const httpServer = createNodeServer(pipeline, options);
   httpServer.requestTimeout = intEnv("B2_HTTP_REQUEST_TIMEOUT_MS", DEFAULT_HTTP_REQUEST_TIMEOUT_MS);
   httpServer.headersTimeout = Math.min(
@@ -209,12 +211,14 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   process.on("SIGINT", onSigint);
 }
 
+export function handleHttpBootstrapFatal(err: unknown): never {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`b2-mcp: ${message}\n`);
+  logger.fatal({ err: message }, "server.fatal");
+  flushLogsSync();
+  process.exit(1);
+}
+
 if (require.main === module) {
-  startHttp().catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`b2-mcp: ${message}\n`);
-    logger.fatal({ err: message }, "server.fatal");
-    flushLogsSync();
-    process.exit(1);
-  });
+  startHttp().catch(handleHttpBootstrapFatal);
 }
