@@ -675,10 +675,7 @@ describe("HTTP server lifecycle", () => {
         );
 
         await new Promise((resolve) => setImmediate(resolve));
-        expect(warnSpy).toHaveBeenCalledWith(
-          { err: expect.any(String) },
-          "mcp.http.failed",
-        );
+        expect(warnSpy).toHaveBeenCalledWith({ err: expect.any(String) }, "mcp.http.failed");
         expect(unhandled).toEqual([]);
       } finally {
         process.off("unhandledRejection", onUnhandled);
