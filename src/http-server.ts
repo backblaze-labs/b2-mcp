@@ -105,7 +105,7 @@ function requestSecretHeaderValues(req: http.IncomingMessage): string[] {
 
 function redactExactSecrets(text: string, secrets: readonly string[]): string {
   let safe = text;
-  for (const secret of new Set(secrets)) {
+  for (const secret of [...new Set(secrets)].sort((a, b) => b.length - a.length)) {
     if (!secret.trim() || secret === SECRET_SANITIZER_REDACTION) continue;
     safe = safe.split(secret).join(SECRET_SANITIZER_REDACTION);
   }

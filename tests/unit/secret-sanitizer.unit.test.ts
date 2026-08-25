@@ -1,18 +1,18 @@
 import { createAuditedToolCallback } from "../../src/server";
-import { logger } from "../../src/utils/logger";
 import { toolError, toolJson } from "../../src/utils/errors";
+import { logger } from "../../src/utils/logger";
 import {
   configuredSecretValuesFromConfig,
-  LOGGER_SECRET_REDACTION_PATHS,
   LOG_SANITIZER_FAILURE,
-  sanitizeForMcpOutput,
-  sanitizeError,
+  LOGGER_SECRET_REDACTION_PATHS,
   sanitizeProviderCode,
   sanitizeProviderRequestId,
-  sanitizeStructuredLogValue,
-  sanitizeText,
   SECRET_SANITIZER_REDACTION,
   STRUCTURED_SECRET_FIELD_NAMES,
+  sanitizeError,
+  sanitizeForMcpOutput,
+  sanitizeStructuredLogValue,
+  sanitizeText,
   TEXT_SECRET_LABELS,
 } from "../../src/utils/secret-sanitizer";
 import { B2Config } from "../../src/utils/types";
@@ -110,6 +110,20 @@ describe("secret sanitizer canary policy", () => {
     expect(sanitizeText(json)).toBe(
       `{"applicationKey":"${SECRET_SANITIZER_REDACTION}","authorizationToken":"${SECRET_SANITIZER_REDACTION}","metadata":"keep"}`,
     );
+  });
+
+  it("redacts overlapping configured secret values longest first", () => {
+    const shorterSecret = "abcdefgh";
+    const longerSecret = "abcdefghijkl";
+
+    expect(
+      sanitizeText(`fatal ${longerSecret}`, {
+        env: {
+          B2_APPLICATION_KEY: shorterSecret,
+          B2_MASTER_KEY: longerSecret,
+        },
+      }),
+    ).toBe(`fatal ${SECRET_SANITIZER_REDACTION}`);
   });
 
   it("redacts JSON-formatted sensitive fields from sanitized Error objects", () => {

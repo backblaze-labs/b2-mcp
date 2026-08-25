@@ -644,6 +644,42 @@ describe("HTTP server lifecycle", () => {
     });
   });
 
+  it("redacts overlapping short and long header secrets longest first", async () => {
+    const shorterSecret = "abcdefgh";
+    const longerSecret = "abcdefghijkl";
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(() => Promise.reject(`string failure with ${longerSecret}`)),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp", {
+          headers: {
+            "x-b2-app-key": shorterSecret,
+            "x-b2-key": longerSecret,
+          },
+        });
+
+        expect(res.status).toBe(500);
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "string failure with [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(longerSecret);
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("ijkl");
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
   it.each(["SIGTERM", "SIGINT"] as const)("handles %s by draining and closing", async (signal) => {
     const signalSnapshot = snapshotSignalListeners();
     const exitCodes: Array<string | number | null | undefined> = [];

@@ -211,7 +211,7 @@ function configuredSecretValues(options: SanitizerOptions): string[] {
   ]
     .map(secretCandidate)
     .filter((value): value is string => value !== null);
-  return [...new Set(values)];
+  return [...new Set(values)].sort((a, b) => b.length - a.length);
 }
 
 export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): SanitizerOptions {
