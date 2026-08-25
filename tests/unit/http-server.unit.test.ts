@@ -721,6 +721,35 @@ describe("HTTP server lifecycle", () => {
     });
   });
 
+  it("redacts key-id credential handles from fallback logs", async () => {
+    const keyId = "005id7";
+    const pipeline: B2McpFetchHandler = {
+      sessions: new Map<string, never>(),
+      fetch: vi.fn(() => Promise.reject(`string failure with ${keyId}`)),
+      drain: vi.fn(),
+      close: vi.fn(async () => undefined),
+    };
+
+    await withMockedFetchPipeline(pipeline, async ({ buildHttpServer, logger }) => {
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+      const handle = buildHttpServer();
+
+      try {
+        const port = await listenOnLocalhost(handle);
+        const res = await request(port, "GET", "/mcp", { headers: { "x-b2-key-id": keyId } });
+
+        expect(res.status).toBe(500);
+        expect(warnSpy).toHaveBeenCalledWith(
+          { err: "string failure with [redacted]" },
+          "mcp.http.failed",
+        );
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(keyId);
+      } finally {
+        await closeHttpServer(handle);
+      }
+    });
+  });
+
   it("sanitizes header secrets when the mcpHandler rejects inside the pipeline", async () => {
     const secret = "s7short";
     const fetch = vi.fn(async () => {
