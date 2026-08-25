@@ -614,7 +614,7 @@ describe("HTTP server lifecycle", () => {
   });
 
   it("returns a sanitized 500 when the Node fetch pipeline rejects non-Error values", async () => {
-    const secret = "raw-header-secret-value";
+    const secret = "s7";
     const pipeline: B2McpFetchHandler = {
       sessions: new Map<string, never>(),
       fetch: vi.fn(() => Promise.reject(`string failure with ${secret}`)),

@@ -32,7 +32,7 @@ import {
   resumeUnreadRequest,
   writeWebResponse,
 } from "./utils/node-web-bridge.js";
-import { sanitizeText } from "./utils/secret-sanitizer.js";
+import { SECRET_SANITIZER_REDACTION, sanitizeText } from "./utils/secret-sanitizer.js";
 import type { B2Config } from "./utils/types.js";
 
 export {
@@ -103,10 +103,19 @@ function requestSecretHeaderValues(req: http.IncomingMessage): string[] {
   });
 }
 
+function redactExactSecrets(text: string, secrets: readonly string[]): string {
+  let safe = text;
+  for (const secret of new Set(secrets)) {
+    if (!secret.trim() || secret === SECRET_SANITIZER_REDACTION) continue;
+    safe = safe.split(secret).join(SECRET_SANITIZER_REDACTION);
+  }
+  return safe;
+}
+
 function safeErrorText(err: unknown, req?: http.IncomingMessage): string {
   const text = err instanceof Error ? err.message : String(err);
   const secrets = req ? requestSecretHeaderValues(req) : [];
-  return sanitizeText(text, { secrets });
+  return sanitizeText(redactExactSecrets(text, secrets), { secrets });
 }
 
 function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOptions): http.Server {
