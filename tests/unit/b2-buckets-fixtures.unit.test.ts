@@ -61,6 +61,16 @@ describe("B2 bucket tools with deterministic native fake", () => {
                 ],
               },
             },
+            {
+              name: "malformed-headers",
+              eventTypes: ["b2:ObjectDeleted:*"],
+              isEnabled: true,
+              targetConfiguration: {
+                targetType: "webhook",
+                url: "https://hooks.example.test/delete/path",
+                customHeaders: "Bearer sensitive-value",
+              },
+            },
           ],
         };
       },
@@ -140,6 +150,7 @@ describe("B2 bucket tools with deterministic native fake", () => {
       hmacSha256SigningSecret: "[redacted]",
       customHeaders: [{ name: "Authorization", value: "[redacted]" }],
     });
+    expect(getResult.eventNotificationRules[1].targetConfiguration.customHeaders).toEqual({});
     expect(JSON.stringify(getResult)).not.toContain("sensitive-value");
     expect(JSON.stringify(getResult)).not.toContain("malformed-secret-header");
 

@@ -167,6 +167,16 @@ describe("MCP resources", () => {
               ],
             },
           },
+          {
+            name: "malformed-headers",
+            eventTypes: ["b2:ObjectDeleted:*"],
+            isEnabled: true,
+            targetConfiguration: {
+              targetType: "webhook",
+              url: "https://hooks.example.com/delete-path",
+              customHeaders: `Bearer ${THIRD_PARTY_SECRET}`,
+            },
+          },
         ],
       }),
     );
@@ -199,6 +209,9 @@ describe("MCP resources", () => {
     expect(
       payload.eventNotifications.eventNotificationRules[0].targetConfiguration,
     ).not.toHaveProperty("customHeaders.0.metadata");
+    expect(payload.eventNotifications.eventNotificationRules[1].targetConfiguration).toMatchObject({
+      customHeaders: {},
+    });
     expect(serialized).not.toContain(CANARY);
     expect(serialized).not.toContain(THIRD_PARTY_SECRET);
     expect(serialized).not.toContain("malformed-secret-header");

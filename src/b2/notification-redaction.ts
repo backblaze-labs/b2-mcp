@@ -34,7 +34,7 @@ function redactCustomHeaders(
   if (customHeaders && typeof customHeaders === "object") {
     return Object.fromEntries(Object.keys(customHeaders).map((name) => [name, REDACTED]));
   }
-  return undefined;
+  return {};
 }
 
 /**
