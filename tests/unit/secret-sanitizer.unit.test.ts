@@ -228,6 +228,7 @@ describe("secret sanitizer canary policy", () => {
     expect(safe.nested.uploadToken).toBe(SECRET_SANITIZER_REDACTION);
     expect(safe.nested.nextToken).toBe("page-token");
     expect(safe.arrayPayload.authorization).toBe(SECRET_SANITIZER_REDACTION);
+    expect(safe.arrayPayload[0]).toBe(SECRET_SANITIZER_REDACTION);
     expectNoCanary(safe);
     expect(JSON.stringify(safe)).not.toContain(overlappingSecret);
     expect(JSON.stringify(safe)).not.toContain(longerOverlappingSecret);
@@ -317,14 +318,12 @@ describe("secret sanitizer canary policy", () => {
     expectNoCanary(safe);
   });
 
-  it("handles configured secret edge values and non-string text inputs", () => {
+  it("handles configured secret edge values and already masked text inputs", () => {
     const secret = "configured-edge-secret";
     const longerSecret = `${secret}-extended`;
 
     const sanitized = sanitizeText(
-      {
-        toString: () => `applicationKey=${longerSecret} ${secret} appKey=[redacted] not-json-token`,
-      } as never,
+      `applicationKey=${longerSecret} ${secret} appKey=[redacted] not-json-token`,
       {
         secrets: [undefined, "", "   ", "short", SECRET_SANITIZER_REDACTION, secret, longerSecret],
       },
@@ -668,7 +667,7 @@ describe("secret sanitizer canary policy", () => {
     expect(
       sanitizeProviderCode(CONFIGURED_APPLICATION_KEY, { secrets: [CONFIGURED_APPLICATION_KEY] }),
     ).toBe(SECRET_SANITIZER_REDACTION);
-    expect(sanitizeProviderCode(undefined as never)).toBe("unknown_error");
+    expect(sanitizeProviderCode(undefined)).toBe("unknown_error");
     expect(sanitizeProviderRequestId("request/id:1")).toBe("request/id:1");
     expect(sanitizeProviderRequestId(undefined)).toBeUndefined();
     expect(sanitizeProviderRequestId(`request-${CANARY}`)).toBe(SECRET_SANITIZER_REDACTION);

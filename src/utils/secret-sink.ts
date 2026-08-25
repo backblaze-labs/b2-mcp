@@ -19,6 +19,13 @@ export const APPLICATION_KEY_REDACTED = "[redacted]";
 export const INLINE_SECRET_WARNING =
   "B2_SECRET_SINK=inline: this application key secret was returned into the model context and may be logged or retained by the client. Rotate it after use.";
 
+type SecretSinkWriteSync = (
+  fd: number,
+  buffer: Uint8Array,
+  offset: number,
+  length: number,
+) => number;
+
 const SECRET_SINK_FILE_ENV = "B2_SECRET_SINK_FILE";
 const SECRET_SINK_PARENT_MODE = 0o700;
 const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
@@ -31,8 +38,27 @@ export const secretSinkFileOpsForTests = {
   fsyncSync: fs.fsyncSync,
   unlinkSync: fs.unlinkSync,
   renameSync: fs.renameSync,
+};
+
+const secretSinkSensitiveWriteOpsForTests: { writeSync: SecretSinkWriteSync } = {
   writeSync: fs.writeSync,
 };
+
+export function withSecretSinkSensitiveWriteOpsForTests<T>(
+  ops: Partial<typeof secretSinkSensitiveWriteOpsForTests>,
+  callback: () => T,
+): T {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("Secret sink sensitive write hooks are only available in tests");
+  }
+  const previous = { ...secretSinkSensitiveWriteOpsForTests };
+  Object.assign(secretSinkSensitiveWriteOpsForTests, ops);
+  try {
+    return callback();
+  } finally {
+    Object.assign(secretSinkSensitiveWriteOpsForTests, previous);
+  }
+}
 
 let inlineWarningEmitted = false;
 
@@ -275,7 +301,12 @@ function writeAll(fd: number, line: string): void {
   const buffer = new TextEncoder().encode(line);
   let offset = 0;
   while (offset < buffer.length) {
-    const written = secretSinkFileOpsForTests.writeSync(fd, buffer, offset, buffer.length - offset);
+    const written = secretSinkSensitiveWriteOpsForTests.writeSync(
+      fd,
+      buffer,
+      offset,
+      buffer.length - offset,
+    );
     if (written <= 0) {
       throw new Error(`${SECRET_SINK_FILE_ENV} write made no progress`);
     }

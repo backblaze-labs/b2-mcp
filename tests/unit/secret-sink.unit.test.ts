@@ -24,8 +24,19 @@ import {
   resetSecretSinkWarningForTests,
   resolveSecretSinkConfig,
   secretSinkFileOpsForTests,
+  withSecretSinkSensitiveWriteOpsForTests,
 } from "../../src/utils/secret-sink";
 import { logger } from "../../src/utils/logger";
+
+const APPEND_LOCK_SUFFIX = ".append.lock";
+const APPEND_RECLAIM_LOCK_SUFFIX = ".reclaim";
+const APPEND_LOCK_WAIT_TIMEOUT_MS = 30_000;
+const APPEND_LOCK_WAIT_TIMEOUT_MARGIN_MS = 1_000;
+const COMMITTED_IDEMPOTENCY_MARKER_SUFFIX = ".committed.json";
+const IDEMPOTENCY_INDEX_SUFFIX = ".idempotency.jsonl";
+const PENDING_CLAIM_MARKER_SUFFIX = ".pending";
+
+type TestIdempotency = ReturnType<typeof durableSecretIdempotency>;
 
 function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "b2-mcp-secret-sink-"));
@@ -55,6 +66,34 @@ function testIdempotency(idempotencyKey: string, normalizedInput?: unknown) {
       capabilities: ["listBuckets"],
     },
   });
+}
+
+function appendLockPath(file: string): string {
+  return `${file}${APPEND_LOCK_SUFFIX}`;
+}
+
+function appendReclaimLockPath(file: string): string {
+  return `${appendLockPath(file)}${APPEND_RECLAIM_LOCK_SUFFIX}`;
+}
+
+function idempotencyIndexPath(file: string): string {
+  return `${file}${IDEMPOTENCY_INDEX_SUFFIX}`;
+}
+
+function pendingClaimPath(file: string, idempotency: TestIdempotency): string {
+  return `${file}.${idempotency.claimFingerprint}${PENDING_CLAIM_MARKER_SUFFIX}`;
+}
+
+function committedIdempotencyMarkerPath(file: string, idempotency: TestIdempotency): string {
+  return `${file}.${idempotency.claimFingerprint}${COMMITTED_IDEMPOTENCY_MARKER_SUFFIX}`;
+}
+
+function pendingClaimNames(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.endsWith(PENDING_CLAIM_MARKER_SUFFIX));
+}
+
+function appendLockNames(dir: string): string[] {
+  return readdirSync(dir).filter((name) => name.endsWith(APPEND_LOCK_SUFFIX));
 }
 
 function durableSecretTestOptions(
@@ -505,7 +544,7 @@ describe("secret sink file writer", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const appendLock = `${file}.append.lock`;
+    const appendLock = appendLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
     writeFileSync(appendLock, `${JSON.stringify({ status: "appending" })}\n`, { mode: 0o600 });
     const stale = new Date(Date.now() - 10 * 60 * 1000);
@@ -524,7 +563,7 @@ describe("secret sink file writer", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const appendLock = `${file}.append.lock`;
+    const appendLock = appendLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
     writeFileSync(appendLock, "not-json\n", { mode: 0o600 });
     const stale = new Date(Date.now() - 10 * 60 * 1000);
@@ -543,8 +582,8 @@ describe("secret sink file writer", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const appendLock = `${file}.append.lock`;
-    const reclaimLock = `${appendLock}.reclaim`;
+    const appendLock = appendLockPath(file);
+    const reclaimLock = appendReclaimLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
     writeFileSync(appendLock, `${JSON.stringify({ status: "appending" })}\n`, { mode: 0o600 });
     writeFileSync(
@@ -812,7 +851,7 @@ describe("secret sink file writer", () => {
 
     expect(createCalls).toBe(1);
     expect(second.structuredContent).toEqual(first.structuredContent);
-    const index = readFileSync(`${file}.idempotency.jsonl`, "utf8");
+    const index = readFileSync(idempotencyIndexPath(file), "utf8");
     expect(index).toContain("ledger-rotated");
     expect(index).not.toContain("B2_MCP_CANARY_SECRET_indexed");
   });
@@ -881,12 +920,12 @@ describe("secret sink file writer", () => {
       normalizedInput: { keyName: "raced-commit", capabilities: ["listBuckets"] },
     });
     const pointer = { type: "file" as const, path: file, recordId: "raced-record" };
-    const markerPath = `${file}.${idempotency.claimFingerprint}.committed.json`;
+    const markerPath = committedIdempotencyMarkerPath(file, idempotency);
     const fsync = secretSinkFileOpsForTests.fsyncSync;
     let markerWritten = false;
     vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
       const result = fsync(fd);
-      if (!markerWritten && existsSync(`${file}.${idempotency.claimFingerprint}.pending`)) {
+      if (!markerWritten && existsSync(pendingClaimPath(file, idempotency))) {
         markerWritten = true;
         writeFileSync(
           markerPath,
@@ -930,7 +969,7 @@ describe("secret sink file writer", () => {
       applicationKey: "[redacted]",
       secretSink: pointer,
     });
-    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+    expect(pendingClaimNames(dir)).toHaveLength(0);
   });
 
   it("rejects conflicting input on the same pending idempotency claim", async () => {
@@ -995,7 +1034,7 @@ describe("secret sink file writer", () => {
     await first;
 
     expect(createCalls).toBe(1);
-    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+    expect(pendingClaimNames(dir)).toHaveLength(0);
   });
 
   it("leaves an ambiguous provider outcome pending instead of retrying creation", async () => {
@@ -1044,7 +1083,7 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ code: "idempotency_key_pending" });
 
     expect(createCalls).toBe(1);
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
   });
 
   it("releases the pending claim after a known provider rejection", async () => {
@@ -1076,7 +1115,7 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ status: 403 });
 
-    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+    expect(pendingClaimNames(dir)).toHaveLength(0);
   });
 
   it("keeps the pending claim after an HTTP 408 provider timeout", async () => {
@@ -1125,7 +1164,7 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ code: "idempotency_key_pending" });
 
     expect(createCalls).toBe(1);
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
   });
 
   it("releases the pending claim when pre-provider claim durability fails", async () => {
@@ -1169,7 +1208,7 @@ describe("secret sink file writer", () => {
     ).rejects.toThrow(/claim directory fsync/);
 
     expect(createCalls).toBe(0);
-    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+    expect(pendingClaimNames(dir)).toHaveLength(0);
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("claim_cleanup_failed");
   });
 
@@ -1178,7 +1217,7 @@ describe("secret sink file writer", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
     const idempotency = testIdempotency("post-claim-fsync-failure");
-    const pendingPath = `${file}.${idempotency.claimFingerprint}.pending`;
+    const pendingPath = pendingClaimPath(file, idempotency);
     const fsync = secretSinkFileOpsForTests.fsyncSync;
     let pendingDurabilityCalls = 0;
     vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
@@ -1213,7 +1252,7 @@ describe("secret sink file writer", () => {
     const unlink = secretSinkFileOpsForTests.unlinkSync;
     let failedPendingCleanup = false;
     vi.spyOn(secretSinkFileOpsForTests, "unlinkSync").mockImplementation((path) => {
-      if (!failedPendingCleanup && String(path).endsWith(".pending")) {
+      if (!failedPendingCleanup && String(path).endsWith(PENDING_CLAIM_MARKER_SUFFIX)) {
         failedPendingCleanup = true;
         throw new Error("simulated claim cleanup failure");
       }
@@ -1267,7 +1306,7 @@ describe("secret sink file writer", () => {
       normalizedInput: { keyName: "malformed-pending", capabilities: ["listBuckets"] },
     });
     writeFileSync(
-      `${file}.${idempotency.claimFingerprint}.pending`,
+      pendingClaimPath(file, idempotency),
       `${JSON.stringify({
         idempotency: { key: idempotency.key, claimFingerprint: idempotency.claimFingerprint },
       })}\n`,
@@ -1306,11 +1345,9 @@ describe("secret sink file writer", () => {
       const dir = tempDir();
       const file = join(dir, "secrets.jsonl");
       const idempotency = testIdempotency(`malformed-pending-${suffix}`);
-      writeFileSync(
-        `${file}.${idempotency.claimFingerprint}.pending`,
-        `${JSON.stringify(payload)}\n`,
-        { mode: 0o600 },
-      );
+      writeFileSync(pendingClaimPath(file, idempotency), `${JSON.stringify(payload)}\n`, {
+        mode: 0o600,
+      });
       let createCalls = 0;
 
       await expect(
@@ -1332,7 +1369,7 @@ describe("secret sink file writer", () => {
     const recoverSpy = vi.fn();
     const rename = secretSinkFileOpsForTests.renameSync;
     vi.spyOn(secretSinkFileOpsForTests, "renameSync").mockImplementation((oldPath, newPath) => {
-      if (String(newPath).endsWith(".committed.json")) {
+      if (String(newPath).endsWith(COMMITTED_IDEMPOTENCY_MARKER_SUFFIX)) {
         throw new Error("simulated committed marker rename failure");
       }
       return rename(oldPath, newPath);
@@ -1392,24 +1429,66 @@ describe("secret sink file writer", () => {
     expect(createCalls).toBe(1);
     expect(recoverSpy).not.toHaveBeenCalled();
     expect(readFileSync(file, "utf8")).toContain(secret);
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
       "secret_sink.idempotency_claim_retained_after_index_failure",
     );
   });
 
+  it("does not expose plaintext writes through exported file test helpers", () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const secret = "B2_MCP_CANARY_SECRET_exported_write_seam";
+    const exportedOps = secretSinkFileOpsForTests as Record<string, unknown>;
+    const interceptedWrite = vi.fn(() => {
+      throw new Error("intercepted plaintext write");
+    });
+
+    try {
+      expect(exportedOps.writeSync).toBeUndefined();
+      exportedOps.writeSync = interceptedWrite;
+      const pointer = appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+        applicationKey: secret,
+      });
+
+      expect(pointer.recordId).toEqual(expect.any(String));
+      expect(interceptedWrite).not.toHaveBeenCalled();
+      expect(readFileSync(file, "utf8")).toContain(secret);
+    } finally {
+      delete exportedOps.writeSync;
+    }
+  });
+
+  it("guards sensitive write overrides outside the test environment", () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+
+      expect(() => withSecretSinkSensitiveWriteOpsForTests({}, () => undefined)).toThrow(
+        /only available in tests/,
+      );
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
+
   it("cleans up lock files when a lock write makes no progress", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    vi.spyOn(secretSinkFileOpsForTests, "writeSync").mockReturnValue(0);
 
     expect(() =>
-      appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
-        applicationKey: "B2_MCP_CANARY_SECRET_lock_write_no_progress",
-      }),
+      withSecretSinkSensitiveWriteOpsForTests({ writeSync: () => 0 }, () =>
+        appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
+          applicationKey: "B2_MCP_CANARY_SECRET_lock_write_no_progress",
+        }),
+      ),
     ).toThrow(/write made no progress/);
 
-    expect(readdirSync(dir).filter((name) => name.endsWith(".append.lock"))).toHaveLength(0);
+    expect(appendLockNames(dir)).toHaveLength(0);
   });
 
   it("logs close failures before an uncommitted append is rolled back", () => {
@@ -1568,7 +1647,7 @@ describe("secret sink file writer", () => {
       const file = join(dir, "secrets.jsonl");
       const idempotency = testIdempotency(`committed-${suffix}`);
       writeFileSync(
-        `${file}.${idempotency.claimFingerprint}.committed.json`,
+        committedIdempotencyMarkerPath(file, idempotency),
         `${JSON.stringify({
           ts: "2026-08-18T12:00:00Z",
           tool: "b2_create_key",
@@ -1604,7 +1683,7 @@ describe("secret sink file writer", () => {
     const file = join(dir, "secrets.jsonl");
     const idempotency = testIdempotency("committed-conflict");
     writeFileSync(
-      `${file}.${idempotency.claimFingerprint}.committed.json`,
+      committedIdempotencyMarkerPath(file, idempotency),
       `${JSON.stringify({
         ts: "2026-08-18T12:00:00Z",
         tool: "b2_create_key",
@@ -1633,7 +1712,7 @@ describe("secret sink file writer", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
     const idempotency = testIdempotency("committed-malformed-json");
-    writeFileSync(`${file}.${idempotency.claimFingerprint}.committed.json`, "not-json\n", {
+    writeFileSync(committedIdempotencyMarkerPath(file, idempotency), "not-json\n", {
       mode: 0o600,
     });
     let createCalls = 0;
@@ -1656,7 +1735,7 @@ describe("secret sink file writer", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
     const indexTarget = join(dir, "index-target.jsonl");
-    const indexPath = `${file}.idempotency.jsonl`;
+    const indexPath = idempotencyIndexPath(file);
     const idempotency = testIdempotency("audit-index-symlink");
     writeFileSync(indexTarget, "", { mode: 0o600 });
     symlinkSync(indexTarget, indexPath);
@@ -1672,10 +1751,7 @@ describe("secret sink file writer", () => {
       }),
     });
 
-    const committed = readFileSync(
-      `${file}.${idempotency.claimFingerprint}.committed.json`,
-      "utf8",
-    );
+    const committed = readFileSync(committedIdempotencyMarkerPath(file, idempotency), "utf8");
     expect(result.structuredContent).toMatchObject({
       applicationKeyId: "key-id",
       applicationKey: "[redacted]",
@@ -1759,7 +1835,7 @@ describe("secret sink file writer", () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const appendLock = `${file}.append.lock`;
+    const appendLock = appendLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
     writeFileSync(appendLock, "[]\n", { mode: 0o600 });
     const stale = new Date(Date.now() - 10 * 60 * 1000);
@@ -1776,7 +1852,7 @@ describe("secret sink file writer", () => {
   it("continues when a stale append lock disappears during reclaim", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const appendLock = `${file}.append.lock`;
+    const appendLock = appendLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
     writeFileSync(appendLock, `${JSON.stringify({ status: "appending" })}\n`, { mode: 0o600 });
     const stale = new Date(Date.now() - 10 * 60 * 1000);
@@ -1805,7 +1881,7 @@ describe("secret sink file writer", () => {
   it("waits once for a live append lock before timing out", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const appendLock = `${file}.append.lock`;
+    const appendLock = appendLockPath(file);
     writeFileSync(file, "", { mode: 0o600 });
     writeFileSync(
       appendLock,
@@ -1819,11 +1895,19 @@ describe("secret sink file writer", () => {
       { mode: 0o600 },
     );
     const now = Date.now();
-    let nowCalls = 0;
-    vi.spyOn(Date, "now").mockImplementation(() => {
-      nowCalls++;
-      return nowCalls < 4 ? now : now + 31_000;
+    const unlink = secretSinkFileOpsForTests.unlinkSync;
+    let firstReclaimAttemptFinished = false;
+    vi.spyOn(secretSinkFileOpsForTests, "unlinkSync").mockImplementation((path) => {
+      if (String(path) === appendReclaimLockPath(file)) {
+        firstReclaimAttemptFinished = true;
+      }
+      return unlink(path);
     });
+    vi.spyOn(Date, "now").mockImplementation(() =>
+      firstReclaimAttemptFinished
+        ? now + APPEND_LOCK_WAIT_TIMEOUT_MS + APPEND_LOCK_WAIT_TIMEOUT_MARGIN_MS
+        : now,
+    );
 
     expect(() =>
       appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
@@ -1831,7 +1915,7 @@ describe("secret sink file writer", () => {
       }),
     ).toThrow(/EEXIST|file already exists/i);
 
-    expect(nowCalls).toBeGreaterThanOrEqual(4);
+    expect(firstReclaimAttemptFinished).toBe(true);
     expect(existsSync(appendLock)).toBe(true);
   });
 
@@ -1866,7 +1950,7 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
     expect(recoverSpy).toHaveBeenCalledOnce();
-    expect(readdirSync(dir).filter((name) => name.endsWith(".pending"))).toHaveLength(0);
+    expect(pendingClaimNames(dir)).toHaveLength(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("write_failed_after_provider_create");
   });
 
@@ -1898,7 +1982,7 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("manual-review");
   });
 
@@ -1930,7 +2014,7 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("not_configured");
   });
 
@@ -1964,7 +2048,7 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("cleanup failed");
   });
 
@@ -1998,7 +2082,7 @@ describe("secret sink file writer", () => {
       }),
     ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
 
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("cleanup failed with Error");
   });
 
@@ -2077,7 +2161,7 @@ describe("secret sink file writer", () => {
 
     expect(createCalls).toBe(0);
     expect(recoverSpy).not.toHaveBeenCalled();
-    expect(readdirSync(dir).some((name) => name.endsWith(".pending"))).toBe(true);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("pending_reconciliation");
   });
 });
