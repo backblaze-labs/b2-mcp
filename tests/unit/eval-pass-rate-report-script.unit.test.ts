@@ -89,10 +89,14 @@ describe("eval pass-rate report script", () => {
               passRate: 1,
             },
           ],
-          summary:
-            "Pass-rate comparison (Claude) across 1 shared case(s): Claude: 1/1 (100.0%).",
+          summary: "Pass-rate comparison (Claude) across 1 shared case(s): Claude: 1/1 (100.0%).",
           results: [
-            { provider: "Claude", caseName: "blocked delete bucket", status: "passed", passed: true },
+            {
+              provider: "Claude",
+              caseName: "blocked delete bucket",
+              status: "passed",
+              passed: true,
+            },
           ],
         }),
       )}\n`,
@@ -119,7 +123,12 @@ describe("eval pass-rate report script", () => {
             { provider: "Other", model: "other-model", passed: 1, total: 1, passRate: 1 },
           ],
           results: [
-            { provider: "Other", caseName: "blocked delete bucket", status: "passed", passed: true },
+            {
+              provider: "Other",
+              caseName: "blocked delete bucket",
+              status: "passed",
+              passed: true,
+            },
           ],
         }),
       )}\n`,
@@ -155,7 +164,12 @@ describe("eval pass-rate report script", () => {
             },
           ],
           results: [
-            { provider: "Claude", caseName: "blocked delete bucket", status: "passed", passed: true },
+            {
+              provider: "Claude",
+              caseName: "blocked delete bucket",
+              status: "passed",
+              passed: true,
+            },
           ],
         }),
       )}\n`,
