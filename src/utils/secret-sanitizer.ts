@@ -514,12 +514,20 @@ function requestSecretHeaderValues(lookup: HeaderLookup): string[] {
   });
 }
 
-/** Secret values carried on a Node request's headers. */
+/**
+ * Extract the secret values carried on a Node request's headers.
+ *
+ * @returns The sensitive header values, including derived credential/cookie parts.
+ */
 export function nodeRequestSecrets(req: http.IncomingMessage): string[] {
   return requestSecretHeaderValues((name) => req.headers[name]);
 }
 
-/** Secret values carried on a Web request's headers. */
+/**
+ * Extract the secret values carried on a Web request's headers.
+ *
+ * @returns The sensitive header values, including derived credential/cookie parts.
+ */
 export function webRequestSecrets(headers: Headers): string[] {
   return requestSecretHeaderValues((name) => headers.get(name) ?? undefined);
 }
@@ -528,6 +536,8 @@ export function webRequestSecrets(headers: Headers): string[] {
  * Render an error message with the given request-header secrets redacted. Exact
  * redaction covers short values the generic sanitizer skips; the sanitizer then
  * handles configured env secrets and labeled/bearer patterns.
+ *
+ * @returns The error text with request-header and configured secrets redacted.
  */
 export function safeErrorText(err: unknown, secrets: readonly string[]): string {
   const text = err instanceof Error ? err.message : String(err);

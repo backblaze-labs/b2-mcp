@@ -788,7 +788,10 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
     try {
       return await mcpHandler.fetch(sdkRequest, requestOptions);
     } catch (err) {
-      logger.warn({ err: safeErrorText(err, webRequestSecrets(request.headers)) }, "mcp.http.failed");
+      logger.warn(
+        { err: safeErrorText(err, webRequestSecrets(request.headers)) },
+        "mcp.http.failed",
+      );
       return internalMcpErrorResponse();
     }
   }
@@ -945,7 +948,10 @@ export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2Mc
       );
       return responseWithCleanup(response, () => finalize(limitKey, prepared));
     } catch (err) {
-      logger.warn({ err: safeErrorText(err, webRequestSecrets(request.headers)) }, "mcp.http.failed");
+      logger.warn(
+        { err: safeErrorText(err, webRequestSecrets(request.headers)) },
+        "mcp.http.failed",
+      );
       return responseWithCleanup(jsonResponse(500, { error: "Internal server error" }), () =>
         finalize(limitKey, prepared),
       );
