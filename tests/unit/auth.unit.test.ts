@@ -16,8 +16,6 @@ import {
 
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
-type DomExceptionConstructor = new (message?: string, name?: string) => Error;
-
 const mockConfig: B2Config = {
   applicationKeyId: "test-key-id",
   applicationKey: "test-key-secret",
@@ -656,9 +654,9 @@ describe("B2AuthManager", () => {
 
   it("normalizes abort errors that carry an empty message", async () => {
     // tsconfig omits DOM lib types, but Node provides DOMException at runtime.
-    const DomExceptionCtor = (
-      globalThis as typeof globalThis & { DOMException: DomExceptionConstructor }
-    ).DOMException;
+    const { DOMException: DomExceptionCtor } = globalThis as typeof globalThis & {
+      DOMException: new (message?: string, name?: string) => Error;
+    };
     const inner = new RecordingTransport(() => {
       throw new DomExceptionCtor("", "AbortError");
     });
