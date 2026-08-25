@@ -111,7 +111,10 @@ function cookieSecretValues(value: string): string[] {
     const equalsIndex = cookie.indexOf("=");
     if (equalsIndex === -1) return [cookie];
     const cookieValue = cookie.slice(equalsIndex + 1).trim();
-    return cookieValue ? [cookie, cookieValue] : [cookie];
+    const unquotedValue = /^"(.*)"$/.exec(cookieValue)?.[1];
+    return cookieValue
+      ? [cookie, cookieValue, ...(unquotedValue ? [unquotedValue] : [])]
+      : [cookie];
   });
 }
 

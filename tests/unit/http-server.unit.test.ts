@@ -702,7 +702,7 @@ describe("HTTP server lifecycle", () => {
         const res = await request(port, "GET", "/mcp", {
           headers: {
             authorization: `Bearer ${authorizationCredential}`,
-            cookie: `session=${cookieValue}; theme=light`,
+            cookie: `session="${cookieValue}"; theme=light`,
           },
         });
 
