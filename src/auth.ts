@@ -1,22 +1,22 @@
 import {
-  B2Client as SdkB2Client,
-  FetchTransport,
-  RetryTransport,
-  UrlGuard,
-  deriveAllowedSuffixes,
   type AuthorizeAccountResponse,
+  deriveAllowedSuffixes,
+  FetchTransport,
   type HttpRequest,
   type HttpResponse,
   type HttpTransport,
   type RetryOptions,
+  RetryTransport,
+  B2Client as SdkB2Client,
+  UrlGuard,
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
+import { abortError, isAbortError } from "./utils/named-error.js";
+import { consumeRetryBudgetToken } from "./utils/retry.js";
+import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
-import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
-import { consumeRetryBudgetToken } from "./utils/retry.js";
-import { abortError, isAbortError } from "./utils/named-error.js";
-import { isTestRuntime } from "./utils/runtime.js";
 
 /** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
@@ -154,6 +154,40 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
   return Object.prototype.toString.call(body);
 }
 
+function retryAfterSeconds(value: string): number | null {
+  const numeric = Number.parseInt(value, 10);
+  if (Number.isFinite(numeric)) return numeric;
+
+  const retryAtMs = Date.parse(value);
+  if (!Number.isFinite(retryAtMs)) return null;
+
+  return Math.max(0, Math.ceil((retryAtMs - Date.now()) / 1000));
+}
+
+function withNormalizedRetryAfterHeader(response: HttpResponse): HttpResponse {
+  const retryAfter = response.headers.get("Retry-After");
+  if (!retryAfter) return response;
+
+  const seconds = retryAfterSeconds(retryAfter);
+  if (seconds === null || retryAfter === String(seconds)) return response;
+
+  // RetryTransport currently consumes Retry-After as seconds; accept HTTP-date
+  // values at the MCP transport boundary and let the SDK keep applying clamps.
+  const headers = new Headers(response.headers);
+  headers.set("Retry-After", String(seconds));
+
+  return {
+    status: response.status,
+    headers,
+    get body() {
+      return response.body;
+    },
+    json: () => response.json(),
+    text: () => response.text(),
+    arrayBuffer: () => response.arrayBuffer(),
+  };
+}
+
 class SharedRetryBudgetTransport implements HttpTransport {
   readonly urlGuard: UrlGuard | undefined;
   private readonly attemptsBySignal = new WeakMap<AbortSignal, Map<string, number>>();
@@ -172,7 +206,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return response;
+      return withNormalizedRetryAfterHeader(response);
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;

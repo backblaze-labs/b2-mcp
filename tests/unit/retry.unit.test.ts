@@ -1,11 +1,12 @@
 /**
  * Unit tests for the withRetry() exponential backoff utility.
  *
- * Retryable status codes: 408, 429, 503, 504.
- * Non-retryable: everything else (400, 401, 404, plain errors).
+ * Retryable status codes: 408, 429, 500, 502, 503, 504.
+ * Non-retryable: everything else (400, 401, 403, 404, plain errors).
  * Max retries: 3 (4 total attempts).
  */
 
+import { abortError } from "../../src/utils/named-error";
 import {
   _consumeRetryToken,
   _resetRetryBudget,
@@ -273,9 +274,10 @@ describe("withRetry — custom retry count", () => {
 describe("withRetry — abort signal", () => {
   it("fails before the first attempt when the signal is already aborted", async () => {
     const fn = vi.fn().mockResolvedValue("never-called");
-    const signal = { aborted: true, reason: undefined } as AbortSignal;
+    const abort = new AbortController();
+    abort.abort(abortError());
 
-    await expect(withRetry(fn, 3, signal)).rejects.toMatchObject({
+    await expect(withRetry(fn, 3, abort.signal)).rejects.toMatchObject({
       name: "AbortError",
       message: "Aborted",
     });

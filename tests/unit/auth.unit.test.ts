@@ -1,8 +1,3 @@
-import {
-  type AuthorizeAccountResponse,
-  bucketId,
-  type B2Client as SdkB2Client,
-} from "@backblaze-labs/b2-sdk";
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
@@ -16,6 +11,7 @@ import {
   installSdkTransport,
   RecordingTransport,
   StaticHttpResponse,
+  scopedAuthorizeResponse,
 } from "../support/sdk-test-helpers";
 
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
@@ -58,34 +54,25 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function authWithToken(
-  authorizationToken: string,
-  capabilities: string[] = ["listBuckets"],
-): AuthorizeAccountResponse {
+async function waitForRecordedRequests(transport: RecordingTransport, count: number) {
+  for (let i = 0; i < 20 && transport.requests.length < count; i++) {
+    await Promise.resolve();
+  }
+  expect(transport.requests).toHaveLength(count);
+}
+
+function authWithToken(authorizationToken: string, capabilities: string[] = ["listBuckets"]) {
   return {
     ...authorizeResponse(capabilities),
     authorizationToken,
-  } as unknown as AuthorizeAccountResponse;
+  };
 }
 
-function authWithBucketScope(authorizationToken: string): AuthorizeAccountResponse {
-  const base = authWithToken(authorizationToken);
-  return {
-    ...base,
-    apiInfo: {
-      ...base.apiInfo,
-      storageApi: {
-        ...base.apiInfo.storageApi,
-        allowed: {
-          ...base.apiInfo.storageApi.allowed,
-          buckets: [{ id: bucketId("bucket-1"), name: "scoped-bucket" }],
-        },
-      },
-    },
-  } as AuthorizeAccountResponse;
+function authWithBucketScope(authorizationToken: string) {
+  return { ...scopedAuthorizeResponse(["listBuckets"]), authorizationToken };
 }
 
-function authWithoutAllowed(authorizationToken: string): AuthorizeAccountResponse {
+function authWithoutAllowed(authorizationToken: string) {
   const base = authWithToken(authorizationToken);
   return {
     ...base,
@@ -95,32 +82,6 @@ function authWithoutAllowed(authorizationToken: string): AuthorizeAccountRespons
         ...base.apiInfo.storageApi,
         allowed: undefined,
       },
-    },
-  } as unknown as AuthorizeAccountResponse;
-}
-
-function installFakeSdkClient(responses: AuthorizeAccountResponse[]) {
-  const queue = [...responses];
-  let sdkAuth: AuthorizeAccountResponse | null = null;
-  const fakeClient = {
-    accountInfo: {
-      getAuth: vi.fn(() => sdkAuth),
-      clear: vi.fn(() => {
-        sdkAuth = null;
-      }),
-    },
-    authorize: vi.fn(async () => {
-      const next = queue.shift();
-      if (!next) throw new Error("No fake authorize response queued");
-      sdkAuth = next;
-      return next;
-    }),
-  };
-  setB2SdkClientFactoryForTests(() => ({ client: fakeClient as unknown as SdkB2Client }));
-  return {
-    fakeClient,
-    setSdkAuth(next: AuthorizeAccountResponse | null) {
-      sdkAuth = next;
     },
   };
 }
@@ -161,10 +122,9 @@ describe("B2AuthManager", () => {
   it("refreshes cached auth at the 23 hour token boundary", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
-    const { fakeClient } = installFakeSdkClient([
-      authWithToken("token-before-ttl"),
-      authWithToken("token-at-ttl"),
-    ]);
+    const transport = installAuthorizeTransport((call) =>
+      call === 1 ? authWithToken("token-before-ttl") : authWithToken("token-at-ttl"),
+    );
     const manager = new B2AuthManager(mockConfig);
 
     await expect(manager.getAuth()).resolves.toMatchObject({
@@ -175,13 +135,13 @@ describe("B2AuthManager", () => {
     await expect(manager.getAuth()).resolves.toMatchObject({
       authorizationToken: "token-before-ttl",
     });
-    expect(fakeClient.authorize).toHaveBeenCalledTimes(1);
+    expect(transport.requests).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(1);
     await expect(manager.getAuth()).resolves.toMatchObject({
       authorizationToken: "token-at-ttl",
     });
-    expect(fakeClient.authorize).toHaveBeenCalledTimes(2);
+    expect(transport.requests).toHaveLength(2);
   });
 
   it("re-authorizes after invalidate()", async () => {
@@ -202,23 +162,28 @@ describe("B2AuthManager", () => {
   });
 
   it("updates cached auth when the SDK account cache changes", async () => {
-    const { fakeClient, setSdkAuth } = installFakeSdkClient([authWithToken("sdk-cache-token-1")]);
+    const transport = installAuthorizeTransport((call) =>
+      call === 1 ? authWithToken("sdk-cache-token-1") : authWithBucketScope("sdk-cache-token-2"),
+    );
     const manager = new B2AuthManager(mockConfig);
 
-    await expect(manager.getAuth()).resolves.toMatchObject({
+    const authorized = await manager.getAuthorizedSdk();
+    expect(authorized.auth).toMatchObject({
       authorizationToken: "sdk-cache-token-1",
     });
 
-    setSdkAuth(authWithBucketScope("sdk-cache-token-2"));
+    await authorized.client.authorize();
     await expect(manager.getAuth()).resolves.toMatchObject({
       authorizationToken: "sdk-cache-token-2",
       allowedBuckets: [{ id: "bucket-1", name: "scoped-bucket" }],
     });
-    expect(fakeClient.authorize).toHaveBeenCalledTimes(1);
+    expect(transport.requests).toHaveLength(2);
   });
 
   it("flattens SDK auth when optional allowed fields are absent", async () => {
-    const { fakeClient } = installFakeSdkClient([authWithoutAllowed("sdk-cache-token-no-allowed")]);
+    const transport = installAuthorizeTransport(() =>
+      authWithoutAllowed("sdk-cache-token-no-allowed"),
+    );
     const manager = new B2AuthManager(mockConfig);
 
     await expect(manager.getAuth()).resolves.toMatchObject({
@@ -226,7 +191,7 @@ describe("B2AuthManager", () => {
       capabilities: [],
       allowedBuckets: null,
     });
-    expect(fakeClient.authorize).toHaveBeenCalledTimes(1);
+    expect(transport.requests).toHaveLength(1);
   });
 
   it("throws on authorization failure", async () => {
@@ -578,6 +543,67 @@ describe("B2AuthManager", () => {
     }
   });
 
+  it.each([
+    {
+      name: "seconds",
+      retryAfter: "2",
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 2000,
+    },
+    {
+      name: "HTTP-date",
+      retryAfter: () => new Date(Date.now() + 3000).toUTCString(),
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 3000,
+    },
+    {
+      name: "clamped seconds",
+      retryAfter: "60",
+      maxRetryDelayMs: 4000,
+      expectedDelayMs: 4000,
+    },
+  ])(
+    "honors Retry-After $name delays before retrying through the SDK transport",
+    async ({ retryAfter, maxRetryDelayMs, expectedDelayMs }) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      _resetRetryBudget();
+      const header = typeof retryAfter === "function" ? retryAfter() : retryAfter;
+      let calls = 0;
+      const inner = new RecordingTransport(() => {
+        calls++;
+        if (calls === 1) {
+          return new StaticHttpResponse(
+            503,
+            { status: 503, code: "service_unavailable", message: "try later" },
+            { "Retry-After": header },
+          );
+        }
+        return new StaticHttpResponse(200, {});
+      });
+      const transport = createMcpHttpTransport(inner, {
+        maxRetries: 1,
+        initialRetryDelayMs: 1,
+        maxRetryDelayMs,
+        requestTimeoutMs: 30_000,
+      });
+
+      const pending = transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_list_buckets",
+        method: "POST",
+        body: "{}",
+      });
+      await waitForRecordedRequests(inner, 1);
+
+      await vi.advanceTimersByTimeAsync(expectedDelayMs - 1);
+      expect(inner.requests).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await waitForRecordedRequests(inner, 2);
+
+      await expect(pending).resolves.toMatchObject({ status: 200 });
+    },
+  );
+
   it("does not retain retry attempts after an inner abort error", async () => {
     _resetRetryBudget();
     for (let i = 0; i < 100; i++) _consumeRetryToken();
@@ -604,6 +630,7 @@ describe("B2AuthManager", () => {
   });
 
   it("normalizes abort errors that carry an empty message", async () => {
+    // tsconfig omits DOM lib types, but Node provides DOMException at runtime.
     const DomExceptionCtor = (
       globalThis as typeof globalThis & { DOMException: DomExceptionConstructor }
     ).DOMException;
