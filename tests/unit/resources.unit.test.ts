@@ -1,15 +1,16 @@
+import { B2Client, type BucketInfoResult } from "../../src/b2/client";
 import type { McpServer } from "../../src/mcp";
 import { createServer, getRegisteredResources, invalidateAuthManagerCache } from "../../src/server";
-import { B2Client, type BucketInfoResult } from "../../src/b2/client";
-import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import {
-  DeterministicB2NativeFake,
-  testConfig as baseTestConfig,
-} from "../support/deterministic-fakes";
-import { installSdkTransport, StaticHttpResponse } from "../support/sdk-test-helpers";
 import { logger } from "../../src/utils/logger";
+import {
+  testConfig as baseTestConfig,
+  DeterministicB2NativeFake,
+} from "../support/deterministic-fakes";
+import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
+import { installSdkTransport, StaticHttpResponse } from "../support/sdk-test-helpers";
 
 const CANARY = "B2_MCP_CANARY_SECRET_resource_do_not_leak";
+const THIRD_PARTY_SECRET = "third-party-secret-value";
 
 const resourceTestConfig = {
   ...baseTestConfig,
@@ -233,12 +234,12 @@ describe("MCP resources", () => {
             url: "https://internal-alerts.corp.local/services/path-secret",
             hmacSha256SigningSecret: CANARY,
             customHeaders: { Authorization: `Bearer ${CANARY}` },
-            extraSecret: CANARY,
+            extraSecret: THIRD_PARTY_SECRET,
           },
-          injectedSecret: CANARY,
+          injectedSecret: THIRD_PARTY_SECRET,
         } as any,
       ],
-      injectedSecret: CANARY,
+      injectedSecret: THIRD_PARTY_SECRET,
     } as any);
 
     const server = createServer(resourceTestConfig, ["listBuckets", "readBucketNotifications"], {
@@ -256,6 +257,7 @@ describe("MCP resources", () => {
     expect(payload.eventNotifications.eventNotificationRules[0].injectedSecret).toBe("[redacted]");
     expect(payload.eventNotifications.injectedSecret).toBe("[redacted]");
     expect(serialized).not.toContain(CANARY);
+    expect(serialized).not.toContain(THIRD_PARTY_SECRET);
     expect(serialized).not.toContain("internal-alerts.corp.local");
     expect(serialized).not.toContain("path-secret");
   });
@@ -332,6 +334,36 @@ describe("MCP resources", () => {
       readResource(server, "b2://bucket/aborted-bucket", { mcpReq: { signal: controller.signal } }),
     ).rejects.toThrow("client disconnected");
     expect(fake.requestsFor("b2_list_buckets")).toHaveLength(1);
+  });
+
+  it("propagates notification-rule aborts instead of degrading them", async () => {
+    const fake = new DeterministicB2NativeFake({
+      capabilities: ["listBuckets", "readBucketNotifications"],
+    });
+    installSdkTransport(fake);
+    fake.respond(
+      "b2_list_buckets",
+      new StaticHttpResponse(200, {
+        buckets: [bucketInfoFixture("bucket-1", "notification-abort-bucket")],
+      }),
+    );
+    const controller = new AbortController();
+    fake.respond("b2_get_bucket_notification_rules", () => {
+      controller.abort(new Error("client disconnected during notifications"));
+      const error = new Error("SDK request aborted");
+      error.name = "AbortError";
+      throw error;
+    });
+
+    const server = createServer(resourceTestConfig, ["listBuckets", "readBucketNotifications"], {
+      oauthScopes: ["b2:admin"],
+    });
+
+    await expect(
+      readResource(server, "b2://bucket/notification-abort-bucket", {
+        mcpReq: { signal: controller.signal },
+      }),
+    ).rejects.toThrow("client disconnected during notifications");
   });
 
   it("logs failed backend resource reads with resource identity", async () => {

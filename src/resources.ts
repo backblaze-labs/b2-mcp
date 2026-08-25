@@ -7,19 +7,22 @@ import type {
 } from "./b2/client.js";
 import { redactNotificationSecrets } from "./b2/notification-redaction.js";
 import {
-  ResourceTemplate,
   type RegisteredToolMap,
   type ResourceRegistrar,
   type ResourceRegistrationConfig,
+  ResourceTemplate,
 } from "./mcp.js";
+import { currentMcpRequestSignal } from "./request-context.js";
 import { DESTRUCTIVE_TOOL_NAMES, getDestructivePolicy } from "./utils/destructive-gate.js";
 import { parseB2Error } from "./utils/errors.js";
+import { isAbortError } from "./utils/named-error.js";
+import { currentSanitizerOptions, sanitizeForMcpOutput } from "./utils/secret-sanitizer.js";
 import {
   capabilitiesAllow,
+  type McpToolAnnotations,
+  type OAuthOperationScope,
   oauthScopesAllowOperation,
   TOOL_CAPABILITIES,
-  type OAuthOperationScope,
-  type McpToolAnnotations,
 } from "./utils/tool-capabilities.js";
 import type { B2Config } from "./utils/types.js";
 import { VERSION } from "./version.js";
@@ -65,12 +68,13 @@ interface JsonResourcePayload {
 }
 
 function jsonResource({ uri, value }: JsonResourcePayload) {
+  const safeValue = sanitizeForMcpOutput(value, currentSanitizerOptions());
   return {
     contents: [
       {
         uri: uri.href,
         mimeType: JSON_MIME,
-        text: JSON.stringify(value, null, 2),
+        text: JSON.stringify(safeValue, null, 2),
       },
     ],
   };
@@ -123,6 +127,16 @@ function isAuthorizationFailure(error: unknown): boolean {
   );
 }
 
+function isAbortLikeError(error: unknown): boolean {
+  const value = error as { name?: unknown; code?: unknown } | null;
+  return isAbortError(error) || value?.name === "AbortError" || value?.code === "ABORT_ERR";
+}
+
+function abortedRequestError(signal: AbortSignal): unknown {
+  const reason = signal.reason;
+  return reason instanceof Error ? reason : new Error(reason ? String(reason) : "Aborted");
+}
+
 type NotificationRulesState =
   | ({ available: true } & NotificationRulesResult)
   | {
@@ -172,6 +186,9 @@ async function readNotificationRulesIfAllowed(
       ...redactNotificationSecrets(await client.getBucketNotificationRules(bucketId)),
     };
   } catch (error) {
+    const signal = currentMcpRequestSignal();
+    if (signal?.aborted === true) throw abortedRequestError(signal);
+    if (isAbortLikeError(error)) throw error;
     return isAuthorizationFailure(error)
       ? unavailableNotificationRules(
           "runtime_auth_failure",
