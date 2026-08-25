@@ -65,7 +65,7 @@ not match that pin. Change the region only after reviewing latency to your B2
 account region; Vercel function region selection does not change B2 data
 residency.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_JWKS_URI,B2_OAUTH_JWKS_CACHE_TTL_SECONDS,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/backblaze-labs/b2-mcp&env=B2_HTTP_CREDENTIAL_MODE,B2_APPLICATION_KEY_ID,B2_APPLICATION_KEY,B2_ALLOWED_HOSTS,B2_DESTRUCTIVE_POLICY,B2_REGISTER_ALL_TOOLS,B2_ALLOW_LOCAL_FILES,B2_MCP_OUTPUT_FORMAT,B2_MCP_PUBLIC_URL,B2_OAUTH_ISSUER,B2_OAUTH_AUTHORIZATION_ENDPOINT,B2_OAUTH_TOKEN_ENDPOINT,B2_OAUTH_INTROSPECTION_ENDPOINT,B2_OAUTH_JWKS_URI,B2_OAUTH_JWKS_CACHE_TTL_SECONDS,B2_OAUTH_RESOURCE,B2_OAUTH_AUDIENCE,B2_OAUTH_ALLOWED_SUBJECTS,B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL,B2_OAUTH_INTROSPECTION_CLIENT_ID,B2_OAUTH_INTROSPECTION_CLIENT_SECRET&envDescription=Production-only%20B2%20credentials%20and%20OAuth%20resource-server%20settings.%20Never%20put%20secret%20values%20in%20Preview%20or%20URL%20query%20strings.)
 
 Set these in Vercel Project Settings, not in source:
 
@@ -73,7 +73,7 @@ Set these in Vercel Project Settings, not in source:
 | --- | --- |
 | `B2_HTTP_CREDENTIAL_MODE` | `server` |
 | `B2_VERCEL_ALLOW_HEADER_CREDENTIAL_MODE` | Omit unless intentionally enabling legacy header mode |
-| `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | Omit unless a reviewed deployment accepts sharing one B2 key across multiple subjects |
+| `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | `true` only for a reviewed multi-user deployment that accepts sharing one B2 key across admitted subjects |
 | `B2_APPLICATION_KEY_ID` | Production-only encrypted environment value |
 | `B2_APPLICATION_KEY` | Production-only encrypted environment value |
 | `B2_ALLOWED_HOSTS` | Exact Vercel/custom hostname without wildcards |
@@ -84,7 +84,7 @@ Set these in Vercel Project Settings, not in source:
 | `B2_MCP_OUTPUT_FORMAT` | `json` until every client validates `toon` |
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
-| `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for the supported single-tenant `server` mode |
+| `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for default single-subject `server` mode; omit only when the shared-credential flag is enabled and issuer/audience/scope admission is reviewed |
 | OAuth verifier settings | Configure introspection credentials for opaque tokens, `B2_OAUTH_JWKS_URI` for JWT-only verification, or both when introspection should remain authoritative |
 | Rate/concurrency values | Explicit reviewed per-warm-instance values |
 
@@ -99,15 +99,31 @@ This adapter is an OAuth resource server, not an authorization server. Configure
 your authorization server to issue access tokens for exactly the MCP resource
 URL and audience in `B2_OAUTH_RESOURCE` / `B2_OAUTH_AUDIENCE`.
 
-The supported `server` credential mode is single-tenant: one verified OAuth
-subject uses one server-held B2 application key. Configure exactly one
-`B2_OAUTH_ALLOWED_SUBJECTS` value matching the token `sub`, or
-`issuer#sub`, for that tenant. This prevents multiple unrelated principals
-from sharing one broad B2 credential without bucket or prefix authorization.
-Use `principal` mode when different verified principals need distinct B2
-credentials. `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` exists only for a
-separately reviewed deployment where the operator accepts that every allowed
-principal can access everything the shared B2 key can access.
+The default supported `server` credential mode is single-tenant and
+single-subject: one verified OAuth subject uses one server-held B2 application
+key. Configure exactly one `B2_OAUTH_ALLOWED_SUBJECTS` value matching the token
+`sub`, or `issuer#sub`, for that tenant. This prevents multiple unrelated
+principals from sharing one broad B2 credential without bucket or prefix
+authorization. Use `principal` mode when different verified principals need
+distinct B2 credentials.
+
+The Backblaze internal-testing deployment uses Okta as the authorization server
+and Okta app plus group assignment as the employee access gate. For that
+deployment, set `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` and omit
+`B2_OAUTH_ALLOWED_SUBJECTS`; the adapter then admits any active Okta token that
+matches `B2_OAUTH_ISSUER`, `B2_OAUTH_RESOURCE`, `B2_OAUTH_AUDIENCE`, and the
+required `b2:*`/`B2_OAUTH_REQUIRED_SCOPES` policy. This is an explicit
+shared-credential model: every assigned Okta user can use everything allowed by
+the one server-held B2 key, with OAuth scopes, B2 key capabilities, and the
+destructive policy still applying.
+
+Set the Backblaze Okta custom Authorization Server `audience` to the final MCP
+resource URL, normally the same value as `B2_MCP_PUBLIC_URL`,
+`B2_OAUTH_RESOURCE`, and `B2_OAUTH_AUDIENCE`. Configure authorization-code plus
+PKCE for the Claude.ai connector app, assign the app to the employee or
+`b2-mcp-users` Okta group, and use an introspection client id/secret in Vercel
+Production environment variables. A one-tester rollout before the shared
+credential review can keep the single `B2_OAUTH_ALLOWED_SUBJECTS` value instead.
 
 Token validation uses the authorization server's RFC 7662 introspection
 endpoint for opaque tokens, or local JWT verification when `B2_OAUTH_JWKS_URI`

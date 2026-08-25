@@ -221,6 +221,41 @@ describe("Vercel adapter", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("admits any Okta-issued subject when shared server credentials are enabled", async () => {
+    delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
+    process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
+    process.env.B2_OAUTH_ISSUER = "https://backblaze.okta.example/oauth2/b2-mcp/";
+    process.env.B2_OAUTH_AUTHORIZATION_ENDPOINT =
+      "https://backblaze.okta.example/oauth2/b2-mcp/v1/authorize";
+    process.env.B2_OAUTH_TOKEN_ENDPOINT = "https://backblaze.okta.example/oauth2/b2-mcp/v1/token";
+    process.env.B2_OAUTH_INTROSPECTION_ENDPOINT =
+      "https://backblaze.okta.example/oauth2/b2-mcp/v1/introspect";
+    const introspection = vi.fn(async () =>
+      introspectionResponse({
+        iss: "https://backblaze.okta.example/oauth2/b2-mcp/",
+        sub: "employee-123",
+        scope: "b2:read",
+      }),
+    );
+    vi.stubGlobal("fetch", introspection);
+
+    const response = await vercelMcpFetch(
+      new Request("https://mcp.example.com/mcp", {
+        method: "POST",
+        headers: {
+          ...modernHeaders("server/discover"),
+          Authorization: "Bearer okta-access-token",
+        },
+        body: modernBody("server/discover"),
+      }),
+      { remoteAddress: "203.0.113.42" },
+    );
+    const body = await rpcJson(response);
+
+    expect(body.result?.supportedVersions).toContain("2026-07-28");
+    expect(introspection).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts locally verified JWT bearer tokens through JWKS", async () => {
     delete process.env.B2_OAUTH_INTROSPECTION_ENDPOINT;
     delete process.env.B2_OAUTH_INTROSPECTION_CLIENT_ID;
@@ -591,9 +626,19 @@ describe("Vercel adapter", () => {
     expect(body.error).toMatch(/not configured/i);
   });
 
-  it("requires an allowed OAuth subject even when shared server credentials are enabled", async () => {
+  it("allows issuer/audience/scope admission when shared server credentials are enabled", async () => {
     delete process.env.B2_OAUTH_ALLOWED_SUBJECTS;
     process.env.B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL = "true";
+
+    const response = await vercelHealthFetch(
+      new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it("rejects multiple OAuth subjects without the shared server credential override", async () => {
+    process.env.B2_OAUTH_ALLOWED_SUBJECTS = "subject,other-subject";
 
     const response = await vercelHealthFetch(
       new Request("https://mcp.example.com/health", { headers: { host: "mcp.example.com" } }),

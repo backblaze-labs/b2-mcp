@@ -65,6 +65,14 @@ B2_SECRET_SINK=off
 B2_ALLOW_INLINE_SECRETS=false
 B2_ALLOW_LOCAL_FILES=false
 B2_MCP_PUBLIC_URL=https://mcp.example.com/mcp
+B2_OAUTH_ISSUER=https://issuer.example.com/
+B2_OAUTH_AUTHORIZATION_ENDPOINT=https://issuer.example.com/oauth2/authorize
+B2_OAUTH_TOKEN_ENDPOINT=https://issuer.example.com/oauth2/token
+B2_OAUTH_INTROSPECTION_ENDPOINT=https://issuer.example.com/oauth2/introspect
+B2_OAUTH_RESOURCE=https://mcp.example.com/mcp
+B2_OAUTH_AUDIENCE=https://mcp.example.com/mcp
+B2_OAUTH_INTROSPECTION_CLIENT_ID=resource-server-client-id
+B2_OAUTH_INTROSPECTION_CLIENT_SECRET=resource-server-client-secret
 ```
 
 Use `deploy/vercel/vercel.env.example` as the checklist. Do not set Production
@@ -98,6 +106,20 @@ introspection remains authoritative for revocation and JWT-shaped opaque-token
 compatibility. Server mode is single-tenant by default and requires one
 `B2_OAUTH_ALLOWED_SUBJECTS` value unless
 `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` is separately reviewed.
+
+For the Backblaze internal-testing deployment, Okta is the authorization server
+and Okta app plus group assignment is the access gate. Set the Okta custom
+Authorization Server audience to the final public `/mcp` URL, assign the OIDC
+app to the employee or `b2-mcp-users` group, configure authorization-code plus
+PKCE for the Claude.ai connector redirect URI, and store the Okta issuer,
+authorization endpoint, token endpoint, introspection endpoint, introspection
+client id/secret, resource URL, and audience in Vercel Production environment
+variables. In that reviewed profile, set
+`B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` and omit
+`B2_OAUTH_ALLOWED_SUBJECTS`; the adapter admits any active Okta token with the
+configured issuer, audience/resource, and required scopes. Every admitted Okta
+user shares the one server-held B2 key and its capabilities, with
+`B2_DESTRUCTIVE_POLICY=block` still preventing destructive operations.
 
 ## Health Checks
 

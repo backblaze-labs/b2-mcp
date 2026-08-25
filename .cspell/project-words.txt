@@ -63,7 +63,9 @@ creds
 EOPENBREAKER
 exfiltration
 noout
+okta
 paginators
+PKCE
 sessionful
 unallowed
 unparseable

@@ -51,13 +51,14 @@ export function validateVercelStaticConfiguration(): OAuthResourceServerConfig {
   validatePreviewCredentialCustody();
   const oauthConfig = loadValidatedOAuthConfiguration();
   if (getHttpCredentialMode() === "server") {
-    if (oauthConfig.allowedSubjects.length === 0) {
-      throw new Error("Vercel server mode requires at least one B2_OAUTH_ALLOWED_SUBJECTS value");
+    const sharedServerCredentialAllowed =
+      process.env[ALLOW_SHARED_SERVER_CREDENTIAL_FLAG] === "true";
+    if (oauthConfig.allowedSubjects.length === 0 && !sharedServerCredentialAllowed) {
+      throw new Error(
+        `Vercel server mode requires B2_OAUTH_ALLOWED_SUBJECTS or ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true for issuer/audience/scope admission`,
+      );
     }
-    if (
-      oauthConfig.allowedSubjects.length !== 1 &&
-      process.env[ALLOW_SHARED_SERVER_CREDENTIAL_FLAG] !== "true"
-    ) {
+    if (oauthConfig.allowedSubjects.length > 1 && !sharedServerCredentialAllowed) {
       throw new Error(
         `Vercel server mode requires exactly one B2_OAUTH_ALLOWED_SUBJECTS value unless ${ALLOW_SHARED_SERVER_CREDENTIAL_FLAG}=true is set`,
       );

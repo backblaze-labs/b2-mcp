@@ -83,6 +83,11 @@ Backblaze B2
 This is the recommended hosted shape for new single-tenant deployments, but it
 must be selected explicitly with `B2_HTTP_CREDENTIAL_MODE=server`. OAuth scopes,
 B2 key capabilities, and tool-profile filtering are cumulative restrictions.
+Hosted adapters may require a subject allowlist before a shared server-held B2
+key is used. The Vercel adapter also supports a reviewed Okta internal-testing
+profile where `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL=true` admits any token
+from the configured issuer, audience/resource, and scope policy without
+enumerating individual subjects.
 
 ### HTTP Client-Supplied Credential Compatibility
 
@@ -132,6 +137,7 @@ are public metadata and are cacheable for a short period.
 | `B2_OAUTH_AUDIENCE` | Exact audience expected for this MCP deployment. |
 | `B2_OAUTH_REQUIRED_SCOPES` | Additional scopes required beyond one `b2:*` deployment scope. |
 | `B2_OAUTH_ALLOWED_SUBJECTS` | Optional comma-separated subject allowlist. Values may be `sub` or `issuer#sub`. |
+| `B2_VERCEL_ALLOW_SHARED_SERVER_CREDENTIAL` | Vercel-only reviewed opt-in that allows issuer/audience/scope admission without `B2_OAUTH_ALLOWED_SUBJECTS` in server mode. |
 | `B2_OAUTH_ALLOWED_TOKEN_TYPES` | Accepted token types when introspection returns `token_type`. |
 | `B2_OAUTH_ALLOWED_ALGORITHMS` | Accepted introspection algorithm claims and JWKS algorithms. |
 | `B2_OAUTH_INTROSPECTION_ENDPOINT` | RFC 7662 introspection endpoint for opaque or authoritative token checks. |
