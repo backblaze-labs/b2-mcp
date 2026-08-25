@@ -162,12 +162,15 @@ function rfc850DateStamps(
 ): { retryStamp: string; validationStamp: string } {
   const now = new Date(Date.now());
   const currentYear = now.getUTCFullYear();
-  const year = Math.floor(currentYear / 100) * 100 + Number(twoDigitYear);
-  const validationStamp = `${day} ${month} ${year} ${time}`;
   const cutoff = new Date(now.getTime());
   cutoff.setUTCFullYear(currentYear + 50);
-  const retryYear = Date.parse(`${validationStamp} GMT`) > cutoff.getTime() ? year - 100 : year;
-  const retryStamp = `${day} ${month} ${retryYear} ${time}`;
+  const stampAt = (y: number) => `${day} ${month} ${y} ${time}`;
+  let year = Math.floor(currentYear / 100) * 100 + Number(twoDigitYear);
+  // HTTP resolves a two-digit year to the latest same-suffix year no more than
+  // 50 years ahead, advancing across centuries as well as rolling back.
+  while (Date.parse(`${stampAt(year + 100)} GMT`) <= cutoff.getTime()) year += 100;
+  while (Date.parse(`${stampAt(year)} GMT`) > cutoff.getTime()) year -= 100;
+  const retryStamp = stampAt(year);
   return { retryStamp, validationStamp: retryStamp };
 }
 

@@ -621,6 +621,14 @@ describe("B2AuthManager", () => {
       expectedDelayMs: 4000,
     },
     {
+      name: "RFC850 cross-century rolling year clamp",
+      retryAfter: "Friday, 01-Jan-00 00:00:00 GMT",
+      now: "2076-01-01T00:00:00.000Z",
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 4000,
+      expectedDelayMs: 4000,
+    },
+    {
       name: "RFC850 past rolling year fallback",
       retryAfter: "Friday, 31-Dec-76 00:00:00 GMT",
       initialRetryDelayMs: 1,
