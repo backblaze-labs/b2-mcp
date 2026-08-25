@@ -615,9 +615,17 @@ describe("B2AuthManager", () => {
     {
       name: "RFC850 rolling year clamp",
       retryAfter: "Wednesday, 01-Jan-76 00:00:03 GMT",
+      now: "2026-08-25T00:00:00.000Z",
       initialRetryDelayMs: 1,
       maxRetryDelayMs: 4000,
       expectedDelayMs: 4000,
+    },
+    {
+      name: "RFC850 past rolling year fallback",
+      retryAfter: "Thursday, 31-Dec-76 00:00:00 GMT",
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 4000,
+      expectedDelayMs: 1,
     },
     {
       name: "invalid asctime date fallback",
@@ -628,9 +636,9 @@ describe("B2AuthManager", () => {
     },
   ])(
     "uses the $name Retry-After retry boundary through the SDK transport",
-    async ({ retryAfter, initialRetryDelayMs, maxRetryDelayMs, expectedDelayMs }) => {
+    async ({ retryAfter, now, initialRetryDelayMs, maxRetryDelayMs, expectedDelayMs }) => {
       vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      vi.setSystemTime(new Date(now ?? "2026-01-01T00:00:00.000Z"));
       vi.spyOn(Math, "random").mockReturnValue(0);
       _resetRetryBudget();
       const header = typeof retryAfter === "function" ? retryAfter() : retryAfter;

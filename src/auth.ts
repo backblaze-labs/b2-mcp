@@ -154,10 +154,20 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
   return Object.prototype.toString.call(body);
 }
 
-function rfc850Year(twoDigitYear: string): number {
-  const currentYear = new Date(Date.now()).getUTCFullYear();
+function rfc850DateStamps(
+  day: string,
+  month: string,
+  twoDigitYear: string,
+  time: string,
+): { retryStamp: string; validationStamp: string } {
+  const now = new Date(Date.now());
+  const currentYear = now.getUTCFullYear();
   const year = Math.floor(currentYear / 100) * 100 + Number(twoDigitYear);
-  return year - currentYear > 50 ? year - 100 : year;
+  const validationStamp = `${day} ${month} ${year} ${time}`;
+  const cutoff = new Date(now.getTime());
+  cutoff.setUTCFullYear(currentYear + 50);
+  const retryYear = Date.parse(`${validationStamp} GMT`) > cutoff.getTime() ? year - 100 : year;
+  return { retryStamp: `${day} ${month} ${retryYear} ${time}`, validationStamp };
 }
 
 function withRetryAfterHeader(r: HttpResponse): HttpResponse {
@@ -166,12 +176,14 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   if (!v || !/\D/.test(v)) return r;
 
   const m = RETRY_AFTER_HTTP_DATE.exec(v);
-  const s = m
-    ? `${m[1] ?? m[5] ?? m[10]?.replace(" ", "0")} ${m[2] ?? m[6] ?? m[9]} ${m[3] ?? m[12] ?? rfc850Year(m[7])} ${m[4] ?? m[8] ?? m[11]}`
+  const rfc850 = m?.[5] ? rfc850DateStamps(m[5], m[6], m[7], m[8]) : undefined;
+  const validationStamp = m
+    ? (rfc850?.validationStamp ??
+      `${m[1] ?? m[10]?.replace(" ", "0")} ${m[2] ?? m[9]} ${m[3] ?? m[12]} ${m[4] ?? m[11]}`)
     : "";
-  let ms = Date.parse(`${s} GMT`);
-  const utc = new Date(ms).toUTCString();
-  if (!utc.startsWith(v.slice(0, 3)) || !utc.includes(s)) ms = NaN;
+  let ms = Date.parse(`${rfc850?.retryStamp ?? validationStamp} GMT`);
+  const utc = new Date(Date.parse(`${validationStamp} GMT`)).toUTCString();
+  if (!utc.startsWith(v.slice(0, 3)) || !utc.includes(validationStamp)) ms = NaN;
   const headers = new Headers(r.headers);
   if (Number.isFinite(ms)) {
     headers.set(h, String(Math.max(0, Math.ceil((ms - Date.now()) / 1000))));
