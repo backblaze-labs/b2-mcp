@@ -7,6 +7,7 @@ import {
   authenticateOAuthRequest,
   loadOAuthResourceServerConfig,
   oauthMetadataOptions,
+  oauthMetadataRouteResponse,
   protectedResourceMetadata,
   protectedResourceMetadataUrl,
   resetOAuthVerifierCacheForTests,
@@ -130,6 +131,102 @@ function preverifiedAuthInfo(overrides: Partial<AuthInfo> = {}): AuthInfo {
     },
     ...overrides,
   };
+}
+
+function bearerChallenge(response: Response) {
+  const header = response.headers.get("www-authenticate");
+  expect(header).toBeTruthy();
+  expect(header).toMatch(/^Bearer /);
+  const parts: string[] = [];
+  let current = "";
+  let quoted = false;
+  let escaped = false;
+  for (const character of header?.slice("Bearer ".length) ?? "") {
+    if (escaped) {
+      current += character;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      current += character;
+      escaped = true;
+      continue;
+    }
+    if (character === '"') quoted = !quoted;
+    if (character === "," && !quoted) {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += character;
+  }
+  if (current) parts.push(current.trim());
+  const params = new Map(
+    parts.map((part) => {
+      const [name, quotedValue] = part.split("=");
+      return [name, quotedValue?.replace(/^"|"$/g, "") ?? ""];
+    }),
+  );
+  return { header, params };
+}
+
+async function expectBearerChallenge(
+  response: AuthInfo | Response,
+  {
+    error,
+    status,
+    description,
+    scope,
+  }: {
+    error: OAuthErrorCode;
+    status: number;
+    description: RegExp;
+    scope?: string;
+  },
+) {
+  expect(response).toBeInstanceOf(Response);
+  const rejection = response as Response;
+  expect(rejection.status).toBe(status);
+  const { header, params } = bearerChallenge(rejection);
+  expect(params.get("error")).toBe(error);
+  expect(params.get("error_description")).toMatch(description);
+  expect(params.get("resource_metadata")).toBe(protectedResourceMetadataUrl(baseConfig));
+  if (scope) {
+    expect(params.get("scope")).toBe(scope);
+  } else {
+    expect(params.has("scope")).toBe(false);
+  }
+  await expect(rejection.json()).resolves.toMatchObject({
+    error,
+    error_description: expect.stringMatching(description),
+  });
+  return header;
+}
+
+function stubOAuthEnv(overrides: Record<string, string> = {}) {
+  for (const [name, value] of Object.entries({
+    B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+    B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+    B2_OAUTH_ISSUER: baseConfig.issuer,
+    B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+    B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+    B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+    B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+    B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+    B2_OAUTH_RESOURCE: baseConfig.resource,
+    B2_OAUTH_AUDIENCE: baseConfig.audience,
+    ...overrides,
+  })) {
+    vi.stubEnv(name, value);
+  }
+}
+
+function testBase64Url(value: unknown): string {
+  return Buffer.from(typeof value === "string" ? value : JSON.stringify(value))
+    .toString("base64")
+    .replace(/=/g, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
 }
 
 describe("OAuthIntrospectionVerifier", () => {
@@ -661,6 +758,126 @@ describe("OAuthIntrospectionVerifier", () => {
     await expect(verifier.verifyAccessToken("inactive-token")).rejects.toThrow(/inactive/i);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("accepts array-valued introspection scopes and string NumericDate claims", async () => {
+    const { verifier } = verifierFor(
+      claims({
+        scope: ["profile", "b2:read", 42],
+        exp: "2000",
+        nbf: "900",
+        client_id: undefined,
+        azp: "authorized-party",
+      }),
+    );
+
+    await expect(verifier.verifyAccessToken("array-scope-token")).resolves.toMatchObject({
+      clientId: "authorized-party",
+      scopes: ["profile", "b2:read"],
+      expiresAt: 2000,
+    });
+  });
+
+  it("rejects introspection responses without parseable scopes or expiry", async () => {
+    const noScope = verifierWithFetch(vi.fn(async () => Response.json(claims({ scope: 42 }))));
+    const noExpiry = verifierWithFetch(vi.fn(async () => Response.json(claims({ exp: "soon" }))));
+
+    await expect(noScope.verifyAccessToken("no-scope-token")).rejects.toThrow(/deployment scope/i);
+    await expect(noExpiry.verifyAccessToken("no-expiry-token")).rejects.toThrow(/expired/i);
+  });
+
+  it("accepts configured required scopes when the token includes them", async () => {
+    const verifier = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ scope: "b2:read custom:report" }))),
+      { requiredScopes: ["custom:report"] },
+    );
+
+    await expect(verifier.verifyAccessToken("required-scope-token")).resolves.toMatchObject({
+      scopes: ["b2:read", "custom:report"],
+    });
+  });
+
+  it("skips token algorithm checks when introspection algorithms are disabled", async () => {
+    const verifier = verifierWithFetch(
+      vi.fn(async () => Response.json(claims({ alg: "HS256" }))),
+      { allowedAlgorithms: [] },
+    );
+
+    await expect(verifier.verifyAccessToken("unchecked-alg-token")).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+  });
+
+  it("supports dangerous unauthenticated introspection when explicitly configured", async () => {
+    const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = init?.headers;
+      expect(headers).toBeInstanceOf(Headers);
+      expect((headers as Headers).has("authorization")).toBe(false);
+      return Response.json(claims());
+    });
+    const verifier = verifierWithFetch(fetchMock, {
+      introspectionClientId: undefined,
+      introspectionClientSecret: undefined,
+      dangerouslyAllowUnauthenticatedIntrospection: true,
+    });
+
+    await expect(
+      verifier.verifyAccessToken("unauthenticated-introspection-token"),
+    ).resolves.toMatchObject({
+      clientId: "mcp-client",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache tokens whose effective cache expiry is already stale", async () => {
+    const fetchMock = vi.fn(async () => Response.json(claims({ exp: 1010 })));
+    const verifier = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, tokenCacheSkewSeconds: 20 },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken("skew-stale-token");
+    await verifier.verifyAccessToken("skew-stale-token");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("evicts the least-recently stored token when the token cache is full", async () => {
+    const fetchMock = vi.fn(async () => Response.json(claims()));
+    const verifier = new OAuthIntrospectionVerifier({
+      config: { ...baseConfig, tokenCacheMaxEntries: 1 },
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken("first-token");
+    await verifier.verifyAccessToken("second-token");
+    await verifier.verifyAccessToken("first-token");
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("wraps unexpected introspection request failures as dependency failures", async () => {
+    const verifier = verifierWithFetch(
+      vi.fn(async () => {
+        throw new Error("unexpected fetch failure");
+      }),
+      { introspectionMaxRetries: 0 },
+    );
+
+    await expect(verifier.verifyAccessToken("unexpected-error-token")).rejects.toBeInstanceOf(
+      OAuthDependencyError,
+    );
+  });
+
+  it("rejects direct introspection verifier construction without introspection config", () => {
+    expect(
+      () =>
+        new OAuthIntrospectionVerifier({
+          config: pureJwksOnlyConfig() as never,
+        }),
+    ).toThrow(/introspection endpoint/i);
+  });
 });
 
 function jwksOnlyConfig(overrides: Partial<typeof baseConfig> = {}) {
@@ -672,6 +889,22 @@ function jwksOnlyConfig(overrides: Partial<typeof baseConfig> = {}) {
     introspectionClientSecret: undefined,
     ...overrides,
   };
+}
+
+function pureJwksOnlyConfig(overrides: Partial<ReturnType<typeof jwksOnlyConfig>> = {}) {
+  const {
+    introspectionEndpoint: _introspectionEndpoint,
+    introspectionClientId: _introspectionClientId,
+    introspectionClientSecret: _introspectionClientSecret,
+    introspectionBearerToken: _introspectionBearerToken,
+    ...config
+  } = jwksOnlyConfig(overrides);
+  return config;
+}
+
+function pureIntrospectionConfig(overrides: Partial<typeof baseConfig> = {}) {
+  const { jwksUri: _jwksUri, ...config } = { ...baseConfig, ...overrides };
+  return config;
 }
 
 function standardJwtClaims(overrides: Record<string, unknown> = {}) {
@@ -752,6 +985,45 @@ describe("OAuthJwtVerifier", () => {
           config: jwksOnlyConfig({ allowedJwtAlgorithms: ["constructor"] }),
         }),
     ).toThrow(/unsupported JWT algorithm/i);
+  });
+
+  it("rejects direct JWT verifier construction without JWKS config", () => {
+    expect(
+      () =>
+        new OAuthJwtVerifier({
+          config: pureIntrospectionConfig() as never,
+        }),
+    ).toThrow(/JWKS URI/i);
+  });
+
+  it("verifies tokens with a JWKS-only config that omits introspection properties", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse());
+    const verifier = new OAuthJwtVerifier({
+      config: pureJwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "pure-jwks" })),
+    ).resolves.toMatchObject({
+      clientId: "pure-jwks",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("verifies tokens with an introspection-only config that omits JWKS properties", async () => {
+    const fetchMock = vi.fn(async () => Response.json(claims({ client_id: "pure-introspection" })));
+    const verifier = new OAuthIntrospectionVerifier({
+      config: pureIntrospectionConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await expect(verifier.verifyAccessToken("pure-introspection-token")).resolves.toMatchObject({
+      clientId: "pure-introspection",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
@@ -1039,6 +1311,30 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects JWTs whose decoded header or claims are not JSON objects", async () => {
+    const fetchMock = vi.fn(async () => jwksResponse());
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig(),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+    const validSignature = jwtFor().split(".")[2];
+
+    await expect(
+      verifier.verifyAccessToken(
+        `${testBase64Url([])}.${testBase64Url(standardJwtClaims())}.${validSignature}`,
+      ),
+    ).rejects.toThrow(/malformed/i);
+    await expect(
+      verifier.verifyAccessToken(
+        `${testBase64Url({ alg: "RS256", typ: "at+jwt", kid: rsaPublicJwk.kid })}.${testBase64Url(
+          [],
+        )}.${validSignature}`,
+      ),
+    ).rejects.toThrow(/malformed/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("accepts standards-compliant access tokens bound by aud only", async () => {
     const verifier = new OAuthJwtVerifier({
       config: jwksOnlyConfig(),
@@ -1133,8 +1429,10 @@ describe("OAuthJwtVerifier", () => {
     ["wrong issuer", { iss: "http://localhost:9001/" }, {}, /issuer/i],
     ["issuer alias without iss", { iss: undefined, issuer: baseConfig.issuer }, {}, /issuer/i],
     ["missing scope", { scope: "profile" }, {}, /deployment scope/i],
+    ["missing alg", {}, { alg: undefined }, /algorithm/i],
     ["alg none", {}, { alg: "none" }, /algorithm/i],
     ["non-empty crit", {}, { crit: ["exp"] }, /critical/i],
+    ["missing typ", {}, { typ: undefined }, /missing.*B2_OAUTH_ALLOWED_JWT_TYPES/i],
     ["non-access typ", {}, { typ: "id+jwt" }, /type/i],
   ])("rejects JWTs with %s", async (_name, claimOverrides, headerOverrides, message) => {
     const verifier = new OAuthJwtVerifier({
@@ -1466,6 +1764,72 @@ describe("OAuthJwtVerifier", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not force a second JWKS refresh for a different unknown kid within cooldown", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksRefreshCooldownMs: 30_000 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-forced-refresh-cache" }));
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-one" }, { kid: "missing-one" })),
+    ).rejects.toThrow(/signature/i);
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-two" }, { kid: "missing-two" })),
+    ).rejects.toThrow(/signature/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not remember unknown kids when JWKS refresh cooldown is disabled", async () => {
+    const fetchMock = vi.fn(async () =>
+      jwksResponse([rsaPublicJwk], { headers: { "Cache-Control": "max-age=60" } }),
+    );
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksRefreshCooldownMs: 0 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-no-cooldown-cache" }));
+    await expect(
+      verifier.verifyAccessToken(jwtFor({ client_id: "missing-one" }, { kid: "missing-one" })),
+    ).rejects.toThrow(/signature/i);
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "missing-one-again" }, { kid: "missing-one" }),
+      ),
+    ).rejects.toThrow(/signature/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects unknown-kid tokens when a forced JWKS refresh returns duplicate matches", async () => {
+    const rotatedKey = { ...rsaPublicJwk, kid: "rotated-key" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jwksResponse([rsaPublicJwk]))
+      .mockResolvedValueOnce(jwksResponse([rotatedKey, { ...rotatedKey }]));
+    const verifier = new OAuthJwtVerifier({
+      config: jwksOnlyConfig({ jwksRefreshCooldownMs: 30_000 }),
+      fetch: fetchMock as typeof fetch,
+      nowSeconds: () => 1000,
+    });
+
+    await verifier.verifyAccessToken(jwtFor({ client_id: "prime-duplicate-refresh-cache" }));
+    await expect(
+      verifier.verifyAccessToken(
+        jwtFor({ client_id: "rotated-duplicate" }, { kid: "rotated-key" }),
+      ),
+    ).rejects.toThrow(/signature/i);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("purges expired unknown kid cache entries before recording new misses", async () => {
     let now = 1000;
     const fetchMock = vi.fn(async () =>
@@ -1649,9 +2013,167 @@ describe("OAuthBearerTokenVerifier", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("fails closed when constructed without any token verifier config", async () => {
+    const {
+      introspectionEndpoint: _introspectionEndpoint,
+      jwksUri: _jwksUri,
+      ...config
+    } = {
+      ...baseConfig,
+      introspectionEndpoint: undefined,
+      jwksUri: undefined,
+    };
+    const verifier = new OAuthBearerTokenVerifier({
+      config: config as never,
+    });
+
+    await expect(verifier.verifyAccessToken("no-verifier-token")).rejects.toThrow(
+      /verifier is not configured/i,
+    );
+  });
 });
 
 describe("OAuth bearer rejection responses", () => {
+  beforeEach(() => {
+    resetOAuthVerifierCacheForTests();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ["missing Authorization", undefined, /Missing Authorization header/],
+    ["non-bearer Authorization", "Basic abc123", /expected 'Bearer TOKEN'/],
+    ["missing bearer token", "Bearer", /expected 'Bearer TOKEN'/],
+    ["empty bearer token", "Bearer   ", /expected 'Bearer TOKEN'/],
+  ])("returns a 401 bearer challenge for %s", async (_name, authorization, description) => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: authorization ? { Authorization: authorization } : {},
+      }),
+      baseConfig,
+    );
+
+    await expectBearerChallenge(response, {
+      error: OAuthErrorCode.InvalidToken,
+      status: 401,
+      description,
+    });
+  });
+
+  it.each([
+    ["inactive introspection token", claims({ active: false }), /Token is inactive/],
+    ["expired introspection token", claims({ exp: 999 }), /Token is expired/],
+    ["wrong-audience introspection token", claims({ aud: "other" }), /audience/],
+    ["wrong-resource introspection token", claims({ resource: "other" }), /resource/],
+  ])("returns a 401 bearer challenge for a %s", async (_name, tokenClaims, description) => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: `Bearer ${_name}` },
+      }),
+      baseConfig,
+      {
+        fetch: vi.fn(async () => Response.json(tokenClaims)) as typeof fetch,
+        nowSeconds: () => 1000,
+      },
+    );
+
+    await expectBearerChallenge(response, {
+      error: OAuthErrorCode.InvalidToken,
+      status: 401,
+      description,
+    });
+  });
+
+  it("returns a 401 bearer challenge for an expired locally verified JWT", async () => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: `Bearer ${jwtFor({ exp: 900 })}` },
+      }),
+      jwksOnlyConfig(),
+      {
+        fetch: vi.fn(async () => jwksResponse()) as typeof fetch,
+        nowSeconds: () => 1000,
+      },
+    );
+
+    await expectBearerChallenge(response, {
+      error: OAuthErrorCode.InvalidToken,
+      status: 401,
+      description: /Token is expired/,
+    });
+  });
+
+  it("returns a 401 bearer challenge when a custom verifier omits token expiry", async () => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: "Bearer no-expiry-token" },
+      }),
+      baseConfig,
+      {
+        verifier: {
+          verifyAccessToken: vi.fn(async () => ({
+            token: "verified:no-expiry-token",
+            clientId: "mcp-client",
+            scopes: ["b2:read"],
+          })),
+        },
+      },
+    );
+
+    await expectBearerChallenge(response, {
+      error: OAuthErrorCode.InvalidToken,
+      status: 401,
+      description: /no expiration time/,
+    });
+  });
+
+  it("returns a 403 bearer challenge with required scopes for insufficient scope", async () => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: "Bearer insufficient-scope-token" },
+      }),
+      { ...baseConfig, requiredScopes: ["custom:report"] },
+      {
+        fetch: vi.fn(async () => Response.json(claims({ scope: "b2:read" }))) as typeof fetch,
+        nowSeconds: () => 1000,
+      },
+    );
+
+    await expectBearerChallenge(response, {
+      error: OAuthErrorCode.InsufficientScope,
+      status: 403,
+      description: /required OAuth scope/,
+      scope: "custom:report",
+    });
+  });
+
+  it("returns a 500 OAuth JSON response when the verifier throws a non-OAuth error", async () => {
+    const response = await authenticateOAuthRequest(
+      new Request(baseConfig.publicUrl, {
+        headers: { Authorization: "Bearer server-error-token" },
+      }),
+      baseConfig,
+      {
+        verifier: {
+          verifyAccessToken: vi.fn(async () => {
+            throw new Error("unexpected verifier failure");
+          }),
+        },
+      },
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(500);
+    expect((response as Response).headers.get("www-authenticate")).toBeNull();
+    await expect((response as Response).json()).resolves.toMatchObject({
+      error: OAuthErrorCode.ServerError,
+      error_description: "Internal Server Error",
+    });
+  });
+
   it.each([
     ["decline", OAuthErrorCode.AccessDenied, "declined by user"],
     ["cancel", OAuthErrorCode.InvalidRequest, "authorization canceled"],
@@ -1688,9 +2210,32 @@ describe("validatePreverifiedOAuthAuthInfo", () => {
     });
   });
 
+  it("accepts preverified AuthInfo with issuer/resource aliases and the default clock", () => {
+    const extra = { ...preverifiedAuthInfo().extra };
+    delete extra.iss;
+    delete extra.resource;
+
+    expect(
+      validatePreverifiedOAuthAuthInfo(
+        preverifiedAuthInfo({
+          expiresAt: Math.floor(Date.now() / 1000) + 60,
+          extra: {
+            ...extra,
+            issuer: baseConfig.issuer,
+          },
+        }),
+        baseConfig,
+      ),
+    ).toMatchObject({
+      clientId: "mcp-client",
+      scopes: ["b2:read"],
+    });
+  });
+
   it.each([
     ["missing audience", { aud: undefined }, /audience/i],
     ["wrong audience", { aud: "other" }, /audience/i],
+    ["wrong issuer", { iss: "http://localhost:9001/" }, /issuer/i],
     ["future not-before", { nbf: 1001 }, /not yet valid/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
     ["missing token algorithm", { alg: undefined }, /algorithm/i],
@@ -1709,9 +2254,37 @@ describe("validatePreverifiedOAuthAuthInfo", () => {
       ),
     ).toThrow(message);
   });
+
+  it("rejects preverified AuthInfo without extra claims", () => {
+    expect(() =>
+      validatePreverifiedOAuthAuthInfo(
+        preverifiedAuthInfo({
+          extra: undefined,
+        }),
+        baseConfig,
+        () => 1000,
+      ),
+    ).toThrow(/issuer/i);
+  });
+
+  it("rejects preverified AuthInfo bound to a different resource", () => {
+    expect(() =>
+      validatePreverifiedOAuthAuthInfo(
+        preverifiedAuthInfo({
+          resource: new URL("http://localhost:3000/other-mcp"),
+        }),
+        baseConfig,
+        () => 1000,
+      ),
+    ).toThrow(/resource/i);
+  });
 });
 
 describe("OAuth resource metadata", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("requires a public URL or resource for OAuth metadata", () => {
     expect(() =>
       loadOAuthResourceServerConfig({
@@ -1719,6 +2292,34 @@ describe("OAuth resource metadata", () => {
         B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
       }),
     ).toThrow(/B2_MCP_PUBLIC_URL.*B2_OAUTH_RESOURCE/);
+  });
+
+  it("requires issuer metadata after the resource URL is configured", () => {
+    expect(() =>
+      loadOAuthResourceServerConfig({
+        B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+        B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+        B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+        B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+        B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+        B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+        B2_OAUTH_INTROSPECTION_CLIENT_SECRET: baseConfig.introspectionClientSecret,
+      }),
+    ).toThrow(/B2_OAUTH_ISSUER/);
+  });
+
+  it("requires paired introspection client credentials", () => {
+    expect(() =>
+      loadOAuthResourceServerConfig({
+        B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true",
+        B2_MCP_PUBLIC_URL: baseConfig.publicUrl,
+        B2_OAUTH_ISSUER: baseConfig.issuer,
+        B2_OAUTH_AUTHORIZATION_ENDPOINT: baseConfig.authorizationEndpoint,
+        B2_OAUTH_TOKEN_ENDPOINT: baseConfig.tokenEndpoint,
+        B2_OAUTH_INTROSPECTION_ENDPOINT: baseConfig.introspectionEndpoint,
+        B2_OAUTH_INTROSPECTION_CLIENT_ID: baseConfig.introspectionClientId,
+      }),
+    ).toThrow(/configured together/);
   });
 
   it("loads static configuration from an explicit env object", () => {
@@ -1874,6 +2475,63 @@ describe("OAuth resource metadata", () => {
     ).toBe("http://localhost:3000/.well-known/oauth-protected-resource/api/b2/mcp");
   });
 
+  it("serves CORS preflight for the protected-resource metadata route", () => {
+    stubOAuthEnv();
+
+    const response = oauthMetadataRouteResponse(
+      new Request(protectedResourceMetadataUrl(baseConfig), {
+        method: "OPTIONS",
+        headers: {
+          "Access-Control-Request-Headers": "authorization,x-b2-key",
+        },
+      }),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response?.status).toBe(204);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response?.headers.get("access-control-allow-methods")).toBe("GET, HEAD, OPTIONS");
+    expect(response?.headers.get("access-control-allow-headers")).toBe("authorization,x-b2-key");
+    expect(response?.headers.get("vary")).toBe("Access-Control-Request-Headers");
+  });
+
+  it("rejects unsupported methods on the protected-resource metadata route", async () => {
+    stubOAuthEnv();
+
+    const response = oauthMetadataRouteResponse(
+      new Request(protectedResourceMetadataUrl(baseConfig), { method: "POST" }),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response?.status).toBe(405);
+    expect(response?.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+    await expect(response?.json()).resolves.toMatchObject({
+      error: OAuthErrorCode.MethodNotAllowed,
+      error_description: "The method POST is not allowed for this endpoint",
+    });
+  });
+
+  it("serves authorization-server metadata without a HEAD response body", async () => {
+    stubOAuthEnv();
+
+    const response = oauthMetadataRouteResponse(
+      new Request("http://localhost:3000/.well-known/oauth-authorization-server", {
+        method: "HEAD",
+      }),
+    );
+
+    expect(response).toBeInstanceOf(Response);
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("access-control-allow-origin")).toBe("*");
+    await expect(response?.text()).resolves.toBe("");
+  });
+
+  it("falls through non-OAuth metadata routes", () => {
+    stubOAuthEnv();
+
+    expect(oauthMetadataRouteResponse(new Request("http://localhost:3000/mcp"))).toBeUndefined();
+  });
+
   it("fails closed without authenticated introspection credentials by default", () => {
     expect(() =>
       loadOAuthResourceServerConfig({
@@ -1899,16 +2557,5 @@ describe("OAuth resource metadata", () => {
     });
 
     expect(config.dangerouslyAllowUnauthenticatedIntrospection).toBe(true);
-  });
-
-  it("returns an SDK bearer challenge for missing Authorization", async () => {
-    const response = await authenticateOAuthRequest(new Request(baseConfig.publicUrl), baseConfig);
-
-    expect(response).toBeInstanceOf(Response);
-    expect((response as Response).status).toBe(401);
-    expect((response as Response).headers.get("www-authenticate")).toContain("Bearer");
-    expect((response as Response).headers.get("www-authenticate")).toContain(
-      ".well-known/oauth-protected-resource/mcp",
-    );
   });
 });
