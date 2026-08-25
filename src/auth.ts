@@ -142,6 +142,8 @@ function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
 }
 
 const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);
+const RETRY_AFTER_HTTP_DATE =
+  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d\d (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d\d:\d\d:\d\d GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d\d-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d\d \d\d:\d\d:\d\d GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d\d:\d\d:\d\d \d{4})$/;
 
 function bodyBudgetKey(body: HttpRequest["body"]): string {
   if (body === undefined || body === null) return "";
@@ -157,7 +159,7 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   const v = r.headers.get(h)?.trim();
   if (!v || !/\D/.test(v)) return r;
 
-  const ms = /^[A-Z][a-z]{2}/.test(v) ? Date.parse(v) : NaN;
+  const ms = RETRY_AFTER_HTTP_DATE.test(v) ? Date.parse(v) : NaN;
   const headers = new Headers(r.headers);
   if (Number.isFinite(ms)) {
     headers.set(h, String(Math.max(0, Math.ceil((ms - Date.now()) / 1000))));
