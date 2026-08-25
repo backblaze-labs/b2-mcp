@@ -319,7 +319,11 @@ export class B2AuthManager {
     return this.config;
   }
 
-  /** Return cached auth or share one in-flight authorize call. */
+  /**
+   * Return cached auth or share one in-flight authorize call.
+   *
+   * @returns Cached or fresh B2 auth.
+   */
   async getAuth(): Promise<B2AuthResponse> {
     this.syncCachedAuthFromSdk();
     if (this.isValid()) {
@@ -367,7 +371,11 @@ export class B2AuthManager {
     this.sdk.client.accountInfo.clear();
   }
 
-  /** Force a fresh authorization and return it. */
+  /**
+   * Force a fresh authorization.
+   *
+   * @returns Fresh B2 auth.
+   */
   async forceRefresh(): Promise<B2AuthResponse> {
     this.invalidate();
     return this.getAuth();
