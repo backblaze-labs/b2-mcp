@@ -19,6 +19,10 @@ function errorOf(frame: any): any {
   return frame.error;
 }
 
+function parseResourceContent(result: any): any {
+  return JSON.parse(result.contents[0].text);
+}
+
 describe("stdio transport (MCP 2026-07-28)", () => {
   let raw: RawStdioSession | null = null;
 
@@ -70,6 +74,7 @@ describe("stdio transport (MCP 2026-07-28)", () => {
       const discover = client.getDiscoverResult() ?? (await client.discover());
       expect(discover.supportedVersions).toContain(MODERN_PROTOCOL_VERSION);
       expect(discover.capabilities.tools).toBeDefined();
+      expect(discover.capabilities.resources).toBeDefined();
       expect(client.getServerVersion()?.name).toBe("backblaze-b2");
 
       const listed = await client.listTools(undefined, { cacheMode: "refresh" });
@@ -87,6 +92,38 @@ describe("stdio transport (MCP 2026-07-28)", () => {
       const b2Call = await client.callTool({ name: "b2_list_buckets", arguments: {} });
       expect(b2Call.isError).not.toBe(true);
       expect(JSON.stringify(b2Call)).toContain(bucketName);
+
+      const listedResources = await client.listResources(undefined, { cacheMode: "refresh" });
+      expect(listedResources.resources.map((resource) => resource.uri).sort()).toEqual([
+        "b2://capabilities",
+        "b2://server/configuration",
+        "b2://server/destructive-policy",
+        "b2://server/tool-profile",
+      ]);
+
+      const templates = await client.listResourceTemplates(undefined, { cacheMode: "refresh" });
+      expect(templates.resourceTemplates).toContainEqual(
+        expect.objectContaining({
+          name: "b2_bucket_config",
+          uriTemplate: "b2://bucket/{bucketName}",
+          mimeType: "application/json",
+        }),
+      );
+
+      const capabilities = parseResourceContent(
+        await client.readResource({ uri: "b2://capabilities" }, { cacheMode: "refresh" }),
+      );
+      expect(capabilities.resource).toBe("capability-summary");
+      expect(capabilities.registeredToolCount).toBeGreaterThan(0);
+
+      const bucketConfig = parseResourceContent(
+        await client.readResource({ uri: `b2://bucket/${bucketName}` }, { cacheMode: "refresh" }),
+      );
+      expect(bucketConfig.bucket).toMatchObject({
+        bucketName,
+        bucketType: "allPrivate",
+        visibility: "private",
+      });
 
       const s3Call = await client.callTool({
         name: "s3_list_objects_v2",

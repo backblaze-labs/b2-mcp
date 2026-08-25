@@ -2,12 +2,14 @@ import {
   createMcpServer,
   getMcpClientCapabilities,
   getMcpNegotiatedProtocolVersion,
+  getRegisteredTools,
+  ResourceRegistrationAdapter,
   ToolRegistrationAdapter,
   type McpServer,
   type ToolCallback,
   type ToolRegistrar,
 } from "./mcp.js";
-export { getRegisteredTools } from "./mcp.js";
+export { getRegisteredResources, getRegisteredTools } from "./mcp.js";
 import { z } from "zod";
 import type { B2Config, SecretSinkConfig } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
@@ -64,6 +66,11 @@ import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
 import { isDestructiveTool } from "./utils/destructive-gate.js";
+import {
+  isResourceAllowedByOAuthScopes,
+  isResourceEnabled,
+  registerB2Resources,
+} from "./resources.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
@@ -197,6 +204,8 @@ export function createServer(
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
         "tools/list": { ttlMs: 30_000, cacheScope: "private" },
+        "resources/list": { ttlMs: 30_000, cacheScope: "private" },
+        "resources/templates/list": { ttlMs: 30_000, cacheScope: "private" },
       },
       requestState: {
         verify: requestStateCodec.verify,
@@ -314,7 +323,19 @@ export function createServer(
   }
 
   const toolCount = registrar.commit();
-  logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
+  const resourceRegistrar = new ResourceRegistrationAdapter(server, {
+    shouldRegister: (name) =>
+      isResourceEnabled(name, capsSet) && isResourceAllowedByOAuthScopes(name, oauthScopes),
+  });
+  registerB2Resources(resourceRegistrar, {
+    config,
+    client: b2Client,
+    capabilities,
+    oauthScopes,
+    getRegisteredTools: () => getRegisteredTools(server),
+  });
+  const resourceCount = resourceRegistrar.commit();
+  logger.info({ toolCount, resourceCount, version: VERSION, outputFormat }, "server.ready");
 
   const originalClose = server.close.bind(server);
   let cleanedUp = false;
