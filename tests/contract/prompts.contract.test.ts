@@ -100,6 +100,32 @@ describe("MCP prompt contract", () => {
     });
   });
 
+  it("rejects invalid prompt arguments before returning prompt text", async () => {
+    await withPromptClient(null, async (client) => {
+      await expect(
+        client.getPrompt({
+          name: "b2-provision-object-lock-bucket",
+          arguments: {
+            bucketName: "contract-lock-bucket",
+            mode: "governance",
+            retentionDuration: "0",
+            retentionUnit: "days",
+          },
+        }),
+      ).rejects.toThrow();
+
+      await expect(
+        client.getPrompt({
+          name: "b2-audit-public-exposure",
+          arguments: {
+            bucketName: "a".repeat(64),
+            riskContext: "production",
+          },
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
   it("omits key rotation from credentials without key-management capabilities", async () => {
     await withPromptClient(
       ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],

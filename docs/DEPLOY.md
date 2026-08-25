@@ -84,6 +84,14 @@ or pull request code. Record deployed commit, artifact digest, Node version,
 MCP revision, platform region/runtime, tool-contract hash, and result. A failed
 provider smoke downgrades that recipe's support claim until repaired.
 
+During a rolling deploy that adds a new optional MCP capability such as
+`prompts`, stateless HTTP replicas can briefly disagree about whether
+`prompts/list` and `prompts/get` exist. A client that initialized against a new
+replica may receive a transient JSON-RPC method-not-found response from an old
+replica until the rollout finishes and private list caches expire. Treat that
+as deployment skew, re-initialize or refresh the prompt list, and investigate
+only if it continues after every old replica has drained.
+
 The supported container operator runbook is
 [`deploy/customer-hosted/README.md`](../deploy/customer-hosted/README.md).
 Treat that README as the canonical source for build/run steps, secret injection,

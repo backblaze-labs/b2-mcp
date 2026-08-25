@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Added MCP prompts for guided B2 workflows, with credential-aware prompt
+  availability, bounded prompt arguments, and safety constraints that keep
+  destructive steps behind the existing gate and elicitation path. (#166)
+
 ## [0.1.2] - 2026-08-23
 
 ### Changed

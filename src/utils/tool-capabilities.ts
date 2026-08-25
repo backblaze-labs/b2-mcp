@@ -257,6 +257,95 @@ export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): b
 }
 
 /**
+ * Capability-aware prompt registration.
+ *
+ * Prompt requirements live next to tool requirements because guided workflows
+ * must not advertise a plan whose mandatory tools are filtered out. Prompt
+ * semantics are intentionally stricter than TOOL_CAPABILITIES: every listed
+ * `requiredTools` entry must be enabled, while each individual tool still uses
+ * the tool map's existing any-of capability semantics. `allCapabilities`
+ * captures B2 capabilities that are required for a workflow but not represented
+ * by a distinct public MCP tool.
+ *
+ * Unlike tools, unmapped prompt names fail closed so a newly added guided admin
+ * workflow cannot be accidentally exposed to scoped credentials.
+ */
+export interface WorkflowPromptRequirement {
+  requiredTools: readonly string[];
+  allCapabilities?: readonly string[];
+  oauthOperation: OAuthOperationScope;
+}
+
+export const B2_WORKFLOW_PROMPT_REQUIREMENTS = {
+  "b2-audit-public-exposure": {
+    requiredTools: ["b2_list_buckets"],
+    oauthOperation: "read",
+  },
+  "b2-configure-lifecycle-cost-optimization": {
+    requiredTools: [
+      "b2_list_buckets",
+      "b2_usage_growth",
+      "b2_largest_files",
+      "b2_unfinished_uploads",
+      "b2_update_bucket",
+      "s3_list_objects_v2",
+      "s3_list_object_versions",
+      "s3_list_multipart_uploads",
+      "s3_put_bucket_lifecycle",
+    ],
+    oauthOperation: "admin",
+  },
+  "b2-provision-object-lock-bucket": {
+    requiredTools: ["b2_create_bucket", "b2_update_bucket", "b2_list_buckets"],
+    allCapabilities: ["writeBucketRetentions"],
+    oauthOperation: "admin",
+  },
+  "b2-review-event-notifications": {
+    requiredTools: ["b2_list_buckets", "b2_get_bucket_notification_rules"],
+    oauthOperation: "admin",
+  },
+  "b2-rotate-application-key": {
+    requiredTools: ["b2_list_keys", "b2_create_key", "b2_delete_key"],
+    oauthOperation: "admin",
+  },
+} as const satisfies Record<string, WorkflowPromptRequirement>;
+
+export type B2WorkflowPromptName = keyof typeof B2_WORKFLOW_PROMPT_REQUIREMENTS;
+
+export const B2_WORKFLOW_PROMPT_NAMES = Object.keys(
+  B2_WORKFLOW_PROMPT_REQUIREMENTS,
+) as B2WorkflowPromptName[];
+
+function promptToolsAreEnabled(
+  requirement: WorkflowPromptRequirement,
+  capabilities: ReadonlySet<string> | null,
+): boolean {
+  return requirement.requiredTools.every((toolName) => isToolEnabled(toolName, capabilities));
+}
+
+function promptExtraCapabilitiesArePresent(
+  requirement: WorkflowPromptRequirement,
+  capabilities: ReadonlySet<string> | null,
+): boolean {
+  if (capabilities === null) return true;
+  return (requirement.allCapabilities ?? []).every((capability) => capabilities.has(capability));
+}
+
+export function isWorkflowPromptEnabled(
+  name: string,
+  capabilities: ReadonlySet<string> | null,
+  oauthScopes: ReadonlySet<string> | null,
+): boolean {
+  const requirement = B2_WORKFLOW_PROMPT_REQUIREMENTS[name as B2WorkflowPromptName];
+  if (!requirement) return false;
+  return (
+    promptToolsAreEnabled(requirement, capabilities) &&
+    promptExtraCapabilitiesArePresent(requirement, capabilities) &&
+    oauthScopesAllowOperation(oauthScopes, requirement.oauthOperation)
+  );
+}
+
+/**
  * OAuth deployment scopes are an independent resource-server authorization
  * layer. They only reduce the surface that the B2 capability filter would
  * otherwise expose; they never grant a B2 operation by themselves.

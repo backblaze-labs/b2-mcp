@@ -96,6 +96,21 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 **Capability-aware registration.** When `createServer` is given a `capabilities` array (the entry points fetch it via `fetchCapabilities`), it wraps `server.tool` so only tools the key can use are registered — the surface auto-right-sizes to the credential (a read-only key drops every write/delete/admin tool; full ~9,719 tokens → read-only ~2,867). The map is `src/utils/tool-capabilities.ts` (any-of semantics; unmapped tools always register; Partner tools register only with a distinct master key). When `capabilities` is `null`/omitted — all unit tests, or `B2_REGISTER_ALL_TOOLS=true` — the full surface registers, so there's no behavior change. The key decides what's _possible_; the destructive gate decides what's _permitted_.
 
+### Prompt registration flow
+
+Guided workflows are registered as MCP prompts through `registerB2WorkflowPrompts`
+in `src/prompts.ts`, using `PromptRegistrationAdapter` from `src/mcp.ts`.
+Prompt templates must stay plan-oriented and must not bypass the destructive
+gate, MCP elicitation, or durable-secret sink policy.
+
+Every new prompt must also be added to `B2_WORKFLOW_PROMPT_REQUIREMENTS` in
+`src/utils/tool-capabilities.ts`. Prompt requirements live beside the tool
+capability map so `prompts/list` only advertises workflows whose mandatory
+tools are available for the current credential and OAuth deployment scope.
+Unlike tools, unmapped prompt names fail closed. Prompt requirements use
+all-of semantics across `requiredTools`; each required tool still uses the
+tool map's any-of capability semantics.
+
 ### Three backing categories, two client types
 
 The public tool surface is described by backing category, with availability

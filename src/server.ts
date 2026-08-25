@@ -198,6 +198,10 @@ export function createServer(
       ].join("\n"),
       cacheHints: {
         "server/discover": { ttlMs: 30_000, cacheScope: "private" },
+        // Prompts are an optional MCP capability. During rolling HTTP deploys,
+        // a client can initialize against a new pod and send prompts/get to an
+        // old pod before rollout completes; docs/DEPLOY.md calls out the
+        // transient method-not-found behavior so operators can correlate it.
         "prompts/list": { ttlMs: 30_000, cacheScope: "private" },
         "tools/list": { ttlMs: 30_000, cacheScope: "private" },
       },

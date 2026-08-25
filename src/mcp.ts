@@ -63,7 +63,6 @@ export interface PromptRegistrar {
     config: PromptRegistrationConfig,
     cb: PromptCallback<TArgs>,
   ): void;
-  hasPrompt(name: string): boolean;
 }
 
 interface PendingTool {
@@ -100,10 +99,48 @@ type ServerWithRegistry = McpServer & {
   [REGISTERED_PROMPTS]?: RegisteredPromptMap;
 };
 
-export class ToolRegistrationAdapter implements ToolRegistrar {
-  private readonly pending: PendingTool[] = [];
-  private readonly records: RegisteredToolMap = {};
+class RegistrationState<TRecord, TPending extends { name: string }> {
+  private readonly pending: TPending[] = [];
+  private readonly records: Record<string, TRecord> = {};
   private committed = false;
+
+  constructor(private readonly kind: string) {}
+
+  assertOpen(name: string): void {
+    if (this.committed) throw new Error(`${this.kind} registered after commit: ${name}`);
+  }
+
+  add(name: string, record: TRecord, pending: TPending): void {
+    this.assertOpen(name);
+    if (this.records[name]) throw new Error(`Duplicate MCP ${this.kind} registration: ${name}`);
+    this.records[name] = record;
+    this.pending.push(pending);
+  }
+
+  has(name: string): boolean {
+    return this.records[name] !== undefined;
+  }
+
+  commit(
+    register: (pending: TPending) => void,
+    publish: (records: Record<string, TRecord>) => void,
+  ): number {
+    if (this.committed) return Object.keys(this.records).length;
+    this.committed = true;
+    for (const pending of [...this.pending].sort((a, b) => a.name.localeCompare(b.name))) {
+      register(pending);
+    }
+    publish(
+      Object.fromEntries(
+        Object.entries(this.records).sort(([a], [b]) => a.localeCompare(b)),
+      ) as Record<string, TRecord>,
+    );
+    return Object.keys(this.records).length;
+  }
+}
+
+export class ToolRegistrationAdapter implements ToolRegistrar {
+  private readonly state = new RegistrationState<RegisteredToolRecord, PendingTool>("tool");
 
   constructor(
     private readonly server: McpServer,
@@ -115,64 +152,61 @@ export class ToolRegistrationAdapter implements ToolRegistrar {
     config: ToolRegistrationConfig,
     cb: ToolCallback<TArgs>,
   ): void {
-    if (this.committed) throw new Error(`Tool registered after commit: ${name}`);
+    this.state.assertOpen(name);
     if (!config.force && this.options.shouldRegister && !this.options.shouldRegister(name)) {
       return;
     }
-    if (this.records[name]) throw new Error(`Duplicate MCP tool registration: ${name}`);
 
     const callback = this.options.wrapCallback?.(name, cb as ToolCallback) ?? (cb as ToolCallback);
     const inputSchema = z.object(config.inputSchema ?? {});
     const annotations = annotationsForTool(name);
-    this.records[name] = {
+    this.state.add(
       name,
-      description: config.description,
-      inputSchema,
-      annotations,
-      execute: callback,
-    };
-    this.pending.push({
-      name,
-      title: config.title,
-      description: config.description,
-      inputSchema,
-      annotations,
-      callback,
-    });
+      {
+        name,
+        description: config.description,
+        inputSchema,
+        annotations,
+        execute: callback,
+      },
+      {
+        name,
+        title: config.title,
+        description: config.description,
+        inputSchema,
+        annotations,
+        callback,
+      },
+    );
   }
 
   hasTool(name: string): boolean {
-    return this.records[name] !== undefined;
+    return this.state.has(name);
   }
 
   commit(): number {
-    if (this.committed) return Object.keys(this.records).length;
-    this.committed = true;
-    for (const { name, title, description, inputSchema, annotations, callback } of [
-      ...this.pending,
-    ].sort((a, b) => a.name.localeCompare(b.name))) {
-      this.server.registerTool(
-        name,
-        {
-          title,
-          description,
-          inputSchema,
-          annotations,
-        },
-        callback as any,
-      );
-    }
-    (this.server as ServerWithRegistry)[REGISTERED_TOOLS] = Object.fromEntries(
-      Object.entries(this.records).sort(([a], [b]) => a.localeCompare(b)),
+    return this.state.commit(
+      ({ name, title, description, inputSchema, annotations, callback }) => {
+        this.server.registerTool(
+          name,
+          {
+            title,
+            description,
+            inputSchema,
+            annotations,
+          },
+          callback as any,
+        );
+      },
+      (records) => {
+        (this.server as ServerWithRegistry)[REGISTERED_TOOLS] = records as RegisteredToolMap;
+      },
     );
-    return Object.keys(this.records).length;
   }
 }
 
 export class PromptRegistrationAdapter implements PromptRegistrar {
-  private readonly pending: PendingPrompt[] = [];
-  private readonly records: RegisteredPromptMap = {};
-  private committed = false;
+  private readonly state = new RegistrationState<RegisteredPromptRecord, PendingPrompt>("prompt");
 
   constructor(
     private readonly server: McpServer,
@@ -184,52 +218,47 @@ export class PromptRegistrationAdapter implements PromptRegistrar {
     config: PromptRegistrationConfig,
     cb: PromptCallback<TArgs>,
   ): void {
-    if (this.committed) throw new Error(`Prompt registered after commit: ${name}`);
+    this.state.assertOpen(name);
     if (this.options.shouldRegister && !this.options.shouldRegister(name)) return;
-    if (this.records[name]) throw new Error(`Duplicate MCP prompt registration: ${name}`);
 
     const argsSchema = z.object(config.argsSchema ?? {});
     const callback = cb as PromptCallback;
-    this.records[name] = {
+    this.state.add(
       name,
-      title: config.title,
-      description: config.description,
-      argsSchema,
-      execute: callback,
-    };
-    this.pending.push({
-      name,
-      title: config.title,
-      description: config.description,
-      argsSchema,
-      callback,
-    });
-  }
-
-  hasPrompt(name: string): boolean {
-    return this.records[name] !== undefined;
+      {
+        name,
+        title: config.title,
+        description: config.description,
+        argsSchema,
+        execute: callback,
+      },
+      {
+        name,
+        title: config.title,
+        description: config.description,
+        argsSchema,
+        callback,
+      },
+    );
   }
 
   commit(): number {
-    if (this.committed) return Object.keys(this.records).length;
-    this.committed = true;
-    for (const { name, title, description, argsSchema, callback } of [...this.pending].sort(
-      (a, b) => a.name.localeCompare(b.name),
-    )) {
-      this.server.registerPrompt(
-        name,
-        {
-          title,
-          description,
-          argsSchema,
-        },
-        callback as any,
-      );
-    }
-    (this.server as ServerWithRegistry)[REGISTERED_PROMPTS] = Object.fromEntries(
-      Object.entries(this.records).sort(([a], [b]) => a.localeCompare(b)),
+    return this.state.commit(
+      ({ name, title, description, argsSchema, callback }) => {
+        this.server.registerPrompt(
+          name,
+          {
+            title,
+            description,
+            argsSchema,
+          },
+          callback as any,
+        );
+      },
+      (records) => {
+        (this.server as ServerWithRegistry)[REGISTERED_PROMPTS] = records as RegisteredPromptMap;
+      },
     );
-    return Object.keys(this.records).length;
   }
 }
 
