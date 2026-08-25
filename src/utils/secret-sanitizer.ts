@@ -219,7 +219,7 @@ export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): Sani
 }
 
 export function sanitizeText(text: unknown, options: SanitizerOptions = {}): string {
-  let safe = typeof text === "string" ? text : String(text);
+  let safe = String(text);
   for (const secret of configuredSecretValues(options).sort((a, b) => b.length - a.length)) {
     safe = safe.split(secret).join(REDACTED);
   }

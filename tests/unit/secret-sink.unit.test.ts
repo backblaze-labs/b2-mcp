@@ -24,7 +24,7 @@ import {
   resetSecretSinkWarningForTests,
   resolveSecretSinkConfig,
   secretSinkFileOpsForTests,
-  withSecretSinkSensitiveWriteOpsForTests,
+  setSinkWriteForTests,
 } from "../../src/utils/secret-sink";
 import { logger } from "../../src/utils/logger";
 
@@ -1468,9 +1468,7 @@ describe("secret sink file writer", () => {
     try {
       process.env.NODE_ENV = "production";
 
-      expect(() => withSecretSinkSensitiveWriteOpsForTests({}, () => undefined)).toThrow(
-        /only available in tests/,
-      );
+      expect(() => setSinkWriteForTests(() => 0)).toThrow(/test only/);
     } finally {
       if (originalNodeEnv === undefined) {
         delete process.env.NODE_ENV;
@@ -1483,14 +1481,17 @@ describe("secret sink file writer", () => {
   it("cleans up lock files when a lock write makes no progress", () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
+    const previousWrite = setSinkWriteForTests(() => 0);
 
-    expect(() =>
-      withSecretSinkSensitiveWriteOpsForTests({ writeSync: () => 0 }, () =>
+    try {
+      expect(() =>
         appendSecretSinkRecord({ mode: "file", filePath: file }, "b2_create_key", {
           applicationKey: "B2_MCP_CANARY_SECRET_lock_write_no_progress",
         }),
-      ),
-    ).toThrow(/write made no progress/);
+      ).toThrow(/write made no progress/);
+    } finally {
+      setSinkWriteForTests(previousWrite);
+    }
 
     expect(appendLockNames(dir)).toHaveLength(0);
   });
