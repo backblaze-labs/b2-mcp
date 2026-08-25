@@ -211,13 +211,23 @@ function httpCredentialMode(): "headers" | "principal" | "server" | "invalid" | 
   return "invalid";
 }
 
+function publicUrlSummary(rawUrl: string | undefined): string | null {
+  if (rawUrl === undefined) return null;
+  try {
+    const url = new URL(rawUrl);
+    return `${url.protocol}//${url.host}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
 function serverConfiguration(config: B2Config) {
   return {
     resource: "server-configuration",
     server: {
       name: "backblaze-b2",
       version: VERSION,
-      publicUrl: process.env.B2_MCP_PUBLIC_URL ?? null,
+      publicUrl: publicUrlSummary(process.env.B2_MCP_PUBLIC_URL),
       transport: config.transport ?? "unknown",
       credentialMode:
         config.transport === "http" ? (httpCredentialMode() ?? "headers") : "stdio-env",

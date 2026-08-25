@@ -454,51 +454,63 @@ describe("MCP resources", () => {
 
   it("summarizes capabilities and configuration without secret material", async () => {
     const server = createServer(resourceTestConfig, ["readFiles", "listBuckets"]);
+    const previousPublicUrl = process.env.B2_MCP_PUBLIC_URL;
+    process.env.B2_MCP_PUBLIC_URL =
+      "https://user:password@mcp.example.com/mcp?token=public-url-secret#fragment-secret";
 
-    const capabilitySummary = parseResource(await readResource(server, "b2://capabilities"));
-    expect(capabilitySummary).toMatchObject({
-      capabilityFilterActive: true,
-      capabilities: ["listBuckets", "readFiles"],
-      credentialFingerprint: "credential-fingerprint",
-    });
+    try {
+      const capabilitySummary = parseResource(await readResource(server, "b2://capabilities"));
+      expect(capabilitySummary).toMatchObject({
+        capabilityFilterActive: true,
+        capabilities: ["listBuckets", "readFiles"],
+        credentialFingerprint: "credential-fingerprint",
+      });
 
-    const configSummary = parseResource(await readResource(server, "b2://server/configuration"));
-    expect(configSummary.server).toMatchObject({
-      destructivePolicy: "block",
-      credentialMode: "stdio-env",
-    });
-    expect(configSummary.server).not.toHaveProperty("localFileAccess");
-    expect(configSummary.server).not.toHaveProperty("secretSinkMode");
+      const configSummary = parseResource(await readResource(server, "b2://server/configuration"));
+      expect(configSummary.server).toMatchObject({
+        publicUrl: "https://mcp.example.com/mcp",
+        destructivePolicy: "block",
+        credentialMode: "stdio-env",
+      });
+      expect(configSummary.server).not.toHaveProperty("localFileAccess");
+      expect(configSummary.server).not.toHaveProperty("secretSinkMode");
 
-    const toolProfile = parseResource(await readResource(server, "b2://server/tool-profile"));
-    expect(toolProfile.resource).toBe("tool-profile");
-    expect(toolProfile.toolCount).toBeGreaterThan(0);
-    expect(toolProfile.tools[0]).toMatchObject({
-      name: expect.any(String),
-      annotations: expect.objectContaining({
-        readOnlyHint: expect.any(Boolean),
-        destructiveHint: expect.any(Boolean),
-      }),
-    });
+      const toolProfile = parseResource(await readResource(server, "b2://server/tool-profile"));
+      expect(toolProfile.resource).toBe("tool-profile");
+      expect(toolProfile.toolCount).toBeGreaterThan(0);
+      expect(toolProfile.tools[0]).toMatchObject({
+        name: expect.any(String),
+        annotations: expect.objectContaining({
+          readOnlyHint: expect.any(Boolean),
+          destructiveHint: expect.any(Boolean),
+        }),
+      });
 
-    const destructivePolicy = parseResource(
-      await readResource(server, "b2://server/destructive-policy"),
-    );
-    expect(destructivePolicy).toMatchObject({
-      resource: "destructive-policy",
-      destructivePolicy: "block",
-    });
-    expect(destructivePolicy.destructiveTools).toContain("b2_delete_bucket");
+      const destructivePolicy = parseResource(
+        await readResource(server, "b2://server/destructive-policy"),
+      );
+      expect(destructivePolicy).toMatchObject({
+        resource: "destructive-policy",
+        destructivePolicy: "block",
+      });
+      expect(destructivePolicy.destructiveTools).toContain("b2_delete_bucket");
 
-    const allStaticText = (
-      await Promise.all(
-        Object.values(getRegisteredResources(server)?.resources ?? {}).map((resource) =>
-          resource.read(new URL(resource.uri), {} as any),
-        ),
+      const allStaticText = (
+        await Promise.all(
+          Object.values(getRegisteredResources(server)?.resources ?? {}).map((resource) =>
+            resource.read(new URL(resource.uri), {} as any),
+          ),
+        )
       )
-    )
-      .map((result: any) => result.contents[0].text)
-      .join("\n");
-    expect(allStaticText).not.toContain(CANARY);
+        .map((result: any) => result.contents[0].text)
+        .join("\n");
+      expect(allStaticText).not.toContain(CANARY);
+      expect(allStaticText).not.toContain("user:password");
+      expect(allStaticText).not.toContain("public-url-secret");
+      expect(allStaticText).not.toContain("fragment-secret");
+    } finally {
+      if (previousPublicUrl === undefined) delete process.env.B2_MCP_PUBLIC_URL;
+      else process.env.B2_MCP_PUBLIC_URL = previousPublicUrl;
+    }
   });
 });
