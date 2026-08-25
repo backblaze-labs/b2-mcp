@@ -1,24 +1,23 @@
 import {
-  B2Client as SdkB2Client,
-  FetchTransport,
-  RetryTransport,
-  UrlGuard,
-  deriveAllowedSuffixes,
   type AuthorizeAccountResponse,
+  deriveAllowedSuffixes,
+  FetchTransport,
   type HttpRequest,
   type HttpResponse,
   type HttpTransport,
   type RetryOptions,
+  RetryTransport,
+  B2Client as SdkB2Client,
+  UrlGuard,
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
+import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
+import { abortError, isAbortError } from "./utils/named-error.js";
+import { consumeRetryBudgetToken } from "./utils/retry.js";
+import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
-import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
-import { consumeRetryBudgetToken } from "./utils/retry.js";
-import { abortError, isAbortError } from "./utils/named-error.js";
-import { isTestRuntime } from "./utils/runtime.js";
 
-/** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
 
 export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
@@ -53,7 +52,6 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
   "b2_upload_part",
 ]);
 
-// Token lifetime is 24h but we refresh after 23h to be safe.
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
 interface ManagedSdkClient {
@@ -144,6 +142,8 @@ function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
 }
 
 const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);
+const RETRY_AFTER_HTTP_DATE =
+  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d\d) ([A-Z][a-z]{2}) (\d{4}) (\d\d:\d\d:\d\d) GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (\d\d)-([A-Z][a-z]{2})-(\d\d) (\d\d:\d\d:\d\d) GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ([A-Z][a-z]{2}) ([ \d]\d) (\d\d:\d\d:\d\d) (\d{4}))$/;
 
 function bodyBudgetKey(body: HttpRequest["body"]): string {
   if (body === undefined || body === null) return "";
@@ -152,6 +152,49 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
   if (body instanceof ArrayBuffer) return `arraybuffer:${body.byteLength}`;
   if (ArrayBuffer.isView(body)) return `${body.constructor.name}:${body.byteLength}`;
   return Object.prototype.toString.call(body);
+}
+
+function rfc850DateStamps(
+  day: string,
+  month: string,
+  twoDigitYear: string,
+  time: string,
+): { retryStamp: string; validationStamp: string } {
+  const now = new Date(Date.now());
+  const currentYear = now.getUTCFullYear();
+  const cutoff = new Date(now.getTime());
+  cutoff.setUTCFullYear(currentYear + 50);
+  const stampAt = (y: number) => `${day} ${month} ${y} ${time}`;
+  let year = Math.floor(currentYear / 100) * 100 + Number(twoDigitYear);
+  // HTTP resolves a two-digit year to the latest same-suffix year no more than
+  // 50 years ahead, advancing across centuries as well as rolling back.
+  while (Date.parse(`${stampAt(year + 100)} GMT`) <= cutoff.getTime()) year += 100;
+  while (Date.parse(`${stampAt(year)} GMT`) > cutoff.getTime()) year -= 100;
+  const retryStamp = stampAt(year);
+  return { retryStamp, validationStamp: retryStamp };
+}
+
+function withRetryAfterHeader(r: HttpResponse): HttpResponse {
+  const h = "Retry-After";
+  const v = r.headers.get(h)?.trim();
+  if (!v || !/\D/.test(v)) return r;
+
+  const m = RETRY_AFTER_HTTP_DATE.exec(v);
+  const rfc850 = m?.[5] ? rfc850DateStamps(m[5], m[6], m[7], m[8]) : undefined;
+  const validationStamp = m
+    ? (rfc850?.validationStamp ??
+      `${m[1] ?? m[10]?.replace(" ", "0")} ${m[2] ?? m[9]} ${m[3] ?? m[12]} ${m[4] ?? m[11]}`)
+    : "";
+  let ms = Date.parse(`${rfc850?.retryStamp ?? validationStamp} GMT`);
+  const utc = new Date(Date.parse(`${validationStamp} GMT`)).toUTCString();
+  if (!utc.startsWith(v.slice(0, 3)) || !utc.includes(validationStamp)) ms = NaN;
+  const headers = new Headers(r.headers);
+  if (Number.isFinite(ms)) {
+    headers.set(h, String(Math.max(0, Math.ceil((ms - Date.now()) / 1000))));
+  } else {
+    headers.delete(h);
+  }
+  return Object.assign(Object.create(r), { headers });
 }
 
 class SharedRetryBudgetTransport implements HttpTransport {
@@ -172,7 +215,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return response;
+      return withRetryAfterHeader(response);
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;
@@ -222,7 +265,6 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
 export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
   const urlGuard = new UrlGuard();
   return new SdkPartnerClient({
-    // Partner B2Config instances carry master credentials in applicationKey*.
     masterKeyId: config.applicationKeyId,
     masterKey: config.applicationKey,
     transport: createMcpHttpTransport(
@@ -290,11 +332,7 @@ function flattenAuth(data: AuthorizeAccountResponse): B2AuthResponse {
   };
 }
 
-/**
- * B2AuthManager owns one official SDK client for one resolved credential set.
- * It never constructs cross-principal state; callers obtain managers through the
- * server's secret-bound credential cache.
- */
+/** Auth cache around one SDK client for one resolved credential set. */
 export class B2AuthManager {
   private readonly config: B2Config;
   private readonly sdk: ManagedSdkClient;
@@ -312,10 +350,9 @@ export class B2AuthManager {
   }
 
   /**
-   * Return cached auth or re-authorize. Thread-safe: multiple concurrent
-   * callers share a single in-flight SDK authorize call.
+   * Return cached auth or share one in-flight authorize call.
    *
-   * @returns The cached or freshly authorized B2 auth response.
+   * @returns Cached or fresh B2 auth.
    */
   async getAuth(): Promise<B2AuthResponse> {
     this.syncCachedAuthFromSdk();
@@ -357,10 +394,7 @@ export class B2AuthManager {
     this.authTime = Date.now();
   }
 
-  /**
-   * Invalidate the cached token. Subsequent getAuth() calls re-authorize through
-   * the SDK and clear the SDK's accountInfo cache.
-   */
+  /** Invalidate cached auth and clear the SDK account cache. */
   invalidate(): void {
     this.cachedAuth = null;
     this.authTime = null;
@@ -368,10 +402,9 @@ export class B2AuthManager {
   }
 
   /**
-   * Force a fresh authorization and return the result.
-   * Useful for testing credentials or initial setup.
+   * Force a fresh authorization.
    *
-   * @returns The freshly authorized B2 auth response.
+   * @returns Fresh B2 auth.
    */
   async forceRefresh(): Promise<B2AuthResponse> {
     this.invalidate();
