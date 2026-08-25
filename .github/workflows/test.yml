@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -40,8 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -58,10 +58,10 @@ jobs:
         run: pnpm run verify
       - name: Run local runtime smoke
         run: pnpm run smoke:local
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload primary verification reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: primary-verify-reports
           path: |
@@ -76,8 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -104,8 +104,8 @@ jobs:
       matrix:
         node-version: [22.23.1, 24, 26]
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -140,10 +140,10 @@ jobs:
             echo '(coverage-summary.json not found)' >> "$GITHUB_STEP_SUMMARY"
           fi
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload coverage and test reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: coverage-and-tests-node-${{ matrix.node-version }}
           path: |
@@ -173,8 +173,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -188,10 +188,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:reliability
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload reliability reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: reliability-resilience-node-22.23.1
           path: |
@@ -206,8 +206,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -222,10 +222,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run test:contract
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload contract artifacts and reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: mcp-contract-node-22.23.1
           path: |
@@ -242,8 +242,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -257,10 +257,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:protocol
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload protocol reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: protocol-transport-node-22.23.1
           path: |
@@ -275,8 +275,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -290,10 +290,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run test:observability
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload observability logging reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: observability-logging
           path: |
@@ -308,8 +308,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -331,10 +331,10 @@ jobs:
         run: |
           mkdir -p reports/package
           npm pack --json --dry-run > reports/package/npm-pack-manifest.json
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload package manifest and reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: package-install-smoke
           path: |
@@ -352,16 +352,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 22.3.0
-      # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: package-install-smoke
           path: reports/package-install-smoke
@@ -403,8 +403,8 @@ jobs:
       matrix:
         node-version: [22.23.1, 24, 26]
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # actions/setup-node v7, reviewed 2026-08-06.
@@ -449,8 +449,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -467,10 +467,10 @@ jobs:
       - run: pnpm run check:package-budget
       - run: pnpm run check:vercel-bundle
       - run: pnpm run check:cloudflare-worker-bundle
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload package budget reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: package-budget
           path: |
@@ -486,8 +486,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -510,10 +510,10 @@ jobs:
       - run: pnpm run build:vercel-local
       - run: pnpm run check:vercel-build-output
       - run: pnpm run audit:supply-chain:denylist --artifacts-dir .vercel/output
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload Vercel build scan reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: vercel-build-output-scan
           path: |
@@ -527,8 +527,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Build and smoke Docker image
@@ -540,8 +540,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -577,17 +577,17 @@ jobs:
       contents: read
       security-events: write
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      # github/codeql-action/init v4.37.6, reviewed 2026-08-06.
-      - uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3
+      # github/codeql-action/init v4.37.7, reviewed 2026-08-25.
+      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
           languages: javascript-typescript
           build-mode: none
-      # github/codeql-action/analyze v4.37.6, reviewed 2026-08-06.
-      - uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3
+      # github/codeql-action/analyze v4.37.7, reviewed 2026-08-25.
+      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd
         with:
           category: "/language:javascript-typescript"
           upload: never
@@ -622,8 +622,8 @@ jobs:
       VITEST_MAX_WORKERS: 1
       VITEST_MIN_WORKERS: 1
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -638,10 +638,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm run test:slow -- --maxWorkers=1
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload slow lifecycle reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: slow-lifecycle
           path: |
@@ -660,8 +660,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       # pnpm/action-setup v6.0.10, reviewed 2026-08-06.
@@ -715,8 +715,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Publish Phase 1 conformance summary
@@ -769,8 +769,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: true
       - name: Advance owned ci-green marker if main is current
