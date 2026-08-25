@@ -1,3 +1,4 @@
+import { ResourceNotFoundError } from "@modelcontextprotocol/server";
 import { B2Client, type BucketInfoResult } from "../../src/b2/client";
 import type { McpServer } from "../../src/mcp";
 import { createServer, getRegisteredResources, invalidateAuthManagerCache } from "../../src/server";
@@ -351,6 +352,28 @@ describe("MCP resources", () => {
       readResource(server, "b2://bucket/aborted-bucket", { mcpReq: { signal: controller.signal } }),
     ).rejects.toThrow("client disconnected");
     expect(fake.requestsFor("b2_list_buckets")).toHaveLength(1);
+  });
+
+  it("preserves resource-not-found protocol errors after sanitization", async () => {
+    const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] });
+    installSdkTransport(fake);
+    fake.respond("b2_list_buckets", new StaticHttpResponse(200, { buckets: [] }));
+    const server = createServer(resourceTestConfig, ["listBuckets"]);
+
+    let thrown: unknown;
+    try {
+      await readResource(server, `b2://bucket/${CANARY}`);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ResourceNotFoundError);
+    expect(thrown).toMatchObject({
+      code: -32602,
+      data: { uri: "b2://bucket/[redacted]" },
+    });
+    expect((thrown as ResourceNotFoundError).uri).toBe("b2://bucket/[redacted]");
+    expect((thrown as Error).message).not.toContain(CANARY);
   });
 
   it("propagates notification-rule aborts instead of degrading them", async () => {

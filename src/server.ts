@@ -14,6 +14,7 @@ import {
 
 export { getRegisteredResources, getRegisteredTools } from "./mcp.js";
 
+import { ProtocolError } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { B2AuthManager } from "./auth.js";
 import { registerBucketTools } from "./b2/buckets.js";
@@ -645,6 +646,20 @@ function sanitizedProviderErrorFields(
   };
 }
 
+function sanitizeThrownError(
+  err: unknown,
+  sanitizerOptions: ReturnType<typeof sanitizerOptionsFromConfig>,
+): Error {
+  if (err instanceof ProtocolError) {
+    return ProtocolError.fromError(
+      err.code,
+      sanitizeText(err.message, sanitizerOptions),
+      err.data === undefined ? undefined : sanitizeMcpResponse(err.data, sanitizerOptions),
+    );
+  }
+  return sanitizeError(err, sanitizerOptions);
+}
+
 export function createAuditedResourceCallback<TCallback extends AnyResourceCallback>(
   name: string,
   uriPattern: string,
@@ -682,7 +697,7 @@ export function createAuditedResourceCallback<TCallback extends AnyResourceCallb
       );
       return result;
     } catch (err) {
-      const safeErr = sanitizeError(err, sanitizerOptions);
+      const safeErr = sanitizeThrownError(err, sanitizerOptions);
       logger.warn(
         {
           resource: name,
