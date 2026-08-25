@@ -150,6 +150,10 @@ export interface SanitizerOptions {
 }
 
 type SanitizerMode = "mcp" | "log";
+interface TextSpan {
+  start: number;
+  end: number;
+}
 
 const sanitizerOptionsStorage = new AsyncLocalStorage<SanitizerOptions | undefined>();
 
@@ -219,14 +223,47 @@ export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): Sani
 }
 
 export function sanitizeText(text: unknown, options: SanitizerOptions = {}): string {
-  let safe = String(text);
-  for (const secret of configuredSecretValues(options).sort((a, b) => b.length - a.length)) {
-    safe = safe.split(secret).join(REDACTED);
-  }
+  const safe = redactExactTextSecrets(typeof text === "string" ? text : String(text), [
+    ...configuredSecretValues(options),
+  ]);
   return safe
     .replace(CANARY_SECRET, REDACTED)
     .replace(BEARER_OR_BASIC, `$1${REDACTED}`)
     .replace(LABELED_SECRET, `$1${REDACTED}`);
+}
+
+export function redactExactTextSecrets(text: string, secrets: readonly string[]): string {
+  const spans: TextSpan[] = [];
+  for (const secret of new Set(secrets)) {
+    if (!secret.trim() || secret === REDACTED) continue;
+    let start = 0;
+    while (start < text.length) {
+      const index = text.indexOf(secret, start);
+      if (index === -1) break;
+      spans.push({ start: index, end: index + secret.length });
+      start = index + 1;
+    }
+  }
+  if (spans.length === 0) return text;
+
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: TextSpan[] = [];
+  for (const span of spans) {
+    const previous = merged.at(-1);
+    if (previous && span.start <= previous.end) {
+      previous.end = Math.max(previous.end, span.end);
+    } else {
+      merged.push({ ...span });
+    }
+  }
+
+  let safe = "";
+  let offset = 0;
+  for (const span of merged) {
+    safe += `${text.slice(offset, span.start)}${REDACTED}`;
+    offset = span.end;
+  }
+  return safe + text.slice(offset);
 }
 
 export function bootstrapErrorMessage(err: unknown): string {

@@ -33,6 +33,7 @@ import {
 } from "./utils/node-web-bridge.js";
 import {
   bootstrapErrorMessage,
+  redactExactTextSecrets,
   SECRET_SANITIZER_REDACTION,
   sanitizeText,
 } from "./utils/secret-sanitizer.js";
@@ -136,12 +137,10 @@ function requestSecretHeaderValues(req: http.IncomingMessage): string[] {
 }
 
 function redactExactSecrets(text: string, secrets: readonly string[]): string {
-  let safe = text;
-  for (const secret of [...new Set(secrets)].sort((a, b) => b.length - a.length)) {
-    if (!secret.trim() || secret === SECRET_SANITIZER_REDACTION) continue;
-    safe = safe.split(secret).join(SECRET_SANITIZER_REDACTION);
-  }
-  return safe;
+  return redactExactTextSecrets(
+    text,
+    secrets.filter((secret) => secret !== SECRET_SANITIZER_REDACTION),
+  );
 }
 
 function safeErrorText(err: unknown, req?: http.IncomingMessage): string {

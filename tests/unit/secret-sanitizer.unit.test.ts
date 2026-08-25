@@ -112,15 +112,17 @@ describe("secret sanitizer canary policy", () => {
     );
   });
 
-  it("redacts overlapping configured secret values longest first", () => {
-    const shorterSecret = "abcdefgh";
-    const longerSecret = "abcdefghijkl";
+  it("redacts overlapping configured secret values as merged spans", () => {
+    const firstSecret = "abcdefgh";
+    const suffix = String.fromCharCode(105, 106);
+    const secondSecret = `${firstSecret.slice(2)}${suffix}`;
+    const overlappingText = `${firstSecret}${suffix}`;
 
     expect(
-      sanitizeText(`fatal ${longerSecret}`, {
+      sanitizeText(`fatal ${overlappingText}`, {
         env: {
-          B2_APPLICATION_KEY: shorterSecret,
-          B2_MASTER_KEY: longerSecret,
+          B2_APPLICATION_KEY: firstSecret,
+          B2_MASTER_KEY: secondSecret,
         },
       }),
     ).toBe(`fatal ${SECRET_SANITIZER_REDACTION}`);
