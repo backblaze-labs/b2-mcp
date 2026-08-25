@@ -159,7 +159,8 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   const v = r.headers.get(h)?.trim();
   if (!v || !/\D/.test(v)) return r;
 
-  const ms = RETRY_AFTER_HTTP_DATE.test(v) ? Date.parse(v) : NaN;
+  let ms = RETRY_AFTER_HTTP_DATE.test(v) ? Date.parse(v) : NaN;
+  if (v[3] === "," && new Date(ms).toUTCString() !== v) ms = NaN;
   const headers = new Headers(r.headers);
   if (Number.isFinite(ms)) {
     headers.set(h, String(Math.max(0, Math.ceil((ms - Date.now()) / 1000))));

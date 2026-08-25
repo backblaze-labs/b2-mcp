@@ -598,6 +598,13 @@ describe("B2AuthManager", () => {
       maxRetryDelayMs: 10_000,
       expectedDelayMs: 5000,
     },
+    {
+      name: "invalid calendar date fallback",
+      retryAfter: "Sun, 31 Feb 2027 00:00:00 GMT",
+      initialRetryDelayMs: 5000,
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 5000,
+    },
   ])(
     "uses the $name Retry-After retry boundary through the SDK transport",
     async ({ retryAfter, initialRetryDelayMs, maxRetryDelayMs, expectedDelayMs }) => {
