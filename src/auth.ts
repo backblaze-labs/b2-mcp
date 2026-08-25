@@ -18,7 +18,6 @@ import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
 import { buildUserAgent } from "./utils/user-agent.js";
 
-/** Per-attempt timeout for ordinary SDK JSON requests, including authorization. */
 const API_TIMEOUT_MS = 30_000;
 
 export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
@@ -53,7 +52,6 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
   "b2_upload_part",
 ]);
 
-// Token lifetime is 24h but we refresh after 23h to be safe.
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
 interface ManagedSdkClient {
@@ -144,7 +142,6 @@ function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
 }
 
 const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);
-const RETRY_AFTER_HTTP_DATE = /^[A-Z][a-z]+(?:, | [A-Z][a-z]{2} )/;
 
 function bodyBudgetKey(body: HttpRequest["body"]): string {
   if (body === undefined || body === null) return "";
@@ -155,42 +152,19 @@ function bodyBudgetKey(body: HttpRequest["body"]): string {
   return Object.prototype.toString.call(body);
 }
 
-function normalizedRetryAfter(value: string): string | null {
-  const trimmed = value.trim();
-  if (/^\d+$/.test(trimmed)) return trimmed;
+function withRetryAfterHeader(r: HttpResponse): HttpResponse {
+  const h = "Retry-After";
+  const v = r.headers.get(h)?.trim();
+  if (!v || !/\D/.test(v)) return r;
 
-  if (!RETRY_AFTER_HTTP_DATE.test(trimmed)) return null;
-
-  const retryAtMs = Date.parse(trimmed);
-  if (!Number.isFinite(retryAtMs)) return null;
-
-  return String(Math.max(0, Math.ceil((retryAtMs - Date.now()) / 1000)));
-}
-
-function withNormalizedRetryAfterHeader(response: HttpResponse): HttpResponse {
-  const retryAfter = response.headers.get("Retry-After");
-  if (retryAfter === null) return response;
-
-  const normalized = normalizedRetryAfter(retryAfter);
-  if (normalized !== null && retryAfter === normalized) return response;
-
-  const headers = new Headers(response.headers);
-  if (normalized === null) {
-    headers.delete("Retry-After");
+  const ms = /^[A-Z][a-z]{2}/.test(v) ? Date.parse(v) : NaN;
+  const headers = new Headers(r.headers);
+  if (Number.isFinite(ms)) {
+    headers.set(h, String(Math.max(0, Math.ceil((ms - Date.now()) / 1000))));
   } else {
-    headers.set("Retry-After", normalized);
+    headers.delete(h);
   }
-
-  return {
-    status: response.status,
-    headers,
-    get body() {
-      return response.body;
-    },
-    json: () => response.json(),
-    text: () => response.text(),
-    arrayBuffer: () => response.arrayBuffer(),
-  };
+  return Object.assign(Object.create(r), { headers });
 }
 
 class SharedRetryBudgetTransport implements HttpTransport {
@@ -211,7 +185,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withNormalizedRetryAfterHeader(response);
+      return withRetryAfterHeader(response);
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;
@@ -261,7 +235,6 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
 export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
   const urlGuard = new UrlGuard();
   return new SdkPartnerClient({
-    // Partner B2Config instances carry master credentials in applicationKey*.
     masterKeyId: config.applicationKeyId,
     masterKey: config.applicationKey,
     transport: createMcpHttpTransport(
@@ -329,11 +302,7 @@ function flattenAuth(data: AuthorizeAccountResponse): B2AuthResponse {
   };
 }
 
-/**
- * B2AuthManager owns one official SDK client for one resolved credential set.
- * It never constructs cross-principal state; callers obtain managers through the
- * server's secret-bound credential cache.
- */
+/** Auth cache around one SDK client for one resolved credential set. */
 export class B2AuthManager {
   private readonly config: B2Config;
   private readonly sdk: ManagedSdkClient;
@@ -350,12 +319,7 @@ export class B2AuthManager {
     return this.config;
   }
 
-  /**
-   * Return cached auth or re-authorize. Thread-safe: multiple concurrent
-   * callers share a single in-flight SDK authorize call.
-   *
-   * @returns The cached or freshly authorized B2 auth response.
-   */
+  /** Return cached auth or share one in-flight authorize call. */
   async getAuth(): Promise<B2AuthResponse> {
     this.syncCachedAuthFromSdk();
     if (this.isValid()) {
@@ -396,22 +360,14 @@ export class B2AuthManager {
     this.authTime = Date.now();
   }
 
-  /**
-   * Invalidate the cached token. Subsequent getAuth() calls re-authorize through
-   * the SDK and clear the SDK's accountInfo cache.
-   */
+  /** Invalidate cached auth and clear the SDK account cache. */
   invalidate(): void {
     this.cachedAuth = null;
     this.authTime = null;
     this.sdk.client.accountInfo.clear();
   }
 
-  /**
-   * Force a fresh authorization and return the result.
-   * Useful for testing credentials or initial setup.
-   *
-   * @returns The freshly authorized B2 auth response.
-   */
+  /** Force a fresh authorization and return it. */
   async forceRefresh(): Promise<B2AuthResponse> {
     this.invalidate();
     return this.getAuth();
