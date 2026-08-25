@@ -9,6 +9,7 @@ import {
   sanitizeProviderRequestId,
   SECRET_SANITIZER_REDACTION,
   STRUCTURED_SECRET_FIELD_NAMES,
+  safeErrorText,
   sanitizeError,
   sanitizeForMcpOutput,
   sanitizeStructuredLogValue,
@@ -697,5 +698,17 @@ describe("secret sanitizer canary policy", () => {
       expect(LOGGER_SECRET_REDACTION_PATHS).toContain(field);
     }
     expect(LOG_SANITIZER_FAILURE).toBe("[log_sanitizer_failed]");
+  });
+
+  it("redacts request-header secrets from error text", () => {
+    expect(safeErrorText(new Error(`boom ${CANARY}`), [CANARY])).toBe(
+      `boom ${SECRET_SANITIZER_REDACTION}`,
+    );
+    expect(safeErrorText("short s7 leak", ["s7"])).toBe(`short ${SECRET_SANITIZER_REDACTION} leak`);
+  });
+
+  it("returns the sanitizer-failure sentinel when coercion throws", () => {
+    const nullProto = Object.create(null) as object;
+    expect(safeErrorText(nullProto, [])).toBe(LOG_SANITIZER_FAILURE);
   });
 });

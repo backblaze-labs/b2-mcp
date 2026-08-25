@@ -541,12 +541,18 @@ export function webRequestSecrets(headers: Headers): string[] {
 /**
  * Render an error message with the given request-header secrets redacted. Exact
  * redaction covers short values the generic sanitizer skips; the sanitizer then
- * handles configured env secrets and labeled/bearer patterns.
+ * handles configured env secrets and labeled/bearer patterns. Any failure while
+ * coercing or sanitizing the error text returns the sanitizer-failure sentinel
+ * so the HTTP catch blocks that call this cannot throw a secondary exception.
  *
- * @returns The error text with request-header and configured secrets redacted.
+ * @returns The redacted error text, or the sanitizer-failure sentinel on error.
  */
 export function safeErrorText(err: unknown, secrets: readonly string[]): string {
-  const text = err instanceof Error ? err.message : String(err);
-  const exact = secrets.filter((secret) => secret !== REDACTED);
-  return sanitizeText(redactExactTextSecrets(text, exact), { secrets: exact });
+  try {
+    const text = err instanceof Error ? err.message : String(err);
+    const exact = secrets.filter((secret) => secret !== REDACTED);
+    return sanitizeText(redactExactTextSecrets(text, exact), { secrets: exact });
+  } catch {
+    return LOG_SANITIZER_FAILURE;
+  }
 }
