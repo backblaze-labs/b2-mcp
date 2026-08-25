@@ -1,9 +1,10 @@
 import type { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2AuthManager } from "../../src/auth";
-import { B2Client, setB2PartnerClientFactoryForTests } from "../../src/b2/client";
+import { B2Client, setB2PartnerClientFactoryForTests, validateB2ApiUrl } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
+import type { B2AuthResponse } from "../../src/utils/types";
 import { testConfig } from "../support/deterministic-fakes";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
@@ -43,19 +44,79 @@ function partnerAuthorizeResponse(
 
 function bucketListResponse(bucketName = "edge-bucket") {
   return {
-    buckets: [
-      {
-        accountId: "test-account-123",
-        bucketId: "bucket-1",
-        bucketName,
-        bucketType: "allPrivate",
-        bucketInfo: {},
-        corsRules: [],
-        lifecycleRules: [],
-        revision: 1,
-        options: [],
-      },
-    ],
+    buckets: [bucketInfo({ bucketName })],
+  };
+}
+
+function bucketInfo(overrides: Record<string, unknown> = {}) {
+  return {
+    accountId: "test-account-123",
+    bucketId: "bucket-1",
+    bucketName: "edge-bucket",
+    bucketType: "allPrivate",
+    bucketInfo: {},
+    corsRules: [],
+    lifecycleRules: [],
+    revision: 1,
+    options: [],
+    ...overrides,
+  };
+}
+
+function fileVersion(overrides: Record<string, unknown> = {}) {
+  return {
+    accountId: "test-account-123",
+    bucketId: "bucket-1",
+    fileId: "version-1",
+    fileName: "file.txt",
+    action: "upload",
+    contentLength: 1,
+    contentSha1: "none",
+    contentType: "text/plain",
+    fileInfo: {},
+    uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function nativeAuthResponse(
+  options: {
+    token?: string;
+    apiUrl?: string;
+    allowedBuckets?: B2AuthResponse["allowedBuckets"];
+  } = {},
+): B2AuthResponse {
+  return {
+    accountId: "test-account-123",
+    authorizationToken: options.token ?? "native-token",
+    apiUrl: options.apiUrl ?? "https://api005.backblazeb2.com",
+    downloadUrl: "https://f005.backblazeb2.com",
+    recommendedPartSize: 100 * 1024 * 1024,
+    absoluteMinimumPartSize: 5 * 1024 * 1024,
+    s3ApiUrl: "https://s3.us-west-004.backblazeb2.com",
+    capabilities: ["listBuckets", "listFiles", "readFiles", "writeFiles"],
+    allowedBuckets: options.allowedBuckets ?? null,
+  };
+}
+
+function clientWithMockedNativeSdk(
+  sdk: unknown,
+  authResponses: B2AuthResponse[] = [nativeAuthResponse()],
+) {
+  let authIndex = 0;
+  const authManager = {
+    getAuthorizedSdk: vi.fn(async () => {
+      const auth = authResponses[Math.min(authIndex, authResponses.length - 1)];
+      authIndex += 1;
+      return { client: sdk, auth };
+    }),
+    syncCachedAuthFromSdk: vi.fn(),
+    invalidate: vi.fn(),
+    getConfig: vi.fn(() => testConfig),
+  };
+  return {
+    authManager,
+    client: new B2Client(authManager as unknown as B2AuthManager),
   };
 }
 
@@ -72,6 +133,7 @@ describe("B2Client native edge branches", () => {
     vi.unstubAllGlobals();
     _resetRetryBudget();
     setB2SdkClientFactoryForTests(null);
+    setB2PartnerClientFactoryForTests(null);
   });
 
   it("rejects immediately without authorizing when the native circuit is open", async () => {
@@ -82,6 +144,21 @@ describe("B2Client native edge branches", () => {
     await expect(client.listBuckets()).rejects.toMatchObject({ code: "EOPENBREAKER" });
 
     expect(transport.requests).toHaveLength(0);
+  });
+
+  it("does not ask auth for an SDK when the native circuit fast-fails", async () => {
+    const sdk = {
+      raw: {
+        listBuckets: vi.fn(async () => bucketListResponse()),
+      },
+    };
+    const { authManager, client } = clientWithMockedNativeSdk(sdk);
+    circuitBreaker.open();
+
+    await expect(client.listBuckets()).rejects.toMatchObject({ code: "EOPENBREAKER" });
+
+    expect(authManager.getAuthorizedSdk).not.toHaveBeenCalled();
+    expect(sdk.raw.listBuckets).not.toHaveBeenCalled();
   });
 
   it("allows the half-open probe and closes again after a successful native call", async () => {
@@ -113,6 +190,467 @@ describe("B2Client native edge branches", () => {
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_list_buckets"),
     ).toHaveLength(2);
+  });
+
+  it("invalidates cached native auth and retries once after a 401", async () => {
+    const listTokens: string[] = [];
+    const sdk = {
+      raw: {
+        listBuckets: vi.fn(async (_apiUrl: string, authorizationToken: string) => {
+          listTokens.push(authorizationToken);
+          if (authorizationToken === "stale-token") {
+            throw Object.assign(new Error("expired"), {
+              response: { status: 401 },
+              code: "expired_auth_token",
+            });
+          }
+          return bucketListResponse("fresh-bucket");
+        }),
+      },
+    };
+    const { authManager, client } = clientWithMockedNativeSdk(sdk, [
+      nativeAuthResponse({ token: "stale-token" }),
+      nativeAuthResponse({ token: "fresh-token" }),
+    ]);
+
+    await expect(client.listBuckets()).resolves.toMatchObject({
+      buckets: [{ bucketName: "fresh-bucket" }],
+    });
+
+    expect(authManager.invalidate).toHaveBeenCalledTimes(1);
+    expect(authManager.getAuthorizedSdk).toHaveBeenCalledTimes(2);
+    expect(authManager.syncCachedAuthFromSdk).toHaveBeenCalledTimes(2);
+    expect(listTokens).toEqual(["stale-token", "fresh-token"]);
+  });
+
+  it("surfaces the second native 401 after a single invalidation", async () => {
+    const sdk = {
+      raw: {
+        listBuckets: vi.fn(async () => {
+          throw Object.assign(new Error("still expired"), {
+            status: 401,
+            code: "expired_auth_token",
+          });
+        }),
+      },
+    };
+    const { authManager, client } = clientWithMockedNativeSdk(sdk, [
+      nativeAuthResponse({ token: "stale-token" }),
+      nativeAuthResponse({ token: "still-stale-token" }),
+    ]);
+
+    await expect(client.listBuckets()).rejects.toMatchObject({
+      status: 401,
+      code: "expired_auth_token",
+    });
+
+    expect(authManager.invalidate).toHaveBeenCalledTimes(1);
+    expect(authManager.getAuthorizedSdk).toHaveBeenCalledTimes(2);
+    expect(sdk.raw.listBuckets).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a native 401 after the caller has aborted", async () => {
+    const controller = new AbortController();
+    const unauthorized = Object.assign(new Error("expired after abort"), {
+      status: 401,
+      code: "expired_auth_token",
+    });
+    const sdk = {
+      raw: {
+        listBuckets: vi.fn(async () => {
+          controller.abort(new Error("caller aborted"));
+          throw unauthorized;
+        }),
+      },
+    };
+    const { authManager, client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      runWithMcpRequestSignal(controller.signal, () => client.listBuckets()),
+    ).rejects.toBe(unauthorized);
+
+    expect(authManager.invalidate).not.toHaveBeenCalled();
+    expect(authManager.getAuthorizedSdk).toHaveBeenCalledTimes(1);
+    expect(sdk.raw.listBuckets).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["not a url", "is not a valid URL"],
+    ["http://api005.backblazeb2.com", "must use https://"],
+    ["https://user:pass@api005.backblazeb2.com", "must not include credentials"],
+    ["https://api005.backblazeb2.com:8443", "must not include a custom port"],
+    ["https://api005.backblazeb2.com/path", "must not include a path"],
+    ["https://api005.backblazeb2.com?x=1", "must not include a path"],
+    ["https://evil.example.com", "must match a trusted backblazeb2.com host"],
+  ])("rejects invalid authorized native API URL %s", (raw, expected) => {
+    expect(validateB2ApiUrl(raw)).toContain(expected);
+  });
+
+  it("rejects native operations before SDK calls when the authorized API URL is unsafe", async () => {
+    const sdk = {
+      raw: {
+        listBuckets: vi.fn(async () => bucketListResponse()),
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk, [
+      nativeAuthResponse({ apiUrl: "https://api005.backblazeb2.com/path" }),
+    ]);
+
+    await expect(client.listBuckets()).rejects.toThrow(
+      /Authorized B2 API endpoint must not include a path/,
+    );
+
+    expect(sdk.raw.listBuckets).not.toHaveBeenCalled();
+  });
+
+  it("serializes optional native bucket DTO fields without leaking SDK extras", async () => {
+    const sdk = {
+      raw: {
+        listBuckets: vi.fn(async () => ({
+          buckets: [
+            bucketInfo({
+              bucketName: "replicated-bucket",
+              options: undefined,
+              defaultServerSideEncryption: { mode: "future-mode", algorithm: "future-algorithm" },
+              defaultRetention: { mode: null, period: null },
+              fileLockConfiguration: {
+                isClientAuthorizedToRead: false,
+                value: null,
+              },
+              replicationConfiguration: {
+                asReplicationSource: {
+                  sourceApplicationKeyId: "source-key-id",
+                  replicationRules: [
+                    {
+                      replicationRuleName: "copy-all",
+                      destinationBucketId: "dest-bucket-id",
+                      fileNamePrefix: "",
+                      includeExistingFiles: false,
+                      isEnabled: true,
+                      priority: 1,
+                    },
+                  ],
+                },
+                asReplicationDestination: {
+                  sourceToDestinationKeyMapping: {
+                    "source-key-id": "destination-key-id",
+                  },
+                },
+              },
+            }),
+            bucketInfo({
+              bucketId: "bucket-2",
+              bucketName: "locked-bucket",
+              defaultServerSideEncryption: { mode: null, algorithm: null },
+              fileLockConfiguration: {
+                isClientAuthorizedToRead: true,
+                value: {
+                  isFileLockEnabled: true,
+                  defaultRetention: null,
+                },
+              },
+              replicationConfiguration: {
+                asReplicationSource: null,
+                asReplicationDestination: null,
+              },
+            }),
+          ],
+        })),
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(client.listBuckets()).resolves.toEqual({
+      buckets: [
+        expect.objectContaining({
+          bucketName: "replicated-bucket",
+          options: [],
+          defaultServerSideEncryption: { mode: null },
+          defaultRetention: { mode: null, period: null },
+          fileLockConfiguration: {
+            isClientAuthorizedToRead: false,
+            value: null,
+          },
+          replicationConfiguration: {
+            asReplicationSource: {
+              sourceApplicationKeyId: "source-key-id",
+              replicationRules: [
+                {
+                  replicationRuleName: "copy-all",
+                  destinationBucketId: "dest-bucket-id",
+                  fileNamePrefix: "",
+                  includeExistingFiles: false,
+                  isEnabled: true,
+                  priority: 1,
+                },
+              ],
+            },
+            asReplicationDestination: {
+              sourceToDestinationKeyMapping: {
+                "source-key-id": "destination-key-id",
+              },
+            },
+          },
+        }),
+        expect.objectContaining({
+          bucketName: "locked-bucket",
+          defaultServerSideEncryption: { mode: null, algorithm: null },
+          fileLockConfiguration: {
+            isClientAuthorizedToRead: true,
+            value: {
+              isFileLockEnabled: true,
+              defaultRetention: { mode: "none", period: null },
+            },
+          },
+          replicationConfiguration: {
+            asReplicationSource: null,
+            asReplicationDestination: null,
+          },
+        }),
+      ],
+    });
+  });
+
+  it("normalizes optional native create and update bucket payload fields", async () => {
+    const createBucket = vi.fn(async () => ({
+      info: bucketInfo({ bucketName: "created-bucket" }),
+    }));
+    const updateBucket = vi.fn(async () => bucketInfo({ bucketName: "updated-bucket" }));
+    const sdk = {
+      createBucket,
+      raw: { updateBucket },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+    const fullBucketOptions = {
+      bucketInfo: { env: "test" },
+      corsRules: [
+        {
+          corsRuleName: "rule-one",
+          allowedOrigins: ["https://example.com"],
+          allowedOperations: ["b2_download_file_by_name"],
+          maxAgeSeconds: 3600,
+        },
+        {
+          corsRuleName: "rule-two",
+          allowedOrigins: ["https://ops.example.com"],
+          allowedHeaders: ["authorization"],
+          allowedOperations: ["b2_upload_file"],
+          exposeHeaders: ["x-bz-file-id"],
+          maxAgeSeconds: 60,
+        },
+      ],
+      defaultServerSideEncryption: { mode: "none" as const },
+      defaultRetention: { mode: null, period: null },
+      fileLockEnabled: false,
+      lifecycleRules: [
+        {
+          fileNamePrefix: "tmp/",
+          daysFromUploadingToHiding: 3,
+          daysFromStartingToCancelingUnfinishedLargeFiles: null,
+        },
+      ],
+      replicationConfiguration: {
+        asReplicationSource: {
+          sourceApplicationKeyId: "source-key-id",
+          replicationRules: [
+            {
+              replicationRuleName: "copy-all",
+              destinationBucketId: "dest-bucket-id",
+              isEnabled: true,
+              priority: 1,
+            },
+          ],
+        },
+        asReplicationDestination: {
+          sourceToDestinationKeyMapping: {
+            "source-key-id": "destination-key-id",
+          },
+        },
+      },
+    };
+
+    await expect(
+      client.createBucket({
+        bucketName: "created-bucket",
+        bucketType: "allPrivate",
+        ...fullBucketOptions,
+      }),
+    ).resolves.toMatchObject({ bucketName: "created-bucket" });
+    await expect(
+      client.updateBucket({
+        bucketId: "bucket-1",
+        bucketType: "allPublic",
+        ifRevisionIs: 7,
+        ...fullBucketOptions,
+      }),
+    ).resolves.toMatchObject({ bucketName: "updated-bucket" });
+
+    expect(createBucket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bucketInfo: { env: "test" },
+        corsRules: [
+          expect.objectContaining({ allowedHeaders: null, exposeHeaders: null }),
+          expect.objectContaining({
+            allowedHeaders: ["authorization"],
+            exposeHeaders: ["x-bz-file-id"],
+          }),
+        ],
+        defaultServerSideEncryption: { mode: "none" },
+        defaultRetention: { mode: "none", period: null },
+        fileLockEnabled: false,
+        lifecycleRules: [
+          expect.objectContaining({
+            fileNamePrefix: "tmp/",
+            daysFromHidingToDeleting: null,
+            daysFromUploadingToHiding: 3,
+            daysFromStartingToCancelingUnfinishedLargeFiles: null,
+          }),
+        ],
+        replicationConfiguration: {
+          asReplicationSource: {
+            sourceApplicationKeyId: "source-key-id",
+            replicationRules: [
+              {
+                replicationRuleName: "copy-all",
+                destinationBucketId: "dest-bucket-id",
+                fileNamePrefix: "",
+                includeExistingFiles: false,
+                isEnabled: true,
+                priority: 1,
+              },
+            ],
+          },
+          asReplicationDestination: {
+            sourceToDestinationKeyMapping: {
+              "source-key-id": "destination-key-id",
+            },
+          },
+        },
+      }),
+    );
+    expect(updateBucket).toHaveBeenCalledWith(
+      "https://api005.backblazeb2.com",
+      "native-token",
+      expect.objectContaining({
+        accountId: "test-account-123",
+        bucketId: "bucket-1",
+        bucketType: "allPublic",
+        ifRevisionIs: 7,
+        replicationConfiguration: expect.any(Object),
+      }),
+    );
+  });
+
+  it("normalizes nullable multi-bucket key scopes", async () => {
+    const createKey = vi.fn(
+      async (options: { keyName: string; bucketIds?: string[] | null; bucketId?: string }) => ({
+        keyName: options.keyName,
+        applicationKeyId: `key-${options.keyName}`,
+        applicationKey: `secret-${options.keyName}`,
+        capabilities: ["listFiles"],
+        accountId: "test-account-123",
+        expirationTimestamp: null,
+        bucketIds: options.bucketIds ?? null,
+        bucketId: options.bucketId ?? null,
+        namePrefix: null,
+        options: [],
+      }),
+    );
+    const sdk = { createKey };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      client.createKey({
+        keyName: "all-buckets",
+        capabilities: ["listFiles"],
+        validDurationInSeconds: 60,
+        namePrefix: "logs/",
+        bucketIds: null,
+      }),
+    ).resolves.toMatchObject({ keyName: "all-buckets", bucketIds: null });
+    await expect(
+      client.createKey({
+        keyName: "some-buckets",
+        capabilities: ["listFiles"],
+        bucketIds: ["bucket-1", "bucket-2"],
+      }),
+    ).resolves.toMatchObject({ keyName: "some-buckets", bucketIds: ["bucket-1", "bucket-2"] });
+
+    expect(createKey).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        keyName: "all-buckets",
+        validDurationInSeconds: 60,
+        namePrefix: "logs/",
+        bucketIds: null,
+      }),
+    );
+    expect(createKey).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ keyName: "some-buckets", bucketIds: ["bucket-1", "bucket-2"] }),
+    );
+  });
+
+  it("normalizes notification-rule defaults and object-form custom headers", async () => {
+    const setBucketNotificationRules = vi.fn(
+      async (_apiUrl: string, _authorizationToken: string, request: Record<string, unknown>) => ({
+        bucketId: request.bucketId,
+        eventNotificationRules: request.eventNotificationRules,
+      }),
+    );
+    const sdk = {
+      raw: { setBucketNotificationRules },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      client.setBucketNotificationRules("bucket-1", [
+        {
+          name: "rule-one",
+          eventTypes: ["b2:ObjectCreated:*"],
+          isEnabled: true,
+          targetConfiguration: {
+            targetType: "webhook",
+            url: "https://hooks.example.com/b2",
+            customHeaders: { "X-Trace": "trace-id" },
+          },
+        },
+      ]),
+    ).resolves.toEqual({
+      bucketId: "bucket-1",
+      eventNotificationRules: [
+        {
+          name: "rule-one",
+          eventTypes: ["b2:ObjectCreated:*"],
+          isEnabled: true,
+          isSuspended: false,
+          objectNamePrefix: "",
+          suspensionReason: "",
+          targetConfiguration: {
+            targetType: "webhook",
+            url: "https://hooks.example.com/b2",
+            customHeaders: { "X-Trace": "trace-id" },
+          },
+        },
+      ],
+    });
+    expect(setBucketNotificationRules).toHaveBeenCalledWith(
+      "https://api005.backblazeb2.com",
+      "native-token",
+      expect.objectContaining({
+        bucketId: "bucket-1",
+        eventNotificationRules: [
+          expect.objectContaining({
+            isSuspended: false,
+            objectNamePrefix: "",
+            suspensionReason: "",
+            targetConfiguration: expect.objectContaining({
+              customHeaders: { "X-Trace": "trace-id" },
+            }),
+          }),
+        ],
+      }),
+    );
   });
 
   it("rejects S3 version IDs that resolve to a different key in the same bucket", async () => {
@@ -149,6 +687,104 @@ describe("B2Client native edge branches", () => {
         versionId: "version-a",
       }),
     ).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("rejects S3 version IDs that resolve to another bucket", async () => {
+    const sdk = {
+      getBucket: vi.fn(async () => ({ id: "bucket-1" })),
+      raw: {
+        getFileInfo: vi.fn(async () =>
+          fileVersion({ fileId: "version-a", fileName: "expected-key.txt", bucketId: "bucket-2" }),
+        ),
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      client.resolveS3FileVersion({
+        bucket: "versioned-bucket",
+        key: "expected-key.txt",
+        versionId: "version-a",
+      }),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("returns unversioned bulk S3 targets without native lookups", async () => {
+    const sdk = {
+      getBucket: vi.fn(async () => ({ id: "bucket-1" })),
+      raw: {
+        getFileInfo: vi.fn(async () => fileVersion()),
+      },
+    };
+    const { authManager, client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(client.resolveS3FileVersions({ bucket: "bucket", objects: [] })).resolves.toEqual(
+      [],
+    );
+    await expect(
+      client.resolveS3FileVersions({
+        bucket: "bucket",
+        objects: [{ key: "latest-a.txt" }, { key: "latest-b.txt" }],
+      }),
+    ).resolves.toEqual([
+      { object: { key: "latest-a.txt" }, version: null },
+      { object: { key: "latest-b.txt" }, version: null },
+    ]);
+
+    expect(authManager.getAuthorizedSdk).not.toHaveBeenCalled();
+    expect(sdk.getBucket).not.toHaveBeenCalled();
+    expect(sdk.raw.getFileInfo).not.toHaveBeenCalled();
+  });
+
+  it("records per-object bulk S3 version binding errors", async () => {
+    const sdk = {
+      getBucket: vi.fn(async () => ({ id: "bucket-1" })),
+      raw: {
+        getFileInfo: vi.fn(async (_apiUrl: string, _authorizationToken: string, request: any) => {
+          if (request.fileId === "version-a") {
+            return fileVersion({ fileId: "version-a", fileName: "a.txt", bucketId: "bucket-1" });
+          }
+          return fileVersion({ fileId: "version-b", fileName: "other.txt", bucketId: "bucket-1" });
+        }),
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    const result = await client.resolveS3FileVersions({
+      bucket: "bucket",
+      objects: [
+        { key: "a.txt", versionId: "version-a" },
+        { key: "b.txt", versionId: "version-b" },
+        { key: "latest.txt" },
+      ],
+    });
+
+    expect(result[0]).toMatchObject({ object: { key: "a.txt" }, version: { fileId: "version-a" } });
+    expect(result[1]).toMatchObject({
+      object: { key: "b.txt" },
+      version: null,
+      error: { status: 404, code: "not_found" },
+    });
+    expect(result[2]).toEqual({ object: { key: "latest.txt" }, version: null });
+  });
+
+  it("fails version binding closed when the bucket lookup returns no bucket", async () => {
+    const sdk = {
+      getBucket: vi.fn(async () => null),
+      raw: {
+        getFileInfo: vi.fn(async () => fileVersion()),
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      client.resolveS3FileVersion({ bucket: "missing-bucket", key: "a.txt", versionId: "v1" }),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+    await expect(
+      client.getCurrentS3FileVersion({ bucket: "missing-bucket", key: "a.txt" }),
+    ).rejects.toMatchObject({ status: 404, code: "not_found" });
+
+    expect(sdk.raw.getFileInfo).not.toHaveBeenCalled();
   });
 
   it("resolves the current native hide marker for S3 delete-marker synthesis", async () => {
@@ -205,6 +841,108 @@ describe("B2Client native edge branches", () => {
       action: "hide",
       serverSideEncryption: "AES256",
     });
+  });
+
+  it("returns null when the current native version page does not match the requested key", async () => {
+    const sdk = {
+      getBucket: vi.fn(async () => ({ id: "bucket-1" })),
+      raw: {
+        listFileVersions: vi.fn(async () => ({
+          files: [fileVersion({ fileName: "prefix-neighbor.txt" })],
+          nextFileName: null,
+          nextFileId: null,
+        })),
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      client.getCurrentS3FileVersion({ bucket: "versioned-bucket", key: "prefix.txt" }),
+    ).resolves.toBeNull();
+  });
+
+  it("passes optional native listing request fields through raw lookup calls", async () => {
+    const listFileNames = vi.fn(async () => ({
+      files: [fileVersion({ fileName: "prefix/a.txt", contentLength: 42 })],
+      nextFileName: "prefix/b.txt",
+    }));
+    const listUnfinishedLargeFiles = vi.fn(async () => ({
+      files: [
+        {
+          fileId: "large-1",
+          fileName: "prefix/large.bin",
+          uploadTimestamp: Date.parse("2026-01-01T00:00:00.000Z"),
+        },
+      ],
+      nextFileId: "large-2",
+    }));
+    const listParts = vi.fn(async () => ({
+      parts: [{ partNumber: 1, contentLength: 1024 }],
+      nextPartNumber: 2,
+    }));
+    const sdk = {
+      raw: {
+        listFileNames,
+        listUnfinishedLargeFiles,
+        listParts,
+      },
+    };
+    const { client } = clientWithMockedNativeSdk(sdk);
+
+    await expect(
+      client.listFileNames({
+        bucketId: "bucket-1",
+        startFileName: "prefix/a.txt",
+        maxFileCount: 1,
+        prefix: "prefix/",
+        delimiter: "/",
+      }),
+    ).resolves.toMatchObject({ nextFileName: "prefix/b.txt" });
+    await expect(
+      client.listUnfinishedLargeFiles({
+        bucketId: "bucket-1",
+        namePrefix: "prefix/",
+        startFileId: "large-start",
+        maxFileCount: 1,
+      }),
+    ).resolves.toMatchObject({ nextFileId: "large-2" });
+    await expect(
+      client.listParts({ fileId: "large-1", startPartNumber: 1, maxPartCount: 1 }),
+    ).resolves.toMatchObject({ nextPartNumber: 2 });
+
+    expect(listFileNames).toHaveBeenCalledWith(
+      "https://api005.backblazeb2.com",
+      "native-token",
+      expect.objectContaining({
+        bucketId: "bucket-1",
+        startFileName: "prefix/a.txt",
+        maxFileCount: 1,
+        prefix: "prefix/",
+        delimiter: "/",
+      }),
+      expect.any(Object),
+    );
+    expect(listUnfinishedLargeFiles).toHaveBeenCalledWith(
+      "https://api005.backblazeb2.com",
+      "native-token",
+      expect.objectContaining({
+        bucketId: "bucket-1",
+        namePrefix: "prefix/",
+        startFileId: "large-start",
+        maxFileCount: 1,
+      }),
+      expect.any(Object),
+    );
+    expect(listParts).toHaveBeenCalledWith(
+      "https://api005.backblazeb2.com",
+      "native-token",
+      expect.objectContaining({
+        fileId: "large-1",
+        startPartNumber: 1,
+        maxPartCount: 1,
+      }),
+      expect.any(Object),
+    );
   });
 
   it("refreshes stale cached Partner authorization before sending another read", async () => {
