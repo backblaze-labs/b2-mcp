@@ -24,7 +24,6 @@ import {
   type HttpPipelineOptions,
   type PreparedMcpRequest,
 } from "./http-fetch-handler.js";
-import { bootstrapErrorMessage } from "./utils/bootstrap-errors.js";
 import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import {
@@ -32,7 +31,11 @@ import {
   resumeUnreadRequest,
   writeWebResponse,
 } from "./utils/node-web-bridge.js";
-import { SECRET_SANITIZER_REDACTION, sanitizeText } from "./utils/secret-sanitizer.js";
+import {
+  bootstrapErrorMessage,
+  SECRET_SANITIZER_REDACTION,
+  sanitizeText,
+} from "./utils/secret-sanitizer.js";
 import type { B2Config } from "./utils/types.js";
 
 export {
@@ -271,9 +274,7 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   process.on("SIGINT", onSigint);
 }
 
-export function httpBootstrapFatalMessage(err: unknown): string {
-  return bootstrapErrorMessage(err);
-}
+export const httpBootstrapFatalMessage = bootstrapErrorMessage;
 
 function handleHttpBootstrapFatal(err: unknown): never {
   const message = httpBootstrapFatalMessage(err);

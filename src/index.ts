@@ -26,9 +26,9 @@ import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { CredentialResolutionError } from "./credentials.js";
 import * as serverModule from "./server.js";
-import { bootstrapErrorMessage } from "./utils/bootstrap-errors.js";
 import { PortUsageError } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
+import { bootstrapErrorMessage } from "./utils/secret-sanitizer.js";
 import { VERSION } from "./version.js";
 
 export async function startStdio(): Promise<void> {

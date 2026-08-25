@@ -229,6 +229,10 @@ export function sanitizeText(text: unknown, options: SanitizerOptions = {}): str
     .replace(LABELED_SECRET, `$1${REDACTED}`);
 }
 
+export function bootstrapErrorMessage(err: unknown): string {
+  return sanitizeText(err instanceof Error ? err.message : String(err));
+}
+
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
   return sanitizeValue(value, [], new WeakSet<object>(), options, "mcp");
 }

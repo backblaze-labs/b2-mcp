@@ -647,6 +647,7 @@ describe("HTTP server lifecycle", () => {
   it("redacts overlapping short and long header secrets longest first", async () => {
     const shorterSecret = "abcdefgh";
     const longerSecret = "abcdefghijkl";
+    const leakedSuffix = longerSecret.slice(shorterSecret.length);
     const pipeline: B2McpFetchHandler = {
       sessions: new Map<string, never>(),
       fetch: vi.fn(() => Promise.reject(`string failure with ${longerSecret}`)),
@@ -673,7 +674,7 @@ describe("HTTP server lifecycle", () => {
           "mcp.http.failed",
         );
         expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(longerSecret);
-        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("ijkl");
+        expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(leakedSuffix);
       } finally {
         await closeHttpServer(handle);
       }
