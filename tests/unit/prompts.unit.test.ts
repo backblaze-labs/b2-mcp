@@ -131,6 +131,23 @@ describe("B2 workflow MCP prompts", () => {
     expect(text).toContain("b2_update_bucket");
   });
 
+  it("audits public exposure with direct public-bucket listing and truncation handling", async () => {
+    const server = createServer(testConfig);
+    const prompts = getRegisteredPrompts(server) ?? {};
+    const result: any = await prompts["b2-audit-public-exposure"].execute(
+      {
+        riskContext: "account-wide review",
+      },
+      {},
+    );
+    const text = promptText(result);
+
+    expect(text).toContain("bucketTypes ['allPublic']");
+    expect(text).toContain("limit 1000");
+    expect(text).toContain("Treat any truncated response as incomplete");
+    expect(text).toContain("cannot prove a clean result beyond the returned slice");
+  });
+
   it("renders injected arguments as bounded caller data after safety constraints", async () => {
     const server = createServer(testConfig);
     const prompts = getRegisteredPrompts(server) ?? {};
