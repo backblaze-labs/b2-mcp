@@ -143,7 +143,7 @@ function withOperationRetryPolicy(request: HttpRequest): HttpRequest {
 
 const RETRYABLE_BUDGET_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504, 401]);
 const RETRY_AFTER_HTTP_DATE =
-  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d\d (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d\d:\d\d:\d\d GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d\d-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d\d \d\d:\d\d:\d\d GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d\d:\d\d:\d\d \d{4})$/;
+  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d\d) ([A-Z][a-z]{2}) (\d{4}) (\d\d:\d\d:\d\d) GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), (\d\d)-([A-Z][a-z]{2})-(\d\d) (\d\d:\d\d:\d\d) GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) ([A-Z][a-z]{2}) ([ \d]\d) (\d\d:\d\d:\d\d) (\d{4}))$/;
 
 function bodyBudgetKey(body: HttpRequest["body"]): string {
   if (body === undefined || body === null) return "";
@@ -159,8 +159,13 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   const v = r.headers.get(h)?.trim();
   if (!v || !/\D/.test(v)) return r;
 
-  let ms = RETRY_AFTER_HTTP_DATE.test(v) ? Date.parse(v) : NaN;
-  if (v[3] === "," && new Date(ms).toUTCString() !== v) ms = NaN;
+  const m = RETRY_AFTER_HTTP_DATE.exec(v);
+  const s = m
+    ? `${m[1] ?? m[5] ?? m[10]?.replace(" ", "0")} ${m[2] ?? m[6] ?? m[9]} ${m[3] ?? m[12] ?? new Date(Date.parse(v)).toUTCString().slice(12, 16)} ${m[4] ?? m[8] ?? m[11]}`
+    : "";
+  let ms = Date.parse(`${s} GMT`);
+  const utc = new Date(ms).toUTCString();
+  if (!utc.startsWith(v.slice(0, 3)) || !utc.includes(s)) ms = NaN;
   const headers = new Headers(r.headers);
   if (Number.isFinite(ms)) {
     headers.set(h, String(Math.max(0, Math.ceil((ms - Date.now()) / 1000))));

@@ -605,6 +605,20 @@ describe("B2AuthManager", () => {
       maxRetryDelayMs: 10_000,
       expectedDelayMs: 5000,
     },
+    {
+      name: "invalid RFC850 date fallback",
+      retryAfter: "Sunday, 31-Feb-27 00:00:00 GMT",
+      initialRetryDelayMs: 5000,
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 5000,
+    },
+    {
+      name: "invalid asctime date fallback",
+      retryAfter: "Sun Feb 31 00:00:00 2027",
+      initialRetryDelayMs: 5000,
+      maxRetryDelayMs: 10_000,
+      expectedDelayMs: 5000,
+    },
   ])(
     "uses the $name Retry-After retry boundary through the SDK transport",
     async ({ retryAfter, initialRetryDelayMs, maxRetryDelayMs, expectedDelayMs }) => {
