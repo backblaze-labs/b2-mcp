@@ -390,7 +390,6 @@ describe("CI workflow policy", () => {
 
   it("runs provider evals only from trusted scheduled or manual main refs", () => {
     const guard = workflowJobBlock(evals, "guard") ?? "";
-    const skipped = workflowJobBlock(evals, "skipped");
     const evalJob = workflowJobBlock(evals, "evals") ?? "";
 
     expect(evals).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
@@ -412,15 +411,17 @@ describe("CI workflow policy", () => {
     expect(guard).toContain("workflow_dispatch|schedule");
     expect(guard).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
     expect(guard).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    expect(guard).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    // OpenAI is temporarily disabled (no account credits); the fail-loud guard
+    // requires the active Anthropic secret only.
+    expect(guard).not.toContain("OPENAI_API_KEY");
     expect(guard).toContain("::add-mask::");
     expect(guard).toContain('missing+=("ANTHROPIC_API_KEY")');
-    expect(guard).toContain('missing+=("OPENAI_API_KEY")');
+    expect(guard).not.toContain('missing+=("OPENAI_API_KEY")');
     expect(guard).toContain('echo "::error::missing provider secret(s): ${missing[*]}"');
     expect(guard).toContain("exit 1");
     expect(guard).not.toContain("environment:");
 
-    expect(skipped).toBeNull();
+    expect(workflowJobBlock(evals, "skipped")).toBeNull();
     expect(evals).not.toContain("LLM evals skipped");
     expect(evalJob).not.toContain("needs.guard.outputs.should-run");
     expect(evalJob).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
@@ -436,7 +437,7 @@ describe("CI workflow policy", () => {
     const requireSuccess = workflowStepBlock(evals, "Require eval pass-rate success");
     const secretRefs = [...evals.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
 
-    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY"]);
     expect(packageJson.scripts?.["evals:provider-comparison"]).toBe(
       "tsx evals/run-provider-comparison.ts",
     );
@@ -448,7 +449,8 @@ describe("CI workflow policy", () => {
     expect(run).toContain('RUN_LLM_EVALS: "1"');
     expect(run).toContain('RUN_LLM_PROVIDER_COMPARISON: "1"');
     expect(run).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    expect(run).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    expect(run).not.toContain("OPENAI_API_KEY");
+    expect(run).not.toMatch(/ANTHROPIC_API_KEY:[\s\S]*OPENAI_API_KEY:/);
     expect(run).toContain("ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001");
     expect(run).toContain("LLM_EVAL_CASE_SET: ci-no-b2");
     expect(run).toContain('LLM_EVAL_CASE_LIMIT: "5"');
@@ -463,7 +465,7 @@ describe("CI workflow policy", () => {
     expect(validate).toContain("id: validate_report");
     expect(validate).toContain("if: always()");
     expect(validate).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    expect(validate).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    expect(validate).not.toContain("OPENAI_API_KEY");
     expect(validate).toContain(
       "node scripts/eval-pass-rate-report.mjs validate reports/evals/provider-pass-rates.json",
     );
@@ -473,10 +475,12 @@ describe("CI workflow policy", () => {
     );
     expect(evalJob).toContain("Provider pass rates");
     expect(upload).toContain("steps.validate_report.outcome == 'success'");
-    expect(upload).toContain("provider-pass-rate-report");
+    expect(upload).toContain("claude-pass-rate-report");
     expect(upload).toContain("path: reports/evals/provider-pass-rates.json");
     expect(upload).toContain("if-no-files-found: error");
     expect(requireSuccess).toContain("steps.run_evals.outcome != 'success'");
+    expect(requireSuccess).toContain("provider eval pass-rate run failed");
+    expect(requireSuccess).not.toContain("Claude eval pass-rate run failed");
     expect(requireSuccess).toContain("exit 1");
     expect(evalJob).not.toContain("path: reports/evals/**");
   });
