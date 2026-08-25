@@ -2,6 +2,7 @@ import { createAuditedToolCallback } from "../../src/server";
 import { toolError, toolJson } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import {
+  bootstrapErrorMessage,
   configuredSecretValuesFromConfig,
   LOG_SANITIZER_FAILURE,
   LOGGER_SECRET_REDACTION_PATHS,
@@ -710,5 +711,29 @@ describe("secret sanitizer canary policy", () => {
   it("returns the sanitizer-failure sentinel when coercion throws", () => {
     const nullProto = Object.create(null) as object;
     expect(safeErrorText(nullProto, [])).toBe(LOG_SANITIZER_FAILURE);
+  });
+
+  it("redacts configured B2 key-ID env values from text", () => {
+    const keyId = "005abcdef0000000000000010";
+    expect(
+      sanitizeText(`startup failed for ${keyId}`, { env: { B2_APPLICATION_KEY_ID: keyId } }),
+    ).toBe(`startup failed for ${SECRET_SANITIZER_REDACTION}`);
+    expect(
+      sanitizeText(`credential ${keyId}`, { env: { B2_CREDENTIAL_TENANT_MASTER_KEY_ID: keyId } }),
+    ).toBe(`credential ${SECRET_SANITIZER_REDACTION}`);
+  });
+
+  it("redacts configured key-ID env values from bootstrap fatal text", () => {
+    const keyId = "005masterkeyid0000000001";
+    const previous = process.env.B2_MASTER_KEY_ID;
+    process.env.B2_MASTER_KEY_ID = keyId;
+    try {
+      expect(bootstrapErrorMessage(new Error(`fatal ${keyId}`))).toBe(
+        `fatal ${SECRET_SANITIZER_REDACTION}`,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.B2_MASTER_KEY_ID;
+      else process.env.B2_MASTER_KEY_ID = previous;
+    }
   });
 });

@@ -56,8 +56,11 @@ const SECRET_HEADER_NAMES = new Set([
 const SECRET_ENV_VAR_NAMES = new Set([
   "AWS_SECRET_ACCESS_KEY",
   "B2_APP_KEY",
+  "B2_APP_KEY_ID",
   "B2_APPLICATION_KEY",
+  "B2_APPLICATION_KEY_ID",
   "B2_MASTER_KEY",
+  "B2_MASTER_KEY_ID",
 ]);
 
 const LOGGER_SECRET_FIELD_NAMES = [
@@ -184,7 +187,7 @@ function isSecretEnvName(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     SECRET_ENV_VAR_NAMES.has(upper) ||
-    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)$/.test(upper)
+    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)(?:_ID)?$/.test(upper)
   );
 }
 

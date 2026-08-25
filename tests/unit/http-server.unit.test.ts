@@ -778,6 +778,37 @@ describe("HTTP server lifecycle", () => {
     }
   });
 
+  it("sanitizes header secrets in the outer pipeline catch", async () => {
+    const secret = "s7outer";
+    const pipeline = createB2McpFetchHandler();
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    try {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new Error(`body read failed with ${secret}`));
+        },
+      });
+      const request = new Request("http://localhost/mcp", {
+        method: "POST",
+        headers: { host: "localhost", "content-type": "application/json", "x-b2-key": secret },
+        body: body as unknown as RequestInit["body"],
+        duplex: "half",
+      } as RequestInit & { duplex: "half" });
+
+      const res = await pipeline.fetch(request);
+
+      expect(res.status).toBe(500);
+      expect(warnSpy).toHaveBeenCalledWith(
+        { err: "body read failed with [redacted]" },
+        "mcp.http.failed",
+      );
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(secret);
+    } finally {
+      await pipeline.close();
+    }
+  });
+
   it.each(["SIGTERM", "SIGINT"] as const)("handles %s by draining and closing", async (signal) => {
     const signalSnapshot = snapshotSignalListeners();
     const exitCodes: Array<string | number | null | undefined> = [];
