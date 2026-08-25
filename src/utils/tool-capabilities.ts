@@ -228,6 +228,17 @@ export function oauthScopesAllowOperation(
   return hasAnyScope(scopes, OAUTH_OPERATION_SCOPES[operation]);
 }
 
+export function capabilitiesAllow(
+  name: string,
+  caps: ReadonlySet<string> | null,
+  capabilityMap: Readonly<Record<string, readonly string[]>>,
+): boolean {
+  if (caps === null) return true;
+  const required = capabilityMap[name];
+  if (!required || required.length === 0) return true;
+  return required.some((capability) => caps.has(capability));
+}
+
 /**
  * Return the reviewed OAuth deployment-scope policy for a tool.
  *
@@ -250,10 +261,7 @@ export function oauthToolScopePolicy(name: string): OAuthToolScopePolicy | null 
  * @returns True when the tool should be registered for the capability set.
  */
 export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): boolean {
-  if (caps === null) return true;
-  const required = TOOL_CAPABILITIES[name];
-  if (!required || required.length === 0) return true;
-  return required.some((c) => caps.has(c));
+  return capabilitiesAllow(name, caps, TOOL_CAPABILITIES);
 }
 
 /**

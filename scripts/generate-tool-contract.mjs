@@ -30,6 +30,8 @@ const {
   destructiveConfirmToolsFromTools,
   fixtureHash,
   normalizeTool,
+  normalizeResource,
+  normalizeResourceTemplate,
   renderProfileReference,
   requiredFieldsByTool,
   stable,
@@ -75,6 +77,20 @@ async function collectToolsList(profile, era) {
     await client.connect(transport);
     const list = await client.listTools({}, { cacheMode: "refresh" });
     const tools = [...(list.tools ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    const resourcesList =
+      era === "modern"
+        ? await client.listResources({}, { cacheMode: "refresh" })
+        : { resources: [] };
+    const resourceTemplatesList =
+      era === "modern"
+        ? await client.listResourceTemplates({}, { cacheMode: "refresh" })
+        : { resourceTemplates: [] };
+    const resources = [...(resourcesList.resources ?? [])].sort((a, b) =>
+      (a.name ?? "").localeCompare(b.name ?? ""),
+    );
+    const resourceTemplates = [...(resourceTemplatesList.resourceTemplates ?? [])].sort((a, b) =>
+      (a.name ?? "").localeCompare(b.name ?? ""),
+    );
     const names = tools.map((tool) => tool.name);
     const normalizedTools = tools.map(normalizeTool);
     const fixture = {
@@ -93,6 +109,10 @@ async function collectToolsList(profile, era) {
       requiredFields: requiredFieldsByTool(tools),
       confirmTools: confirmToolsFrom(tools),
       tools: normalizedTools,
+      resourceNames: resources.map((resource) => resource.name ?? ""),
+      resources: resources.map(normalizeResource),
+      resourceTemplateNames: resourceTemplates.map((template) => template.name ?? ""),
+      resourceTemplates: resourceTemplates.map(normalizeResourceTemplate),
     };
 
     if (era === "modern") {
@@ -101,6 +121,14 @@ async function collectToolsList(profile, era) {
         toolsListCacheHint: {
           ttlMs: list.ttlMs,
           cacheScope: list.cacheScope,
+        },
+        resourcesListCacheHint: {
+          ttlMs: resourcesList.ttlMs,
+          cacheScope: resourcesList.cacheScope,
+        },
+        resourceTemplatesListCacheHint: {
+          ttlMs: resourceTemplatesList.ttlMs,
+          cacheScope: resourceTemplatesList.cacheScope,
         },
         discover: {
           supportedVersions: discover?.supportedVersions ?? [],

@@ -25,6 +25,13 @@ configured.
 
 Destructive actions are gated, durable B2 secrets stay out of the model's context in the default/file/off modes, and the unsafe `B2_SECRET_SINK=inline` escape hatch is explicit. The tool surface is deliberately lean (registration is capability-aware, so a key only ever sees tools it can use).
 
+The server also exposes read-only MCP resources for stable control-plane context:
+`b2://capabilities`, `b2://server/tool-profile`,
+`b2://server/destructive-policy`, `b2://server/configuration`, and the
+`b2://bucket/{bucketName}` resource template. Resources are capability/OAuth
+filtered like tools, sanitized with the shared MCP response sanitizer, and do
+not expose object listings or object bytes.
+
 ---
 
 ## Quick start
@@ -366,6 +373,19 @@ with mixed `B2_MCP_OUTPUT_FORMAT` values can return either text shape.
 ## Available tools
 
 **40 total — 17 Native B2 SDK + 19 AWS S3 SDK + 4 Neither SDK/custom MCP tools.** Prefix counts remain 21 native `b2_*` names + 19 data-plane `s3_*` names. Availability is orthogonal to backing: `b2_create_key` and `b2_create_group_member` are available when `B2_SECRET_SINK=file` or `inline`; `b2_reserve_trial_create_account` is available only with explicit `inline` mode because Reserve Trial has no provider-side recovery path after a file sink write failure. These names are non-secret compatibility stubs when unavailable. The inherited `s3_*` aliases use the AWS S3 SDK against B2's S3-compatible endpoint, with configuration derived from the official B2 SDK `/s3` helper. Under stdio's default `confirm` policy, fifteen destructive, durable-secret-producing, or protection-weakening tool names require `confirm: true` or MCP form elicitation before execution: the explicit deletes (`s3_delete_object`, `s3_delete_objects`, `s3_abort_multipart_upload`, `b2_delete_bucket`, `b2_delete_key`), durable key creation (`b2_create_key`), PutObject presigning (`s3_get_presigned_url` with `operation: "PutObject"`), Partner group membership changes (`b2_eject_group_member`, `b2_create_group_member`), trial-account reservation (`b2_reserve_trial_create_account`), persistent outbound webhook replacement (`b2_set_bucket_notification_rules`), and the protection-removal or copy/delete policy paths (`b2_update_file_retention` when clearing/bypassing, `b2_update_file_legal_hold` when set off, `b2_update_bucket` when it makes a bucket public or weakens Object Lock/lifecycle/replication, and `s3_put_bucket_lifecycle` when a rule schedules deletion). HTTP defaults to `block`, so the same calls are refused unless the operator explicitly selects `confirm` or `allow`.
+
+**Read-only resources.** `resources/list` returns the static JSON resources
+`b2://capabilities`, `b2://server/tool-profile`,
+`b2://server/destructive-policy`, and `b2://server/configuration`.
+`resources/templates/list` returns `b2://bucket/{bucketName}` when the current
+credential has `listBuckets`. The bucket resource returns bucket type,
+visibility, lifecycle, Object Lock/default retention, encryption, replication
+with application-key IDs redacted, and notification rules when the credential
+and OAuth scope can read them. Notification webhook URLs, signing secrets, and
+custom headers are redacted; optional notification-rule fetch failures degrade
+to `available: false` while preserving the core bucket metadata. The bucket
+resource uses a short private cache hint because these fields can change through
+write tools; clients should refresh after mutations.
 
 <details>
 <summary><b>Category 1 — Native B2 SDK (17)</b></summary>

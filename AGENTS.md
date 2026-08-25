@@ -96,6 +96,31 @@ Each register function receives the server + client(s) and calls `server.tool(na
 
 **Capability-aware registration.** When `createServer` is given a `capabilities` array (the entry points fetch it via `fetchCapabilities`), it wraps `server.tool` so only tools the key can use are registered — the surface auto-right-sizes to the credential (a read-only key drops every write/delete/admin tool; full ~9,719 tokens → read-only ~2,867). The map is `src/utils/tool-capabilities.ts` (any-of semantics; unmapped tools always register; Partner tools register only with a distinct master key). When `capabilities` is `null`/omitted — all unit tests, or `B2_REGISTER_ALL_TOOLS=true` — the full surface registers, so there's no behavior change. The key decides what's _possible_; the destructive gate decides what's _permitted_.
 
+### Resource registration flow
+
+MCP resources are the read-only context surface. `src/resources.ts` owns the
+current resource set: `b2://capabilities`, `b2://server/tool-profile`,
+`b2://server/destructive-policy`, `b2://server/configuration`, and the bounded
+template `b2://bucket/{bucketName}` for bucket control-plane metadata. Add a new
+resource in `registerB2Resources()` and add any required B2 capability to
+`RESOURCE_CAPABILITIES`; resource enablement uses the same any-of capability
+matcher as tools. OAuth-scoped deployments also consult
+`RESOURCE_OAUTH_SCOPE_POLICY`, and resource-specific elevated checks should live
+near the resource read handler.
+
+Resources must stay read-only and control-plane-only: do not expose object
+listings or object bytes as resources. Object data stays on the presigned
+`s3_*` data-plane path. Resource callbacks are wrapped by
+`createAuditedResourceCallback`, so they run with the MCP request abort signal,
+shared response sanitizer, and structured `resource.read` / `resource.error`
+logs. Notification-rule redaction is shared with the bucket tools via
+`src/b2/notification-redaction.ts`; do not add a second redaction path. The
+server-configuration resource is intentionally a non-secret read-scoped summary
+for client planning; keep secrets, local filesystem roots, and credential values
+out of it. Bucket resources advertise a short private cache hint because they
+include mutation-sensitive fields such as visibility, lifecycle, retention, and
+notification rules.
+
 ### Three backing categories, two client types
 
 The public tool surface is described by backing category, with availability

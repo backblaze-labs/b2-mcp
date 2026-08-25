@@ -695,8 +695,82 @@
       }
     }
   ],
+  "resourceNames": [
+    "b2_capability_summary",
+    "b2_destructive_policy",
+    "b2_server_configuration",
+    "b2_tool_profile"
+  ],
+  "resources": [
+    {
+      "name": "b2_capability_summary",
+      "uri": "b2://capabilities",
+      "title": "B2 Capability Summary",
+      "descriptionSha256": "59f1994b6140ed43910d34fedfb848cba43536aeac8e63d163209c57cd1c032a",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": ["assistant"],
+        "priority": 0.6
+      }
+    },
+    {
+      "name": "b2_destructive_policy",
+      "uri": "b2://server/destructive-policy",
+      "title": "B2 Destructive Policy",
+      "descriptionSha256": "f72582f6c50c16ccb02ca8f709558b0ced99ccdbf513dbffe0e21fc1ed8cec8b",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": ["assistant"],
+        "priority": 0.6
+      }
+    },
+    {
+      "name": "b2_server_configuration",
+      "uri": "b2://server/configuration",
+      "title": "B2 Server Configuration",
+      "descriptionSha256": "d8abbd7a8900eb4fd083670ab892d014a39f6e0c4f9b739e28cffba886461a81",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": ["assistant"],
+        "priority": 0.6
+      }
+    },
+    {
+      "name": "b2_tool_profile",
+      "uri": "b2://server/tool-profile",
+      "title": "B2 Tool Profile",
+      "descriptionSha256": "09ea60675b9ceee880eceb60d45effbe0bfffe926e2ac3099ea516f397781a2d",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": ["assistant"],
+        "priority": 0.6
+      }
+    }
+  ],
+  "resourceTemplateNames": ["b2_bucket_config"],
+  "resourceTemplates": [
+    {
+      "name": "b2_bucket_config",
+      "uriTemplate": "b2://bucket/{bucketName}",
+      "title": "B2 Bucket Configuration",
+      "descriptionSha256": "7063296a87a394b743f1c02b9b981fbbcaca35212704560839d659c3848128a4",
+      "mimeType": "application/json",
+      "annotations": {
+        "audience": ["assistant"],
+        "priority": 0.6
+      }
+    }
+  ],
   "modern": {
     "toolsListCacheHint": {
+      "ttlMs": 30000,
+      "cacheScope": "private"
+    },
+    "resourcesListCacheHint": {
+      "ttlMs": 30000,
+      "cacheScope": "private"
+    },
+    "resourceTemplatesListCacheHint": {
       "ttlMs": 30000,
       "cacheScope": "private"
     },
@@ -715,5 +789,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0"
+  "hash": "0464a1ca0624ed9b6db820f09ad637d784945b5e903d87cef968f36e8dcac5bb"
 }

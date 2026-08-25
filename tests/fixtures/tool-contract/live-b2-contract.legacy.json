@@ -2019,9 +2019,13 @@
       }
     }
   ],
+  "resourceNames": [],
+  "resources": [],
+  "resourceTemplateNames": [],
+  "resourceTemplates": [],
   "legacy": {
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "069b5c0910b3262e56fb821b1a8e1945c805689b67b4ebcf200f7f0ff9cad18c"
+  "hash": "cf90568a838f27f6993619424962f52f87390aea08ac0f76e1fb4e150423e6d4"
 }

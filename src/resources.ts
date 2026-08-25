@@ -1,5 +1,11 @@
 import { ResourceNotFoundError } from "@modelcontextprotocol/server";
-import type { B2Client, BucketInfoResult, NotificationRulesResult } from "./b2/client.js";
+import type {
+  B2Client,
+  BucketInfoResult,
+  NotificationRulesResult,
+  ReplicationConfigurationResult,
+} from "./b2/client.js";
+import { redactNotificationSecrets } from "./b2/notification-redaction.js";
 import {
   ResourceTemplate,
   type RegisteredToolMap,
@@ -7,9 +13,12 @@ import {
   type ResourceRegistrationConfig,
 } from "./mcp.js";
 import { DESTRUCTIVE_TOOL_NAMES, getDestructivePolicy } from "./utils/destructive-gate.js";
+import { parseB2Error } from "./utils/errors.js";
 import {
+  capabilitiesAllow,
   oauthScopesAllowOperation,
   TOOL_CAPABILITIES,
+  type OAuthOperationScope,
   type McpToolAnnotations,
 } from "./utils/tool-capabilities.js";
 import type { B2Config } from "./utils/types.js";
@@ -17,24 +26,29 @@ import { VERSION } from "./version.js";
 
 const JSON_MIME = "application/json";
 const PRIVATE_30S = { ttlMs: 30_000, cacheScope: "private" as const };
-const PRIVATE_60S = { ttlMs: 60_000, cacheScope: "private" as const };
+const MUTATION_SENSITIVE_5S = { ttlMs: 5_000, cacheScope: "private" as const };
 
 export const RESOURCE_CAPABILITIES: Record<string, string[]> = {
   b2_bucket_config: ["listBuckets"],
 };
 
+export const RESOURCE_OAUTH_SCOPE_POLICY: Record<string, OAuthOperationScope> = {
+  b2_bucket_config: "read",
+  b2_capability_summary: "read",
+  b2_destructive_policy: "read",
+  b2_server_configuration: "read",
+  b2_tool_profile: "read",
+};
+
 export function isResourceEnabled(name: string, caps: ReadonlySet<string> | null): boolean {
-  if (caps === null) return true;
-  const required = RESOURCE_CAPABILITIES[name];
-  if (!required || required.length === 0) return true;
-  return required.some((capability) => caps.has(capability));
+  return capabilitiesAllow(name, caps, RESOURCE_CAPABILITIES);
 }
 
 export function isResourceAllowedByOAuthScopes(
-  _name: string,
+  name: string,
   scopes: ReadonlySet<string> | null,
 ): boolean {
-  return oauthScopesAllowOperation(scopes, "read");
+  return oauthScopesAllowOperation(scopes, RESOURCE_OAUTH_SCOPE_POLICY[name] ?? "read");
 }
 
 interface RegisterB2ResourcesOptions {
@@ -83,49 +97,6 @@ function sortedCapabilities(capabilities: readonly string[] | null | undefined):
   return Array.isArray(capabilities) ? [...capabilities].sort() : null;
 }
 
-function redactWebhookUrl(raw: string | undefined): string | undefined {
-  if (raw === undefined) return undefined;
-  try {
-    const url = new URL(raw);
-    return `${url.protocol}//${url.host}/[redacted]`;
-  } catch {
-    return "[redacted]";
-  }
-}
-
-function redactNotificationSecrets(result: NotificationRulesResult): NotificationRulesResult {
-  return {
-    bucketId: result.bucketId,
-    eventNotificationRules: result.eventNotificationRules.map((rule) => {
-      const customHeaders = rule.targetConfiguration.customHeaders;
-      return {
-        ...rule,
-        targetConfiguration: {
-          ...rule.targetConfiguration,
-          url: redactWebhookUrl(rule.targetConfiguration.url) ?? rule.targetConfiguration.url,
-          ...(rule.targetConfiguration.hmacSha256SigningSecret !== undefined
-            ? { hmacSha256SigningSecret: "[redacted]" }
-            : {}),
-          ...(Array.isArray(customHeaders)
-            ? {
-                customHeaders: customHeaders.map((header) => ({
-                  ...header,
-                  value: "[redacted]",
-                })),
-              }
-            : customHeaders && typeof customHeaders === "object"
-              ? {
-                  customHeaders: Object.fromEntries(
-                    Object.keys(customHeaders).map((name) => [name, "[redacted]"]),
-                  ),
-                }
-              : {}),
-        },
-      };
-    }),
-  };
-}
-
 function hasCapability(caps: ReadonlySet<string> | null, required: readonly string[]): boolean {
   return caps === null || required.some((capability) => caps.has(capability));
 }
@@ -152,18 +123,66 @@ function isAuthorizationFailure(error: unknown): boolean {
   );
 }
 
+type NotificationRulesState =
+  | ({ available: true } & NotificationRulesResult)
+  | {
+      available: false;
+      reason: "not_permitted" | "runtime_auth_failure" | "temporarily_unavailable";
+      message: string;
+      status?: number;
+      code?: string;
+      requestId?: string;
+    };
+
+type NotificationRulesUnavailableReason = Extract<
+  NotificationRulesState,
+  { available: false }
+>["reason"];
+
+function unavailableNotificationRules(
+  reason: NotificationRulesUnavailableReason,
+  message: string,
+  error?: unknown,
+): NotificationRulesState {
+  const parsed = error ? parseB2Error(error) : null;
+  return {
+    available: false,
+    reason,
+    message,
+    ...(parsed ? { status: parsed.status, code: parsed.code } : {}),
+    ...(parsed?.requestId ? { requestId: parsed.requestId } : {}),
+  };
+}
+
 async function readNotificationRulesIfAllowed(
   client: B2Client,
   bucketId: string,
   caps: ReadonlySet<string> | null,
   oauthScopes: ReadonlySet<string> | null,
-): Promise<NotificationRulesResult | null> {
-  if (!canReadNotificationRules(caps, oauthScopes)) return null;
+): Promise<NotificationRulesState> {
+  if (!canReadNotificationRules(caps, oauthScopes)) {
+    return unavailableNotificationRules(
+      "not_permitted",
+      "The current credential or OAuth scope does not allow reading bucket notification rules.",
+    );
+  }
   try {
-    return await client.getBucketNotificationRules(bucketId);
+    return {
+      available: true,
+      ...redactNotificationSecrets(await client.getBucketNotificationRules(bucketId)),
+    };
   } catch (error) {
-    if (isAuthorizationFailure(error)) return null;
-    throw error;
+    return isAuthorizationFailure(error)
+      ? unavailableNotificationRules(
+          "runtime_auth_failure",
+          "Bucket notification rules could not be read because B2 rejected this authorized request.",
+          error,
+        )
+      : unavailableNotificationRules(
+          "temporarily_unavailable",
+          "Bucket notification rules are temporarily unavailable; bucket metadata was returned without them.",
+          error,
+        );
   }
 }
 
@@ -186,13 +205,7 @@ function serverConfiguration(config: B2Config) {
       credentialMode:
         config.transport === "http" ? (httpCredentialMode() ?? "headers") : "stdio-env",
       destructivePolicy: getDestructivePolicy(config),
-      localFileAccess: config.allowLocalFiles
-        ? config.fileRoot
-          ? "enabled-confined"
-          : "enabled-unrestricted"
-        : "disabled",
       outputFormat: config.outputFormat ?? "json",
-      secretSinkMode: config.secretSink?.mode ?? "off",
     },
   };
 }
@@ -257,10 +270,30 @@ function bucketVisibility(bucketType: string): "public" | "private" | "snapshot"
   }
 }
 
-function bucketResourcePayload(
-  bucket: BucketInfoResult,
-  notifications: NotificationRulesResult | null,
-) {
+function redactReplicationConfiguration(
+  replicationConfiguration: ReplicationConfigurationResult | undefined,
+): ReplicationConfigurationResult | null {
+  if (replicationConfiguration === undefined) return null;
+  return {
+    asReplicationSource: replicationConfiguration.asReplicationSource
+      ? {
+          ...replicationConfiguration.asReplicationSource,
+          sourceApplicationKeyId: "[redacted]",
+        }
+      : null,
+    asReplicationDestination: replicationConfiguration.asReplicationDestination
+      ? {
+          sourceToDestinationKeyMapping: Object.fromEntries(
+            Object.keys(
+              replicationConfiguration.asReplicationDestination.sourceToDestinationKeyMapping,
+            ).map((_, index) => [`[redacted:${index + 1}]`, "[redacted]"]),
+          ),
+        }
+      : null,
+  };
+}
+
+function bucketResourcePayload(bucket: BucketInfoResult, notifications: NotificationRulesState) {
   return {
     resource: "bucket-config",
     bucket: {
@@ -279,17 +312,11 @@ function bucketResourcePayload(
       encryption: {
         defaultServerSideEncryption: bucket.defaultServerSideEncryption ?? null,
       },
-      replicationConfiguration: bucket.replicationConfiguration ?? null,
+      replicationConfiguration: redactReplicationConfiguration(bucket.replicationConfiguration),
       options: bucket.options ?? [],
       revision: bucket.revision ?? null,
     },
-    eventNotifications: notifications
-      ? { available: true, ...redactNotificationSecrets(notifications) }
-      : {
-          available: false,
-          reason:
-            "The current credential or OAuth scope does not allow reading bucket notification rules.",
-        },
+    eventNotifications: notifications,
   };
 }
 
@@ -359,7 +386,7 @@ export function registerB2Resources(
     resourceConfig(
       "B2 Bucket Configuration",
       "Read-only control-plane metadata for a B2 bucket, fetched on demand by bucket name.",
-      PRIVATE_60S,
+      MUTATION_SENSITIVE_5S,
     ),
     async (uri, variables) => {
       const bucketName = variableString(variables.bucketName);

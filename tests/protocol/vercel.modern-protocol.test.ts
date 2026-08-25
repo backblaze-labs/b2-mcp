@@ -37,12 +37,22 @@ type VercelRequests = Awaited<ReturnType<typeof connectVercelClient>>["requests"
 
 function collectVercelToolsList(
   listed: Record<string, unknown>,
+  resourcesListed: Record<string, unknown>,
+  resourceTemplatesListed: Record<string, unknown>,
   discover: Record<string, unknown>,
   protocolVersion: string,
 ): CollectedToolList {
   return {
     tools: Array.isArray(listed.tools) ? (listed.tools as CollectedToolList["tools"]) : [],
     list: listed as CollectedToolList["list"],
+    resources: Array.isArray(resourcesListed.resources)
+      ? (resourcesListed.resources as CollectedToolList["resources"])
+      : [],
+    resourceTemplates: Array.isArray(resourceTemplatesListed.resourceTemplates)
+      ? (resourceTemplatesListed.resourceTemplates as CollectedToolList["resourceTemplates"])
+      : [],
+    resourcesList: resourcesListed as CollectedToolList["resourcesList"],
+    resourceTemplatesList: resourceTemplatesListed as CollectedToolList["resourceTemplatesList"],
     discover: discover as CollectedToolList["discover"],
     protocolVersion,
   };
@@ -61,12 +71,20 @@ async function collectModernVercelTools(client: VercelClient): Promise<{
     string,
     unknown
   >;
+  const resourcesListed = (await client.listResources(undefined, {
+    cacheMode: "refresh",
+  })) as Record<string, unknown>;
+  const resourceTemplatesListed = (await client.listResourceTemplates(undefined, {
+    cacheMode: "refresh",
+  })) as Record<string, unknown>;
 
   return {
     discover,
     listed,
     collected: collectVercelToolsList(
       listed,
+      resourcesListed,
+      resourceTemplatesListed,
       discover,
       client.getNegotiatedProtocolVersion() ?? "",
     ),
@@ -93,6 +111,10 @@ function expectStatelessModernRequests(requests: VercelRequests): void {
   expect(requests.every((record) => record.method === "POST")).toBe(true);
   expect(requests.some((record) => record.headers["mcp-method"] === "server/discover")).toBe(true);
   expect(requests.some((record) => record.headers["mcp-method"] === "tools/list")).toBe(true);
+  expect(requests.some((record) => record.headers["mcp-method"] === "resources/list")).toBe(true);
+  expect(
+    requests.some((record) => record.headers["mcp-method"] === "resources/templates/list"),
+  ).toBe(true);
   expect(requests.every((record) => record.headers["mcp-session-id"] === undefined)).toBe(true);
 }
 

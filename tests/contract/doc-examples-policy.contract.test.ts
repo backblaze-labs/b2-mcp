@@ -37,7 +37,7 @@ describe("documentation example validator policy", () => {
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:40");
+    expect(result.stderr).toContain("README.md:47");
     expect(result.stderr).toContain("@attacker/b2-mcp");
   });
 
@@ -70,7 +70,7 @@ describe("documentation example validator policy", () => {
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:149");
+    expect(result.stderr).toContain("README.md:156");
     expect(result.stderr).toContain("B2_HTTP_CREDENTIAL_MODE must be server");
   });
 
@@ -79,7 +79,7 @@ describe("documentation example validator policy", () => {
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:496");
+    expect(result.stderr).toContain("README.md:516");
     expect(result.stderr).toContain("has an unclosed Markdown code fence");
   });
 
@@ -97,7 +97,7 @@ describe("documentation example validator policy", () => {
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:499");
+    expect(result.stderr).toContain("README.md:519");
     expect(result.stderr).toContain("references missing package script missing-script");
   });
 });

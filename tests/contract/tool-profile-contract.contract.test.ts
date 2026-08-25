@@ -41,6 +41,40 @@ const biomeRunner = join(root, "scripts/run-biome.mjs");
 
 const profileNames = Object.keys(contract.profiles) as ProfileName[];
 const eras: Era[] = ["modern", "legacy"];
+const expectedResources = [
+  {
+    name: "b2_capability_summary",
+    uri: "b2://capabilities",
+    title: "B2 Capability Summary",
+    mimeType: "application/json",
+  },
+  {
+    name: "b2_destructive_policy",
+    uri: "b2://server/destructive-policy",
+    title: "B2 Destructive Policy",
+    mimeType: "application/json",
+  },
+  {
+    name: "b2_server_configuration",
+    uri: "b2://server/configuration",
+    title: "B2 Server Configuration",
+    mimeType: "application/json",
+  },
+  {
+    name: "b2_tool_profile",
+    uri: "b2://server/tool-profile",
+    title: "B2 Tool Profile",
+    mimeType: "application/json",
+  },
+];
+const expectedResourceTemplates = [
+  {
+    name: "b2_bucket_config",
+    uriTemplate: "b2://bucket/{bucketName}",
+    title: "B2 Bucket Configuration",
+    mimeType: "application/json",
+  },
+];
 
 async function listenOnEphemeralPort(handle: HttpServerHandle): Promise<number> {
   await new Promise<void>((resolve) => handle.server.listen(0, "127.0.0.1", resolve));
@@ -80,9 +114,21 @@ async function collectToolsList(profile: ProfileName, era: Era): Promise<Collect
     await client.connect(transport);
     const list = await client.listTools({}, { cacheMode: "refresh" });
     const tools = [...(list.tools ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+    const resourcesList =
+      era === "modern"
+        ? await client.listResources({}, { cacheMode: "refresh" })
+        : { resources: [] };
+    const resourceTemplatesList =
+      era === "modern"
+        ? await client.listResourceTemplates({}, { cacheMode: "refresh" })
+        : { resourceTemplates: [] };
     return {
       tools,
       list,
+      resources: [...(resourcesList.resources ?? [])],
+      resourceTemplates: [...(resourceTemplatesList.resourceTemplates ?? [])],
+      resourcesList,
+      resourceTemplatesList,
       protocolVersion:
         era === "modern" ? (client.getNegotiatedProtocolVersion() ?? "") : LEGACY_PROTOCOL_VERSION,
       discover: client.getDiscoverResult(),
@@ -273,8 +319,34 @@ describe("MCP tool profile invariants", () => {
     const fixture = fixtureFor(profile, "modern");
     expect(fixture.names).toEqual([...fixture.names].sort());
     expect(fixture.tools.map((tool) => tool.name)).toEqual(fixture.names);
+    expect(fixture.resourceNames).toEqual([...fixture.resourceNames].sort());
+    expect(fixture.resources.map((resource) => resource.name)).toEqual(fixture.resourceNames);
+    expect(fixture.resourceTemplateNames).toEqual([...fixture.resourceTemplateNames].sort());
+    expect(fixture.resourceTemplates.map((template) => template.name)).toEqual(
+      fixture.resourceTemplateNames,
+    );
     expect(fixture.counts).toEqual(countPrefixes(fixture.names));
     expect(fixture.counts).toEqual(contract.profiles[profile].counts);
+  });
+
+  it.each(profileNames)("%s captures the public resource surface", (profile) => {
+    const fixture = fixtureFor(profile, "modern");
+    expect(
+      fixture.resources.map(({ name, uri, title, mimeType }) => ({
+        name,
+        uri,
+        title,
+        mimeType,
+      })),
+    ).toEqual(expectedResources);
+    expect(
+      fixture.resourceTemplates.map(({ name, uriTemplate, title, mimeType }) => ({
+        name,
+        uriTemplate,
+        title,
+        mimeType,
+      })),
+    ).toEqual(expectedResourceTemplates);
   });
 
   it.each(profileNames)("%s declares required fields from the contract artifact", (profile) => {
@@ -365,6 +437,22 @@ describe("MCP tool profile invariants", () => {
           },
         );
       }
+      for (const resource of [...collected.resources, ...collected.resourceTemplates]) {
+        collectStrings(
+          {
+            title: resource.title,
+            description: resource.description,
+            mimeType: resource.mimeType,
+            annotations: resource.annotations,
+            _meta: resource._meta,
+          },
+          (value, path) => {
+            for (const { label, pattern } of unsafeModelVisibleTextPatterns) {
+              if (pattern.test(value)) violations.push(`${resource.name}:${path}:${label}`);
+            }
+          },
+        );
+      }
       expect(violations).toEqual([]);
     },
   );
@@ -422,6 +510,8 @@ describe("MCP advertised capability contract", () => {
     (profile) => {
       const fixture = fixtureFor(profile, "modern");
       expect(fixture.modern?.toolsListCacheHint).toEqual(contract.approvedCacheHint);
+      expect(fixture.modern?.resourcesListCacheHint).toEqual(contract.approvedCacheHint);
+      expect(fixture.modern?.resourceTemplatesListCacheHint).toEqual(contract.approvedCacheHint);
       expect(fixture.modern?.discover.ttlMs).toBe(contract.approvedCacheHint.ttlMs);
       expect(fixture.modern?.discover.cacheScope).toBe(contract.approvedCacheHint.cacheScope);
       expect(fixture.modern?.discover.supportedVersions).toEqual([contract.mcpRevision]);

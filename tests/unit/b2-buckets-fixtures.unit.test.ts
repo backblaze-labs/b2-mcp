@@ -132,7 +132,7 @@ describe("B2 bucket tools with deterministic native fake", () => {
       await tools.call("b2_get_bucket_notification_rules", { bucketId: "bucket-1" }),
     );
     expect(getResult.eventNotificationRules[0].targetConfiguration).toMatchObject({
-      url: "https://hooks.example.test/[redacted]",
+      url: "https://[redacted]",
       hmacSha256SigningSecret: "[redacted]",
       customHeaders: [{ name: "Authorization", value: "[redacted]" }],
     });
@@ -175,7 +175,7 @@ describe("B2 bucket tools with deterministic native fake", () => {
       ],
     });
     expect(setResult.eventNotificationRules[0].targetConfiguration).toMatchObject({
-      url: "https://hooks.example.test/[redacted]",
+      url: "https://[redacted]",
       hmacSha256SigningSecret: "[redacted]",
     });
   });

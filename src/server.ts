@@ -6,6 +6,8 @@ import {
   ResourceRegistrationAdapter,
   ToolRegistrationAdapter,
   type McpServer,
+  type ResourceReadCallback,
+  type ResourceTemplateReadCallback,
   type ToolCallback,
   type ToolRegistrar,
 } from "./mcp.js";
@@ -13,7 +15,7 @@ export { getRegisteredResources, getRegisteredTools } from "./mcp.js";
 import { z } from "zod";
 import type { B2Config, SecretSinkConfig } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
-import { isSanitizedMcpResponse, parseErrorText, toolError } from "./utils/errors.js";
+import { isSanitizedMcpResponse, parseB2Error, parseErrorText, toolError } from "./utils/errors.js";
 import {
   DEFAULT_MCP_OUTPUT_FORMAT,
   outputFormatInstructions,
@@ -326,6 +328,10 @@ export function createServer(
   const resourceRegistrar = new ResourceRegistrationAdapter(server, {
     shouldRegister: (name) =>
       isResourceEnabled(name, capsSet) && isResourceAllowedByOAuthScopes(name, oauthScopes),
+    wrapResourceCallback: (name, uri, callback) =>
+      createAuditedResourceCallback(name, uri, callback, config),
+    wrapResourceTemplateCallback: (name, uriTemplate, callback) =>
+      createAuditedResourceCallback(name, uriTemplate, callback, config),
   });
   registerB2Resources(resourceRegistrar, {
     config,
@@ -613,6 +619,86 @@ export async function fetchCapabilities(
   capabilityInflight.set(resolvedCacheKey, discovery);
 
   return [...(await discovery)];
+}
+
+type AnyResourceCallback = ResourceReadCallback | ResourceTemplateReadCallback;
+
+function resourceUriFromArgs(args: readonly unknown[]): string {
+  const uri = args[0];
+  if (uri instanceof URL) return uri.href;
+  if (uri && typeof uri === "object" && typeof (uri as { href?: unknown }).href === "string") {
+    return (uri as { href: string }).href;
+  }
+  return String(uri ?? "");
+}
+
+function sanitizedProviderErrorFields(
+  err: unknown,
+  sanitizerOptions: ReturnType<typeof sanitizerOptionsFromConfig>,
+) {
+  const parsed = parseB2Error(err);
+  const requestId = sanitizeProviderRequestId(parsed.requestId, sanitizerOptions);
+  return {
+    code: sanitizeProviderCode(parsed.code, sanitizerOptions),
+    status: parsed.status,
+    ...(requestId && { requestId }),
+  };
+}
+
+export function createAuditedResourceCallback<TCallback extends AnyResourceCallback>(
+  name: string,
+  uriPattern: string,
+  original: TCallback,
+  config: B2Config,
+): TCallback {
+  const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
+
+  return async function auditedResourceCallback(this: unknown, ...args: unknown[]) {
+    const start = Date.now();
+    const uri = resourceUriFromArgs(args);
+    const extra = args[args.length - 1] as any;
+    const sanitizerOptions = sanitizerOptionsFromConfig(config);
+    const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
+    try {
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error ? signal.reason : new Error("Request aborted");
+      }
+      const rawResult = await runWithMcpRequestSignal(signal, () =>
+        runWithSanitizerOptions(sanitizerOptions, () =>
+          (original as (...callbackArgs: unknown[]) => unknown).apply(this, args),
+        ),
+      );
+      const result = sanitizeMcpResponse(rawResult, sanitizerOptions);
+      logger.info(
+        {
+          resource: name,
+          uriPattern,
+          uri,
+          credential: keyFingerprint,
+          durationMs: Date.now() - start,
+          error: false,
+        },
+        "resource.read",
+      );
+      return result;
+    } catch (err) {
+      const safeErr = sanitizeError(err, sanitizerOptions);
+      logger.warn(
+        {
+          resource: name,
+          uriPattern,
+          uri,
+          credential: keyFingerprint,
+          durationMs: Date.now() - start,
+          error: true,
+          err: safeErr.message,
+          ...sanitizedProviderErrorFields(err, sanitizerOptions),
+        },
+        "resource.error",
+      );
+      throw safeErr;
+    }
+  } as TCallback;
 }
 
 /**

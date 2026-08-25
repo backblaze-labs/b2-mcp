@@ -131,6 +131,26 @@ export interface NormalizedTool {
   _meta?: JsonObject;
 }
 
+export interface NormalizedResource {
+  name: string;
+  uri: string;
+  title?: string;
+  descriptionSha256: string;
+  mimeType?: string;
+  annotations?: JsonObject;
+  _meta?: JsonObject;
+}
+
+export interface NormalizedResourceTemplate {
+  name: string;
+  uriTemplate: string;
+  title?: string;
+  descriptionSha256: string;
+  mimeType?: string;
+  annotations?: JsonObject;
+  _meta?: JsonObject;
+}
+
 export interface ToolFixture {
   contractVersion: number;
   issue: number;
@@ -146,8 +166,14 @@ export interface ToolFixture {
   requiredFields: Record<string, string[]>;
   confirmTools: string[];
   tools: NormalizedTool[];
+  resourceNames: string[];
+  resources: NormalizedResource[];
+  resourceTemplateNames: string[];
+  resourceTemplates: NormalizedResourceTemplate[];
   modern?: {
     toolsListCacheHint: { ttlMs: number; cacheScope: string };
+    resourcesListCacheHint: { ttlMs: number; cacheScope: string };
+    resourceTemplatesListCacheHint: { ttlMs: number; cacheScope: string };
     discover: {
       supportedVersions: string[];
       capabilities: JsonObject;
@@ -206,9 +232,43 @@ export interface RawToolPayload {
   _meta?: unknown;
 }
 
+export interface RawResourcePayload {
+  name?: string;
+  uri?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  annotations?: unknown;
+  _meta?: unknown;
+}
+
+export interface RawResourceTemplatePayload {
+  name?: string;
+  uriTemplate?: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  annotations?: unknown;
+  _meta?: unknown;
+}
+
 export interface CollectedToolList {
   tools: RawToolPayload[];
   list: { tools?: unknown; ttlMs?: number; cacheScope?: string; [key: string]: unknown };
+  resources: RawResourcePayload[];
+  resourceTemplates: RawResourceTemplatePayload[];
+  resourcesList: {
+    resources?: unknown;
+    ttlMs?: number;
+    cacheScope?: string;
+    [key: string]: unknown;
+  };
+  resourceTemplatesList: {
+    resourceTemplates?: unknown;
+    ttlMs?: number;
+    cacheScope?: string;
+    [key: string]: unknown;
+  };
   protocolVersion: string;
   discover?: {
     supportedVersions?: string[];
@@ -367,6 +427,37 @@ export function normalizeTool(tool: {
   return normalized;
 }
 
+export function normalizeResource(resource: RawResourcePayload): NormalizedResource {
+  const normalized: NormalizedResource = {
+    name: stringValue(resource.name, ""),
+    uri: stringValue(resource.uri, ""),
+    title: resource.title,
+    descriptionSha256: sha256(resource.description ?? ""),
+    mimeType: resource.mimeType,
+  };
+  if (resource.annotations !== undefined)
+    normalized.annotations = stable(resource.annotations) as JsonObject;
+  if (resource._meta !== undefined) normalized._meta = stable(resource._meta) as JsonObject;
+  return normalized;
+}
+
+export function normalizeResourceTemplate(
+  resourceTemplate: RawResourceTemplatePayload,
+): NormalizedResourceTemplate {
+  const normalized: NormalizedResourceTemplate = {
+    name: stringValue(resourceTemplate.name, ""),
+    uriTemplate: stringValue(resourceTemplate.uriTemplate, ""),
+    title: resourceTemplate.title,
+    descriptionSha256: sha256(resourceTemplate.description ?? ""),
+    mimeType: resourceTemplate.mimeType,
+  };
+  if (resourceTemplate.annotations !== undefined)
+    normalized.annotations = stable(resourceTemplate.annotations) as JsonObject;
+  if (resourceTemplate._meta !== undefined)
+    normalized._meta = stable(resourceTemplate._meta) as JsonObject;
+  return normalized;
+}
+
 export function requiredFieldsByTool(
   tools: Array<{ name: string; inputSchema?: { required?: string[] } }>,
 ): Record<string, string[]> {
@@ -411,8 +502,27 @@ export function destructiveConfirmToolsFromTools(
     .sort();
 }
 
-export function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {
-  return sha256(JSON.stringify({ names: fixture.names, tools: fixture.tools }));
+export function fixtureHash(
+  fixture: Pick<
+    ToolFixture,
+    | "names"
+    | "resourceNames"
+    | "resourceTemplateNames"
+    | "resourceTemplates"
+    | "resources"
+    | "tools"
+  >,
+): string {
+  return sha256(
+    JSON.stringify({
+      names: fixture.names,
+      tools: fixture.tools,
+      resourceNames: fixture.resourceNames,
+      resources: fixture.resources,
+      resourceTemplateNames: fixture.resourceTemplateNames,
+      resourceTemplates: fixture.resourceTemplates,
+    }),
+  );
 }
 
 function numberValue(value: unknown, fallback: number): number {
@@ -440,6 +550,12 @@ export function toolFixtureFromCollected({
 }: ToolFixtureFromCollectedOptions): ToolFixture {
   const tools = [...collected.tools].sort((a, b) => a.name.localeCompare(b.name));
   const names = tools.map((tool) => tool.name);
+  const resources = [...collected.resources].sort((a, b) =>
+    stringValue(a.name, "").localeCompare(stringValue(b.name, "")),
+  );
+  const resourceTemplates = [...collected.resourceTemplates].sort((a, b) =>
+    stringValue(a.name, "").localeCompare(stringValue(b.name, "")),
+  );
   const fixture: ToolFixture = {
     contractVersion,
     issue,
@@ -455,6 +571,10 @@ export function toolFixtureFromCollected({
     requiredFields: requiredFieldsByTool(tools),
     confirmTools: confirmToolsFrom(tools),
     tools: tools.map(normalizeTool),
+    resourceNames: resources.map((resource) => stringValue(resource.name, "")),
+    resources: resources.map(normalizeResource),
+    resourceTemplateNames: resourceTemplates.map((template) => stringValue(template.name, "")),
+    resourceTemplates: resourceTemplates.map(normalizeResourceTemplate),
     hash: "",
   };
 
@@ -464,6 +584,14 @@ export function toolFixtureFromCollected({
       toolsListCacheHint: {
         ttlMs: numberValue(collected.list.ttlMs, -1),
         cacheScope: stringValue(collected.list.cacheScope, ""),
+      },
+      resourcesListCacheHint: {
+        ttlMs: numberValue(collected.resourcesList.ttlMs, -1),
+        cacheScope: stringValue(collected.resourcesList.cacheScope, ""),
+      },
+      resourceTemplatesListCacheHint: {
+        ttlMs: numberValue(collected.resourceTemplatesList.ttlMs, -1),
+        cacheScope: stringValue(collected.resourceTemplatesList.cacheScope, ""),
       },
       discover: {
         supportedVersions: stringArrayValue(discover?.supportedVersions),

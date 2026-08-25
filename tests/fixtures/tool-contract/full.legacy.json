@@ -2027,9 +2027,13 @@
       }
     }
   ],
+  "resourceNames": [],
+  "resources": [],
+  "resourceTemplateNames": [],
+  "resourceTemplates": [],
   "legacy": {
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "d2303ac126434295689e1bc06d2adb7d07441e96f53e88f0813594bdfe5b4a71"
+  "hash": "e5ffa222ffe67347ce8b93a8cfb960db689efbadee2a6187ee0bc738757cecdf"
 }

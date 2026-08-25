@@ -180,8 +180,25 @@ type PendingResource = RegisteredStaticResourceRecord | RegisteredTemplateResour
 
 interface ResourceRegistrationAdapterOptions {
   shouldRegister?: (name: string) => boolean;
+  wrapResourceCallback?: (
+    name: string,
+    uri: string,
+    cb: ResourceReadCallback,
+  ) => ResourceReadCallback;
+  wrapResourceTemplateCallback?: (
+    name: string,
+    uriTemplate: string,
+    cb: ResourceTemplateReadCallback,
+  ) => ResourceTemplateReadCallback;
 }
 
+function resourceTemplatePattern(template: ResourceTemplate): string {
+  return String(template.uriTemplate);
+}
+
+// Intentionally mirrors ToolRegistrationAdapter's commit-time registry pattern.
+// Resource callbacks have static/template-specific SDK shapes and URI uniqueness
+// rules, so sharing the whole adapter would hide those differences.
 export class ResourceRegistrationAdapter implements ResourceRegistrar {
   private readonly pending: PendingResource[] = [];
   private readonly resources: Record<string, RegisteredStaticResourceRecord> = {};
@@ -206,13 +223,14 @@ export class ResourceRegistrationAdapter implements ResourceRegistrar {
       throw new Error(`Duplicate MCP resource registration: ${name}`);
     }
     if (this.resourceUris.has(uri)) throw new Error(`Duplicate MCP resource URI: ${uri}`);
+    const read = this.options.wrapResourceCallback?.(name, uri, cb) ?? cb;
 
     const record: RegisteredStaticResourceRecord = {
       kind: "resource",
       name,
       uri,
       metadata: config,
-      read: cb,
+      read,
     };
     this.resources[name] = record;
     this.resourceUris.add(uri);
@@ -230,13 +248,15 @@ export class ResourceRegistrationAdapter implements ResourceRegistrar {
     if (this.resources[name] || this.resourceTemplates[name]) {
       throw new Error(`Duplicate MCP resource registration: ${name}`);
     }
+    const uriTemplate = resourceTemplatePattern(template);
+    const read = this.options.wrapResourceTemplateCallback?.(name, uriTemplate, cb) ?? cb;
 
     const record: RegisteredTemplateResourceRecord = {
       kind: "template",
       name,
       resourceTemplate: template,
       metadata: config,
-      read: cb,
+      read,
     };
     this.resourceTemplates[name] = record;
     this.pending.push(record);

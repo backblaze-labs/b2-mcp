@@ -7,7 +7,6 @@ import {
   type BucketFilters,
   type CreateBucketOptions,
   type EventNotificationRuleInput,
-  type NotificationRulesResult,
   type ServerSideEncryptionInput,
   type UpdateBucketOptions,
 } from "./client.js";
@@ -15,39 +14,7 @@ import { B2Config } from "../utils/types.js";
 import { badRequest, toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { isTestRuntime } from "../utils/runtime.js";
-
-/**
- * Redact webhook secrets from a notification-rules API response before it reaches
- * the model — B2 echoes back hmacSha256SigningSecret and custom-header values on
- * get/set, and a prompt-injected model should not be able to read them.
- */
-function redactWebhookUrl(raw: string | undefined): string | undefined {
-  if (raw === undefined) return undefined;
-  try {
-    const u = new URL(raw);
-    return `${u.protocol}//${u.host}/[redacted]`;
-  } catch {
-    return "[redacted]";
-  }
-}
-
-function redactNotificationSecrets(result: NotificationRulesResult): NotificationRulesResult {
-  for (const rule of result.eventNotificationRules) {
-    const tc = rule.targetConfiguration;
-    tc.url = redactWebhookUrl(tc.url) ?? tc.url;
-    if (tc.hmacSha256SigningSecret) tc.hmacSha256SigningSecret = "[redacted]";
-    if (Array.isArray(tc.customHeaders)) {
-      tc.customHeaders = tc.customHeaders.map((h) =>
-        h && typeof h === "object" ? { ...h, value: "[redacted]" } : h,
-      );
-    } else if (tc.customHeaders && typeof tc.customHeaders === "object") {
-      tc.customHeaders = Object.fromEntries(
-        Object.keys(tc.customHeaders).map((k) => [k, "[redacted]"]),
-      );
-    }
-  }
-  return result;
-}
+import { redactNotificationSecrets, redactWebhookUrl } from "./notification-redaction.js";
 
 const NON_GLOBAL_IPV4_CIDRS: Array<[string, number]> = [
   ["0.0.0.0", 8],
