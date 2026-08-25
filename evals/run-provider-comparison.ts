@@ -1,7 +1,7 @@
 import { CI_PROVIDER_COMPARISON_EVAL_CASES, FULL_PROFILE_EVAL_CASES } from "./cases";
 import {
-  CLAUDE_OPENAI_PROVIDERS,
-  claudeOpenAIComparisonEvalGate,
+  providerPassRateEvalGate,
+  providersWithConfiguredKeys,
   runProviderPassRateComparison,
 } from "./provider-comparison";
 import { assertProviderPassRateComparisonForCli } from "./provider-comparison-cli";
@@ -13,23 +13,26 @@ import {
 } from "./provider-pass-rate-report";
 
 async function main(): Promise<void> {
-  const comparisonGate = claudeOpenAIComparisonEvalGate();
-  if (!comparisonGate.enabled) {
-    throw new Error(`Claude vs OpenAI comparison gate disabled: ${comparisonGate.reason}`);
+  const gate = providerPassRateEvalGate();
+  if (!gate.enabled) {
+    throw new Error(`Provider pass-rate gate disabled: ${gate.reason}`);
   }
 
+  // Run whichever providers have a key configured. OpenAI is currently unconfigured
+  // (no account credits), so this resolves to an Anthropic-only run until it returns.
+  const providers = providersWithConfiguredKeys();
   const cases = selectProviderComparisonCases({
     full: FULL_PROFILE_EVAL_CASES,
     "ci-no-b2": CI_PROVIDER_COMPARISON_EVAL_CASES,
   });
   const comparison = await runProviderPassRateComparison({
     cases,
-    providers: CLAUDE_OPENAI_PROVIDERS,
+    providers,
   });
   const report = createProviderPassRateReport({
     comparison,
     cases,
-    providers: CLAUDE_OPENAI_PROVIDERS,
+    providers,
   });
   writeProviderPassRateReport(
     process.env[PROVIDER_PASS_RATE_REPORT_ENV] ?? "reports/evals/provider-pass-rates.json",

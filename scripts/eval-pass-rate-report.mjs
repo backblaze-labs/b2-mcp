@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const PROVIDER_SECRET_ENV_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
-const EXPECTED_PROVIDER_NAMES = ["Claude", "OpenAI"];
+const ALLOWED_PROVIDER_NAMES = new Set(["Claude", "OpenAI"]);
+const ALLOWED_PROVIDER_LABEL = "Claude or OpenAI";
 const RESULT_STATUSES = new Set(["passed", "failed", "errored"]);
 const PASS_RATE_TOLERANCE = 1e-12;
 const REPORT_KEYS = new Set([
@@ -78,19 +79,22 @@ export function validateProviderPassRateReport(report) {
   if (!Array.isArray(report.providers)) {
     fail("report.providers must be an array");
   }
-  if (report.providers.length !== EXPECTED_PROVIDER_NAMES.length) {
-    fail("report.providers must contain exactly one Claude and one OpenAI entry");
+  if (report.providers.length === 0) {
+    fail("report.providers must contain at least one provider entry");
   }
-  const providerCounts = new Map(EXPECTED_PROVIDER_NAMES.map((provider) => [provider, 0]));
+  const seenProviders = new Set();
   for (const [index, provider] of report.providers.entries()) {
     const path = `report.providers[${index}]`;
     if (!isRecord(provider)) fail(`${path} must be an object`);
     assertAllowedKeys(provider, PROVIDER_KEYS, path);
     assertString(provider.provider, `${path}.provider`);
-    if (!providerCounts.has(provider.provider)) {
-      fail(`${path}.provider must be Claude or OpenAI`);
+    if (!ALLOWED_PROVIDER_NAMES.has(provider.provider)) {
+      fail(`${path}.provider must be ${ALLOWED_PROVIDER_LABEL}`);
     }
-    providerCounts.set(provider.provider, providerCounts.get(provider.provider) + 1);
+    if (seenProviders.has(provider.provider)) {
+      fail(`${path}.provider is duplicated; each provider may appear once`);
+    }
+    seenProviders.add(provider.provider);
     assertString(provider.model, `${path}.model`);
     assertNonNegativeInteger(provider.passed, `${path}.passed`);
     assertNonNegativeInteger(provider.total, `${path}.total`);
@@ -102,20 +106,18 @@ export function validateProviderPassRateReport(report) {
       fail(`${path}.passRate must equal passed / total`);
     }
   }
-  for (const [provider, count] of providerCounts) {
-    if (count !== 1) fail(`report.providers must contain exactly one ${provider} entry`);
-  }
-
   if (!Array.isArray(report.results)) fail("report.results must be an array");
   const resultCountsByProvider = new Map(
-    EXPECTED_PROVIDER_NAMES.map((provider) => [provider, { passed: 0, total: 0 }]),
+    report.providers.map((provider) => [provider.provider, { passed: 0, total: 0 }]),
   );
   for (const [index, result] of report.results.entries()) {
     const path = `report.results[${index}]`;
     if (!isRecord(result)) fail(`${path} must be an object`);
     assertString(result.provider, `${path}.provider`);
     const providerResultCounts = resultCountsByProvider.get(result.provider);
-    if (!providerResultCounts) fail(`${path}.provider must be Claude or OpenAI`);
+    if (!providerResultCounts) {
+      fail(`${path}.provider must be a declared provider (${ALLOWED_PROVIDER_LABEL})`);
+    }
     assertString(result.caseName, `${path}.caseName`);
     if (!RESULT_STATUSES.has(result.status)) fail(`${path}.status is invalid`);
     assertAllowedKeys(result, RESULT_KEYS_BY_STATUS[result.status], path);
@@ -170,7 +172,7 @@ export function validateReportFile(path, options = {}) {
 export function renderPassRateSummaryMarkdown(report) {
   validateProviderPassRateReport(report);
   const lines = [
-    "## Claude vs OpenAI pass rates",
+    `## ${report.providers.map((provider) => provider.provider).join(" vs ")} pass rates`,
     "",
     report.summary,
     "",

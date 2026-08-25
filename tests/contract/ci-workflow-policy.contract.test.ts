@@ -411,7 +411,9 @@ describe("CI workflow policy", () => {
     expect(guard).toContain("workflow_dispatch|schedule");
     expect(guard).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
     expect(guard).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    expect(guard).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    // OpenAI is temporarily disabled (no account credits); the guard requires
+    // Anthropic only and must not reference the OpenAI secret.
+    expect(guard).not.toContain("OPENAI_API_KEY");
     expect(guard).toContain("::add-mask::");
     expect(guard).toContain("should_run=false");
     expect(guard).toContain("missing provider secret(s)");
@@ -427,16 +429,17 @@ describe("CI workflow policy", () => {
     expect(evalJob).toContain("persist-credentials: false");
   });
 
-  it("uploads bounded Claude-vs-OpenAI pass-rate artifacts without B2 secrets", () => {
+  it("uploads bounded Claude pass-rate artifacts without B2 secrets", () => {
     const evalJob = workflowJobBlock(evals, "evals") ?? "";
-    const run = workflowStepBlock(evals, "Run Claude vs OpenAI eval comparison");
+    const run = workflowStepBlock(evals, "Run Claude eval pass rates");
     const validate = workflowStepBlock(evals, "Validate pass-rate report");
     const summary = workflowStepBlock(evals, "Publish pass-rate summary");
-    const upload = workflowStepBlock(evals, "Upload Claude vs OpenAI pass-rate report");
-    const requireSuccess = workflowStepBlock(evals, "Require eval comparison success");
+    const upload = workflowStepBlock(evals, "Upload Claude pass-rate report");
+    const requireSuccess = workflowStepBlock(evals, "Require eval pass-rate success");
     const secretRefs = [...evals.matchAll(/secrets\.([A-Z0-9_]+)/g)].map((match) => match[1]);
 
-    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+    // OpenAI disabled (no account credits): Anthropic is the only provider secret.
+    expect([...new Set(secretRefs)].sort()).toEqual(["ANTHROPIC_API_KEY"]);
     expect(packageJson.scripts?.["evals:provider-comparison"]).toBe(
       "tsx evals/run-provider-comparison.ts",
     );
@@ -448,7 +451,7 @@ describe("CI workflow policy", () => {
     expect(run).toContain('RUN_LLM_EVALS: "1"');
     expect(run).toContain('RUN_LLM_PROVIDER_COMPARISON: "1"');
     expect(run).toContain("ANTHROPIC_EVAL_MODEL: claude-haiku-4-5-20251001");
-    expect(run).toContain("OPENAI_EVAL_MODEL: gpt-5-nano");
+    expect(run).not.toContain("OPENAI");
     expect(run).toContain("LLM_EVAL_CASE_SET: ci-no-b2");
     expect(run).toContain('LLM_EVAL_CASE_LIMIT: "5"');
     expect(run).toContain('LLM_EVAL_BLOCK_SERVER_NETWORK: "1"');
@@ -462,7 +465,7 @@ describe("CI workflow policy", () => {
     expect(validate).toContain("id: validate_report");
     expect(validate).toContain("if: always()");
     expect(validate).toContain("ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}");
-    expect(validate).toContain("OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}");
+    expect(validate).not.toContain("OPENAI_API_KEY");
     expect(validate).toContain(
       "node scripts/eval-pass-rate-report.mjs validate reports/evals/provider-pass-rates.json",
     );
@@ -470,9 +473,9 @@ describe("CI workflow policy", () => {
     expect(summary).toContain(
       'node scripts/eval-pass-rate-report.mjs summary reports/evals/provider-pass-rates.json >> "$GITHUB_STEP_SUMMARY"',
     );
-    expect(evalJob).toContain("Claude vs OpenAI pass rates");
+    expect(evalJob).toContain("Claude pass rates");
     expect(upload).toContain("steps.validate_report.outcome == 'success'");
-    expect(upload).toContain("claude-openai-pass-rate-report");
+    expect(upload).toContain("claude-pass-rate-report");
     expect(upload).toContain("path: reports/evals/provider-pass-rates.json");
     expect(upload).toContain("if-no-files-found: error");
     expect(requireSuccess).toContain("steps.run_evals.outcome != 'success'");

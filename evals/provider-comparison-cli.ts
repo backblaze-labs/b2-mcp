@@ -4,7 +4,7 @@ import {
 } from "./provider-comparison";
 
 export const PROVIDER_COMPARISON_ASSERTION_FAILURE_MESSAGE =
-  "Claude vs OpenAI eval comparison failed policy checks; see the sanitized pass-rate report artifact.";
+  "Provider eval pass-rate checks failed policy checks; see the sanitized pass-rate report artifact.";
 
 export function assertProviderPassRateComparisonForCli(
   comparison: ProviderPassRateComparison,

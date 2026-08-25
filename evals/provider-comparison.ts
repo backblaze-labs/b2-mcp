@@ -81,6 +81,42 @@ export const CLAUDE_OPENAI_PROVIDERS: readonly EvalProvider[] = [
   { name: "OpenAI", model: openAIEvalModel, createDriver: createOpenAIDriver },
 ];
 
+// Maps each known provider to the API-key env var that must be present to run it.
+// Lets the pass-rate runner degrade to whichever providers are actually configured
+// (e.g. Anthropic-only while OpenAI billing is unavailable).
+const PROVIDER_KEY_ENV: Readonly<Record<string, string>> = {
+  Claude: ANTHROPIC_API_KEY_ENV,
+  OpenAI: OPENAI_API_KEY_ENV,
+};
+
+export function providersWithConfiguredKeys(
+  providers: readonly EvalProvider[] = CLAUDE_OPENAI_PROVIDERS,
+  env: NodeJS.ProcessEnv = process.env,
+): readonly EvalProvider[] {
+  return providers.filter((provider) => {
+    const keyEnv = PROVIDER_KEY_ENV[provider.name];
+    return keyEnv ? Boolean(env[keyEnv]) : false;
+  });
+}
+
+// Gate for the pass-rate CLI runner. Unlike the strict two-provider comparison gate,
+// this enables the run as long as RUN_LLM_PROVIDER_COMPARISON=1 and at least one
+// known provider key is configured, so the runner covers the providers that are live.
+export function providerPassRateEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGate {
+  const sharedGate = llmEvalGate(env);
+  if (!sharedGate.enabled) return sharedGate;
+  if (env[PROVIDER_COMPARISON_EVAL_ENV] !== "1") {
+    return { enabled: false, reason: `${PROVIDER_COMPARISON_EVAL_ENV} is not 1` };
+  }
+  if (providersWithConfiguredKeys(CLAUDE_OPENAI_PROVIDERS, env).length === 0) {
+    return {
+      enabled: false,
+      reason: `missing provider key(s) (${ANTHROPIC_API_KEY_ENV} or ${OPENAI_API_KEY_ENV})`,
+    };
+  }
+  return { enabled: true };
+}
+
 export function claudeOpenAIComparisonEvalGate(env: NodeJS.ProcessEnv = process.env): EvalGate {
   const sharedGate = llmEvalGate(env);
   if (!sharedGate.enabled) return sharedGate;
@@ -109,8 +145,8 @@ export async function runProviderPassRateComparison(options: {
   if (options.cases.length === 0) {
     throw new Error("Provider comparison requires at least one eval case.");
   }
-  if (options.providers.length < 2) {
-    throw new Error("Provider comparison requires at least two providers.");
+  if (options.providers.length === 0) {
+    throw new Error("Provider comparison requires at least one provider.");
   }
 
   const runEvalImpl = options.runEvalImpl ?? runEval;

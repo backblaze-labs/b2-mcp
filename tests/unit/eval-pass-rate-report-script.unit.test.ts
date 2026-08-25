@@ -74,7 +74,42 @@ describe("eval pass-rate report script", () => {
     expect(validation.stderr).not.toContain("sk-proj-secret123456789");
   });
 
-  it("requires exactly one Claude and one OpenAI provider", () => {
+  it("validates a single configured provider (Anthropic-only)", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          providers: [
+            {
+              provider: "Claude",
+              model: "claude-haiku-4-5-20251001",
+              passed: 1,
+              total: 1,
+              passRate: 1,
+            },
+          ],
+          summary:
+            "Pass-rate comparison (Claude) across 1 shared case(s): Claude: 1/1 (100.0%).",
+          results: [
+            { provider: "Claude", caseName: "blocked delete bucket", status: "passed", passed: true },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+    const summary = runScript("summary", path);
+
+    expect(validation.status).toBe(0);
+    expect(summary.status).toBe(0);
+    expect(summary.stdout).toContain("## Claude pass rates");
+    expect(summary.stdout).toContain("| Claude | claude-haiku-4-5-20251001 | 1 | 1 | 100.0% |");
+    expect(summary.stdout).not.toContain("OpenAI");
+  });
+
+  it("rejects providers outside the allowed set", () => {
     const path = tempReportPath();
     writeFileSync(
       path,
@@ -82,6 +117,9 @@ describe("eval pass-rate report script", () => {
         report({
           providers: [
             { provider: "Other", model: "other-model", passed: 1, total: 1, passRate: 1 },
+          ],
+          results: [
+            { provider: "Other", caseName: "blocked delete bucket", status: "passed", passed: true },
           ],
         }),
       )}\n`,
@@ -91,7 +129,43 @@ describe("eval pass-rate report script", () => {
     const validation = runScript("validate", path);
 
     expect(validation.status).not.toBe(0);
-    expect(validation.stderr).toContain("exactly one Claude and one OpenAI");
+    expect(validation.stderr).toContain("must be Claude or OpenAI");
+  });
+
+  it("rejects duplicate provider entries", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          providers: [
+            {
+              provider: "Claude",
+              model: "claude-haiku-4-5-20251001",
+              passed: 1,
+              total: 1,
+              passRate: 1,
+            },
+            {
+              provider: "Claude",
+              model: "claude-haiku-4-5-20251001",
+              passed: 1,
+              total: 1,
+              passRate: 1,
+            },
+          ],
+          results: [
+            { provider: "Claude", caseName: "blocked delete bucket", status: "passed", passed: true },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+
+    expect(validation.status).not.toBe(0);
+    expect(validation.stderr).toContain("is duplicated");
   });
 
   it("rejects provider rates that do not match case totals", () => {
