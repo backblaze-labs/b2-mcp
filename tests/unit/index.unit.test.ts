@@ -3,14 +3,20 @@ import { spawnSync } from "child_process";
 import * as http from "http";
 import type { AddressInfo } from "net";
 import * as path from "path";
+import { helpText } from "../../src/cli";
 import { CredentialResolutionError } from "../../src/credentials";
-import { startStdio } from "../../src/index";
+import * as packageRoot from "../../src/index";
 import * as serverModule from "../../src/server";
-import { logger } from "../../src/utils/logger";
+import * as loggerModule from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
+import { VERSION } from "../../src/version";
 
 vi.mock("@modelcontextprotocol/server/stdio", () => ({
   serveStdio: vi.fn(),
+}));
+
+vi.mock("../../src/http-server.js", () => ({
+  startHttp: vi.fn(),
 }));
 
 const credentialEnvKeys = [
@@ -21,6 +27,30 @@ const credentialEnvKeys = [
   "B2_MASTER_KEY_ID",
   "B2_MASTER_KEY",
 ] as const;
+
+const transportEnvKeys = ["B2_MCP_TRANSPORT"] as const;
+const executableEnvKeys = [...credentialEnvKeys, ...transportEnvKeys] as const;
+const { startStdio } = packageRoot;
+
+type IndexTestSeams = {
+  runCli(argv?: string[]): Promise<void>;
+  handleCliError(err: unknown): never;
+};
+
+function indexTestSeams(): IndexTestSeams {
+  const seams = (globalThis as typeof globalThis & { __b2McpIndexTestSeams?: IndexTestSeams })
+    .__b2McpIndexTestSeams;
+  if (!seams) throw new Error("index test seams were not installed");
+  return seams;
+}
+
+async function runMain(argv: string[]): Promise<void> {
+  try {
+    await indexTestSeams().runCli(argv);
+  } catch (err) {
+    indexTestSeams().handleCliError(err);
+  }
+}
 
 const tsxBin = path.join(
   process.cwd(),
@@ -49,7 +79,7 @@ function testConfig(): B2Config {
 
 function executableEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: "test" };
-  for (const key of credentialEnvKeys) delete env[key];
+  for (const key of executableEnvKeys) delete env[key];
   delete env.FORCE_COLOR;
   delete env.NO_COLOR;
   return { ...env, ...overrides };
@@ -93,7 +123,7 @@ describe("stdio entry point", () => {
           close: vi.fn(async () => undefined),
         }) as ReturnType<typeof stdioTransport.serveStdio>,
     );
-    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
 
     await startStdio();
 
@@ -117,6 +147,7 @@ describe("stdio entry point", () => {
         "capability_upstream_unavailable",
       ),
     );
+    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
     const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
       () =>
         ({
@@ -129,6 +160,19 @@ describe("stdio entry point", () => {
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
     expect(createServer).toHaveBeenCalledWith(config, null);
+    expect(warn).toHaveBeenCalledWith(
+      { code: "capability_upstream_unavailable" },
+      "capability.fetch.stdio_degraded",
+    );
+  });
+
+  it("rethrows unexpected capability lookup failures", async () => {
+    const config = testConfig();
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockRejectedValue(new Error("authorize failed"));
+
+    await expect(startStdio()).rejects.toThrow("authorize failed");
+    expect(stdioTransport.serveStdio).not.toHaveBeenCalled();
   });
 
   it("writes the missing-credential message and exits non-zero", async () => {
@@ -142,6 +186,125 @@ describe("stdio entry point", () => {
     expect(stderr).toHaveBeenCalledWith(
       "b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio\n",
     );
+  });
+});
+
+describe("package root surface", () => {
+  it("exports only the supported startStdio API", () => {
+    expect(Object.keys(packageRoot).sort()).toEqual(["startStdio"]);
+  });
+});
+
+describe("CLI dispatch", () => {
+  let stdout: ReturnType<typeof vi.spyOn>;
+  let savedTransportEnv: Record<(typeof transportEnvKeys)[number], string | undefined>;
+
+  beforeEach(() => {
+    savedTransportEnv = Object.fromEntries(
+      transportEnvKeys.map((key) => [key, process.env[key]]),
+    ) as Record<(typeof transportEnvKeys)[number], string | undefined>;
+    for (const key of transportEnvKeys) delete process.env[key];
+    stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    for (const key of transportEnvKeys) {
+      const value = savedTransportEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it("prints help without starting a transport", async () => {
+    const loadConfig = vi.spyOn(serverModule, "loadConfig");
+
+    await indexTestSeams().runCli(["--help"]);
+
+    expect(stdout).toHaveBeenCalledWith(`${helpText()}\n`);
+    expect(loadConfig).not.toHaveBeenCalled();
+  });
+
+  it("prints the package version without starting a transport", async () => {
+    const loadConfig = vi.spyOn(serverModule, "loadConfig");
+
+    await indexTestSeams().runCli(["--version"]);
+
+    expect(stdout).toHaveBeenCalledWith(`${VERSION}\n`);
+    expect(loadConfig).not.toHaveBeenCalled();
+  });
+
+  it("dispatches HTTP transport through the dynamic import seam", async () => {
+    const httpServer = await import("../../src/http-server.js");
+    const startHttp = vi.mocked(httpServer.startHttp).mockResolvedValue(undefined);
+
+    await indexTestSeams().runCli(["http", "--port", "4321"]);
+
+    expect(startHttp).toHaveBeenCalledWith({ port: 4321 });
+  });
+
+  it("dispatches stdio by default", async () => {
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    await indexTestSeams().runCli([]);
+
+    expect(stdioTransport.serveStdio).toHaveBeenCalledOnce();
+  });
+});
+
+describe("CLI fatal-error handler", () => {
+  let stderr: ReturnType<typeof vi.spyOn>;
+  let exit: ReturnType<typeof vi.spyOn>;
+  let flushLogsSync: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    exit = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      throw Object.assign(new Error(`process.exit(${code})`), { exitCode: code });
+    }) as typeof process.exit);
+    flushLogsSync = vi.spyOn(loggerModule, "flushLogsSync").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    ["CLI usage", ["--transport", "sse"]],
+    ["port usage", ["http", "--port", "nope"]],
+  ])("exits with code 2 for %s errors", async (_name, argv) => {
+    await expect(runMain(argv)).rejects.toThrow("process.exit(2)");
+
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("b2-mcp: "));
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("\n\nUsage: b2-mcp"));
+    expect(flushLogsSync).toHaveBeenCalledOnce();
+    expect(exit).toHaveBeenCalledWith(2);
+  });
+
+  it("logs fatal and exits with code 1 for generic startup errors", async () => {
+    const fatal = vi.spyOn(loggerModule.logger, "fatal").mockImplementation(() => undefined);
+    vi.spyOn(serverModule, "loadConfig").mockImplementation(() => {
+      throw new Error("startup failed");
+    });
+
+    await expect(runMain(["stdio"])).rejects.toThrow("process.exit(1)");
+
+    expect(stderr).toHaveBeenCalledWith("b2-mcp: startup failed\n");
+    expect(fatal).toHaveBeenCalledWith({ err: "startup failed" }, "server.fatal");
+    expect(flushLogsSync).toHaveBeenCalledOnce();
+    expect(exit).toHaveBeenCalledWith(1);
   });
 });
 

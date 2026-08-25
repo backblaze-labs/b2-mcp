@@ -31,10 +31,18 @@ import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import { bootstrapErrorMessage } from "./utils/secret-sanitizer.js";
 import { VERSION } from "./version.js";
 
+type IndexTestSeams = {
+  runCli(argv?: string[]): Promise<void>;
+  handleCliError(err: unknown): never;
+};
+
+type GlobalWithIndexTestSeams = typeof globalThis & {
+  __b2McpIndexTestSeams?: IndexTestSeams;
+};
+
 export async function startStdio(): Promise<void> {
   initLogging();
   const config = serverModule.loadConfig();
-  // Right-size the surface to the key's capabilities (null → full surface).
   let capabilities: string[] | null;
   try {
     capabilities = await serverModule.fetchCapabilities(config);
@@ -84,18 +92,25 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
   await startStdio();
 }
 
-// Only run when invoked directly (not when imported by tests).
-if (require.main === module) {
-  runCli().catch((err) => {
-    const message = bootstrapErrorMessage(err);
-    if (err instanceof CliUsageError || err instanceof PortUsageError) {
-      process.stderr.write(`b2-mcp: ${message}\n\n${helpText()}\n`);
-      flushLogsSync();
-      process.exit(2);
-    }
-    process.stderr.write(`b2-mcp: ${message}\n`);
-    logger.fatal({ err: message }, "server.fatal");
+function handleCliError(err: unknown): never {
+  const message = bootstrapErrorMessage(err);
+  if (err instanceof CliUsageError || err instanceof PortUsageError) {
+    process.stderr.write(`b2-mcp: ${message}\n\n${helpText()}\n`);
     flushLogsSync();
-    process.exit(1);
-  });
+    process.exit(2);
+  }
+  process.stderr.write(`b2-mcp: ${message}\n`);
+  logger.fatal({ err: message }, "server.fatal");
+  flushLogsSync();
+  process.exit(1);
+}
+
+/* v8 ignore next 3 */
+if (require.main === module) {
+  void runCli().catch(handleCliError);
+}
+
+/* v8 ignore next 3 */
+if (process.env.NODE_ENV === "test") {
+  (globalThis as GlobalWithIndexTestSeams).__b2McpIndexTestSeams = { runCli, handleCliError };
 }
