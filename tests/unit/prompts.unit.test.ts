@@ -199,6 +199,22 @@ describe("B2 workflow MCP prompts", () => {
     expect(text).toContain("[redacted]");
   });
 
+  it("requires lifecycle updates to preserve the complete configuration", async () => {
+    const server = createServer(testConfig);
+    const prompts = getRegisteredPrompts(server) ?? {};
+    const result: any = await prompts["b2-configure-lifecycle-cost-optimization"].execute(
+      sampleArgs["b2-configure-lifecycle-cost-optimization"],
+      {},
+    );
+    const text = promptText(result);
+
+    expect(text).toContain("complete replacement lifecycle configuration");
+    expect(text).toContain("current rules plus the proposed optimization rule");
+    expect(text).toContain("cannot be reconstructed exactly");
+    expect(text).toContain("stay plan-only");
+    expect(text).toContain("every preserved rule and changed rule");
+  });
+
   it("preserves resource identifiers that resemble unlabeled secret shapes", async () => {
     const server = createServer(testConfig);
     const prompts = getRegisteredPrompts(server) ?? {};
