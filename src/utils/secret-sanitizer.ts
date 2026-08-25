@@ -56,10 +56,16 @@ const SECRET_HEADER_NAMES = new Set([
 const SECRET_ENV_VAR_NAMES = new Set([
   "AWS_SECRET_ACCESS_KEY",
   "B2_APP_KEY",
-  "B2_APP_KEY_ID",
   "B2_APPLICATION_KEY",
-  "B2_APPLICATION_KEY_ID",
   "B2_MASTER_KEY",
+]);
+
+// Key-ID env values are credential handles: redacted from logs and the
+// bootstrap fatal path (like LOGGER_SECRET_FIELD_NAMES), but intentionally
+// preserved in MCP output, where tools such as b2_list_keys return key IDs.
+const SECRET_KEY_ID_ENV_VAR_NAMES = new Set([
+  "B2_APP_KEY_ID",
+  "B2_APPLICATION_KEY_ID",
   "B2_MASTER_KEY_ID",
 ]);
 
@@ -187,7 +193,15 @@ function isSecretEnvName(name: string): boolean {
   const upper = name.toUpperCase();
   return (
     SECRET_ENV_VAR_NAMES.has(upper) ||
-    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)(?:_ID)?$/.test(upper)
+    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)$/.test(upper)
+  );
+}
+
+function isSecretKeyIdEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return (
+    SECRET_KEY_ID_ENV_VAR_NAMES.has(upper) ||
+    /^B2_CREDENTIAL_[A-Z0-9_]+_(?:APP_KEY|APPLICATION_KEY|MASTER_KEY)_ID$/.test(upper)
   );
 }
 
@@ -196,6 +210,24 @@ function configuredSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): st
     .filter(([name]) => isSecretEnvName(name))
     .map(([, value]) => secretCandidate(value))
     .filter((value): value is string => value !== null);
+}
+
+/** Configured key-ID env values, for log-only and bootstrap exact redaction. */
+function keyIdSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  return Object.entries(env)
+    .filter(([name]) => isSecretKeyIdEnvName(name))
+    .map(([, value]) => secretCandidate(value))
+    .filter((value): value is string => value !== null);
+}
+
+/** Add configured key-ID env values to options for log/bootstrap sanitization. */
+function withKeyIdLogSecrets(options: SanitizerOptions): SanitizerOptions {
+  const keyIds = keyIdSecretValuesFromEnv(options.env);
+  if (keyIds.length === 0) return options;
+  return {
+    ...options,
+    secrets: [...(options.secrets ? [...options.secrets] : []), ...keyIds],
+  };
 }
 
 export function configuredSecretValuesFromConfig(config?: SanitizerSecretConfig): string[] {
@@ -271,7 +303,11 @@ export function redactExactTextSecrets(text: string, secrets: readonly string[])
 }
 
 export function bootstrapErrorMessage(err: unknown): string {
-  return sanitizeText(err instanceof Error ? err.message : String(err));
+  try {
+    return sanitizeText(err instanceof Error ? err.message : String(err), withKeyIdLogSecrets({}));
+  } catch {
+    return LOG_SANITIZER_FAILURE;
+  }
 }
 
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
@@ -282,7 +318,7 @@ export function sanitizeStructuredLogValue(
   value: unknown,
   options: SanitizerOptions = {},
 ): unknown {
-  return sanitizeValue(value, [], new WeakSet<object>(), options, "log");
+  return sanitizeValue(value, [], new WeakSet<object>(), withKeyIdLogSecrets(options), "log");
 }
 
 function sanitizeValue(
@@ -423,12 +459,13 @@ export function sanitizeMcpResponse<T>(response: T, options: SanitizerOptions = 
 }
 
 export function sanitizeError(err: unknown, options: SanitizerOptions = {}): Error {
+  const logOptions = withKeyIdLogSecrets(options);
   if (err instanceof Error) {
     const seen = new WeakSet<object>();
     seen.add(err);
-    return sanitizeErrorForLog(err, seen, options);
+    return sanitizeErrorForLog(err, seen, logOptions);
   }
-  return new Error(sanitizeText(String(err), options));
+  return new Error(sanitizeText(String(err), logOptions));
 }
 
 function sanitizedIdentifier(

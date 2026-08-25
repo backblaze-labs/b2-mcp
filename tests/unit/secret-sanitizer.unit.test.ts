@@ -713,14 +713,22 @@ describe("secret sanitizer canary policy", () => {
     expect(safeErrorText(nullProto, [])).toBe(LOG_SANITIZER_FAILURE);
   });
 
-  it("redacts configured B2 key-ID env values from text", () => {
+  it("redacts configured key-ID env values in logs but keeps them in MCP output", () => {
     const keyId = "005abcdef0000000000000010";
-    expect(
-      sanitizeText(`startup failed for ${keyId}`, { env: { B2_APPLICATION_KEY_ID: keyId } }),
-    ).toBe(`startup failed for ${SECRET_SANITIZER_REDACTION}`);
-    expect(
-      sanitizeText(`credential ${keyId}`, { env: { B2_CREDENTIAL_TENANT_MASTER_KEY_ID: keyId } }),
-    ).toBe(`credential ${SECRET_SANITIZER_REDACTION}`);
+    const env = { B2_APPLICATION_KEY_ID: keyId };
+    const credentialEnv = { B2_CREDENTIAL_TENANT_MASTER_KEY_ID: keyId };
+
+    // Log-mode text redacts the configured key-ID value.
+    expect(sanitizeStructuredLogValue(`startup failed for ${keyId}`, { env })).toBe(
+      `startup failed for ${SECRET_SANITIZER_REDACTION}`,
+    );
+    expect(sanitizeStructuredLogValue(`credential ${keyId}`, { env: credentialEnv })).toBe(
+      `credential ${SECRET_SANITIZER_REDACTION}`,
+    );
+
+    // MCP output keeps key IDs (b2_list_keys returns them); default text too.
+    expect(sanitizeForMcpOutput(`key ${keyId}`, { env })).toBe(`key ${keyId}`);
+    expect(sanitizeText(`key ${keyId}`, { env })).toBe(`key ${keyId}`);
   });
 
   it("redacts configured key-ID env values from bootstrap fatal text", () => {
@@ -735,5 +743,18 @@ describe("secret sanitizer canary policy", () => {
       if (previous === undefined) delete process.env.B2_MASTER_KEY_ID;
       else process.env.B2_MASTER_KEY_ID = previous;
     }
+  });
+
+  it("returns the sentinel when bootstrap message coercion throws", () => {
+    const nullProto = Object.create(null) as object;
+    expect(bootstrapErrorMessage(nullProto)).toBe(LOG_SANITIZER_FAILURE);
+
+    const throwingMessage = new Error("placeholder");
+    Object.defineProperty(throwingMessage, "message", {
+      get() {
+        throw new Error("message accessor failed");
+      },
+    });
+    expect(bootstrapErrorMessage(throwingMessage)).toBe(LOG_SANITIZER_FAILURE);
   });
 });
