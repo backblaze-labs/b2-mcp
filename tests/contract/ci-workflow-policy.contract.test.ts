@@ -417,8 +417,10 @@ describe("CI workflow policy", () => {
     expect(guard).toContain("::add-mask::");
     expect(guard).toContain('missing+=("ANTHROPIC_API_KEY")');
     expect(guard).not.toContain('missing+=("OPENAI_API_KEY")');
-    expect(guard).toContain('echo "::error::missing provider secret(s): ${missing[*]}"');
-    expect(guard).toContain("exit 1");
+    expect(guard).toContain(`if [[ "\${#missing[@]}" -gt 0 ]]; then
+            echo "::error::missing provider secret(s): \${missing[*]}"
+            exit 1
+          fi`);
     expect(guard).not.toContain("environment:");
 
     expect(workflowJobBlock(evals, "skipped")).toBeNull();
