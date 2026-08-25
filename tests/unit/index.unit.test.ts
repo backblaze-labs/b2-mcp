@@ -3,14 +3,23 @@ import * as http from "http";
 import type { AddressInfo } from "net";
 import * as path from "path";
 import * as stdioTransport from "@modelcontextprotocol/server/stdio";
+import { helpText } from "../../src/cli";
 import { CredentialResolutionError } from "../../src/credentials";
-import { startStdio } from "../../src/index";
+import { runCli, startStdio } from "../../src/index";
 import * as serverModule from "../../src/server";
 import { logger } from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
+import { VERSION } from "../../src/version";
 
 vi.mock("@modelcontextprotocol/server/stdio", () => ({
   serveStdio: vi.fn(),
+}));
+
+// runCli's http branch resolves this via a dynamic import(); mocking the
+// statically-imported specifier here still intercepts it, since Vitest keys
+// mocks by resolved module id rather than by import syntax.
+vi.mock("../../src/http-server", () => ({
+  startHttp: vi.fn(),
 }));
 
 const credentialEnvKeys = [
@@ -142,6 +151,79 @@ describe("stdio entry point", () => {
     expect(stderr).toHaveBeenCalledWith(
       "b2-mcp: B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required for stdio\n",
     );
+  });
+});
+
+describe("runCli dispatch (in-process)", () => {
+  // These call the exported runCli() directly rather than spawning a
+  // subprocess, so v8 coverage attributes to the lines it executes -- the
+  // "executable CLI entry point" tests below exercise the same behavior
+  // black-box, through the real CLI, but coverage cannot see into a spawned
+  // child process.
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it("--help prints usage and does not start a server", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const loadConfig = vi.spyOn(serverModule, "loadConfig");
+
+    await runCli(["--help"]);
+
+    expect(stdout).toHaveBeenCalledWith(`${helpText()}
+`);
+    expect(loadConfig).not.toHaveBeenCalled();
+  });
+
+  it("-h is the same as --help", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await runCli(["-h"]);
+
+    expect(stdout).toHaveBeenCalledWith(`${helpText()}
+`);
+  });
+
+  it("--version prints the package version and does not start a server", async () => {
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const loadConfig = vi.spyOn(serverModule, "loadConfig");
+
+    await runCli(["--version"]);
+
+    expect(stdout).toHaveBeenCalledWith(`${VERSION}
+`);
+    expect(loadConfig).not.toHaveBeenCalled();
+  });
+
+  it("dispatches to the HTTP transport when transport is http", async () => {
+    const { startHttp } = await import("../../src/http-server");
+
+    await runCli(["http", "--port", "4321"]);
+
+    expect(vi.mocked(startHttp)).toHaveBeenCalledWith({ port: 4321 });
+  });
+
+  it("dispatches to startStdio by default", async () => {
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    await runCli([]);
+
+    expect(serveStdio).toHaveBeenCalled();
+  });
+
+  it("propagates a CLI usage error to the caller rather than swallowing it", async () => {
+    await expect(runCli(["--transport", "sse"])).rejects.toThrow("Invalid transport: sse");
   });
 });
 

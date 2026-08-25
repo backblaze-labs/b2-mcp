@@ -59,12 +59,16 @@ export async function startStdio(): Promise<void> {
   logger.info({ transport: "stdio" }, "server.started");
 }
 
-async function startHttpTransport(options: { port?: number }): Promise<void> {
+export async function startHttpTransport(options: { port?: number }): Promise<void> {
   const { startHttp } = await import("./http-server.js");
   await startHttp({ port: options.port });
 }
 
-async function runCli(argv = process.argv.slice(2)): Promise<void> {
+// Exported so tests can drive dispatch and error handling in-process, rather
+// than only through the subprocess-spawning black-box tests below -- those
+// exercise real behavior but run outside this process, so v8/istanbul
+// coverage never attributes to the lines they execute.
+export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   const options = parseCliArgs(argv);
   if (options.action === "help") {
     process.stdout.write(`${helpText()}\n`);
