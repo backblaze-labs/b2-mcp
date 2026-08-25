@@ -4,7 +4,11 @@ import { getRegisteredTools } from "./mcp.js";
 import type { B2Client, BucketInfoResult } from "./b2/client.js";
 import type { B2Config } from "./utils/types.js";
 import { parseIntEnv } from "./utils/config.js";
-import { fingerprintConfig, verificationFingerprintConfig } from "./credentials.js";
+import {
+  credentialFingerprint,
+  fingerprintConfig,
+  verificationFingerprintConfig,
+} from "./credentials.js";
 import { parseB2Error } from "./utils/errors.js";
 import { logger } from "./utils/logger.js";
 import { abortError, isAbortError } from "./utils/named-error.js";
@@ -19,6 +23,7 @@ import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-cont
 const DEFAULT_COMPLETION_CACHE_TTL_MS = 15_000;
 const DEFAULT_COMPLETION_CACHE_MAX_ENTRIES = 10_000;
 const MAX_COMPLETION_VALUES = 100;
+const MAX_CACHED_COMPLETION_CANDIDATES = MAX_COMPLETION_VALUES + 1;
 const KEY_COMPLETION_PAGE_SIZE = 1000;
 const KEY_COMPLETION_MAX_PAGES = 20;
 
@@ -192,9 +197,13 @@ export function sweepCompletionCache(now = Date.now()): void {
   }
 }
 
-function credentialCompletionCacheKey(config: B2Config, kind: "buckets" | "keys"): string {
+function credentialCompletionCacheKey(
+  config: B2Config,
+  kind: "buckets" | "keys",
+  suffix?: string,
+): string {
   const caller = config.callerFingerprint ? `caller:${config.callerFingerprint}` : "caller:none";
-  return `${kind}:${verificationFingerprintConfig(config)}:${caller}`;
+  return `${kind}:${verificationFingerprintConfig(config)}:${caller}${suffix ? `:${suffix}` : ""}`;
 }
 
 function completionCredentialFingerprint(config: B2Config): string {
@@ -433,9 +442,14 @@ async function cachedBucketCompletionSources(
 async function cachedApplicationKeyIds(
   client: B2Client,
   config: B2Config,
+  prefix: string,
 ): Promise<CompletionFetchResult<string[]>> {
   return cachedPerCredential(keyCompletionCache, keyCompletionInflight, {
-    cacheKey: credentialCompletionCacheKey(config, "keys"),
+    cacheKey: credentialCompletionCacheKey(
+      config,
+      "keys",
+      `prefix:${credentialFingerprint(prefix)}`,
+    ),
     kind: "application-key-id",
     config,
     empty: () => [],
@@ -448,7 +462,15 @@ async function cachedApplicationKeyIds(
           maxKeyCount: KEY_COMPLETION_PAGE_SIZE,
           ...(startApplicationKeyId && { startApplicationKeyId }),
         });
-        ids.push(...result.keys.map((key) => key.applicationKeyId).filter(Boolean));
+        for (const key of result.keys) {
+          const id = key.applicationKeyId;
+          if (!id?.startsWith(prefix)) continue;
+          ids.push(id);
+          if (ids.length >= MAX_CACHED_COMPLETION_CANDIDATES) {
+            truncated = true;
+            return { values: ids, truncated };
+          }
+        }
         const next = result.nextApplicationKeyId ?? undefined;
         if (!next) {
           startApplicationKeyId = undefined;
@@ -560,7 +582,7 @@ async function completeApplicationKeyIds(
   config: B2Config,
   value: string,
 ): Promise<CompletionComputation> {
-  const keyIds = await cachedApplicationKeyIds(client, config);
+  const keyIds = await cachedApplicationKeyIds(client, config, value);
   return completionFromCandidates(keyIds.values, value, {
     degraded: keyIds.degraded,
     truncated: keyIds.truncated,

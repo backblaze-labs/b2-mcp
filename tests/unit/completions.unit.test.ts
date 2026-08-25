@@ -248,6 +248,49 @@ describe("MCP tool argument completion", () => {
     ]);
   });
 
+  it("caches only bounded prefix matches for application-key completions", async () => {
+    const native = new DeterministicB2NativeFake({
+      capabilities: ["listKeys", "deleteKeys"],
+    });
+    native.paginate("b2_list_keys", [
+      {
+        keys: Array.from({ length: 150 }, (_, i) =>
+          applicationKeyFixture(`match-${String(i).padStart(3, "0")}`),
+        ),
+        nextApplicationKeyId: "after-page-one",
+      },
+      {
+        keys: [applicationKeyFixture("match-second-page")],
+        nextApplicationKeyId: null,
+      },
+    ]);
+    installSdkTransport(native, sdkTestRetry);
+
+    connected = await connect(createServer(testConfig, ["listKeys", "deleteKeys"]));
+    const first = await completeToolArgument(
+      connected.client,
+      "b2_delete_key",
+      "applicationKeyId",
+      "match-",
+    );
+    const second = await completeToolArgument(
+      connected.client,
+      "b2_delete_key",
+      "applicationKeyId",
+      "match-",
+    );
+
+    expect(first.completion.values).toHaveLength(100);
+    expect(first.completion.values[0]).toBe("match-000");
+    expect(first.completion.values).not.toContain("match-100");
+    expect(first.completion.hasMore).toBe(true);
+    expect(first.completion.total).toBeUndefined();
+    expect(second.completion.values).toEqual(first.completion.values);
+    expect(native.requestsFor("b2_list_keys").map((request) => request.body)).toEqual([
+      { accountId: "test-account-123", maxKeyCount: 1000 },
+    ]);
+  });
+
   it("audits bucket and key completions without logging completion values", async () => {
     const info = vi.spyOn(logger, "info").mockImplementation(() => undefined as never);
     const native = new DeterministicB2NativeFake({
