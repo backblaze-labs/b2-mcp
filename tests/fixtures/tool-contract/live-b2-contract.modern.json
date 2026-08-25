@@ -2027,6 +2027,7 @@
     "discover": {
       "supportedVersions": ["2026-07-28"],
       "capabilities": {
+        "completions": {},
         "tools": {
           "listChanged": true
         }

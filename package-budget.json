@@ -19,10 +19,10 @@
   "limits": {
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
-    "packedTarballBytes": 493500,
-    "unpackedPackageBytes": 2268000,
-    "packedEntryCount": 251,
-    "cleanConsumerInstallFootprintBytes": 31000000
+    "packedTarballBytes": 497000,
+    "unpackedPackageBytes": 2290000,
+    "packedEntryCount": 254,
+    "cleanConsumerInstallFootprintBytes": 31010000
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {

@@ -23,6 +23,7 @@ import {
   sweepAuthManagerCache,
   sweepCapabilityCache,
 } from "./server.js";
+import { sweepCompletionCache } from "./completions.js";
 import { VERSION } from "./version.js";
 import { logger } from "./utils/logger.js";
 import { allowRequest, sweepIdleBuckets } from "./utils/rate-limiter.js";
@@ -322,6 +323,7 @@ function runIdleSweep(): void {
   sweepIdleBuckets(now);
   sweepCapabilityCache(now);
   sweepAuthManagerCache(now);
+  sweepCompletionCache(now);
 }
 
 type CredentialErrorShape = { kind: "plain" } | { kind: "json-rpc"; id: string | number | null };

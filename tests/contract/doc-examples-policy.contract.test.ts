@@ -79,7 +79,7 @@ describe("documentation example validator policy", () => {
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:496");
+    expect(result.stderr).toContain("README.md:497");
     expect(result.stderr).toContain("has an unclosed Markdown code fence");
   });
 
@@ -97,7 +97,7 @@ describe("documentation example validator policy", () => {
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:499");
+    expect(result.stderr).toContain("README.md:500");
     expect(result.stderr).toContain("references missing package script missing-script");
   });
 });

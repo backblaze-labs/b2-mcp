@@ -24,6 +24,7 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
+import { invalidateCompletionCache } from "../../src/completions";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { CredentialProvider, CredentialResolutionError } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
@@ -193,6 +194,7 @@ beforeEach(async () => {
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
   restoreEnv(savedMutableEnv);
   invalidateCapabilityCache();
+  invalidateCompletionCache();
   installSdkTransport(
     new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
@@ -213,6 +215,7 @@ afterEach(async () => {
   vi.clearAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
+  invalidateCompletionCache();
   await closeHttpServer(handle);
 });
 
@@ -268,6 +271,17 @@ function credentialProviderFromHeaders(): CredentialProvider {
 
 function callToolBody(name: string, args: Record<string, unknown> = {}, id = 1): string {
   return modernBody("tools/call", { name, arguments: args }, id);
+}
+
+function completionBody(toolName: string, argumentName: string, value = "", id = 1): string {
+  return modernBody(
+    "completion/complete",
+    {
+      ref: { type: "ref/tool", name: toolName },
+      argument: { name: argumentName, value },
+    },
+    id,
+  );
 }
 
 async function replaceHandle(
@@ -436,6 +450,95 @@ describe("HTTP transport handler", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect(seenConfigs.sort()).toEqual(["tenant-a", "tenant-b"]);
+  });
+
+  it("uses per-request credentials for tool argument completion without leaking tenants", async () => {
+    delete process.env.B2_REGISTER_ALL_TOOLS;
+    invalidateAuthManagerCache();
+    invalidateCapabilityCache();
+    invalidateCompletionCache();
+    const tenantBuckets = {
+      "tenant-a": {
+        accountId: "account-a",
+        token: "token-a",
+        bucketId: "bucket-a-id",
+        bucketName: "tenant-a-bucket",
+      },
+      "tenant-b": {
+        accountId: "account-b",
+        token: "token-b",
+        bucketId: "bucket-b-id",
+        bucketName: "tenant-b-bucket",
+      },
+    };
+    const tenantByToken = new Map(
+      Object.values(tenantBuckets).map((tenant) => [tenant.token, tenant]),
+    );
+    installSdkTransport(
+      new RecordingTransport((sdkRequest) => {
+        const endpoint = b2EndpointName(sdkRequest);
+        const authHeader = String(
+          sdkRequest.headers?.Authorization ?? sdkRequest.headers?.authorization ?? "",
+        );
+        if (endpoint === "b2_authorize_account") {
+          const decoded = Buffer.from(authHeader.replace(/^Basic\s+/i, ""), "base64").toString(
+            "utf8",
+          );
+          const keyId = decoded.split(":")[0];
+          const tenant =
+            keyId === "tenant-a-key" ? tenantBuckets["tenant-a"] : tenantBuckets["tenant-b"];
+          return new StaticHttpResponse(200, {
+            ...authorizeResponse(["listBuckets"]),
+            accountId: tenant.accountId,
+            authorizationToken: tenant.token,
+          });
+        }
+        if (endpoint === "b2_list_buckets") {
+          const tenant = tenantByToken.get(authHeader);
+          if (!tenant) throw new Error(`unexpected tenant token ${authHeader}`);
+          return new StaticHttpResponse(200, {
+            buckets: [
+              {
+                accountId: tenant.accountId,
+                bucketId: tenant.bucketId,
+                bucketName: tenant.bucketName,
+                bucketType: "allPrivate",
+                bucketInfo: {},
+                corsRules: [],
+                lifecycleRules: [],
+                revision: 1,
+                options: [],
+              },
+            ],
+          });
+        }
+        throw new Error(`unexpected endpoint ${endpoint}`);
+      }),
+    );
+
+    const first = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "tenant-a-key",
+        "x-b2-key": "tenant-a-secret",
+        ...modernHeaders("completion/complete"),
+      },
+      body: completionBody("b2_list_buckets", "bucketName", "tenant-", 11),
+    });
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "tenant-b-key",
+        "x-b2-key": "tenant-b-secret",
+        ...modernHeaders("completion/complete"),
+      },
+      body: completionBody("b2_list_buckets", "bucketName", "tenant-", 12),
+    });
+
+    const firstValues = JSON.parse(first.body).result.completion.values;
+    const secondValues = JSON.parse(second.body).result.completion.values;
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(firstValues).toEqual(["tenant-a-bucket"]);
+    expect(secondValues).toEqual(["tenant-b-bucket"]);
   });
 
   it("fails closed when no prepared request state is scoped", () => {

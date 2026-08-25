@@ -64,6 +64,7 @@ import { registerS3MultipartTools } from "./s3/multipart.js";
 import { registerS3PresignedTools } from "./s3/presigned.js";
 import { registerS3ExtraTools } from "./s3/extras.js";
 import { isDestructiveTool } from "./utils/destructive-gate.js";
+import { registerToolCompletionHandler } from "./completions.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
@@ -233,6 +234,7 @@ export function createServer(
   // application-key client, so a single non-master key needs no extra wiring.
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth);
+  const completionClient = new B2Client(new B2AuthManager(config));
   const reportClient = new B2ReportClient(auth);
   const s3Client = createAuthorizedS3Client(auth, {
     applicationKeyId: config.applicationKeyId,
@@ -314,6 +316,7 @@ export function createServer(
   }
 
   const toolCount = registrar.commit();
+  registerToolCompletionHandler(server, completionClient, config);
   logger.info({ toolCount, version: VERSION, outputFormat }, "server.ready");
 
   const originalClose = server.close.bind(server);

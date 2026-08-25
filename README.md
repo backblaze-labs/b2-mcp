@@ -239,6 +239,7 @@ S3-compatible and report tools use the `s3ApiUrl` returned by `b2_authorize_acco
 | `B2_MCP_RATE_LIMIT_RPS` / `B2_MCP_RATE_LIMIT_BURST`              | `60` / `120`       | HTTP transport: per-credential request throttling                                                                         |
 | `B2_MAX_SESSIONS` / `B2_MAX_SESSIONS_PER_KEY`                    | `1000` / `20`      | HTTP transport: global and per-credential concurrent in-flight request caps                                               |
 | `B2_CAPABILITY_CACHE_TTL_MS` / `B2_CAPABILITY_CACHE_MAX_ENTRIES` | `300000` / `10000` | Bounded capability-discovery cache TTL and size. Cache identity is secret-bound; log labels are non-secret fingerprints   |
+| `B2_COMPLETION_CACHE_TTL_MS` / `B2_COMPLETION_CACHE_MAX_ENTRIES` | `15000` / `10000`  | Bounded MCP argument-completion cache TTL and size. Cache identity is secret-bound and caller-scoped                      |
 | `B2_S3_SAVE_TO_PATH_IDLE_TIMEOUT_MS`                             | `60000`            | Idle timeout while streaming `s3_get_object` results to `saveToPath`                                                      |
 
 A ready-to-copy [`.env.example`](.env.example) lists the local environment
