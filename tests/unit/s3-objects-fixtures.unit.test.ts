@@ -207,6 +207,19 @@ describe("S3 object tools with deterministic handler fake", () => {
     expect(s3.requests).toEqual([]);
   });
 
+  it("refuses oversized inline uploads before calling S3", async () => {
+    const result = await tools.call("s3_put_object", {
+      bucket: "b",
+      key: "large.bin",
+      content: Buffer.alloc(MAX_INLINE_OBJECT_BYTES + 1).toString("base64"),
+      contentType: "application/octet-stream",
+    });
+
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatch(/inline limit|s3_get_presigned_url|multipart tools/i);
+    expect(s3.requestsFor("putObject")).toHaveLength(0);
+  });
+
   it("uploads a small local file through the inline filePath branch", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "b2-inline-put-"));
     const filePath = path.join(dir, "manifest.json");
