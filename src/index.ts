@@ -65,7 +65,7 @@ async function startHttpTransport(options: { port?: number }): Promise<void> {
   await startHttp({ port: options.port });
 }
 
-async function runCli(argv = process.argv.slice(2)): Promise<void> {
+export async function runCli(argv = process.argv.slice(2)): Promise<void> {
   const options = parseCliArgs(argv);
   if (options.action === "help") {
     process.stdout.write(`${helpText()}\n`);
@@ -84,18 +84,28 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
   await startStdio();
 }
 
+function handleCliError(err: unknown): never {
+  const message = bootstrapErrorMessage(err);
+  if (err instanceof CliUsageError || err instanceof PortUsageError) {
+    process.stderr.write(`b2-mcp: ${message}\n\n${helpText()}\n`);
+    flushLogsSync();
+    process.exit(2);
+  }
+  process.stderr.write(`b2-mcp: ${message}\n`);
+  logger.fatal({ err: message }, "server.fatal");
+  flushLogsSync();
+  process.exit(1);
+}
+
+export async function main(argv = process.argv.slice(2)): Promise<void> {
+  try {
+    await runCli(argv);
+  } catch (err) {
+    handleCliError(err);
+  }
+}
+
 // Only run when invoked directly (not when imported by tests).
 if (require.main === module) {
-  runCli().catch((err) => {
-    const message = bootstrapErrorMessage(err);
-    if (err instanceof CliUsageError || err instanceof PortUsageError) {
-      process.stderr.write(`b2-mcp: ${message}\n\n${helpText()}\n`);
-      flushLogsSync();
-      process.exit(2);
-    }
-    process.stderr.write(`b2-mcp: ${message}\n`);
-    logger.fatal({ err: message }, "server.fatal");
-    flushLogsSync();
-    process.exit(1);
-  });
+  void main();
 }
