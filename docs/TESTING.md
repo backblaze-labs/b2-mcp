@@ -151,8 +151,8 @@ The stable required PR check names are:
 - `slow/lifecycle`
 - `cross-platform minimum`
 
-Global V8 coverage must remain at or above 94.1% statements, 87.8% branches,
-97.2% functions, and 96.5% lines. Raise these floors as coverage improves;
+Global V8 coverage must remain at or above 94.3% statements, 88% branches,
+97.2% functions, and 96.6% lines. Raise these floors as coverage improves;
 lowering them requires explicit review and justification. Coverage collection is source
 only: `src/**/*.ts`, excluding `dist/`, declarations, generated files, and test
 files. The current Phase 1 floor is a ratchet: when `coverage/coverage-summary.json`
@@ -174,9 +174,10 @@ to the global floor:
 | Logger destination   | `src/utils/logger.ts`                                                                       | `B2_LOG_FILE` import safety, async file/stderr routing, redaction, POSIX owner-only permissions, Windows rejection, symlink/FIFO/hard-link rejection, SIGHUP reopen, stderr fallback, and startup/shutdown tests |
 | Transport boundary   | `src/http-server.ts`, `src/utils/node-web-bridge.ts`, stdio and HTTP protocol suites        | Close/abort/listener tests      |
 
-The v1.0.0 target is 90% statements, 80% branches, 90% functions, and 90% lines
-globally, with credential/redaction/destructive/filesystem modules kept at 95%+
-statements or covered by explicit invariant tests. The SDK reference baseline is
+The historical v1.0.0 minimum baseline was 90% statements, 80% branches, 90%
+functions, and 90% lines globally; it does not supersede the active ratcheted
+floors above. Credential/redaction/destructive/filesystem modules stay at 95%+
+statements or are covered by explicit invariant tests. The SDK reference baseline is
 tracked as comparison evidence for test design, especially simulator behavior,
 retry ownership, pagination, and cancellation. Matching SDK parity is not a
 release blocker for this MCP package; regressions in this repository's critical

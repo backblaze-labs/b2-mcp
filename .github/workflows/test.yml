@@ -125,7 +125,7 @@ jobs:
         run: |
           echo "## Coverage summary" >> "$GITHUB_STEP_SUMMARY"
           echo "Node.js ${{ matrix.node-version }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Required: statements 94.1%, branches 87.8%, functions 97.2%, lines 96.5%." >> "$GITHUB_STEP_SUMMARY"
+          echo "Required: statements 94.3%, branches 88%, functions 97.2%, lines 96.6%." >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           if [ -f coverage/coverage-summary.json ]; then
             node -e "
