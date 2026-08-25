@@ -25,11 +25,11 @@ function redactCustomHeaders(
 ): Array<{ name: string; value: string }> | Record<string, string> | undefined {
   if (customHeaders === undefined) return undefined;
   if (Array.isArray(customHeaders)) {
-    return customHeaders.map((header) =>
-      header && typeof header === "object"
-        ? { ...(header as { name: string; value: string }), value: REDACTED }
-        : header,
-    ) as Array<{ name: string; value: string }>;
+    return customHeaders.flatMap((header) => {
+      if (!header || typeof header !== "object" || Array.isArray(header)) return [];
+      const name = (header as { name?: unknown }).name;
+      return typeof name === "string" ? [{ name, value: REDACTED }] : [];
+    });
   }
   if (customHeaders && typeof customHeaders === "object") {
     return Object.fromEntries(Object.keys(customHeaders).map((name) => [name, REDACTED]));

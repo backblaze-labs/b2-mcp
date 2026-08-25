@@ -160,7 +160,11 @@ describe("MCP resources", () => {
               targetType: "webhook",
               url: "https://hooks.example.com/services/path-secret?token=query-secret#frag-secret",
               hmacSha256SigningSecret: CANARY,
-              customHeaders: [{ name: "Authorization", value: `Bearer ${CANARY}` }],
+              customHeaders: [
+                { name: "Authorization", value: `Bearer ${CANARY}`, metadata: THIRD_PARTY_SECRET },
+                "malformed-secret-header",
+                { value: THIRD_PARTY_SECRET },
+              ],
             },
           },
         ],
@@ -192,7 +196,12 @@ describe("MCP resources", () => {
       hmacSha256SigningSecret: "[redacted]",
       customHeaders: [{ name: "Authorization", value: "[redacted]" }],
     });
+    expect(
+      payload.eventNotifications.eventNotificationRules[0].targetConfiguration,
+    ).not.toHaveProperty("customHeaders.0.metadata");
     expect(serialized).not.toContain(CANARY);
+    expect(serialized).not.toContain(THIRD_PARTY_SECRET);
+    expect(serialized).not.toContain("malformed-secret-header");
     expect(serialized).not.toContain("hooks.example.com");
     expect(serialized).not.toContain("path-secret");
     expect(serialized).not.toContain("query-secret");

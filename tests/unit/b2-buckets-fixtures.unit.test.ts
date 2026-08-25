@@ -1,7 +1,7 @@
 import { registerBucketTools, setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import type { B2Client } from "../../src/b2/client";
 import { circuitBreaker } from "../../src/utils/circuit-breaker";
-import { ToolHarness, parseResult, testConfig } from "../support/deterministic-fakes";
+import { parseResult, ToolHarness, testConfig } from "../support/deterministic-fakes";
 
 function bucket(index: number) {
   return {
@@ -54,7 +54,11 @@ describe("B2 bucket tools with deterministic native fake", () => {
                 targetType: "webhook",
                 url: "https://hooks.example.test/private/path",
                 hmacSha256SigningSecret: "secret",
-                customHeaders: [{ name: "Authorization", value: "Bearer secret" }],
+                customHeaders: [
+                  { name: "Authorization", value: "Bearer secret", metadata: "sensitive-value" },
+                  "malformed-secret-header",
+                  { value: "sensitive-value" },
+                ],
               },
             },
           ],
@@ -136,6 +140,8 @@ describe("B2 bucket tools with deterministic native fake", () => {
       hmacSha256SigningSecret: "[redacted]",
       customHeaders: [{ name: "Authorization", value: "[redacted]" }],
     });
+    expect(JSON.stringify(getResult)).not.toContain("sensitive-value");
+    expect(JSON.stringify(getResult)).not.toContain("malformed-secret-header");
 
     const setResult = parseResult(
       await tools.call("b2_set_bucket_notification_rules", {
