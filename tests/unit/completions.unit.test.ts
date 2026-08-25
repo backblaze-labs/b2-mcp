@@ -366,10 +366,14 @@ describe("MCP tool argument completion", () => {
 
   it("cancels a shared completion fetch after all waiters abort", async () => {
     const native = new DeterministicB2NativeFake({ capabilities: ["listBuckets", "readFiles"] });
+    let releaseAbortedFetch!: () => void;
     let markFetchStarted!: () => void;
     let sharedSignal: AbortSignal | undefined;
     const fetchStarted = new Promise<void>((resolve) => {
       markFetchStarted = resolve;
+    });
+    const releaseOldFetch = new Promise<void>((resolve) => {
+      releaseAbortedFetch = resolve;
     });
     const sharedAborted = new Promise<void>((resolve) => {
       native.respond("b2_list_buckets", async (captured) => {
@@ -382,9 +386,16 @@ describe("MCP tool argument completion", () => {
           );
         }
         resolve();
+        await releaseOldFetch;
         throw sharedSignal.reason ?? abortError();
       });
     });
+    native.respond(
+      "b2_list_buckets",
+      new StaticHttpResponse(200, {
+        buckets: [bucketFixture("fresh-after-abort", "fresh-after-abort-id")],
+      }),
+    );
     installSdkTransport(native, sdkTestRetry);
 
     connected = await connect(createServer(testConfig, ["listBuckets", "readFiles"]));
@@ -409,6 +420,11 @@ describe("MCP tool argument completion", () => {
 
     expect(String(secondErr)).toContain("second caller left");
     expect(sharedSignal?.aborted).toBe(true);
-    expect(native.requestsFor("b2_list_buckets")).toHaveLength(1);
+
+    const fresh = await completeToolArgument(connected.client, "s3_get_object", "bucket", "fresh-");
+    releaseAbortedFetch();
+
+    expect(fresh.completion.values).toEqual(["fresh-after-abort"]);
+    expect(native.requestsFor("b2_list_buckets")).toHaveLength(2);
   });
 });

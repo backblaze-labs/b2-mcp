@@ -362,7 +362,14 @@ async function cachedPerCredential<T>(
 
   const callerSignal = currentMcpRequestSignal();
   const existing = inflight.get(options.cacheKey);
-  if (existing) return waitForCompletionInflight(existing, callerSignal);
+  if (existing) {
+    if (!existing.settled && !existing.controller.signal.aborted) {
+      return waitForCompletionInflight(existing, callerSignal);
+    }
+    if (inflight.get(options.cacheKey) === existing) {
+      inflight.delete(options.cacheKey);
+    }
+  }
 
   const controller = new AbortController();
   const entry: CompletionInflightEntry<T> = {
