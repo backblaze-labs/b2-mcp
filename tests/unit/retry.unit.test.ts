@@ -6,7 +6,12 @@
  * Max retries: 3 (4 total attempts).
  */
 
-import { withRetry, _resetRetryBudget, _consumeRetryToken } from "../../src/utils/retry";
+import {
+  _consumeRetryToken,
+  _resetRetryBudget,
+  isRetryableError,
+  withRetry,
+} from "../../src/utils/retry";
 
 // Suppress actual sleep delays by mocking timers
 beforeAll(() => {
@@ -17,9 +22,11 @@ afterAll(() => {
 });
 afterEach(() => {
   vi.clearAllTimers();
+  vi.restoreAllMocks();
 });
 
 beforeEach(() => {
+  vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
   _resetRetryBudget();
 });
 
@@ -33,6 +40,13 @@ async function flushRetries() {
   }
 }
 
+async function waitForCallCount(fn: { mock: { calls: unknown[][] } }, count: number) {
+  for (let i = 0; i < 10 && fn.mock.calls.length < count; i++) {
+    await Promise.resolve();
+  }
+  expect(fn.mock.calls).toHaveLength(count);
+}
+
 /** Make an axios-like error with a response status code */
 function httpError(status: number) {
   return { response: { status, data: { code: "test_error", message: `HTTP ${status}` } } };
@@ -42,6 +56,23 @@ function httpError(status: number) {
 function awsError(status: number) {
   return { name: "TestError", message: `HTTP ${status}`, $metadata: { httpStatusCode: status } };
 }
+
+// -- Error classification ------------------------------------------------------
+
+describe("isRetryableError", () => {
+  it("honors explicit retryable flags before status codes", () => {
+    expect(isRetryableError({ retryable: true, status: 400 })).toBe(true);
+    expect(isRetryableError({ retryable: false, status: 503 })).toBe(false);
+  });
+
+  it("rejects primitive and malformed status carriers", () => {
+    expect(isRetryableError("HTTP 503")).toBe(false);
+    expect(isRetryableError({ response: { status: "503" } })).toBe(false);
+    expect(isRetryableError({ $metadata: "503" })).toBe(false);
+    expect(isRetryableError({ $metadata: { httpStatusCode: "503" } })).toBe(false);
+    expect(isRetryableError({ status: "503" })).toBe(false);
+  });
+});
 
 // ── Successful calls ──────────────────────────────────────────────────────────
 
@@ -77,6 +108,30 @@ describe("withRetry — success path", () => {
 
     expect(result).toBe("third-time");
     expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it("backs off exponentially between retries", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(httpError(503))
+      .mockRejectedValueOnce(httpError(503))
+      .mockResolvedValueOnce("ok");
+
+    const promise = withRetry(fn);
+    await waitForCallCount(fn, 1);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await waitForCallCount(fn, 2);
+
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(fn).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await waitForCallCount(fn, 3);
+
+    await expect(promise).resolves.toBe("ok");
   });
 });
 
@@ -213,6 +268,39 @@ describe("withRetry — custom retry count", () => {
   });
 });
 
+// -- Abort handling ------------------------------------------------------------
+
+describe("withRetry — abort signal", () => {
+  it("fails before the first attempt when the signal is already aborted", async () => {
+    const fn = vi.fn().mockResolvedValue("never-called");
+    const signal = { aborted: true, reason: undefined } as AbortSignal;
+
+    await expect(withRetry(fn, 3, signal)).rejects.toMatchObject({
+      name: "AbortError",
+      message: "Aborted",
+    });
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("cancels retry backoff when the caller aborts", async () => {
+    const abort = new AbortController();
+    const reason = new Error("caller stopped");
+    const fn = vi.fn().mockRejectedValue(httpError(503));
+
+    const promise = withRetry(fn, 3, abort.signal);
+    await waitForCallCount(fn, 1);
+    for (let i = 0; i < 10 && vi.getTimerCount() === 0; i++) {
+      await Promise.resolve();
+    }
+    expect(vi.getTimerCount()).toBe(1);
+
+    abort.abort(reason);
+
+    await expect(promise).rejects.toBe(reason);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ── Global retry budget ──────────────────────────────────────────────────────
 
 describe("withRetry — global retry budget", () => {
@@ -229,11 +317,19 @@ describe("withRetry — global retry budget", () => {
     _resetRetryBudget();
     for (let i = 0; i < 100; i++) _consumeRetryToken();
     expect(_consumeRetryToken()).toBe(false);
-    // Use real timers for the wait — fake timers won't advance Date.now().
-    vi.useRealTimers();
-    await new Promise((r) => setTimeout(r, 150));
-    vi.useFakeTimers();
-    // After ~150ms, at 10 tokens/sec refill, ~1 token should be available.
+
+    vi.advanceTimersByTime(150);
+
     expect(_consumeRetryToken()).toBe(true);
+  });
+
+  it("fails without sleeping when the retry budget is exhausted", async () => {
+    for (let i = 0; i < 100; i++) _consumeRetryToken();
+    const fn = vi.fn().mockRejectedValue(httpError(503));
+
+    await expect(withRetry(fn)).rejects.toMatchObject({ response: { status: 503 } });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
