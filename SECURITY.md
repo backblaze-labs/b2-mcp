@@ -78,7 +78,7 @@ JSON validation, redaction, or output-size controls.
 
 TOON serialization does not execute third-party package code in the
 credential-bearing server process. The runtime encoder is reviewed
-repository-owned code for TOON spec `4.1`; `@toon-format/toon@4.1.0` is retained
+repository-owned code for TOON spec `4.1`; `@toon-format/toon@4.1.1` is retained
 only as a dev/test decoder oracle. TOON mode is preflighted during config
 validation and falls back to compact JSON for bounded encode failures, so an
 optional text optimization must not turn a successful structured tool result

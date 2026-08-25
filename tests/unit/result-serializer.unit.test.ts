@@ -295,7 +295,7 @@ describe("result serializer", () => {
     expect(TOON_IMPLEMENTATION).toBe("repo-owned");
     expect(TOON_SPEC_VERSION).toBe("4.1");
     expect(packageJson.dependencies?.["@toon-format/toon"]).toBeUndefined();
-    expect(packageJson.devDependencies?.["@toon-format/toon"]).toBe("4.1.0");
+    expect(packageJson.devDependencies?.["@toon-format/toon"]).toBe("4.1.1");
   });
 
   it("imports the third-party TOON test decoder only in a sanitized child process", async () => {

@@ -41,8 +41,8 @@ jobs:
       release-notes-name: ${{ steps.notes.outputs.release_notes_name }}
       release-notes-sha256: ${{ steps.notes.outputs.release_notes_sha256 }}
     steps:
-      # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           run-id: ${{ github.event.workflow_run.id }}
           name: release-tag-request
@@ -59,8 +59,8 @@ jobs:
             exit 1
           fi
           echo "tag=${PUBLISH_TAG}" >> "${GITHUB_OUTPUT}"
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: refs/heads/ci-green
           persist-credentials: false
@@ -93,8 +93,8 @@ jobs:
             --remote "${PUBLISH_REMOTE}" \
             --wait-for-ci-green-timeout-ms 1200000 \
             --wait-for-ci-green-interval-ms 30000
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ steps.ref.outputs.checkout_sha }}
           fetch-depth: 0
@@ -294,8 +294,8 @@ jobs:
             scripts/verify-npm-registry-metadata.mjs \
             publish-package/release-tools/
           cp scripts/lib/release-utils.mjs publish-package/release-tools/lib/
-      # actions/upload-artifact v6, reviewed 2026-08-06.
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+      # actions/upload-artifact v7, reviewed 2026-08-25.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: npm-package
           path: |
@@ -332,8 +332,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: npm-package
           path: publish-package
@@ -488,8 +488,8 @@ jobs:
       # prepare job) rather than a dynamic sha in this write-privileged job, then
       # hard-pin to the validated release commit below. This keeps the checkout
       # off attacker-influenced refs in a packages:write/id-token:write context.
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: refs/heads/ci-green
           fetch-depth: 0
@@ -508,8 +508,8 @@ jobs:
             exit 1
           fi
           git checkout --detach "${CHECKOUT_SHA}"
-      # docker/setup-qemu-action v3.6.0, reviewed 2026-08-07.
-      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392
+      # docker/setup-qemu-action v4.2.0, reviewed 2026-08-25.
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
       # docker/setup-buildx-action v3.11.1, reviewed 2026-08-07.
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
       # sigstore/cosign-installer v3.9.2, reviewed 2026-08-07.
@@ -557,8 +557,8 @@ jobs:
       actions: read
       contents: write
     steps:
-      # actions/download-artifact v6, reviewed 2026-08-06.
-      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: npm-package
           path: publish-package

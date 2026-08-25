@@ -481,7 +481,7 @@ Running it safely:
 - **Local use → stdio** (the Quick Start above). Credentials stay in your client config / environment.
 - **Exposing HTTP → choose a credential mode.** Unset mode remains `headers` for one-release compatibility with existing header clients; B2 credential headers must be present on every MCP request. Set `B2_HTTP_CREDENTIAL_MODE=server` to keep one B2 credential in the server process/customer secret manager, or `principal` to map verified MCP `authInfo` to customer-held credentials.
 - **Caller auth stays at your edge.** For `principal` mode, terminate TLS and validate OAuth before the SDK handler receives `authInfo`; strip any trusted identity headers at the edge and only re-add them inside an allowlisted proxy boundary.
-- **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; opt-in TOON output uses a reviewed repo-owned encoder for spec `4.1`, with `@toon-format/toon@4.1.0` retained only as a dev/test decoder oracle.
+- **MCP SDK v2 packages are pinned.** HTTP and stdio use the official `@modelcontextprotocol/server` v2 package from `github.com/modelcontextprotocol/typescript-sdk`; opt-in TOON output uses a reviewed repo-owned encoder for spec `4.1`, with `@toon-format/toon@4.1.1` retained only as a dev/test decoder oracle.
 - **Never commit credentials** — use env vars / a secrets manager. `.env*` is gitignored.
 
 Full hosted runbook (nginx, Let's Encrypt, hardened systemd, fail2ban, monitoring, and a security baseline checklist): [`docs/DEPLOY.md`](docs/DEPLOY.md).
@@ -519,7 +519,7 @@ pnpm run smoke:inspector    # advisory locked Inspector CLI smoke; requires exis
 ```
 
 Compatible MCP Inspector release for isolated manual inspection:
-`@modelcontextprotocol/inspector@2.1.0`, which requires Node.js 22.19.0 or
+`@modelcontextprotocol/inspector@2.3.0`, which requires Node.js 22.19.0 or
 newer. Run it through `pnpm run smoke:inspector` so the command uses the
 committed lockfile and a sanitized temporary environment.
 

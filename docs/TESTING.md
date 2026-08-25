@@ -308,7 +308,7 @@ credential-free evidence. External clients are advisory evidence until they
 prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned by the repository wrapper to
-`@modelcontextprotocol/inspector@2.1.0`. That Inspector release requires
+`@modelcontextprotocol/inspector@2.3.0`. That Inspector release requires
 Node.js 22.19.0 or newer, so it is supplemental evidence for the patched Node
 22 LTS development/runtime pin. Install project dependencies, build from a
 non-serving checkout, then run the locked Inspector CLI through the wrapper:
@@ -404,7 +404,7 @@ Credential-free unit tests cover the structured result serializer:
 
 - default compact JSON text output preserves the same `structuredContent`;
 - `B2_MCP_OUTPUT_FORMAT=toon` round-trips through the repo-owned encoder and
-  official `@toon-format/toon@4.1.0` dev/test decoder in a sanitized child
+  official `@toon-format/toon@4.1.1` dev/test decoder in a sanitized child
   process while preserving the same `structuredContent`;
 - unknown output formats fail during config resolution;
 - HTTP header-mode readiness rejects unknown output formats and TOON preflight

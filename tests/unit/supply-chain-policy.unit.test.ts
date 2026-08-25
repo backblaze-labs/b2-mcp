@@ -699,8 +699,8 @@ describe("supply-chain audit policy", () => {
   });
 
   it("keeps tsx dev-only and denies esbuild install builds", () => {
-    const tsxPackage = rawPnpmLock.packages?.["tsx@4.23.11"];
-    const tsxSnapshot = rawPnpmLock.snapshots?.["tsx@4.23.11"];
+    const tsxPackage = rawPnpmLock.packages?.["tsx@4.23.12"];
+    const tsxSnapshot = rawPnpmLock.snapshots?.["tsx@4.23.12"];
     const esbuildPackage = rawPnpmLock.packages?.["esbuild@0.28.1"];
     const esbuildPlatformPackages = Object.entries(rawPnpmLock.packages ?? {}).filter(([key]) =>
       key.startsWith("@esbuild/"),
@@ -708,13 +708,13 @@ describe("supply-chain audit policy", () => {
 
     expect(packageJson.dependencies).not.toHaveProperty("tsx");
     expect(packageJson.dependencies).not.toHaveProperty("esbuild");
-    expect(packageJson.devDependencies.tsx).toBe("4.23.11");
+    expect(packageJson.devDependencies.tsx).toBe("4.23.12");
     expect(rawPnpmLock.importers?.["."]?.devDependencies?.tsx).toEqual({
-      specifier: "4.23.11",
-      version: "4.23.11",
+      specifier: "4.23.12",
+      version: "4.23.12",
     });
     expect(tsxPackage?.resolution?.integrity).toBe(
-      "sha512-Ry2oTEUnhBdeEdWIztY8kf3/nBGnPnjMLVGL0YfdRXMORuPER5NlKmayqxtxRxwB1xBN+RivRaJfe7PM1rtiyw==",
+      "sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==",
     );
     expect(tsxSnapshot?.dependencies).toEqual({ esbuild: "0.28.1" });
     expect(tsxSnapshot?.optionalDependencies).toEqual({ fsevents: "2.3.3" });

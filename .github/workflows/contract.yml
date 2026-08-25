@@ -118,8 +118,8 @@ jobs:
       B2_INTEGRATION_REQUIRE_CREDENTIALS: "1"
       B2_MCP_LIVE_RUN_PREFIX: ${{ needs.guard.outputs.run-prefix }}-preflight
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
           fetch-depth: 0
@@ -194,10 +194,10 @@ jobs:
             }
           }
           JSON
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload live B2 preflight evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: live-b2-preflight-isolation-cleanup
           path: reports/live-b2/preflight.json
@@ -225,8 +225,8 @@ jobs:
       B2_MCP_LIVE_RESOURCE_LEDGER: reports/live-b2/resources-node-${{ matrix.node-version }}.jsonl
       MATRIX_NODE_VERSION: ${{ matrix.node-version }}
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event_name == 'workflow_call' && 'ci-green' || 'main' }}
           fetch-depth: 0
@@ -387,10 +387,10 @@ jobs:
             }
           }
           JSON
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload live B2 isolation and cleanup evidence
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: live-b2-isolation-cleanup-node-${{ matrix.node-version }}
           path: reports/live-b2/isolation-cleanup-node-${{ matrix.node-version }}.json

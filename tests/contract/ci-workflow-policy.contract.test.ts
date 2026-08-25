@@ -246,7 +246,7 @@ describe("CI workflow policy", () => {
     expect(runtimeFloorJob).toContain("needs: package-install-smoke");
     expect(runtimeFloorJob).toContain("node-version: 22.3.0");
     expect(runtimeFloorJob).toContain(
-      "actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53",
+      "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     );
     expect(runtimeFloorJob).toContain("find reports/package-install-smoke -name '*.tgz'");
     expect(runtimeFloorJob).toContain(
@@ -361,10 +361,10 @@ describe("CI workflow policy", () => {
     expect(workflowSecurity).toContain("actions: read");
     expect(workflowSecurity).toContain("security-events: write");
     expect(workflowSecurity).toContain(
-      "github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3",
+      "github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd",
     );
     expect(workflowSecurity).toContain(
-      "github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3",
+      "github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd",
     );
     expect(workflowSecurity).toContain("upload: never");
     expect(workflowSecurity).toContain("persist-credentials: false");

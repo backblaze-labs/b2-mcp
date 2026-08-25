@@ -216,7 +216,7 @@ suite and the separately named 2025-era fallback suite. The package-budget job
 writes a Vercel bundle estimate to `reports/vercel-bundle/` without requiring
 Production B2 secrets. The `Vercel build output scan` job runs
 `typecheck`, `build`, then a real token-free `vercel build` through the
-lockfile-backed `vercel@59.1.3` CLI and `@vercel/node@5.10.1` builder. It
+lockfile-backed `vercel@59.3.0` CLI and `@vercel/node@5.10.2` builder. It
 also rejects any Vercel builder TypeScript diagnostics before the generated
 artifact can be scanned as clean. The `vercel-build` hook performs the same
 typecheck/build gate on real Vercel deploys before the JavaScript launchers are

@@ -150,7 +150,7 @@ describe("smoke script release contract", () => {
     expect(clientSmokeScript).not.toMatch(/stderr\s*\+=|let\s+stderr\s*=\s*["']/);
     expect(clientSmokeScript).not.toContain("@modelcontextprotocol/sdk");
     expect(clientSmokeScript).not.toContain("initialize");
-    expect(testingDoc).toContain("@modelcontextprotocol/inspector@2.1.0");
+    expect(testingDoc).toContain("@modelcontextprotocol/inspector@2.3.0");
     expect(testingDoc).toContain("Node.js 22.19.0 or newer");
     expect(`${readme}\n${testingDoc}\n${packageJson}`).not.toMatch(/\bpnpm\s+dlx\b/);
     expect(testingDoc).toMatch(/Claude[\s\S]{0,120}supplemental/);
@@ -204,18 +204,18 @@ describe("smoke script release contract", () => {
       NPM_TOKEN: "real-npm-token",
     };
 
-    expect(parsedPackageJson.devDependencies["@modelcontextprotocol/inspector"]).toBe("2.1.0");
+    expect(parsedPackageJson.devDependencies["@modelcontextprotocol/inspector"]).toBe("2.3.0");
     expect(parsedPackageJson.scripts["smoke:inspector"]).toBe(
       "node scripts/mcp-inspector-smoke.mjs",
     );
     expect(parsedPackageJson.scripts.verify).not.toContain("smoke:inspector");
-    expect(lockedInspector?.version).toBe("2.1.0");
+    expect(lockedInspector?.version).toBe("2.3.0");
     expect(lockedInspector?.dev).toBe(true);
     expect(lockedInspector?.integrity).toMatch(/^sha512-/);
     expect(pnpmWorkspace).toContain("'@modelcontextprotocol/inspector': false");
     expect(pnpmWorkspace).not.toContain("@modelcontextprotocol/inspector@");
     expect(inspectorSmoke.INSPECTOR_PACKAGE).toBe("@modelcontextprotocol/inspector");
-    expect(inspectorSmoke.INSPECTOR_VERSION).toBe("2.1.0");
+    expect(inspectorSmoke.INSPECTOR_VERSION).toBe("2.3.0");
     expect(inspectorSmoke.pnpmExecArgs()).toEqual([
       "exec",
       "mcp-inspector",

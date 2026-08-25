@@ -89,8 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      # actions/checkout v6, reviewed 2026-08-06.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      # actions/checkout v7, reviewed 2026-08-25.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.guard.outputs.checkout-sha }}
           persist-credentials: false
@@ -134,10 +134,10 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/eval-pass-rate-report.mjs summary reports/evals/provider-pass-rates.json >> "$GITHUB_STEP_SUMMARY"
-      # actions/upload-artifact v6, reviewed 2026-08-06.
+      # actions/upload-artifact v7, reviewed 2026-08-25.
       - name: Upload Claude pass-rate report
         if: ${{ always() && steps.validate_report.outcome == 'success' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: claude-pass-rate-report
           path: reports/evals/provider-pass-rates.json
