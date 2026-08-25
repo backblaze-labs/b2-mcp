@@ -349,8 +349,9 @@ export function registerB2WorkflowPrompts(registrar: PromptRegistrar): void {
           "2. Call b2_get_bucket_notification_rules with the resolved bucketId. Treat returned webhook URLs and signing data as redacted summaries only.",
           "3. Summarize rule names, prefixes, event types, enabled status, target host, and any coverage gaps or overly broad matches.",
           "4. Propose a complete replacement rule set only when changes are needed, because b2_set_bucket_notification_rules replaces the bucket's persistent notification rules.",
-          "5. Before calling b2_set_bucket_notification_rules, get approval for the full replacement list, target URLs, event types, prefixes, and secret-handling plan. Let the destructive gate or MCP elicitation enforce approval.",
-          "6. After any approved update, call b2_get_bucket_notification_rules again and compare the final rules to the approved plan.",
+          "5. If preserving existing rules requires any redacted URL path, HMAC signing secret, or custom-header value, do not call b2_set_bucket_notification_rules from this prompt; hand off an out-of-band update plan that an operator can complete with the original secret values.",
+          "6. Before calling b2_set_bucket_notification_rules, get approval for the full replacement list, target URLs, event types, prefixes, and secret-handling plan. Let the destructive gate or MCP elicitation enforce approval.",
+          "7. After any approved update, call b2_get_bucket_notification_rules again and compare the final rules to the approved plan.",
         ),
       );
     },

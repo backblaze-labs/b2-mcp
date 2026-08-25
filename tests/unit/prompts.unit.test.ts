@@ -269,6 +269,20 @@ describe("B2 workflow MCP prompts", () => {
     expect(text).toContain("use only the resolved bucketId");
   });
 
+  it("does not reconstruct notification replacements from redacted secrets", async () => {
+    const server = createServer(testConfig);
+    const prompts = getRegisteredPrompts(server) ?? {};
+    const result: any = await prompts["b2-review-event-notifications"].execute(
+      sampleArgs["b2-review-event-notifications"],
+      {},
+    );
+    const text = promptText(result);
+
+    expect(text).toContain("do not call b2_set_bucket_notification_rules");
+    expect(text).toContain("out-of-band update plan");
+    expect(text).toContain("original secret values");
+  });
+
   it("validates positive integer retention duration strings", () => {
     const server = createServer(testConfig);
     const prompt = getRegisteredPrompts(server)?.["b2-provision-object-lock-bucket"];
