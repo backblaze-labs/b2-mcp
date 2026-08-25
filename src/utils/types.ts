@@ -68,6 +68,8 @@ export interface B2Config {
   credentialFingerprint?: string;
   /** Non-secret fingerprint that includes the verified caller when one is available. */
   callerFingerprint?: string;
+  /** Non-secret fingerprint of the verified OAuth principal when one is available. */
+  callerPrincipalFingerprint?: string;
 }
 
 export interface B2AuthResponse {

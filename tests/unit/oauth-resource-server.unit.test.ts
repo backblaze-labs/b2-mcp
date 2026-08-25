@@ -272,6 +272,9 @@ describe("OAuthIntrospectionVerifier", () => {
     ["missing resource", { resource: undefined }, /resource/i],
     ["wrong resource", { resource: "other" }, /resource/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
+    ["malformed token algorithm", { alg: 123 }, /algorithm/i],
+    ["null token algorithm", { alg: null }, /algorithm/i],
+    ["empty token algorithm", { alg: "" }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
     ["missing deployment scope", { scope: "profile" }, /deployment scope/i],
   ])("rejects %s tokens", async (_name, overrides, message) => {
@@ -1691,6 +1694,9 @@ describe("validatePreverifiedOAuthAuthInfo", () => {
     ["wrong audience", { aud: "other" }, /audience/i],
     ["future not-before", { nbf: 1001 }, /not yet valid/i],
     ["wrong token type", { token_type: "mac" }, /token type/i],
+    ["malformed token algorithm", { alg: 123 }, /algorithm/i],
+    ["null token algorithm", { alg: null }, /algorithm/i],
+    ["empty token algorithm", { alg: "" }, /algorithm/i],
     ["wrong token algorithm", { alg: "HS256" }, /algorithm/i],
   ])("rejects preverified AuthInfo with %s", (_name, extraOverrides, message) => {
     expect(() =>

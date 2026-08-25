@@ -144,8 +144,8 @@ The shared B2 key means B2 account-side logs see one application key. MCP logs
 therefore emit stable redacted fingerprints for attribution: successful
 admissions log `vercel.oauth.admission_accepted`, authenticated admission
 rejects log `vercel.oauth.admission_rejected`, and `tool.call`, `tool.error`,
-credential resolution, and capability failures include a per-caller fingerprint
-when a verified subject is present. Use those fingerprints with Okta sign-in
+credential resolution, and capability failures include the same `principal`
+fingerprint when a verified subject is present. Use that field with Okta sign-in
 and application logs to map activity back to an employee.
 
 Token validation uses the authorization server's RFC 7662 introspection

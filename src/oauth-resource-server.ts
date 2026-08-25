@@ -494,10 +494,15 @@ function assertTokenAlgorithm(
   allowedAlgorithms: readonly string[],
 ): string | undefined {
   if (allowedAlgorithms.length === 0) return undefined;
-  const algorithm = stringClaim(claims.alg ?? claims.jwt_alg ?? claims.token_alg);
-  if (!algorithm) return undefined;
-  assertAllowedAlgorithm(algorithm, allowedAlgorithms);
-  return algorithm;
+  for (const claimName of ["alg", "jwt_alg", "token_alg"] as const) {
+    const value = claims[claimName];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || !value.trim()) {
+      throw new OAuthError(OAuthErrorCode.InvalidToken, "Token algorithm is not accepted");
+    }
+    return assertAllowedAlgorithm(value, allowedAlgorithms);
+  }
+  return undefined;
 }
 
 function assertAllowedAlgorithm(

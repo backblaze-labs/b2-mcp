@@ -90,6 +90,7 @@ describe("createAuditedToolCallback", () => {
     const wrapped = createAuditedToolCallback("t", original, {
       ...cfg,
       callerFingerprint: "caller-fingerprint",
+      callerPrincipalFingerprint: "principal-fingerprint",
     } as B2Config);
 
     const result = await wrapped({ bucketId: "b" }, {});
@@ -99,6 +100,7 @@ describe("createAuditedToolCallback", () => {
       expect.objectContaining({
         tool: "t",
         caller: "caller-fingerprint",
+        principal: "principal-fingerprint",
         outputFormat: "json",
         argKeys: ["bucketId"],
         error: false,
@@ -170,11 +172,17 @@ describe("createAuditedToolCallback", () => {
     const wrapped = createAuditedToolCallback("t", original, {
       ...cfg,
       callerFingerprint: "caller-fingerprint",
+      callerPrincipalFingerprint: "principal-fingerprint",
     } as B2Config);
 
     await expect(wrapped({}, {})).rejects.toThrow("boom");
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ tool: "t", caller: "caller-fingerprint", err: "boom" }),
+      expect.objectContaining({
+        tool: "t",
+        caller: "caller-fingerprint",
+        principal: "principal-fingerprint",
+        err: "boom",
+      }),
       "tool.error",
     );
   });

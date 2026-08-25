@@ -113,9 +113,8 @@ export function verificationFingerprintConfig(
   );
 }
 
-function authInfoScope(authInfo: AuthInfo | undefined): string | null {
-  const principal = rateLimitPrincipalFromAuthInfo(authInfo);
-  return principal ? `verified-principal:${credentialFingerprint(principal)}` : null;
+function principalFingerprintFromValue(principal: string | null | undefined): string | undefined {
+  return principal ? credentialFingerprint(principal) : undefined;
 }
 
 function capabilityCacheKeyForConfig(prefix: string, config: B2Config): string {
@@ -310,11 +309,13 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
     }
     const config = configFromMaterial(headerMaterial(context.req.headers), httpConfigOptions());
-    const authScope = authInfoScope(context.req.auth);
+    const principal = rateLimitPrincipalFromAuthInfo(context.req.auth);
+    const authScope = principal ? `verified-principal:${credentialFingerprint(principal)}` : null;
     const cacheKey = authScope
       ? `credential-principal:${config.credentialFingerprint}:${authScope}`
       : `credential:${config.credentialFingerprint}`;
     config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
+    config.callerPrincipalFingerprint = authInfoPrincipalFingerprint(context.req.auth);
     return {
       config,
       cacheKey,
@@ -340,6 +341,7 @@ export class HttpServerCredentialProvider implements CredentialProvider {
       ? `server-principal:${credentialFingerprint(principal)}`
       : `credential:${config.credentialFingerprint}`;
     config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
+    config.callerPrincipalFingerprint = authInfoPrincipalFingerprint(context?.req?.auth);
     return {
       config,
       cacheKey,
@@ -398,7 +400,7 @@ export function authInfoPrincipalFingerprint(
 ): string | undefined {
   if (!authInfo) return undefined;
   const subject = principalFromAuthInfo(authInfo);
-  return subject ? credentialFingerprint(subject) : undefined;
+  return principalFingerprintFromValue(subject);
 }
 
 function rateLimitPrincipalFromAuthInfo(authInfo: AuthInfo | undefined): string | null {
@@ -496,6 +498,7 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
     const config = configFromMaterial(material, httpConfigOptions());
     const cacheKey = `principal:${credentialFingerprint(principal)}`;
     config.callerFingerprint = callerFingerprintForConfig(config, cacheKey);
+    config.callerPrincipalFingerprint = principalFingerprintFromValue(principal);
     return {
       config,
       cacheKey,

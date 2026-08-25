@@ -149,12 +149,12 @@ admission in a later config-only promotion. Rollbacks to old code require the
 subject allowlist to be restored first.
 
 The shared-key audit trail uses redacted fingerprints, not raw identities.
-Successful admission logs `vercel.oauth.admission_accepted` with a principal
+Successful admission logs `vercel.oauth.admission_accepted` with a `principal`
 fingerprint and OAuth client fingerprint; rejected authenticated admissions log
 `vercel.oauth.admission_rejected`; `tool.call`, `tool.error`, credential
-resolution, and capability failures include a per-caller fingerprint when a
-verified subject is present. Use those MCP logs with Okta sign-in logs to map a
-shared B2-key action back to an employee.
+resolution, and capability failures include the same `principal` fingerprint
+when a verified subject is present. Use that field with Okta sign-in logs to map
+a shared B2-key action back to an employee.
 
 ## Health Checks
 

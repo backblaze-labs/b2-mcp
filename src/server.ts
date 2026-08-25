@@ -345,6 +345,23 @@ interface CapabilityCacheEntry {
   expiresAt: number;
 }
 
+interface CapabilityFailureDetails {
+  status: number;
+  code: string;
+  log: Record<string, unknown>;
+  message: string;
+}
+
+class CapabilityResolutionFailure extends CredentialResolutionError {
+  readonly log: Record<string, unknown>;
+
+  constructor(details: CapabilityFailureDetails) {
+    super(details.message, details.status, details.code);
+    this.name = "CapabilityResolutionFailure";
+    this.log = details.log;
+  }
+}
+
 const capabilityCache = new Map<string, CapabilityCacheEntry>();
 const capabilityInflight = new Map<string, Promise<string[]>>();
 const DEFAULT_CAPABILITY_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -468,15 +485,7 @@ function responseHeader(headers: unknown, names: string[]): unknown {
   return undefined;
 }
 
-function capabilityFailureDetails(
-  err: unknown,
-  config: B2Config,
-): {
-  status: number;
-  code: string;
-  log: Record<string, unknown>;
-  message: string;
-} {
+function capabilityFailureDetails(err: unknown, config: B2Config): CapabilityFailureDetails {
   const anyErr = err as {
     status?: unknown;
     code?: unknown;
@@ -544,21 +553,35 @@ function capabilityFailureDetails(
   };
 }
 
-function throwCapabilityResolutionError(
+function capabilityResolutionFailure(err: unknown, config: B2Config): CredentialResolutionError {
+  if (err instanceof CapabilityResolutionFailure) return err;
+  return new CapabilityResolutionFailure(capabilityFailureDetails(err, config));
+}
+
+function callerAuditFields(config: B2Config): Record<string, string> {
+  return {
+    ...(config.callerFingerprint && { caller: config.callerFingerprint }),
+    ...(config.callerPrincipalFingerprint && { principal: config.callerPrincipalFingerprint }),
+  };
+}
+
+function logCapabilityResolutionFailure(
   err: unknown,
   config: B2Config,
   credentialLogKey: string,
-): never {
-  const details = capabilityFailureDetails(err, config);
+): void {
+  const details =
+    err instanceof CapabilityResolutionFailure
+      ? { log: err.log }
+      : { log: capabilityFailureDetails(err, config).log };
   logger.warn(
     {
       credential: credentialLogKey,
-      ...(config.callerFingerprint && { caller: config.callerFingerprint }),
+      ...callerAuditFields(config),
       ...details.log,
     },
     "capability.fetch.failed",
   );
-  throw new CredentialResolutionError(details.message, details.status, details.code);
 }
 
 export async function fetchCapabilities(
@@ -581,7 +604,14 @@ export async function fetchCapabilities(
   }
 
   const existingInflight = capabilityInflight.get(resolvedCacheKey);
-  if (existingInflight) return [...(await existingInflight)];
+  if (existingInflight) {
+    try {
+      return [...(await existingInflight)];
+    } catch (err) {
+      logCapabilityResolutionFailure(err, config, credentialLogKey);
+      throw err;
+    }
+  }
 
   const discovery = (async () => {
     try {
@@ -591,14 +621,19 @@ export async function fetchCapabilities(
       rememberCapabilities(resolvedCacheKey, capabilities, now);
       return capabilities;
     } catch (err) {
-      throwCapabilityResolutionError(err, config, credentialLogKey);
+      throw capabilityResolutionFailure(err, config);
     } finally {
       capabilityInflight.delete(resolvedCacheKey);
     }
   })();
   capabilityInflight.set(resolvedCacheKey, discovery);
 
-  return [...(await discovery)];
+  try {
+    return [...(await discovery)];
+  } catch (err) {
+    logCapabilityResolutionFailure(err, config, credentialLogKey);
+    throw err;
+  }
 }
 
 /**
@@ -616,7 +651,7 @@ export function createAuditedToolCallback(
   contextProviders?: DestructiveElicitationContextProviders,
 ): ToolCallback {
   const keyFingerprint = config.credentialFingerprint ?? fingerprintConfig(config);
-  const callerFingerprint = config.callerFingerprint;
+  const auditFields = callerAuditFields(config);
 
   return async function auditedToolCallback(args: any, extra: any) {
     const start = Date.now();
@@ -667,7 +702,7 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
-          ...(callerFingerprint && { caller: callerFingerprint }),
+          ...auditFields,
           outputFormat,
           argKeys,
           durationMs,
@@ -697,7 +732,7 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
-          ...(callerFingerprint && { caller: callerFingerprint }),
+          ...auditFields,
           outputFormat: config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT,
           argKeys,
           durationMs,

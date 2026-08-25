@@ -1,5 +1,6 @@
 import {
   CredentialResolutionError,
+  credentialFingerprint,
   fingerprintConfig,
   getHttpCredentialMode,
   getHttpCredentialProvider,
@@ -197,6 +198,12 @@ describe("credential providers", () => {
     expect(alice.config.credentialFingerprint).toBe(bob.config.credentialFingerprint);
     expect(alice.cacheKey).not.toBe(bob.cacheKey);
     expect(alice.config.callerFingerprint).not.toBe(bob.config.callerFingerprint);
+    expect(alice.config.callerPrincipalFingerprint).toBe(
+      credentialFingerprint("https://issuer.example#alice"),
+    );
+    expect(bob.config.callerPrincipalFingerprint).toBe(
+      credentialFingerprint("https://issuer.example#bob"),
+    );
     expect(alice.cacheKey).not.toContain("alice");
     expect(alice.cacheKey).not.toContain("header-secret");
     expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
@@ -283,6 +290,12 @@ describe("credential providers", () => {
     expect(alice.capabilityCacheKey).toBe(bob.capabilityCacheKey);
     expect(alice.config.credentialFingerprint).toBe(bob.config.credentialFingerprint);
     expect(alice.config.callerFingerprint).not.toBe(bob.config.callerFingerprint);
+    expect(alice.config.callerPrincipalFingerprint).toBe(
+      credentialFingerprint("https://issuer.example#alice"),
+    );
+    expect(bob.config.callerPrincipalFingerprint).toBe(
+      credentialFingerprint("https://issuer.example#bob"),
+    );
     expect(alice.cacheKey).not.toContain("alice");
     expect(alice.cacheKey).not.toContain("server-secret");
   });
@@ -302,6 +315,7 @@ describe("credential providers", () => {
     expect(resolved.cacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
     expect(resolved.capabilityCacheKey).toMatch(/^principal:[a-f0-9]{16}$/);
     expect(resolved.config.callerFingerprint).toMatch(/^[a-f0-9]{16}$/);
+    expect(resolved.config.callerPrincipalFingerprint).toBe(credentialFingerprint("alice"));
     expect(resolved.cacheKey).not.toContain("alice");
     expect(resolved.cacheKey).not.toContain("tenant-id");
   });

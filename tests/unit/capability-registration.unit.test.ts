@@ -238,11 +238,19 @@ describe("fetchCapabilities", () => {
         `B2 ${upstreamStatus}`,
         { "X-Bz-Request-Id": requestId },
       );
+      const configs = ["alice", "bob", "carol"].map(
+        (name) =>
+          ({
+            ...baseConfig,
+            callerFingerprint: `caller-${name}`,
+            callerPrincipalFingerprint: `principal-${name}`,
+          }) as B2Config,
+      );
 
       const results = await Promise.allSettled([
-        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
-        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
-        fetchCapabilities(baseConfig, "credential:shared-fail", "credential:shared-log"),
+        fetchCapabilities(configs[0], "credential:shared-fail", "credential:shared-log-alice"),
+        fetchCapabilities(configs[1], "credential:shared-fail", "credential:shared-log-bob"),
+        fetchCapabilities(configs[2], "credential:shared-fail", "credential:shared-log-carol"),
       ]);
 
       expect(transport.requests).toHaveLength(1);
@@ -255,12 +263,18 @@ describe("fetchCapabilities", () => {
           code: expectedCode,
         });
       }
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          requestId,
-        }),
-        "capability.fetch.failed",
-      );
+      expect(warnSpy).toHaveBeenCalledTimes(3);
+      for (const name of ["alice", "bob", "carol"]) {
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            credential: `credential:shared-log-${name}`,
+            caller: `caller-${name}`,
+            principal: `principal-${name}`,
+            requestId,
+          }),
+          "capability.fetch.failed",
+        );
+      }
     },
   );
 

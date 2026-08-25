@@ -2,7 +2,7 @@ const { existsSync, readFileSync, statSync } = require("fs");
 const { dirname, extname, resolve } = require("path");
 
 const WORKER_SOURCE_GRAPH_FILES_BUDGET = 75;
-const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 633_000;
+const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 634_000;
 const WORKER_EMITTED_FILES_BUDGET = 8;
 const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 9_150_000;
 const WORKER_UPLOAD_SCRIPT_BYTES_BUDGET = 3_000_000;
