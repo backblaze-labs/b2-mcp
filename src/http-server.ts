@@ -95,11 +95,37 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+function authorizationCredentialValues(value: string): string[] {
+  const match = /^\S+\s+(.+)$/.exec(value.trim());
+  const credential = match?.[1]?.trim();
+  return credential ? [credential] : [];
+}
+
+function cookieSecretValues(value: string): string[] {
+  return value.split(";").flatMap((part) => {
+    const cookie = part.trim();
+    if (!cookie) return [];
+    const equalsIndex = cookie.indexOf("=");
+    if (equalsIndex === -1) return [cookie];
+    const cookieValue = cookie.slice(equalsIndex + 1).trim();
+    return cookieValue ? [cookie, cookieValue] : [cookie];
+  });
+}
+
+function secretHeaderValues(
+  name: (typeof SECRET_REQUEST_HEADERS)[number],
+  value: string,
+): string[] {
+  if (name === "authorization") return [value, ...authorizationCredentialValues(value)];
+  if (name === "cookie") return [value, ...cookieSecretValues(value)];
+  return [value];
+}
+
 function requestSecretHeaderValues(req: http.IncomingMessage): string[] {
   return SECRET_REQUEST_HEADERS.flatMap((name) => {
     const value = req.headers[name];
-    if (Array.isArray(value)) return value;
-    return value ? [value] : [];
+    const values = Array.isArray(value) ? value : value ? [value] : [];
+    return values.flatMap((headerValue) => secretHeaderValues(name, headerValue));
   });
 }
 
