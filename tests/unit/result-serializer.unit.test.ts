@@ -6,6 +6,7 @@ import {
   preflightMcpOutputFormat,
   runWithResultSerializationOptions,
   serializeStructuredToolResult,
+  serializeUnsanitizedStructuredToolResult,
   TOON_IMPLEMENTATION,
   TOON_SPEC_VERSION,
 } from "../../src/utils/result-serializer";
@@ -161,6 +162,18 @@ describe("result serializer", () => {
     await expect(decodeToon(result.content[0].text)).resolves.toEqual(result.structuredContent);
   });
 
+  it("serializes unsanitized compatible output in the selected text format", async () => {
+    const result = serializeUnsanitizedStructuredToolResult({ ok: true }, "toon");
+
+    expect(result.structuredContent).toEqual({ ok: true });
+    expect(result.content[0].text).toBe("ok: true");
+    await expect(decodeToon(result.content[0].text)).resolves.toEqual(result.structuredContent);
+  });
+
+  it("rejects unsanitized values that cannot become structured JSON", () => {
+    expect(() => serializeUnsanitizedStructuredToolResult(undefined)).toThrow(/JSON-compatible/);
+  });
+
   it("emits visible text for an empty object in TOON mode", async () => {
     const result = await runWithResultSerializationOptions({ outputFormat: "toon" }, () =>
       toolJson({ omitted: undefined }),
@@ -213,6 +226,20 @@ describe("result serializer", () => {
   it("preflights TOON mode with a smoke serialization", () => {
     expect(() => preflightMcpOutputFormat("json")).not.toThrow();
     expect(() => preflightMcpOutputFormat("toon")).not.toThrow();
+  });
+
+  it("fails TOON preflight when the encoder contract drifts", async () => {
+    vi.resetModules();
+    vi.doMock("../../src/utils/toon-encoder", () => ({
+      encodeToon: () => "ok: false",
+    }));
+    try {
+      const serializer = await import("../../src/utils/result-serializer");
+      expect(() => serializer.preflightMcpOutputFormat("toon")).toThrow(/preflight failed/);
+    } finally {
+      vi.doUnmock("../../src/utils/toon-encoder");
+      vi.resetModules();
+    }
   });
 
   it("does not load the npm TOON package when JSON mode serializes text", async () => {

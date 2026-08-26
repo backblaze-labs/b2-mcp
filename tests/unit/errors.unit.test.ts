@@ -1,4 +1,5 @@
 import {
+  badRequest,
   parseB2Error,
   formatB2Error,
   parseErrorText,
@@ -106,6 +107,69 @@ describe("parseB2Error", () => {
 
     expect(parsed.message).toContain("applicationKey");
     expect(parsed.message).toContain(CANARY);
+  });
+
+  it("uses safe fallbacks for malformed legacy response errors", () => {
+    const parsed = parseB2Error({
+      response: {
+        status: "not-a-number",
+        data: "not-a-response-body",
+        headers: null,
+      },
+    });
+
+    expect(parsed).toEqual({
+      status: 500,
+      code: "unknown_error",
+      message: "An unknown error occurred",
+      requestId: undefined,
+    });
+  });
+
+  it("falls back for incomplete AWS SDK metadata errors", () => {
+    const parsed = parseB2Error({
+      Code: "",
+      name: "",
+      message: undefined,
+      $metadata: {
+        requestId: 42,
+        extendedRequestId: false,
+      },
+    });
+
+    expect(parsed).toEqual({
+      status: 500,
+      code: "unknown_error",
+      message: "An unknown error occurred",
+      requestId: undefined,
+      extendedRequestId: undefined,
+    });
+  });
+
+  it("normalizes already parsed B2 errors with optional fields missing", () => {
+    expect(parseB2Error({ code: "already_parsed", message: "done", requestId: 42 })).toEqual({
+      status: 500,
+      code: "already_parsed",
+      message: "done",
+      requestId: undefined,
+    });
+  });
+
+  it("stringifies provider messages that cannot be JSON encoded", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(parseB2Error({ message: circular })).toEqual({
+      status: 500,
+      code: "internal_error",
+      message: "[object Object]",
+    });
+  });
+
+  it("throws a normalized bad request object", () => {
+    expect(() => badRequest("bad input")).toThrow(
+      expect.objectContaining({ status: 400, code: "bad_request", message: "bad input" }),
+    );
   });
 });
 
