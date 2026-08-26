@@ -105,7 +105,7 @@ These clients share the same `mcpServers` block. Paste it into the client's conf
 
 Config file per client:
 
-- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) / `%APPDATA%\Claude\claude_desktop_config.json` (Windows). Restart fully (Cmd/Ctrl+Q) and reopen after editing.
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) / `%APPDATA%\Claude\claude_desktop_config.json` (Windows) / `~/.config/Claude/claude_desktop_config.json` (Linux). Restart fully (Cmd/Ctrl+Q) and reopen after editing.
 - **Cursor**: `.cursor/mcp.json` in your project (or `~/.cursor/mcp.json` globally).
 - **Cline**: MCP Servers → Configure (edits `cline_mcp_settings.json`).
 - **Windsurf**: `~/.codeium/windsurf/mcp_config.json`.

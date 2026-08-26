@@ -35,7 +35,11 @@ The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary 
 
 S3-compatible and report tools derive their endpoint region from the authorized B2 account response. `B2_REGION` is only a fallback/default for paths that need a region before authorization, or when authorization is temporarily unavailable.
 
-**Connect Claude Desktop** by editing `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Connect Claude Desktop** by editing its config file — `claude_desktop_config.json`, located per OS:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -62,7 +66,7 @@ If you need an explicit fallback region before authorization, include `B2_REGION
 }
 ```
 
-Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from clients that do not expose child-process stderr, add `"B2_LOG_FILE": "/absolute/path/to/b2-mcp.log"` to the same `env` block.
+Restart Claude Desktop and the B2 tools appear. To persist local stdio logs from clients that do not expose child-process stderr, add `"B2_LOG_FILE"` to the same `env` block, set to an OS-appropriate absolute path (for example `/var/log/b2-mcp.log` on macOS/Linux or `C:\\logs\\b2-mcp.log` on Windows).
 
 > **One non-master application key covers normal storage work:** B2 native, S3, and key management. SDK-backed Partner/Groups tools require `B2_MASTER_KEY_ID` / `B2_MASTER_KEY` on an account authorized for the Partner API. B2's S3 endpoint rejects master keys, which is why the application key remains the primary credential. See [Configuration](#configuration) for the full list.
 >
