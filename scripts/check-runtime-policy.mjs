@@ -12,6 +12,7 @@ const require = createRequire(import.meta.url);
 const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const errors = [];
 const {
+  decodeYamlDoubleQuoted,
   valuesEqual,
   workflowJobBlock: parseWorkflowJobBlock,
   workflowJobBlocks: parseWorkflowJobBlocks,
@@ -155,14 +156,12 @@ function stripYamlInlineComment(value) {
   return value.trim();
 }
 
-function parseQuotedScalar(value, relativePath) {
+function parseQuotedScalar(value) {
+  // Decode YAML double-quoted escapes (including \xXX and \U00XXXXXX) rather than
+  // relying on JSON.parse, so an escaped action or key cannot slip past a raw
+  // substring check while GitHub resolves it to a structural token.
   if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      fail(`${relativePath}: workflow double-quoted scalar must parse`);
-      return value.slice(1, -1);
-    }
+    return decodeYamlDoubleQuoted(value.slice(1, -1));
   }
   if (value.startsWith("'") && value.endsWith("'")) {
     return value.slice(1, -1).replace(/''/g, "'");
@@ -175,7 +174,7 @@ function parseWorkflowScalar(rawValue, context, relativePath) {
   const value = stripYamlInlineComment(rawValue);
   const anchored = value.match(/^&([^\s]+)(?:\s+(.*))?$/);
   if (anchored) {
-    const resolved = parseQuotedScalar(anchored[2] ?? "", relativePath);
+    const resolved = parseQuotedScalar(anchored[2] ?? "");
     if (!anchors.has(anchored[1])) anchors.set(anchored[1], resolved);
     return resolved;
   }
@@ -192,7 +191,7 @@ function parseWorkflowScalar(rawValue, context, relativePath) {
     return anchors.has(alias[1]) ? anchors.get(alias[1]) : value;
   }
 
-  return parseQuotedScalar(value, relativePath);
+  return parseQuotedScalar(value);
 }
 
 const scalarAnchorCache = new Map();
@@ -399,10 +398,49 @@ function jobUsesAction(relativePath, jobBlock, action) {
   );
 }
 
+// Fail closed on step forms workflowStepBlocks cannot turn into a step block.
+// A flow-style steps list (`steps: [ ... ]`), an aliased steps value
+// (`steps: *foo`), or an individual flow-mapping/alias step (`- { uses: ... }`,
+// `- *step`) is valid YAML that this parser skips, so a Pages action hidden in
+// that form would otherwise dodge every Pages check.
+function unsupportedStepForms(jobBlock) {
+  const topLevelIndent = blockChildIndent(jobBlock);
+  if (topLevelIndent === null) return [];
+
+  const lines = jobBlock.split(/\r?\n/);
+  const reasons = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const entry = topLevelMappingEntry(line, topLevelIndent);
+    if (!entry || entry.key !== "steps") continue;
+
+    if (!hasEmptyOrAnchorValue(entry.rawValue)) {
+      reasons.push("steps");
+      continue;
+    }
+    for (let child = index + 1; child < lines.length; child += 1) {
+      const childLine = lines[child];
+      if (!childLine.trim() || childLine.trimStart().startsWith("#")) continue;
+      const childIndent = childLine.match(/^ */)?.[0].length ?? 0;
+      if (childIndent <= topLevelIndent) break;
+      const item = childLine.slice(childIndent).match(/^-\s+(.+)$/);
+      if (item && /^[[{*]/.test(item[1].trim())) reasons.push("step");
+    }
+  }
+  return reasons;
+}
+
 function requireParseableWorkflowJobs() {
   for (const workflow of listFiles(".github/workflows")) {
-    for (const name of parseUnsupportedWorkflowJobForms(read(workflow))) {
+    const text = read(workflow);
+    for (const name of parseUnsupportedWorkflowJobForms(text)) {
       fail(`${workflow}: job ${name} uses an unsupported inline mapping form`);
+    }
+    for (const job of parseWorkflowJobBlocks(text)) {
+      for (const reason of unsupportedStepForms(job.block)) {
+        fail(`${workflow}: job ${job.name} uses an unsupported inline ${reason} form`);
+      }
     }
   }
 }
@@ -520,6 +558,50 @@ function requirePagesPackageExecutionHardening() {
       }
       if (!hasDocsStep) {
         fail(`${workflow}: Pages artifact job ${job.name} must run pnpm run docs`);
+      }
+    }
+  }
+}
+
+// GitHub's default runner shell (bash on the ubuntu Pages runner) runs the step
+// script verbatim. A custom `shell:` (step-level or via job/workflow
+// `defaults.run.shell`) can be a wrapper that runs `npm install` before the
+// approved command while the run text still matches, so any non-default shell in
+// a Pages workflow must fail closed.
+const TRUSTED_WORKFLOW_SHELLS = new Set(["bash", "sh"]);
+
+function workflowShellValues(relativePath) {
+  const values = [];
+  let blockScalarParentIndent = null;
+  for (const line of read(relativePath).split(/\r?\n/)) {
+    if (blockScalarParentIndent !== null) {
+      if (!line.trim()) continue;
+      const indent = line.match(/^ */)?.[0].length ?? 0;
+      if (indent > blockScalarParentIndent) continue;
+      blockScalarParentIndent = null;
+    }
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const entry = workflowLineMappingEntry(line);
+    if (!entry) continue;
+    const rawValue = stripYamlInlineComment(entry.rawValue);
+    if (/^[|>](?:[+-]?\d+|\d+[+-]?)?$/.test(rawValue)) {
+      blockScalarParentIndent = entry.indent;
+      continue;
+    }
+    if (entry.key === "shell") {
+      values.push(
+        parseWorkflowScalar(entry.rawValue, workflowScalarAnchors(relativePath), relativePath),
+      );
+    }
+  }
+  return values;
+}
+
+function requirePagesTrustedShells() {
+  for (const workflow of workflowFilesWithPagesDeploy()) {
+    for (const shell of workflowShellValues(workflow)) {
+      if (!TRUSTED_WORKFLOW_SHELLS.has(String(shell).trim())) {
+        fail(`${workflow}: Pages workflow must use a trusted default shell, got ${shell}`);
       }
     }
   }
@@ -757,6 +839,7 @@ requireParseableWorkflowJobs();
 requirePagesDeploysFromMainOnly();
 requirePagesJobTimeouts();
 requirePagesPackageExecutionHardening();
+requirePagesTrustedShells();
 
 for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smoke.yml"]) {
   requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");

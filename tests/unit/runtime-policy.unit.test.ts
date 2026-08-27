@@ -986,4 +986,174 @@ describe("runtime policy", () => {
       );
     });
   });
+
+  it("rejects Pages deploy actions hidden in flow-style steps", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          '    steps: [{ uses: "actions/deploy-\\u0070ages@def" }]',
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: job deploy uses an unsupported inline steps form",
+      );
+    });
+  });
+
+  it("rejects individual Pages steps written in flow-mapping form", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          '      - { uses: "actions/deploy-\\u0070ages@def" }',
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: job build uses an unsupported inline step form",
+      );
+    });
+  });
+
+  it("rejects Pages deploy actions written with escaped keys and values", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          '      - "\\x75ses": "actions/deploy-\\x70ages@def"',
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages deploy job deploy must require github.ref == refs/heads/main",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages job deploy must declare timeout-minutes",
+      );
+    });
+  });
+
+  it("rejects Pages steps that run under a custom shell wrapper", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        shell: custom-wrapper {0}",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages workflow must use a trusted default shell",
+      );
+    });
+  });
 });
