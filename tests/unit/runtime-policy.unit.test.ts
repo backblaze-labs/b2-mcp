@@ -246,7 +246,7 @@ describe("runtime policy", () => {
         ".github/workflows/docs.yml: Pages pnpm install step must use --ignore-scripts",
       );
       expect(result.stderr).toContain(
-        ".github/workflows/docs.yml: Pages pnpm install step must blank ACTIONS_RUNTIME_TOKEN",
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm install with --ignore-scripts",
       );
       expect(result.stderr).toContain(
         ".github/workflows/docs.yml: Pages docs build step must blank ACTIONS_RUNTIME_TOKEN",
@@ -301,6 +301,56 @@ describe("runtime policy", () => {
     });
   });
 
+  it("rejects Pages exact package steps without blanked env", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages pnpm install step must blank ACTIONS_RUNTIME_TOKEN",
+      );
+      expect(result.stderr).not.toContain(
+        ".github/workflows/docs.yml: Pages docs build step must blank ACTIONS_RUNTIME_TOKEN",
+      );
+    });
+  });
+
   it("rejects Pages package steps with heredoc-spoofed env blanks", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(
@@ -350,10 +400,68 @@ describe("runtime policy", () => {
 
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(
-        ".github/workflows/docs.yml: Pages pnpm install step must blank ACTIONS_RUNTIME_TOKEN",
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
       );
-      expect(result.stderr).not.toContain(
-        ".github/workflows/docs.yml: Pages docs build step must blank ACTIONS_RUNTIME_TOKEN",
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm install with --ignore-scripts",
+      );
+    });
+  });
+
+  it("rejects Pages commands present only in heredoc or comment text", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: |",
+          "          cat <<'EOF'",
+          "          pnpm install --frozen-lockfile --ignore-scripts",
+          "          pnpm run docs",
+          "          EOF",
+          "          # pnpm install --frozen-lockfile --ignore-scripts",
+          "          # pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm install with --ignore-scripts",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm run docs",
       );
     });
   });

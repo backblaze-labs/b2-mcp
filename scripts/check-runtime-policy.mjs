@@ -24,6 +24,8 @@ const ACTIONS_RUNTIME_ENV_KEYS = [
   "ACTIONS_RUNTIME_TOKEN",
   "ACTIONS_RUNTIME_URL",
 ];
+const PAGES_DOCS_INSTALL_COMMAND = "pnpm install --frozen-lockfile --ignore-scripts";
+const PAGES_DOCS_BUILD_COMMAND = "pnpm run docs";
 
 function read(relativePath) {
   return readFileSync(path.join(root, relativePath), "utf8");
@@ -244,15 +246,13 @@ function requirePagesPackageExecutionHardening() {
       for (const stepBlock of workflowStepBlocks(job.block)) {
         const runCommand = stepTopLevelValue(stepBlock, "run");
         if (runCommand === null) continue;
+        const normalizedRunCommand = runCommand.trim();
 
-        const runsPnpmInstall = /\bpnpm\s+install\b/.test(runCommand);
-        const runsDocsBuild = /\bpnpm\s+run\s+docs\b/.test(runCommand);
+        const runsPnpmInstall = normalizedRunCommand === PAGES_DOCS_INSTALL_COMMAND;
+        const runsDocsBuild = normalizedRunCommand === PAGES_DOCS_BUILD_COMMAND;
 
         if (runsPnpmInstall) {
           hasInstallStep = true;
-          if (!/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(runCommand)) {
-            fail(`${workflow}: Pages pnpm install step must use --ignore-scripts`);
-          }
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages pnpm install step");
         }
 
@@ -261,10 +261,17 @@ function requirePagesPackageExecutionHardening() {
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages docs build step");
         }
 
-        const unexpectedPackageCommands = runCommand
-          .replace(/\bpnpm\s+install\b[^\n;&|]*/g, "")
-          .replace(/\bpnpm\s+run\s+docs\b[^\n;&|]*/g, "");
-        if (/\b(?:corepack|npm|npx|pnpm|yarn)\b/.test(unexpectedPackageCommands)) {
+        if (
+          /\b(?:corepack|npm|npx|pnpm|yarn)\b/.test(normalizedRunCommand) &&
+          !runsPnpmInstall &&
+          !runsDocsBuild
+        ) {
+          if (
+            /\bpnpm\s+install\b/.test(normalizedRunCommand) &&
+            !/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(normalizedRunCommand)
+          ) {
+            fail(`${workflow}: Pages pnpm install step must use --ignore-scripts`);
+          }
           fail(`${workflow}: Pages artifact job ${job.name} has unexpected package command`);
         }
       }
