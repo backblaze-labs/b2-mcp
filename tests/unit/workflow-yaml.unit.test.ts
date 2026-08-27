@@ -2,6 +2,7 @@ import { createRequire } from "module";
 
 const nodeRequire = createRequire(__filename);
 const {
+  decodeYamlDoubleQuoted,
   valuesEqual,
   workflowJobBlock,
   workflowJobBlocks,
@@ -9,6 +10,7 @@ const {
   yamlMappingForKey,
   yamlValuesForKey,
 } = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  decodeYamlDoubleQuoted: (inner: string) => string;
   valuesEqual: (actual: string[], expected: string[]) => boolean;
   workflowJobBlock: (text: string, jobName: string) => string | null;
   workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
@@ -116,6 +118,17 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlocks(quotedWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
     expect(workflowJobBlock(quotedWorkflow, "deploy")).toContain("&pages-deploy");
     expect(workflowJobBlock(quotedWorkflow, "build")).not.toContain("deploy");
+  });
+
+  it("decodes YAML double-quoted escapes JSON rejects", () => {
+    expect(decodeYamlDoubleQuoted("actions/deploy-\\u0070ages@sha")).toBe(
+      "actions/deploy-pages@sha",
+    );
+    expect(decodeYamlDoubleQuoted("u\\x73es")).toBe("uses");
+    expect(decodeYamlDoubleQuoted("\\U00000041")).toBe("A");
+    expect(decodeYamlDoubleQuoted("plain/value@sha")).toBe("plain/value@sha");
+    // Malformed hex escapes stay undecoded so they cannot spell a token.
+    expect(decodeYamlDoubleQuoted("bad\\xZZ")).toBe("bad\\xZZ");
   });
 
   it("flags flow-style job mappings as unsupported forms", () => {

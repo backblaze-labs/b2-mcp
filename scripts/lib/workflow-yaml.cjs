@@ -23,6 +23,66 @@ function stripInlineComment(value) {
   return value.trim();
 }
 
+// Single-character YAML double-quote escapes. JSON.parse handles a subset of
+// these plus \uXXXX, but YAML also supports \xXX, \U00XXXXXX, and letter
+// escapes like \N/\_/\L/\P that JSON rejects. Decoding them ourselves keeps the
+// parser fail-closed: an escaped structural token such as "u\x73es" resolves to
+// `uses`, so leaving it undecoded would let an escaped key hide an action.
+const YAML_SIMPLE_ESCAPES = {
+  0: "\0",
+  a: "\x07",
+  b: "\b",
+  t: "\t",
+  n: "\n",
+  v: "\v",
+  f: "\f",
+  r: "\r",
+  e: "\x1b",
+  " ": " ",
+  '"': '"',
+  "/": "/",
+  "\\": "\\",
+  N: "\u0085",
+  _: "\u00a0",
+  L: "\u2028",
+  P: "\u2029",
+};
+
+function decodeYamlDoubleQuoted(inner) {
+  let out = "";
+  for (let index = 0; index < inner.length; index += 1) {
+    const char = inner[index];
+    if (char !== "\\") {
+      out += char;
+      continue;
+    }
+    const next = inner[index + 1];
+    if (next === undefined) {
+      out += char;
+      break;
+    }
+    if (next === "x" || next === "u" || next === "U") {
+      const width = next === "x" ? 2 : next === "u" ? 4 : 8;
+      const hex = inner.slice(index + 2, index + 2 + width);
+      if (hex.length === width && /^[0-9a-fA-F]+$/.test(hex)) {
+        out += String.fromCodePoint(Number.parseInt(hex, 16));
+        index += 1 + width;
+        continue;
+      }
+      // Malformed hex escape: leave it undecoded so it cannot spell a token.
+      out += char;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(YAML_SIMPLE_ESCAPES, next)) {
+      out += YAML_SIMPLE_ESCAPES[next];
+      index += 1;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
 // Workflow policy tests need only small GitHub Actions snippets and deliberately
 // strip inline comments. pnpm-lock.cjs has a separate fail-closed parser for the
 // stricter pnpm-lock.yaml trust boundary, so these helpers are not
@@ -30,11 +90,7 @@ function stripInlineComment(value) {
 function unquoteYamlScalar(value) {
   const trimmed = stripInlineComment(value);
   if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return trimmed.slice(1, -1);
-    }
+    return decodeYamlDoubleQuoted(trimmed.slice(1, -1));
   }
   if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
     return trimmed.slice(1, -1).replace(/''/g, "'");
@@ -260,6 +316,7 @@ function unsupportedWorkflowJobForms(text) {
 }
 
 module.exports = {
+  decodeYamlDoubleQuoted,
   yamlValuesForKey,
   yamlMappingEntry,
   yamlBlockForKey,
