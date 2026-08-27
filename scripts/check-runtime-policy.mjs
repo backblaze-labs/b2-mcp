@@ -226,12 +226,15 @@ function workflowScalarAnchors(relativePath) {
 }
 
 function workflowLineMappingEntry(line) {
-  const entry = yamlMappingEntry(line);
-  if (entry) return entry;
-
+  // Parse the sequence-item mapping first: a step whose first key sits on the
+  // dash line (`- shell: custom {0}`) would otherwise parse to key `- shell`,
+  // hiding a step-level shell or anchor from order-independent scanning.
   const sequence = line.match(/^(\s*)-\s+(.+)$/);
-  if (!sequence) return null;
-  return yamlMappingEntry(`${" ".repeat(sequence[1].length + 2)}${sequence[2]}`);
+  if (sequence) {
+    const inner = yamlMappingEntry(`${" ".repeat(sequence[1].length + 2)}${sequence[2]}`);
+    if (inner) return inner;
+  }
+  return yamlMappingEntry(line);
 }
 
 function hasEmptyOrAnchorValue(rawValue) {
@@ -431,9 +434,52 @@ function unsupportedStepForms(jobBlock) {
   return reasons;
 }
 
+// A double-quoted scalar that opens on a line but does not close on it is a
+// multi-line/continued scalar. A `\`-newline join (`"actions/deploy-\` then
+// `pages@sha"`) resolves to a structural token this line-local parser cannot
+// see, so action discovery would omit the workflow. Fail closed on it instead.
+function opensUnterminatedDoubleQuote(rawValue) {
+  const value = rawValue.trimStart();
+  if (!value.startsWith('"')) return false;
+  for (let index = 1; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === "\\") {
+      index += 1;
+      continue;
+    }
+    if (char === '"') return false;
+  }
+  return true;
+}
+
+function hasContinuedQuotedScalar(relativePath) {
+  let blockScalarParentIndent = null;
+  for (const line of read(relativePath).split(/\r?\n/)) {
+    if (blockScalarParentIndent !== null) {
+      if (!line.trim()) continue;
+      const indent = line.match(/^ */)?.[0].length ?? 0;
+      if (indent > blockScalarParentIndent) continue;
+      blockScalarParentIndent = null;
+    }
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const entry = workflowLineMappingEntry(line);
+    if (!entry) continue;
+    const rawValue = stripYamlInlineComment(entry.rawValue);
+    if (/^[|>](?:[+-]?\d+|\d+[+-]?)?$/.test(rawValue)) {
+      blockScalarParentIndent = entry.indent;
+      continue;
+    }
+    if (opensUnterminatedDoubleQuote(entry.rawValue)) return true;
+  }
+  return false;
+}
+
 function requireParseableWorkflowJobs() {
   for (const workflow of listFiles(".github/workflows")) {
     const text = read(workflow);
+    if (hasContinuedQuotedScalar(workflow)) {
+      fail(`${workflow}: continued double-quoted scalar is not supported`);
+    }
     for (const name of parseUnsupportedWorkflowJobForms(text)) {
       fail(`${workflow}: job ${name} uses an unsupported inline mapping form`);
     }

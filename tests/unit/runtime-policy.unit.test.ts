@@ -1156,4 +1156,106 @@ describe("runtime policy", () => {
       );
     });
   });
+
+  it("rejects a custom shell declared on a step dash line", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - shell: custom-wrapper {0}",
+          "        run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages workflow must use a trusted default shell",
+      );
+    });
+  });
+
+  it("rejects Pages deploy actions split across continued quoted scalars", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    steps:",
+          '      - uses: "actions/deploy-\\',
+          'pages@def"',
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: continued double-quoted scalar is not supported",
+      );
+    });
+  });
 });
