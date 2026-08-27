@@ -199,4 +199,58 @@ describe("runtime policy", () => {
       expect(result.stderr).toContain("^22.3.0 || ^24 || ^26");
     });
   });
+
+  it("rejects Pages workflows without deploy and package hardening", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile",
+          "      - run: pnpm run docs",
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages deploy job deploy must require github.ref == refs/heads/main",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages job build must declare timeout-minutes",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages job deploy must declare timeout-minutes",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages pnpm install step must use --ignore-scripts",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages pnpm install step must blank ACTIONS_RUNTIME_TOKEN",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages docs build step must blank ACTIONS_RUNTIME_TOKEN",
+      );
+    });
+  });
 });

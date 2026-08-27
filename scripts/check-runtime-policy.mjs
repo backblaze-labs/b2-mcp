@@ -11,7 +11,19 @@ const root = process.env.B2_MCP_RUNTIME_POLICY_ROOT
 const require = createRequire(import.meta.url);
 const { readPackageManagerLock } = require("./lib/pnpm-lock.cjs");
 const errors = [];
-const { valuesEqual, workflowJobBlock: parseWorkflowJobBlock, yamlValuesForKey } = workflowYaml;
+const {
+  valuesEqual,
+  workflowJobBlock: parseWorkflowJobBlock,
+  workflowJobBlocks: parseWorkflowJobBlocks,
+  yamlValuesForKey,
+} = workflowYaml;
+
+const ACTIONS_RUNTIME_ENV_KEYS = [
+  "ACTIONS_CACHE_URL",
+  "ACTIONS_RESULTS_URL",
+  "ACTIONS_RUNTIME_TOKEN",
+  "ACTIONS_RUNTIME_URL",
+];
 
 function read(relativePath) {
   return readFileSync(path.join(root, relativePath), "utf8");
@@ -57,6 +69,89 @@ function workflowJobBlock(relativePath, jobName) {
     return "";
   }
   return block;
+}
+
+function workflowJobBlocks(relativePath) {
+  return parseWorkflowJobBlocks(read(relativePath));
+}
+
+function workflowStepBlocks(jobBlockText) {
+  const matches = [...jobBlockText.matchAll(/^ {6}-\s/gm)];
+  return matches.map((match, index) => {
+    const start = match.index ?? 0;
+    const end = matches[index + 1]?.index ?? jobBlockText.length;
+    return jobBlockText.slice(start, end);
+  });
+}
+
+function workflowFilesWithPagesDeploy() {
+  return listFiles(".github/workflows").filter((workflow) =>
+    read(workflow).includes("actions/deploy-pages@"),
+  );
+}
+
+function requirePagesDeploysFromMainOnly() {
+  for (const workflow of workflowFilesWithPagesDeploy()) {
+    for (const job of workflowJobBlocks(workflow)) {
+      if (!job.block.includes("actions/deploy-pages@")) continue;
+      if (
+        !/^ {4}if:\s*(?:\$\{\{\s*)?github\.ref == ['"]refs\/heads\/main['"](?:\s*\}\})?\s*$/m.test(
+          job.block,
+        )
+      ) {
+        fail(
+          `${workflow}: Pages deploy job ${job.name} must require github.ref == refs/heads/main`,
+        );
+      }
+    }
+  }
+}
+
+function requirePagesJobTimeouts() {
+  for (const workflow of workflowFilesWithPagesDeploy()) {
+    for (const job of workflowJobBlocks(workflow)) {
+      if (
+        !job.block.includes("actions/upload-pages-artifact@") &&
+        !job.block.includes("actions/deploy-pages@")
+      ) {
+        continue;
+      }
+      if (!/^ {4}timeout-minutes:\s*[1-9][0-9]*\s*$/m.test(job.block)) {
+        fail(`${workflow}: Pages job ${job.name} must declare timeout-minutes`);
+      }
+    }
+  }
+}
+
+function requireBlankActionsRuntimeEnv(relativePath, stepBlock, label) {
+  for (const key of ACTIONS_RUNTIME_ENV_KEYS) {
+    const pattern = new RegExp(`^\\s+${key}:\\s*(?:""|''|)$`, "m");
+    if (!pattern.test(stepBlock)) {
+      fail(`${relativePath}: ${label} must blank ${key}`);
+    }
+  }
+}
+
+function requirePagesPackageExecutionHardening() {
+  for (const workflow of workflowFilesWithPagesDeploy()) {
+    for (const job of workflowJobBlocks(workflow)) {
+      if (!job.block.includes("actions/upload-pages-artifact@")) continue;
+      for (const stepBlock of workflowStepBlocks(job.block)) {
+        if (!/^\s*(?:-\s*)?run:/m.test(stepBlock)) continue;
+
+        if (/\bpnpm\s+install\b/.test(stepBlock)) {
+          if (!/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(stepBlock)) {
+            fail(`${workflow}: Pages pnpm install step must use --ignore-scripts`);
+          }
+          requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages pnpm install step");
+        }
+
+        if (/\bpnpm\s+run\s+docs\b/.test(stepBlock)) {
+          requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages docs build step");
+        }
+      }
+    }
+  }
 }
 
 function parseNodeVersion(value) {
@@ -287,6 +382,9 @@ requireWorkflowMatrixInJob(
   policy.liveNodeMatrix,
 );
 requireSupportedRuntimeJobs(policy);
+requirePagesDeploysFromMainOnly();
+requirePagesJobTimeouts();
+requirePagesPackageExecutionHardening();
 
 for (const workflow of [".github/workflows/contract.yml", ".github/workflows/smoke.yml"]) {
   requireWorkflowScalar(workflow, "max-parallel", "1", "live matrix serialization");
