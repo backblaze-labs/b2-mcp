@@ -15,6 +15,7 @@ const {
   valuesEqual,
   workflowJobBlock: parseWorkflowJobBlock,
   workflowJobBlocks: parseWorkflowJobBlocks,
+  unsupportedWorkflowJobForms: parseUnsupportedWorkflowJobForms,
   yamlMappingEntry,
   yamlValuesForKey,
 } = workflowYaml;
@@ -169,7 +170,8 @@ function parseQuotedScalar(value, relativePath) {
   return value;
 }
 
-function parseWorkflowScalar(rawValue, anchors, relativePath) {
+function parseWorkflowScalar(rawValue, context, relativePath) {
+  const { anchors, duplicates } = context;
   const value = stripYamlInlineComment(rawValue);
   const anchored = value.match(/^&([^\s]+)(?:\s+(.*))?$/);
   if (anchored) {
@@ -179,7 +181,16 @@ function parseWorkflowScalar(rawValue, anchors, relativePath) {
   }
 
   const alias = value.match(/^\*([^\s]+)$/);
-  if (alias) return anchors.get(alias[1]) ?? value;
+  if (alias) {
+    // Fail closed: a redefined anchor resolves to its most recent preceding
+    // definition in real YAML, so trusting the cached first definition would let
+    // `&cmd` masquerade as the approved command while `*cmd` runs a later one.
+    if (duplicates.has(alias[1])) {
+      fail(`${relativePath}: alias *${alias[1]} resolves a redefined anchor`);
+      return value;
+    }
+    return anchors.has(alias[1]) ? anchors.get(alias[1]) : value;
+  }
 
   return parseQuotedScalar(value, relativePath);
 }
@@ -189,7 +200,7 @@ const scalarAnchorCache = new Map();
 function workflowScalarAnchors(relativePath) {
   if (scalarAnchorCache.has(relativePath)) return scalarAnchorCache.get(relativePath);
 
-  const anchors = new Map();
+  const context = { anchors: new Map(), duplicates: new Set() };
   let blockScalarParentIndent = null;
   for (const line of read(relativePath).split(/\r?\n/)) {
     if (blockScalarParentIndent !== null) {
@@ -206,11 +217,13 @@ function workflowScalarAnchors(relativePath) {
       blockScalarParentIndent = entry.indent;
       continue;
     }
-    parseWorkflowScalar(entry.rawValue, anchors, relativePath);
+    const anchored = rawValue.match(/^&([^\s]+)/);
+    if (anchored && context.anchors.has(anchored[1])) context.duplicates.add(anchored[1]);
+    parseWorkflowScalar(entry.rawValue, context, relativePath);
   }
 
-  scalarAnchorCache.set(relativePath, anchors);
-  return anchors;
+  scalarAnchorCache.set(relativePath, context);
+  return context;
 }
 
 function workflowLineMappingEntry(line) {
@@ -322,9 +335,9 @@ function parseInlineEnvMapping(relativePath, rawValue) {
   for (const part of body.split(",")) {
     const separator = part.indexOf(":");
     if (separator === -1) continue;
-    const anchors = workflowScalarAnchors(relativePath);
-    const key = parseWorkflowScalar(part.slice(0, separator), anchors, relativePath);
-    mapping[key] = parseWorkflowScalar(part.slice(separator + 1), anchors, relativePath);
+    const context = workflowScalarAnchors(relativePath);
+    const key = parseWorkflowScalar(part.slice(0, separator), context, relativePath);
+    mapping[key] = parseWorkflowScalar(part.slice(separator + 1), context, relativePath);
   }
 
   return mapping;
@@ -384,6 +397,14 @@ function jobUsesAction(relativePath, jobBlock, action) {
   return workflowStepBlocks(jobBlock).some((stepBlock) =>
     stepUsesAction(relativePath, stepBlock, action),
   );
+}
+
+function requireParseableWorkflowJobs() {
+  for (const workflow of listFiles(".github/workflows")) {
+    for (const name of parseUnsupportedWorkflowJobForms(read(workflow))) {
+      fail(`${workflow}: job ${name} uses an unsupported inline mapping form`);
+    }
+  }
 }
 
 function workflowFilesWithPagesDeploy() {
@@ -732,6 +753,7 @@ requireWorkflowMatrixInJob(
   policy.liveNodeMatrix,
 );
 requireSupportedRuntimeJobs(policy);
+requireParseableWorkflowJobs();
 requirePagesDeploysFromMainOnly();
 requirePagesJobTimeouts();
 requirePagesPackageExecutionHardening();
