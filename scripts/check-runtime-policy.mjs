@@ -174,7 +174,7 @@ function parseWorkflowScalar(rawValue, anchors, relativePath) {
   const anchored = value.match(/^&([^\s]+)(?:\s+(.*))?$/);
   if (anchored) {
     const resolved = parseQuotedScalar(anchored[2] ?? "", relativePath);
-    anchors.set(anchored[1], resolved);
+    if (!anchors.has(anchored[1])) anchors.set(anchored[1], resolved);
     return resolved;
   }
 
@@ -190,10 +190,23 @@ function workflowScalarAnchors(relativePath) {
   if (scalarAnchorCache.has(relativePath)) return scalarAnchorCache.get(relativePath);
 
   const anchors = new Map();
+  let blockScalarParentIndent = null;
   for (const line of read(relativePath).split(/\r?\n/)) {
+    if (blockScalarParentIndent !== null) {
+      if (!line.trim()) continue;
+      const indent = line.match(/^ */)?.[0].length ?? 0;
+      if (indent > blockScalarParentIndent) continue;
+      blockScalarParentIndent = null;
+    }
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
     const entry = workflowLineMappingEntry(line);
-    if (entry) parseWorkflowScalar(entry.rawValue, anchors, relativePath);
+    if (!entry) continue;
+    const rawValue = stripYamlInlineComment(entry.rawValue);
+    if (/^[|>](?:[+-]?\d+|\d+[+-]?)?$/.test(rawValue)) {
+      blockScalarParentIndent = entry.indent;
+      continue;
+    }
+    parseWorkflowScalar(entry.rawValue, anchors, relativePath);
   }
 
   scalarAnchorCache.set(relativePath, anchors);
@@ -364,7 +377,7 @@ function stepKeyIndent(stepBlock) {
 
 function stepUsesAction(relativePath, stepBlock, action) {
   const uses = stepTopLevelValue(relativePath, stepBlock, "uses");
-  return typeof uses === "string" && uses.startsWith(`${action}@`);
+  return typeof uses === "string" && uses.toLowerCase().startsWith(`${action.toLowerCase()}@`);
 }
 
 function jobUsesAction(relativePath, jobBlock, action) {
@@ -379,7 +392,7 @@ function workflowFilesWithPagesDeploy() {
     const hasParsedDeployJob = jobs.some((job) =>
       jobUsesAction(workflow, job.block, "actions/deploy-pages"),
     );
-    if (!hasParsedDeployJob && read(workflow).includes("actions/deploy-pages@")) {
+    if (!hasParsedDeployJob && read(workflow).toLowerCase().includes("actions/deploy-pages@")) {
       fail(`${workflow}: deploy-pages action must be inside a parsed workflow job`);
     }
     return hasParsedDeployJob;
@@ -435,7 +448,11 @@ function requireBlankActionsRuntimeEnv(relativePath, stepBlock, label) {
 function requirePagesPackageExecutionHardening() {
   for (const workflow of workflowFilesWithPagesDeploy()) {
     for (const job of workflowJobBlocks(workflow)) {
-      if (!jobUsesAction(workflow, job.block, "actions/upload-pages-artifact")) continue;
+      const uploadsPagesArtifact = jobUsesAction(
+        workflow,
+        job.block,
+        "actions/upload-pages-artifact",
+      );
 
       let hasInstallStep = false;
       let hasDocsStep = false;
@@ -448,6 +465,11 @@ function requirePagesPackageExecutionHardening() {
         const runsPnpmInstall = normalizedRunCommand === PAGES_DOCS_INSTALL_COMMAND;
         const runsDocsBuild = normalizedRunCommand === PAGES_DOCS_BUILD_COMMAND;
 
+        if (!uploadsPagesArtifact) {
+          fail(`${workflow}: Pages job ${job.name} must not run shell commands`);
+          continue;
+        }
+
         if (runsPnpmInstall) {
           hasInstallStep = true;
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages pnpm install step");
@@ -458,11 +480,7 @@ function requirePagesPackageExecutionHardening() {
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages docs build step");
         }
 
-        if (
-          /\b(?:corepack|npm|npx|pnpm|yarn)\b/.test(normalizedRunCommand) &&
-          !runsPnpmInstall &&
-          !runsDocsBuild
-        ) {
+        if (!runsPnpmInstall && !runsDocsBuild) {
           if (
             /\bpnpm\s+install\b/.test(normalizedRunCommand) &&
             !/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(normalizedRunCommand)
@@ -473,6 +491,7 @@ function requirePagesPackageExecutionHardening() {
         }
       }
 
+      if (!uploadsPagesArtifact) continue;
       if (!hasInstallStep) {
         fail(
           `${workflow}: Pages artifact job ${job.name} must run pnpm install with --ignore-scripts`,

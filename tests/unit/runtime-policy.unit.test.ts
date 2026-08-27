@@ -520,7 +520,7 @@ describe("runtime policy", () => {
     });
   });
 
-  it("rejects Pages workflows using quoted keys and bare sequence steps", () => {
+  it("rejects Pages workflows using quoted keys and mixed-case bare sequence steps", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(
         fixtureRoot,
@@ -536,7 +536,7 @@ describe("runtime policy", () => {
           "      -",
           "        run: npm install",
           "      -",
-          "        uses: actions/upload-pages-artifact@abc",
+          "        uses: Actions/Upload-Pages-Artifact@abc",
           "  'deploy':",
           "    runs-on: ubuntu-latest",
           "    permissions:",
@@ -544,7 +544,7 @@ describe("runtime policy", () => {
           "      id-token: write",
           "    steps:",
           "      -",
-          "        uses: actions/deploy-pages@def",
+          "        uses: Actions/Deploy-Pages@def",
           "",
         ].join("\n"),
       );
@@ -562,6 +562,115 @@ describe("runtime policy", () => {
       expect(result.stderr).toContain(
         ".github/workflows/docs.yml: Pages job deploy must declare timeout-minutes",
       );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
+      );
+    });
+  });
+
+  it("rejects Pages run aliases spoofed by block scalar text", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "x-cmd: &cmd npm install",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: *cmd",
+          "      - name: |",
+          "          ignored: &cmd pnpm install --frozen-lockfile --ignore-scripts",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
+      );
+    });
+  });
+
+  it("rejects obfuscated Pages package commands", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: n\\pm install",
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
       expect(result.stderr).toContain(
         ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
       );
