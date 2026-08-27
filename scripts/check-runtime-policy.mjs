@@ -188,7 +188,15 @@ function parseWorkflowScalar(rawValue, context, relativePath) {
       fail(`${relativePath}: alias *${alias[1]} resolves a redefined anchor`);
       return value;
     }
-    return anchors.has(alias[1]) ? anchors.get(alias[1]) : value;
+    // Fail closed: the prescan only captures anchors defined at a mapping value
+    // start, so an anchor nested in a flow collection (`[&pages "..."]`) stays
+    // unknown here. GitHub still resolves the alias, possibly to a hidden
+    // action, so reject it instead of returning the unresolved literal.
+    if (!anchors.has(alias[1])) {
+      fail(`${relativePath}: alias *${alias[1]} refers to an unresolved anchor`);
+      return value;
+    }
+    return anchors.get(alias[1]);
   }
 
   return parseQuotedScalar(value);
@@ -216,9 +224,13 @@ function workflowScalarAnchors(relativePath) {
       blockScalarParentIndent = entry.indent;
       continue;
     }
+    // Only anchor definitions populate the map; skip alias lines here so an
+    // unresolved alias is reported once during resolution, not during prescan.
     const anchored = rawValue.match(/^&([^\s]+)/);
-    if (anchored && context.anchors.has(anchored[1])) context.duplicates.add(anchored[1]);
-    parseWorkflowScalar(entry.rawValue, context, relativePath);
+    if (anchored) {
+      if (context.anchors.has(anchored[1])) context.duplicates.add(anchored[1]);
+      parseWorkflowScalar(entry.rawValue, context, relativePath);
+    }
   }
 
   scalarAnchorCache.set(relativePath, context);

@@ -1258,4 +1258,55 @@ describe("runtime policy", () => {
       );
     });
   });
+
+  it("rejects aliases to anchors nested in flow collections", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    strategy:",
+          "      matrix:",
+          '        marker: [&pages "actions/deploy-\\u0070ages@sha"]',
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    steps:",
+          "      - uses: *pages",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: alias *pages refers to an unresolved anchor",
+      );
+    });
+  });
 });
