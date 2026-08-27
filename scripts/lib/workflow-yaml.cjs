@@ -129,10 +129,17 @@ function workflowJobBlock(text, jobName) {
 
 function workflowJobBlocks(text) {
   const lines = text.split(/\r?\n/);
-  const jobsIndex = lines.findIndex((line) => /^\s*jobs:\s*(?:#.*)?$/.test(line));
-  if (jobsIndex === -1) return [];
+  const jobsEntries = lines
+    .map((line, index) => {
+      const match = line.match(/^(\s*)jobs:\s*(?:#.*)?$/);
+      return match ? { index, indent: match[1].length } : null;
+    })
+    .filter(Boolean);
+  if (jobsEntries.length === 0) return [];
 
-  const jobsIndent = lines[jobsIndex].match(/^\s*/)?.[0].length ?? 0;
+  const { index: jobsIndex, indent: jobsIndent } = jobsEntries.reduce((least, entry) =>
+    entry.indent < least.indent ? entry : least,
+  );
   const jobsLines = [];
   for (let index = jobsIndex + 1; index < lines.length; index += 1) {
     const line = lines[index];
@@ -152,7 +159,9 @@ function workflowJobBlocks(text) {
   const jobIndent = Math.min(...jobIndents);
   const jobsText = jobsLines.join("\n");
   const matches = [
-    ...jobsText.matchAll(new RegExp(`^ {${jobIndent}}([A-Za-z0-9_-]+):\\s*(?:#.*)?$`, "gm")),
+    ...jobsText.matchAll(
+      new RegExp(`^ {${jobIndent}}([A-Za-z0-9_-]+):\\s*(?:&\\S+)?\\s*(?:#.*)?$`, "gm"),
+    ),
   ];
   return matches.map((match, index) => {
     const start = match.index ?? 0;

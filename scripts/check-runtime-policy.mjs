@@ -143,7 +143,7 @@ function blockChildIndent(blockText) {
   const firstIndex = lines.findIndex((line) => line.trim());
   if (firstIndex === -1) return null;
 
-  const match = lines[firstIndex].match(/^(\s*)[^:#]+:\s*(?:#.*)?$/);
+  const match = lines[firstIndex].match(/^(\s*)[^:#]+:\s*(?:&\S+)?\s*(?:#.*)?$/);
   if (!match) return null;
   const parentIndent = match[1].length;
 

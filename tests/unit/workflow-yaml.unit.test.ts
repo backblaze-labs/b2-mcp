@@ -76,6 +76,26 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlock(commentedWorkflow, "build")).not.toContain("deploy:");
   });
 
+  it("extracts root workflow jobs when nested jobs metadata comes first", () => {
+    const reusableWorkflow = [
+      "on:",
+      "  workflow_call:",
+      "    inputs:",
+      "      jobs:",
+      "        type: string",
+      "jobs:",
+      "  build: &docs-build",
+      "    runs-on: ubuntu-latest",
+      "  deploy: &pages-deploy",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(reusableWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
+    expect(workflowJobBlock(reusableWorkflow, "build")).toContain("&docs-build");
+    expect(workflowJobBlock(reusableWorkflow, "build")).not.toContain("workflow_call");
+  });
+
   it("extracts mapping values independent of key order", () => {
     expect(yamlMappingForKey(workflow, "permissions")).toEqual({
       actions: "read",

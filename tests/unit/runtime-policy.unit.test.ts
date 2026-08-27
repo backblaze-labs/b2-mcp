@@ -410,6 +410,57 @@ describe("runtime policy", () => {
     });
   });
 
+  it("rejects anchored Pages workflows after nested jobs metadata", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_call:",
+          "    inputs:",
+          "      jobs:",
+          "        type: string",
+          "jobs:",
+          "  build: &docs-build",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: npm install",
+          "      - uses: actions/upload-pages-artifact@abc",
+          "  deploy: &pages-deploy",
+          "    runs-on: ubuntu-latest",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages deploy job deploy must require github.ref == refs/heads/main",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages job deploy must declare timeout-minutes",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm install with --ignore-scripts",
+      );
+    });
+  });
+
   it("rejects Pages artifact jobs missing the expected package steps", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(
