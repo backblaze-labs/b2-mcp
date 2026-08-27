@@ -461,6 +461,65 @@ describe("runtime policy", () => {
     });
   });
 
+  it("rejects Pages workflows using escaped and aliased scalars", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "x-upload: &upload actions/upload-pages-artifact@abc",
+          "x-unsafe: &unsafe npm install",
+          "jobs:",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: pnpm install --frozen-lockfile --ignore-scripts",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: pnpm run docs",
+          "        env:",
+          '          ACTIONS_CACHE_URL: ""',
+          '          ACTIONS_RESULTS_URL: ""',
+          '          ACTIONS_RUNTIME_TOKEN: ""',
+          '          ACTIONS_RUNTIME_URL: ""',
+          "      - run: *unsafe",
+          "      - uses: *upload",
+          "  deploy:",
+          "    runs-on: ubuntu-latest",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          '      - uses: "actions/deploy-\\u0070ages@def"',
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages deploy job deploy must require github.ref == refs/heads/main",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages job deploy must declare timeout-minutes",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
+      );
+    });
+  });
+
   it("rejects Pages artifact jobs missing the expected package steps", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(
