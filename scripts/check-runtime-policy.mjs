@@ -451,7 +451,11 @@ function unsupportedStepForms(jobBlock) {
         break;
       }
       const item = childLine.slice(childIndent).match(/^-\s+(.+)$/);
-      if (item && /^[[{*]/.test(item[1].trim())) reasons.push("inline step");
+      // Strip a leading anchor (`- &deploy { ... }`) before classifying the item
+      // so an anchored flow-mapping or alias step is still rejected.
+      if (item && /^[[{*]/.test(item[1].trim().replace(/^&[^\s]+\s*/, ""))) {
+        reasons.push("inline step");
+      }
     }
   }
   return reasons;
