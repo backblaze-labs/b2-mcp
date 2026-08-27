@@ -84,6 +84,107 @@ function workflowStepBlocks(jobBlockText) {
   });
 }
 
+function stripYamlInlineComment(value) {
+  return value.replace(/\s+#.*$/, "").trim();
+}
+
+function unquoteWorkflowScalar(value) {
+  const trimmed = stripYamlInlineComment(value);
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"'))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function stepTopLevelEntry(line) {
+  const firstEntry = line.match(/^ {6}-\s+([A-Za-z0-9_-]+):\s*(.*)$/);
+  if (firstEntry) return { key: firstEntry[1], rawValue: firstEntry[2], indent: 8 };
+
+  const entry = line.match(/^ {8}([A-Za-z0-9_-]+):\s*(.*)$/);
+  if (entry) return { key: entry[1], rawValue: entry[2], indent: 8 };
+
+  return null;
+}
+
+function stepTopLevelValue(stepBlock, key) {
+  const lines = stepBlock.split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const entry = stepTopLevelEntry(lines[index]);
+    if (!entry || entry.key !== key) continue;
+
+    const rawValue = stripYamlInlineComment(entry.rawValue);
+    if (/^[|>][+-]?$/.test(rawValue)) {
+      const blockLines = [];
+      for (let child = index + 1; child < lines.length; child += 1) {
+        const childLine = lines[child];
+        if (childLine.trim()) {
+          const childIndent = childLine.match(/^ */)?.[0].length ?? 0;
+          if (childIndent <= entry.indent) break;
+        }
+        blockLines.push(childLine.trim());
+      }
+      return blockLines.join("\n");
+    }
+
+    return unquoteWorkflowScalar(rawValue);
+  }
+
+  return null;
+}
+
+function parseInlineEnvMapping(rawValue) {
+  const trimmed = stripYamlInlineComment(rawValue);
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
+
+  const mapping = {};
+  const body = trimmed.slice(1, -1).trim();
+  if (!body) return mapping;
+
+  for (const part of body.split(",")) {
+    const separator = part.indexOf(":");
+    if (separator === -1) continue;
+    const key = unquoteWorkflowScalar(part.slice(0, separator));
+    mapping[key] = unquoteWorkflowScalar(part.slice(separator + 1));
+  }
+
+  return mapping;
+}
+
+function stepEnvMapping(stepBlock) {
+  const lines = stepBlock.split(/\r?\n/);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const entry = stepTopLevelEntry(lines[index]);
+    if (!entry || entry.key !== "env") continue;
+
+    const inlineMapping = parseInlineEnvMapping(entry.rawValue);
+    if (inlineMapping) return inlineMapping;
+
+    const rawValue = stripYamlInlineComment(entry.rawValue);
+    if (rawValue) return {};
+
+    const mapping = {};
+    for (let child = index + 1; child < lines.length; child += 1) {
+      const childLine = lines[child];
+      if (!childLine.trim() || childLine.trimStart().startsWith("#")) continue;
+
+      const childIndent = childLine.match(/^ */)?.[0].length ?? 0;
+      if (childIndent <= entry.indent) break;
+      if (childIndent !== entry.indent + 2) continue;
+
+      const childEntry = childLine.slice(childIndent).match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/);
+      if (childEntry) mapping[childEntry[1]] = unquoteWorkflowScalar(childEntry[2]);
+    }
+    return mapping;
+  }
+
+  return null;
+}
+
 function workflowFilesWithPagesDeploy() {
   return listFiles(".github/workflows").filter((workflow) =>
     read(workflow).includes("actions/deploy-pages@"),
@@ -124,9 +225,9 @@ function requirePagesJobTimeouts() {
 }
 
 function requireBlankActionsRuntimeEnv(relativePath, stepBlock, label) {
+  const env = stepEnvMapping(stepBlock);
   for (const key of ACTIONS_RUNTIME_ENV_KEYS) {
-    const pattern = new RegExp(`^\\s+${key}:\\s*(?:""|''|)$`, "m");
-    if (!pattern.test(stepBlock)) {
+    if (env?.[key] !== "") {
       fail(`${relativePath}: ${label} must blank ${key}`);
     }
   }
@@ -136,19 +237,45 @@ function requirePagesPackageExecutionHardening() {
   for (const workflow of workflowFilesWithPagesDeploy()) {
     for (const job of workflowJobBlocks(workflow)) {
       if (!job.block.includes("actions/upload-pages-artifact@")) continue;
-      for (const stepBlock of workflowStepBlocks(job.block)) {
-        if (!/^\s*(?:-\s*)?run:/m.test(stepBlock)) continue;
 
-        if (/\bpnpm\s+install\b/.test(stepBlock)) {
-          if (!/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(stepBlock)) {
+      let hasInstallStep = false;
+      let hasDocsStep = false;
+
+      for (const stepBlock of workflowStepBlocks(job.block)) {
+        const runCommand = stepTopLevelValue(stepBlock, "run");
+        if (runCommand === null) continue;
+
+        const runsPnpmInstall = /\bpnpm\s+install\b/.test(runCommand);
+        const runsDocsBuild = /\bpnpm\s+run\s+docs\b/.test(runCommand);
+
+        if (runsPnpmInstall) {
+          hasInstallStep = true;
+          if (!/(?:^|\s)--ignore-scripts(?:\s|$)/m.test(runCommand)) {
             fail(`${workflow}: Pages pnpm install step must use --ignore-scripts`);
           }
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages pnpm install step");
         }
 
-        if (/\bpnpm\s+run\s+docs\b/.test(stepBlock)) {
+        if (runsDocsBuild) {
+          hasDocsStep = true;
           requireBlankActionsRuntimeEnv(workflow, stepBlock, "Pages docs build step");
         }
+
+        const unexpectedPackageCommands = runCommand
+          .replace(/\bpnpm\s+install\b[^\n;&|]*/g, "")
+          .replace(/\bpnpm\s+run\s+docs\b[^\n;&|]*/g, "");
+        if (/\b(?:corepack|npm|npx|pnpm|yarn)\b/.test(unexpectedPackageCommands)) {
+          fail(`${workflow}: Pages artifact job ${job.name} has unexpected package command`);
+        }
+      }
+
+      if (!hasInstallStep) {
+        fail(
+          `${workflow}: Pages artifact job ${job.name} must run pnpm install with --ignore-scripts`,
+        );
+      }
+      if (!hasDocsStep) {
+        fail(`${workflow}: Pages artifact job ${job.name} must run pnpm run docs`);
       }
     }
   }
