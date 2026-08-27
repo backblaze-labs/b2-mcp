@@ -319,7 +319,10 @@ function stepTopLevelValue(relativePath, stepBlock, key) {
     if (!entry || entry.key !== key) continue;
 
     const rawValue = stripYamlInlineComment(entry.rawValue);
-    if (/^[|>][+-]?$/.test(rawValue)) {
+    // Accept explicit block-scalar indicators (`|2-`, `>-2`, ...) like the other
+    // scanners, so a command written with an indentation indicator is read from
+    // its body rather than returned as the literal `|2-` and skipped.
+    if (/^[|>](?:[+-]?\d+|\d+[+-]?)?$/.test(rawValue)) {
       const blockLines = [];
       for (let child = index + 1; child < lines.length; child += 1) {
         const childLine = lines[child];
@@ -675,8 +678,37 @@ function workflowShellValues(relativePath) {
   return values;
 }
 
+// A flow-style `defaults` mapping (`defaults: { run: { shell: "custom {0}" } }`)
+// or a flow-style `run` mapping under it hides a custom shell from the
+// line-level shell scan, so reject those forms in Pages workflows rather than
+// letting a wrapper shell run extra commands.
+function hasFlowStyleDefaults(relativePath) {
+  let blockScalarParentIndent = null;
+  for (const line of read(relativePath).split(/\r?\n/)) {
+    if (blockScalarParentIndent !== null) {
+      if (!line.trim()) continue;
+      const indent = line.match(/^ */)?.[0].length ?? 0;
+      if (indent > blockScalarParentIndent) continue;
+      blockScalarParentIndent = null;
+    }
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const entry = workflowLineMappingEntry(line);
+    if (!entry) continue;
+    const rawValue = stripYamlInlineComment(entry.rawValue);
+    if (/^[|>](?:[+-]?\d+|\d+[+-]?)?$/.test(rawValue)) {
+      blockScalarParentIndent = entry.indent;
+      continue;
+    }
+    if ((entry.key === "defaults" || entry.key === "run") && rawValue.startsWith("{")) return true;
+  }
+  return false;
+}
+
 function requirePagesTrustedShells() {
   for (const workflow of workflowFilesWithPagesDeploy()) {
+    if (hasFlowStyleDefaults(workflow)) {
+      fail(`${workflow}: Pages workflow must not use a flow-style defaults mapping`);
+    }
     for (const shell of workflowShellValues(workflow)) {
       if (!TRUSTED_WORKFLOW_SHELLS.has(String(shell).trim())) {
         fail(`${workflow}: Pages workflow must use a trusted default shell, got ${shell}`);
