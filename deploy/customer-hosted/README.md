@@ -41,7 +41,9 @@ Docker network.
   `pnpm install --prod --frozen-lockfile --ignore-scripts` from the committed
   `pnpm-lock.yaml` mirrored into this directory; it does not install
   `@backblaze-labs/b2-mcp` from a mutable registry resolution during image
-  build.
+  build. The mirror stays byte-for-byte aligned with the root lockfile for
+  review parity, so it can include dev-only docs tooling records such as
+  TypeDoc; `--prod` keeps those packages out of the hosted runtime image.
 
 ## Build And Run
 
