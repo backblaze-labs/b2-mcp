@@ -95,7 +95,7 @@ function workflowStepBlocks(jobBlockText) {
     let stepsEnd = index + 1;
     for (let child = index + 1; child < lines.length; child += 1) {
       const childLine = lines[child];
-      if (childLine.trim()) {
+      if (childLine.trim() && !childLine.trimStart().startsWith("#")) {
         const childIndent = childLine.match(/^ */)?.[0].length ?? 0;
         if (childIndent <= stepsIndent) {
           stepsEnd = child;

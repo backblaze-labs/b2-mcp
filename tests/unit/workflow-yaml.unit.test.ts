@@ -61,10 +61,10 @@ describe("workflow YAML helper", () => {
     const commentedWorkflow = [
       "jobs:",
       "# before first job",
-      "  build:",
+      "  build: # build job",
       "    runs-on: ubuntu-latest",
       "# between jobs",
-      "  deploy:",
+      "  deploy: # deploy job",
       "    runs-on: ubuntu-latest",
       "",
     ].join("\n");

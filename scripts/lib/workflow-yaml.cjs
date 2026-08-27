@@ -152,7 +152,7 @@ function workflowJobBlocks(text) {
   const jobIndent = Math.min(...jobIndents);
   const jobsText = jobsLines.join("\n");
   const matches = [
-    ...jobsText.matchAll(new RegExp(`^ {${jobIndent}}([A-Za-z0-9_-]+):\\s*$`, "gm")),
+    ...jobsText.matchAll(new RegExp(`^ {${jobIndent}}([A-Za-z0-9_-]+):\\s*(?:#.*)?$`, "gm")),
   ];
   return matches.map((match, index) => {
     const start = match.index ?? 0;
