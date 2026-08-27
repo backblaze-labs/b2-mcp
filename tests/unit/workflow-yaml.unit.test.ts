@@ -1,14 +1,21 @@
 import { createRequire } from "module";
 
 const nodeRequire = createRequire(__filename);
-const { valuesEqual, workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey } =
-  nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
-    valuesEqual: (actual: string[], expected: string[]) => boolean;
-    workflowJobBlock: (text: string, jobName: string) => string | null;
-    workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
-    yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
-    yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
-  };
+const {
+  valuesEqual,
+  workflowJobBlock,
+  workflowJobBlocks,
+  unsupportedWorkflowJobForms,
+  yamlMappingForKey,
+  yamlValuesForKey,
+} = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  valuesEqual: (actual: string[], expected: string[]) => boolean;
+  workflowJobBlock: (text: string, jobName: string) => string | null;
+  workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
+  unsupportedWorkflowJobForms: (text: string) => string[];
+  yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
+  yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
+};
 
 describe("workflow YAML helper", () => {
   const workflow = [
@@ -109,6 +116,20 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlocks(quotedWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
     expect(workflowJobBlock(quotedWorkflow, "deploy")).toContain("&pages-deploy");
     expect(workflowJobBlock(quotedWorkflow, "build")).not.toContain("deploy");
+  });
+
+  it("flags flow-style job mappings as unsupported forms", () => {
+    const flowWorkflow = [
+      "jobs:",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      '  deploy: { runs-on: ubuntu-latest, steps: [{ uses: "actions/deploy-\\u0070ages@sha" }] }',
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(flowWorkflow).map((job) => job.name)).toEqual(["build"]);
+    expect(unsupportedWorkflowJobForms(flowWorkflow)).toEqual(["deploy"]);
+    expect(unsupportedWorkflowJobForms(workflow)).toEqual([]);
   });
 
   it("extracts mapping values independent of key order", () => {

@@ -186,7 +186,7 @@ function workflowJobBlock(text, jobName) {
   return job?.block ?? null;
 }
 
-function workflowJobBlocks(text) {
+function workflowJobsRegion(text) {
   const lines = text.split(/\r?\n/);
   const jobsEntries = lines
     .map((line, index) => {
@@ -196,7 +196,7 @@ function workflowJobBlocks(text) {
         : null;
     })
     .filter(Boolean);
-  if (jobsEntries.length === 0) return [];
+  if (jobsEntries.length === 0) return null;
 
   const { index: jobsIndex, indent: jobsIndent } = jobsEntries.reduce((least, entry) =>
     entry.indent < least.indent ? entry : least,
@@ -215,9 +215,16 @@ function workflowJobBlocks(text) {
     .filter((line) => line.trim() && !line.trimStart().startsWith("#"))
     .map((line) => line.match(/^\s*/)?.[0].length ?? 0)
     .filter((indent) => indent > jobsIndent);
-  if (jobIndents.length === 0) return [];
+  if (jobIndents.length === 0) return null;
 
-  const jobIndent = Math.min(...jobIndents);
+  return { jobsLines, jobIndent: Math.min(...jobIndents) };
+}
+
+function workflowJobBlocks(text) {
+  const region = workflowJobsRegion(text);
+  if (!region) return [];
+
+  const { jobsLines, jobIndent } = region;
   const matches = jobsLines
     .map((line, index) => {
       const entry = yamlMappingEntry(line);
@@ -232,6 +239,26 @@ function workflowJobBlocks(text) {
   });
 }
 
+// Fail closed on job keys this block parser cannot turn into a step block. A
+// flow-style mapping (`deploy: { steps: [...] }`) or any inline scalar value at
+// job indent is skipped by workflowJobBlocks, so callers that only inspect
+// parsed job blocks would never see a Pages action hidden in that form. Callers
+// treat a non-empty return as a policy failure instead of silently proceeding.
+function unsupportedWorkflowJobForms(text) {
+  const region = workflowJobsRegion(text);
+  if (!region) return [];
+
+  const { jobsLines, jobIndent } = region;
+  return jobsLines
+    .map((line) => {
+      const entry = yamlMappingEntry(line);
+      return entry?.indent === jobIndent && !hasEmptyOrAnchorValue(entry.rawValue)
+        ? entry.key
+        : null;
+    })
+    .filter(Boolean);
+}
+
 module.exports = {
   yamlValuesForKey,
   yamlMappingEntry,
@@ -240,4 +267,5 @@ module.exports = {
   valuesEqual,
   workflowJobBlock,
   workflowJobBlocks,
+  unsupportedWorkflowJobForms,
 };
