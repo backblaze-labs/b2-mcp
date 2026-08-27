@@ -1,6 +1,6 @@
 {
-  "entryPoints": ["src"],
-  "entryPointStrategy": "expand",
+  "entryPoints": ["src/index.ts"],
+  "entryPointStrategy": "resolve",
   "out": "api-docs",
   "excludePrivate": true,
   "excludeProtected": true,
