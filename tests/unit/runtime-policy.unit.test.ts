@@ -307,6 +307,55 @@ describe("runtime policy", () => {
     });
   });
 
+  it("rejects commented Pages workflows without package hardening", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      writeFixtureFile(
+        fixtureRoot,
+        ".github/workflows/docs.yml",
+        [
+          "on:",
+          "  workflow_dispatch:",
+          "jobs:",
+          "# comment before build",
+          "  build:",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 15",
+          "    steps:",
+          "      - run: npm install",
+          "      - uses: actions/upload-pages-artifact@abc",
+          "# comment before deploy",
+          "  deploy:",
+          "    if: github.ref == 'refs/heads/main'",
+          "    runs-on: ubuntu-latest",
+          "    timeout-minutes: 10",
+          "    permissions:",
+          "      pages: write",
+          "      id-token: write",
+          "    steps:",
+          "      - uses: actions/deploy-pages@def",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build has unexpected package command",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm install with --ignore-scripts",
+      );
+      expect(result.stderr).toContain(
+        ".github/workflows/docs.yml: Pages artifact job build must run pnpm run docs",
+      );
+    });
+  });
+
   it("rejects Pages artifact jobs missing the expected package steps", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(

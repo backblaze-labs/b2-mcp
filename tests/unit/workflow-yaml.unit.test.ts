@@ -57,6 +57,25 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlock(indentedWorkflow, "build")).not.toContain("deploy:");
   });
 
+  it("extracts workflow job blocks across comment-only lines", () => {
+    const commentedWorkflow = [
+      "jobs:",
+      "# before first job",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      "# between jobs",
+      "  deploy:",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(commentedWorkflow).map((job) => job.name)).toEqual([
+      "build",
+      "deploy",
+    ]);
+    expect(workflowJobBlock(commentedWorkflow, "build")).not.toContain("deploy:");
+  });
+
   it("extracts mapping values independent of key order", () => {
     expect(yamlMappingForKey(workflow, "permissions")).toEqual({
       actions: "read",

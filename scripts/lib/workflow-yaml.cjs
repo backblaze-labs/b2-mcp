@@ -136,7 +136,7 @@ function workflowJobBlocks(text) {
   const jobsLines = [];
   for (let index = jobsIndex + 1; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line.trim()) {
+    if (line.trim() && !line.trimStart().startsWith("#")) {
       const indent = line.match(/^\s*/)?.[0].length ?? 0;
       if (indent <= jobsIndent) break;
     }
