@@ -415,9 +415,10 @@ function jobUsesAction(relativePath, jobBlock, action) {
 
 // Fail closed on step forms workflowStepBlocks cannot turn into a step block.
 // A flow-style steps list (`steps: [ ... ]`), an aliased steps value
-// (`steps: *foo`), or an individual flow-mapping/alias step (`- { uses: ... }`,
-// `- *step`) is valid YAML that this parser skips, so a Pages action hidden in
-// that form would otherwise dodge every Pages check.
+// (`steps: *foo`), an individual flow-mapping/alias step (`- { uses: ... }`,
+// `- *step`), or an indentationless block sequence (`steps:` with `- uses:` at
+// the same indent) is valid YAML that this parser skips, so a Pages action
+// hidden in that form would otherwise dodge every Pages check.
 function unsupportedStepForms(jobBlock) {
   const topLevelIndent = blockChildIndent(jobBlock);
   if (topLevelIndent === null) return [];
@@ -431,16 +432,23 @@ function unsupportedStepForms(jobBlock) {
     if (!entry || entry.key !== "steps") continue;
 
     if (!hasEmptyOrAnchorValue(entry.rawValue)) {
-      reasons.push("steps");
+      reasons.push("inline steps");
       continue;
     }
     for (let child = index + 1; child < lines.length; child += 1) {
       const childLine = lines[child];
       if (!childLine.trim() || childLine.trimStart().startsWith("#")) continue;
       const childIndent = childLine.match(/^ */)?.[0].length ?? 0;
-      if (childIndent <= topLevelIndent) break;
+      const isSequenceItem = /^-(?:\s|$)/.test(childLine.slice(childIndent));
+      if (childIndent < topLevelIndent) break;
+      if (childIndent === topLevelIndent) {
+        // A sequence item at the steps indent is an indentationless block
+        // sequence this parser cannot walk; a mapping key here is a sibling.
+        if (isSequenceItem) reasons.push("indentationless steps");
+        break;
+      }
       const item = childLine.slice(childIndent).match(/^-\s+(.+)$/);
-      if (item && /^[[{*]/.test(item[1].trim())) reasons.push("step");
+      if (item && /^[[{*]/.test(item[1].trim())) reasons.push("inline step");
     }
   }
   return reasons;
@@ -509,7 +517,7 @@ function requireParseableWorkflowJobs() {
     }
     for (const job of parseWorkflowJobBlocks(text)) {
       for (const reason of unsupportedStepForms(job.block)) {
-        fail(`${workflow}: job ${job.name} uses an unsupported inline ${reason} form`);
+        fail(`${workflow}: job ${job.name} uses an unsupported ${reason} form`);
       }
     }
   }
