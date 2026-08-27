@@ -40,6 +40,23 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlock(workflow, "missing")).toBeNull();
   });
 
+  it("extracts workflow job blocks with nonstandard indentation", () => {
+    const indentedWorkflow = [
+      "jobs:",
+      "    build:",
+      "        runs-on: ubuntu-latest",
+      "        steps:",
+      "          - run: pnpm test",
+      "    deploy:",
+      "        runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(indentedWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
+    expect(workflowJobBlock(indentedWorkflow, "build")).toContain("pnpm test");
+    expect(workflowJobBlock(indentedWorkflow, "build")).not.toContain("deploy:");
+  });
+
   it("extracts mapping values independent of key order", () => {
     expect(yamlMappingForKey(workflow, "permissions")).toEqual({
       actions: "read",

@@ -128,10 +128,32 @@ function workflowJobBlock(text, jobName) {
 }
 
 function workflowJobBlocks(text) {
-  const jobsStart = text.search(/^jobs:\s*$/m);
-  if (jobsStart === -1) return [];
-  const jobsText = text.slice(jobsStart);
-  const matches = [...jobsText.matchAll(/^ {2}([A-Za-z0-9_-]+):\s*$/gm)];
+  const lines = text.split(/\r?\n/);
+  const jobsIndex = lines.findIndex((line) => /^\s*jobs:\s*(?:#.*)?$/.test(line));
+  if (jobsIndex === -1) return [];
+
+  const jobsIndent = lines[jobsIndex].match(/^\s*/)?.[0].length ?? 0;
+  const jobsLines = [];
+  for (let index = jobsIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim()) {
+      const indent = line.match(/^\s*/)?.[0].length ?? 0;
+      if (indent <= jobsIndent) break;
+    }
+    jobsLines.push(line);
+  }
+
+  const jobIndents = jobsLines
+    .filter((line) => line.trim() && !line.trimStart().startsWith("#"))
+    .map((line) => line.match(/^\s*/)?.[0].length ?? 0)
+    .filter((indent) => indent > jobsIndent);
+  if (jobIndents.length === 0) return [];
+
+  const jobIndent = Math.min(...jobIndents);
+  const jobsText = jobsLines.join("\n");
+  const matches = [
+    ...jobsText.matchAll(new RegExp(`^ {${jobIndent}}([A-Za-z0-9_-]+):\\s*$`, "gm")),
+  ];
   return matches.map((match, index) => {
     const start = match.index ?? 0;
     const end = matches[index + 1]?.index ?? jobsText.length;

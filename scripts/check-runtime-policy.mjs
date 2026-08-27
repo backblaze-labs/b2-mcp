@@ -78,12 +78,50 @@ function workflowJobBlocks(relativePath) {
 }
 
 function workflowStepBlocks(jobBlockText) {
-  const matches = [...jobBlockText.matchAll(/^ {6}-\s/gm)];
-  return matches.map((match, index) => {
-    const start = match.index ?? 0;
-    const end = matches[index + 1]?.index ?? jobBlockText.length;
-    return jobBlockText.slice(start, end);
-  });
+  const lines = jobBlockText.split(/\r?\n/);
+  const topLevelIndent = blockChildIndent(jobBlockText);
+  if (topLevelIndent === null) return [];
+
+  const blocks = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.trim()) continue;
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    if (indent !== topLevelIndent || !/^steps:\s*(?:#.*)?$/.test(line.slice(indent))) continue;
+
+    const stepsIndent = indent;
+    let stepIndent = null;
+    let currentStart = null;
+    let stepsEnd = index + 1;
+    for (let child = index + 1; child < lines.length; child += 1) {
+      const childLine = lines[child];
+      stepsEnd = child;
+      if (childLine.trim()) {
+        const childIndent = childLine.match(/^ */)?.[0].length ?? 0;
+        if (childIndent <= stepsIndent) {
+          stepsEnd = child;
+          break;
+        }
+
+        if (stepIndent === null && childLine.slice(childIndent).startsWith("- ")) {
+          stepIndent = childIndent;
+          currentStart = child;
+        } else if (
+          stepIndent !== null &&
+          childIndent === stepIndent &&
+          childLine.slice(childIndent).startsWith("- ")
+        ) {
+          blocks.push(lines.slice(currentStart, child).join("\n"));
+          currentStart = child;
+        }
+      }
+      stepsEnd = child + 1;
+    }
+
+    if (currentStart !== null) blocks.push(lines.slice(currentStart, stepsEnd).join("\n"));
+  }
+
+  return blocks;
 }
 
 function stripYamlInlineComment(value) {
@@ -101,21 +139,64 @@ function unquoteWorkflowScalar(value) {
   return trimmed;
 }
 
-function stepTopLevelEntry(line) {
-  const firstEntry = line.match(/^ {6}-\s+([A-Za-z0-9_-]+):\s*(.*)$/);
-  if (firstEntry) return { key: firstEntry[1], rawValue: firstEntry[2], indent: 8 };
+function blockChildIndent(blockText) {
+  const lines = blockText.split(/\r?\n/);
+  const firstIndex = lines.findIndex((line) => line.trim());
+  if (firstIndex === -1) return null;
 
-  const entry = line.match(/^ {8}([A-Za-z0-9_-]+):\s*(.*)$/);
-  if (entry) return { key: entry[1], rawValue: entry[2], indent: 8 };
+  const match = lines[firstIndex].match(/^(\s*)[^:#]+:\s*(?:#.*)?$/);
+  if (!match) return null;
+  const parentIndent = match[1].length;
+
+  const childIndents = [];
+  for (const line of lines.slice(firstIndex + 1)) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    if (indent <= parentIndent) break;
+    childIndents.push(indent);
+  }
+
+  return childIndents.length > 0 ? Math.min(...childIndents) : parentIndent + 2;
+}
+
+function blockTopLevelValue(blockText, key) {
+  const keyIndent = blockChildIndent(blockText);
+  if (keyIndent === null) return null;
+
+  for (const line of blockText.split(/\r?\n/)) {
+    const entry = topLevelMappingEntry(line, keyIndent);
+    if (entry?.key === key) return unquoteWorkflowScalar(entry.rawValue);
+  }
+
+  return null;
+}
+
+function topLevelMappingEntry(line, keyIndent) {
+  const entry = line.match(/^(\s*)([A-Za-z0-9_-]+):\s*(.*)$/);
+  if (!entry || entry[1].length !== keyIndent) return null;
+  return { key: entry[2], rawValue: entry[3], indent: keyIndent };
+}
+
+function stepTopLevelEntry(line, keyIndent) {
+  const firstEntry = line.match(/^(\s*)-\s+([A-Za-z0-9_-]+):\s*(.*)$/);
+  if (firstEntry && firstEntry[1].length + 2 === keyIndent) {
+    return { key: firstEntry[2], rawValue: firstEntry[3], indent: keyIndent };
+  }
+
+  const entry = topLevelMappingEntry(line, keyIndent);
+  if (entry) return entry;
 
   return null;
 }
 
 function stepTopLevelValue(stepBlock, key) {
   const lines = stepBlock.split(/\r?\n/);
+  const stepStart = stepBlock.match(/^(\s*)-\s/);
+  if (!stepStart) return null;
+  const keyIndent = stepStart[1].length + 2;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const entry = stepTopLevelEntry(lines[index]);
+    const entry = stepTopLevelEntry(lines[index], keyIndent);
     if (!entry || entry.key !== key) continue;
 
     const rawValue = stripYamlInlineComment(entry.rawValue);
@@ -158,9 +239,12 @@ function parseInlineEnvMapping(rawValue) {
 
 function stepEnvMapping(stepBlock) {
   const lines = stepBlock.split(/\r?\n/);
+  const stepStart = stepBlock.match(/^(\s*)-\s/);
+  if (!stepStart) return null;
+  const keyIndent = stepStart[1].length + 2;
 
   for (let index = 0; index < lines.length; index += 1) {
-    const entry = stepTopLevelEntry(lines[index]);
+    const entry = stepTopLevelEntry(lines[index], keyIndent);
     if (!entry || entry.key !== "env") continue;
 
     const inlineMapping = parseInlineEnvMapping(entry.rawValue);
@@ -197,9 +281,10 @@ function requirePagesDeploysFromMainOnly() {
   for (const workflow of workflowFilesWithPagesDeploy()) {
     for (const job of workflowJobBlocks(workflow)) {
       if (!job.block.includes("actions/deploy-pages@")) continue;
+      const condition = blockTopLevelValue(job.block, "if");
       if (
-        !/^ {4}if:\s*(?:\$\{\{\s*)?github\.ref == ['"]refs\/heads\/main['"](?:\s*\}\})?\s*$/m.test(
-          job.block,
+        !/^(?:\$\{\{\s*)?github\.ref == ['"]refs\/heads\/main['"](?:\s*\}\})?$/.test(
+          condition ?? "",
         )
       ) {
         fail(
@@ -219,7 +304,7 @@ function requirePagesJobTimeouts() {
       ) {
         continue;
       }
-      if (!/^ {4}timeout-minutes:\s*[1-9][0-9]*\s*$/m.test(job.block)) {
+      if (!/^[1-9][0-9]*$/.test(blockTopLevelValue(job.block, "timeout-minutes") ?? "")) {
         fail(`${workflow}: Pages job ${job.name} must declare timeout-minutes`);
       }
     }
