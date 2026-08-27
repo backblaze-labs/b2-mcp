@@ -464,6 +464,17 @@ function opensUnterminatedDoubleQuote(rawValue) {
   return true;
 }
 
+// A continued double-quoted key opens a scalar the mapping parser never turns
+// into an entry (`"r\` then `un": npm install` resolves to key `run`), so check
+// the key position on the raw line rather than only a parsed value.
+function lineOpensUnterminatedQuotedKey(line) {
+  const trimmed = line.trimStart();
+  const sequence = trimmed.match(/^-\s+(.*)$/);
+  const keyStart = sequence ? sequence[1] : trimmed;
+  if (!keyStart.startsWith('"')) return false;
+  return opensUnterminatedDoubleQuote(keyStart);
+}
+
 function hasContinuedQuotedScalar(relativePath) {
   let blockScalarParentIndent = null;
   for (const line of read(relativePath).split(/\r?\n/)) {
@@ -474,6 +485,7 @@ function hasContinuedQuotedScalar(relativePath) {
       blockScalarParentIndent = null;
     }
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    if (lineOpensUnterminatedQuotedKey(line)) return true;
     const entry = workflowLineMappingEntry(line);
     if (!entry) continue;
     const rawValue = stripYamlInlineComment(entry.rawValue);
