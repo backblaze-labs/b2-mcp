@@ -1,9 +1,26 @@
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function stripInlineComment(value) {
-  return value.replace(/\s+#.*$/, "").trim();
+  let quote = null;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote === "'") {
+      if (char === "'" && value[index + 1] === "'") index += 1;
+      else if (char === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (char === "\\") index += 1;
+      else if (char === '"') quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === "#" && (index === 0 || /\s/.test(value[index - 1]))) {
+      return value.slice(0, index).trim();
+    }
+  }
+  return value.trim();
 }
 
 // Workflow policy tests need only small GitHub Actions snippets and deliberately
@@ -12,13 +29,59 @@ function stripInlineComment(value) {
 // interchangeable YAML primitives.
 function unquoteYamlScalar(value) {
   const trimmed = stripInlineComment(value);
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-    (trimmed.startsWith('"') && trimmed.endsWith('"'))
-  ) {
-    return trimmed.slice(1, -1);
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+    return trimmed.slice(1, -1).replace(/''/g, "'");
   }
   return trimmed;
+}
+
+function yamlMappingEntry(line) {
+  const indent = line.match(/^\s*/)?.[0].length ?? 0;
+  const body = line.slice(indent);
+  let quote = null;
+
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index];
+    if (quote === "'") {
+      if (char === "'" && body[index + 1] === "'") index += 1;
+      else if (char === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (char === "\\") index += 1;
+      else if (char === '"') quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === "#" && (index === 0 || /\s/.test(body[index - 1]))) break;
+    if (char !== ":") continue;
+    if (body[index + 1] && !/\s|#/.test(body[index + 1])) continue;
+
+    const rawKey = body.slice(0, index).trim();
+    if (!rawKey) return null;
+    return {
+      indent,
+      key: unquoteYamlScalar(rawKey),
+      rawValue: body.slice(index + 1).trim(),
+    };
+  }
+
+  return null;
+}
+
+function hasEmptyOrAnchorValue(rawValue) {
+  const value = stripInlineComment(rawValue);
+  return value === "" || /^&[^\s]+$/.test(value);
 }
 
 function parseInlineYamlList(value) {
@@ -33,17 +96,16 @@ function parseInlineYamlList(value) {
 
 function yamlBlockForKey(text, key) {
   const lines = text.split(/\r?\n/);
-  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(?:#.*)?$`);
 
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(keyPattern);
-    if (!match) continue;
+    const entry = yamlMappingEntry(lines[index]);
+    if (!entry || entry.key !== key || !hasEmptyOrAnchorValue(entry.rawValue)) continue;
 
-    const indent = match[1].length;
+    const indent = entry.indent;
     const blockLines = [];
     for (let child = index + 1; child < lines.length; child += 1) {
       const childLine = lines[child];
-      if (childLine.trim()) {
+      if (childLine.trim() && !childLine.trimStart().startsWith("#")) {
         const childIndent = childLine.match(/^\s*/)?.[0].length ?? 0;
         if (childIndent <= indent) break;
       }
@@ -69,28 +131,25 @@ function yamlMappingForKey(text, key) {
   const mapping = {};
   for (const line of lines) {
     if (!line.trim() || line.trim().startsWith("#")) continue;
-    const indent = line.match(/^\s*/)?.[0].length ?? 0;
-    if (indent !== childIndent) continue;
-    const match = line.slice(childIndent).match(/^([^:#]+):\s*(.*)$/);
-    if (!match) continue;
-    const rawValue = match[2].trim();
+    const entry = yamlMappingEntry(line);
+    if (!entry || entry.indent !== childIndent) continue;
+    const rawValue = entry.rawValue.trim();
     const inlineList = parseInlineYamlList(rawValue);
-    mapping[match[1].trim()] = inlineList ?? unquoteYamlScalar(rawValue);
+    mapping[entry.key] = inlineList ?? unquoteYamlScalar(rawValue);
   }
   return mapping;
 }
 
 function yamlValuesForKey(text, key) {
   const lines = text.split(/\r?\n/);
-  const keyPattern = new RegExp(`^(\\s*)${escapeRegExp(key)}:\\s*(.*)$`);
   const values = [];
 
   for (let index = 0; index < lines.length; index += 1) {
-    const match = lines[index].match(keyPattern);
-    if (!match) continue;
+    const entry = yamlMappingEntry(lines[index]);
+    if (!entry || entry.key !== key) continue;
 
-    const indent = match[1].length;
-    const rawValue = match[2].trim();
+    const indent = entry.indent;
+    const rawValue = entry.rawValue.trim();
     const inlineList = parseInlineYamlList(rawValue);
     if (inlineList) {
       values.push(inlineList);
@@ -131,8 +190,10 @@ function workflowJobBlocks(text) {
   const lines = text.split(/\r?\n/);
   const jobsEntries = lines
     .map((line, index) => {
-      const match = line.match(/^(\s*)jobs:\s*(?:#.*)?$/);
-      return match ? { index, indent: match[1].length } : null;
+      const entry = yamlMappingEntry(line);
+      return entry?.key === "jobs" && hasEmptyOrAnchorValue(entry.rawValue)
+        ? { index, indent: entry.indent }
+        : null;
     })
     .filter(Boolean);
   if (jobsEntries.length === 0) return [];
@@ -157,21 +218,23 @@ function workflowJobBlocks(text) {
   if (jobIndents.length === 0) return [];
 
   const jobIndent = Math.min(...jobIndents);
-  const jobsText = jobsLines.join("\n");
-  const matches = [
-    ...jobsText.matchAll(
-      new RegExp(`^ {${jobIndent}}([A-Za-z0-9_-]+):\\s*(?:&\\S+)?\\s*(?:#.*)?$`, "gm"),
-    ),
-  ];
+  const matches = jobsLines
+    .map((line, index) => {
+      const entry = yamlMappingEntry(line);
+      return entry?.indent === jobIndent && hasEmptyOrAnchorValue(entry.rawValue)
+        ? { index, name: entry.key }
+        : null;
+    })
+    .filter(Boolean);
   return matches.map((match, index) => {
-    const start = match.index ?? 0;
-    const end = matches[index + 1]?.index ?? jobsText.length;
-    return { name: match[1], block: jobsText.slice(start, end) };
+    const end = matches[index + 1]?.index ?? jobsLines.length;
+    return { name: match.name, block: jobsLines.slice(match.index, end).join("\n") };
   });
 }
 
 module.exports = {
   yamlValuesForKey,
+  yamlMappingEntry,
   yamlBlockForKey,
   yamlMappingForKey,
   valuesEqual,

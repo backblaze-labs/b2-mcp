@@ -15,6 +15,7 @@ const {
   valuesEqual,
   workflowJobBlock: parseWorkflowJobBlock,
   workflowJobBlocks: parseWorkflowJobBlocks,
+  yamlMappingEntry,
   yamlValuesForKey,
 } = workflowYaml;
 
@@ -87,7 +88,8 @@ function workflowStepBlocks(jobBlockText) {
     const line = lines[index];
     if (!line.trim()) continue;
     const indent = line.match(/^ */)?.[0].length ?? 0;
-    if (indent !== topLevelIndent || !/^steps:\s*(?:#.*)?$/.test(line.slice(indent))) continue;
+    const entry = topLevelMappingEntry(line, topLevelIndent);
+    if (!entry || entry.key !== "steps" || !hasEmptyOrAnchorValue(entry.rawValue)) continue;
 
     const stepsIndent = indent;
     let stepIndent = null;
@@ -102,13 +104,13 @@ function workflowStepBlocks(jobBlockText) {
           break;
         }
 
-        if (stepIndent === null && childLine.slice(childIndent).startsWith("- ")) {
+        if (stepIndent === null && isYamlSequenceItemStart(childLine.slice(childIndent))) {
           stepIndent = childIndent;
           currentStart = child;
         } else if (
           stepIndent !== null &&
           childIndent === stepIndent &&
-          childLine.slice(childIndent).startsWith("- ")
+          isYamlSequenceItemStart(childLine.slice(childIndent))
         ) {
           blocks.push(lines.slice(currentStart, child).join("\n"));
           currentStart = child;
@@ -121,6 +123,10 @@ function workflowStepBlocks(jobBlockText) {
   }
 
   return blocks;
+}
+
+function isYamlSequenceItemStart(value) {
+  return /^-(?:\s|$)/.test(value);
 }
 
 function stripYamlInlineComment(value) {
@@ -186,12 +192,26 @@ function workflowScalarAnchors(relativePath) {
   const anchors = new Map();
   for (const line of read(relativePath).split(/\r?\n/)) {
     if (!line.trim() || line.trimStart().startsWith("#")) continue;
-    const entry = line.match(/^(?:\s*-\s+)?\s*[A-Za-z0-9_-]+:\s*(.*)$/);
-    if (entry) parseWorkflowScalar(entry[1], anchors, relativePath);
+    const entry = workflowLineMappingEntry(line);
+    if (entry) parseWorkflowScalar(entry.rawValue, anchors, relativePath);
   }
 
   scalarAnchorCache.set(relativePath, anchors);
   return anchors;
+}
+
+function workflowLineMappingEntry(line) {
+  const entry = yamlMappingEntry(line);
+  if (entry) return entry;
+
+  const sequence = line.match(/^(\s*)-\s+(.+)$/);
+  if (!sequence) return null;
+  return yamlMappingEntry(`${" ".repeat(sequence[1].length + 2)}${sequence[2]}`);
+}
+
+function hasEmptyOrAnchorValue(rawValue) {
+  const value = stripYamlInlineComment(rawValue);
+  return value === "" || /^&[^\s]+$/.test(value);
 }
 
 function blockChildIndent(blockText) {
@@ -199,9 +219,9 @@ function blockChildIndent(blockText) {
   const firstIndex = lines.findIndex((line) => line.trim());
   if (firstIndex === -1) return null;
 
-  const match = lines[firstIndex].match(/^(\s*)[^:#]+:\s*(?:&\S+)?\s*(?:#.*)?$/);
-  if (!match) return null;
-  const parentIndent = match[1].length;
+  const entry = yamlMappingEntry(lines[firstIndex]);
+  if (!entry) return null;
+  const parentIndent = entry.indent;
 
   const childIndents = [];
   for (const line of lines.slice(firstIndex + 1)) {
@@ -229,15 +249,18 @@ function blockTopLevelValue(relativePath, blockText, key) {
 }
 
 function topLevelMappingEntry(line, keyIndent) {
-  const entry = line.match(/^(\s*)([A-Za-z0-9_-]+):\s*(.*)$/);
-  if (!entry || entry[1].length !== keyIndent) return null;
-  return { key: entry[2], rawValue: entry[3], indent: keyIndent };
+  const entry = yamlMappingEntry(line);
+  if (!entry || entry.indent !== keyIndent) return null;
+  return { key: entry.key, rawValue: entry.rawValue, indent: keyIndent };
 }
 
 function stepTopLevelEntry(line, keyIndent) {
-  const firstEntry = line.match(/^(\s*)-\s+([A-Za-z0-9_-]+):\s*(.*)$/);
+  const firstEntry = line.match(/^(\s*)-\s+(.+)$/);
   if (firstEntry && firstEntry[1].length + 2 === keyIndent) {
-    return { key: firstEntry[2], rawValue: firstEntry[3], indent: keyIndent };
+    const inlineEntry = yamlMappingEntry(`${" ".repeat(keyIndent)}${firstEntry[2]}`);
+    if (inlineEntry?.indent === keyIndent) {
+      return { key: inlineEntry.key, rawValue: inlineEntry.rawValue, indent: keyIndent };
+    }
   }
 
   const entry = topLevelMappingEntry(line, keyIndent);
@@ -248,9 +271,8 @@ function stepTopLevelEntry(line, keyIndent) {
 
 function stepTopLevelValue(relativePath, stepBlock, key) {
   const lines = stepBlock.split(/\r?\n/);
-  const stepStart = stepBlock.match(/^(\s*)-\s/);
-  if (!stepStart) return null;
-  const keyIndent = stepStart[1].length + 2;
+  const keyIndent = stepKeyIndent(stepBlock);
+  if (keyIndent === null) return null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const entry = stepTopLevelEntry(lines[index], keyIndent);
@@ -297,9 +319,8 @@ function parseInlineEnvMapping(relativePath, rawValue) {
 
 function stepEnvMapping(relativePath, stepBlock) {
   const lines = stepBlock.split(/\r?\n/);
-  const stepStart = stepBlock.match(/^(\s*)-\s/);
-  if (!stepStart) return null;
-  const keyIndent = stepStart[1].length + 2;
+  const keyIndent = stepKeyIndent(stepBlock);
+  if (keyIndent === null) return null;
 
   for (let index = 0; index < lines.length; index += 1) {
     const entry = stepTopLevelEntry(lines[index], keyIndent);
@@ -335,6 +356,12 @@ function stepEnvMapping(relativePath, stepBlock) {
   return null;
 }
 
+function stepKeyIndent(stepBlock) {
+  const firstLine = stepBlock.split(/\r?\n/).find((line) => line.trim());
+  const stepStart = firstLine?.match(/^(\s*)-(?:\s|$)/);
+  return stepStart ? stepStart[1].length + 2 : null;
+}
+
 function stepUsesAction(relativePath, stepBlock, action) {
   const uses = stepTopLevelValue(relativePath, stepBlock, "uses");
   return typeof uses === "string" && uses.startsWith(`${action}@`);
@@ -347,11 +374,16 @@ function jobUsesAction(relativePath, jobBlock, action) {
 }
 
 function workflowFilesWithPagesDeploy() {
-  return listFiles(".github/workflows").filter((workflow) =>
-    workflowJobBlocks(workflow).some((job) =>
+  return listFiles(".github/workflows").filter((workflow) => {
+    const jobs = workflowJobBlocks(workflow);
+    const hasParsedDeployJob = jobs.some((job) =>
       jobUsesAction(workflow, job.block, "actions/deploy-pages"),
-    ),
-  );
+    );
+    if (!hasParsedDeployJob && read(workflow).includes("actions/deploy-pages@")) {
+      fail(`${workflow}: deploy-pages action must be inside a parsed workflow job`);
+    }
+    return hasParsedDeployJob;
+  });
 }
 
 function requirePagesDeploysFromMainOnly() {

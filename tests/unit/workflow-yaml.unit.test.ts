@@ -96,6 +96,21 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlock(reusableWorkflow, "build")).not.toContain("workflow_call");
   });
 
+  it("extracts quoted jobs keys and quoted job ids", () => {
+    const quotedWorkflow = [
+      '"jobs": &all-jobs',
+      '  "build":',
+      "    runs-on: ubuntu-latest",
+      "  'deploy': &pages-deploy",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(quotedWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
+    expect(workflowJobBlock(quotedWorkflow, "deploy")).toContain("&pages-deploy");
+    expect(workflowJobBlock(quotedWorkflow, "build")).not.toContain("deploy");
+  });
+
   it("extracts mapping values independent of key order", () => {
     expect(yamlMappingForKey(workflow, "permissions")).toEqual({
       actions: "read",
