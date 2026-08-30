@@ -84,8 +84,8 @@ importers:
         specifier: ^8.1.9
         version: 8.1.9
       '@vercel/node':
-        specifier: 5.10.2
-        version: 5.10.2(supports-color@10.2.2)
+        specifier: 7.0.0
+        version: 7.0.0(@vercel/build-utils@14.4.0)(supports-color@10.2.2)
       '@vitest/coverage-v8':
         specifier: ^4.1.11
         version: 4.1.11(vitest@4.1.11)
@@ -1840,6 +1840,9 @@ packages:
   '@vercel/build-utils@14.2.0':
     resolution: {integrity: sha512-GwmtB31tBXQEzFw11grr8BKFCBdUORmYeooB0ZtonaCXZMZaPCHLBFTMFKsvaV6ZciQORPInRwXShbFvmnjqtg==}
 
+  '@vercel/build-utils@14.4.0':
+    resolution: {integrity: sha512-X+VSuVphZO+qSOse1ttxCKtBi1WzMKpRuV84wsTZUTMAZWB6VDTQzH0YgEFrXNHr+QpgulfltETpTaSa7P941g==}
+
   '@vercel/cervel@0.1.47':
     resolution: {integrity: sha512-OGcexMCXYda6uEpva+0GyPTK+os9pr6lDIhs4Ju4shoA55Wf25PyUVK4v3ple/eMrbalP6TnpSK4heQWci4twg==}
     hasBin: true
@@ -1914,6 +1917,11 @@ packages:
 
   '@vercel/node@5.10.2':
     resolution: {integrity: sha512-YBXcoQVOh5O2ySXvzE+POhPEQEPMJJo4ctlMMdp5why/NIoa8m6gotv14j8Uo6D5qyZsnc+0+++JgUiV4mYB6w==}
+
+  '@vercel/node@7.0.0':
+    resolution: {integrity: sha512-RqNQuw4Ix0nG5yiUUE8UZPEaz+f3YRKJtEzYq8qGvGElNYwokivBVPa0BcW1XWjKwGcGGSJPFz5pLnLp+XY85g==}
+    peerDependencies:
+      '@vercel/build-utils': 14.4.0
 
   '@vercel/oidc@3.2.0':
     resolution: {integrity: sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug==}
@@ -2047,6 +2055,11 @@ packages:
 
   acorn@8.16.0:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
+
+  acorn@8.18.0:
+    resolution: {integrity: sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ==}
     engines: {node: '>=0.4.0'}
     hasBin: true
 
@@ -2729,8 +2742,8 @@ packages:
     resolution: {integrity: sha512-ts6Wi+2j3jQjqi70w5AlN8DFnkSwC+MqmxEzdEALB2qXZYV3X/b1CTfgPLGJNMeAWxdPfU8FO1ms3NUfaHCPYg==}
     engines: {node: '>=10'}
 
-  get-tsconfig@4.14.2:
-    resolution: {integrity: sha512-XpwZALwwl/BaKTAyC6+c5T8y6kCg2jk+XGqOVrKIQmW49pNypYLMRjCUXqa28tQgJlhS2RlzP7sc+Rx7W6qsfw==}
+  get-tsconfig@4.14.3:
+    resolution: {integrity: sha512-++QEw4DIY7WGoukz+/+A/8dGYPT9l9yIadnmSgZ8Rjr3YVSVDipQSO9CdnJo9ePqFqUUqh+wk9uIaoiAwsiPkA==}
 
   glob-parent@5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
@@ -3235,6 +3248,15 @@ packages:
 
   node-fetch@2.6.9:
     resolution: {integrity: sha512-DJm/CJkZkRjKKj4Zi4BsKVZh3ValV5IR5s7LVZnW+6YMh0W1BfNA8XSs6DLMGYlId5F3KnA70uu2qepcR08Qqg==}
+    engines: {node: 4.x || >=6.0.0}
+    peerDependencies:
+      encoding: ^0.1.0
+    peerDependenciesMeta:
+      encoding:
+        optional: true
+
+  node-fetch@2.7.0:
+    resolution: {integrity: sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==}
     engines: {node: 4.x || >=6.0.0}
     peerDependencies:
       encoding: ^0.1.0
@@ -4972,7 +4994,7 @@ snapshots:
       consola: 3.4.2
       detect-libc: 2.1.2
       https-proxy-agent: 7.0.6(supports-color@10.2.2)
-      node-fetch: 2.6.9
+      node-fetch: 2.7.0
       nopt: 8.1.0
       semver: 7.8.5
       tar: 7.5.22
@@ -5694,6 +5716,11 @@ snapshots:
       cjs-module-lexer: 1.2.3
       es-module-lexer: 1.5.0
 
+  '@vercel/build-utils@14.4.0':
+    dependencies:
+      cjs-module-lexer: 1.2.3
+      es-module-lexer: 1.5.0
+
   '@vercel/cervel@0.1.47(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(supports-color@10.2.2)':
     dependencies:
       '@vercel/backends': 0.8.39(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(supports-color@10.2.2)
@@ -5863,8 +5890,8 @@ snapshots:
     dependencies:
       '@mapbox/node-pre-gyp': 2.0.3(supports-color@10.2.2)
       '@rollup/pluginutils': 5.4.0
-      acorn: 8.16.0
-      acorn-import-attributes: 1.9.5(acorn@8.16.0)
+      acorn: 8.18.0
+      acorn-import-attributes: 1.9.5(acorn@8.18.0)
       async-sema: 3.1.1
       bindings: 1.5.0
       estree-walker: 2.0.2
@@ -5885,6 +5912,35 @@ snapshots:
       '@edge-runtime/vm': 3.2.0
       '@types/node': 22.3.0
       '@vercel/build-utils': 14.2.0
+      '@vercel/error-utils': 2.2.1
+      '@vercel/nft': 1.10.0(supports-color@10.2.2)
+      '@vercel/static-config': 3.4.1
+      async-listen: 3.0.0
+      cjs-module-lexer: 1.2.3
+      edge-runtime: 2.5.9
+      es-module-lexer: 1.4.1
+      esbuild: 0.28.1
+      etag: 1.8.1
+      mime-types: 2.1.35
+      node-fetch: 2.6.9
+      path-to-regexp: 6.3.0
+      path-to-regexp-updated: path-to-regexp@6.3.0
+      ts-morph: 12.0.0
+      tsx: 4.21.0
+      typescript: 5.9.3
+      undici: 6.28.0
+    transitivePeerDependencies:
+      - encoding
+      - rollup
+      - supports-color
+
+  '@vercel/node@7.0.0(@vercel/build-utils@14.4.0)(supports-color@10.2.2)':
+    dependencies:
+      '@edge-runtime/node-utils': 2.3.0
+      '@edge-runtime/primitives': 4.1.0
+      '@edge-runtime/vm': 3.2.0
+      '@types/node': 22.3.0
+      '@vercel/build-utils': 14.4.0
       '@vercel/error-utils': 2.2.1
       '@vercel/nft': 1.10.0(supports-color@10.2.2)
       '@vercel/static-config': 3.4.1
@@ -6074,15 +6130,17 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.0.0
 
-  acorn-import-attributes@1.9.5(acorn@8.16.0):
+  acorn-import-attributes@1.9.5(acorn@8.18.0):
     dependencies:
-      acorn: 8.16.0
+      acorn: 8.18.0
 
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
       acorn: 8.16.0
 
   acorn@8.16.0: {}
+
+  acorn@8.18.0: {}
 
   agent-base@7.1.4: {}
 
@@ -6836,7 +6894,7 @@ snapshots:
 
   get-stream@6.0.1: {}
 
-  get-tsconfig@4.14.2:
+  get-tsconfig@4.14.3:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
@@ -7271,6 +7329,10 @@ snapshots:
       whatwg-url: 5.0.0
 
   node-fetch@2.6.9:
+    dependencies:
+      whatwg-url: 5.0.0
+
+  node-fetch@2.7.0:
     dependencies:
       whatwg-url: 5.0.0
 
@@ -7922,7 +7984,7 @@ snapshots:
   tsx@4.21.0:
     dependencies:
       esbuild: 0.28.1
-      get-tsconfig: 4.14.2
+      get-tsconfig: 4.14.3
     optionalDependencies:
       fsevents: 2.3.3
 

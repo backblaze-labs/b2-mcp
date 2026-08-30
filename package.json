@@ -125,7 +125,7 @@
     "@toon-format/toon": "4.1.1",
     "@types/node": "22.3.0",
     "@types/opossum": "^8.1.9",
-    "@vercel/node": "5.10.2",
+    "@vercel/node": "7.0.0",
     "@vitest/coverage-v8": "^4.1.11",
     "cspell": "^10.0.1",
     "eslint": "9.39.1",
