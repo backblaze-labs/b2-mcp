@@ -511,7 +511,7 @@ jobs:
       # docker/setup-qemu-action v4.2.0, reviewed 2026-08-25.
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8
       # docker/setup-buildx-action v3.11.1, reviewed 2026-08-07.
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
       # sigstore/cosign-installer v3.9.2, reviewed 2026-08-07.
       - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159
       - name: Smoke local Docker image
