@@ -107,8 +107,8 @@
   "author": "Backblaze",
   "license": "MIT",
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1103.0",
-    "@aws-sdk/s3-request-presigner": "3.1103.0",
+    "@aws-sdk/client-s3": "3.1119.0",
+    "@aws-sdk/s3-request-presigner": "3.1119.0",
     "@backblaze-labs/b2-sdk": "0.3.0",
     "@modelcontextprotocol/server": "2.0.0",
     "@smithy/types": "4.16.1",
