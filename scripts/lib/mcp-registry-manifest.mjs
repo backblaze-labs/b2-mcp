@@ -96,7 +96,18 @@ function secretLikeB2EnvironmentVariable(name) {
   return name.startsWith("B2_") && /(CREDENTIAL|KEY|PASSWORD|SECRET|TOKEN)/.test(name);
 }
 
-function assertEnvironmentVariableContract(environmentVariables) {
+function normalizedEnvironmentVariableField(actual, field, expectedValue, options) {
+  if (
+    options.omittedFalseBooleansAsFalse &&
+    expectedValue === false &&
+    actual[field] === undefined
+  ) {
+    return false;
+  }
+  return actual[field];
+}
+
+function assertEnvironmentVariableContract(environmentVariables, options = {}) {
   assert(Array.isArray(environmentVariables), "server.json environmentVariables must be an array");
 
   const byName = new Map();
@@ -134,8 +145,9 @@ function assertEnvironmentVariableContract(environmentVariables) {
       `server.json environment variable ${expected.name}`,
     );
     for (const [field, expectedValue] of Object.entries(expected)) {
+      const actualValue = normalizedEnvironmentVariableField(actual, field, expectedValue, options);
       assert(
-        actual[field] === expectedValue,
+        actualValue === expectedValue,
         `server.json environment variable ${expected.name}.${field} must be ${JSON.stringify(expectedValue)}`,
       );
     }
@@ -192,9 +204,9 @@ export function assertMcpRegistryManifestContract(manifest, options = {}) {
   assertRecord(packageEntry.transport, "server.json package transport");
   assertOnlyKeys(packageEntry.transport, allowedTransportKeys, "server.json package transport");
   assert(packageEntry.transport.type === "stdio", "server.json package transport must be stdio");
-  assertEnvironmentVariableContract(packageEntry.environmentVariables);
+  assertEnvironmentVariableContract(packageEntry.environmentVariables, options);
 
-  return normalizedMcpRegistryManifest(manifest);
+  return normalizedMcpRegistryManifest(manifest, options);
 }
 
 export function assertMcpRegistryPackageJsonContract(packageJson, options = {}) {
@@ -225,7 +237,7 @@ export function verifyMcpRegistryManifestFiles({
   return { manifest, normalized, packageJson };
 }
 
-export function normalizedMcpRegistryManifest(manifest) {
+export function normalizedMcpRegistryManifest(manifest, options = {}) {
   const packageEntry = manifest.packages[0];
   return {
     $schema: manifest.$schema,
@@ -249,7 +261,12 @@ export function normalizedMcpRegistryManifest(manifest) {
           const actual = packageEntry.environmentVariables.find(
             (variable) => variable.name === expected.name,
           );
-          return Object.fromEntries(Object.keys(expected).map((key) => [key, actual[key]]));
+          return Object.fromEntries(
+            Object.entries(expected).map(([key, expectedValue]) => [
+              key,
+              normalizedEnvironmentVariableField(actual, key, expectedValue, options),
+            ]),
+          );
         }),
       },
     ],
@@ -266,6 +283,7 @@ export function assertRegistryResponseMatchesManifest(responseJson, manifest) {
   let actual;
   try {
     actual = assertMcpRegistryManifestContract(fetchedServer, {
+      omittedFalseBooleansAsFalse: true,
       expectedVersion: manifest.version,
     });
   } catch (error) {

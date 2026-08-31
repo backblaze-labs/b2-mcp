@@ -338,6 +338,16 @@ describe("release scripts", () => {
       },
     },
     {
+      name: "omitted false environment variable flags",
+      message: "server.json environment variable B2_REGION.isRequired must be false",
+      mutate: (manifest: Record<string, any>) => {
+        const variable = manifest.packages[0].environmentVariables.find(
+          (candidate: Record<string, any>) => candidate.name === "B2_REGION",
+        );
+        delete variable.isRequired;
+      },
+    },
+    {
       name: "secret-like B2 variables marked non-secret",
       message: "server.json environment variable B2_APPLICATION_KEY must be secret",
       mutate: (manifest: Record<string, any>) => {
@@ -409,7 +419,12 @@ describe("release scripts", () => {
         expect(result).toMatchObject({ status: "published" });
         expect(calls).toEqual([
           {
-            args: ["login", "github-oidc"],
+            args: [
+              "login",
+              "github-oidc",
+              "--registry",
+              "https://registry.modelcontextprotocol.io",
+            ],
             publisherPath: "/tmp/mcp-publisher",
             timeoutMs: 120000,
           },
@@ -419,6 +434,50 @@ describe("release scripts", () => {
             timeoutMs: 120000,
           },
         ]);
+      },
+    );
+  });
+
+  it("passes custom MCP Registry roots to mcp-publisher login", async () => {
+    const { publishMcpRegistry } = await mcpRegistryPublishModule();
+    const calls: McpPublisherRun[] = [];
+    const lookupUrls: string[] = [];
+
+    await withTempManifest(
+      () => undefined,
+      async (manifestPath, manifest) => {
+        const result = await publishMcpRegistry({
+          fetchText: async (url: string) => {
+            lookupUrls.push(url);
+            return { body: "not found", status: 404 };
+          },
+          log: quietLog(),
+          publisherPath: "/tmp/mcp-publisher",
+          registryBaseUrl: "https://registry.example.test/custom/v0",
+          runPublisher: async (args: string[], options: Record<string, unknown>) => {
+            calls.push({
+              args,
+              publisherPath: String(options.publisherPath),
+              timeoutMs: Number(options.timeoutMs),
+            });
+            return { code: 0, stderr: "", stdout: "" };
+          },
+          serverJsonPath: manifestPath,
+          sleep: async () => undefined,
+          version: manifest.version,
+        });
+
+        expect(result).toMatchObject({ status: "published" });
+        expect(lookupUrls).toEqual([
+          `https://registry.example.test/custom/v0/servers/${encodeURIComponent(
+            manifest.name,
+          )}/versions/${manifest.version}`,
+        ]);
+        expect(calls[0]).toEqual({
+          args: ["login", "github-oidc", "--registry", "https://registry.example.test/custom"],
+          publisherPath: "/tmp/mcp-publisher",
+          timeoutMs: 120000,
+        });
       },
     );
   });
@@ -518,6 +577,46 @@ describe("release scripts", () => {
     );
   });
 
+  it("accepts registry response manifests that omit explicit false booleans", async () => {
+    const { publishMcpRegistry } = await mcpRegistryPublishModule();
+
+    await withTempManifest(
+      () => undefined,
+      async (manifestPath, manifest) => {
+        const registeredManifest = JSON.parse(JSON.stringify(manifest));
+        for (const variable of registeredManifest.packages[0].environmentVariables) {
+          if (variable.isRequired === false) delete variable.isRequired;
+          if (variable.isSecret === false) delete variable.isSecret;
+        }
+
+        const result = await publishMcpRegistry({
+          fetchText: async () => ({
+            body: JSON.stringify({
+              _meta: {
+                "io.modelcontextprotocol.registry/official": {
+                  isLatest: true,
+                  status: "active",
+                },
+              },
+              server: registeredManifest,
+            }),
+            status: 200,
+          }),
+          log: quietLog(),
+          publisherPath: "/tmp/mcp-publisher",
+          runPublisher: async () => {
+            throw new Error("mcp-publisher should not run for matching existing versions");
+          },
+          serverJsonPath: manifestPath,
+          sleep: async () => undefined,
+          version: manifest.version,
+        });
+
+        expect(result).toMatchObject({ status: "already-published" });
+      },
+    );
+  });
+
   it("rechecks the registry after ambiguous mcp-publisher publish failures", async () => {
     const { publishMcpRegistry } = await mcpRegistryPublishModule();
     const publisherCalls: string[][] = [];
@@ -567,7 +666,7 @@ describe("release scripts", () => {
         expect(result).toMatchObject({ status: "already-published" });
         expect(registryStatuses).toEqual([404, 404, 200]);
         expect(publisherCalls).toEqual([
-          ["login", "github-oidc"],
+          ["login", "github-oidc", "--registry", "https://registry.modelcontextprotocol.io"],
           ["publish", manifestPath],
           ["publish", manifestPath],
         ]);
@@ -644,7 +743,7 @@ describe("release scripts", () => {
 
         expect(result).toMatchObject({ status: "published" });
         expect(publisherCalls).toEqual([
-          ["login", "github-oidc"],
+          ["login", "github-oidc", "--registry", "https://registry.modelcontextprotocol.io"],
           ["publish", manifestPath],
           ["publish", manifestPath],
         ]);

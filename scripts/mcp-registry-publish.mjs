@@ -139,6 +139,11 @@ function shouldRequeryAfterPublishFailure(result) {
   return isTransientMcpPublisherFailure(result) || isDuplicateVersionFailure(result);
 }
 
+function registryPublisherRootUrl(registryBaseUrl) {
+  const root = String(registryBaseUrl).replace(/\/+$/, "");
+  return root.endsWith("/v0") ? root.slice(0, -"/v0".length) : root;
+}
+
 async function defaultFetchText(url, { timeoutMs }) {
   const controller = new AbortController();
   const timer = setTimeout(
@@ -333,7 +338,16 @@ export async function publishMcpRegistry(options) {
     throw new Error(`MCP Registry lookup returned ${lookup.status}: ${lookup.body}`);
   }
 
-  await runPublisherWithRetry("login github-oidc", ["login", "github-oidc"], runtimeOptions);
+  await runPublisherWithRetry(
+    "login github-oidc",
+    [
+      "login",
+      "github-oidc",
+      "--registry",
+      registryPublisherRootUrl(runtimeOptions.registryBaseUrl),
+    ],
+    runtimeOptions,
+  );
   return publishWithRegistryRecheck(manifest, lookupUrl, runtimeOptions);
 }
 
