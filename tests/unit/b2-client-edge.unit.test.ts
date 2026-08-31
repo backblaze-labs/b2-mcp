@@ -418,7 +418,14 @@ describe("B2Client native edge branches", () => {
         nativeAuthResponse({ apiUrl: "https://api005.backblazeb2.com/path" }),
       ]);
 
-      await expect(client.listBuckets()).rejects.toThrow(/Authorized B2 API endpoint/);
+      const rejection = client.listBuckets();
+      await expect(rejection).rejects.toThrow(/Authorized B2 API endpoint/);
+      // Deliberate refusal, so it must carry its own code rather than fall
+      // through to parseB2Error's codeless internal_error/500 tail.
+      await expect(rejection).rejects.toMatchObject({
+        status: 502,
+        code: "untrusted_endpoint",
+      });
 
       expect(sdk.raw.listBuckets).not.toHaveBeenCalled();
     });

@@ -30,6 +30,30 @@ export interface B2ApiError {
 }
 
 /**
+ * Build an error carrying its own HTTP status and code.
+ *
+ * parseB2Error reaches its internal_error/500 tail only for errors with no code
+ * of their own, so a bare `new Error()` always reads as a server fault. Build
+ * every *deliberate* refusal here instead, so the classification is chosen. It
+ * stays an Error, so stack traces and `rejects.toThrow()` still work.
+ *
+ * @returns An Error carrying the given status and code.
+ */
+export function codedError(status: number, code: string, message: string): Error & B2ApiError {
+  return Object.assign(new Error(message), { status, code });
+}
+
+/**
+ * Build an HTTP 400 bad_request error for a caller-input refusal — the server
+ * understood the request and said no, so the caller needs a correctable 4xx.
+ *
+ * @returns An Error carrying status 400 and code `bad_request`.
+ */
+export function badRequestError(message: string): Error & B2ApiError {
+  return codedError(400, "bad_request", message);
+}
+
+/**
  * Throw HTTP 400 bad_request.
  *
  * @param message - Error message exposed in the normalized response.
@@ -37,7 +61,7 @@ export interface B2ApiError {
  * @throws A normalized B2 API error object.
  */
 export function badRequest(message: string): never {
-  throw { status: 400, code: "bad_request", message } satisfies B2ApiError;
+  throw badRequestError(message);
 }
 
 /** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */

@@ -420,7 +420,7 @@ describe("s3_put_object and s3_get_object", () => {
       contentType: "text/plain",
     });
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline limit|s3_get_presigned_url/i);
+    expectBadRequestToolError(result, /inline limit|s3_get_presigned_url/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 
@@ -447,7 +447,7 @@ describe("s3_put_object and s3_get_object", () => {
       });
 
       expect(result.isError).toBe(true);
-      expect(parseResult(result)).toMatch(/regular file/i);
+      expectBadRequestToolError(result, /regular file/i);
       expect(sendSpy).not.toHaveBeenCalled();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -467,7 +467,7 @@ describe("s3_put_object and s3_get_object", () => {
       });
 
       expect(result.isError).toBe(true);
-      expect(parseResult(result)).toMatch(/inline limit/i);
+      expectBadRequestToolError(result, /inline limit/i);
       expect(sendSpy).not.toHaveBeenCalled();
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -514,7 +514,7 @@ describe("s3_put_object and s3_get_object", () => {
     const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline read limit|s3_get_presigned_url|saveToPath/i);
+    expectBadRequestToolError(result, /inline read limit|s3_get_presigned_url|saveToPath/i);
     expect(cancel).toHaveBeenCalled();
   });
 
@@ -529,7 +529,11 @@ describe("s3_put_object and s3_get_object", () => {
     const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/invalid content length/i);
+    const errorText = parseResult(result);
+    expect(errorText).toMatch(/invalid content length/i);
+    // A malformed upstream response is a real server fault, so it keeps the 500
+    // classification — the coded-refusal rule is about caller-input faults.
+    expect(parseErrorText(errorText)).toMatchObject({ code: "internal_error", status: 500 });
     expect(cancel).toHaveBeenCalled();
   });
 
@@ -552,7 +556,7 @@ describe("s3_put_object and s3_get_object", () => {
     const result = await callTool(server, "s3_get_object", { bucket: "bucket-b", key: "k" });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline read limit|exceeded/i);
+    expectBadRequestToolError(result, /inline read limit|exceeded/i);
     expect(cancel).toHaveBeenCalled();
     expect(reader.releaseLock).toHaveBeenCalled();
   });
@@ -1190,6 +1194,22 @@ describe("s3_get_presigned_url", () => {
 
     expect(result.isError).toBe(true);
     expectBadRequestToolError(result, /contentType/i);
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a versionId on presigned PutObject URLs as a caller-input fault", async () => {
+    const result = await callTool(server, "s3_get_presigned_url", {
+      bucket: "my-bucket",
+      key: "photo.jpg",
+      operation: "PutObject",
+      contentType: "image/jpeg",
+      versionId: "v1",
+      expiresIn: 3600,
+      confirm: true,
+    });
+
+    expect(result.isError).toBe(true);
+    expectBadRequestToolError(result, /versionId is only valid for GetObject/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 

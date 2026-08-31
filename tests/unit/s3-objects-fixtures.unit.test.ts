@@ -74,6 +74,12 @@ function fileVersion(overrides: Partial<B2S3FileVersionBinding> = {}): B2S3FileV
   };
 }
 
+function expectBadRequestToolError(result: unknown, message: RegExp): void {
+  const errorText = parseResult(result) as string;
+  expect(errorText).toMatch(message);
+  expect(parseErrorText(errorText)).toMatchObject({ code: "bad_request", status: 400 });
+}
+
 function notFound(message = "Object not found") {
   return Object.assign(new Error(message), { status: 404, code: "not_found" });
 }
@@ -203,7 +209,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/Either filePath or content/);
+    expectBadRequestToolError(result, /Either filePath or content/);
     expect(s3.requests).toEqual([]);
   });
 
@@ -216,7 +222,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline limit|s3_get_presigned_url|multipart tools/i);
+    expectBadRequestToolError(result, /inline limit|s3_get_presigned_url|multipart tools/i);
     expect(s3.requestsFor("putObject")).toHaveLength(0);
   });
 
@@ -327,7 +333,7 @@ describe("S3 object tools with deterministic handler fake", () => {
     const result = await tools.call("s3_get_object", { bucket: "b", key: "lying.bin" });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/inline read limit|exceeded/i);
+    expectBadRequestToolError(result, /inline read limit|exceeded/i);
     expect(destroySpy).toHaveBeenCalled();
   });
 

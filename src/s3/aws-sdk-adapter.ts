@@ -823,7 +823,7 @@ export class B2S3PeerClient {
    */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
-      throw new Error("versionId is only valid for GetObject presigned URLs.");
+      badRequest("versionId is only valid for GetObject presigned URLs.");
     }
     if (input.operation === "PutObject")
       assertSafeObjectContentType(input.contentType, "Presigned PutObject URLs");

@@ -17,7 +17,7 @@ import {
   type UpdateBucketOptions,
 } from "./client.js";
 import { B2Config } from "../utils/types.js";
-import { badRequest, toolJson, toolError } from "../utils/errors.js";
+import { badRequest, badRequestError, toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import { isTestRuntime } from "../utils/runtime.js";
 
@@ -914,7 +914,7 @@ export function registerBucketTools(
           const reason = await validateWebhookUrl(rule.targetConfiguration.url);
           if (reason) {
             const safeUrl = redactWebhookUrl(rule.targetConfiguration.url);
-            return toolError(new Error(`Webhook URL ${JSON.stringify(safeUrl)} ${reason}.`));
+            return toolError(badRequestError(`Webhook URL ${JSON.stringify(safeUrl)} ${reason}.`));
           }
         }
         const result = await client.setBucketNotificationRules(

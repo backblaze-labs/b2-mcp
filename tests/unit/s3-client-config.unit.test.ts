@@ -308,12 +308,16 @@ describe("B2 S3 client configuration", () => {
   });
 
   it("rejects non-B2 authorized S3 endpoints while building report config", () => {
-    expect(() =>
+    const build = () =>
       buildB2S3ClientConfig(config, {
         authorizedS3ApiUrl: "https://attacker.example",
         surface: "b2-insights-reports",
-      }),
-    ).toThrow(/Authorized B2 S3 endpoint must match s3\.<region>\.backblazeb2\.com/);
+      });
+
+    expect(build).toThrow(/Authorized B2 S3 endpoint must match s3\.<region>\.backblazeb2\.com/);
+    // Deliberate refusal, so it must carry its own code rather than fall through
+    // to parseB2Error's codeless internal_error/500 tail.
+    expect(build).toThrow(expect.objectContaining({ status: 502, code: "untrusted_endpoint" }));
   });
 
   it("keeps the endpoint-only AccountInfo shim credential-free", () => {
