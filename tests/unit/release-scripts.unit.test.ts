@@ -18,6 +18,12 @@ type RegistryMetadataModule = {
 
 type McpRegistryPublishModule = {
   publishMcpRegistry: (options: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  isTransientMcpPublisherFailure: (result: {
+    signal?: string | null;
+    stderr?: string;
+    stdout?: string;
+    timedOut?: boolean;
+  }) => boolean;
 };
 
 type McpRegistryManifest = Record<string, any>;
@@ -520,6 +526,55 @@ describe("release scripts", () => {
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("--attempts must be a positive integer");
+  });
+
+  it("retries only explicit MCP Registry npm propagation 404s", async () => {
+    const { isTransientMcpPublisherFailure, publishMcpRegistry } = await mcpRegistryPublishModule();
+    const propagationMessage =
+      "404: A newly published release can take a moment to appear. Wait and retry.";
+
+    expect(isTransientMcpPublisherFailure({ stderr: propagationMessage, stdout: "" })).toBe(true);
+    expect(isTransientMcpPublisherFailure({ stderr: "404: package not found", stdout: "" })).toBe(
+      false,
+    );
+
+    await withTempManifest(
+      () => undefined,
+      async (manifestPath, manifest) => {
+        const publisherCalls: string[][] = [];
+        const sleeps: number[] = [];
+        const result = await publishMcpRegistry({
+          attempts: 3,
+          fetchText: async () => ({ body: "", status: 404 }),
+          initialDelayMs: 17,
+          log: quietLog(),
+          publisherPath: "/tmp/mcp-publisher",
+          runPublisher: async (args: string[]) => {
+            publisherCalls.push(args);
+            if (args[0] === "login") return { code: 0, stderr: "", stdout: "" };
+            const publishAttempts = publisherCalls.filter(
+              ([command]) => command === "publish",
+            ).length;
+            return publishAttempts === 1
+              ? { code: 1, stderr: propagationMessage, stdout: "" }
+              : { code: 0, stderr: "", stdout: "" };
+          },
+          serverJsonPath: manifestPath,
+          sleep: async (delayMs: number) => {
+            sleeps.push(delayMs);
+          },
+          version: manifest.version,
+        });
+
+        expect(result).toMatchObject({ status: "published" });
+        expect(publisherCalls).toEqual([
+          ["login", "github-oidc", "--registry", "https://registry.modelcontextprotocol.io"],
+          ["publish", manifestPath],
+          ["publish", manifestPath],
+        ]);
+        expect(sleeps).toEqual([17]);
+      },
+    );
   });
 
   it("reports actual attempts for permanent MCP Registry publisher failures", async () => {

@@ -114,9 +114,19 @@ function isTransientHttpStatus(status) {
   return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
 
+function isRegistryNpmPropagationDelay(text) {
+  return (
+    /\b404\b/.test(text) &&
+    /newly published release can take a moment to appear\.\s*wait and retry/i.test(text)
+  );
+}
+
 function transientPublisherText(text) {
-  return /\b(408|409|425|429|5\d\d)\b|bad gateway|connection reset|dns|econnreset|econnrefused|etimedout|gateway timeout|i\/o timeout|network|no such host|service unavailable|temporary|timeout|too many requests/i.test(
-    text,
+  return (
+    isRegistryNpmPropagationDelay(text) ||
+    /\b(408|409|425|429|5\d\d)\b|bad gateway|connection reset|dns|econnreset|econnrefused|etimedout|gateway timeout|i\/o timeout|network|no such host|service unavailable|temporary|timeout|too many requests/i.test(
+      text,
+    )
   );
 }
 
