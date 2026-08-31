@@ -169,10 +169,13 @@ function callerFingerprintForConfig(config: B2Config, callerScope: string): stri
 
 function resolveDestructivePolicy(transport: "stdio" | "http"): DestructivePolicy {
   const value = process.env.B2_DESTRUCTIVE_POLICY;
-  if (transport === "http") {
-    return value === "allow" || value === "block" || value === "confirm" ? value : "block";
-  }
-  return value === "allow" || value === "block" ? value : "confirm";
+  const explicit =
+    value === "allow" || value === "block" || value === "confirm" || value === "elicit"
+      ? value
+      : undefined;
+  // Per-transport default when no valid explicit policy is set: HTTP (internet-
+  // facing) fails safe to `block`; stdio (trusted local user) defaults to `confirm`.
+  return explicit ?? (transport === "http" ? "block" : "confirm");
 }
 
 function resolveOptionalPair(

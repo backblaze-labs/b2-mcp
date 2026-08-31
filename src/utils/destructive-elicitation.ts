@@ -167,10 +167,38 @@ export async function maybeRequireDestructiveElicitation<T>({
 
   const policy = getDestructivePolicy(config);
   const requestExtra = mcpRequestExtra(extra);
-  if (policy !== "confirm" || !destructiveElicitationEnabled()) {
+  // Only `confirm` and `elicit` run the elicitation flow; `allow`/`block` are
+  // resolved entirely by the in-handler gate.
+  if (policy !== "confirm" && policy !== "elicit") {
+    return runOriginal();
+  }
+
+  // When no human can be reached — elicitation disabled, or the client cannot
+  // present a form — `confirm` falls through to the gate (which still accepts a
+  // model confirm:true), while `elicit` refuses: its contract is "require a
+  // human, and refuse if you can't reach one".
+  if (!destructiveElicitationEnabled()) {
+    if (policy === "elicit") {
+      return destructiveElicitationRefused(
+        toolName,
+        effect,
+        "MCP elicitation is disabled on this server (B2_DESTRUCTIVE_ELICITATION), so no human can be prompted",
+        sanitizerOptions,
+        onDecision,
+      );
+    }
     return runOriginal();
   }
   if (!clientCanUseReturnBasedElicitation(requestExtra, contextProviders)) {
+    if (policy === "elicit") {
+      return destructiveElicitationRefused(
+        toolName,
+        effect,
+        "this client cannot present an MCP elicitation prompt, so no human can approve",
+        sanitizerOptions,
+        onDecision,
+      );
+    }
     return runOriginal();
   }
 

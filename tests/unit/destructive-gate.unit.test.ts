@@ -4,8 +4,10 @@
  */
 import {
   checkDestructive,
+  destructiveTargetDigest,
   getDestructivePolicy,
   isDestructiveTool,
+  runWithDestructiveElicitationConsent,
 } from "../../src/utils/destructive-gate";
 import { B2Config, DestructivePolicy } from "../../src/utils/types";
 
@@ -51,9 +53,10 @@ describe("destructive-gate", () => {
       expect(getDestructivePolicy(cfg("garbage" as unknown as DestructivePolicy))).toBe("confirm");
     });
 
-    it("honors allow and block", () => {
+    it("honors allow, block, and elicit", () => {
       expect(getDestructivePolicy(cfg("allow"))).toBe("allow");
       expect(getDestructivePolicy(cfg("block"))).toBe("block");
+      expect(getDestructivePolicy(cfg("elicit"))).toBe("elicit");
     });
   });
 
@@ -140,6 +143,60 @@ describe("destructive-gate", () => {
     it("permits a destructive call without confirm", () => {
       const r = checkDestructive("s3_delete_object", { bucket: "b", key: "k" }, cfg("allow"));
       expect(r.ok).toBe(true);
+    });
+  });
+
+  describe("elicit policy", () => {
+    // `elicit` is "require a human, and refuse if you can't reach one": a
+    // model-supplied confirm:true never satisfies it, and the only way through
+    // the gate is wrapper-installed human elicitation consent.
+    it("refuses without consent, even with confirm:true", () => {
+      const without = checkDestructive("b2_delete_bucket", { bucketId: "b" }, cfg("elicit"));
+      const withConfirm = checkDestructive(
+        "b2_delete_bucket",
+        { bucketId: "b", confirm: true },
+        cfg("elicit"),
+      );
+      for (const r of [without, withConfirm]) {
+        expect(r).toMatchObject({
+          ok: false,
+          error: { code: "destructive_confirmation_refused", status: 409 },
+        });
+      }
+    });
+
+    it("addresses the operator and never coaches a confirm:true bypass", () => {
+      const r = checkDestructive("b2_delete_bucket", { bucketId: "b" }, cfg("elicit"));
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+      const message = r.error.message;
+      expect(message).toContain("permanently delete a bucket");
+      expect(message).toContain("B2_DESTRUCTIVE_POLICY=elicit");
+      expect(message).toMatch(/human operator/i);
+      expect(message).not.toMatch(/["']?confirm["']?\s*[:=]\s*true/i);
+      expect(message).not.toMatch(/re-?invoke|to proceed/i);
+    });
+
+    it("permits a call carrying wrapper-installed elicitation consent", () => {
+      const config = cfg("elicit");
+      const args = { bucketId: "b" };
+      const digest = destructiveTargetDigest(config, args);
+      const r = runWithDestructiveElicitationConsent("b2_delete_bucket", digest, () =>
+        checkDestructive("b2_delete_bucket", args, config),
+      );
+      expect(r.ok).toBe(true);
+    });
+
+    it("ignores consent minted for a different target", () => {
+      const config = cfg("elicit");
+      const otherDigest = destructiveTargetDigest(config, { bucketId: "other" });
+      const r = runWithDestructiveElicitationConsent("b2_delete_bucket", otherDigest, () =>
+        checkDestructive("b2_delete_bucket", { bucketId: "b" }, config),
+      );
+      expect(r).toMatchObject({
+        ok: false,
+        error: { code: "destructive_confirmation_refused" },
+      });
     });
   });
 
