@@ -50,8 +50,8 @@ describe("Vercel adapter policy", () => {
 
     expect(allDeps).not.toHaveProperty("mcp-handler");
     expect(allDeps).not.toHaveProperty("@modelcontextprotocol/sdk");
-    expect(pkg.devDependencies?.vercel).toBe("59.3.0");
-    expect(pkg.devDependencies?.["@vercel/node"]).toBe("5.10.2");
+    expect(pkg.devDependencies?.vercel).toBe("59.7.0");
+    expect(pkg.devDependencies?.["@vercel/node"]).toBe("7.0.0");
   });
 
   it("publishes the expected Vercel routes and Node runtime policy", () => {

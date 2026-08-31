@@ -22,7 +22,7 @@
     "packedTarballBytes": 502000,
     "unpackedPackageBytes": 2311500,
     "packedEntryCount": 251,
-    "cleanConsumerInstallFootprintBytes": 31030000
+    "cleanConsumerInstallFootprintBytes": 31045000
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {
@@ -66,9 +66,9 @@
     "jose": {
       "purpose": "JOSE (JWKS/JWT) verification for the OAuth resource server local access-token path; performs JWK import and JWS signature verification for RS256/ES256/EdDSA.",
       "policy": "Exact-pinned and asymmetric algorithms only. jose is a new production dependency: it was previously present only in the dev tree (via the @modelcontextprotocol/client devDependency), so a production install did not include it before. It adds exactly one package to the production closure (jose has no runtime dependencies of its own), which is why the reviewed total production package count moved to 48.",
-      "version": "6.2.9",
-      "resolved": "https://registry.npmjs.org/jose/-/jose-6.2.9.tgz",
-      "integrity": "sha512-XrchZOFZUl/T3vTwRe8XK+cJrGtMF4th1ARnDfwbBXFKThGhlsxEE4Zu03AD/bjJSt/9jT/mxrOCkJWOg77aPA=="
+      "version": "6.2.10",
+      "resolved": "https://registry.npmjs.org/jose/-/jose-6.2.10.tgz",
+      "integrity": "sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g=="
     },
     "opossum": {
       "purpose": "Circuit breaker runtime for bounded provider calls.",

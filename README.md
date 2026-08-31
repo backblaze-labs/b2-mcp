@@ -523,7 +523,7 @@ pnpm run smoke:inspector    # advisory locked Inspector CLI smoke; requires exis
 ```
 
 Compatible MCP Inspector release for isolated manual inspection:
-`@modelcontextprotocol/inspector@2.3.0`, which requires Node.js 22.19.0 or
+`@modelcontextprotocol/inspector@2.4.0`, which requires Node.js 22.19.0 or
 newer. Run it through `pnpm run smoke:inspector` so the command uses the
 committed lockfile and a sanitized temporary environment.
 
