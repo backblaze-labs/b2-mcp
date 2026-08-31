@@ -16,7 +16,9 @@ const savedEnv = { ...process.env };
 beforeEach(async () => {
   setVercelProtocolEnv(savedEnv);
   installSdkTransport(
-    withTrustedS3ApiUrl(new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport()),
+    withTrustedS3ApiUrl(
+      new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
+    ),
   );
   // s3_* tools run on the AWS SDK, which the B2 simulator transport does not
   // intercept; stub the S3 client so the representative s3_list_objects_v2 call
