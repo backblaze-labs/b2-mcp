@@ -282,8 +282,11 @@ export function createS3ObjectClient(config: B2Config, surface: string): B2S3Pee
  * @remarks
  * B2 authorize returns the account's S3 API URL. This facade builds the real S3
  * client from that endpoint on first operation, shares the in-flight authorize
- * call, and falls back to the configured region only when authorize is
- * temporarily unavailable.
+ * call, and falls back to the configured region for any authorize failure,
+ * including invalid credentials, malformed or unsafe authorized endpoints, and
+ * timeouts. That fallback is a compatibility path, not a fail-closed check; the
+ * first S3 operation then surfaces any credential or endpoint failure from the
+ * S3 API itself.
  *
  * @param auth - Provider of B2 runtime config and authorize responses.
  * @param options - Optional key and user-agent overrides.

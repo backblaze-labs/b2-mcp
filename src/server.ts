@@ -97,7 +97,7 @@ export const SERVER_CREDENTIAL_SAFETY_INSTRUCTION =
  *
  * @returns The validated B2 server configuration.
  *
- * @throws CredentialResolutionError when an unexpected credential resolution error occurs.
+ * @throws Error when a non-credential startup failure escapes configuration loading.
  *
  * @example
  * ```ts

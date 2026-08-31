@@ -817,7 +817,9 @@ export class B2S3PeerClient {
    *
    * @returns Presigned URL metadata.
    *
-   * @throws Error when a PutObject URL includes a version ID or unsafe content type.
+   * @throws Error when a PutObject URL includes a version ID.
+   * @throws A 400-style tool error object when PutObject content type validation rejects missing
+   * or unsafe input.
    */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
