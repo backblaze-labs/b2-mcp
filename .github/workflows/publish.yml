@@ -459,7 +459,7 @@ jobs:
     needs: [prepare, live-contract, mcp-registry-preflight]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read

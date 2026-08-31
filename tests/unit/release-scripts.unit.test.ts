@@ -452,6 +452,17 @@ describe("release scripts", () => {
     );
   });
 
+  it("rejects malformed MCP Registry retry integers", () => {
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/mcp-registry-publish.mjs", "--attempts", "3seconds"],
+      { cwd: root, encoding: "utf8" },
+    );
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--attempts must be a positive integer");
+  });
+
   it("fails closed when an existing MCP Registry version mismatches server.json", async () => {
     const { publishMcpRegistry } = await mcpRegistryPublishModule();
 
@@ -503,6 +514,64 @@ describe("release scripts", () => {
         });
 
         expect(result).toMatchObject({ status: "already-published" });
+      },
+    );
+  });
+
+  it("rechecks the registry after ambiguous mcp-publisher publish failures", async () => {
+    const { publishMcpRegistry } = await mcpRegistryPublishModule();
+    const publisherCalls: string[][] = [];
+    const registryStatuses: number[] = [];
+    const sleeps: number[] = [];
+
+    await withTempManifest(
+      () => undefined,
+      async (manifestPath, manifest) => {
+        const registryResponses = [
+          { body: "", status: 404 },
+          { body: "", status: 404 },
+          { body: JSON.stringify({ server: manifest }), status: 200 },
+        ];
+        const result = await publishMcpRegistry({
+          attempts: 3,
+          fetchText: async () => {
+            const response = registryResponses.shift();
+            if (!response) throw new Error("unexpected registry lookup");
+            registryStatuses.push(response.status);
+            return response;
+          },
+          initialDelayMs: 13,
+          log: quietLog(),
+          publisherPath: "/tmp/mcp-publisher",
+          runPublisher: async (args: string[]) => {
+            publisherCalls.push(args);
+            if (args[0] === "login") return { code: 0, stderr: "", stdout: "" };
+            const publishAttempts = publisherCalls.filter(
+              ([command]) => command === "publish",
+            ).length;
+            return publishAttempts === 1
+              ? { code: 1, stderr: "", stdout: "", timedOut: true }
+              : {
+                  code: 1,
+                  stderr: "cannot publish duplicate version",
+                  stdout: "",
+                };
+          },
+          serverJsonPath: manifestPath,
+          sleep: async (delayMs: number) => {
+            sleeps.push(delayMs);
+          },
+          version: manifest.version,
+        });
+
+        expect(result).toMatchObject({ status: "already-published" });
+        expect(registryStatuses).toEqual([404, 404, 200]);
+        expect(publisherCalls).toEqual([
+          ["login", "github-oidc"],
+          ["publish", manifestPath],
+          ["publish", manifestPath],
+        ]);
+        expect(sleeps).toEqual([13]);
       },
     );
   });

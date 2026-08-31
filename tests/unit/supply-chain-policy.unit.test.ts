@@ -725,6 +725,7 @@ describe("supply-chain audit policy", () => {
       mcpPublisherInstallStep.indexOf("tar -xzf mcp-publisher.tar.gz"),
     );
     expect(publishJob).toContain("needs: [prepare, live-contract, mcp-registry-preflight]");
+    expect(publishJob).toContain("timeout-minutes: 30");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
     expect(publishJob).toContain("id-token: write");

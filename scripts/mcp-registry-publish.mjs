@@ -18,8 +18,11 @@ function usage() {
 }
 
 function parsePositiveInt(raw, name) {
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  if (!/^[1-9]\d*$/.test(String(raw ?? ""))) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value)) throw new Error(`${name} must be a positive integer`);
   return value;
 }
 
@@ -120,6 +123,20 @@ function transientPublisherText(text) {
 export function isTransientMcpPublisherFailure(result) {
   if (result.timedOut || result.signal) return true;
   return transientPublisherText(`${result.stderr ?? ""}\n${result.stdout ?? ""}`);
+}
+
+function publisherOutput(result) {
+  return `${result.stderr ?? ""}\n${result.stdout ?? ""}`;
+}
+
+function isDuplicateVersionFailure(result) {
+  return /already exists|cannot publish duplicate version|duplicate version|version already exists/i.test(
+    publisherOutput(result),
+  );
+}
+
+function shouldRequeryAfterPublishFailure(result) {
+  return isTransientMcpPublisherFailure(result) || isDuplicateVersionFailure(result);
 }
 
 async function defaultFetchText(url, { timeoutMs }) {
@@ -230,6 +247,54 @@ async function runPublisherWithRetry(label, args, options) {
   );
 }
 
+async function registryVersionMatches(lookupUrl, manifest, options, context) {
+  const lookup = await lookupRegistryVersion(lookupUrl, options);
+  if (lookup.status === 200) {
+    const responseJson = JSON.parse(lookup.body);
+    assertRegistryResponseMatchesManifest(responseJson, manifest);
+    options.log.log(
+      `mcp-registry: ${manifest.name}@${manifest.version} exists and matches server.json after ${context}`,
+    );
+    return true;
+  }
+  if (lookup.status === 404) return false;
+  throw new Error(`MCP Registry lookup returned ${lookup.status}: ${lookup.body}`);
+}
+
+async function publishWithRegistryRecheck(manifest, lookupUrl, options) {
+  let lastResult = null;
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    const result = await options.runPublisher(["publish", options.serverJsonPath], {
+      publisherPath: options.publisherPath,
+      timeoutMs: options.publisherTimeoutMs,
+    });
+    lastResult = result;
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    if (result.code === 0) return { status: "published" };
+
+    if (shouldRequeryAfterPublishFailure(result)) {
+      const matched = await registryVersionMatches(
+        lookupUrl,
+        manifest,
+        options,
+        "ambiguous publish failure",
+      );
+      if (matched) return { status: "already-published" };
+    }
+
+    if (!isTransientMcpPublisherFailure(result) || attempt >= options.attempts) break;
+    options.log.warn(
+      `mcp-registry: publish failed transiently; retrying in ${options.initialDelayMs * attempt}ms`,
+    );
+    await options.sleep(options.initialDelayMs * attempt);
+  }
+
+  throw new Error(
+    `mcp-publisher publish failed after ${options.attempts} attempts with exit ${lastResult?.code ?? "unknown"}`,
+  );
+}
+
 export async function publishMcpRegistry(options) {
   const runtimeOptions = {
     attempts: 3,
@@ -269,12 +334,7 @@ export async function publishMcpRegistry(options) {
   }
 
   await runPublisherWithRetry("login github-oidc", ["login", "github-oidc"], runtimeOptions);
-  await runPublisherWithRetry(
-    "publish",
-    ["publish", runtimeOptions.serverJsonPath],
-    runtimeOptions,
-  );
-  return { status: "published" };
+  return publishWithRegistryRecheck(manifest, lookupUrl, runtimeOptions);
 }
 
 async function main() {
