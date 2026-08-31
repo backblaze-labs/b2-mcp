@@ -19,11 +19,18 @@ import { B2Config, DestructivePolicy } from "./types.js";
  *
  * Policy (env `B2_DESTRUCTIVE_POLICY`, default `confirm`):
  *   - `confirm` — a destructive call must pass `confirm: true`; otherwise it is
- *     refused with a description of the effect and how to proceed. This turns a
- *     silent destructive action into a deliberate, auditable two-step and gives an
- *     MCP host a clear point to require human approval. (Defense-in-depth: a fully
+ *     refused with a description of the effect and the policy that refused it,
+ *     addressed to the human operator rather than telling the caller how to
+ *     satisfy the gate itself. This turns a silent destructive action into a
+ *     deliberate, auditable two-step and gives an MCP host a clear point to
+ *     require human approval. (Defense-in-depth: a fully
  *     hijacked model could also set `confirm`, so pair with host consent and/or
  *     `block` for untrusted/automated deployments.)
+ *   - `elicit` — a destructive call requires human approval through an MCP
+ *     elicitation prompt and is refused if the client cannot present one. Unlike
+ *     `confirm`, a model-supplied `confirm: true` does not satisfy it: this is the
+ *     "require a human, and refuse if you can't reach one" policy for deployments
+ *     that want real consent without giving up the operation entirely.
  *   - `block` — destructive operations are refused outright. The hard control for
  *     read-mostly / unattended deployments.
  *   - `allow` — no gate (explicit opt-out for a trusted single-user stdio session).
@@ -217,11 +224,11 @@ function canonicalJson(value: unknown): string {
  *
  * @param config - B2 runtime configuration.
  *
- * @returns `allow`, `block`, or the default `confirm`.
+ * @returns `allow`, `block`, `elicit`, or the default `confirm`.
  */
 export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   const p = config.destructivePolicy;
-  return p === "allow" || p === "block" ? p : "confirm";
+  return p === "allow" || p === "block" || p === "elicit" ? p : "confirm";
 }
 
 /** Successful destructive-gate decision. */
@@ -281,19 +288,51 @@ export function checkDestructive(
     };
   }
 
-  // policy === "confirm"
+  // policy === "confirm" || policy === "elicit"
   // Human elicitation approval is a wrapper-to-gate signal. It composes with
-  // the confirm policy without mutating tool args, and is matched to this
-  // tool plus canonical target digest before the explicit model-supplied
-  // confirm fallback.
+  // either policy without mutating tool args, and is matched to this tool plus
+  // canonical target digest. Under both policies it is accepted; the difference
+  // is only in the fallback below.
   if (hasDestructiveElicitationConsent(toolName, destructiveTargetDigest(config, args))) {
     return { ok: true };
   }
+
+  // Under `elicit`, an accepted MCP elicitation response is the ONLY way through:
+  // a model-supplied confirm:true does not satisfy it, and when no such response
+  // can be obtained the action is refused. The wrapper refuses can't-elicit
+  // clients before the handler runs; this is the defense-in-depth backstop for
+  // any path that reaches the gate without wrapper-installed consent. The
+  // response is client-relayed, so this is human-in-the-loop friction, not proof
+  // of human identity.
+  if (policy === "elicit") {
+    const message =
+      `Refused: this would ${effect} — a destructive/irreversible action. ` +
+      `This server's policy (B2_DESTRUCTIVE_POLICY=elicit) requires an accepted MCP ` +
+      `elicitation response for this specific action; a model-supplied confirmation ` +
+      `cannot satisfy it, and the action is refused when no such response can be ` +
+      `obtained. Report this refusal and the effect above to the human operator.`;
+    return {
+      ok: false,
+      error: {
+        status: 409,
+        code: "destructive_confirmation_refused",
+        message,
+      },
+    };
+  }
+
+  // policy === "confirm": the legacy model-supplied confirm fallback applies.
   if (args.confirm === true) return { ok: true };
+  // Addressed to the human operator, not to the caller: the refusal states the
+  // effect and the policy that produced it, and deliberately does not tell the
+  // calling model how to satisfy the gate itself — a refusal that spells out its
+  // own bypass gets self-approved.
   const message =
-    `Confirmation required: this would ${effect} — a destructive/irreversible action. ` +
-    `Re-invoke the identical call with "confirm": true to proceed. ` +
-    `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`;
+    `Refused: this would ${effect} — a destructive/irreversible action. ` +
+    `This server's policy (B2_DESTRUCTIVE_POLICY=confirm) expects a human operator, ` +
+    `not the calling model, to approve this specific action before it runs. ` +
+    `Report this refusal and the effect above to the human operator and let them ` +
+    `decide; do not approve it on their behalf.`;
   return {
     ok: false,
     error: {

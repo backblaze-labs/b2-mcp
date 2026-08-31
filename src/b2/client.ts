@@ -73,6 +73,7 @@ import type {
 import { DEFAULT_BOUNDED_WORKER_CONCURRENCY, forEachBounded } from "../utils/concurrency.js";
 import { isTestRuntime } from "../utils/runtime.js";
 import { abortError } from "../utils/named-error.js";
+import { codedError } from "../utils/errors.js";
 
 /** Concrete B2 bucket types accepted by native bucket operations. */
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
@@ -1208,7 +1209,8 @@ export function validateB2ApiUrl(raw: string): string | null {
 
 function assertB2ApiUrl(raw: string): void {
   const reason = validateB2ApiUrl(raw);
-  if (reason) throw new Error(`Authorized B2 API endpoint ${reason}.`);
+  // Coded, not bare: a deliberate refusal, not an internal fault.
+  if (reason) throw codedError(502, "untrusted_endpoint", `Authorized B2 API endpoint ${reason}.`);
 }
 
 function isUnauthorized(err: unknown): boolean {

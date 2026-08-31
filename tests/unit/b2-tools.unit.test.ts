@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
+import { parseErrorText } from "../../src/utils/errors";
 import { B2AuthManager } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
@@ -1916,6 +1917,13 @@ describe("bucket notification rules", () => {
     targetConfiguration: { targetType: "webhook" as const, url },
   });
 
+  const expectWebhookBadRequest = (res: { content: Array<{ text: string }> }): void => {
+    expect(parseErrorText(res.content[0].text)).toMatchObject({
+      code: "bad_request",
+      status: 400,
+    });
+  };
+
   it("blocks notification-rule updates without confirmation before SDK update", async () => {
     invalidateAuthManagerCache();
     const transport = new RecordingTransport((request) => {
@@ -1963,6 +1971,7 @@ describe("bucket notification rules", () => {
     });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/https/i);
+    expectWebhookBadRequest(res);
   });
 
   it("rejects internal/SSRF webhook URL forms", async () => {
@@ -1990,6 +1999,7 @@ describe("bucket notification rules", () => {
       });
       expect(res.isError).toBe(true);
       expect(res.content[0].text).toMatch(/private|loopback|numeric|IPv6|non-public/i);
+      expectWebhookBadRequest(res);
     }
   });
 
@@ -2005,6 +2015,7 @@ describe("bucket notification rules", () => {
 
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/must not resolve to a non-public IP address/i);
+    expectWebhookBadRequest(res);
   });
 
   it("rejects webhook hostnames that resolve to mixed public and private addresses", async () => {
@@ -2022,6 +2033,7 @@ describe("bucket notification rules", () => {
 
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/must not resolve to a non-public IP address/i);
+    expectWebhookBadRequest(res);
   });
 
   it("rejects webhook hostnames that do not resolve", async () => {
@@ -2038,6 +2050,7 @@ describe("bucket notification rules", () => {
 
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/must resolve to a public IP address/i);
+    expectWebhookBadRequest(res);
   });
 
   it("rejects webhook URLs with embedded credentials", async () => {
@@ -2051,6 +2064,7 @@ describe("bucket notification rules", () => {
     });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/credentials/i);
+    expectWebhookBadRequest(res);
     expect(res.content[0].text).not.toContain("pa55w0rd");
     expect(res.content[0].text).not.toContain("path-token");
     expect(res.content[0].text).not.toContain("query-token");
@@ -2432,7 +2446,7 @@ describe("Partner API tools", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Confirmation required");
+    expect(result.content[0].text).toContain("expects a human operator");
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toEqual([]);

@@ -418,6 +418,68 @@ describe("destructive elicitation", () => {
     },
   );
 
+  describe("elicit policy", () => {
+    // `elicit` requires real human approval and refuses when it can't reach a
+    // human — the divergence from `confirm` is entirely in the can't-elicit path.
+    it("elicits a form-capable client, then runs on human approval", async () => {
+      const config = cfg("elicit");
+      const original = destructiveOriginal(config);
+      const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
+
+      const initial = await wrapped({ bucket: "photos", key: "old.jpg" }, {});
+      expect(initial.resultType).toBe("input_required");
+      expect(original).not.toHaveBeenCalled();
+
+      const accepted = await wrapped(
+        { bucket: "photos", key: "old.jpg" },
+        extraWithElicitation(acceptedResponse(), initial.requestState as string),
+      );
+      expect(accepted.content?.[0]?.text).toBe("deleted");
+      expect(original).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses a client that cannot present a form, even with confirm:true", async () => {
+      // Under `confirm` this same incapable client would fall through to the gate
+      // and be satisfied by confirm:true; under `elicit` it is refused outright.
+      const config = cfg("elicit");
+      const original = destructiveOriginal(config);
+      const wrapped = createAuditedToolCallback(
+        "s3_delete_object",
+        original,
+        config,
+        providers(URL_ONLY_ELICITATION),
+      );
+
+      const result = await wrapped(
+        { bucket: "photos", key: "old.jpg", confirm: true },
+        { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0]?.text).toContain(
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+      );
+      expect(result.content?.[0]?.text).toMatch(/cannot present an MCP elicitation prompt/i);
+      expect(original).not.toHaveBeenCalled();
+    });
+
+    it("refuses when elicitation is disabled server-side", async () => {
+      process.env.B2_DESTRUCTIVE_ELICITATION = "off";
+      const config = cfg("elicit");
+      const original = destructiveOriginal(config);
+      const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
+
+      const result = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, {});
+
+      expect(result.isError).toBe(true);
+      expect(result.content?.[0]?.text).toContain(
+        "B2 Error [destructive_confirmation_refused] (HTTP 409)",
+      );
+      expect(result.content?.[0]?.text).toMatch(/elicitation is disabled/i);
+      expect(original).not.toHaveBeenCalled();
+    });
+  });
+
   it("requires elicitation for capable clients even when confirm is already true", async () => {
     const config = cfg("confirm");
     const original = destructiveOriginal(config);
@@ -439,7 +501,7 @@ describe("destructive elicitation", () => {
 
     expect(result.resultType).not.toBe("input_required");
     expect(result.isError).toBe(true);
-    expect(result.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(result.content?.[0]?.text).toMatch(/expects a human operator/i);
     expect(result.content?.[0]?.text).toContain(
       "B2 Error [destructive_confirmation_required] (HTTP 409)",
     );
@@ -544,7 +606,7 @@ describe("destructive elicitation", () => {
 
     const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, extra);
     expect(missingConfirm.resultType).not.toBe("input_required");
-    expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(missingConfirm.content?.[0]?.text).toMatch(/expects a human operator/i);
     expect(missingConfirm.content?.[0]?.text).toContain(
       "B2 Error [destructive_confirmation_required] (HTTP 409)",
     );

@@ -7,7 +7,7 @@ import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
 import { closeVercelMcpHandlerForTests } from "../../deploy/vercel/adapter";
 import { invalidateAuthManagerCache, invalidateCapabilityCache } from "../../src/server";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { installSdkTransport } from "../support/sdk-test-helpers";
+import { installSdkTransport, withTrustedS3ApiUrl } from "../support/sdk-test-helpers";
 import { closeClient } from "./support/clients";
 import { connectVercelClient, setVercelProtocolEnv } from "./support/vercel";
 
@@ -16,7 +16,9 @@ const savedEnv = { ...process.env };
 beforeEach(async () => {
   setVercelProtocolEnv(savedEnv);
   installSdkTransport(
-    new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
+    withTrustedS3ApiUrl(
+      new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
+    ),
   );
   // s3_* tools run on the AWS SDK, which the B2 simulator transport does not
   // intercept; stub the S3 client so the representative s3_list_objects_v2 call

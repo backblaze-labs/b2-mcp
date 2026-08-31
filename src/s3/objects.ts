@@ -10,7 +10,7 @@ import * as path from "path";
 import { Readable, Transform } from "stream";
 import { pipeline } from "stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
-import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
+import { badRequestError, codedError, toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { resolveLocalPath } from "../utils/fs-guard.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
@@ -206,7 +206,7 @@ async function webStreamToBuffer(
       total += value.byteLength;
       if (total > maxBytes) {
         await reader.cancel(`Inline object body exceeded ${maxBytes} bytes.`);
-        throw new Error(
+        throw badRequestError(
           `Object body exceeded the ${maxBytes}-byte inline read limit for s3_get_object while streaming.`,
         );
       }
@@ -245,7 +245,7 @@ async function nodeStreamToBuffer(stream: Readable, maxBytes: number): Promise<B
       total += buffer.byteLength;
       if (total > maxBytes) {
         stream.destroy(new Error(`Inline object body exceeded ${maxBytes} bytes.`));
-        throw new Error(
+        throw badRequestError(
           `Object body exceeded the ${maxBytes}-byte inline read limit for s3_get_object while streaming.`,
         );
       }
@@ -334,7 +334,7 @@ function hasS3DeleteMarkerSignal(err: unknown): boolean {
 }
 
 function inlineUploadLimitError(size?: number): Error {
-  return new Error(
+  return badRequestError(
     `Payload ${
       size === undefined ? "exceeds" : `is ${size} bytes, over`
     } the ${MAX_INLINE_OBJECT_BYTES}-byte inline limit for s3_put_object. Use s3_get_presigned_url or multipart tools for large objects.`,
@@ -348,7 +348,7 @@ async function readSmallRegularFile(filePath: string): Promise<Buffer> {
   );
   try {
     const stat = await handle.stat();
-    if (!stat.isFile()) throw new Error("s3_put_object filePath must be a regular file.");
+    if (!stat.isFile()) throw badRequestError("s3_put_object filePath must be a regular file.");
     if (stat.size > MAX_INLINE_OBJECT_BYTES) throw inlineUploadLimitError(stat.size);
     const output = new Uint8Array(stat.size);
     let total = 0;
@@ -524,7 +524,7 @@ export function registerS3ObjectTools(
     async (args) => {
       try {
         if (!args.filePath && !args.content) {
-          return toolError(new Error("Either filePath or content must be provided."));
+          return toolError(badRequestError("Either filePath or content must be provided."));
         }
 
         assertSafeObjectContentType(args.contentType, "s3_put_object");
@@ -622,13 +622,19 @@ export function registerS3ObjectTools(
           result.contentLength < 0
         ) {
           await cancelBody(result.body);
-          return toolError(new Error("Object response reported an invalid content length."));
+          return toolError(
+            codedError(
+              500,
+              "internal_error",
+              "Object response reported an invalid content length.",
+            ),
+          );
         }
 
         if (result.contentLength > MAX_INLINE_OBJECT_BYTES) {
           await cancelBody(result.body);
           return toolError(
-            new Error(
+            badRequestError(
               `Object is ${result.contentLength} bytes, over the ${MAX_INLINE_OBJECT_BYTES}-byte inline read limit for s3_get_object. ` +
                 `Generate a GetObject URL with s3_get_presigned_url to download directly from B2, use saveToPath to stream it to disk, ` +
                 `or a Range request to read a small slice.`,

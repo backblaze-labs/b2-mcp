@@ -32,7 +32,13 @@ version: `0.1.1`. MCP revision: 2026-07-28. Documentation owner: Gonza.
     advertise form elicitation are prompted before the server-side confirm gate;
     clients without compatible elicitation, or servers with
     `B2_DESTRUCTIVE_ELICITATION=off`, fall back to the explicit `confirm: true`
-    retry. Under `allow`, both elicitation and the confirm gate are skipped.
+    retry. Use `elicit` when you want mandatory human-in-the-loop friction without an
+    all-or-nothing `block`: it requires an accepted MCP form-elicitation response
+    from a form-capable client and refuses when no such response can be obtained,
+    so a model-supplied `confirm: true` cannot satisfy it. The response is relayed
+    by the client, so `elicit` is friction, not an independent authorization
+    boundary a compromised client cannot forge; only `block` is that wall. Under
+    `allow`, both elicitation and the confirm gate are skipped.
 12. Never log B2 credentials, bearer tokens, presigned URLs, authorization
     responses, or provider deployment-bypass tokens.
     If `B2_LOG_FILE` is set, structured logs move off stderr/stdout and provider

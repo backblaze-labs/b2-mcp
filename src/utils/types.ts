@@ -6,7 +6,7 @@
 import type { McpOutputFormat } from "./result-serializer.js";
 
 /** Policy for the destructive-operation gate (see utils/destructive-gate.ts). */
-export type DestructivePolicy = "allow" | "confirm" | "block";
+export type DestructivePolicy = "allow" | "confirm" | "block" | "elicit";
 export type { McpOutputFormat };
 
 /** Durable secret sink mode for one-time credential-producing tools. */
@@ -78,8 +78,13 @@ export interface B2Config {
    * Gate policy for destructive/irreversible tools (delete bucket/file-version/
    *  key, cancel large file, eject group member, make-public / weaken-lock /
    *  replication via b2_update_bucket, outbound notification rules).
-   *  "confirm" (default) requires confirm:true; "block" refuses;
-   *  "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY.
+   *  "confirm" (default) requires confirm:true or an accepted MCP elicitation
+   *  response; "elicit" requires an accepted MCP elicitation response and refuses
+   *  if the client cannot supply one (a model confirm:true does not satisfy it);
+   *  "block" refuses; "allow" disables the gate. The elicitation response is
+   *  relayed by the client, so it is human-in-the-loop friction, not proof of
+   *  human identity; only "block" is a boundary a compromised client cannot
+   *  forge. Set via B2_DESTRUCTIVE_POLICY.
    */
   destructivePolicy?: DestructivePolicy;
   /**

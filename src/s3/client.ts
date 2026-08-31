@@ -16,6 +16,7 @@ import type { B2AuthResponse, B2Config } from "../utils/types.js";
 import { runWithMcpRequestSignal } from "../request-context.js";
 import { logger } from "../utils/logger.js";
 import { timeoutError } from "../utils/named-error.js";
+import { codedError } from "../utils/errors.js";
 import { PRODUCT_NAME, productVersion } from "../version.js";
 import {
   createB2S3PeerClient,
@@ -105,15 +106,38 @@ export function validateB2S3ApiUrl(raw: string, validation: B2S3ApiUrlValidation
 
 function authorizedB2S3Endpoint(raw: string): AuthorizedB2S3Endpoint {
   const reason = validateB2S3ApiUrl(raw, { mode: "authorized-region" });
-  if (reason) throw new Error(`Authorized B2 S3 endpoint ${reason}.`);
+  // Coded, not bare: a deliberate refusal, not an internal fault.
+  if (reason) {
+    throw codedError(502, "untrusted_endpoint", `Authorized B2 S3 endpoint ${reason}.`);
+  }
   const parsed = new URL(raw);
   const hostname = parsed.hostname.toLowerCase();
   const match = B2_S3_ENDPOINT_HOST.exec(hostname);
-  if (!match?.[1]) throw new Error("Authorized B2 S3 endpoint is missing a region.");
+  if (!match?.[1]) {
+    throw codedError(502, "untrusted_endpoint", "Authorized B2 S3 endpoint is missing a region.");
+  }
   return {
     endpoint: `https://${hostname}`,
     region: match[1].toLowerCase(),
   };
+}
+
+/**
+ * Whether an error is the coded 502 refusal raised when the authorize response
+ * returns an S3 endpoint outside the trusted B2 host set. It is a deliberate
+ * validation refusal, not an authorization outage, so callers must not mask it
+ * with the configured-region fallback.
+ *
+ * @param err - Error thrown while building an authorized S3 client.
+ *
+ * @returns `true` when the error carries the `untrusted_endpoint` code.
+ */
+function isUntrustedEndpointError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "untrusted_endpoint"
+  );
 }
 
 function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
@@ -299,11 +323,12 @@ export function createS3ObjectClient(config: B2Config, surface: string): B2S3Pee
  * @remarks
  * B2 authorize returns the account's S3 API URL. This facade builds the real S3
  * client from that endpoint on first operation, shares the in-flight authorize
- * call, and falls back to the configured region for any authorize failure,
- * including invalid credentials, malformed or unsafe authorized endpoints, and
- * timeouts. That fallback is a compatibility path, not a fail-closed check; the
- * first S3 operation then surfaces any credential or endpoint failure from the
- * S3 API itself.
+ * call, and falls back to the configured region for an authorize outage such as
+ * invalid credentials or a timeout. That fallback is a compatibility path, not a
+ * fail-closed check; the first S3 operation then surfaces any credential failure
+ * from the S3 API itself. An authorized endpoint outside the trusted B2 host set
+ * is the exception: it is a deliberate `untrusted_endpoint`/502 refusal and is
+ * re-thrown rather than masked by the fallback.
  *
  * @param auth - Provider of B2 runtime config and authorize responses.
  * @param options - Optional key and user-agent overrides.
@@ -351,6 +376,10 @@ export function createAuthorizedS3Client(
       return { client: await inflight, cached: true };
     } catch (err) {
       if (closed) throw err;
+      // A rejected authorized endpoint is a deliberate untrusted_endpoint/502
+      // refusal, not an authorization outage. Surface it instead of proceeding
+      // with the configured-region fallback, which would ignore the rejection.
+      if (isUntrustedEndpointError(err)) throw err;
       const config = auth.getConfig();
       logger.warn(
         {
