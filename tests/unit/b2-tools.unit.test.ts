@@ -2446,7 +2446,7 @@ describe("Partner API tools", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("requires that a human operator");
+    expect(result.content[0].text).toContain("expects a human operator");
     expect(
       transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toEqual([]);

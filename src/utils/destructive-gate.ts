@@ -314,8 +314,8 @@ export function checkDestructive(
   // own bypass gets self-approved.
   const message =
     `Refused: this would ${effect} — a destructive/irreversible action. ` +
-    `This server's policy (B2_DESTRUCTIVE_POLICY=confirm) requires that a human ` +
-    `operator, not the calling model, approves this specific action before it runs. ` +
+    `This server's policy (B2_DESTRUCTIVE_POLICY=confirm) expects a human operator, ` +
+    `not the calling model, to approve this specific action before it runs. ` +
     `Report this refusal and the effect above to the human operator and let them ` +
     `decide; do not approve it on their behalf.`;
   return {
