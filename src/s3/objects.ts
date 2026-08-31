@@ -1,3 +1,8 @@
+/**
+ * S3-compatible object operation tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
@@ -29,18 +34,6 @@ interface DeleteObjectEntry {
   key: string;
   versionId?: string;
 }
-
-type B2S3ObjectClient = Pick<
-  B2S3PeerClient,
-  | "putObject"
-  | "getObject"
-  | "deleteObject"
-  | "deleteObjects"
-  | "headObject"
-  | "copyObject"
-  | "listObjectsV2"
-  | "listObjectVersions"
->;
 
 function isWebReadableStream(value: unknown): value is WebReadableStream<Uint8Array> {
   return (
@@ -440,18 +433,47 @@ async function validateDeleteObjectVersions(
 // cap is what keeps the data plane off the server: anything larger must presign.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
-interface S3ObjectToolOptions {
-  allowExplicitVersionInspection?: boolean;
-  allowCurrentVersionInspection?: boolean;
-  allowBypassGovernance?: boolean;
-}
-
+/**
+ * Register S3-compatible object tools.
+ *
+ * @remarks
+ * Inline object operations are capped to small control-plane payloads. Large
+ * object movement should use the presigned URL or multipart flows so bytes move
+ * directly between the client and B2. Version-aware deletes and reads use the B2
+ * native version guard before crossing the S3 boundary.
+ *
+ * @param server - Tool registrar receiving object tools.
+ * @param s3 - Repository-owned S3-compatible client facade.
+ * @param versions - B2 native version guard for S3 version IDs.
+ * @param config - Server configuration for filesystem and destructive policy.
+ * @param options - Capability-derived controls for version inspection and
+ * governance bypass.
+ *
+ * @example
+ * ```ts
+ * registerS3ObjectTools(registrar, s3Client, b2Client, config);
+ * ```
+ */
 export function registerS3ObjectTools(
   server: ToolRegistrar,
-  s3: B2S3ObjectClient,
+  s3: Pick<
+    B2S3PeerClient,
+    | "putObject"
+    | "getObject"
+    | "deleteObject"
+    | "deleteObjects"
+    | "headObject"
+    | "copyObject"
+    | "listObjectsV2"
+    | "listObjectVersions"
+  >,
   versions: B2S3VersionGuard,
   config: B2Config,
-  options: S3ObjectToolOptions = {},
+  options: {
+    allowExplicitVersionInspection?: boolean;
+    allowCurrentVersionInspection?: boolean;
+    allowBypassGovernance?: boolean;
+  } = {},
 ): void {
   const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   const allowCurrentVersionInspection = options.allowCurrentVersionInspection ?? true;

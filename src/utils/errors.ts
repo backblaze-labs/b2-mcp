@@ -1,3 +1,8 @@
+/**
+ * Error normalization and MCP tool-result helpers.
+ *
+ * @packageDocumentation
+ */
 import {
   currentSanitizerOptions,
   hasCurrentSanitizerOptions,
@@ -13,6 +18,7 @@ import {
 
 const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
 
+/** Normalized provider error shape used by MCP tool responses and audit logs. */
 export interface B2ApiError {
   status: number;
   code: string;
@@ -25,6 +31,8 @@ export interface B2ApiError {
 
 /**
  * Throw HTTP 400 bad_request.
+ *
+ * @param message - Error message exposed in the normalized response.
  *
  * @throws A normalized B2 API error object.
  */
@@ -71,6 +79,8 @@ function numberOrFallback(value: unknown, fallback: number): number {
  *
  * Reading the AWS SDK shape is what lets us tell a genuine Backblaze 5xx apart
  * from a 4xx (e.g. NoSuchKey) and surface the requestId support needs.
+ *
+ * @param err - Error value thrown by B2 native, S3-compatible, or local code.
  *
  * @returns The normalized B2 API error object.
  */
@@ -144,6 +154,8 @@ export function parseB2Error(err: unknown): B2ApiError {
  * surface only carries the formatted text). Returns null if the text isn't a
  * formatted B2 error.
  *
+ * @param text - Error text produced by {@link formatB2Error}.
+ *
  * @returns Parsed error metadata, or null when the text is not a formatted B2 error.
  */
 export function parseErrorText(
@@ -159,6 +171,8 @@ export function parseErrorText(
  * Format a B2 error into a human-readable string for MCP tool responses.
  * Includes the provider requestId when available — the field a Backblaze
  * support ticket needs to trace a server-side failure.
+ *
+ * @param err - Provider or normalized error to format.
  *
  * @returns The formatted, sanitized B2 error message.
  */
@@ -180,6 +194,13 @@ function markSanitizedMcpResponse<T extends object>(response: T): T {
   return response;
 }
 
+/**
+ * Return whether an MCP response has already been sanitized.
+ *
+ * @param response - Candidate MCP response object.
+ *
+ * @returns `true` when the response was marked by this module.
+ */
 export function isSanitizedMcpResponse(response: unknown): boolean {
   return !!(
     response &&
@@ -211,6 +232,8 @@ function errorHint(parsed: B2ApiError): string {
 /**
  * Return a structured MCP error content block for tool error responses.
  *
+ * @param err - Provider or normalized error to format.
+ *
  * @returns The structured MCP error response.
  */
 export function toolError(err: unknown): {
@@ -226,6 +249,8 @@ export function toolError(err: unknown): {
 /**
  * Return a successful tool response with text content.
  *
+ * @param text - Text payload to sanitize and return.
+ *
  * @returns The structured MCP success response.
  */
 export function toolSuccess(text: string): { content: Array<{ type: "text"; text: string }> } {
@@ -237,6 +262,8 @@ export function toolSuccess(text: string): { content: Array<{ type: "text"; text
 /**
  * Return a successful tool response with a JSON object.
  *
+ * @param data - JSON-compatible data to sanitize and serialize.
+ *
  * @returns The structured MCP JSON response.
  */
 export function toolJson(data: unknown): StructuredToolResult {
@@ -246,6 +273,8 @@ export function toolJson(data: unknown): StructuredToolResult {
 /**
  * Return an intentionally unsanitized JSON response for the explicit
  * B2_SECRET_SINK=inline escape hatch. Do not use for ordinary tool output.
+ *
+ * @param data - JSON-compatible data containing deliberate durable secrets.
  *
  * @returns The structured MCP JSON response with deliberate inline secrets.
  */

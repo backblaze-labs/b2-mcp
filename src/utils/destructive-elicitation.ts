@@ -1,3 +1,8 @@
+/**
+ * MCP elicitation support for destructive-operation confirmation.
+ *
+ * @packageDocumentation
+ */
 import {
   CLIENT_CAPABILITIES_META_KEY,
   inputRequired,
@@ -22,22 +27,34 @@ import type { SanitizerOptions } from "./secret-sanitizer.js";
 import { sanitizeText, SECRET_SANITIZER_REDACTION } from "./secret-sanitizer.js";
 import type { B2Config } from "./types.js";
 
+/** Input-response key used for the human approval checkbox. */
 export const DESTRUCTIVE_ELICITATION_RESPONSE_KEY = "destructiveConfirmation";
+/** Request-state namespace used to bind destructive approval to one call. */
 export const DESTRUCTIVE_ELICITATION_REQUEST_STATE = "b2-mcp-destructive-elicitation-v1";
 
+/** Supplies negotiated MCP client capabilities from the active request. */
 export type ClientCapabilitiesProvider = () => ClientCapabilities | undefined;
+/** Supplies the negotiated MCP protocol version from the active request. */
 export type ProtocolVersionProvider = () => string | undefined;
+/** Codec used to mint and verify destructive-approval request state. */
 export type DestructiveElicitationRequestStateCodec =
   RequestStateCodec<DestructiveElicitationState>;
 
+/** Audit payload emitted when destructive elicitation makes a decision. */
 export interface DestructiveElicitationAuditEvent {
+  /** Final decision outcome. */
   outcome: ElicitationDecision;
+  /** Optional refusal/decline/cancel reason. */
   reason?: string;
 }
 
+/** Optional context hooks used by tests and protocol adapters. */
 export interface DestructiveElicitationContextProviders {
+  /** Returns request-local MCP client capabilities. */
   getClientCapabilities?: ClientCapabilitiesProvider;
+  /** Returns request-local MCP protocol version. */
   getProtocolVersion?: ProtocolVersionProvider;
+  /** Overrides the SDK request-state codec. */
   requestStateCodec?: DestructiveElicitationRequestStateCodec;
 }
 
@@ -54,15 +71,23 @@ interface McpRequestExtra {
   };
 }
 
+/** Signed state carried between the elicitation request and resumed tool call. */
 export interface DestructiveElicitationState {
+  /** State schema version. */
   v: 1;
+  /** State discriminator. */
   kind: "destructive-elicitation";
+  /** Tool that requested approval. */
   toolName: string;
+  /** Sanitized destructive effect approved by the user. */
   effect: string;
+  /** Digest of the destructive target arguments. */
   argsDigest: string;
+  /** State issuance timestamp in epoch milliseconds. */
   issuedAt: number;
 }
 
+/** Decision lifecycle for return-based destructive-operation elicitation. */
 export type ElicitationDecision = "requested" | "accepted" | "declined" | "cancelled" | "refused";
 type StateVerification =
   | { ok: true; state: DestructiveElicitationState }
@@ -96,19 +121,35 @@ const PROMPT_FIELDS = [
   ["Upload ID", "uploadId"],
 ] as const;
 
-interface DestructiveElicitationOptions<T> {
+/** Options for wrapping one tool callback with destructive elicitation. */
+export interface DestructiveElicitationOptions<T> {
+  /** Tool name being invoked. */
   toolName: string;
+  /** Tool arguments used to compute target identity and prompt details. */
   args: Record<string, unknown>;
+  /** MCP SDK callback context for the current request. */
   extra: unknown;
+  /** Active B2 server configuration. */
   config: B2Config;
+  /** Sanitizer options used before prompt/log emission. */
   sanitizerOptions: SanitizerOptions;
+  /** Optional protocol/context providers. */
   contextProviders?: DestructiveElicitationContextProviders;
+  /** Optional audit callback for tests and transport logging. */
   onDecision?: (event: DestructiveElicitationAuditEvent) => void;
+  /** Original tool implementation to run after approval or bypass. */
   runOriginal: () => T | Promise<T>;
 }
 
 type ToolErrorResult = ReturnType<typeof toolError>;
 
+/**
+ * Run a destructive tool callback through return-based MCP elicitation when needed.
+ *
+ * @param options - Tool call, configuration, and callback state.
+ *
+ * @returns The original result, an MCP input-required response, or a stable tool error.
+ */
 export async function maybeRequireDestructiveElicitation<T>({
   toolName,
   args,
@@ -243,6 +284,14 @@ export async function maybeRequireDestructiveElicitation<T>({
   );
 }
 
+/**
+ * Determine whether a request can use return-based MCP elicitation.
+ *
+ * @param extra - MCP SDK callback context or compatible test object.
+ * @param contextProviders - Optional negotiated protocol/capability providers.
+ *
+ * @returns True when the request protocol and client capabilities support forms.
+ */
 export function clientCanUseReturnBasedElicitation(
   extra: unknown,
   contextProviders?: DestructiveElicitationContextProviders,
@@ -254,6 +303,14 @@ export function clientCanUseReturnBasedElicitation(
   );
 }
 
+/**
+ * Determine whether the client advertised form elicitation support.
+ *
+ * @param extra - MCP request metadata.
+ * @param getClientCapabilities - Optional capability provider override.
+ *
+ * @returns True when the client supports form-based elicitation.
+ */
 export function clientSupportsFormElicitation(
   extra: McpRequestExtra | unknown,
   getClientCapabilities?: ClientCapabilitiesProvider,
@@ -270,6 +327,16 @@ export function clientSupportsFormElicitation(
   return Object.prototype.hasOwnProperty.call(elicitation, "form");
 }
 
+/**
+ * Build the destructive-operation approval message shown to the user.
+ *
+ * @param toolName - Tool that would run.
+ * @param effect - Human-readable destructive effect.
+ * @param args - Tool arguments used for target details.
+ * @param sanitizerOptions - Sanitizer options for secret redaction.
+ *
+ * @returns Sanitized one-line elicitation prompt.
+ */
 export function destructiveElicitationMessage(
   toolName: string,
   effect: string,
@@ -554,6 +621,13 @@ function requestSupportsReturnBasedInput(
   return mcpProtocolVersion(extra, contextProviders) === RETURN_BASED_INPUT_PROTOCOL_VERSION;
 }
 
+/**
+ * Create the signed request-state codec for destructive elicitation.
+ *
+ * @param config - Active B2 config used as key material.
+ *
+ * @returns Codec that prefixes and verifies destructive-elicitation state.
+ */
 export function createDestructiveElicitationRequestStateCodec(
   config: B2Config,
 ): DestructiveElicitationRequestStateCodec {

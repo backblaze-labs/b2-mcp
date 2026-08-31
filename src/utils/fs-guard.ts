@@ -1,3 +1,8 @@
+/**
+ * Local filesystem policy enforcement for tool read and write paths.
+ *
+ * @packageDocumentation
+ */
 import * as fs from "fs";
 import * as path from "path";
 import { B2Config } from "./types.js";
@@ -53,6 +58,10 @@ function realTargetForWrite(resolved: string): string {
  * - `write`: the file need not exist yet, but its resolved path and nearest
  *   existing ancestor must both be inside the root, so symlinked ancestors
  *   can't redirect the write outside.
+ *
+ * @param config - Runtime filesystem policy from server configuration.
+ * @param userPath - Caller-supplied path to validate.
+ * @param mode - Whether the caller intends to read or write the path.
  *
  * @returns The safe absolute path to use for the requested access.
  *

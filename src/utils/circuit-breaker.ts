@@ -1,9 +1,15 @@
+/**
+ * Circuit-breaker primitives and shared operation wrappers.
+ *
+ * @packageDocumentation
+ */
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
 import { abortError, timeoutError } from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { isTestRuntime } from "./runtime.js";
 
+/** Default whole-call deadline for metadata/control-plane circuit execution. */
 export const CIRCUIT_TIMEOUT_MS = 150_000;
 
 function isAbortLikeError(err: unknown): boolean {
@@ -292,13 +298,26 @@ function breakerProxy(get: () => CircuitBreakerInstance): CircuitBreakerInstance
   });
 }
 
+/** Lazy proxy for the native B2 control-plane circuit breaker. */
 export const circuitBreaker = breakerProxy(defaultBreaker);
+/** Lazy proxy for long-running native transfer operations. */
 export const transferCircuitBreaker = breakerProxy(transferBreaker);
+/** Lazy proxy for usage-report S3 reads. */
 export const reportCircuitBreaker = breakerProxy(usageReportBreaker);
+/** Lazy proxy for B2 S3-compatible data-plane requests. */
 export const s3CircuitBreaker = breakerProxy(s3ApiBreaker);
+/** Lazy proxy for long-running S3-compatible transfer operations. */
 export const s3TransferCircuitBreaker = breakerProxy(s3TransferBreaker);
+/** Lazy proxy for Partner/Groups control-plane requests. */
 export const partnerCircuitBreaker = breakerProxy(partnerApiBreaker);
 
+/**
+ * Reset every circuit breaker singleton in test runs.
+ *
+ * @throws Error when called outside the test runtime.
+ *
+ * @internal
+ */
 export function resetCircuitBreakersForTests(): void {
   if (!isTestRuntime()) {
     throw new Error("Circuit breaker reset is only available in tests.");

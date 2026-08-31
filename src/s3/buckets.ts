@@ -1,3 +1,8 @@
+/**
+ * S3-compatible bucket reachability and lifecycle tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { B2S3LifecycleRule, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
@@ -5,16 +10,26 @@ import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 
-type B2S3BucketClient = Pick<
-  B2S3PeerClient,
-  "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle"
->;
-
-// Retained S3 bucket tools cover S3 reachability and lifecycle features that
-// lack native B2 equivalents. Expiration and empty-rules clearing are gated.
+/**
+ * Register S3-compatible bucket reachability and lifecycle tools.
+ *
+ * @remarks
+ * These retained S3 tools cover features that either validate S3 endpoint
+ * reachability or lack a native B2 equivalent. Lifecycle expiration and
+ * empty-rule clearing are routed through the shared destructive gate.
+ *
+ * @param server - Tool registrar receiving S3 bucket tools.
+ * @param s3 - Repository-owned S3-compatible client facade.
+ * @param config - Server configuration used for destructive policy.
+ *
+ * @example
+ * ```ts
+ * registerS3BucketTools(registrar, s3Client, config);
+ * ```
+ */
 export function registerS3BucketTools(
   server: ToolRegistrar,
-  s3: B2S3BucketClient,
+  s3: Pick<B2S3PeerClient, "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle">,
   config: B2Config,
 ): void {
   server.registerTool(

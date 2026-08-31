@@ -1,3 +1,8 @@
+/**
+ * Shared runtime for serverless MCP HTTP adapters.
+ *
+ * @packageDocumentation
+ */
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   createB2McpFetchHandler,
@@ -22,38 +27,83 @@ import { allowRequest } from "./utils/rate-limiter.js";
 import { sanitizeText } from "./utils/secret-sanitizer.js";
 import { readCappedBodyBytes } from "./utils/http-body-limit.js";
 
+/**
+ * Context accepted by serverless MCP fetch adapters.
+ *
+ * @remarks
+ * Hosts may inject already-verified MCP auth info or allow this runtime to
+ * perform OAuth bearer-token verification itself.
+ */
 export interface ServerlessMcpFetchContext {
+  /** Verified MCP auth info from hosting middleware. */
   authInfo?: AuthInfo | null;
+  /** Fetch implementation used for OAuth metadata/introspection calls. */
   oauthFetch?: typeof fetch;
+  /** Remote caller address for admission-control accounting. */
   remoteAddress?: string;
 }
 
+/** Normalized serverless request context used internally by adapters. */
 export interface NormalizedServerlessMcpFetchContext {
+  /** Verified auth info, or null when OAuth verification is still required. */
   authInfo: AuthInfo | null;
+  /** Fetch implementation used for OAuth metadata/introspection calls. */
   oauthFetch?: typeof fetch;
+  /** Remote caller address for admission-control accounting. */
   remoteAddress?: string;
 }
 
 const SERVERLESS_MCP_CONTEXT_KEYS = ["authInfo", "oauthFetch", "remoteAddress"] as const;
 
+/** Structured warning logger injected by serverless wrappers. */
 export type ServerlessWarnLogger = (fields: Record<string, unknown>, message: string) => void;
 
+/** Options used to compose a runtime-neutral serverless MCP adapter. */
 export interface ServerlessAdapterRuntimeOptions<Context extends ServerlessMcpFetchContext> {
+  /** Public error message returned when static OAuth configuration is invalid. */
   configurationErrorMessage: string;
+  /** Log event name for invalid static OAuth configuration. */
   configurationInvalidEvent: string;
+  /** Log event name for rate-limit or in-flight admission rejection. */
   admissionRejectedEvent: string;
+  /**
+   * Load and validate static OAuth resource-server configuration.
+   *
+   * @returns Validated OAuth resource-server config.
+   */
   validateStaticConfiguration(): OAuthResourceServerConfig;
+  /**
+   * Build the key used for serverless OAuth admission limits.
+   *
+   * @param request - Incoming Web request.
+   * @param context - Host-specific serverless context.
+   *
+   * @returns Non-secret limiter key.
+   */
   oauthAdmissionKey(request: Request, context: Context): string;
+  /** Optional shared HTTP pipeline overrides. */
   createHandlerOptions?: HttpPipelineOptions;
+  /** Whether injected auth info should be revalidated against static config. */
   validateInjectedAuthInfo?: boolean;
+  /** Optional structured warning sink. */
   warn?: ServerlessWarnLogger;
 }
 
+/** Fetch handlers exposed by a composed serverless adapter runtime. */
 export interface ServerlessAdapterRuntime<Context extends ServerlessMcpFetchContext> {
+  /** Handle an MCP request. */
   mcpFetch(request: Request, context: Context): Promise<Response>;
+  /** Handle a health-check request. */
   healthFetch(request: Request): Promise<Response>;
+  /** Return RFC 9728 protected-resource metadata. */
   protectedResourceMetadataFetch(): Response;
+  /** Return OAuth authorization-server metadata. */
   authorizationServerMetadataFetch(): Response;
+  /**
+   * Close cached MCP/OAuth runtime state for tests.
+   *
+   * @internal
+   */
   closeForTests(): Promise<void>;
 }
 
@@ -62,6 +112,15 @@ type StaticConfigurationState =
   | { status: "ok"; oauthConfig: OAuthResourceServerConfig }
   | { status: "error"; error: unknown };
 
+/**
+ * Create a JSON Web Response with a consistent content type.
+ *
+ * @param status - HTTP status code.
+ * @param body - JSON-serializable response body.
+ * @param headers - Additional response headers.
+ *
+ * @returns Web Response containing the serialized JSON body.
+ */
 export function jsonResponse(
   status: number,
   body: unknown,
@@ -73,12 +132,28 @@ export function jsonResponse(
   });
 }
 
+/**
+ * Return a copy of a request with a different path.
+ *
+ * @param request - Original request.
+ * @param pathname - Replacement pathname.
+ *
+ * @returns Request cloned with the rewritten URL path.
+ */
 export function rewritePath(request: Request, pathname: string): Request {
   const url = new URL(request.url);
   url.pathname = pathname;
   return new Request(url, request);
 }
 
+/**
+ * Normalize legacy AuthInfo inputs and full serverless context objects.
+ *
+ * @param input - Either auth info, serverless context, or undefined.
+ * @param isContext - Optional host-specific context type guard.
+ *
+ * @returns Normalized context with explicit `authInfo: null` when absent.
+ */
 export function normalizeServerlessMcpContext<Context extends ServerlessMcpFetchContext>(
   input?: AuthInfo | Context,
   isContext?: (input: AuthInfo | Context) => input is Context,
@@ -95,12 +170,26 @@ export function normalizeServerlessMcpContext<Context extends ServerlessMcpFetch
   return { authInfo: input as AuthInfo };
 }
 
+/**
+ * Determine whether a value is a serverless fetch context.
+ *
+ * @param input - AuthInfo or serverless context candidate.
+ *
+ * @returns True when the value carries serverless context fields.
+ */
 export function isServerlessMcpFetchContext(
   input: AuthInfo | ServerlessMcpFetchContext,
 ): input is ServerlessMcpFetchContext {
   return SERVERLESS_MCP_CONTEXT_KEYS.some((key) => key in input) || !("token" in input);
 }
 
+/**
+ * Run method, path, and Host/Origin checks before serverless MCP handling.
+ *
+ * @param request - Incoming request.
+ *
+ * @returns A rejection response, or null when the request may continue.
+ */
 export function serverlessMcpPreflight(request: Request): Response | null {
   const url = new URL(request.url);
   if (url.pathname !== "/mcp" && url.pathname !== "/api/mcp") {
@@ -135,6 +224,13 @@ async function requestWithCappedBody(request: Request): Promise<Request | Respon
   });
 }
 
+/**
+ * Compose OAuth admission, MCP HTTP handling, and metadata routes for serverless runtimes.
+ *
+ * @param options - Adapter construction options.
+ *
+ * @returns Runtime fetch handlers suitable for platform-specific wrappers.
+ */
 export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetchContext>(
   options: ServerlessAdapterRuntimeOptions<Context>,
 ): ServerlessAdapterRuntime<Context> {
@@ -307,6 +403,13 @@ export function createServerlessAdapterRuntime<Context extends ServerlessMcpFetc
   };
 }
 
+/**
+ * Load OAuth configuration and verify metadata can be derived from it.
+ *
+ * @returns Validated OAuth resource-server configuration.
+ *
+ * @throws Error when required OAuth environment variables are missing or invalid.
+ */
 export function loadValidatedOAuthConfiguration(): OAuthResourceServerConfig {
   const oauthConfig = loadOAuthResourceServerConfig();
   protectedResourceMetadata(oauthConfig);

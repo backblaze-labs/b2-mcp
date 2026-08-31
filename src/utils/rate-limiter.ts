@@ -14,6 +14,8 @@
  * Buckets that have been full for over IDLE_TTL_MS are evicted by periodic
  * HTTP sweeps and by throttled opportunistic sweeps so the Map doesn't grow
  * unbounded.
+ *
+ * @packageDocumentation
  */
 
 const DEFAULT_RPS = 60;
@@ -27,8 +29,11 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Runtime rate-limiter settings derived from environment variables. */
 export interface RateLimiterConfig {
+  /** Sustained token refill rate per second. */
   readonly rps: number;
+  /** Maximum burst capacity per limiter key. */
   readonly burst: number;
 }
 
@@ -40,8 +45,11 @@ function currentRateLimiterConfig(): RateLimiterConfig {
   };
 }
 
+/** Current token bucket state for one limiter key. */
 interface Bucket {
+  /** Available request tokens. */
   tokens: number;
+  /** Last refill timestamp in epoch milliseconds. */
   lastRefill: number;
 }
 
@@ -98,7 +106,11 @@ export function sweepIdleBuckets(now: number = Date.now()): void {
   }
 }
 
-/** Test-only: clear all buckets. */
+/**
+ * Test-only: clear all buckets.
+ *
+ * @internal
+ */
 export function _resetRateLimiter(): void {
   buckets.clear();
   nextOpportunisticSweepAt = 0;
@@ -108,11 +120,18 @@ export function _resetRateLimiter(): void {
  * Test-only: read current bucket state.
  *
  * @returns The bucket state for `key`, if present.
+ *
+ * @internal
  */
 export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);
 }
 
+/**
+ * Live view of current rate-limiter configuration.
+ *
+ * @internal
+ */
 export const rateLimiterConfig: RateLimiterConfig = {
   get rps() {
     return currentRateLimiterConfig().rps;

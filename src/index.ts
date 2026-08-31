@@ -1,4 +1,16 @@
 #!/usr/bin/env node
+/**
+ * Node CLI and stdio bootstrap for the Backblaze B2 MCP server.
+ *
+ * @packageDocumentation
+ *
+ * @remarks
+ * The package binary enters here. It handles `--help`, `--version`, stdio
+ * serving for local MCP hosts, and delegation to the HTTP transport when the
+ * CLI selects `--transport http`.
+ *
+ */
+
 /*
  * Backblaze B2 MCP Server — stdio transport entry point.
  *
@@ -40,6 +52,26 @@ type GlobalWithIndexTestSeams = typeof globalThis & {
   __b2McpIndexTestSeams?: IndexTestSeams;
 };
 
+/**
+ * Start the MCP server over stdio.
+ *
+ * @remarks
+ * The stdio path reads credentials from the process environment, attempts
+ * capability discovery once, and deliberately degrades to the full tool surface
+ * only when B2 capability lookup is temporarily unavailable. Other credential
+ * errors remain fatal during bootstrap.
+ *
+ * @returns A promise that resolves after the stdio transport has been
+ * registered with the MCP SDK.
+ *
+ * @throws CredentialResolutionError when credential resolution fails for a
+ * reason other than transient capability lookup.
+ *
+ * @example
+ * ```ts
+ * await startStdio();
+ * ```
+ */
 export async function startStdio(): Promise<void> {
   initLogging();
   const config = serverModule.loadConfig();

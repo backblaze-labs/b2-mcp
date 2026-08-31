@@ -37,7 +37,7 @@ module.exports = [
       "jsdoc/check-tag-names": [
         "error",
         {
-          definedTags: ["internal", "inheritDoc", "typeParam", "packageDocumentation"],
+          definedTags: ["internal", "inheritDoc", "typeParam", "packageDocumentation", "remarks"],
         },
       ],
       "jsdoc/require-param-description": "error",
@@ -53,6 +53,7 @@ module.exports = [
         {
           tagSequence: [
             { tags: ["module", "packageDocumentation"] },
+            { tags: ["remarks"] },
             { tags: ["typeParam", "template"] },
             { tags: ["param"] },
             { tags: ["returns"] },

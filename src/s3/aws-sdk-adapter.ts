@@ -1,5 +1,15 @@
-// AWS S3 SDK boundary for B2's S3-compatible data plane. The adapter keeps
-// tool handlers behind a repository-owned contract while using B2 S3 semantics.
+/**
+ * AWS SDK adapter for B2's S3-compatible data plane.
+ *
+ * @packageDocumentation
+ *
+ * @remarks
+ * Tool handlers call this repository-owned facade rather than AWS SDK commands
+ * directly. The adapter preserves B2-specific semantics, applies request abort
+ * signals and circuit breakers, keeps unsafe mutations on a low-retry client,
+ * and maps AWS SDK response shapes into stable MCP-facing objects.
+ *
+ */
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -41,8 +51,10 @@ type S3SendCommand<
   OutputType extends ServiceOutputTypes,
 > = Command<ServiceInputTypes, InputType, ServiceOutputTypes, OutputType, S3ClientResolvedConfig>;
 
+/** AWS S3 client configuration accepted by the B2 peer facade. */
 export type B2S3PeerClientConfig = AwsS3ClientConfig;
 
+/** S3 lifecycle rule subset supported by the B2 MCP tool surface. */
 export interface B2S3LifecycleRule {
   id: string;
   status: "Enabled" | "Disabled";
@@ -52,11 +64,13 @@ export interface B2S3LifecycleRule {
   abortIncompleteMultipartUpload?: { daysAfterInitiation: number };
 }
 
+/** Completed multipart part supplied to S3 CompleteMultipartUpload. */
 export interface B2S3CompletedMultipartPart {
   partNumber: number;
   etag: string;
 }
 
+/** Multipart upload summary returned by S3 list operations. */
 export interface B2S3MultipartUploadSummary {
   Key?: string;
   UploadId?: string;
@@ -65,6 +79,7 @@ export interface B2S3MultipartUploadSummary {
   Owner?: unknown;
 }
 
+/** Multipart part summary returned by S3 list-parts operations. */
 export interface B2S3PartSummary {
   PartNumber?: number;
   LastModified?: Date;
@@ -72,6 +87,7 @@ export interface B2S3PartSummary {
   Size?: number;
 }
 
+/** Options for an inline S3 PutObject call. */
 export interface B2S3PutObjectOptions {
   bucket: string;
   key: string;
@@ -82,6 +98,7 @@ export interface B2S3PutObjectOptions {
   serverSideEncryption?: "AES256";
 }
 
+/** Options for an S3 GetObject call. */
 export interface B2S3GetObjectOptions {
   bucket: string;
   key: string;
@@ -89,8 +106,10 @@ export interface B2S3GetObjectOptions {
   versionId?: string;
 }
 
+/** Streaming body returned by the AWS SDK for downloaded S3 objects. */
 export type B2S3ObjectBody = StreamingBlobPayloadOutputTypes | undefined;
 
+/** Downloaded object metadata and optional body stream. */
 export interface B2S3DownloadedObject {
   key: string;
   contentType?: string;
@@ -102,17 +121,20 @@ export interface B2S3DownloadedObject {
   body?: B2S3ObjectBody;
 }
 
+/** Options for an S3 HeadObject call. */
 export interface B2S3HeadObjectOptions {
   bucket: string;
   key: string;
   versionId?: string;
 }
 
+/** HeadObject metadata without a body stream. */
 export type B2S3HeadObjectResult = Omit<B2S3DownloadedObject, "body"> & {
   serverSideEncryption?: string;
   deleteMarker?: boolean;
 };
 
+/** Options for deleting one object or version through S3. */
 export interface B2S3DeleteObjectOptions {
   bucket: string;
   key: string;
@@ -120,11 +142,13 @@ export interface B2S3DeleteObjectOptions {
   bypassGovernance?: boolean;
 }
 
+/** Result metadata from an S3 DeleteObject call. */
 export interface B2S3DeleteObjectResult {
   versionId?: string;
   deleteMarker?: boolean;
 }
 
+/** Options for bounded multi-object deletes. */
 export interface B2S3DeleteObjectsOptions {
   bucket: string;
   objects: Array<{ key: string; versionId?: string }>;
@@ -132,6 +156,7 @@ export interface B2S3DeleteObjectsOptions {
   bypassGovernance?: boolean;
 }
 
+/** Aggregated result from bounded multi-object deletes. */
 export interface B2S3DeleteObjectsResult {
   deleted: Array<{
     Key?: string;
@@ -151,6 +176,7 @@ export interface B2S3DeleteObjectsResult {
   maxConcurrency: number;
 }
 
+/** Object summary returned by S3 list operations. */
 export interface B2S3ObjectSummary {
   Key?: string;
   LastModified?: Date;
@@ -159,10 +185,12 @@ export interface B2S3ObjectSummary {
   StorageClass?: string;
 }
 
+/** Common prefix entry returned when S3 list operations use a delimiter. */
 export interface B2S3CommonPrefix {
   Prefix?: string;
 }
 
+/** Normalized S3 ListObjectsV2 result. */
 export interface B2S3ListObjectsV2Result {
   objects: B2S3ObjectSummary[];
   commonPrefixes: B2S3CommonPrefix[];
@@ -171,11 +199,13 @@ export interface B2S3ListObjectsV2Result {
   keyCount: number;
 }
 
+/** Object version summary returned by S3 version listing. */
 export interface B2S3ObjectVersionSummary extends B2S3ObjectSummary {
   VersionId?: string;
   IsLatest?: boolean;
 }
 
+/** Delete marker summary returned by S3 version listing. */
 export interface B2S3DeleteMarkerSummary {
   Key?: string;
   VersionId?: string;
@@ -183,6 +213,7 @@ export interface B2S3DeleteMarkerSummary {
   LastModified?: Date;
 }
 
+/** Normalized S3 ListObjectVersions result. */
 export interface B2S3ListObjectVersionsResult {
   versions: B2S3ObjectVersionSummary[];
   deleteMarkers: B2S3DeleteMarkerSummary[];
@@ -192,6 +223,7 @@ export interface B2S3ListObjectVersionsResult {
   nextVersionIdMarker?: string;
 }
 
+/** Options for an S3 CopyObject call. */
 export interface B2S3CopyObjectOptions {
   sourceBucket: string;
   sourceKey: string;
@@ -203,6 +235,7 @@ export interface B2S3CopyObjectOptions {
   metadata?: Record<string, string>;
 }
 
+/** Options for listing current S3 objects. */
 export interface B2S3ListObjectsV2Options {
   bucket: string;
   prefix?: string;
@@ -212,6 +245,7 @@ export interface B2S3ListObjectsV2Options {
   startAfter?: string;
 }
 
+/** Options for listing S3 object versions and delete markers. */
 export interface B2S3ListObjectVersionsOptions {
   bucket: string;
   prefix?: string;
@@ -221,6 +255,7 @@ export interface B2S3ListObjectVersionsOptions {
   versionIdMarker?: string;
 }
 
+/** Options for generating a presigned GetObject or PutObject URL. */
 export interface B2S3PresignObjectUrlOptions {
   bucket: string;
   key: string;
@@ -230,6 +265,7 @@ export interface B2S3PresignObjectUrlOptions {
   contentType?: string;
 }
 
+/** Generated presigned URL metadata. */
 export interface B2S3PresignObjectUrlResult {
   url: string;
   operation: "GetObject" | "PutObject";
@@ -286,6 +322,14 @@ function providerErrorMessage(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Convert an AWS SDK delete failure into a stable multi-delete error entry.
+ *
+ * @param object - Object target whose delete failed.
+ * @param err - Provider error thrown by the AWS SDK.
+ *
+ * @returns Normalized error entry used by `s3_delete_objects`.
+ */
 export function b2S3DeleteErrorEntry(
   object: { key: string; versionId?: string },
   err: unknown,
@@ -380,6 +424,19 @@ function badRequest(message: string): never {
   throw { status: 400, code: "bad_request", message };
 }
 
+/**
+ * Reject browser-executable content types for signed upload capabilities.
+ *
+ * @remarks
+ * Presigned PutObject URLs are bearer capabilities. Requiring a specific,
+ * non-browser-executable content type reduces the blast radius if a generated
+ * URL is mishandled.
+ *
+ * @param contentType - Content type supplied for an upload.
+ * @param context - Human-readable operation context for error messages.
+ *
+ * @throws A 400-style bad request object when the type is missing or unsafe.
+ */
 export function assertSafeObjectContentType(
   contentType: string | undefined,
   context: string,
@@ -393,6 +450,15 @@ export function assertSafeObjectContentType(
   }
 }
 
+/**
+ * Repository-owned facade over the AWS S3 SDK for B2's S3-compatible endpoint.
+ *
+ * @remarks
+ * Read operations share the configured SDK client and use the shared S3 circuit
+ * breaker. Mutating operations use a separate low-retry client to avoid retrying
+ * unsafe writes at the SDK layer; tool-level idempotency and destructive policy
+ * remain enforced above this boundary.
+ */
 export class B2S3PeerClient {
   private readonly readClient: S3Client;
   private unsafeMutationClient: S3Client | null = null;
@@ -403,6 +469,7 @@ export class B2S3PeerClient {
     this.readClient = new S3Client(config);
   }
 
+  /** Release AWS SDK client resources held by this facade. */
   destroy(): void {
     this.unsafeMutationClient?.destroy();
     this.unsafeMutationClient = null;
@@ -452,14 +519,29 @@ export class B2S3PeerClient {
     );
   }
 
+  /**
+   * Check whether a bucket is reachable through the S3-compatible endpoint.
+   *
+   * @param bucket - Bucket name.
+   */
   async headBucket(bucket: string): Promise<void> {
     await this.sendWithCircuit(new HeadBucketCommand({ Bucket: bucket }));
   }
 
+  /**
+   * Delete the S3 lifecycle configuration for a bucket.
+   *
+   * @param bucket - Bucket name.
+   */
   async deleteBucketLifecycle(bucket: string): Promise<void> {
     await this.sendWithCircuit(new DeleteBucketLifecycleCommand({ Bucket: bucket }));
   }
 
+  /**
+   * Replace the S3 lifecycle configuration for a bucket.
+   *
+   * @param input - Bucket name and full lifecycle rule set.
+   */
   async putBucketLifecycle(input: { bucket: string; rules: B2S3LifecycleRule[] }): Promise<void> {
     await this.sendWithCircuit(
       new PutBucketLifecycleConfigurationCommand({
@@ -491,11 +573,23 @@ export class B2S3PeerClient {
     );
   }
 
+  /**
+   * Read the S3 location constraint for a bucket.
+   *
+   * @param bucket - Bucket name.
+   *
+   * @returns Bucket location constraint, when the provider returns one.
+   */
   async getBucketLocation(bucket: string): Promise<{ locationConstraint?: string }> {
     const result = await this.sendWithCircuit(new GetBucketLocationCommand({ Bucket: bucket }));
     return { locationConstraint: result.LocationConstraint };
   }
 
+  /**
+   * Upload a small inline object through the server.
+   *
+   * @param input - Inline PutObject options.
+   */
   async putObject(input: B2S3PutObjectOptions): Promise<void> {
     await this.sendUnsafeMutationWithCircuit(
       new PutObjectCommand({
@@ -510,6 +604,13 @@ export class B2S3PeerClient {
     );
   }
 
+  /**
+   * Download an object or object range through the server.
+   *
+   * @param input - GetObject options.
+   *
+   * @returns Downloaded object metadata and body stream.
+   */
   async getObject(input: B2S3GetObjectOptions): Promise<B2S3DownloadedObject> {
     const result = await this.sendWithCircuit(
       new GetObjectCommand({
@@ -531,6 +632,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Read object metadata without downloading the body.
+   *
+   * @param input - HeadObject options.
+   *
+   * @returns Object metadata.
+   */
   async headObject(input: B2S3HeadObjectOptions): Promise<B2S3HeadObjectResult> {
     const result = await this.sendWithCircuit(
       new HeadObjectCommand({
@@ -552,6 +660,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Delete one object or object version.
+   *
+   * @param input - DeleteObject options.
+   *
+   * @returns Delete marker and version metadata.
+   */
   async deleteObject(input: B2S3DeleteObjectOptions): Promise<B2S3DeleteObjectResult> {
     const result = await this.sendUnsafeMutationWithCircuit(
       new DeleteObjectCommand({
@@ -567,6 +682,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Delete multiple objects with bounded concurrency.
+   *
+   * @param input - Multi-delete options.
+   *
+   * @returns Aggregated delete successes, failures, and execution metadata.
+   */
   async deleteObjects(input: B2S3DeleteObjectsOptions): Promise<B2S3DeleteObjectsResult> {
     if (input.objects.length === 0) {
       return { deleted: [], errors: [], attempted: 0, aborted: false, maxConcurrency: 0 };
@@ -612,6 +734,11 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Copy an object or version to another key.
+   *
+   * @param input - CopyObject options.
+   */
   async copyObject(input: B2S3CopyObjectOptions): Promise<void> {
     await this.sendUnsafeMutationWithCircuit(
       new CopyObjectCommand({
@@ -625,6 +752,13 @@ export class B2S3PeerClient {
     );
   }
 
+  /**
+   * List current objects with the S3 ListObjectsV2 API.
+   *
+   * @param input - Object listing options.
+   *
+   * @returns Normalized current-object listing page.
+   */
   async listObjectsV2(input: B2S3ListObjectsV2Options): Promise<B2S3ListObjectsV2Result> {
     const result = await this.sendWithCircuit(
       new ListObjectsV2Command({
@@ -646,6 +780,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * List object versions and delete markers.
+   *
+   * @param input - Version listing options.
+   *
+   * @returns Normalized version listing page.
+   */
   async listObjectVersions(
     input: B2S3ListObjectVersionsOptions,
   ): Promise<B2S3ListObjectVersionsResult> {
@@ -669,6 +810,17 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Generate a presigned GetObject or PutObject URL.
+   *
+   * @param input - Presign options.
+   *
+   * @returns Presigned URL metadata.
+   *
+   * @throws Error when a PutObject URL includes a version ID.
+   * @throws A 400-style tool error object when PutObject content type validation rejects missing
+   * or unsafe input.
+   */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
     if (input.operation === "PutObject" && input.versionId !== undefined) {
       throw new Error("versionId is only valid for GetObject presigned URLs.");
@@ -695,6 +847,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Create a multipart upload.
+   *
+   * @param input - Multipart creation options.
+   *
+   * @returns Upload ID and provider metadata.
+   */
   async createMultipartUpload(input: {
     bucket: string;
     key: string;
@@ -716,6 +875,13 @@ export class B2S3PeerClient {
     return { uploadId: result.UploadId, bucket: result.Bucket, key: result.Key };
   }
 
+  /**
+   * Generate a presigned URL for one multipart upload part.
+   *
+   * @param input - Upload ID, part number, and expiry options.
+   *
+   * @returns Part number and presigned upload URL.
+   */
   async presignUploadPart(input: {
     bucket: string;
     key: string;
@@ -736,6 +902,13 @@ export class B2S3PeerClient {
     return { partNumber: input.partNumber, url };
   }
 
+  /**
+   * Complete a multipart upload from uploaded part ETags.
+   *
+   * @param input - Multipart completion options.
+   *
+   * @returns Provider completion metadata.
+   */
   async completeMultipartUpload(input: {
     bucket: string;
     key: string;
@@ -763,6 +936,11 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Abort a multipart upload and discard uploaded parts.
+   *
+   * @param input - Multipart upload target.
+   */
   async abortMultipartUpload(input: {
     bucket: string;
     key: string;
@@ -777,6 +955,13 @@ export class B2S3PeerClient {
     );
   }
 
+  /**
+   * List in-progress multipart uploads.
+   *
+   * @param input - Multipart upload listing options.
+   *
+   * @returns Multipart upload listing page.
+   */
   async listMultipartUploads(input: {
     bucket: string;
     prefix?: string;
@@ -808,6 +993,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * List uploaded parts for one multipart upload.
+   *
+   * @param input - Multipart part listing options.
+   *
+   * @returns Multipart part listing page.
+   */
   async listParts(input: {
     bucket: string;
     key: string;
@@ -836,6 +1028,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Copy an existing object range into a multipart upload part.
+   *
+   * @param input - UploadPartCopy options.
+   *
+   * @returns Copied part ETag and last-modified metadata.
+   */
   async uploadPartCopy(input: {
     bucket: string;
     key: string;
@@ -860,6 +1059,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * List report object keys from a reports bucket.
+   *
+   * @param input - Reports bucket listing options.
+   *
+   * @returns Report object key page.
+   */
   async listReportObjectKeys(input: {
     bucketName: string;
     prefix?: string;
@@ -885,6 +1091,13 @@ export class B2S3PeerClient {
     };
   }
 
+  /**
+   * Download a report object body for bounded text decoding.
+   *
+   * @param input - Reports bucket object target.
+   *
+   * @returns Provider body stream wrapper.
+   */
   async downloadReportObject(input: {
     bucketName: string;
     key: string;
@@ -896,6 +1109,18 @@ export class B2S3PeerClient {
   }
 }
 
+/**
+ * Create a B2 S3-compatible peer client facade.
+ *
+ * @param config - AWS SDK S3 client configuration for a B2 S3 endpoint.
+ *
+ * @returns New repository-owned S3 peer client.
+ *
+ * @example
+ * ```ts
+ * const s3 = createB2S3PeerClient(config);
+ * ```
+ */
 export function createB2S3PeerClient(config: B2S3PeerClientConfig): B2S3PeerClient {
   return new B2S3PeerClient(config);
 }

@@ -1,3 +1,8 @@
+/**
+ * Backblaze B2 User-Agent construction helpers.
+ *
+ * @packageDocumentation
+ */
 import { productToken } from "../version.js";
 import { B2Config } from "./types.js";
 

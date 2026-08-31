@@ -1,3 +1,8 @@
+/**
+ * S3-compatible presigned URL tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
@@ -13,14 +18,6 @@ import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
  * and PUT URLs are supported. s3_get_presigned_post has been intentionally
  * omitted for this reason.
  */
-interface S3PresignedToolOptions {
-  allowGetObjectUrl?: boolean;
-  allowPutObjectUrl?: boolean;
-  allowExplicitVersionInspection?: boolean;
-}
-
-type B2S3PresignedClient = Pick<B2S3PeerClient, "presignObjectUrl">;
-
 const PUT_OBJECT_CONFIRM_DESC =
   "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
 
@@ -46,12 +43,36 @@ function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean)
   return z.enum(["GetObject"]).describe("Generate a download URL.");
 }
 
+/**
+ * Register S3-compatible presigned object URL tools.
+ *
+ * @remarks
+ * Presigned URLs are the preferred data path for real object uploads and
+ * downloads because object bytes bypass the MCP server. PutObject URLs are
+ * destructive-gated as bearer capabilities and require a signed non-browser
+ * executable content type.
+ *
+ * @param server - Tool registrar receiving presigned URL tools.
+ * @param s3 - Repository-owned S3-compatible client facade.
+ * @param versions - B2 native version guard used for versioned GetObject URLs.
+ * @param config - Server configuration used for destructive policy.
+ * @param options - Capability-derived controls for allowed URL operations.
+ *
+ * @example
+ * ```ts
+ * registerS3PresignedTools(registrar, s3Client, b2Client, config);
+ * ```
+ */
 export function registerS3PresignedTools(
   server: ToolRegistrar,
-  s3: B2S3PresignedClient,
+  s3: Pick<B2S3PeerClient, "presignObjectUrl">,
   versions: B2S3VersionGuard,
   config: B2Config,
-  options: S3PresignedToolOptions = {},
+  options: {
+    allowGetObjectUrl?: boolean;
+    allowPutObjectUrl?: boolean;
+    allowExplicitVersionInspection?: boolean;
+  } = {},
 ): void {
   const allowGetObjectUrl = options.allowGetObjectUrl ?? true;
   const allowPutObjectUrl = options.allowPutObjectUrl ?? true;

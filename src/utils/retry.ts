@@ -11,6 +11,8 @@
  * The first attempt is *never* counted against the budget — only retries.
  * When the budget is exhausted, the original error is thrown immediately
  * instead of retrying.
+ *
+ * @packageDocumentation
  */
 
 import { logger } from "./logger.js";
@@ -31,6 +33,12 @@ interface RetryBudget {
 
 const budget: RetryBudget = { tokens: BUDGET_TOKENS, lastRefill: Date.now() };
 
+/**
+ * Consume one global retry-budget token.
+ *
+ * @returns True when a retry is allowed, false when the process-wide retry
+ * budget is exhausted.
+ */
 export function consumeRetryBudgetToken(): boolean {
   const now = Date.now();
   const elapsed = now - budget.lastRefill;
@@ -45,7 +53,11 @@ export function consumeRetryBudgetToken(): boolean {
   return false;
 }
 
-/** Test-only: reset the budget to a known state. */
+/**
+ * Test-only: reset the budget to a known state.
+ *
+ * @internal
+ */
 export function _resetRetryBudget(): void {
   budget.tokens = BUDGET_TOKENS;
   budget.lastRefill = Date.now();
@@ -55,11 +67,24 @@ export function _resetRetryBudget(): void {
  * Test-only: synchronously try to consume a retry token.
  *
  * @returns True when a retry-budget token was consumed.
+ *
+ * @internal
  */
 export function _consumeRetryToken(): boolean {
   return consumeRetryBudgetToken();
 }
 
+/**
+ * Run an operation with bounded exponential-backoff retries.
+ *
+ * @param fn - Operation to invoke.
+ * @param retries - Maximum retry attempts after the first call.
+ * @param signal - Optional cancellation signal.
+ *
+ * @returns Operation result when any attempt succeeds.
+ *
+ * @throws The last operation error, or an abort error when cancelled.
+ */
 export async function withRetry<T>(
   fn: () => Promise<T>,
   retries = MAX_RETRIES,
@@ -96,6 +121,13 @@ export async function withRetry<T>(
   throw lastErr;
 }
 
+/**
+ * Classify whether an error should be retried by {@link withRetry}.
+ *
+ * @param err - Error-like value to classify.
+ *
+ * @returns True for explicit retryable errors or configured transient statuses.
+ */
 export function isRetryableError(err: unknown): boolean {
   if (typeof err === "object" && err !== null) {
     const retryable = (err as Record<string, unknown>).retryable;

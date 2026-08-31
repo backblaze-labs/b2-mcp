@@ -1,6 +1,9 @@
-/*
+/**
  * Runtime-neutral HTTP MCP request pipeline.
  *
+ * @packageDocumentation
+ *
+ * @remarks
  * Node's standalone server and serverless adapters both enter here so the
  * security-sensitive transport behavior does not drift across runtimes.
  */
@@ -61,45 +64,76 @@ const SDK_HEADER_ALLOWLIST = new Set([
   "tracestate",
   "baggage",
 ]);
+/** In-flight request limiter shared by Node and serverless HTTP runtimes. */
 export interface InFlightLimiter {
   readonly active: number;
+  /** Attempt to acquire capacity for a credential-scoped request. */
   acquire(cacheKey: string): { ok: true } | { ok: false; status: number; error: string };
+  /** Move an acquired request from a pre-auth key to its resolved credential key. */
   rekey(
     fromCacheKey: string,
     toCacheKey: string,
   ): { ok: true } | { ok: false; status: number; error: string };
+  /** Release previously acquired capacity. */
   release(cacheKey: string): void;
 }
 
+/** Per-request MCP server preparation state held in AsyncLocalStorage. */
 export interface PreparedMcpRequest {
+  /** Resolved B2 config and non-secret cache keys. */
   resolved: CredentialResolution;
+  /** Capability set for this credential, or `null` for full-surface mode. */
   capabilities: string[] | null;
+  /** MCP server instances created during this request. */
   servers: Set<ReturnType<typeof createMcpServerDefinition>>;
+  /** Verified MCP auth info supplied by OAuth or hosting middleware. */
   authInfo?: AuthInfo;
 }
 
+/** Construction options for the runtime-neutral HTTP fetch handler. */
 export interface HttpPipelineOptions {
+  /** Credential provider used to resolve B2 config for each request. */
   credentialProvider?: CredentialProvider;
+  /** Secret broker used when principal credential mode is active. */
   secretBroker?: SecretBroker;
+  /** Optional MCP SDK handler override for tests. */
   mcpHandler?: Pick<McpHttpHandler, "fetch" | "close">;
+  /** Server factory override for tests and adapters. */
   createServer?: typeof createMcpServerDefinition;
+  /** Capability discovery override for tests and adapters. */
   fetchCapabilities?: typeof fetchCredentialCapabilities;
+  /** Whether idle sweeps run on an interval or only on request handling. */
   idleSweepMode?: "interval" | "request";
 }
 
+/** Runtime context supplied by an HTTP adapter for one request. */
 export interface HttpFetchContext {
+  /** Verified MCP auth info from OAuth or hosting middleware. */
   authInfo?: AuthInfo | null;
+  /** Remote address as seen by the adapter. */
   remoteAddress?: string;
+  /** Allow local loopback probes to reach `/health` under strict host policy. */
   allowLoopbackHealthProbe?: boolean;
 }
 
+/** Runtime-neutral fetch handler for B2 MCP HTTP requests. */
 export interface B2McpFetchHandler {
   readonly sessions: Map<string, never>;
+  /** Handle one HTTP request. */
   fetch(request: Request, context?: HttpFetchContext): Promise<Response>;
+  /** Stop accepting new MCP work and start graceful shutdown. */
   drain(): void;
+  /** Close the underlying MCP handler and release timers. */
   close(): Promise<void>;
 }
 
+/**
+ * Derive a rate-limiter key from a credential/principal cache key.
+ *
+ * @param cacheKey - Credential or principal cache key.
+ *
+ * @returns Rate-limiter key.
+ */
 export function deriveRateKey(cacheKey: string): string {
   return `rate:${cacheKey}`;
 }
@@ -108,6 +142,14 @@ function intEnv(name: string, fallback: number): number {
   return Math.max(1, parseIntEnv(process.env[name], fallback));
 }
 
+/**
+ * Create an in-flight request limiter.
+ *
+ * @param maxTotal - Maximum concurrent requests across all credentials.
+ * @param maxPerKey - Maximum concurrent requests for one credential/principal key.
+ *
+ * @returns Limiter with acquire, rekey, release, and active-count operations.
+ */
 export function createInFlightLimiter(
   maxTotal = intEnv("B2_MAX_SESSIONS", DEFAULT_MAX_IN_FLIGHT),
   maxPerKey = intEnv("B2_MAX_SESSIONS_PER_KEY", DEFAULT_MAX_IN_FLIGHT_PER_KEY),
@@ -151,6 +193,17 @@ export function createInFlightLimiter(
   };
 }
 
+/**
+ * Create the per-request MCP server factory used by the MCP HTTP handler.
+ *
+ * @param preparedRequestScope - AsyncLocalStorage carrying resolved credentials
+ * and capabilities for the current request.
+ * @param createServerForRequest - Server factory to invoke for each request.
+ *
+ * @returns MCP SDK server factory bound to request-local prepared state.
+ *
+ * @throws Error when called outside a prepared request scope.
+ */
 export function createPreparedMcpServerFactory(
   preparedRequestScope: AsyncLocalStorage<PreparedMcpRequest>,
   createServerForRequest: typeof createMcpServerDefinition,
@@ -247,6 +300,13 @@ function isLoopbackHealthProbe(request: Request, remoteAddress: string | undefin
   return !origin || isLoopbackHostName(originHostname(origin));
 }
 
+/**
+ * Enforce Host/Origin allowlist policy for an incoming request.
+ *
+ * @param request - Incoming Web request.
+ *
+ * @returns `true` when Host and Origin satisfy configured policy.
+ */
 export function hostOriginAllowed(request: Request): boolean {
   const allowedHosts = csvEnv("B2_ALLOWED_HOSTS");
   const allowedOrigins = csvEnv("B2_ALLOWED_ORIGINS");
@@ -723,6 +783,19 @@ function responseWithCleanup(response: Response, cleanup: () => Promise<void>): 
   });
 }
 
+/**
+ * Build the runtime-neutral HTTP fetch handler for B2 MCP.
+ *
+ * @remarks
+ * The handler owns credential resolution, host/origin checks, body caps, rate
+ * limiting, in-flight caps, capability discovery, MCP handler dispatch, cache
+ * sweeps, and graceful drain state.
+ *
+ * @param options - Optional credential, server factory, capability, and MCP
+ * handler overrides for tests or serverless adapters.
+ *
+ * @returns Runtime-neutral B2 MCP fetch handler.
+ */
 export function createB2McpFetchHandler(options: HttpPipelineOptions = {}): B2McpFetchHandler {
   const sessions = new Map<string, never>();
   const inFlight = createInFlightLimiter();

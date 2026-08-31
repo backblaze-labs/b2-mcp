@@ -104,7 +104,7 @@ have deliberately configured a reviewed secret sink.
 
 ## B2 Skills pack
 
-This repo bundles a client-side Backblaze B2 skills pack under [`skills/`](skills/).
+This repo bundles a client-side Backblaze B2 skills pack under `skills/` (manifest: [`skills/pack.json`](skills/pack.json)).
 The MCP server is the action layer; these Markdown playbooks are the expertise
 layer for common workflows: backup/restore, least-privilege keys, Object Lock,
 lifecycle and cost hygiene, migration, and incident response.
@@ -349,7 +349,7 @@ Example `b2_list_buckets` text in default compact JSON mode:
 
 The same structured result with `B2_MCP_OUTPUT_FORMAT=toon`:
 
-```toon
+```text
 accountId: account-123
 buckets[2]{bucketId,bucketName,bucketType}:
   bucket-a,logs-2026,allPrivate
