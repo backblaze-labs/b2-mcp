@@ -283,19 +283,20 @@ export function checkDestructive(
     return { ok: true };
   }
 
-  // Under `elicit`, human elicitation approval is the ONLY way through: a
-  // model-supplied confirm:true does not satisfy it, and when no human can be
-  // reached the action is refused. The wrapper refuses can't-elicit clients
-  // before the handler runs; this is the defense-in-depth backstop for any path
-  // that reaches the gate without wrapper-installed consent.
+  // Under `elicit`, an accepted MCP elicitation response is the ONLY way through:
+  // a model-supplied confirm:true does not satisfy it, and when no such response
+  // can be obtained the action is refused. The wrapper refuses can't-elicit
+  // clients before the handler runs; this is the defense-in-depth backstop for
+  // any path that reaches the gate without wrapper-installed consent. The
+  // response is client-relayed, so this is human-in-the-loop friction, not proof
+  // of human identity.
   if (policy === "elicit") {
     const message =
       `Refused: this would ${effect} — a destructive/irreversible action. ` +
-      `This server's policy (B2_DESTRUCTIVE_POLICY=elicit) requires a human operator ` +
-      `to approve this specific action through an MCP elicitation prompt; a ` +
-      `model-supplied confirmation cannot satisfy it, and the action is refused when ` +
-      `no human can be prompted. Report this refusal and the effect above to the ` +
-      `human operator.`;
+      `This server's policy (B2_DESTRUCTIVE_POLICY=elicit) requires an accepted MCP ` +
+      `elicitation response for this specific action; a model-supplied confirmation ` +
+      `cannot satisfy it, and the action is refused when no such response can be ` +
+      `obtained. Report this refusal and the effect above to the human operator.`;
     return {
       ok: false,
       error: {

@@ -55,10 +55,13 @@ export interface B2Config {
    * Gate policy for destructive/irreversible tools (delete bucket/file-version/
    *  key, cancel large file, eject group member, make-public / weaken-lock /
    *  replication via b2_update_bucket, outbound notification rules).
-   *  "confirm" (default) requires confirm:true or human elicitation approval;
-   *  "elicit" requires human MCP elicitation approval and refuses if the client
-   *  cannot prompt a human (a model confirm:true does not satisfy it); "block"
-   *  refuses; "allow" disables the gate. Set via B2_DESTRUCTIVE_POLICY.
+   *  "confirm" (default) requires confirm:true or an accepted MCP elicitation
+   *  response; "elicit" requires an accepted MCP elicitation response and refuses
+   *  if the client cannot supply one (a model confirm:true does not satisfy it);
+   *  "block" refuses; "allow" disables the gate. The elicitation response is
+   *  relayed by the client, so it is human-in-the-loop friction, not proof of
+   *  human identity; only "block" is a boundary a compromised client cannot
+   *  forge. Set via B2_DESTRUCTIVE_POLICY.
    */
   destructivePolicy?: DestructivePolicy;
   /**
