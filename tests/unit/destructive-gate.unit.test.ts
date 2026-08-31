@@ -74,6 +74,48 @@ describe("destructive-gate", () => {
       const r = checkDestructive("b2_delete_bucket", { bucketId: "b", confirm: true }, cfg());
       expect(r.ok).toBe(true);
     });
+
+    // A refusal that tells the caller how to satisfy the gate coaches its own
+    // bypass: the model reads it as the compliant next step and self-approves.
+    // The message must address the human operator instead, while the gate's
+    // wire contract (code/status) and the confirm:true fallback stay unchanged.
+    it("addresses the human operator without instructing the caller to self-approve", () => {
+      const r = checkDestructive("b2_delete_bucket", { bucketId: "b" }, cfg());
+      expect(r.ok).toBe(false);
+      if (r.ok) return;
+
+      // Unchanged wire contract.
+      expect(r.error.code).toBe("destructive_confirmation_required");
+      expect(r.error.status).toBe(409);
+
+      const message = r.error.message;
+      // Still states the refused effect and the policy that refused it.
+      expect(message).toContain("permanently delete a bucket");
+      expect(message).toContain("B2_DESTRUCTIVE_POLICY");
+      expect(message).toMatch(/human operator/i);
+
+      // Never tells the caller to re-issue the call with confirm: true.
+      expect(message).not.toMatch(/re-?invoke/i);
+      expect(message).not.toMatch(/retry|re-?try|resend|re-?send|re-?issue/i);
+      expect(message).not.toMatch(/["']?confirm["']?\s*[:=]\s*true/i);
+      expect(message).not.toMatch(/\bto proceed\b/i);
+      expect(message).not.toMatch(/\bset\b[^.]*\bconfirm\b/i);
+      expect(message).not.toMatch(/\bpass\b[^.]*\bconfirm\b/i);
+    });
+
+    it("still honors confirm:true after the reworded refusal", () => {
+      const refused = checkDestructive("s3_delete_object", { bucket: "b", key: "k" }, cfg());
+      expect(refused).toMatchObject({
+        ok: false,
+        error: { code: "destructive_confirmation_required", status: 409 },
+      });
+      const confirmed = checkDestructive(
+        "s3_delete_object",
+        { bucket: "b", key: "k", confirm: true },
+        cfg(),
+      );
+      expect(confirmed.ok).toBe(true);
+    });
   });
 
   describe("block policy", () => {

@@ -1041,7 +1041,7 @@ describe("s3_put_bucket_lifecycle", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toContain("Confirmation required");
+    expect(parseResult(result)).toContain("requires that a human operator");
     expect(parseResult(result)).toContain("clear the bucket's entire S3 lifecycle configuration");
     expect(sendSpy).not.toHaveBeenCalled();
   });
@@ -1179,7 +1179,7 @@ describe("s3_get_presigned_url", () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatch(/Confirmation required/i);
+    expect(parseResult(result)).toMatch(/requires that a human operator/i);
     expect(sendSpy).not.toHaveBeenCalled();
   });
 

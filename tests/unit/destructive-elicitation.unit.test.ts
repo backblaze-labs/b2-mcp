@@ -439,7 +439,7 @@ describe("destructive elicitation", () => {
 
     expect(result.resultType).not.toBe("input_required");
     expect(result.isError).toBe(true);
-    expect(result.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(result.content?.[0]?.text).toMatch(/requires that a human operator/i);
     expect(result.content?.[0]?.text).toContain(
       "B2 Error [destructive_confirmation_required] (HTTP 409)",
     );
@@ -544,7 +544,7 @@ describe("destructive elicitation", () => {
 
     const missingConfirm = await wrapped({ bucket: "photos", key: "old.jpg" }, extra);
     expect(missingConfirm.resultType).not.toBe("input_required");
-    expect(missingConfirm.content?.[0]?.text).toMatch(/Confirmation required/i);
+    expect(missingConfirm.content?.[0]?.text).toMatch(/requires that a human operator/i);
     expect(missingConfirm.content?.[0]?.text).toContain(
       "B2 Error [destructive_confirmation_required] (HTTP 409)",
     );

@@ -19,9 +19,11 @@ import { B2Config, DestructivePolicy } from "./types.js";
  *
  * Policy (env `B2_DESTRUCTIVE_POLICY`, default `confirm`):
  *   - `confirm` — a destructive call must pass `confirm: true`; otherwise it is
- *     refused with a description of the effect and how to proceed. This turns a
- *     silent destructive action into a deliberate, auditable two-step and gives an
- *     MCP host a clear point to require human approval. (Defense-in-depth: a fully
+ *     refused with a description of the effect and the policy that refused it,
+ *     addressed to the human operator rather than telling the caller how to
+ *     satisfy the gate itself. This turns a silent destructive action into a
+ *     deliberate, auditable two-step and gives an MCP host a clear point to
+ *     require human approval. (Defense-in-depth: a fully
  *     hijacked model could also set `confirm`, so pair with host consent and/or
  *     `block` for untrusted/automated deployments.)
  *   - `block` — destructive operations are refused outright. The hard control for
@@ -276,10 +278,16 @@ export function checkDestructive(
     return { ok: true };
   }
   if (args.confirm === true) return { ok: true };
+  // Addressed to the human operator, not to the caller: the refusal states the
+  // effect and the policy that produced it, and deliberately does not tell the
+  // calling model how to satisfy the gate itself — a refusal that spells out its
+  // own bypass gets self-approved.
   const message =
-    `Confirmation required: this would ${effect} — a destructive/irreversible action. ` +
-    `Re-invoke the identical call with "confirm": true to proceed. ` +
-    `(Server policy B2_DESTRUCTIVE_POLICY=confirm; set it to "allow" to disable this gate.)`;
+    `Refused: this would ${effect} — a destructive/irreversible action. ` +
+    `This server's policy (B2_DESTRUCTIVE_POLICY=confirm) requires that a human ` +
+    `operator, not the calling model, approves this specific action before it runs. ` +
+    `Report this refusal and the effect above to the human operator and let them ` +
+    `decide; do not approve it on their behalf.`;
   return {
     ok: false,
     error: {
