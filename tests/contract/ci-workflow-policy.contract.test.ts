@@ -487,11 +487,12 @@ describe("CI workflow policy", () => {
 
   it("blocks publishing until the live contract suite passes for the publish ref", () => {
     const liveContract = workflowJobBlock(publish, "live-contract") ?? "";
+    const mcpRegistryPreflight = workflowJobBlock(publish, "mcp-registry-preflight") ?? "";
     const githubReleaseJob = workflowJobBlock(publish, "github-release") ?? "";
     const containerImageJob = workflowJobBlock(publish, "container-image") ?? "";
     const publishJob = workflowJobBlock(publish, "publish") ?? "";
 
-    expect(publishJob).toContain("needs: [prepare, live-contract]");
+    expect(publishJob).toContain("needs: [prepare, live-contract, mcp-registry-preflight]");
     expect(containerImageJob).toContain("needs: [prepare, publish]");
     expect(containerImageJob).not.toContain("environment: ghcr-publish");
     expect(containerImageJob).toContain("ghcr.io/${{ github.repository }}");
@@ -512,6 +513,7 @@ describe("CI workflow policy", () => {
     expect(liveContract).not.toContain("secrets: inherit");
     expect(liveContract).not.toContain("for attempt in 1 2 3");
     expect(liveContract).not.toContain("retrying");
+    expect(mcpRegistryPreflight).toContain("needs: prepare");
     expect(publish).toContain("github-release:");
   });
 });
