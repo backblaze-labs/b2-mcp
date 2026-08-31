@@ -419,9 +419,10 @@ function normalizedMediaType(contentType: string | undefined): string | null {
   return mediaType ? mediaType : null;
 }
 
-// Local to keep the Worker S3 bundle under budget.
+// Local to keep the Worker S3 bundle under budget. Throws a real Error carrying
+// the 400/code properties so stack traces and rejects.toThrow(...) keep working.
 function badRequest(message: string): never {
-  throw { status: 400, code: "bad_request", message };
+  throw Object.assign(new Error(message), { status: 400, code: "bad_request" });
 }
 
 /**
@@ -435,7 +436,7 @@ function badRequest(message: string): never {
  * @param contentType - Content type supplied for an upload.
  * @param context - Human-readable operation context for error messages.
  *
- * @throws A 400-style bad request object when the type is missing or unsafe.
+ * @throws A 400-style bad request Error when the type is missing or unsafe.
  */
 export function assertSafeObjectContentType(
   contentType: string | undefined,
@@ -818,7 +819,7 @@ export class B2S3PeerClient {
    * @returns Presigned URL metadata.
    *
    * @throws Error when a PutObject URL includes a version ID.
-   * @throws A 400-style tool error object when PutObject content type validation rejects missing
+   * @throws A 400-style bad request Error when PutObject content type validation rejects missing
    * or unsafe input.
    */
   async presignObjectUrl(input: B2S3PresignObjectUrlOptions): Promise<B2S3PresignObjectUrlResult> {
