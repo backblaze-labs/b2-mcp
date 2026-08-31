@@ -1,4 +1,8 @@
-/** Shared parsing helpers for CLI and HTTP runtime configuration. */
+/**
+ * Shared parsing helpers for CLI and HTTP runtime configuration.
+ *
+ * @packageDocumentation
+ */
 
 /**
  * Parse an integer from an environment variable-like value.

@@ -1,3 +1,8 @@
+/**
+ * Async request-context utilities shared by transports and tool handlers.
+ *
+ * @packageDocumentation
+ */
 import { AsyncLocalStorage } from "async_hooks";
 
 const requestSignalStorage = new AsyncLocalStorage<AbortSignal | undefined>();

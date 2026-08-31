@@ -1,4 +1,10 @@
 /**
+ * Date formatting helpers for MCP-facing output.
+ *
+ * @packageDocumentation
+ */
+
+/**
  * Convert an optional millisecond timestamp into a Date.
  *
  * @param value - Epoch millisecond timestamp.

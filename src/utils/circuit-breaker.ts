@@ -1,3 +1,8 @@
+/**
+ * Circuit-breaker primitives and shared operation wrappers.
+ *
+ * @packageDocumentation
+ */
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
 import { abortError, timeoutError } from "./named-error.js";
@@ -310,6 +315,8 @@ export const partnerCircuitBreaker = breakerProxy(partnerApiBreaker);
  * Reset every circuit breaker singleton in test runs.
  *
  * @throws Error when called outside the test runtime.
+ *
+ * @internal
  */
 export function resetCircuitBreakersForTests(): void {
   if (!isTestRuntime()) {

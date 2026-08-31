@@ -1,3 +1,8 @@
+/**
+ * Error normalization and MCP tool-result helpers.
+ *
+ * @packageDocumentation
+ */
 import {
   currentSanitizerOptions,
   hasCurrentSanitizerOptions,

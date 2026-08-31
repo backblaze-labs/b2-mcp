@@ -1,6 +1,8 @@
 /**
  * S3-compatible client construction for Backblaze B2.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * This module derives AWS SDK S3 configuration through the official B2 SDK S3
  * helper, validates authorize-returned S3 endpoints, and exposes a lazy facade

@@ -2,6 +2,8 @@
 /**
  * Node HTTP transport bootstrap for hosted Backblaze B2 MCP deployments.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * This module owns the `http.Server` lifecycle, request timeouts, signal
  * handling, and graceful drain. Runtime-neutral MCP request handling lives in

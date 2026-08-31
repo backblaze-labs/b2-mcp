@@ -1,3 +1,8 @@
+/**
+ * Shared runtime for serverless MCP HTTP adapters.
+ *
+ * @packageDocumentation
+ */
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import {
   createB2McpFetchHandler,

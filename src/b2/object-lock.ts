@@ -1,3 +1,8 @@
+/**
+ * Native B2 Object Lock and retention tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client, type UpdateFileRetentionOptions } from "./client.js";

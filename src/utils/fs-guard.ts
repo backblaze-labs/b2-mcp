@@ -1,3 +1,8 @@
+/**
+ * Local filesystem policy enforcement for tool read and write paths.
+ *
+ * @packageDocumentation
+ */
 import * as fs from "fs";
 import * as path from "path";
 import { B2Config } from "./types.js";

@@ -16,6 +16,7 @@
  * key sees its sub-accounts (one report row each) and a customer key sees only
  * itself — scope is automatic and fail-closed.
  *
+ * @packageDocumentation
  */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
@@ -247,7 +248,7 @@ const REPORT_SCAN_LIMITS = {
 };
 
 /** Counters captured while scanning and downloading usage reports. */
-export interface ReportLoadStats {
+interface ReportLoadStats {
   /** Report list pages visited. */
   pages: number;
   /** Object keys listed from the report bucket. */
@@ -273,7 +274,7 @@ interface ReportRowsResult {
 }
 
 /** Mutable scan budget shared by report-key listing and CSV downloads. */
-export interface ReportScanBudget {
+interface ReportScanBudget {
   /** Scan start time in epoch milliseconds. */
   startedAt: number;
   /** Mutable counters for the current scan. */
@@ -605,6 +606,8 @@ async function nearestSnapshotDate(
  * @param budget - Optional scan budget for tests and bounded runtime.
  *
  * @returns The latest snapshot date and whether the reports bucket is missing.
+ *
+ * @internal
  */
 export async function latestSnapshotDate(
   reportClient: ReportObjectClient,

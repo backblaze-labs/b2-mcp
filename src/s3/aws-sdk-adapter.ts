@@ -1,6 +1,8 @@
 /**
  * AWS SDK adapter for B2's S3-compatible data plane.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * Tool handlers call this repository-owned facade rather than AWS SDK commands
  * directly. The adapter preserves B2-specific semantics, applies request abort

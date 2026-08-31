@@ -1,3 +1,8 @@
+/**
+ * Structured logging setup and request audit helpers.
+ *
+ * @packageDocumentation
+ */
 import { closeSync } from "node:fs";
 import pino, { type DestinationStream } from "pino";
 import { VERSION } from "../version.js";

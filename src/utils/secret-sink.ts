@@ -1,3 +1,8 @@
+/**
+ * Durable secret-sink helpers for one-time credential-producing tools.
+ *
+ * @packageDocumentation
+ */
 import * as fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -30,12 +35,16 @@ const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 const SECRET_SINK_TAIL_READ_BYTES = 1024 * 1024;
 
-/** File operations that tests may override indirectly when simulating sink failures. */
+/**
+ * File operations that tests may override indirectly when simulating sink failures.
+ *
+ * @internal
+ */
 export const secretSinkFileOpsForTests = {
   /** Close an open ledger file descriptor. */
   closeSync: fs.closeSync,
   /** Truncate a ledger file descriptor back to a known size. */
-  ftruncateSync: (fd: number, len?: number) => fs.ftruncateSync(fd, len),
+  ftruncateSync: fs.ftruncateSync,
   /** Flush an open ledger file descriptor to disk. */
   fsyncSync: fs.fsyncSync,
   /** Remove a temporary or lock file. */
@@ -45,7 +54,7 @@ export const secretSinkFileOpsForTests = {
 };
 
 /** Write function used by the file secret sink. */
-export type SinkWrite = (fd: number, buffer: Uint8Array, offset: number, length: number) => number;
+type SinkWrite = (fd: number, buffer: Uint8Array, offset: number, length: number) => number;
 
 let secretSinkWrite: SinkWrite = fs.writeSync;
 
@@ -57,6 +66,8 @@ let secretSinkWrite: SinkWrite = fs.writeSync;
  * @returns Previous write function so tests can restore it.
  *
  * @throws Error when called outside the test runtime.
+ *
+ * @internal
  */
 export function setSinkWriteForTests(writeSync: SinkWrite): SinkWrite {
   if (process.env.NODE_ENV !== "test") {
@@ -244,6 +255,8 @@ export function emitInlineSecretSinkWarningOnce(): void {
 
 /**
  * Reset inline warning state for deterministic tests.
+ *
+ * @internal
  */
 export function resetSecretSinkWarningForTests(): void {
   inlineWarningEmitted = false;
@@ -1125,13 +1138,10 @@ function isSecretSinkCommitAmbiguous(err: unknown): boolean {
   );
 }
 
-/** Secret sink modes that are allowed to execute durable-secret operations. */
-export type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
-
 /** Response projection hooks for durable-secret-producing operations. */
 export interface DurableSecretResponseOptions<T> {
   /** Active sink configuration. */
-  secretSink: ActiveSecretSink;
+  secretSink: Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
   /** MCP tool name producing the durable secret. */
   toolName: string;
   /** Secret-bearing provider result. */

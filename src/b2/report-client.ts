@@ -1,6 +1,8 @@
 /**
  * Bounded B2 usage-report object reader.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * Storage insight tools read report CSVs from the reserved reports bucket
  * through this interface. The implementation uses the S3-compatible data plane,

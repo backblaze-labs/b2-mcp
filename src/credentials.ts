@@ -1,3 +1,8 @@
+/**
+ * Credential routing and validation for stdio, HTTP, and principal-based deployments.
+ *
+ * @packageDocumentation
+ */
 import * as crypto from "crypto";
 import * as http from "http";
 import type { AuthInfo } from "@modelcontextprotocol/server";

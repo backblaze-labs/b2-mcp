@@ -1,3 +1,8 @@
+/**
+ * Backblaze B2 authorization manager and SDK client factory helpers.
+ *
+ * @packageDocumentation
+ */
 import {
   type AuthorizeAccountResponse,
   deriveAllowedSuffixes,
@@ -56,13 +61,13 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
 /** Official B2 SDK client plus optional URL guard owned by the auth manager. */
-export interface ManagedSdkClient {
+interface ManagedSdkClient {
   client: SdkB2Client;
   urlGuard?: UrlGuard;
 }
 
 /** Factory hook used by tests to provide a managed B2 SDK client. */
-export type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
+type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
 let sdkClientFactoryForTests: SdkClientFactory | null = null;
 
 type DomExceptionConstructor = new (message?: string, name?: string) => Error;
@@ -79,6 +84,8 @@ function sdkAbortException(message: string): Error {
  * @param factory - Test SDK client factory, or `null` to restore default construction.
  *
  * @throws Error when called outside the test runtime.
+ *
+ * @internal
  */
 export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null): void {
   if (!isTestRuntime()) {

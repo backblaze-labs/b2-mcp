@@ -1,3 +1,8 @@
+/**
+ * Node HTTP to Web Fetch request and response bridge utilities.
+ *
+ * @packageDocumentation
+ */
 import * as http from "http";
 import { Readable } from "stream";
 

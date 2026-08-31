@@ -1,6 +1,8 @@
 /**
  * Small bounded-concurrency worker helper for listing/report scans.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * Callers use this instead of unconstrained `Promise.all` when one logical MCP
  * tool call may touch many B2 objects or report files.

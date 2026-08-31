@@ -1,4 +1,10 @@
 /**
+ * Typed error helpers used across transport and SDK boundaries.
+ *
+ * @packageDocumentation
+ */
+
+/**
  * Create an Error with a specific `name`.
  *
  * @param message - Error message.

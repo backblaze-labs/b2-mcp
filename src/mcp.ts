@@ -1,6 +1,8 @@
 /**
  * MCP SDK adapter and tool registry helpers.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * The rest of the codebase registers tools through this small abstraction
  * instead of calling the MCP SDK directly. That keeps capability filtering,

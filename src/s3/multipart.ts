@@ -1,21 +1,14 @@
+/**
+ * S3-compatible multipart upload tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { B2S3CompletedMultipartPart, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-
-/** S3 facade subset required by multipart upload tools. */
-export type B2S3MultipartClient = Pick<
-  B2S3PeerClient,
-  | "createMultipartUpload"
-  | "presignUploadPart"
-  | "completeMultipartUpload"
-  | "abortMultipartUpload"
-  | "listMultipartUploads"
-  | "listParts"
-  | "uploadPartCopy"
->;
 
 /**
  * Register S3-compatible multipart upload tools.
@@ -37,7 +30,16 @@ export type B2S3MultipartClient = Pick<
  */
 export function registerS3MultipartTools(
   server: ToolRegistrar,
-  s3: B2S3MultipartClient,
+  s3: Pick<
+    B2S3PeerClient,
+    | "createMultipartUpload"
+    | "presignUploadPart"
+    | "completeMultipartUpload"
+    | "abortMultipartUpload"
+    | "listMultipartUploads"
+    | "listParts"
+    | "uploadPartCopy"
+  >,
   config: B2Config,
 ): void {
   server.registerTool(

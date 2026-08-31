@@ -1,6 +1,8 @@
 /**
  * Core server assembly for the Backblaze B2 MCP tool surface.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * This module is the architecture hub for stdio and HTTP transports. It loads
  * B2 credentials, discovers B2 key capabilities, creates native and S3 data
@@ -523,6 +525,8 @@ function rememberCapabilities(cacheKey: string, capabilities: string[], now: num
  * This is exported for tests that verify cache expiry and tenant isolation.
  *
  * @returns Current positive capability-cache entry count.
+ *
+ * @internal
  */
 export function capabilityCacheSizeForTests(): number {
   return capabilityCache.size;

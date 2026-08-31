@@ -14,6 +14,8 @@
  * Buckets that have been full for over IDLE_TTL_MS are evicted by periodic
  * HTTP sweeps and by throttled opportunistic sweeps so the Map doesn't grow
  * unbounded.
+ *
+ * @packageDocumentation
  */
 
 const DEFAULT_RPS = 60;
@@ -44,7 +46,7 @@ function currentRateLimiterConfig(): RateLimiterConfig {
 }
 
 /** Current token bucket state for one limiter key. */
-export interface Bucket {
+interface Bucket {
   /** Available request tokens. */
   tokens: number;
   /** Last refill timestamp in epoch milliseconds. */
@@ -104,7 +106,11 @@ export function sweepIdleBuckets(now: number = Date.now()): void {
   }
 }
 
-/** Test-only: clear all buckets. */
+/**
+ * Test-only: clear all buckets.
+ *
+ * @internal
+ */
 export function _resetRateLimiter(): void {
   buckets.clear();
   nextOpportunisticSweepAt = 0;
@@ -114,6 +120,8 @@ export function _resetRateLimiter(): void {
  * Test-only: read current bucket state.
  *
  * @returns The bucket state for `key`, if present.
+ *
+ * @internal
  */
 export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);

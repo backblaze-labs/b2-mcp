@@ -1,15 +1,14 @@
+/**
+ * S3-compatible bucket reachability and lifecycle tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { B2S3LifecycleRule, B2S3PeerClient } from "./aws-sdk-adapter.js";
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolSuccess } from "../utils/errors.js";
 import { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
-
-/** S3 facade subset required by bucket reachability and lifecycle tools. */
-export type B2S3BucketClient = Pick<
-  B2S3PeerClient,
-  "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle"
->;
 
 /**
  * Register S3-compatible bucket reachability and lifecycle tools.
@@ -30,7 +29,7 @@ export type B2S3BucketClient = Pick<
  */
 export function registerS3BucketTools(
   server: ToolRegistrar,
-  s3: B2S3BucketClient,
+  s3: Pick<B2S3PeerClient, "headBucket" | "putBucketLifecycle" | "deleteBucketLifecycle">,
   config: B2Config,
 ): void {
   server.registerTool(

@@ -1,3 +1,8 @@
+/**
+ * S3-compatible presigned URL tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolError, toolJson } from "../utils/errors.js";
@@ -13,16 +18,6 @@ import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
  * and PUT URLs are supported. s3_get_presigned_post has been intentionally
  * omitted for this reason.
  */
-/** Capability-derived options for presigned URL tool registration. */
-export interface S3PresignedToolOptions {
-  allowGetObjectUrl?: boolean;
-  allowPutObjectUrl?: boolean;
-  allowExplicitVersionInspection?: boolean;
-}
-
-/** S3 facade subset required by presigned URL tools. */
-export type B2S3PresignedClient = Pick<B2S3PeerClient, "presignObjectUrl">;
-
 const PUT_OBJECT_CONFIRM_DESC =
   "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
 
@@ -70,10 +65,14 @@ function operationSchema(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean)
  */
 export function registerS3PresignedTools(
   server: ToolRegistrar,
-  s3: B2S3PresignedClient,
+  s3: Pick<B2S3PeerClient, "presignObjectUrl">,
   versions: B2S3VersionGuard,
   config: B2Config,
-  options: S3PresignedToolOptions = {},
+  options: {
+    allowGetObjectUrl?: boolean;
+    allowPutObjectUrl?: boolean;
+    allowExplicitVersionInspection?: boolean;
+  } = {},
 ): void {
   const allowGetObjectUrl = options.allowGetObjectUrl ?? true;
   const allowPutObjectUrl = options.allowPutObjectUrl ?? true;

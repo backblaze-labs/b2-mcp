@@ -1,3 +1,8 @@
+/**
+ * MCP elicitation support for destructive-operation confirmation.
+ *
+ * @packageDocumentation
+ */
 import {
   CLIENT_CAPABILITIES_META_KEY,
   inputRequired,

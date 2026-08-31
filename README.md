@@ -104,7 +104,7 @@ have deliberately configured a reviewed secret sink.
 
 ## B2 Skills pack
 
-This repo bundles a client-side Backblaze B2 skills pack under [`skills/`](https://github.com/backblaze-labs/b2-mcp/tree/main/skills).
+This repo bundles a client-side Backblaze B2 skills pack under `skills/` (manifest: [`skills/pack.json`](skills/pack.json)).
 The MCP server is the action layer; these Markdown playbooks are the expertise
 layer for common workflows: backup/restore, least-privilege keys, Object Lock,
 lifecycle and cost hygiene, migration, and incident response.

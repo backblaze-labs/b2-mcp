@@ -1,3 +1,8 @@
+/**
+ * Tool capability, OAuth scope, and MCP annotation policy metadata.
+ *
+ * @packageDocumentation
+ */
 import { DESTRUCTIVE_TOOL_NAMES } from "./destructive-gate.js";
 
 /**
@@ -262,11 +267,9 @@ export function oauthScopesAllowOperation(
 /**
  * Return the reviewed OAuth deployment-scope policy for a tool.
  *
- * @returns The OAuth policy bucket used to reduce the B2 capability-filtered
- * tool surface.
- */
-/**
- * Return the OAuth scope policy for a tool.
+ * @remarks
+ * The policy bucket is used to reduce the B2 capability-filtered tool surface
+ * for OAuth resource-server deployments.
  *
  * @param name - MCP tool name.
  *
@@ -278,17 +281,14 @@ export function oauthToolScopePolicy(name: string): OAuthToolScopePolicy | null 
 
 /**
  * Whether a tool should be registered for a key with the given capabilities.
+ *
+ * @remarks
  * Secret-sink mode is enforced by createServer; this function only answers
  * whether the B2 credential can use the operation. Unmapped tools otherwise
  * register unconditionally (conservative: never hide a tool we did not
  * explicitly classify). Mapped tools register when the key holds any of the
  * required capabilities. A null capability set is the explicit full-surface
  * mode.
- *
- * @returns True when the tool should be registered for the capability set.
- */
-/**
- * Return whether a B2 capability set enables a tool.
  *
  * @param name - MCP tool name.
  * @param caps - Authorized B2 capabilities, or `null` for full-surface mode.
@@ -307,10 +307,9 @@ export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): b
  * layer. They only reduce the surface that the B2 capability filter would
  * otherwise expose; they never grant a B2 operation by themselves.
  *
- * @returns True when OAuth scopes allow the tool to be registered.
- */
-/**
- * Return whether verified OAuth scopes allow a specific tool.
+ * @remarks
+ * Unknown tool names default to the `admin` tier, so OAuth deployments fail
+ * closed until a reviewed policy is added.
  *
  * @param name - MCP tool name.
  * @param scopes - Verified scopes, or `null` when OAuth is not active.

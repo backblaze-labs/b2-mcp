@@ -1,3 +1,8 @@
+/**
+ * Secret redaction helpers for logs, bootstrap errors, and MCP output.
+ *
+ * @packageDocumentation
+ */
 import { AsyncLocalStorage } from "async_hooks";
 import type * as http from "http";
 

@@ -1,3 +1,8 @@
+/**
+ * Runtime package-version and User-Agent product-token resolution.
+ *
+ * @packageDocumentation
+ */
 import { readFileSync } from "fs";
 import { join } from "path";
 import packageMetadata from "../package.json";

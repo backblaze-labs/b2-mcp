@@ -1,6 +1,8 @@
 /**
  * Runtime-neutral HTTP MCP request pipeline.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * Node's standalone server and serverless adapters both enter here so the
  * security-sensitive transport behavior does not drift across runtimes.

@@ -1,3 +1,8 @@
+/**
+ * Policy gate for irreversible or high-impact B2 and S3 operations.
+ *
+ * @packageDocumentation
+ */
 import { AsyncLocalStorage } from "async_hooks";
 import { createHmac } from "crypto";
 import type { B2ApiError } from "./errors.js";

@@ -11,6 +11,8 @@
  * The first attempt is *never* counted against the budget — only retries.
  * When the budget is exhausted, the original error is thrown immediately
  * instead of retrying.
+ *
+ * @packageDocumentation
  */
 
 import { logger } from "./logger.js";
@@ -51,7 +53,11 @@ export function consumeRetryBudgetToken(): boolean {
   return false;
 }
 
-/** Test-only: reset the budget to a known state. */
+/**
+ * Test-only: reset the budget to a known state.
+ *
+ * @internal
+ */
 export function _resetRetryBudget(): void {
   budget.tokens = BUDGET_TOKENS;
   budget.lastRefill = Date.now();
@@ -61,6 +67,8 @@ export function _resetRetryBudget(): void {
  * Test-only: synchronously try to consume a retry token.
  *
  * @returns True when a retry-budget token was consumed.
+ *
+ * @internal
  */
 export function _consumeRetryToken(): boolean {
   return consumeRetryBudgetToken();

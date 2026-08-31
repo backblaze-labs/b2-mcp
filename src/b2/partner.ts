@@ -1,3 +1,8 @@
+/**
+ * Native B2 Partner and Groups API tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";

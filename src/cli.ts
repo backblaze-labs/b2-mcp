@@ -1,3 +1,8 @@
+/**
+ * Command-line parsing helpers for the packaged b2-mcp binary.
+ *
+ * @packageDocumentation
+ */
 import { readPortArg } from "./utils/config.js";
 
 /** Transport names accepted by the command-line entry point. */

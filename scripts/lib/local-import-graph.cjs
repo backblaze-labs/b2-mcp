@@ -2,6 +2,8 @@ const { existsSync, readFileSync, statSync } = require("fs");
 const { dirname, extname, resolve } = require("path");
 
 const WORKER_SOURCE_GRAPH_FILES_BUDGET = 75;
+// Headroom for the documented Worker source graph; emitted bundle budgets still
+// guard the deployed artifact size separately.
 const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 750_000;
 const WORKER_EMITTED_FILES_BUDGET = 8;
 const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 9_160_000;

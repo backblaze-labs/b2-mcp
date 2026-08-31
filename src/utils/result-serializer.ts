@@ -1,3 +1,8 @@
+/**
+ * Structured MCP result serialization helpers.
+ *
+ * @packageDocumentation
+ */
 import { AsyncLocalStorage } from "async_hooks";
 import { sanitizeForMcpOutput, type SanitizerOptions } from "./secret-sanitizer.js";
 import { encodeToon } from "./toon-encoder.js";

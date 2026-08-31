@@ -2,6 +2,8 @@
 /**
  * Node CLI and stdio bootstrap for the Backblaze B2 MCP server.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * The package binary enters here. It handles `--help`, `--version`, stdio
  * serving for local MCP hosts, and delegation to the HTTP transport when the

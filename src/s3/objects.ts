@@ -1,3 +1,8 @@
+/**
+ * S3-compatible object operation tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import * as fs from "fs";
@@ -29,19 +34,6 @@ interface DeleteObjectEntry {
   key: string;
   versionId?: string;
 }
-
-/** S3 facade subset required by object tools. */
-export type B2S3ObjectClient = Pick<
-  B2S3PeerClient,
-  | "putObject"
-  | "getObject"
-  | "deleteObject"
-  | "deleteObjects"
-  | "headObject"
-  | "copyObject"
-  | "listObjectsV2"
-  | "listObjectVersions"
->;
 
 function isWebReadableStream(value: unknown): value is WebReadableStream<Uint8Array> {
   return (
@@ -441,13 +433,6 @@ async function validateDeleteObjectVersions(
 // cap is what keeps the data plane off the server: anything larger must presign.
 const MAX_INLINE_OBJECT_BYTES = 1024 * 1024; // 1 MiB
 
-/** Capability-derived options for object tool registration. */
-export interface S3ObjectToolOptions {
-  allowExplicitVersionInspection?: boolean;
-  allowCurrentVersionInspection?: boolean;
-  allowBypassGovernance?: boolean;
-}
-
 /**
  * Register S3-compatible object tools.
  *
@@ -471,10 +456,24 @@ export interface S3ObjectToolOptions {
  */
 export function registerS3ObjectTools(
   server: ToolRegistrar,
-  s3: B2S3ObjectClient,
+  s3: Pick<
+    B2S3PeerClient,
+    | "putObject"
+    | "getObject"
+    | "deleteObject"
+    | "deleteObjects"
+    | "headObject"
+    | "copyObject"
+    | "listObjectsV2"
+    | "listObjectVersions"
+  >,
   versions: B2S3VersionGuard,
   config: B2Config,
-  options: S3ObjectToolOptions = {},
+  options: {
+    allowExplicitVersionInspection?: boolean;
+    allowCurrentVersionInspection?: boolean;
+    allowBypassGovernance?: boolean;
+  } = {},
 ): void {
   const allowExplicitVersionInspection = options.allowExplicitVersionInspection ?? true;
   const allowCurrentVersionInspection = options.allowCurrentVersionInspection ?? true;

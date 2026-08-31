@@ -1,4 +1,8 @@
-/** Shared JSON-safe B2 and MCP runtime types. */
+/**
+ * Shared JSON-safe B2 and MCP runtime types.
+ *
+ * @packageDocumentation
+ */
 import type { McpOutputFormat } from "./result-serializer.js";
 
 /** Policy for the destructive-operation gate (see utils/destructive-gate.ts). */

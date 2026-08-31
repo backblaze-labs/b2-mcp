@@ -1,3 +1,8 @@
+/**
+ * Native B2 application-key management tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { B2Client, type FullApplicationKeyResult, type ListKeysOptions } from "./client.js";

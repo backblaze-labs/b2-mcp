@@ -1,3 +1,8 @@
+/**
+ * Native B2 bucket, notification, and webhook validation tool registration.
+ *
+ * @packageDocumentation
+ */
 import type { ToolRegistrar } from "../mcp.js";
 import * as dns from "node:dns/promises";
 import { isIP } from "node:net";
@@ -153,7 +158,7 @@ const corsRulesSchema = z
   .describe(CORS_RULES_DESCRIPTION);
 
 /** DNS resolver signature used by bucket webhook target validation. */
-export type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
+type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
 let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
 
 /**
@@ -167,6 +172,8 @@ let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
  * @param lookup - Test DNS resolver, or `null` to restore the default resolver.
  *
  * @throws Error when called outside the test runtime.
+ *
+ * @internal
  */
 export function setWebhookDnsLookupForTests(lookup: WebhookDnsLookup | null): void {
   if (!isTestRuntime()) {

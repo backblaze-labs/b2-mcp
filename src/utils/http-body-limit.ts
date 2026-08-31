@@ -1,10 +1,13 @@
 /**
  * Shared HTTP body cap for MCP POST requests.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * The internet-facing transport is control-plane-only; large object bytes
  * should flow through presigned B2 URLs instead of the MCP server.
  */
+/** Maximum accepted MCP POST body size in bytes. */
 export const MAX_MCP_BODY_BYTES = 1 * 1024 * 1024;
 
 /**

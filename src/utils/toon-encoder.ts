@@ -1,3 +1,8 @@
+/**
+ * Repository-owned TOON encoder for compact structured MCP output.
+ *
+ * @packageDocumentation
+ */
 import type { JsonCompatible } from "./result-serializer.js";
 
 /**

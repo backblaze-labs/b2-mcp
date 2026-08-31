@@ -1,3 +1,8 @@
+/**
+ * POSIX secure append-only file writer for durable secret ledgers.
+ *
+ * @packageDocumentation
+ */
 import { closeSync, constants, fchmodSync, fstatSync, openSync } from "node:fs";
 import { isAbsolute } from "node:path";
 

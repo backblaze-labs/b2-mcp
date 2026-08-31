@@ -1,6 +1,8 @@
 /**
  * OAuth 2.0 resource-server helpers for hosted MCP deployments.
  *
+ * @packageDocumentation
+ *
  * @remarks
  * HTTP deployments can protect the MCP endpoint with bearer tokens while B2
  * credentials remain server-side or principal-scoped. This module loads OAuth
@@ -1000,6 +1002,8 @@ function rememberAuthInfo(
  * @remarks
  * This is exported for deterministic tests that need to isolate token cache,
  * JWKS cache, unknown-key cooldown, and dependency-circuit behavior.
+ *
+ * @internal
  */
 export function resetOAuthVerifierCacheForTests(): void {
   introspectionCache.clear();
