@@ -309,7 +309,7 @@ credential-free evidence. External clients are advisory evidence until they
 prove deterministic enough for CI.
 
 Manual Inspector compatibility is pinned by the repository wrapper to
-`@modelcontextprotocol/inspector@2.3.0`. That Inspector release requires
+`@modelcontextprotocol/inspector@2.4.0`. That Inspector release requires
 Node.js 22.19.0 or newer, so it is supplemental evidence for the patched Node
 22 LTS development/runtime pin. Install project dependencies, build from a
 non-serving checkout, then run the locked Inspector CLI through the wrapper:

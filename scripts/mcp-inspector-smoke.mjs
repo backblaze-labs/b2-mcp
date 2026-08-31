@@ -15,7 +15,7 @@ const scriptPath = fileURLToPath(import.meta.url);
 const NETWORK_GUARD_SCRIPT = "scripts/no-network-guard.mjs";
 
 export const INSPECTOR_PACKAGE = "@modelcontextprotocol/inspector";
-export const INSPECTOR_VERSION = "2.3.0";
+export const INSPECTOR_VERSION = "2.4.0";
 
 export function createInspectorEnv({ sourceEnv = process.env, homeDir } = {}) {
   if (!homeDir) throw new Error("homeDir is required for isolated Inspector smoke");
