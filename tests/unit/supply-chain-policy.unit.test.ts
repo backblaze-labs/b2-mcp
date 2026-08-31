@@ -759,8 +759,9 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).toContain('--tag "$npm_tag"');
   });
 
-  it("exact-pins executable doc lint tooling", () => {
+  it("exact-pins doc lint tooling", () => {
     for (const name of [
+      "@microsoft/tsdoc-config",
       "eslint",
       "eslint-plugin-jsdoc",
       "eslint-plugin-tsdoc",

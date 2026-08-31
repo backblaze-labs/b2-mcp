@@ -220,6 +220,7 @@ describe("CI workflow policy", () => {
     const crossPlatformAggregateJob = workflowJob("cross-platform-minimum");
 
     expect(docsJob).toContain("pnpm run lint:docs");
+    expect(docsJob).not.toContain("pnpm run lint:tsdoc");
     expect(docsJob).toContain("pnpm run spell");
     expect(docsJob).toContain("pnpm run lint:links");
     expect(coverageJob).toContain("node-version: [22.23.1, 24, 26]");

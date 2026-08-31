@@ -164,6 +164,7 @@ describe("doc lint runner", () => {
 
     expect(pkg.scripts["lint:docs"]).toBe("node scripts/run-doc-lint.mjs");
     expect(pkg.scripts["lint:docs:fix"]).toBe("node scripts/run-doc-lint.mjs --fix");
+    expect(pkg.scripts["lint:tsdoc"]).toBe("node scripts/run-doc-lint.mjs --tsdoc-only");
     expect(pkg.scripts["lint:links"]).toBe("node scripts/check-doc-links.mjs");
   });
 
@@ -181,10 +182,32 @@ describe("doc lint runner", () => {
     expect(docConfig).toBeDefined();
     expect(docConfig?.languageOptions?.parser).toBe(tseslint.parser);
     expect(Object.keys(docConfig?.plugins ?? {}).sort()).toEqual(["jsdoc", "tsdoc"]);
+    expect(docConfig?.rules?.["tsdoc/syntax"]).toBe("error");
     expect(
       Object.keys(docConfig?.rules ?? {}).some((ruleName) =>
         ruleName.startsWith("@typescript-eslint/"),
       ),
     ).toBe(false);
+  });
+
+  it("supports a TSDoc-only mode for the focused local script", () => {
+    const configPath = join(root, "eslint.config.js");
+    const previous = process.env.DOC_LINT_TSDOC_ONLY;
+    process.env.DOC_LINT_TSDOC_ONLY = "1";
+    delete nodeRequire.cache[nodeRequire.resolve(configPath)];
+
+    try {
+      const config = nodeRequire(configPath) as Array<{
+        files?: string[];
+        rules?: Record<string, unknown>;
+      }>;
+      const docConfig = config.find((entry) => entry.files?.includes("src/**/*.ts"));
+
+      expect(docConfig?.rules).toEqual({ "tsdoc/syntax": "error" });
+    } finally {
+      if (previous === undefined) delete process.env.DOC_LINT_TSDOC_ONLY;
+      else process.env.DOC_LINT_TSDOC_ONLY = previous;
+      delete nodeRequire.cache[nodeRequire.resolve(configPath)];
+    }
   });
 });
