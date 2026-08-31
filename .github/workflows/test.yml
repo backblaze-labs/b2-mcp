@@ -90,6 +90,7 @@ jobs:
           node-version: 22.23.1
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint:tsdoc
       - run: pnpm run lint:docs
       - run: pnpm run spell
       - run: pnpm run lint:links

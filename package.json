@@ -88,6 +88,7 @@
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",
     "lint": "node scripts/run-biome.mjs lint src tests scripts evals test-support",
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts evals test-support --write",
+    "lint:tsdoc": "eslint \"src/**/*.ts\"",
     "lint:docs": "node scripts/run-doc-lint.mjs",
     "lint:docs:fix": "node scripts/run-doc-lint.mjs --fix",
     "lint:links": "node scripts/check-doc-links.mjs",
@@ -119,6 +120,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
+    "@microsoft/tsdoc-config": "0.18.1",
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/inspector": "2.4.0",
     "@modelcontextprotocol/node": "2.0.0",
