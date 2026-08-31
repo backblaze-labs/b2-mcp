@@ -22,6 +22,18 @@ concurrency:
   group: npm-publish-${{ github.repository }}
   cancel-in-progress: false
 
+env:
+  MCP_PUBLISHER_BINARY_SHA256: 5e39fe8b6fc3c8b01bed6f1de364b88e9dd10ccbef6d3d3b1a0caa46115bf869
+  MCP_PUBLISHER_CERTIFICATE_IDENTITY: https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/v1.8.1
+  MCP_PUBLISHER_GITHUB_REF: refs/tags/v1.8.1
+  MCP_PUBLISHER_GITHUB_REPOSITORY: modelcontextprotocol/registry
+  MCP_PUBLISHER_GITHUB_SHA: f52dc8525a441a3abf5fedc9912152d95af5aab1
+  MCP_PUBLISHER_GITHUB_WORKFLOW_NAME: Release
+  MCP_PUBLISHER_GITHUB_WORKFLOW_TRIGGER: release
+  MCP_PUBLISHER_OIDC_ISSUER: https://token.actions.githubusercontent.com
+  MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+  MCP_PUBLISHER_VERSION: v1.8.1
+
 jobs:
   prepare:
     if: github.repository == 'backblaze-labs/b2-mcp' && github.event.workflow_run.conclusion == 'success'
@@ -290,10 +302,15 @@ jobs:
           set -euo pipefail
           mkdir -p publish-package/release-tools/lib
           cp \
+            scripts/mcp-registry-publish.mjs \
             scripts/npm-publish-metadata.mjs \
+            scripts/verify-mcp-registry-manifest.mjs \
             scripts/verify-npm-registry-metadata.mjs \
             publish-package/release-tools/
-          cp scripts/lib/release-utils.mjs publish-package/release-tools/lib/
+          cp \
+            scripts/lib/mcp-registry-manifest.mjs \
+            scripts/lib/release-utils.mjs \
+            publish-package/release-tools/lib/
       - name: Stage MCP registry manifest
         env:
           ACTIONS_CACHE_URL: ""
@@ -332,8 +349,114 @@ jobs:
       LIVE_B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
       LIVE_B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
 
+  mcp-registry-preflight:
+    name: MCP registry preflight
+    needs: prepare
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: npm-package
+          path: publish-package
+      # Node 24.19.0 bundles the fetch/AbortController runtime used by release helpers.
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Extract staged package for registry preflight
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+          EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
+          EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
+        run: |
+          set -euo pipefail
+          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
+          if [[ ! -f "$tarball" ]]; then
+            echo "::error::Expected publish tarball ${tarball} is missing"
+            exit 1
+          fi
+          actual_sha="$(sha256sum "$tarball" | awk '{print $1}')"
+          if [[ "$actual_sha" != "$EXPECTED_TARBALL_SHA256" ]]; then
+            echo "::error::Publish tarball SHA-256 mismatch"
+            exit 1
+          fi
+          rm -rf publish-package/staged
+          mkdir -p publish-package/staged
+          tar -xzf "$tarball" -C publish-package/staged
+      - name: Verify MCP registry manifest metadata
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+          PUBLISH_TAG: ${{ needs.prepare.outputs.publish-tag }}
+        run: |
+          set -euo pipefail
+          version="${PUBLISH_TAG#refs/tags/}"
+          version="${version#v}"
+          node publish-package/release-tools/verify-mcp-registry-manifest.mjs \
+            --server-json publish-package/server.json \
+            --package-json publish-package/staged/package/package.json \
+            --version "${version}"
+      # sigstore/cosign-installer v4.1.2, reviewed 2026-08-27.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      # mcp-publisher v1.8.1, reviewed 2026-08-31.
+      - name: Download and verify mcp-publisher
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: |
+          set -euo pipefail
+          curl --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 10 --max-time 60 \
+            -fsSLo mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          curl --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 10 --max-time 60 \
+            -fsSLo mcp-publisher.tar.gz.sigstore.json \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz.sigstore.json"
+          printf '%s  mcp-publisher.tar.gz\n' "${MCP_PUBLISHER_SHA256}" | sha256sum -c -
+          cosign verify-blob \
+            --bundle mcp-publisher.tar.gz.sigstore.json \
+            --certificate-identity "${MCP_PUBLISHER_CERTIFICATE_IDENTITY}" \
+            --certificate-oidc-issuer "${MCP_PUBLISHER_OIDC_ISSUER}" \
+            --certificate-github-workflow-repository "${MCP_PUBLISHER_GITHUB_REPOSITORY}" \
+            --certificate-github-workflow-ref "${MCP_PUBLISHER_GITHUB_REF}" \
+            --certificate-github-workflow-sha "${MCP_PUBLISHER_GITHUB_SHA}" \
+            --certificate-github-workflow-name "${MCP_PUBLISHER_GITHUB_WORKFLOW_NAME}" \
+            --certificate-github-workflow-trigger "${MCP_PUBLISHER_GITHUB_WORKFLOW_TRIGGER}" \
+            mcp-publisher.tar.gz
+          mkdir -p mcp-publisher-bin
+          tar -xzf mcp-publisher.tar.gz -C mcp-publisher-bin mcp-publisher
+          printf '%s  mcp-publisher-bin/mcp-publisher\n' "${MCP_PUBLISHER_BINARY_SHA256}" | sha256sum -c -
+          chmod +x mcp-publisher-bin/mcp-publisher
+      - name: Validate MCP registry manifest
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: mcp-publisher-bin/mcp-publisher validate publish-package/server.json
+      # actions/upload-artifact v7, reviewed 2026-08-25.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-publisher
+          path: mcp-publisher-bin/mcp-publisher
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
-    needs: [prepare, live-contract]
+    needs: [prepare, live-contract, mcp-registry-preflight]
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -347,6 +470,11 @@ jobs:
         with:
           name: npm-package
           path: publish-package
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: mcp-publisher
+          path: mcp-publisher-bin
       # Node 24.19.0 bundles npm >=11.5.1, required for npm trusted publishing.
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -483,7 +611,7 @@ jobs:
             --tag "$npm_tag"
           node publish-package/release-tools/verify-npm-registry-metadata.mjs \
             "${metadata_verify_args[@]}"
-      - name: Verify MCP registry manifest metadata
+      - name: Publish MCP registry entry
         env:
           ACTIONS_CACHE_URL: ""
           ACTIONS_RESULTS_URL: ""
@@ -492,100 +620,15 @@ jobs:
           PUBLISH_TAG: ${{ needs.prepare.outputs.publish-tag }}
         run: |
           set -euo pipefail
-          if [[ -z "${PUBLISH_TAG:-}" ]]; then
-            echo "::error::Missing release tag for MCP registry manifest"
-            exit 1
-          fi
+          printf '%s  mcp-publisher-bin/mcp-publisher\n' "${MCP_PUBLISHER_BINARY_SHA256}" | sha256sum -c -
+          chmod +x mcp-publisher-bin/mcp-publisher
           version="${PUBLISH_TAG#refs/tags/}"
           version="${version#v}"
-          if [[ -z "${version}" ]]; then
-            echo "::error::Could not resolve release version for MCP registry manifest"
-            exit 1
-          fi
-          PUBLISH_VERSION="${version}" node <<'NODE'
-          const fs = require("node:fs");
-          const manifestPath = "publish-package/server.json";
-          const version = process.env.PUBLISH_VERSION;
-          if (!version) {
-            throw new Error("PUBLISH_VERSION is required");
-          }
-          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-          const packageJson = JSON.parse(
-            fs.readFileSync("publish-package/staged/package/package.json", "utf8"),
-          );
-          const manifestPackage = (manifest.packages ?? []).find(
-            (pkg) => pkg.registryType === "npm" && pkg.identifier === "@backblaze-labs/b2-mcp",
-          );
-          if (!manifestPackage) {
-            throw new Error("server.json is missing the @backblaze-labs/b2-mcp npm package");
-          }
-          if (packageJson.version !== version) {
-            throw new Error(`package.json version ${packageJson.version} does not match ${version}`);
-          }
-          if (packageJson.mcpName !== manifest.name) {
-            throw new Error(`package.json mcpName ${packageJson.mcpName} does not match ${manifest.name}`);
-          }
-          if (manifest.version !== version) {
-            throw new Error(`server.json version ${manifest.version} does not match ${version}`);
-          }
-          if (manifestPackage.version !== version) {
-            throw new Error(`server.json package version ${manifestPackage.version} does not match ${version}`);
-          }
-          NODE
-      # mcp-publisher v1.8.1, reviewed 2026-08-31.
-      - name: Install mcp-publisher
-        env:
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_RUNTIME_URL: ""
-          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
-          MCP_PUBLISHER_VERSION: v1.8.1
-        run: |
-          set -euo pipefail
-          curl -fsSLo mcp-publisher.tar.gz \
-            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
-          printf '%s  mcp-publisher.tar.gz\n' "${MCP_PUBLISHER_SHA256}" | sha256sum -c -
-          tar -xzf mcp-publisher.tar.gz mcp-publisher
-      - name: Validate MCP registry manifest
-        env:
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_RUNTIME_URL: ""
-        run: ./mcp-publisher validate publish-package/server.json
-      - name: Authenticate to MCP Registry
-        env:
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_RUNTIME_URL: ""
-        run: ./mcp-publisher login github-oidc
-      - name: Publish MCP registry entry
-        env:
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_RUNTIME_URL: ""
-        run: |
-          set -euo pipefail
-          manifest="publish-package/server.json"
-          server_name="$(node -e 'const fs = require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).name);' "$manifest")"
-          server_version="$(node -e 'const fs = require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version);' "$manifest")"
-          encoded_name="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]));' "$server_name")"
-          encoded_version="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]));' "$server_version")"
-          lookup_url="https://registry.modelcontextprotocol.io/v0/servers/${encoded_name}/versions/${encoded_version}"
-          http_status="$(curl -sS -o /tmp/mcp-registry-version.json -w '%{http_code}' "$lookup_url" || true)"
-          if [[ "$http_status" == "200" ]]; then
-            echo "::notice::${server_name}@${server_version} already exists in the MCP Registry; treating as idempotent success"
-            exit 0
-          fi
-          if [[ "$http_status" != "404" ]]; then
-            echo "::error::Unexpected MCP Registry lookup status: ${http_status}"
-            cat /tmp/mcp-registry-version.json || true
-            exit 1
-          fi
-          ./mcp-publisher publish "$manifest"
+          node publish-package/release-tools/mcp-registry-publish.mjs \
+            --server-json publish-package/server.json \
+            --publisher ./mcp-publisher-bin/mcp-publisher \
+            --version "${version}" \
+            --skip-prerelease
 
   container-image:
     needs: [prepare, publish]

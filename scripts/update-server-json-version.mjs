@@ -2,9 +2,13 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { assert, releaseRoot } from "./lib/release-utils.mjs";
-
-const canonicalServerName = "io.github.backblaze-labs/b2-mcp";
+import { assertMcpRegistryManifestContract } from "./lib/mcp-registry-manifest.mjs";
+import {
+  assert,
+  canonicalMcpName,
+  canonicalPackageName,
+  releaseRoot,
+} from "./lib/release-utils.mjs";
 
 function readJson(root, relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
@@ -15,12 +19,9 @@ export function updateServerJsonVersion(root) {
   const serverJsonPath = path.join(root, "server.json");
   const serverJson = readJson(root, "server.json");
 
-  assert(
-    packageJson.name === "@backblaze-labs/b2-mcp",
-    `unexpected package name ${packageJson.name}`,
-  );
-  assert(packageJson.mcpName === canonicalServerName, "package.json mcpName is not canonical");
-  assert(serverJson.name === canonicalServerName, "server.json name is not canonical");
+  assert(packageJson.name === canonicalPackageName, `unexpected package name ${packageJson.name}`);
+  assert(packageJson.mcpName === canonicalMcpName, "package.json mcpName is not canonical");
+  assert(serverJson.name === canonicalMcpName, "server.json name is not canonical");
 
   serverJson.version = packageJson.version;
   let packageUpdated = false;
@@ -31,6 +32,7 @@ export function updateServerJsonVersion(root) {
     }
   }
   assert(packageUpdated, `server.json is missing npm package ${packageJson.name}`);
+  assertMcpRegistryManifestContract(serverJson, { expectedVersion: packageJson.version });
 
   writeFileSync(serverJsonPath, `${JSON.stringify(serverJson, null, 2)}\n`);
   return { name: serverJson.name, version: serverJson.version };
