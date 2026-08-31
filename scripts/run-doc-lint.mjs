@@ -11,6 +11,9 @@ const { buildDocLintEnv, checkoutCredentialFindings } = require("./lib/doc-lint-
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const eslintEntrypoint = join(root, "node_modules", "eslint", "bin", "eslint.js");
 const lockdownEntrypoint = join(root, "scripts", "doc-lint-lockdown.mjs");
+const requestedArgs = process.argv.slice(2);
+const tsdocOnly = requestedArgs.includes("--tsdoc-only");
+const forwardedArgs = requestedArgs.filter((arg) => arg !== "--tsdoc-only");
 
 if (!existsSync(eslintEntrypoint)) {
   console.error(
@@ -26,13 +29,16 @@ if (checkoutFindings.length) {
   process.exit(1);
 }
 
+const docLintEnv = buildDocLintEnv({ lockdownPath: lockdownEntrypoint });
+if (tsdocOnly) docLintEnv.DOC_LINT_TSDOC_ONLY = "1";
+
 const result = spawnSync(
   process.execPath,
-  [eslintEntrypoint, "src", "--no-warn-ignored", ...process.argv.slice(2)],
+  [eslintEntrypoint, "src", "--no-warn-ignored", ...forwardedArgs],
   {
     cwd: root,
     stdio: "inherit",
-    env: buildDocLintEnv({ lockdownPath: lockdownEntrypoint }),
+    env: docLintEnv,
   },
 );
 

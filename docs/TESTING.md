@@ -31,6 +31,7 @@ The individual deterministic layers are:
 | `pnpm test`              | Typecheck, then `pnpm run test:unit`.                                                |
 | `pnpm run lint`          | Biome lint for source, test, and script code.                                        |
 | `pnpm run lint:docs`     | TSDoc/JSDoc doc-comment syntax and hygiene gate for non-test `src/**/*.ts` files.    |
+| `pnpm run lint:tsdoc`    | TSDoc-only syntax diagnostic through the same locked-down wrapper as `lint:docs`.     |
 | `pnpm run lint:links`    | Deterministic local Markdown link validation for repository docs.                    |
 | `pnpm run test:unit`     | Fast source unit tests.                                                              |
 | `pnpm run test:contract` | Deterministic MCP/package/schema/document/workflow contracts.                        |

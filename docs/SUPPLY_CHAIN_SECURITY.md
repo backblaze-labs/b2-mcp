@@ -17,10 +17,15 @@ toolchain:
 - `keyv@4.5.4`
 
 Biome remains the owner for code linting and formatting. ESLint is present only
-for `pnpm run lint:docs`, where it validates TSDoc syntax and JSDoc hygiene for
-the exported TypeScript tool/handler surface that Biome cannot validate. The
-direct doc-lint packages are exact-pinned in `package.json`; the lockfile
-snapshot above remains unchanged after reintroducing that narrow ESLint path.
+for doc-comment scripts: `pnpm run lint:docs` validates TSDoc syntax and JSDoc
+hygiene for the exported TypeScript tool/handler surface that Biome cannot
+validate, while `pnpm run lint:tsdoc` is a TSDoc-only local diagnostic through
+the same wrapper. The CI and `verify` gates stay on `lint:docs` so there is one
+canonical doc-comment lint path. The direct doc-lint packages are exact-pinned
+in `package.json`; `@microsoft/tsdoc-config` is pinned directly to make the
+configuration reader version explicit, even though `eslint-plugin-tsdoc`
+already depends on the same version transitively. The lockfile snapshot above
+remains unchanged after reintroducing that narrow ESLint path.
 Reviewer-owned dependency overrides live only in
 [`../pnpm-workspace.yaml`](../pnpm-workspace.yaml), where the current entries
 pin reviewed transitive fixes for packages including `@hono/node-server`,
@@ -37,7 +42,7 @@ The current lockfile and publish packlist are checked by:
 pnpm run audit:supply-chain:denylist --packlist
 ```
 
-`pnpm run lint:docs` uses the repository-owned
+`pnpm run lint:docs` and `pnpm run lint:tsdoc` use the repository-owned
 [`../scripts/run-doc-lint.mjs`](../scripts/run-doc-lint.mjs) wrapper rather than
 executing the ESLint binary directly. The wrapper strips secret-like environment
 variables, refuses local checkout credentials such as persisted GitHub

@@ -88,7 +88,7 @@
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",
     "lint": "node scripts/run-biome.mjs lint src tests scripts evals test-support",
     "lint:fix": "node scripts/run-biome.mjs lint src tests scripts evals test-support --write",
-    "lint:tsdoc": "eslint \"src/**/*.ts\"",
+    "lint:tsdoc": "node scripts/run-doc-lint.mjs --tsdoc-only",
     "lint:docs": "node scripts/run-doc-lint.mjs",
     "lint:docs:fix": "node scripts/run-doc-lint.mjs --fix",
     "lint:links": "node scripts/check-doc-links.mjs",
