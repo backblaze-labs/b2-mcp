@@ -97,12 +97,29 @@ const DETECTORS: Record<string, Detector> = {
     "replace persistent bucket event notification webhook rules",
 };
 
+/** Stable list of tool names covered by the destructive-operation gate. */
 export const DESTRUCTIVE_TOOL_NAMES = Object.keys(DETECTORS).sort();
 
+/**
+ * Return whether a tool has any destructive-operation detector.
+ *
+ * @param toolName - MCP tool name.
+ *
+ * @returns `true` when the tool may require destructive confirmation.
+ */
 export function isDestructiveTool(toolName: string): boolean {
   return toolName in DETECTORS;
 }
 
+/**
+ * Describe the destructive effect of a concrete tool call.
+ *
+ * @param toolName - MCP tool name.
+ * @param args - Tool arguments to inspect.
+ *
+ * @returns Human-readable destructive effect, or `null` when this specific
+ * argument set is not destructive.
+ */
 export function destructiveEffect(
   toolName: string,
   args: Record<string, unknown> = {},
@@ -122,6 +139,21 @@ const destructiveConsentStorage = new AsyncLocalStorage<DestructiveConsent | und
 // (toolName, argsDigest) through that call stack, avoiding signature churn
 // across every handler. The digest is bound to the exact approved target args,
 // so the gate does not depend on human-readable effect prose.
+/**
+ * Run a callback with wrapper-validated destructive elicitation consent.
+ *
+ * @remarks
+ * The consent is scoped to the exact tool name and canonical target-argument
+ * digest. The inner handler still calls {@link checkDestructive}; this context
+ * simply tells the gate that human approval was already validated by the shared
+ * wrapper.
+ *
+ * @param toolName - MCP tool name approved by elicitation.
+ * @param argsDigest - Canonical digest of the approved destructive target.
+ * @param callback - Work to execute with consent installed.
+ *
+ * @returns The callback result.
+ */
 export function runWithDestructiveElicitationConsent<T>(
   toolName: string,
   argsDigest: string,
@@ -135,6 +167,14 @@ function hasDestructiveElicitationConsent(toolName: string, argsDigest: string):
   return consent?.toolName === toolName && consent.argsDigest === argsDigest;
 }
 
+/**
+ * Compute the credential-bound digest for destructive target arguments.
+ *
+ * @param config - B2 configuration supplying credential-bound HMAC material.
+ * @param args - Tool arguments to bind, excluding the legacy `confirm` flag.
+ *
+ * @returns Base64url HMAC digest used to match elicitation consent.
+ */
 export function destructiveTargetDigest(config: B2Config, args: Record<string, unknown>): string {
   return createHmac("sha256", destructiveGateKey(config))
     .update("b2-mcp-destructive-target-args\0")
@@ -167,11 +207,19 @@ function canonicalJson(value: unknown): string {
   return `{${entries.join(",")}}`;
 }
 
+/**
+ * Resolve the effective destructive-operation policy.
+ *
+ * @param config - B2 runtime configuration.
+ *
+ * @returns `allow`, `block`, or the default `confirm`.
+ */
 export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   const p = config.destructivePolicy;
   return p === "allow" || p === "block" ? p : "confirm";
 }
 
+/** Result returned by {@link checkDestructive}. */
 export type GateResult = { ok: true } | { ok: false; error: B2ApiError };
 
 /**
@@ -182,6 +230,10 @@ export type GateResult = { ok: true } | { ok: false; error: B2ApiError };
  * model-provided `confirm: true` fallback, or by the audited tool wrapper
  * installing elicitation consent after validating server-minted requestState.
  * New handlers should keep calling this function normally.
+ *
+ * @param toolName - MCP tool name being invoked.
+ * @param args - Tool arguments for this invocation.
+ * @param config - Server configuration containing destructive policy.
  *
  * @returns The gate decision for the requested tool call.
  */

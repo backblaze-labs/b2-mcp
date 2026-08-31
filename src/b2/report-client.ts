@@ -1,3 +1,14 @@
+/**
+ * Bounded B2 usage-report object reader.
+ *
+ * @remarks
+ * Storage insight tools read report CSVs from the reserved reports bucket
+ * through this interface. The implementation uses the S3-compatible data plane,
+ * request deadlines, abort propagation, and byte caps so report reads cannot
+ * become unbounded object transfers through the MCP server.
+ *
+ */
+
 import type { B2S3PeerClient } from "../s3/aws-sdk-adapter.js";
 import type { ReadableStreamDefaultReader } from "node:stream/web";
 import { B2AuthManager } from "../auth.js";
@@ -6,22 +17,26 @@ import { createReportS3Client } from "../s3/client.js";
 import { withReportCircuit } from "../utils/circuit-breaker.js";
 import { abortError, timeoutError } from "../utils/named-error.js";
 
+/** Page of report object keys from a reports bucket. */
 export interface ReportObjectPage {
   keys: string[];
   isTruncated: boolean;
   nextContinuationToken?: string;
 }
 
+/** Downloaded report object text and truncation metadata. */
 export interface ReportObjectText {
   text: string;
   bytes: number;
   truncated: boolean;
 }
 
+/** Shared request options for bounded report reads. */
 export interface ReportRequestOptions {
   timeoutMs?: number;
 }
 
+/** Options for listing report object keys. */
 export interface ListReportObjectKeysOptions extends ReportRequestOptions {
   prefix?: string;
   startAfter?: string;
@@ -29,15 +44,19 @@ export interface ListReportObjectKeysOptions extends ReportRequestOptions {
   maxKeys?: number;
 }
 
+/** Options for downloading report object text. */
 export interface DownloadReportObjectTextOptions extends ReportRequestOptions {
   maxBytes?: number;
 }
 
+/** Interface consumed by insight helpers that read report objects. */
 export interface ReportObjectClient {
+  /** List report object keys from a reports bucket. */
   listReportObjectKeys(
     bucketName: string,
     options?: ListReportObjectKeysOptions,
   ): Promise<ReportObjectPage>;
+  /** Download report object text with byte and time bounds. */
   downloadReportObjectText(
     bucketName: string,
     key: string,
@@ -263,11 +282,31 @@ async function withReportDeadline<T>(
   }
 }
 
+/**
+ * S3-backed report client used by storage-activity insight tools.
+ *
+ * @remarks
+ * The client lazily creates a report-specific S3 peer after B2 authorization
+ * reveals the account's S3 endpoint, then reuses it until `destroy()` is called.
+ */
 export class B2ReportClient implements ReportObjectClient {
   private s3Client: B2S3PeerClient | null = null;
 
+  /**
+   * Create a report client.
+   *
+   * @param auth - B2 auth manager used to resolve reports-bucket credentials.
+   */
   constructor(private readonly auth: B2AuthManager) {}
 
+  /**
+   * List report object keys from a reports bucket.
+   *
+   * @param bucketName - Reports bucket name.
+   * @param options - Listing and timeout options.
+   *
+   * @returns Page of report object keys.
+   */
   async listReportObjectKeys(
     bucketName: string,
     options: ListReportObjectKeysOptions = {},
@@ -286,6 +325,15 @@ export class B2ReportClient implements ReportObjectClient {
     );
   }
 
+  /**
+   * Download report object text with byte and time bounds.
+   *
+   * @param bucketName - Reports bucket name.
+   * @param key - Report object key.
+   * @param options - Download limits and timeout options.
+   *
+   * @returns Downloaded text and truncation metadata.
+   */
   async downloadReportObjectText(
     bucketName: string,
     key: string,
@@ -300,6 +348,7 @@ export class B2ReportClient implements ReportObjectClient {
     );
   }
 
+  /** Release the lazily created S3 client, if any. */
   destroy(): void {
     this.s3Client?.destroy();
     this.s3Client = null;

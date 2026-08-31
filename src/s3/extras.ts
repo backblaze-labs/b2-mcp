@@ -3,13 +3,22 @@ import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";
 
-type B2S3ExtraClient = Pick<B2S3PeerClient, "getBucketLocation">;
+/** S3 facade subset required by extra S3 compatibility tools. */
+export type B2S3ExtraClient = Pick<B2S3PeerClient, "getBucketLocation">;
 
 /**
  * Minimal S3-compatible "extras". Trimmed to the one tool with no native
  * equivalent: s3_get_bucket_location (region / location-constraint probe used by
  * the bucket/S3-compatibility validator skill). Everything else here duplicated
  * native b2_* tools and was removed.
+ *
+ * @param server - Tool registrar receiving S3 extra tools.
+ * @param s3 - Repository-owned S3-compatible client facade.
+ *
+ * @example
+ * ```ts
+ * registerS3ExtraTools(registrar, s3Client);
+ * ```
  */
 export function registerS3ExtraTools(server: ToolRegistrar, s3: B2S3ExtraClient): void {
   server.registerTool(

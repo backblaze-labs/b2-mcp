@@ -54,6 +54,10 @@ function realTargetForWrite(resolved: string): string {
  *   existing ancestor must both be inside the root, so symlinked ancestors
  *   can't redirect the write outside.
  *
+ * @param config - Runtime filesystem policy from server configuration.
+ * @param userPath - Caller-supplied path to validate.
+ * @param mode - Whether the caller intends to read or write the path.
+ *
  * @returns The safe absolute path to use for the requested access.
  *
  * @throws FileAccessError when local file access is disabled or outside policy.

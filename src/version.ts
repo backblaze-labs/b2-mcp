@@ -6,17 +6,20 @@ const PACKAGE_NAME = "@backblaze-labs/b2-mcp";
 const RELEASE_MARKER_FILE = "release-version.json";
 const STABLE_SEMVER = /^\d+\.\d+\.\d+$/;
 
+/** Build channel inferred from package metadata and release marker files. */
 export type ReleaseChannel = "published" | "dev";
 
 type JsonRecord = Record<string, unknown>;
 
-type VersionResolution = {
+/** Resolved package version and channel metadata. */
+export type VersionResolution = {
   version: string;
   releaseChannel: ReleaseChannel;
   isPublishedRelease: boolean;
 };
 
-type VersionResolutionOptions = {
+/** Inputs used to resolve the runtime build version. */
+export type VersionResolutionOptions = {
   packageRoot?: string;
   runtimeDir?: string;
 };
@@ -40,6 +43,13 @@ function defaultRuntimeDir(): string {
   return typeof __dirname === "string" ? __dirname : ".";
 }
 
+/**
+ * Resolve package version metadata for the current runtime location.
+ *
+ * @param options - Optional package/runtime directory overrides for tests.
+ *
+ * @returns Version, channel, and published-release flag.
+ */
 export function resolveBuildVersion(options: VersionResolutionOptions = {}): VersionResolution {
   const runtimeDir = options.runtimeDir ?? defaultRuntimeDir();
   const packageRoot = options.packageRoot ?? join(runtimeDir, "..");
@@ -63,10 +73,18 @@ export function resolveBuildVersion(options: VersionResolutionOptions = {}): Ver
 
 const resolution = resolveBuildVersion();
 
+/** Numeric package version used for MCP handshakes and CLI output. */
 export const VERSION = resolution.version;
+/** Runtime build channel used by User-Agent construction. */
 export const RELEASE_CHANNEL = resolution.releaseChannel;
+/** Whether this runtime was stamped by the release process. */
 export const isPublishedRelease = resolution.isPublishedRelease;
 
+/**
+ * Resolve the version component used in outbound product tokens.
+ *
+ * @returns Published semver on releases, otherwise `dev`.
+ */
 export function productVersion(): string {
   if (isPublishedRelease) return VERSION;
   return "dev";

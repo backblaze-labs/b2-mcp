@@ -110,6 +110,25 @@ function normalizeCreateKeyBucketScope(args: { bucketId?: string; bucketIds?: st
   return {};
 }
 
+/**
+ * Register B2 application-key management tools.
+ *
+ * @remarks
+ * Key creation can produce durable one-time credential material. Real create
+ * handlers are registered only when an inline or file secret sink is active;
+ * otherwise `createServer` installs compatibility stubs. Key deletion and key
+ * creation both pass through the destructive gate.
+ *
+ * @param server - Tool registrar receiving key tools.
+ * @param client - Repository-owned B2 native client.
+ * @param auth - Auth manager used for account-scoped key requests.
+ * @param config - Server configuration for secret-sink and destructive policy.
+ *
+ * @example
+ * ```ts
+ * registerKeyTools(registrar, b2Client, auth, config);
+ * ```
+ */
 export function registerKeyTools(
   server: ToolRegistrar,
   client: B2Client,

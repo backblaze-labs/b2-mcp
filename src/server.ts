@@ -1,3 +1,15 @@
+/**
+ * Core server assembly for the Backblaze B2 MCP tool surface.
+ *
+ * @remarks
+ * This module is the architecture hub for stdio and HTTP transports. It loads
+ * B2 credentials, discovers B2 key capabilities, creates native and S3 data
+ * plane clients, registers all tool families, and wraps tool callbacks with
+ * auditing, result serialization, secret sanitization, request abort handling,
+ * and destructive-operation elicitation.
+ *
+ */
+
 import {
   createMcpServer,
   getMcpClientCapabilities,
@@ -67,16 +79,29 @@ import { isDestructiveTool } from "./utils/destructive-gate.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
   "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.";
+/** Opening instruction shown to MCP clients during server discovery. */
 export const SERVER_INSTRUCTION_OPENING = "Backblaze B2 operational flow.";
+/** Credential-safety instruction embedded in the MCP server instructions. */
 export const SERVER_CREDENTIAL_SAFETY_INSTRUCTION =
   "Never log, print, persist, or echo back application keys or master keys. Treat all credentials as sensitive.";
 
 /**
  * Load and validate configuration from environment variables.
  *
+ * @remarks
+ * This is the stdio bootstrap path. It intentionally exits the process on
+ * invalid credential configuration because stdio hosts expect startup failures
+ * to be reported on stderr instead of returned as MCP tool results.
+ *
  * @returns The validated B2 server configuration.
  *
  * @throws CredentialResolutionError when an unexpected credential resolution error occurs.
+ *
+ * @example
+ * ```ts
+ * const config = loadConfig();
+ * const server = createServer(config, await fetchCapabilities(config));
+ * ```
  */
 export function loadConfig(): B2Config {
   try {
@@ -131,8 +156,16 @@ function registerDurableSecretCompatibilityStubs(
   }
 }
 
-/** Options for {@link createServer}. */
+/**
+ * Optional server-construction controls.
+ *
+ * @remarks
+ * HTTP deployments pass verified OAuth scopes here after authentication. Stdio
+ * callers normally omit this so tool availability is governed only by B2 key
+ * capabilities and local destructive policy.
+ */
 export interface CreateServerOptions {
+  /** Verified MCP/OAuth scopes for the current caller. */
   oauthScopes?: readonly string[];
 }
 
@@ -151,7 +184,19 @@ export interface CreateServerOptions {
  * optional); a single non-master key covers everything else. B2's S3 endpoint
  * rejects master keys, which is why the application key is the primary credential.
  *
+ * @param config - Resolved B2 credentials and runtime policy.
+ * @param capabilities - Capabilities returned by B2 authorize, `null` for the
+ * full-surface operator override, or an empty array to fail closed.
+ * @param options - Optional caller-scoped controls such as verified OAuth scopes.
+ *
  * @returns The configured MCP server instance.
+ *
+ * @example
+ * ```ts
+ * const config = loadConfig();
+ * const capabilities = await fetchCapabilities(config);
+ * const server = createServer(config, capabilities);
+ * ```
  */
 export function createServer(
   config: B2Config,
@@ -358,6 +403,16 @@ interface AuthManagerCacheEntry {
 
 const authManagerCache = new Map<string, AuthManagerCacheEntry>();
 
+/**
+ * Clear cached capability discovery results.
+ *
+ * @remarks
+ * Tests and long-running HTTP deployments use this when credential material or
+ * tenant routing changes. Clearing without a key drops both completed and
+ * in-flight discovery state.
+ *
+ * @param cacheKey - Optional exact capability cache key to clear.
+ */
 export function invalidateCapabilityCache(cacheKey?: string): void {
   if (cacheKey) {
     capabilityCache.delete(cacheKey);
@@ -368,6 +423,16 @@ export function invalidateCapabilityCache(cacheKey?: string): void {
   }
 }
 
+/**
+ * Clear cached B2 auth managers.
+ *
+ * @remarks
+ * Auth managers own B2 authorize state. Clearing this cache forces subsequent
+ * requests to authorize again while preserving the caller-visible MCP server
+ * surface.
+ *
+ * @param cacheKey - Optional exact auth-manager cache key to clear.
+ */
 export function invalidateAuthManagerCache(cacheKey?: string): void {
   if (cacheKey) authManagerCache.delete(cacheKey);
   else authManagerCache.clear();
@@ -387,12 +452,22 @@ function capabilityCacheMaxEntries(): number {
   return Math.max(1, max);
 }
 
+/**
+ * Remove expired capability cache entries.
+ *
+ * @param now - Millisecond timestamp used for deterministic tests.
+ */
 export function sweepCapabilityCache(now = Date.now()): void {
   for (const [key, entry] of capabilityCache) {
     if (entry.expiresAt <= now) capabilityCache.delete(key);
   }
 }
 
+/**
+ * Remove expired auth-manager cache entries.
+ *
+ * @param now - Millisecond timestamp used for deterministic tests.
+ */
 export function sweepAuthManagerCache(now = Date.now()): void {
   for (const [key, entry] of authManagerCache) {
     if (entry.expiresAt <= now) authManagerCache.delete(key);
@@ -441,6 +516,14 @@ function rememberCapabilities(cacheKey: string, capabilities: string[], now: num
   enforceCacheMax(capabilityCache, capabilityCacheMaxEntries(), "b2-capability");
 }
 
+/**
+ * Return the number of cached capability entries.
+ *
+ * @remarks
+ * This is exported for tests that verify cache expiry and tenant isolation.
+ *
+ * @returns Current positive capability-cache entry count.
+ */
 export function capabilityCacheSizeForTests(): number {
   return capabilityCache.size;
 }
@@ -554,6 +637,36 @@ function throwCapabilityResolutionError(
   throw new CredentialResolutionError(details.message, details.status, details.code);
 }
 
+/**
+ * Discover the B2 key capabilities used for capability-aware registration.
+ *
+ * @remarks
+ * The returned capabilities come from `b2_authorize_account` and decide which
+ * tools are even registered for the credential. Setting
+ * `B2_REGISTER_ALL_TOOLS=true` is the explicit operator/test escape hatch and
+ * returns `null`; all other authorization failures are sanitized and thrown so
+ * internet-facing servers fail closed.
+ *
+ * Positive non-empty results are cached briefly by credential fingerprint and
+ * concurrent discoveries for the same key share one in-flight authorize call.
+ *
+ * @param config - B2 credential and runtime configuration.
+ * @param capabilityCacheKey - Optional cache key override for tests or
+ * caller-specific HTTP routing.
+ * @param logKey - Optional non-secret log key override.
+ *
+ * @returns A copy of the discovered capabilities, or `null` when registration
+ * should expose the full tool surface.
+ *
+ * @throws CredentialResolutionError when B2 authorization or capability
+ * discovery fails.
+ *
+ * @example
+ * ```ts
+ * const capabilities = await fetchCapabilities(config);
+ * const server = createServer(config, capabilities);
+ * ```
+ */
 export async function fetchCapabilities(
   config: B2Config,
   capabilityCacheKey?: string,
@@ -600,7 +713,18 @@ export async function fetchCapabilities(
  * success/error. Argument values are not logged to avoid leaking file content,
  * bucket data, or credentials.
  *
+ * @param name - MCP tool name being wrapped.
+ * @param original - Original tool callback registered by a tool module.
+ * @param config - Server configuration used for redaction and policy.
+ * @param contextProviders - Optional MCP protocol/capability providers used by
+ * destructive-operation elicitation.
+ *
  * @returns The wrapped tool callback.
+ *
+ * @example
+ * ```ts
+ * const audited = createAuditedToolCallback("b2_list_buckets", handler, config);
+ * ```
  */
 export function createAuditedToolCallback(
   name: string,

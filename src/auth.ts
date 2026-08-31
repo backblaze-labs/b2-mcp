@@ -20,6 +20,7 @@ import { buildUserAgent } from "./utils/user-agent.js";
 
 const API_TIMEOUT_MS = 30_000;
 
+/** Default retry policy for official B2 SDK calls made by the MCP server. */
 export const SDK_RETRY_OPTIONS: Partial<RetryOptions> = {
   maxRetries: 3,
   initialRetryDelayMs: 1000,
@@ -54,12 +55,14 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
 
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
-interface ManagedSdkClient {
+/** Official B2 SDK client plus optional URL guard owned by the auth manager. */
+export interface ManagedSdkClient {
   client: SdkB2Client;
   urlGuard?: UrlGuard;
 }
 
-type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
+/** Factory hook used by tests to provide a managed B2 SDK client. */
+export type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
 let sdkClientFactoryForTests: SdkClientFactory | null = null;
 
 type DomExceptionConstructor = new (message?: string, name?: string) => Error;
@@ -70,6 +73,13 @@ function sdkAbortException(message: string): Error {
   return ctor ? new ctor(message, "AbortError") : abortError(message);
 }
 
+/**
+ * Override official B2 SDK client construction for tests.
+ *
+ * @param factory - Test SDK client factory, or `null` to restore default construction.
+ *
+ * @throws Error when called outside the test runtime.
+ */
 export function setB2SdkClientFactoryForTests(factory: SdkClientFactory | null): void {
   if (!isTestRuntime()) {
     throw new Error("SDK client factory override is only available in tests.");
@@ -108,6 +118,19 @@ function transportUrlGuard(transport: HttpTransport): UrlGuard | undefined {
   return candidate.urlGuard instanceof UrlGuard ? candidate.urlGuard : undefined;
 }
 
+/**
+ * Create a B2 SDK HTTP transport integrated with MCP request cancellation.
+ *
+ * @remarks
+ * The wrapper injects the current MCP request abort signal, applies the shared
+ * retry budget, and disables SDK replay retries for non-idempotent B2 API
+ * endpoints.
+ *
+ * @param inner - Base B2 SDK HTTP transport.
+ * @param retry - Retry policy to apply.
+ *
+ * @returns B2 SDK HTTP transport suitable for MCP request handling.
+ */
 export function createMcpHttpTransport(
   inner: HttpTransport,
   retry: Partial<RetryOptions> = SDK_RETRY_OPTIONS,
@@ -262,6 +285,14 @@ function defaultSdkClientFactory(config: B2Config): ManagedSdkClient {
   };
 }
 
+/**
+ * Create the default official Partner SDK client.
+ *
+ * @param config - B2 config whose application key fields contain the master key
+ * for Partner API use.
+ *
+ * @returns Configured Partner SDK client.
+ */
 export function createDefaultPartnerClient(config: B2Config): SdkPartnerClient {
   const urlGuard = new UrlGuard();
   return new SdkPartnerClient({
@@ -332,7 +363,14 @@ function flattenAuth(data: AuthorizeAccountResponse): B2AuthResponse {
   };
 }
 
-/** Auth cache around one SDK client for one resolved credential set. */
+/**
+ * Auth cache around one official B2 SDK client for one resolved credential set.
+ *
+ * @remarks
+ * B2 authorization tokens are valid for 24 hours. The manager caches them for
+ * 23 hours, deduplicates concurrent authorize calls, syncs auth refreshed by the
+ * SDK, and invalidates on 401 retry paths in the B2 client boundary.
+ */
 export class B2AuthManager {
   private readonly config: B2Config;
   private readonly sdk: ManagedSdkClient;
@@ -340,11 +378,21 @@ export class B2AuthManager {
   private authTime: number | null = null;
   private inflightAuth: Promise<B2AuthResponse> | null = null;
 
+  /**
+   * Create an auth manager for one credential set.
+   *
+   * @param config - B2 credential and runtime configuration.
+   */
   constructor(config: B2Config) {
     this.config = config;
     this.sdk = (configuredSdkClientFactoryForTests() ?? defaultSdkClientFactory)(config);
   }
 
+  /**
+   * Return the immutable runtime config for this auth manager.
+   *
+   * @returns B2 runtime configuration.
+   */
   getConfig(): B2Config {
     return this.config;
   }
@@ -374,11 +422,24 @@ export class B2AuthManager {
     return raceWithCallerAbort(this.inflightAuth, callerSignal);
   }
 
+  /**
+   * Return the official SDK client with valid authorization metadata.
+   *
+   * @returns Authorized SDK client and flattened auth metadata.
+   */
   async getAuthorizedSdk(): Promise<{ client: SdkB2Client; auth: B2AuthResponse }> {
     const auth = await this.getAuth();
     return { client: this.sdk.client, auth };
   }
 
+  /**
+   * Sync cached auth from the official SDK account-info cache.
+   *
+   * @remarks
+   * The SDK may refresh authorization internally during retry handling. This
+   * method keeps the MCP auth manager's flattened cache and URL guard aligned
+   * with that SDK-owned state.
+   */
   syncCachedAuthFromSdk(): void {
     const data = this.sdk.client.accountInfo.getAuth();
     if (!data) return;

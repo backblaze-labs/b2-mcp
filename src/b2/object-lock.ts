@@ -10,11 +10,22 @@ const CONFIRM_DESC =
 
 /**
  * Object Lock tools for the B2 Native API.
+ *
+ * @remarks
  * Requires the bucket to have Object Lock enabled.
  * Legal holds and retention settings independently protect files from deletion.
  *
  * Removing retention or a legal hold is protection-stripping (the step before a
  * delete), so those calls are routed through the destructive-operation gate.
+ *
+ * @param server - Tool registrar receiving Object Lock tools.
+ * @param client - Repository-owned B2 native client.
+ * @param config - Server configuration used for destructive policy.
+ *
+ * @example
+ * ```ts
+ * registerObjectLockTools(registrar, b2Client, config);
+ * ```
  */
 export function registerObjectLockTools(
   server: ToolRegistrar,

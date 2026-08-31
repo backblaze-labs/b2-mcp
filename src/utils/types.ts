@@ -1,17 +1,20 @@
-// ── Shared Types ─────────────────────────────────────────────────────────────
+/** Shared JSON-safe B2 and MCP runtime types. */
 import type { McpOutputFormat } from "./result-serializer.js";
 
 /** Policy for the destructive-operation gate (see utils/destructive-gate.ts). */
 export type DestructivePolicy = "allow" | "confirm" | "block";
 export type { McpOutputFormat };
 
+/** Durable secret sink mode for one-time credential-producing tools. */
 export type SecretSinkMode = "file" | "inline" | "off";
 
+/** Durable secret sink configuration resolved from environment. */
 export type SecretSinkConfig =
   | { mode: "file"; filePath: string }
   | { mode: "inline" }
   | { mode: "off"; unavailableReason?: string };
 
+/** Resolved server configuration shared by stdio, HTTP, and tool handlers. */
 export interface B2Config {
   /**
    * The application key — the workhorse credential. Used for the B2 native API,
@@ -70,6 +73,7 @@ export interface B2Config {
   callerFingerprint?: string;
 }
 
+/** Normalized response from B2 authorization. */
 export interface B2AuthResponse {
   accountId: string;
   authorizationToken: string;
@@ -87,8 +91,10 @@ export interface B2AuthResponse {
   allowedBuckets?: Array<{ id: string; name: string | null }> | null;
 }
 
+/** File action values returned by native B2 file listing APIs. */
 export type B2FileAction = "upload" | "hide" | "start" | "folder" | "copy";
 
+/** Native B2 file-version binding used to validate S3 version IDs. */
 export interface B2S3FileVersionBinding {
   fileName: string;
   fileId: string;
@@ -101,34 +107,41 @@ export interface B2S3FileVersionBinding {
   serverSideEncryption?: string;
 }
 
+/** S3 object target that may include a native B2 file-version ID. */
 export interface B2S3VersionTarget {
   key: string;
   versionId?: string;
 }
 
+/** Batch version-resolution result used by multi-object S3 operations. */
 export interface B2S3FileVersionResolution {
   object: B2S3VersionTarget;
   version: B2S3FileVersionBinding | null;
   error?: unknown;
 }
 
+/** Interface implemented by the B2 native client for S3 version safety checks. */
 export interface B2S3VersionGuard {
+  /** Resolve one S3 version ID to a B2 file-version binding. */
   resolveS3FileVersion(input: {
     bucket: string;
     key: string;
     versionId: string;
   }): Promise<B2S3FileVersionBinding>;
+  /** Resolve many S3 version IDs while preserving per-target errors. */
   resolveS3FileVersions(input: {
     bucket: string;
     objects: B2S3VersionTarget[];
     maxConcurrency?: number;
   }): Promise<B2S3FileVersionResolution[]>;
+  /** Return the current B2 file-version binding for an S3 object key. */
   getCurrentS3FileVersion(input: {
     bucket: string;
     key: string;
   }): Promise<B2S3FileVersionBinding | null>;
 }
 
+/** Legacy normalized B2 bucket shape retained for compatibility. */
 export interface B2Bucket {
   accountId: string;
   bucketId: string;
@@ -141,6 +154,7 @@ export interface B2Bucket {
   options?: string[];
 }
 
+/** Legacy normalized B2 CORS rule shape retained for compatibility. */
 export interface B2CorsRule {
   corsRuleName: string;
   allowedOrigins: string[];
@@ -150,12 +164,14 @@ export interface B2CorsRule {
   maxAgeSeconds: number;
 }
 
+/** Legacy normalized B2 lifecycle rule shape retained for compatibility. */
 export interface B2LifecycleRule {
   fileNamePrefix: string;
   daysFromHidingToDeleting?: number;
   daysFromUploadingToHiding?: number;
 }
 
+/** Legacy normalized B2 file info shape retained for compatibility. */
 export interface B2FileInfo {
   fileId: string;
   fileName: string;
@@ -171,17 +187,20 @@ export interface B2FileInfo {
   serverSideEncryption?: B2Encryption;
 }
 
+/** Server-side encryption metadata returned by B2 file APIs. */
 export interface B2Encryption {
   mode: "none" | "SSE-B2" | "SSE-C";
   algorithm?: string;
 }
 
+/** Legacy normalized B2 file-list response. */
 export interface B2FileList {
   files: B2FileInfo[];
   nextFileName?: string;
   nextFileId?: string;
 }
 
+/** Legacy normalized B2 large-file start response. */
 export interface B2LargeFileStart {
   fileId: string;
   fileName: string;
@@ -192,12 +211,14 @@ export interface B2LargeFileStart {
   uploadTimestamp: number;
 }
 
+/** Legacy normalized B2 upload-part URL response. */
 export interface B2UploadPartUrl {
   fileId: string;
   uploadUrl: string;
   authorizationToken: string;
 }
 
+/** Legacy normalized B2 large-file part metadata. */
 export interface B2Part {
   fileId: string;
   partNumber: number;
@@ -206,6 +227,7 @@ export interface B2Part {
   serverSideEncryption?: B2Encryption;
 }
 
+/** Legacy normalized B2 application-key metadata. */
 export interface B2ApplicationKey {
   applicationKeyId: string;
   keyName: string;
@@ -217,12 +239,14 @@ export interface B2ApplicationKey {
   options?: string[];
 }
 
+/** Legacy normalized B2 download authorization response. */
 export interface B2DownloadAuth {
   bucketId: string;
   fileNamePrefix: string;
   authorizationToken: string;
 }
 
+/** Legacy normalized B2 event notification rule shape. */
 export interface B2NotificationRule {
   name: string;
   eventTypes: string[];
@@ -237,6 +261,7 @@ export interface B2NotificationRule {
   suspensionReason?: string;
 }
 
+/** B2 application-key capability names accepted by key-management tools. */
 export type B2Capability =
   | "listKeys"
   | "writeKeys"
@@ -262,6 +287,7 @@ export type B2Capability =
   | "readBucketNotifications"
   | "writeBucketNotifications";
 
+/** Complete B2 capability allowlist exposed by key creation schemas. */
 export const ALL_CAPABILITIES: B2Capability[] = [
   "listKeys",
   "writeKeys",

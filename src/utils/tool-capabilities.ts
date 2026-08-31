@@ -59,6 +59,7 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
   s3_put_bucket_lifecycle: ["writeBuckets"],
 };
 
+/** MCP tool annotations derived from capability and destructive-policy metadata. */
 export interface McpToolAnnotations {
   readOnlyHint: boolean;
   destructiveHint: boolean;
@@ -68,6 +69,7 @@ export interface McpToolAnnotations {
 
 const DESTRUCTIVE_TOOL_NAME_SET = new Set(DESTRUCTIVE_TOOL_NAMES);
 
+/** Tools treated as read-only even though they are outside the capability map. */
 export const READ_ONLY_OPERATION_TOOL_NAMES = new Set([
   "b2_authorize_account",
   "b2_list_groups",
@@ -77,12 +79,14 @@ export const READ_ONLY_OPERATION_TOOL_NAMES = new Set([
   "b2_get_bucket_notification_rules",
 ]);
 
+/** Capability-read tools that are not read-only at MCP tool granularity. */
 export const NON_READ_ONLY_TOOL_NAMES = new Set([
   // s3_get_object can write downloaded bytes to saveToPath, so the tool is not
   // read-only at tool granularity while that local-write option shares the schema.
   "s3_get_object",
 ]);
 
+/** Destructive tools whose repeated identical calls can create additional effects. */
 export const NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES = new Set([
   "b2_create_key",
   "b2_create_group_member",
@@ -92,6 +96,7 @@ export const NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES = new Set([
   "s3_delete_objects",
 ]);
 
+/** Non-read-only tools whose repeated identical calls converge to the same state. */
 export const IDEMPOTENT_NON_READONLY_TOOL_NAMES = new Set([
   // Non-destructive writes whose repeat with the same arguments lands the same
   // final state: overwriting PUT/copy, part-copy, multipart completion, and
@@ -109,6 +114,13 @@ function isReadListCapability(capability: string): boolean {
   return capability.startsWith("read") || capability.startsWith("list");
 }
 
+/**
+ * Return whether all mapped B2 capabilities for a tool are read/list capabilities.
+ *
+ * @param name - MCP tool name.
+ *
+ * @returns `true` when the capability map makes the tool read-only.
+ */
 export function hasReadOnlyToolCapabilities(name: string): boolean {
   const capabilities = TOOL_CAPABILITIES[name];
   return (
@@ -122,6 +134,13 @@ function hasIdempotentDestructiveGate(name: string): boolean {
   return DESTRUCTIVE_TOOL_NAME_SET.has(name) && !NON_IDEMPOTENT_DESTRUCTIVE_TOOL_NAMES.has(name);
 }
 
+/**
+ * Compute MCP tool annotations for a tool name.
+ *
+ * @param name - MCP tool name.
+ *
+ * @returns Read-only, destructive, idempotent, and open-world hints.
+ */
 export function annotationsForTool(name: string): McpToolAnnotations {
   // destructiveHint tracks the server destructive gate exactly. Per the B2 MCP
   // spec, destructive means deletes, protection removal, and irreversible/billable
@@ -164,9 +183,13 @@ export const PARTNER_TOOLS = new Set<string>([
   "b2_reserve_trial_create_account",
 ]);
 
+/** OAuth scope tier required by a specific MCP tool. */
 export type OAuthToolScopePolicy = "read" | "write" | "admin";
+
+/** OAuth scope tier required by a broad operation family. */
 export type OAuthOperationScope = "read" | "write" | "admin";
 
+/** Per-tool OAuth scope policy used after bearer-token verification. */
 export const OAUTH_TOOL_SCOPE_POLICY: Record<string, OAuthToolScopePolicy> = {
   b2_authorize_account: "read",
   b2_create_bucket: "write",
@@ -220,6 +243,14 @@ const OAUTH_OPERATION_SCOPES: Record<OAuthOperationScope, readonly string[]> = {
   admin: ["b2:admin"],
 };
 
+/**
+ * Return whether verified OAuth scopes allow an operation tier.
+ *
+ * @param scopes - Verified scopes, or `null` when OAuth is not active.
+ * @param operation - Operation tier to check.
+ *
+ * @returns `true` when OAuth is inactive or the scope set permits the operation.
+ */
 export function oauthScopesAllowOperation(
   scopes: ReadonlySet<string> | null,
   operation: OAuthOperationScope,
@@ -233,6 +264,13 @@ export function oauthScopesAllowOperation(
  *
  * @returns The OAuth policy bucket used to reduce the B2 capability-filtered
  * tool surface.
+ */
+/**
+ * Return the OAuth scope policy for a tool.
+ *
+ * @param name - MCP tool name.
+ *
+ * @returns Tool scope policy, or `null` for unmapped tools.
  */
 export function oauthToolScopePolicy(name: string): OAuthToolScopePolicy | null {
   return OAUTH_TOOL_SCOPE_POLICY[name] ?? null;
@@ -249,6 +287,14 @@ export function oauthToolScopePolicy(name: string): OAuthToolScopePolicy | null 
  *
  * @returns True when the tool should be registered for the capability set.
  */
+/**
+ * Return whether a B2 capability set enables a tool.
+ *
+ * @param name - MCP tool name.
+ * @param caps - Authorized B2 capabilities, or `null` for full-surface mode.
+ *
+ * @returns `true` when the tool should be registered.
+ */
 export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): boolean {
   if (caps === null) return true;
   const required = TOOL_CAPABILITIES[name];
@@ -262,6 +308,14 @@ export function isToolEnabled(name: string, caps: ReadonlySet<string> | null): b
  * otherwise expose; they never grant a B2 operation by themselves.
  *
  * @returns True when OAuth scopes allow the tool to be registered.
+ */
+/**
+ * Return whether verified OAuth scopes allow a specific tool.
+ *
+ * @param name - MCP tool name.
+ * @param scopes - Verified scopes, or `null` when OAuth is not active.
+ *
+ * @returns `true` when OAuth is inactive or the tool's required tier is allowed.
  */
 export function isToolAllowedByOAuthScopes(
   name: string,

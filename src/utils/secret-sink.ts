@@ -14,8 +14,13 @@ import {
 } from "./secure-append-file.js";
 import { sanitizeForMcpOutput } from "./secret-sanitizer.js";
 
+/** Default local ledger path for file-mode durable secret storage. */
 export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.jsonl");
+
+/** Placeholder used in MCP responses when an application key secret is stored out of band. */
 export const APPLICATION_KEY_REDACTED = "[redacted]";
+
+/** Warning emitted when durable secrets are intentionally returned inline. */
 export const INLINE_SECRET_WARNING =
   "B2_SECRET_SINK=inline: this application key secret was returned into the model context and may be logged or retained by the client. Rotate it after use.";
 
@@ -25,18 +30,34 @@ const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 const SECRET_SINK_TAIL_READ_BYTES = 1024 * 1024;
 
+/** File operations that tests may override indirectly when simulating sink failures. */
 export const secretSinkFileOpsForTests = {
+  /** Close an open ledger file descriptor. */
   closeSync: fs.closeSync,
-  ftruncateSync: fs.ftruncateSync,
+  /** Truncate a ledger file descriptor back to a known size. */
+  ftruncateSync: (fd: number, len?: number) => fs.ftruncateSync(fd, len),
+  /** Flush an open ledger file descriptor to disk. */
   fsyncSync: fs.fsyncSync,
+  /** Remove a temporary or lock file. */
   unlinkSync: fs.unlinkSync,
+  /** Atomically rename a temporary file into place. */
   renameSync: fs.renameSync,
 };
 
-type SinkWrite = (fd: number, buffer: Uint8Array, offset: number, length: number) => number;
+/** Write function used by the file secret sink. */
+export type SinkWrite = (fd: number, buffer: Uint8Array, offset: number, length: number) => number;
 
 let secretSinkWrite: SinkWrite = fs.writeSync;
 
+/**
+ * Override the file-sink write function for tests.
+ *
+ * @param writeSync - Replacement synchronous write function.
+ *
+ * @returns Previous write function so tests can restore it.
+ *
+ * @throws Error when called outside the test runtime.
+ */
 export function setSinkWriteForTests(writeSync: SinkWrite): SinkWrite {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("test only");
@@ -48,6 +69,7 @@ export function setSinkWriteForTests(writeSync: SinkWrite): SinkWrite {
 
 let inlineWarningEmitted = false;
 
+/** Options for resolving durable secret sink policy from environment. */
 export interface ResolveSecretSinkOptions {
   transport: "stdio" | "http";
   env?: NodeJS.ProcessEnv;
@@ -55,12 +77,14 @@ export interface ResolveSecretSinkOptions {
   defaultFilePath?: string;
 }
 
+/** Pointer returned when a durable secret was written to a file sink. */
 export interface SecretSinkPointer {
   type: "file";
   path: string;
   recordId: string;
 }
 
+/** Stable idempotency fingerprints for durable-secret-producing operations. */
 export interface DurableSecretIdempotency {
   key: string;
   claimFingerprint: string;
@@ -209,16 +233,35 @@ function configuredFileUnavailableError(filePath: string, err: unknown): Error {
   );
 }
 
+/**
+ * Emit the inline durable-secret warning once per process.
+ */
 export function emitInlineSecretSinkWarningOnce(): void {
   if (inlineWarningEmitted) return;
   inlineWarningEmitted = true;
   process.stderr.write(`b2-mcp: WARNING: ${INLINE_SECRET_WARNING}\n`);
 }
 
+/**
+ * Reset inline warning state for deterministic tests.
+ */
 export function resetSecretSinkWarningForTests(): void {
   inlineWarningEmitted = false;
 }
 
+/**
+ * Resolve durable secret sink configuration from transport and environment.
+ *
+ * @remarks
+ * Stdio defaults to file mode when the default ledger is usable; HTTP defaults
+ * to off and requires explicit opt-in for either file or inline modes.
+ *
+ * @param options - Transport, environment, and optional preflight controls.
+ *
+ * @returns Resolved secret-sink configuration.
+ *
+ * @throws Error when an explicitly configured sink is unsafe or unavailable.
+ */
 export function resolveSecretSinkConfig(options: ResolveSecretSinkOptions): SecretSinkConfig {
   const env = options.env ?? process.env;
   const transport = options.transport;
@@ -309,6 +352,18 @@ function fsyncParentDirectory(parent: string): void {
   }
 }
 
+/**
+ * Append a durable secret record to the file sink ledger.
+ *
+ * @param sink - File-mode secret sink configuration.
+ * @param tool - Tool name that produced the secret.
+ * @param result - Secret-bearing provider result to store.
+ * @param idempotency - Optional idempotency metadata.
+ *
+ * @returns Pointer to the appended ledger record.
+ *
+ * @throws Error when the ledger cannot be safely appended.
+ */
 export function appendSecretSinkRecord(
   sink: Extract<SecretSinkConfig, { mode: "file" }>,
   tool: string,
@@ -398,6 +453,14 @@ function sortedJson(value: unknown): unknown {
   return sorted;
 }
 
+/**
+ * Compute idempotency fingerprints for a durable-secret-producing operation.
+ *
+ * @param input - Tool name, caller idempotency key, caller fingerprint, and
+ * normalized operation input.
+ *
+ * @returns Stable idempotency metadata for claim and result matching.
+ */
 export function durableSecretIdempotency(input: {
   toolName: string;
   idempotencyKey: string;
@@ -1062,24 +1125,53 @@ function isSecretSinkCommitAmbiguous(err: unknown): boolean {
   );
 }
 
-type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
+/** Secret sink modes that are allowed to execute durable-secret operations. */
+export type ActiveSecretSink = Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
 
+/** Response projection hooks for durable-secret-producing operations. */
 export interface DurableSecretResponseOptions<T> {
+  /** Active sink configuration. */
   secretSink: ActiveSecretSink;
+  /** MCP tool name producing the durable secret. */
   toolName: string;
+  /** Secret-bearing provider result. */
   result: T;
+  /** Idempotency metadata for replay protection. */
   idempotency: DurableSecretIdempotency;
+  /** Projection used when a file sink stores the secret out of band. */
   projectRedacted: (result: T, pointer: SecretSinkPointer) => unknown;
+  /** Projection used when inline mode deliberately returns the secret. */
   projectInline: (result: T, warning: string) => unknown;
+  /** Non-secret diagnostics for critical logs after sink failures. */
   diagnostics?: (result: T) => Record<string, unknown>;
+  /** Optional provider-side cleanup when sink storage fails after creation. */
   recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
 }
 
+/** Full operation contract for safely executing a durable-secret-producing call. */
 export interface DurableSecretOperationOptions<T>
   extends Omit<DurableSecretResponseOptions<T>, "result"> {
+  /** Provider operation that creates the durable secret. */
   create: () => Promise<T>;
 }
 
+/**
+ * Execute a provider operation that creates durable one-time secret material.
+ *
+ * @remarks
+ * File mode claims an idempotency lock, stores the secret-bearing result out of
+ * band, returns only a redacted projection, and attempts provider-side cleanup
+ * when the sink write fails. Inline mode returns the explicit inline projection
+ * with a warning.
+ *
+ * @param options - Provider create function, sink policy, projections, and
+ * optional recovery hooks.
+ *
+ * @returns Structured MCP tool result for the configured sink mode.
+ *
+ * @throws Error when provider creation fails or file-sink storage cannot be
+ * completed safely.
+ */
 export async function executeDurableSecretOperation<T>({
   secretSink,
   toolName,

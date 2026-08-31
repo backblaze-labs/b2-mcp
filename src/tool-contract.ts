@@ -4,14 +4,22 @@ import { DESTRUCTIVE_TOOL_NAMES } from "./utils/destructive-gate.js";
 
 export { DESTRUCTIVE_TOOL_NAMES };
 
+/** Current schema version for generated MCP tool contract artifacts. */
 export const CONTRACT_VERSION = 1;
+/** Issue that originally introduced the frozen tool contract. */
 export const TOOL_CONTRACT_ISSUE = 49;
+/** GitHub issue URL for the tool contract baseline. */
 export const TOOL_CONTRACT_ISSUE_URL = "https://github.com/backblaze-labs/b2-mcp/issues/49";
+/** Preferred modern MCP protocol revision captured by contract fixtures. */
 export const MCP_REVISION = "2026-07-28";
+/** Legacy MCP protocol revision retained for compatibility fixtures. */
 export const LEGACY_PROTOCOL_VERSION = "2025-11-25";
+/** Approved cache hint TTL in modern contract fixtures. */
 export const APPROVED_TTL_MS = 30_000;
+/** Approved cache hint scope in modern contract fixtures. */
 export const APPROVED_CACHE_SCOPE = "private";
 
+/** Capability profiles used to generate deterministic tool-surface fixtures. */
 export const PROFILE_CAPABILITIES = {
   full: null,
   "live-b2-contract": [
@@ -53,11 +61,16 @@ export const PROFILE_CAPABILITIES = {
   "read-only": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
 } as const;
 
+/** Named contract profile. */
 export type ProfileName = keyof typeof PROFILE_CAPABILITIES;
+/** Protocol era represented by a fixture. */
 export type Era = "modern" | "legacy";
+/** JSON value shape used by stable contract fixtures. */
 export type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
+/** JSON object shape used by stable contract fixtures. */
 export type JsonObject = { [key: string]: JsonValue };
 
+/** Human-readable backing-category metadata for the public tool surface. */
 export const TOOL_BACKING_CATEGORIES = {
   nativeB2Sdk: {
     label: "Native B2 SDK",
@@ -76,9 +89,12 @@ export const TOOL_BACKING_CATEGORIES = {
   },
 } as const;
 
+/** Backing category key for a public MCP tool. */
 export type ToolBackingCategory = keyof typeof TOOL_BACKING_CATEGORIES;
+/** Count of tools by backing category. */
 export type ToolBackingCounts = Record<ToolBackingCategory, number>;
 
+/** Backing category assigned to every public tool name. */
 export const TOOL_BACKING_BY_NAME = {
   b2_authorize_account: "nativeB2Sdk",
   b2_create_bucket: "nativeB2Sdk",
@@ -122,6 +138,7 @@ export const TOOL_BACKING_BY_NAME = {
   s3_upload_part_copy: "awsS3Sdk",
 } as const satisfies Record<string, ToolBackingCategory>;
 
+/** Normalized public tool definition persisted in contract fixtures. */
 export interface NormalizedTool {
   name: string;
   descriptionSha256: string;
@@ -131,6 +148,7 @@ export interface NormalizedTool {
   _meta?: JsonObject;
 }
 
+/** Full deterministic fixture for one profile and protocol era. */
 export interface ToolFixture {
   contractVersion: number;
   issue: number;
@@ -163,6 +181,7 @@ export interface ToolFixture {
   hash: string;
 }
 
+/** Profile summary included in the generated contract reference artifact. */
 export interface ContractProfile {
   description: string;
   capabilities: string[] | null;
@@ -176,6 +195,7 @@ export interface ContractProfile {
   fixtures: Record<Era, string>;
 }
 
+/** Top-level generated contract artifact. */
 export interface ContractArtifact {
   contractVersion: number;
   issue: number;
@@ -188,11 +208,13 @@ export interface ContractArtifact {
   profiles: Record<ProfileName, ContractProfile>;
 }
 
+/** Package metadata subset used to pin dependency versions in artifacts. */
 export interface ToolContractPackageJson {
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
 }
 
+/** Raw MCP tool payload collected from an SDK server instance. */
 export interface RawToolPayload {
   name: string;
   description?: string;
@@ -206,6 +228,7 @@ export interface RawToolPayload {
   _meta?: unknown;
 }
 
+/** Raw tool-list response and discovery metadata collected for one fixture. */
 export interface CollectedToolList {
   tools: RawToolPayload[];
   list: { tools?: unknown; ttlMs?: number; cacheScope?: string; [key: string]: unknown };
@@ -219,6 +242,7 @@ export interface CollectedToolList {
   };
 }
 
+/** Inputs required to convert collected SDK tools into a stable fixture. */
 export interface ToolFixtureFromCollectedOptions {
   contractVersion: number;
   issue: number;
@@ -231,6 +255,7 @@ export interface ToolFixtureFromCollectedOptions {
   collected: CollectedToolList;
 }
 
+/** Human-readable descriptions for each generated tool contract profile. */
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
   full: "Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.",
   "live-b2-contract":
@@ -241,8 +266,10 @@ export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
     "Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.",
 };
 
+/** Stable profile ordering used by contract generation. */
 export const PROFILE_NAMES = Object.keys(PROFILE_CAPABILITIES) as ProfileName[];
 
+/** Dummy B2 configuration used when collecting deterministic contract fixtures. */
 export const CONTRACT_TEST_CONFIG: B2Config = {
   applicationKeyId: "contract-key-id",
   applicationKey: "contract-key-secret",
@@ -255,6 +282,13 @@ export const CONTRACT_TEST_CONFIG: B2Config = {
   fileRoot: null,
 };
 
+/**
+ * Resolve the B2 configuration for a contract profile.
+ *
+ * @param profile - Contract profile being collected.
+ *
+ * @returns B2 config with dummy deterministic credentials.
+ */
 export function configForProfile(profile: ProfileName): B2Config {
   if (profile !== "live-b2-contract") return CONTRACT_TEST_CONFIG;
   return {
@@ -264,11 +298,25 @@ export function configForProfile(profile: ProfileName): B2Config {
   };
 }
 
+/**
+ * Resolve the B2 capability list for a contract profile.
+ *
+ * @param profile - Contract profile being collected.
+ *
+ * @returns Capability list, or null for full-surface mode.
+ */
 export function capabilitiesForProfile(profile: ProfileName): string[] | null {
   const capabilities = PROFILE_CAPABILITIES[profile];
   return capabilities === null ? null : [...capabilities];
 }
 
+/**
+ * Extract SDK dependency versions used in contract artifacts.
+ *
+ * @param packageJson - Package metadata subset.
+ *
+ * @returns Dependency version map persisted into fixtures.
+ */
 export function contractSdkVersions(packageJson: ToolContractPackageJson): Record<string, string> {
   return {
     "@backblaze-labs/b2-sdk": packageJson.dependencies["@backblaze-labs/b2-sdk"],
@@ -277,10 +325,25 @@ export function contractSdkVersions(packageJson: ToolContractPackageJson): Recor
   };
 }
 
+/**
+ * Compute a SHA-256 hex digest.
+ *
+ * @param value - String to hash.
+ *
+ * @returns Hex digest.
+ */
 export function sha256(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
 
+/**
+ * Convert arbitrary JSON-like data into a stable key-sorted fixture value.
+ *
+ * @param value - Value to normalize.
+ * @param parentKey - Parent key used to sort `required` arrays.
+ *
+ * @returns Stable JSON-compatible value.
+ */
 export function stable(value: unknown, parentKey = ""): JsonValue {
   if (Array.isArray(value)) {
     const next = value.map((item) => stable(item));
@@ -298,6 +361,13 @@ export function stable(value: unknown, parentKey = ""): JsonValue {
   ) as JsonObject;
 }
 
+/**
+ * Count tools by public name prefix.
+ *
+ * @param names - Tool names to count.
+ *
+ * @returns Total, b2, s3, and legacy bz counts.
+ */
 export function countPrefixes(names: string[]): ToolFixture["counts"] {
   return {
     total: names.length,
@@ -311,6 +381,15 @@ function backingCategoryNames(): ToolBackingCategory[] {
   return Object.keys(TOOL_BACKING_CATEGORIES) as ToolBackingCategory[];
 }
 
+/**
+ * Build a backing-category map for a list of tool names.
+ *
+ * @param names - Tool names that must be present in {@link TOOL_BACKING_BY_NAME}.
+ *
+ * @returns Sorted map from tool name to backing category.
+ *
+ * @throws Error when any tool lacks backing-category metadata.
+ */
 export function backingCategoryMapForNames(
   names: readonly string[],
 ): Record<string, ToolBackingCategory> {
@@ -334,6 +413,13 @@ export function backingCategoryMapForNames(
   return result;
 }
 
+/**
+ * Count tools by backing category.
+ *
+ * @param names - Tool names to classify.
+ *
+ * @returns Backing-category counts.
+ */
 export function backingCategoryCounts(names: readonly string[]): ToolBackingCounts {
   const counts = Object.fromEntries(
     backingCategoryNames().map((category) => [category, 0]),
@@ -346,6 +432,13 @@ export function backingCategoryCounts(names: readonly string[]): ToolBackingCoun
   return counts;
 }
 
+/**
+ * Normalize one raw MCP tool payload for stable fixture comparison.
+ *
+ * @param tool - Raw tool payload from the MCP SDK.
+ *
+ * @returns Stable normalized tool fixture.
+ */
 export function normalizeTool(tool: {
   name: string;
   description?: string;
@@ -367,6 +460,13 @@ export function normalizeTool(tool: {
   return normalized;
 }
 
+/**
+ * Extract sorted required input fields for each tool.
+ *
+ * @param tools - Tool payloads to inspect.
+ *
+ * @returns Map from tool name to required field names.
+ */
 export function requiredFieldsByTool(
   tools: Array<{ name: string; inputSchema?: { required?: string[] } }>,
 ): Record<string, string[]> {
@@ -375,6 +475,13 @@ export function requiredFieldsByTool(
   );
 }
 
+/**
+ * Find tools that expose the legacy `confirm` destructive-operation parameter.
+ *
+ * @param tools - Tool payloads to inspect.
+ *
+ * @returns Sorted destructive-confirm tool names.
+ */
 export function confirmToolsFrom(
   tools: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }>,
 ): string[] {
@@ -391,6 +498,13 @@ function schemaContainsLiteral(value: unknown, literal: string): boolean {
   return Object.values(value).some((item) => schemaContainsLiteral(item, literal));
 }
 
+/**
+ * Determine whether a tool schema advertises a destructive execution path.
+ *
+ * @param tool - Tool payload to inspect.
+ *
+ * @returns True when the tool is destructive for all calls or for a schema branch.
+ */
 export function toolAdvertisesDestructivePath(tool: {
   name: string;
   inputSchema?: unknown;
@@ -402,6 +516,13 @@ export function toolAdvertisesDestructivePath(tool: {
   return true;
 }
 
+/**
+ * Find destructive tools from collected tool payloads.
+ *
+ * @param tools - Tool payloads to inspect.
+ *
+ * @returns Sorted destructive tool names.
+ */
 export function destructiveConfirmToolsFromTools(
   tools: Array<{ name: string; inputSchema?: unknown }>,
 ): string[] {
@@ -411,6 +532,13 @@ export function destructiveConfirmToolsFromTools(
     .sort();
 }
 
+/**
+ * Compute the stable hash for a fixture's public tool names and schemas.
+ *
+ * @param fixture - Fixture fields that define the public surface.
+ *
+ * @returns SHA-256 fixture hash.
+ */
 export function fixtureHash(fixture: Pick<ToolFixture, "names" | "tools">): string {
   return sha256(JSON.stringify({ names: fixture.names, tools: fixture.tools }));
 }
@@ -427,6 +555,13 @@ function stringArrayValue(value: unknown): string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string") ? [...value] : [];
 }
 
+/**
+ * Convert collected SDK output into a stable contract fixture.
+ *
+ * @param options - Collection metadata and raw tool payloads.
+ *
+ * @returns Complete fixture with stable ordering and hash.
+ */
 export function toolFixtureFromCollected({
   contractVersion,
   issue,
@@ -484,6 +619,13 @@ export function toolFixtureFromCollected({
   return fixture;
 }
 
+/**
+ * Render the generated markdown profile reference.
+ *
+ * @param contract - Contract artifact to render.
+ *
+ * @returns Markdown document for docs/tool profile reference.
+ */
 export function renderProfileReference(contract: ContractArtifact): string {
   const rows = Object.entries(contract.profiles)
     .map(

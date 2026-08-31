@@ -152,9 +152,22 @@ const corsRulesSchema = z
   })
   .describe(CORS_RULES_DESCRIPTION);
 
-type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
+/** DNS resolver signature used by bucket webhook target validation. */
+export type WebhookDnsLookup = (host: string) => Promise<Array<{ address: string }>>;
 let webhookDnsLookupForTests: WebhookDnsLookup | null = null;
 
+/**
+ * Override webhook target DNS lookup for tests.
+ *
+ * @remarks
+ * Bucket notification rule validation blocks private/link-local targets. Tests
+ * use this hook to make those DNS outcomes deterministic without reaching the
+ * network. Runtime calls outside `NODE_ENV=test` are rejected.
+ *
+ * @param lookup - Test DNS resolver, or `null` to restore the default resolver.
+ *
+ * @throws Error when called outside the test runtime.
+ */
 export function setWebhookDnsLookupForTests(lookup: WebhookDnsLookup | null): void {
   if (!isTestRuntime()) {
     throw new Error("Webhook DNS resolver override is only available in tests.");
@@ -522,6 +535,24 @@ function normalizeNotificationRule(rule: NotificationRuleArgs): EventNotificatio
   };
 }
 
+/**
+ * Register B2 native bucket and notification-rule tools.
+ *
+ * @remarks
+ * This family covers control-plane bucket operations: listing, creating,
+ * updating, deleting, and reading or replacing bucket notification rules.
+ * Destructive or protection-weakening operations call the shared destructive
+ * gate before reaching the B2 SDK boundary.
+ *
+ * @param server - Tool registrar receiving the bucket tools.
+ * @param client - Repository-owned B2 native client.
+ * @param config - Server configuration used for destructive policy.
+ *
+ * @example
+ * ```ts
+ * registerBucketTools(registrar, b2Client, config);
+ * ```
+ */
 export function registerBucketTools(
   server: ToolRegistrar,
   client: B2Client,

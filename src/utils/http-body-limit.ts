@@ -1,5 +1,19 @@
+/**
+ * Shared HTTP body cap for MCP POST requests.
+ *
+ * @remarks
+ * The internet-facing transport is control-plane-only; large object bytes
+ * should flow through presigned B2 URLs instead of the MCP server.
+ */
 export const MAX_MCP_BODY_BYTES = 1 * 1024 * 1024;
 
+/**
+ * Check a request Content-Length header against the MCP body cap.
+ *
+ * @param headers - Web request headers.
+ *
+ * @returns True when the declared body length exceeds {@link MAX_MCP_BODY_BYTES}.
+ */
 export function contentLengthExceedsLimit(headers: Headers): boolean {
   const raw = headers.get("content-length");
   if (!raw) return false;
@@ -17,6 +31,13 @@ function concatChunks(chunks: Uint8Array[], totalBytes: number): Uint8Array {
   return body;
 }
 
+/**
+ * Read a Web request body while enforcing the MCP body cap.
+ *
+ * @param request - Request whose body should be buffered.
+ *
+ * @returns Body bytes, or null when the body exceeds the configured cap.
+ */
 export async function readCappedBodyBytes(request: Request): Promise<Uint8Array | null> {
   if (contentLengthExceedsLimit(request.headers)) return null;
   if (!request.body) return new Uint8Array();

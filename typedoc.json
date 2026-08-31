@@ -6,6 +6,7 @@
   "excludeProtected": true,
   "excludeInternal": true,
   "excludeExternals": true,
+  "requiredToBeDocumented": ["Variable", "Function", "Class", "Interface", "TypeAlias"],
   "navigationLinks": {
     "GitHub": "https://github.com/backblaze-labs/b2-mcp",
     "Backblaze": "https://www.backblaze.com/"
@@ -14,6 +15,6 @@
   "validation": {
     "notExported": true,
     "invalidLink": true,
-    "notDocumented": false
+    "notDocumented": true
   }
 }

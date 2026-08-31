@@ -301,6 +301,13 @@ export function initLogging(env: NodeJS.ProcessEnv = process.env): void {
   loggingInitialized = true;
 }
 
+/**
+ * Flush the active log destination synchronously during shutdown or fatal exit.
+ *
+ * @remarks
+ * Flush errors are written directly to stderr because the structured logger may
+ * itself be the failing destination.
+ */
 export function flushLogsSync(): void {
   try {
     activeDestination.flushSync?.call(activeDestination);

@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+/**
+ * Node HTTP transport bootstrap for hosted Backblaze B2 MCP deployments.
+ *
+ * @remarks
+ * This module owns the `http.Server` lifecycle, request timeouts, signal
+ * handling, and graceful drain. Runtime-neutral MCP request handling lives in
+ * `http-fetch-handler`, which lets serverless adapters reuse the same hardened
+ * HTTP pipeline.
+ *
+ */
 
 /*
  * Backblaze B2 MCP Server - HTTP transport entry point.
@@ -49,7 +59,9 @@ const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30 * 1000;
 const DEFAULT_HTTP_HEADERS_TIMEOUT_MS = 10 * 1000;
 const SHUTDOWN_DRAIN_MS = 10 * 1000;
 
+/** Handle returned by {@link buildHttpServer} for tests and custom hosts. */
 export interface HttpServerHandle {
+  /** Node server that listens for `/mcp` and `/health` requests. */
   server: http.Server;
   /** MCP v2 HTTP is stateless; this remains for tests/observability. */
   sessions: Map<string, never>;
@@ -57,15 +69,42 @@ export interface HttpServerHandle {
   drain(): void;
 }
 
+/**
+ * Options for building the Node HTTP transport.
+ *
+ * @remarks
+ * Most request-policy knobs are inherited from the runtime-neutral fetch
+ * handler. The Node layer adds only a hook for middleware or tests that have
+ * already authenticated a caller and want that `authInfo` attached to the MCP
+ * request.
+ */
 export interface HttpServerOptions extends HttpPipelineOptions {
   /** Hook for customer middleware/tests to attach verified MCP authInfo. */
   getAuthInfo?: (req: AuthenticatedIncomingMessage) => AuthInfo | null | undefined;
 }
 
+/** Listen-time options for {@link startHttp}. */
 export interface HttpListenOptions {
+  /** Explicit port override; otherwise CLI args and `PORT` are consulted. */
   port?: number;
 }
 
+/**
+ * Resolve the HTTP listen port from CLI arguments and environment.
+ *
+ * @param argv - CLI arguments to inspect for `--port`.
+ * @param env - Environment object to read `PORT` from.
+ *
+ * @returns The validated TCP port.
+ *
+ * @throws PortUsageError when the selected port is not in the user-space TCP
+ * port range.
+ *
+ * @example
+ * ```ts
+ * const port = getPort(["--port", "3001"], process.env);
+ * ```
+ */
 export function getPort(
   argv = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,
@@ -73,6 +112,19 @@ export function getPort(
   return resolveHttpPort(argv, env);
 }
 
+/**
+ * Extract B2 credential configuration from HTTP headers.
+ *
+ * @remarks
+ * This compatibility export delegates to the shared credential provider. Hosted
+ * deployments should prefer `server` or `principal` credential modes when B2
+ * keys must not be supplied directly by MCP clients.
+ *
+ * @param req - Incoming request-like object containing Node headers.
+ *
+ * @returns Resolved B2 config, or `null` when the selected credential mode does
+ * not use request headers.
+ */
 export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
   return configFromHttpHeaders(req);
 }
@@ -128,6 +180,25 @@ function createNodeServer(pipeline: B2McpFetchHandler, options: HttpServerOption
   });
 }
 
+/**
+ * Build a configured Node HTTP server without listening.
+ *
+ * @remarks
+ * Tests use this to exercise the HTTP pipeline in-process. Production startup
+ * should call {@link startHttp}, which also validates credential mode and
+ * installs process signal handlers.
+ *
+ * @param options - Pipeline and middleware hooks for request handling.
+ *
+ * @returns A server handle with the Node server and drain function.
+ *
+ * @example
+ * ```ts
+ * const { server, drain } = buildHttpServer();
+ * server.listen(3000);
+ * drain();
+ * ```
+ */
 export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHandle {
   const pipeline = createB2McpFetchHandler(options);
   const httpServer = createNodeServer(pipeline, options);
@@ -144,6 +215,28 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
   };
 }
 
+/**
+ * Start the hardened Streamable HTTP MCP transport.
+ *
+ * @remarks
+ * Startup validates HTTP credential mode, creates the runtime-neutral MCP
+ * pipeline, listens on the resolved port, and installs SIGTERM/SIGINT graceful
+ * shutdown handlers. Request handling remains per-request and stateless for the
+ * current MCP HTTP protocol.
+ *
+ * @param options - Optional listen overrides.
+ *
+ * @returns A promise that resolves once the server is listening.
+ *
+ * @throws CredentialResolutionError when the selected HTTP credential mode is
+ * not configured safely.
+ * @throws PortUsageError when the selected port is invalid.
+ *
+ * @example
+ * ```ts
+ * await startHttp({ port: 3000 });
+ * ```
+ */
 export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
   initLogging();
   validateHttpStartupConfiguration();
@@ -216,6 +309,7 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
   process.on("SIGINT", onSigint);
 }
 
+/** Sanitized bootstrap error formatter used by the HTTP binary path and tests. */
 export const httpBootstrapFatalMessage = bootstrapErrorMessage;
 
 function handleHttpBootstrapFatal(err: unknown): never {

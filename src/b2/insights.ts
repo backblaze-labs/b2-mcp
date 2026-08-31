@@ -15,6 +15,7 @@
  * fresh B2Client after per-request credential resolution, so a partner
  * key sees its sub-accounts (one report row each) and a customer key sees only
  * itself — scope is automatic and fail-closed.
+ *
  */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
@@ -40,6 +41,8 @@ const GB = 1e9; // report columns are GB = 1e9 bytes
 
 /**
  * Minimal RFC-4180 parser: handles quoted fields, embedded commas, and "" escapes.
+ *
+ * @param text - CSV text with a header row.
  *
  * @returns Parsed data rows keyed by CSV header names.
  */
@@ -94,6 +97,8 @@ export function parseCsv(text: string): Array<Record<string, string>> {
 /**
  * Normalize a report date to YYYY-MM-DD (the partner CSV sometimes uses M/D/YY).
  *
+ * @param raw - Raw report date string.
+ *
  * @returns The normalized date, or null when the value cannot be parsed.
  */
 export function normalizeDate(raw: string): string | null {
@@ -108,6 +113,7 @@ export function normalizeDate(raw: string): string | null {
   return null;
 }
 
+/** Normalized row from a Backblaze usage report CSV. */
 export interface ReportRow {
   accountId: string;
   _date: string;
@@ -124,6 +130,13 @@ function num(raw: string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/**
+ * Convert a raw CSV object into a normalized usage report row.
+ *
+ * @param raw - Header-keyed CSV row from {@link parseCsv}.
+ *
+ * @returns Normalized row, or `null` when required account/date fields are absent.
+ */
 export function mapRow(raw: Record<string, string>): ReportRow | null {
   const accountId = raw.account_id?.trim();
   const _date = normalizeDate(raw.date);
@@ -143,6 +156,18 @@ export function mapRow(raw: Record<string, string>): ReportRow | null {
 
 // ── Pure aggregation (portable, from the handoff spec) ──────────────────────
 
+/**
+ * Compute stored-data growth by account across all supplied report rows.
+ *
+ * @remarks
+ * This helper is retained for compatibility with earlier insight behavior. New
+ * usage-growth tooling prefers snapshot boundary comparisons so point-in-time
+ * `stored_gb` values are not summed across days.
+ *
+ * @param rows - Normalized usage report rows.
+ *
+ * @returns Growth rows sorted by descending stored-byte growth.
+ */
 export function computeAccountGrowth(rows: ReportRow[]) {
   const daily = new Map<string, Map<string, number>>();
   const tot = new Map<string, { egress: number }>();
@@ -176,6 +201,14 @@ export function computeAccountGrowth(rows: ReportRow[]) {
   return out.sort((x, y) => y.growthBytes - x.growthBytes);
 }
 
+/**
+ * Aggregate egress bytes by account or bucket.
+ *
+ * @param rows - Normalized usage report rows.
+ * @param by - Grouping dimension for the aggregate.
+ *
+ * @returns Egress totals sorted descending.
+ */
 export function computeEgressLeaders(rows: ReportRow[], by: "account" | "bucket" = "account") {
   const g = new Map<
     string,
@@ -213,14 +246,23 @@ const REPORT_SCAN_LIMITS = {
   concurrency: 1,
 };
 
-interface ReportLoadStats {
+/** Counters captured while scanning and downloading usage reports. */
+export interface ReportLoadStats {
+  /** Report list pages visited. */
   pages: number;
+  /** Object keys listed from the report bucket. */
   listed_keys: number;
+  /** Keys matching the report prefix/date filters. */
   candidate_keys: number;
+  /** Candidate keys selected for download. */
   selected_keys: number;
+  /** Report objects downloaded. */
   downloaded_keys: number;
+  /** Raw report bytes downloaded. */
   downloaded_bytes: number;
+  /** CSV rows parsed from downloaded reports. */
   parsed_rows: number;
+  /** Reason scanning stopped before exhausting all candidates. */
   stop_reason?: string;
 }
 
@@ -230,8 +272,11 @@ interface ReportRowsResult {
   stats: ReportLoadStats;
 }
 
-interface ReportScanBudget {
+/** Mutable scan budget shared by report-key listing and CSV downloads. */
+export interface ReportScanBudget {
+  /** Scan start time in epoch milliseconds. */
   startedAt: number;
+  /** Mutable counters for the current scan. */
   stats: ReportLoadStats;
 }
 
@@ -327,6 +372,8 @@ async function reportsBucketName(auth: B2AuthManager): Promise<string> {
  * file would double-count every metric. Falls back to all non-audit CSVs if a
  * different account type names its files differently (Groups/Locations rows lack
  * account_id/date and are dropped by mapRow anyway).
+ *
+ * @param keys - Candidate report object keys.
  *
  * @returns The report object keys that should be treated as usage data.
  */
@@ -481,11 +528,15 @@ const gb = (bytes: number | null) =>
 // We fetch ONLY those two boundary days (Prefix/StartAfter-scoped listings),
 // never the whole report bucket.
 
-type Period = "month" | "quarter" | "year";
+/** Snapshot comparison period accepted by usage-growth helpers. */
+export type Period = "month" | "quarter" | "year";
 
 /**
  * Date one period before `from` (UTC), day-clamped for short months
  *  (e.g. Mar 31 minus one month → Feb 28/29, not Mar 3).
+ *
+ * @param period - Lookback period to subtract.
+ * @param from - UTC anchor date for the comparison.
  *
  * @returns The period start date in YYYY-MM-DD format.
  */
@@ -548,6 +599,11 @@ async function nearestSnapshotDate(
  * Date of the latest available snapshot (most recent day on or before today).
  *  Lists only recent days via StartAfter, widening if reporting is stale.
  *
+ * @param reportClient - Client capable of listing report object keys.
+ * @param bucketName - B2 reports bucket name.
+ * @param today - Date used as the current-day search anchor.
+ * @param budget - Optional scan budget for tests and bounded runtime.
+ *
  * @returns The latest snapshot date and whether the reports bucket is missing.
  */
 export async function latestSnapshotDate(
@@ -590,6 +646,10 @@ export async function latestSnapshotDate(
 
 /**
  * All usage rows for a single day folder (summed across that day's region files).
+ *
+ * @param reportClient - Client capable of listing and downloading report objects.
+ * @param bucketName - B2 reports bucket name.
+ * @param dayDate - Day folder to read in YYYY-MM-DD format.
  *
  * @returns The mapped usage rows for that day.
  */
@@ -645,6 +705,7 @@ function storedByAccount(rows: ReportRow[]): Map<string, number> {
   return m;
 }
 
+/** Stored-data growth for one account between two daily snapshots. */
 export interface SnapshotGrowth {
   accountId: string;
   firstBytes: number;
@@ -657,6 +718,9 @@ export interface SnapshotGrowth {
 /**
  * Per-account stored-data growth between two snapshots. Accounts present only
  *  in `now` are new (no % baseline); present only in `then` shrank toward zero.
+ *
+ * @param thenRows - Earlier snapshot rows.
+ * @param nowRows - Later snapshot rows.
  *
  * @returns Growth rows sorted by descending stored-byte growth.
  */
@@ -853,6 +917,24 @@ async function withNativeInsightDeadline<T>(
 
 // ── Tool registration ───────────────────────────────────────────────────────
 
+/**
+ * Register read-only storage-activity insight tools.
+ *
+ * @remarks
+ * Usage growth and egress leaders read preexisting B2 usage-report CSVs when
+ * available; largest-file and unfinished-upload tools use bounded live listings.
+ * All work remains scoped to the caller's configured credentials.
+ *
+ * @param server - Tool registrar receiving insight tools.
+ * @param b2Client - B2 native client for bucket resolution and live listings.
+ * @param auth - B2 auth manager used to derive the reports bucket.
+ * @param reportClient - Optional report client override for tests.
+ *
+ * @example
+ * ```ts
+ * registerInsightTools(registrar, b2Client, auth, reportClient);
+ * ```
+ */
 export function registerInsightTools(
   server: ToolRegistrar,
   b2Client: B2Client,

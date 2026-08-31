@@ -47,8 +47,21 @@ function callerFingerprint(config: B2Config): string {
  * computer backup management. These endpoints require the admin account to
  * be authorized for the Partner API and a MASTER application key.
  *
+ * @remarks
  * Secret-producing Partner account-creation flows run only when a durable
  * secret sink is active. Off mode keeps compatibility stubs in createServer.
+ *
+ * @param server - Tool registrar receiving Partner/Groups tools.
+ * @param client - Repository-owned B2 client configured with the master key.
+ * @param _auth - Partner auth manager retained for registration signature
+ * compatibility.
+ * @param config - Server configuration for destructive policy and secret-sink
+ * behavior.
+ *
+ * @example
+ * ```ts
+ * registerPartnerTools(registrar, masterClient, masterAuth, config);
+ * ```
  */
 export function registerPartnerTools(
   server: ToolRegistrar,

@@ -1,3 +1,13 @@
+/**
+ * S3-compatible client construction for Backblaze B2.
+ *
+ * @remarks
+ * This module derives AWS SDK S3 configuration through the official B2 SDK S3
+ * helper, validates authorize-returned S3 endpoints, and exposes a lazy facade
+ * that waits for B2 authorization before building the region-correct S3 client.
+ *
+ */
+
 import type { AccountInfo } from "@backblaze-labs/b2-sdk";
 import { createS3ClientConfig } from "@backblaze-labs/b2-sdk/s3";
 import type { B2AuthResponse, B2Config } from "../utils/types.js";
@@ -11,6 +21,13 @@ import {
   type B2S3PeerClientConfig,
 } from "./aws-sdk-adapter.js";
 
+/**
+ * Return the default B2 S3 endpoint for a region.
+ *
+ * @param region - B2 S3 region, such as `us-west-004`.
+ *
+ * @returns HTTPS endpoint origin for the region.
+ */
 export function expectedB2S3Endpoint(region: string): string {
   return `https://s3.${region}.backblazeb2.com`;
 }
@@ -31,10 +48,24 @@ interface AuthorizedB2S3Endpoint {
   region: string;
 }
 
+/** Validation mode for authorized B2 S3 endpoint URLs. */
 export type B2S3ApiUrlValidation =
   | { mode: "exact-region"; region: string }
   | { mode: "authorized-region" };
 
+/**
+ * Validate a B2 S3 API URL.
+ *
+ * @remarks
+ * Authorized endpoint validation accepts any trusted `s3.<region>.backblazeb2.com`
+ * host. Exact-region validation is stricter and is used when an operator-provided
+ * region is expected to match the endpoint.
+ *
+ * @param raw - URL string to validate.
+ * @param validation - Region matching mode.
+ *
+ * @returns `null` when valid, otherwise a human-readable failure reason.
+ */
 export function validateB2S3ApiUrl(raw: string, validation: B2S3ApiUrlValidation): string | null {
   let parsed: URL;
   try {
@@ -99,7 +130,8 @@ function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
   ) as unknown as AccountInfo;
 }
 
-interface B2S3ClientOptions {
+/** Options accepted when constructing a concrete S3 peer client. */
+export interface B2S3ClientOptions {
   accountInfo?: AccountInfo;
   applicationKeyId?: string;
   applicationKey?: string;
@@ -107,16 +139,21 @@ interface B2S3ClientOptions {
   surface?: string;
 }
 
-type B2S3ClientBuildOptions = Pick<
+/** Options accepted by the lazy authorized S3 facade. */
+export type B2S3ClientBuildOptions = Pick<
   B2S3ClientOptions,
   "applicationKeyId" | "applicationKey" | "surface"
 >;
 
-interface B2S3AuthProvider {
+/** Minimal B2 auth provider required by the lazy S3 facade. */
+export interface B2S3AuthProvider {
+  /** Return the static B2 configuration backing S3 credentials. */
   getConfig(): B2Config;
+  /** Return the current B2 authorization response, including S3 API URL. */
   getAuth(): Promise<B2AuthResponse>;
 }
 
+/** Public facade type used by tool registrars for S3-compatible operations. */
 export type B2S3ClientFacade = B2S3PeerClient;
 
 function customUserAgent(
@@ -180,6 +217,13 @@ function fallbackS3AuthorizeMessage(err: unknown): string {
 /**
  * Create an AWS SDK S3Client configured through the B2 SDK S3 helper.
  *
+ * @remarks
+ * When `authorizedS3ApiUrl` is present, it overrides the configured fallback
+ * region so hosted deployments follow the endpoint returned by B2 authorize.
+ *
+ * @param config - B2 runtime configuration.
+ * @param options - S3 construction overrides.
+ *
  * @returns The AWS SDK S3 client configuration for B2 S3 endpoints.
  */
 export function buildB2S3ClientConfig(
@@ -206,14 +250,44 @@ export function buildB2S3ClientConfig(
   };
 }
 
+/**
+ * Create a concrete S3-compatible peer client.
+ *
+ * @param config - B2 runtime configuration.
+ * @param options - Optional endpoint, key, and surface overrides.
+ *
+ * @returns Repository-owned S3 peer client.
+ */
 export function createS3Client(config: B2Config, options: B2S3ClientOptions = {}): B2S3PeerClient {
   return createB2S3PeerClient(buildB2S3ClientConfig(config, options));
 }
 
+/**
+ * Create an S3 peer client tagged with a tool-surface user-agent segment.
+ *
+ * @param config - B2 runtime configuration.
+ * @param surface - User-agent surface label.
+ *
+ * @returns Repository-owned S3 peer client.
+ */
 export function createS3ObjectClient(config: B2Config, surface: string): B2S3PeerClient {
   return createS3Client(config, { surface });
 }
 
+/**
+ * Create a lazy S3 facade that authorizes B2 before first use.
+ *
+ * @remarks
+ * B2 authorize returns the account's S3 API URL. This facade builds the real S3
+ * client from that endpoint on first operation, shares the in-flight authorize
+ * call, and falls back to the configured region only when authorize is
+ * temporarily unavailable.
+ *
+ * @param auth - Provider of B2 runtime config and authorize responses.
+ * @param options - Optional key and user-agent overrides.
+ *
+ * @returns Lazy S3 client facade used by tool registrars.
+ */
 export function createAuthorizedS3Client(
   auth: B2S3AuthProvider,
   options: B2S3ClientBuildOptions = {},
@@ -320,6 +394,14 @@ export function createAuthorizedS3Client(
   }) as B2S3ClientFacade;
 }
 
+/**
+ * Create an S3 client for the B2 reports bucket data path.
+ *
+ * @param config - B2 runtime configuration.
+ * @param auth - B2 authorize response containing the S3 API URL.
+ *
+ * @returns S3 peer client tagged for insight report reads.
+ */
 export function createReportS3Client(config: B2Config, auth: B2AuthResponse): B2S3PeerClient {
   return createS3Client(config, {
     applicationKeyId: config.applicationKeyId,

@@ -1,3 +1,14 @@
+/**
+ * Native B2 SDK facade for control-plane operations.
+ *
+ * @remarks
+ * Tool handlers call this repository-owned boundary instead of the official SDK
+ * directly. It normalizes SDK-specific identifiers and payload shapes, keeps
+ * request abort/circuit-breaker behavior in one place, and bridges B2 native
+ * version metadata back to S3-compatible tool handlers.
+ *
+ */
+
 import type {
   ApplicationKey,
   ApplicationKeyId,
@@ -61,9 +72,13 @@ import { DEFAULT_BOUNDED_WORKER_CONCURRENCY, forEachBounded } from "../utils/con
 import { isTestRuntime } from "../utils/runtime.js";
 import { abortError } from "../utils/named-error.js";
 
+/** Concrete B2 bucket types accepted by native bucket operations. */
 export type BucketType = "allPublic" | "allPrivate" | "snapshot" | "restricted";
+
+/** Bucket type filter accepted by list operations, including the B2 `all` wildcard. */
 export type BucketTypeFilter = BucketType | "all";
 
+/** CORS rule input accepted by create/update bucket tools. */
 export interface CorsRuleInput {
   corsRuleName: string;
   allowedOrigins: string[];
@@ -73,6 +88,7 @@ export interface CorsRuleInput {
   maxAgeSeconds: number;
 }
 
+/** Lifecycle rule input accepted by create/update bucket tools. */
 export interface LifecycleRuleInput {
   fileNamePrefix: string;
   daysFromHidingToDeleting?: number | null;
@@ -80,31 +96,37 @@ export interface LifecycleRuleInput {
   daysFromStartingToCancelingUnfinishedLargeFiles?: number | null;
 }
 
+/** Server-side encryption setting accepted by bucket mutation tools. */
 export interface ServerSideEncryptionInput {
   mode: "none" | "SSE-B2";
   algorithm?: "AES256";
 }
 
+/** Default Object Lock retention policy accepted by bucket mutation tools. */
 export interface BucketRetentionInput {
   mode: "governance" | "compliance" | null;
   period: { duration: number; unit: "days" | "years" } | null;
 }
 
+/** Normalized server-side encryption setting returned from bucket reads. */
 export interface ServerSideEncryptionResult {
   mode: "none" | "SSE-B2" | "SSE-C" | null;
   algorithm?: "AES256" | null;
 }
 
+/** Retention duration returned by B2 Object Lock APIs. */
 export interface RetentionPeriodResult {
   duration: number;
   unit: "days" | "years";
 }
 
+/** Normalized bucket default-retention policy returned by B2. */
 export interface BucketRetentionPolicyResult {
   mode: "governance" | "compliance" | "none" | null;
   period: RetentionPeriodResult | null;
 }
 
+/** Normalized bucket file-lock configuration returned by B2. */
 export interface BucketFileLockConfigurationResult {
   isClientAuthorizedToRead: boolean;
   value: {
@@ -113,6 +135,7 @@ export interface BucketFileLockConfigurationResult {
   } | null;
 }
 
+/** Normalized B2 bucket replication rule returned by bucket reads. */
 export interface ReplicationRuleResult {
   replicationRuleName: string;
   destinationBucketId: string;
@@ -122,6 +145,7 @@ export interface ReplicationRuleResult {
   priority: number;
 }
 
+/** Normalized B2 replication configuration returned by bucket reads. */
 export interface ReplicationConfigurationResult {
   asReplicationSource: {
     replicationRules: ReplicationRuleResult[];
@@ -132,6 +156,7 @@ export interface ReplicationConfigurationResult {
   } | null;
 }
 
+/** Replication configuration accepted by create/update bucket tools. */
 export interface ReplicationConfigurationInput {
   asReplicationSource?: {
     replicationRules: Array<{
@@ -149,6 +174,7 @@ export interface ReplicationConfigurationInput {
   } | null;
 }
 
+/** Options accepted by the native B2 create-bucket boundary. */
 export interface CreateBucketOptions {
   bucketName: string;
   bucketType: "allPublic" | "allPrivate";
@@ -161,6 +187,7 @@ export interface CreateBucketOptions {
   replicationConfiguration?: ReplicationConfigurationInput;
 }
 
+/** Options accepted by the native B2 update-bucket boundary. */
 export interface UpdateBucketOptions {
   bucketId: string;
   bucketType?: "allPublic" | "allPrivate";
@@ -174,6 +201,7 @@ export interface UpdateBucketOptions {
   ifRevisionIs?: number;
 }
 
+/** Event notification rule accepted by bucket notification tools. */
 export interface EventNotificationRuleInput {
   name: string;
   eventTypes: string[];
@@ -189,12 +217,14 @@ export interface EventNotificationRuleInput {
   suspensionReason?: string;
 }
 
+/** Filters accepted by native B2 bucket listing. */
 export interface BucketFilters {
   bucketId?: string;
   bucketName?: string;
   bucketTypes?: BucketTypeFilter[];
 }
 
+/** Normalized bucket metadata returned by native B2 bucket operations. */
 export interface BucketInfoResult {
   bucketId: string;
   bucketName: string;
@@ -211,15 +241,18 @@ export interface BucketInfoResult {
   replicationConfiguration?: ReplicationConfigurationResult;
 }
 
+/** List-buckets response normalized for tool output. */
 export interface ListBucketsResult {
   buckets: BucketInfoResult[];
 }
 
+/** Bucket notification rules response normalized for tool output. */
 export interface NotificationRulesResult {
   bucketId?: string;
   eventNotificationRules: EventNotificationRuleInput[];
 }
 
+/** Application key metadata without one-time secret material. */
 export interface ApplicationKeyResult {
   keyName: string;
   applicationKeyId: string;
@@ -232,10 +265,12 @@ export interface ApplicationKeyResult {
   options: string[];
 }
 
+/** Application key creation result including the one-time secret. */
 export interface FullApplicationKeyResult extends ApplicationKeyResult {
   applicationKey: string;
 }
 
+/** Options accepted by native B2 application-key creation. */
 export interface CreateKeyOptions {
   keyName: string;
   capabilities: string[];
@@ -245,16 +280,19 @@ export interface CreateKeyOptions {
   namePrefix?: string;
 }
 
+/** List-keys response normalized for tool output. */
 export interface ListKeysResult {
   keys: ApplicationKeyResult[];
   nextApplicationKeyId?: string | null;
 }
 
+/** Pagination options for native B2 application-key listing. */
 export interface ListKeysOptions {
   maxKeyCount?: number;
   startApplicationKeyId?: string;
 }
 
+/** Options for native B2 current-file-name listing. */
 export interface ListFileNamesOptions {
   bucketId: string;
   startFileName?: string;
@@ -263,6 +301,7 @@ export interface ListFileNamesOptions {
   delimiter?: string;
 }
 
+/** Options for native B2 unfinished-large-file listing. */
 export interface ListUnfinishedLargeFilesOptions {
   bucketId: string;
   namePrefix?: string;
@@ -270,18 +309,21 @@ export interface ListUnfinishedLargeFilesOptions {
   maxFileCount?: number;
 }
 
+/** Options for native B2 multipart part listing. */
 export interface ListPartsOptions {
   fileId: string;
   startPartNumber?: number;
   maxPartCount?: number;
 }
 
+/** Options for updating legal hold on a specific B2 file version. */
 export interface UpdateFileLegalHoldOptions {
   fileId: string;
   fileName: string;
   legalHold: "on" | "off";
 }
 
+/** Options for updating Object Lock retention on a specific B2 file version. */
 export interface UpdateFileRetentionOptions {
   fileId: string;
   fileName: string;
@@ -292,12 +334,14 @@ export interface UpdateFileRetentionOptions {
   bypassGovernance?: boolean;
 }
 
+/** Normalized file legal-hold update result. */
 export interface UpdateFileLegalHoldResult {
   fileName: string;
   fileId: string;
   legalHold: "on" | "off";
 }
 
+/** Normalized file retention update result. */
 export interface UpdateFileRetentionResult {
   fileName: string;
   fileId: string;
@@ -307,38 +351,45 @@ export interface UpdateFileRetentionResult {
   };
 }
 
+/** Minimal file-version metadata returned by current-file listings. */
 export interface FileVersionResult {
   fileName: string;
   contentLength: number;
   uploadTimestamp: number;
 }
 
+/** Native B2 current-file-name listing result. */
 export interface ListFileNamesResult {
   files: FileVersionResult[];
   nextFileName?: string | null;
 }
 
+/** Unfinished large-file metadata returned by native B2 listings. */
 export interface UnfinishedLargeFileResult {
   fileId: string;
   fileName: string;
   uploadTimestamp?: number;
 }
 
+/** Native B2 unfinished-large-file listing result. */
 export interface ListUnfinishedLargeFilesResult {
   files: UnfinishedLargeFileResult[];
   nextFileId?: string | null;
 }
 
+/** Multipart part metadata returned by native B2 list-parts. */
 export interface PartInfoResult {
   partNumber: number;
   contentLength: number;
 }
 
+/** Native B2 list-parts response normalized for tool output. */
 export interface ListPartsResult {
   parts: PartInfoResult[];
   nextPartNumber?: number | null;
 }
 
+/** Options for Partner API group listing. */
 export interface PartnerListGroupsOptions {
   adminAccountId: string;
   groupName?: string;
@@ -346,6 +397,7 @@ export interface PartnerListGroupsOptions {
   maxGroupCount?: number;
 }
 
+/** Options for Partner API group-member listing. */
 export interface PartnerListGroupMembersOptions {
   adminAccountId: string;
   groupId: string;
@@ -353,6 +405,7 @@ export interface PartnerListGroupMembersOptions {
   maxMemberCount?: number;
 }
 
+/** Options for ejecting a Partner API group member. */
 export interface PartnerEjectGroupMemberOptions {
   adminAccountId: string;
   groupId: string;
@@ -360,6 +413,7 @@ export interface PartnerEjectGroupMemberOptions {
   email?: string | null;
 }
 
+/** Options for creating a Partner API group member account. */
 export interface PartnerCreateGroupMemberOptions {
   adminAccountId: string;
   groupId: string;
@@ -367,17 +421,26 @@ export interface PartnerCreateGroupMemberOptions {
   region?: Region | null;
 }
 
+/** Request shape accepted by Partner reserve-trial account creation. */
 export type PartnerReserveTrialCreateAccountOptions =
   | ReserveTrialCreateAccountRequestEntry
   | ReserveTrialCreateAccountRequest;
 
-type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
+/** Factory hook for constructing the official Partner SDK client in tests. */
+export type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
 
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const PARTNER_TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
 let partnerClientFactoryForTests: PartnerClientFactory | null = null;
 
+/**
+ * Override the Partner SDK client factory for tests.
+ *
+ * @param factory - Test Partner client factory, or `null` to restore default construction.
+ *
+ * @throws Error when called outside the test runtime.
+ */
 export function setB2PartnerClientFactoryForTests(factory: PartnerClientFactory | null): void {
   if (!isTestRuntime()) {
     throw new Error("Partner SDK client factory override is only available in tests.");
@@ -915,6 +978,18 @@ function normalizeEventNotificationRule(
   };
 }
 
+/**
+ * Validate an authorized B2 native API endpoint URL.
+ *
+ * @remarks
+ * B2 authorize responses provide the native API origin that subsequent raw SDK
+ * calls use. The server accepts only HTTPS Backblaze-owned origins without
+ * credentials, custom ports, paths, queries, or fragments.
+ *
+ * @param raw - URL string from B2 authorization.
+ *
+ * @returns `null` when the URL is trusted, otherwise a human-readable reason.
+ */
 export function validateB2ApiUrl(raw: string): string | null {
   let parsed: URL;
   try {
@@ -1018,14 +1093,31 @@ function raceWithCallerAbort<T>(promise: Promise<T>, signal: AbortSignal | undef
 /**
  * Repository-owned adapter over the official B2 SDK. Tool handlers call this
  * class instead of constructing SDK clients or raw credential details.
+ *
+ * @remarks
+ * The client owns native API circuit breaking, token refresh after 401s,
+ * Partner API token caching, B2-to-S3 version ownership checks, and conversion
+ * from SDK branded identifiers to plain JSON-safe tool results.
  */
 export class B2Client {
   private partnerClient: SdkPartnerClient | null = null;
   private partnerAuthTime: number | null = null;
   private partnerInflightAuth: Promise<PartnerAuthorizeResponse> | null = null;
 
+  /**
+   * Create a B2 native client facade.
+   *
+   * @param auth - Auth manager that owns SDK authorization state.
+   */
   constructor(private readonly auth: B2AuthManager) {}
 
+  /**
+   * List buckets visible to the authorized key.
+   *
+   * @param options - Optional bucket filters.
+   *
+   * @returns Normalized bucket list.
+   */
   async listBuckets(options: BucketFilters = {}): Promise<ListBucketsResult> {
     const buckets = await this.withNativeCircuit(async (client, auth) => {
       const requests = toBucketFilters(auth, options);
@@ -1035,6 +1127,13 @@ export class B2Client {
     return { buckets: buckets.map(toBucketInfoResult) };
   }
 
+  /**
+   * Create a private or public B2 bucket.
+   *
+   * @param options - Bucket creation options.
+   *
+   * @returns Metadata for the created bucket.
+   */
   async createBucket(options: CreateBucketOptions): Promise<BucketInfoResult> {
     const bucket = await this.withNativeCircuit((client) =>
       client.createBucket(normalizeCreateBucketOptions(options)),
@@ -1042,12 +1141,26 @@ export class B2Client {
     return toBucketInfoResult(bucket.info);
   }
 
+  /**
+   * Delete an empty B2 bucket by bucket ID.
+   *
+   * @param bucketIdValue - B2 bucket ID to delete.
+   *
+   * @returns Metadata for the deleted bucket.
+   */
   async deleteBucket(bucketIdValue: string): Promise<BucketInfoResult> {
     return toBucketInfoResult(
       await this.withNativeCircuit((client) => client.deleteBucket(bucketId(bucketIdValue))),
     );
   }
 
+  /**
+   * Update mutable bucket settings through the native B2 API.
+   *
+   * @param options - Bucket update options.
+   *
+   * @returns Updated bucket metadata.
+   */
   async updateBucket(options: UpdateBucketOptions): Promise<BucketInfoResult> {
     return toBucketInfoResult(
       await this.withNativeCircuit((client, auth) =>
@@ -1060,6 +1173,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Read bucket event notification rules.
+   *
+   * @param bucketIdValue - B2 bucket ID.
+   *
+   * @returns Current notification rules for the bucket.
+   */
   async getBucketNotificationRules(bucketIdValue: string): Promise<NotificationRulesResult> {
     return toNotificationRulesResult(
       await this.withNativeCircuit((client, auth) =>
@@ -1070,6 +1190,14 @@ export class B2Client {
     );
   }
 
+  /**
+   * Replace bucket event notification rules.
+   *
+   * @param bucketIdValue - B2 bucket ID.
+   * @param eventNotificationRules - Complete replacement rule set.
+   *
+   * @returns Updated notification rules for the bucket.
+   */
   async setBucketNotificationRules(
     bucketIdValue: string,
     eventNotificationRules: EventNotificationRuleInput[],
@@ -1084,6 +1212,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Create an application key and return its one-time secret.
+   *
+   * @param options - Application-key creation options.
+   *
+   * @returns Metadata and one-time secret for the created key.
+   */
   async createKey(options: CreateKeyOptions): Promise<FullApplicationKeyResult> {
     return toFullApplicationKeyResult(
       await this.withNativeCircuit((client) =>
@@ -1092,6 +1227,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * List application keys for the authorized account.
+   *
+   * @param options - Pagination options.
+   *
+   * @returns Normalized application-key page.
+   */
   async listKeys(options: ListKeysOptions): Promise<ListKeysResult> {
     const result = await this.withNativeCircuit((client) =>
       client.listKeys({
@@ -1106,6 +1248,15 @@ export class B2Client {
     };
   }
 
+  /**
+   * Resolve and verify one S3 version ID against B2 native file metadata.
+   *
+   * @param options - Bucket, key, and version ID to verify.
+   *
+   * @returns Native file-version binding for the S3 version target.
+   *
+   * @throws Error when the version does not belong to the requested bucket/key.
+   */
   async resolveS3FileVersion(options: {
     bucket: string;
     key: string;
@@ -1123,6 +1274,13 @@ export class B2Client {
     });
   }
 
+  /**
+   * Resolve a batch of S3 version IDs against B2 native file metadata.
+   *
+   * @param options - Bucket and object targets to verify.
+   *
+   * @returns Per-object resolution results, preserving errors on individual targets.
+   */
   async resolveS3FileVersions(options: {
     bucket: string;
     objects: B2S3VersionTarget[];
@@ -1173,6 +1331,13 @@ export class B2Client {
     });
   }
 
+  /**
+   * Return current B2 native file metadata for an S3 object key.
+   *
+   * @param options - Bucket and key to inspect.
+   *
+   * @returns Current file-version binding, or `null` when the object is absent.
+   */
   async getCurrentS3FileVersion(options: {
     bucket: string;
     key: string;
@@ -1190,6 +1355,13 @@ export class B2Client {
     });
   }
 
+  /**
+   * Delete an application key.
+   *
+   * @param applicationKeyIdValue - Application key ID to delete.
+   *
+   * @returns Metadata for the deleted key.
+   */
   async deleteKey(applicationKeyIdValue: string): Promise<ApplicationKeyResult> {
     return toApplicationKeyResult(
       await this.withNativeCircuit((client) =>
@@ -1198,6 +1370,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Set or clear legal hold on a file version.
+   *
+   * @param options - Legal-hold update options.
+   *
+   * @returns Updated legal-hold state.
+   */
   async updateFileLegalHold(
     options: UpdateFileLegalHoldOptions,
   ): Promise<UpdateFileLegalHoldResult> {
@@ -1209,6 +1388,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Set, update, or clear Object Lock retention on a file version.
+   *
+   * @param options - Retention update options.
+   *
+   * @returns Updated retention state.
+   */
   async updateFileRetention(
     options: UpdateFileRetentionOptions,
   ): Promise<UpdateFileRetentionResult> {
@@ -1220,6 +1406,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * List current file names in a bucket with native B2 pagination.
+   *
+   * @param options - Listing options.
+   *
+   * @returns Current file-name page.
+   */
   async listFileNames(options: ListFileNamesOptions): Promise<ListFileNamesResult> {
     const request = { ...options, bucketId: bucketId(options.bucketId) };
     const result = await this.withNativeCircuit((client, auth) =>
@@ -1233,6 +1426,13 @@ export class B2Client {
     };
   }
 
+  /**
+   * List unfinished native B2 large files in a bucket.
+   *
+   * @param options - Large-file listing options.
+   *
+   * @returns Unfinished large-file page.
+   */
   async listUnfinishedLargeFiles(
     options: ListUnfinishedLargeFilesOptions,
   ): Promise<ListUnfinishedLargeFilesResult> {
@@ -1252,6 +1452,13 @@ export class B2Client {
     };
   }
 
+  /**
+   * List uploaded parts for an unfinished native B2 large file.
+   *
+   * @param options - Part listing options.
+   *
+   * @returns Part listing page.
+   */
   async listParts(options: ListPartsOptions): Promise<ListPartsResult> {
     const request = { ...options, fileId: largeFileId(options.fileId) };
     const result = await this.withNativeCircuit((client, auth) =>
@@ -1265,6 +1472,13 @@ export class B2Client {
     };
   }
 
+  /**
+   * List Partner API groups for an admin account.
+   *
+   * @param options - Partner group listing options.
+   *
+   * @returns Raw Partner API list-groups response cloned for tool output.
+   */
   async listGroups(options: PartnerListGroupsOptions): Promise<ListGroupsResponse> {
     return cloneJsonResponse(
       await this.withPartnerCircuit(
@@ -1292,6 +1506,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * List members of a Partner API group.
+   *
+   * @param options - Partner group-member listing options.
+   *
+   * @returns Raw Partner API list-members response cloned for tool output.
+   */
   async listGroupMembers(
     options: PartnerListGroupMembersOptions,
   ): Promise<ListGroupMembersResponse> {
@@ -1319,6 +1540,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Create a new account as a member of a Partner API group.
+   *
+   * @param options - Partner group-member creation options.
+   *
+   * @returns Secret-bearing Partner API creation response cloned for tool output.
+   */
   async createGroupMember(
     options: PartnerCreateGroupMemberOptions,
   ): Promise<CreateGroupMemberResponse> {
@@ -1344,6 +1572,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Eject an account from a Partner API group.
+   *
+   * @param options - Partner group-member ejection options.
+   *
+   * @returns Raw Partner API ejection response cloned for tool output.
+   */
   async ejectGroupMember(
     options: PartnerEjectGroupMemberOptions,
   ): Promise<EjectGroupMemberResponse> {
@@ -1369,6 +1604,13 @@ export class B2Client {
     );
   }
 
+  /**
+   * Create one or more Partner reserve-trial accounts.
+   *
+   * @param request - Partner reserve-trial create-account request.
+   *
+   * @returns Secret-bearing Partner API creation response cloned for tool output.
+   */
   async reserveTrialCreateAccount(
     request: PartnerReserveTrialCreateAccountOptions,
   ): Promise<ReserveTrialCreateAccountResponse> {

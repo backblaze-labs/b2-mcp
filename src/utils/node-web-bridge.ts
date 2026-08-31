@@ -1,14 +1,38 @@
 import * as http from "http";
 import { Readable } from "stream";
 
+/**
+ * Helpers for translating between Node HTTP primitives and Fetch API objects.
+ *
+ * @remarks
+ * The standalone Node server uses these helpers so the shared fetch pipeline
+ * can also run in serverless environments.
+ */
+
+/** Options used when converting a Node request into a Web request. */
 export interface NodeRequestToWebOptions {
+  /** Scheme to use when reconstructing an absolute request URL. */
   scheme?: "http" | "https";
 }
 
+/**
+ * Return the first header value from Node's string-or-array representation.
+ *
+ * @param value - Header value from `IncomingHttpHeaders`.
+ *
+ * @returns First value, single value, or undefined.
+ */
 export function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/**
+ * Convert Node incoming headers into a Fetch Headers object.
+ *
+ * @param headers - Node incoming headers.
+ *
+ * @returns Fetch-compatible Headers.
+ */
 export function headersFromNode(headers: http.IncomingHttpHeaders): Headers {
   const result = new Headers();
   for (const [name, value] of Object.entries(headers)) {
@@ -22,6 +46,14 @@ export function headersFromNode(headers: http.IncomingHttpHeaders): Headers {
   return result;
 }
 
+/**
+ * Reconstruct an absolute request URL from a Node request.
+ *
+ * @param req - Incoming Node request.
+ * @param options - URL reconstruction options.
+ *
+ * @returns Absolute URL string.
+ */
 export function nodeRequestUrl(
   req: http.IncomingMessage,
   options: NodeRequestToWebOptions = {},
@@ -34,6 +66,14 @@ export function nodeRequestUrl(
   return `${scheme}://${host}${req.url ?? "/"}`;
 }
 
+/**
+ * Read the URL path from a Node request.
+ *
+ * @param req - Incoming Node request.
+ * @param options - URL reconstruction options.
+ *
+ * @returns Request pathname, or `/` when parsing fails.
+ */
 export function nodeRequestPath(
   req: http.IncomingMessage,
   options: NodeRequestToWebOptions = {},
@@ -45,6 +85,15 @@ export function nodeRequestPath(
   }
 }
 
+/**
+ * Convert a Node request stream into a Fetch Request.
+ *
+ * @param req - Incoming Node request.
+ * @param signal - Abort signal tied to the Node connection.
+ * @param options - URL reconstruction options.
+ *
+ * @returns Fetch-compatible Request.
+ */
 export function nodeRequestToWeb(
   req: http.IncomingMessage,
   signal: AbortSignal,
@@ -63,6 +112,13 @@ export function nodeRequestToWeb(
   return new Request(nodeRequestUrl(req, options), init);
 }
 
+/**
+ * Convert Fetch response headers into Node outgoing headers.
+ *
+ * @param headers - Fetch Headers object.
+ *
+ * @returns Node outgoing header map.
+ */
 export function headersFromWeb(headers: Headers): http.OutgoingHttpHeaders {
   const nodeHeaders: http.OutgoingHttpHeaders = {};
   for (const [name, value] of headers) {
@@ -106,6 +162,13 @@ function waitForDrain(res: http.ServerResponse, signal: AbortSignal): Promise<vo
   });
 }
 
+/**
+ * Stream a Fetch Response into a Node ServerResponse.
+ *
+ * @param response - Fetch response produced by the shared HTTP pipeline.
+ * @param res - Node response to write.
+ * @param signal - Abort signal tied to the client connection.
+ */
 export async function writeWebResponse(
   response: Response,
   res: http.ServerResponse,
@@ -138,6 +201,11 @@ export async function writeWebResponse(
   if (!signal.aborted && !res.destroyed) res.end();
 }
 
+/**
+ * Drain any unread request body after a request is rejected.
+ *
+ * @param req - Incoming Node request.
+ */
 export function resumeUnreadRequest(req: http.IncomingMessage): void {
   if (!req.readableEnded && !req.destroyed) req.resume();
 }

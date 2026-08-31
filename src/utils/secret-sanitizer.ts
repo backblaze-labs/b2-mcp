@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import type * as http from "http";
 
 const REDACTED = "[redacted]";
+/** Sentinel returned when sanitizer failure handling itself fails. */
 export const LOG_SANITIZER_FAILURE = "[log_sanitizer_failed]";
 const ACCESSOR_VALUE = "[accessor]";
 const FUNCTION_VALUE = "[function]";
@@ -13,6 +14,7 @@ const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
 
 const MIN_CONFIGURED_SECRET_LENGTH = 8;
 
+/** Structured field names whose values are always redacted from MCP output and logs. */
 export const STRUCTURED_SECRET_FIELD_NAMES = [
   "applicationKey",
   "appKey",
@@ -83,8 +85,10 @@ const LOGGER_SENSITIVE_FIELD_NAMES = new Set(
   LOGGER_SECRET_FIELD_NAMES.map((name) => normalizeKey(name)),
 );
 
+/** Pino redaction paths derived from structured secret field names. */
 export const LOGGER_SECRET_REDACTION_PATHS = redactionPaths(LOGGER_SECRET_FIELD_NAMES);
 
+/** Labels used by the text sanitizer to identify key-value secrets. */
 export const TEXT_SECRET_LABELS = [
   ...STRUCTURED_SECRET_FIELD_NAMES,
   ...SECRET_HEADER_NAMES,
@@ -146,7 +150,8 @@ function isSensitiveField(key: string, path: readonly string[], mode: SanitizerM
   return false;
 }
 
-interface SanitizerSecretConfig {
+/** Credential-like object shape accepted by sanitizer config helpers. */
+export interface SanitizerSecretConfig {
   applicationKey?: unknown;
   appKey?: unknown;
   masterKey?: unknown;
@@ -154,6 +159,7 @@ interface SanitizerSecretConfig {
   authorizationToken?: unknown;
 }
 
+/** Runtime options that influence secret redaction. */
 export interface SanitizerOptions {
   secrets?: Iterable<unknown>;
   env?: NodeJS.ProcessEnv;
@@ -167,6 +173,14 @@ interface TextSpan {
 
 const sanitizerOptionsStorage = new AsyncLocalStorage<SanitizerOptions | undefined>();
 
+/**
+ * Run a callback with AsyncLocalStorage-backed sanitizer options.
+ *
+ * @param options - Sanitizer options for nested response/log helpers.
+ * @param callback - Work to execute with those options active.
+ *
+ * @returns The callback result.
+ */
 export function runWithSanitizerOptions<T>(
   options: SanitizerOptions | undefined,
   callback: () => T,
@@ -174,10 +188,20 @@ export function runWithSanitizerOptions<T>(
   return sanitizerOptionsStorage.run(options, callback);
 }
 
+/**
+ * Return the current sanitizer options.
+ *
+ * @returns Active sanitizer options, or an empty object outside a sanitizer context.
+ */
 export function currentSanitizerOptions(): SanitizerOptions {
   return sanitizerOptionsStorage.getStore() ?? {};
 }
 
+/**
+ * Return whether sanitizer options are installed in the current async context.
+ *
+ * @returns `true` when a sanitizer context is active.
+ */
 export function hasCurrentSanitizerOptions(): boolean {
   return sanitizerOptionsStorage.getStore() !== undefined;
 }
@@ -230,6 +254,13 @@ function withKeyIdLogSecrets(options: SanitizerOptions): SanitizerOptions {
   };
 }
 
+/**
+ * Extract configured secret values from a B2/S3 credential-like config object.
+ *
+ * @param config - Credential-bearing configuration object.
+ *
+ * @returns Unique configured secret values that are long enough to redact safely.
+ */
 export function configuredSecretValuesFromConfig(config?: SanitizerSecretConfig): string[] {
   if (!config) return [];
   return [
@@ -254,10 +285,25 @@ function configuredSecretValues(options: SanitizerOptions): string[] {
   return [...new Set(values)].sort((a, b) => b.length - a.length);
 }
 
+/**
+ * Build sanitizer options from a credential-bearing config object.
+ *
+ * @param config - Credential-bearing configuration object.
+ *
+ * @returns Sanitizer options that redact configured credential values.
+ */
 export function sanitizerOptionsFromConfig(config?: SanitizerSecretConfig): SanitizerOptions {
   return { secrets: configuredSecretValuesFromConfig(config) };
 }
 
+/**
+ * Redact secrets from arbitrary text.
+ *
+ * @param text - Value to coerce to text and sanitize.
+ * @param options - Additional sanitizer options and exact secrets.
+ *
+ * @returns Sanitized text with known secret patterns replaced.
+ */
 export function sanitizeText(text: unknown, options: SanitizerOptions = {}): string {
   const safe = redactExactTextSecrets(typeof text === "string" ? text : String(text), [
     ...configuredSecretValues(options),
@@ -268,6 +314,14 @@ export function sanitizeText(text: unknown, options: SanitizerOptions = {}): str
     .replace(LABELED_SECRET, `$1${REDACTED}`);
 }
 
+/**
+ * Redact exact secret values from text, including overlapping matches.
+ *
+ * @param text - Text to redact.
+ * @param secrets - Exact secret values to replace.
+ *
+ * @returns Redacted text.
+ */
 export function redactExactTextSecrets(text: string, secrets: readonly string[]): string {
   const spans: TextSpan[] = [];
   for (const secret of new Set(secrets)) {
@@ -302,6 +356,13 @@ export function redactExactTextSecrets(text: string, secrets: readonly string[])
   return safe + text.slice(offset);
 }
 
+/**
+ * Format a bootstrap error for stderr with configured secrets redacted.
+ *
+ * @param err - Error or thrown value to format.
+ *
+ * @returns Sanitized bootstrap error message.
+ */
 export function bootstrapErrorMessage(err: unknown): string {
   try {
     return sanitizeText(err instanceof Error ? err.message : String(err), withKeyIdLogSecrets({}));
@@ -310,10 +371,36 @@ export function bootstrapErrorMessage(err: unknown): string {
   }
 }
 
+/**
+ * Sanitize a value for MCP output.
+ *
+ * @remarks
+ * MCP output keeps non-secret credential handles such as application key IDs
+ * visible when tools intentionally return metadata, while redacting actual
+ * secret material.
+ *
+ * @param value - Value to sanitize.
+ * @param options - Sanitizer options and exact secrets.
+ *
+ * @returns Sanitized clone suitable for MCP output.
+ */
 export function sanitizeForMcpOutput(value: unknown, options: SanitizerOptions = {}): unknown {
   return sanitizeValue(value, [], new WeakSet<object>(), options, "mcp");
 }
 
+/**
+ * Sanitize a structured value for logs.
+ *
+ * @remarks
+ * Log mode also redacts credential handles such as key IDs and converts
+ * functions, accessors, dates, buffers, and circular structures to stable safe
+ * representations.
+ *
+ * @param value - Value to sanitize for structured logging.
+ * @param options - Sanitizer options and exact secrets.
+ *
+ * @returns Sanitized clone suitable for logs.
+ */
 export function sanitizeStructuredLogValue(
   value: unknown,
   options: SanitizerOptions = {},
@@ -454,10 +541,26 @@ function sanitizeErrorForLog(err: Error, seen: WeakSet<object>, options: Sanitiz
   return safe;
 }
 
+/**
+ * Sanitize an MCP response object.
+ *
+ * @param response - MCP response to sanitize.
+ * @param options - Sanitizer options and exact secrets.
+ *
+ * @returns Sanitized response clone.
+ */
 export function sanitizeMcpResponse<T>(response: T, options: SanitizerOptions = {}): T {
   return sanitizeForMcpOutput(response, options) as T;
 }
 
+/**
+ * Sanitize an error for logs or rethrowing across MCP boundaries.
+ *
+ * @param err - Error or thrown value to sanitize.
+ * @param options - Sanitizer options and exact secrets.
+ *
+ * @returns Error with sanitized name/message/stack and enumerable fields.
+ */
 export function sanitizeError(err: unknown, options: SanitizerOptions = {}): Error {
   const logOptions = withKeyIdLogSecrets(options);
   if (err instanceof Error) {
@@ -479,6 +582,14 @@ function sanitizedIdentifier(
   return allowed.test(value) ? value : REDACTED;
 }
 
+/**
+ * Sanitize a provider error code for logs and MCP output.
+ *
+ * @param code - Provider error code.
+ * @param options - Sanitizer options.
+ *
+ * @returns Safe provider code, or `unknown_error`.
+ */
 export function sanitizeProviderCode(
   code: string | undefined,
   options: SanitizerOptions = {},
@@ -488,6 +599,14 @@ export function sanitizeProviderCode(
   );
 }
 
+/**
+ * Sanitize a provider request ID.
+ *
+ * @param requestId - Provider request ID.
+ * @param options - Sanitizer options.
+ *
+ * @returns Safe request ID or `undefined`.
+ */
 export function sanitizeProviderRequestId(
   requestId: string | undefined,
   options: SanitizerOptions = {},
@@ -495,6 +614,7 @@ export function sanitizeProviderRequestId(
   return sanitizedIdentifier(requestId, /^[A-Za-z0-9][A-Za-z0-9_.:/+=-]{0,255}$/, options);
 }
 
+/** Literal redaction marker used by sanitizer helpers. */
 export const SECRET_SANITIZER_REDACTION = REDACTED;
 
 /*
@@ -563,6 +683,8 @@ function requestSecretHeaderValues(lookup: HeaderLookup): string[] {
 /**
  * Extract the secret values carried on a Node request's headers.
  *
+ * @param req - Node HTTP request.
+ *
  * @returns The sensitive header values, including derived credential/cookie parts.
  */
 export function nodeRequestSecrets(req: http.IncomingMessage): string[] {
@@ -571,6 +693,8 @@ export function nodeRequestSecrets(req: http.IncomingMessage): string[] {
 
 /**
  * Extract the secret values carried on a Web request's headers.
+ *
+ * @param headers - Web Headers object.
  *
  * @returns The sensitive header values, including derived credential/cookie parts.
  */
@@ -584,6 +708,9 @@ export function webRequestSecrets(headers: Headers): string[] {
  * handles configured env secrets and labeled/bearer patterns. Any failure while
  * coercing or sanitizing the error text returns the sanitizer-failure sentinel
  * so the HTTP catch blocks that call this cannot throw a secondary exception.
+ *
+ * @param err - Error or thrown value to format.
+ * @param secrets - Exact request-secret values to redact.
  *
  * @returns The redacted error text, or the sanitizer-failure sentinel on error.
  */

@@ -1,20 +1,36 @@
 import { readPortArg } from "./utils/config.js";
 
-type CliTransport = "stdio" | "http";
+/** Transport names accepted by the command-line entry point. */
+export type CliTransport = "stdio" | "http";
 
-interface CliOptions {
+/** Parsed command-line options for the packaged b2-mcp binary. */
+export interface CliOptions {
+  /** Requested action after argument parsing. */
   action: "run" | "help" | "version";
+  /** Transport selected by argv or B2_MCP_TRANSPORT. */
   transport: CliTransport;
+  /** Optional HTTP listen port. */
   port?: number;
 }
 
+/** Usage error raised when CLI arguments cannot be parsed. */
 export class CliUsageError extends Error {
+  /**
+   * Create a CLI usage error.
+   *
+   * @param message - Human-readable usage failure.
+   */
   constructor(message: string) {
     super(message);
     this.name = "CliUsageError";
   }
 }
 
+/**
+ * Build the CLI help text.
+ *
+ * @returns Usage text printed for `--help`.
+ */
 export function helpText(): string {
   return [
     "Usage: b2-mcp [stdio|http] [options]",
@@ -41,6 +57,16 @@ function envTransport(env: NodeJS.ProcessEnv): CliTransport | null {
   return raw ? parseTransport(raw) : null;
 }
 
+/**
+ * Parse CLI arguments for the packaged entry point.
+ *
+ * @param argv - Argument vector without `node` and script path.
+ * @param env - Environment used for defaults.
+ *
+ * @returns Parsed CLI options.
+ *
+ * @throws CliUsageError when arguments are invalid.
+ */
 export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions {
   const options: CliOptions = { action: "run", transport: "stdio" };
   let explicitTransport = false;

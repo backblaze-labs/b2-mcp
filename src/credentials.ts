@@ -19,16 +19,20 @@ const HEADER_NAMES = {
 
 const ALL_CREDENTIAL_HEADER_NAMES = new Set<string>(Object.values(HEADER_NAMES).flat());
 
+/** Supported HTTP credential routing modes. */
 export type HttpCredentialMode = "server" | "principal" | "headers";
 
+/** Node request extended with verified MCP auth info. */
 export interface AuthenticatedIncomingMessage extends http.IncomingMessage {
   auth?: AuthInfo;
 }
 
+/** Context supplied when resolving credentials for a request. */
 export interface CredentialProviderContext {
   req?: AuthenticatedIncomingMessage;
 }
 
+/** Resolved B2 configuration plus non-secret cache keys. */
 export interface CredentialResolution {
   config: B2Config;
   /** Non-secret log/rate-limit key: either a credential fingerprint or verified principal. */
@@ -41,12 +45,16 @@ export interface CredentialResolution {
   principal?: string;
 }
 
+/** Interface implemented by stdio and HTTP credential resolvers. */
 export interface CredentialProvider {
   readonly name: string;
+  /** Resolve credentials for a process or request. */
   resolve(context?: CredentialProviderContext): CredentialResolution;
+  /** Validate startup configuration without serving a request, when possible. */
   validateConfiguration?(): void;
 }
 
+/** Stable credential-resolution failure surfaced by bootstrap and HTTP paths. */
 export class CredentialResolutionError extends Error {
   readonly status: number;
   readonly code: string;
@@ -59,6 +67,7 @@ export class CredentialResolutionError extends Error {
   }
 }
 
+/** Raw credential material before runtime defaults and validation are applied. */
 export interface CredentialMaterial {
   applicationKeyId?: string;
   applicationKey?: string;
@@ -75,10 +84,24 @@ interface ConfigOptions {
   strictOptionalPairs?: boolean;
 }
 
+/**
+ * Return a short non-secret fingerprint for a credential-related value.
+ *
+ * @param value - Secret or non-secret value to hash.
+ *
+ * @returns First 16 hex characters of a SHA-256 digest.
+ */
 export function credentialFingerprint(value: string): string {
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
+/**
+ * Fingerprint non-secret credential handles for logs and rate limits.
+ *
+ * @param config - Credential handle subset.
+ *
+ * @returns Non-secret credential fingerprint.
+ */
 export function fingerprintConfig(
   config: Pick<B2Config, "applicationKeyId" | "appKeyId" | "masterKeyId" | "region">,
 ): string {
@@ -87,6 +110,17 @@ export function fingerprintConfig(
   );
 }
 
+/**
+ * Fingerprint full credential material for private verification caches.
+ *
+ * @remarks
+ * This digest is one-way and must not be logged because it changes when secret
+ * material changes and is used to isolate capability discovery.
+ *
+ * @param config - Full credential material subset.
+ *
+ * @returns Secret-bound credential fingerprint.
+ */
 export function verificationFingerprintConfig(
   config: Pick<
     B2Config,
@@ -264,6 +298,13 @@ function headerMaterial(headers: http.IncomingHttpHeaders): CredentialMaterial {
   };
 }
 
+/**
+ * Return whether request headers contain any B2 credential header.
+ *
+ * @param headers - Incoming Node headers.
+ *
+ * @returns `true` when a B2 credential header is present.
+ */
 export function hasCredentialHeaders(headers: http.IncomingHttpHeaders): boolean {
   return Object.keys(headers).some((name) => ALL_CREDENTIAL_HEADER_NAMES.has(name.toLowerCase()));
 }
@@ -277,9 +318,17 @@ function httpConfigOptions(): ConfigOptions {
   };
 }
 
+/** Credential provider for trusted local stdio deployments. */
 export class StdioEnvCredentialProvider implements CredentialProvider {
   readonly name = "stdio-env";
 
+  /**
+   * Resolve B2 credentials from process environment variables.
+   *
+   * @returns Resolved stdio credential configuration and cache keys.
+   *
+   * @throws CredentialResolutionError when required credentials are missing.
+   */
   resolve(): CredentialResolution {
     if (process.env.B2_APP_KEY_ID) {
       logger.warn(
@@ -302,9 +351,19 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
   }
 }
 
+/** Credential provider for compatibility HTTP mode using per-request headers. */
 export class HttpHeaderCredentialProvider implements CredentialProvider {
   readonly name = "http-headers";
 
+  /**
+   * Resolve B2 credentials from request headers.
+   *
+   * @param context - Request context containing headers.
+   *
+   * @returns Resolved credential configuration and cache keys.
+   *
+   * @throws CredentialResolutionError when headers are missing or malformed.
+   */
   resolve(context?: CredentialProviderContext): CredentialResolution {
     if (!context?.req) {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
@@ -323,9 +382,20 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
   }
 }
 
+/** Credential provider for HTTP mode using server-side environment credentials. */
 export class HttpServerCredentialProvider implements CredentialProvider {
   readonly name = "http-server";
 
+  /**
+   * Resolve server-owned B2 credentials for an HTTP request.
+   *
+   * @param context - Optional request context used for rejecting credential headers
+   * and deriving principal-scoped rate-limit keys.
+   *
+   * @returns Resolved credential configuration and cache keys.
+   *
+   * @throws CredentialResolutionError when clients send rejected credential headers.
+   */
   resolve(context?: CredentialProviderContext): CredentialResolution {
     if (context?.req && hasCredentialHeaders(context.req.headers)) {
       throw new CredentialResolutionError(
@@ -348,16 +418,27 @@ export class HttpServerCredentialProvider implements CredentialProvider {
     };
   }
 
+  /** Validate server-owned credential configuration at HTTP startup. */
   validateConfiguration(): void {
     this.resolve({ req: { headers: {} } as AuthenticatedIncomingMessage });
   }
 }
 
+/** Secret lookup interface used by principal credential routing. */
 export interface SecretBroker {
+  /** Resolve a credential reference into raw credential material. */
   resolve(ref: string): CredentialMaterial | null;
 }
 
+/** Environment-backed secret broker for principal credential references. */
 export class EnvSecretBroker implements SecretBroker {
+  /**
+   * Resolve `B2_CREDENTIAL_<REF>_*` variables for a credential reference.
+   *
+   * @param ref - Principal map credential reference.
+   *
+   * @returns Credential material, or `null` when required values are absent.
+   */
   resolve(ref: string): CredentialMaterial | null {
     const prefix = credentialRefEnvPrefix(ref);
     const material = envMaterial(prefix);
@@ -436,11 +517,27 @@ function principalMap(): Record<string, string> {
   }
 }
 
+/** Credential provider for OAuth-authenticated principal-to-credential routing. */
 export class HttpPrincipalCredentialProvider implements CredentialProvider {
   readonly name = "http-principal";
 
+  /**
+   * Create a principal credential provider.
+   *
+   * @param broker - Secret broker used to resolve mapped credential references.
+   */
   constructor(private readonly broker: SecretBroker = new EnvSecretBroker()) {}
 
+  /**
+   * Resolve B2 credentials for a verified OAuth/MCP principal.
+   *
+   * @param context - Request context containing verified auth info.
+   *
+   * @returns Resolved credential configuration and principal-scoped cache keys.
+   *
+   * @throws CredentialResolutionError when auth info, principal mapping, or
+   * referenced credential material is missing.
+   */
   resolve(context?: CredentialProviderContext): CredentialResolution {
     if (!context?.req) {
       throw new CredentialResolutionError("HTTP request required", 500, "request_required");
@@ -498,11 +595,19 @@ export class HttpPrincipalCredentialProvider implements CredentialProvider {
     };
   }
 
+  /** Validate the principal map at HTTP startup. */
   validateConfiguration(): void {
     principalMap();
   }
 }
 
+/**
+ * Resolve the configured HTTP credential mode.
+ *
+ * @returns Effective HTTP credential mode.
+ *
+ * @throws CredentialResolutionError when `B2_HTTP_CREDENTIAL_MODE` is invalid.
+ */
 export function getHttpCredentialMode(): HttpCredentialMode {
   const raw = (process.env.B2_HTTP_CREDENTIAL_MODE ?? "headers").trim().toLowerCase();
   if (raw === "server" || raw === "principal" || raw === "headers") return raw;
@@ -513,6 +618,13 @@ export function getHttpCredentialMode(): HttpCredentialMode {
   );
 }
 
+/**
+ * Build the credential provider for the configured HTTP mode.
+ *
+ * @param broker - Optional secret broker for principal mode.
+ *
+ * @returns Credential provider for HTTP requests.
+ */
 export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProvider {
   switch (getHttpCredentialMode()) {
     case "headers":
@@ -524,6 +636,13 @@ export function getHttpCredentialProvider(broker?: SecretBroker): CredentialProv
   }
 }
 
+/**
+ * Validate HTTP credential and secret-sink configuration at startup.
+ *
+ * @param provider - Credential provider to preflight.
+ *
+ * @throws CredentialResolutionError when HTTP credential settings are unsafe or invalid.
+ */
 export function validateHttpCredentialConfiguration(
   provider: CredentialProvider = getHttpCredentialProvider(),
 ): void {
@@ -531,6 +650,11 @@ export function validateHttpCredentialConfiguration(
   provider.validateConfiguration?.();
 }
 
+/**
+ * Validate HTTP startup settings that are independent of a request.
+ *
+ * @throws Error when output format, secret sink, or credential mode is invalid.
+ */
 export function validateHttpStartupConfiguration(): void {
   resolveOutputFormat();
   resolveSecretSinkConfig({ transport: "http", preflight: true });
@@ -541,6 +665,8 @@ export function validateHttpStartupConfiguration(): void {
  * Header-compatibility parser. Returns null only when the required primary
  * header pair is absent/incomplete. Malformed optional pairs or conflicting
  * duplicate headers throw CredentialResolutionError with a stable code.
+ *
+ * @param req - Request-like object containing incoming headers.
  *
  * @returns A B2 configuration, or null when the primary header pair is absent.
  *

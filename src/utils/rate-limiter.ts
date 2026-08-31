@@ -27,8 +27,11 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+/** Runtime rate-limiter settings derived from environment variables. */
 export interface RateLimiterConfig {
+  /** Sustained token refill rate per second. */
   readonly rps: number;
+  /** Maximum burst capacity per limiter key. */
   readonly burst: number;
 }
 
@@ -40,8 +43,11 @@ function currentRateLimiterConfig(): RateLimiterConfig {
   };
 }
 
-interface Bucket {
+/** Current token bucket state for one limiter key. */
+export interface Bucket {
+  /** Available request tokens. */
   tokens: number;
+  /** Last refill timestamp in epoch milliseconds. */
   lastRefill: number;
 }
 
@@ -113,6 +119,7 @@ export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);
 }
 
+/** Live view of current rate-limiter configuration. */
 export const rateLimiterConfig: RateLimiterConfig = {
   get rps() {
     return currentRateLimiterConfig().rps;

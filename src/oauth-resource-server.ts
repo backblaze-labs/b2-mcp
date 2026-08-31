@@ -1,3 +1,15 @@
+/**
+ * OAuth 2.0 resource-server helpers for hosted MCP deployments.
+ *
+ * @remarks
+ * HTTP deployments can protect the MCP endpoint with bearer tokens while B2
+ * credentials remain server-side or principal-scoped. This module loads OAuth
+ * configuration, publishes authorization-server/resource metadata, verifies
+ * tokens by introspection or JWKS, and converts verification failures into MCP
+ * OAuth challenge responses.
+ *
+ */
+
 import { createHmac, createSecretKey, type JsonWebKey, randomBytes } from "node:crypto";
 import {
   type AuthInfo,
@@ -17,7 +29,10 @@ import { compactVerify, importJWK, type JWK } from "jose";
 import { parseIntEnv } from "./utils/config.js";
 import { logger } from "./utils/logger.js";
 
+/** Deployment-level OAuth scopes understood by the B2 MCP tool filter. */
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
+
+/** Environment variable names consumed by {@link loadOAuthResourceServerConfig}. */
 export const OAUTH_ENVIRONMENT_VARIABLES = {
   allowedAlgorithms: "B2_OAUTH_ALLOWED_ALGORITHMS",
   allowedJwtTypes: "B2_OAUTH_ALLOWED_JWT_TYPES",
@@ -83,13 +98,23 @@ const JWKS_UNKNOWN_KID_CACHE_MAX_ENTRIES = 1000;
 
 type FetchLike = typeof fetch;
 
+/**
+ * Shared constructor options for OAuth token verifiers.
+ *
+ * @typeParam Config - Concrete resource-server configuration required by the verifier.
+ */
 export interface OAuthVerifierOptions<Config extends OAuthResourceServerConfig> {
+  /** Explicit config; defaults to loading from process environment. */
   config?: Config;
+  /** Fetch implementation for introspection or JWKS calls. */
   fetch?: FetchLike;
+  /** Clock source for token lifetime validation. */
   nowSeconds?: () => number;
+  /** Caller abort signal for dependency requests. */
   signal?: AbortSignal;
 }
 
+/** Common OAuth resource-server settings shared by introspection and JWKS verification. */
 export interface OAuthResourceServerCommonConfig {
   issuer: string;
   resource: string;
@@ -111,6 +136,7 @@ export interface OAuthResourceServerCommonConfig {
   tokenCacheSkewSeconds: number;
 }
 
+/** Configuration required to verify bearer tokens by OAuth introspection. */
 export interface OAuthIntrospectionVerifierConfig extends OAuthResourceServerCommonConfig {
   introspectionEndpoint: string;
   introspectionClientId?: string;
@@ -123,6 +149,7 @@ export interface OAuthIntrospectionVerifierConfig extends OAuthResourceServerCom
   introspectionCircuitOpenMs: number;
 }
 
+/** Configuration required to verify JWT bearer tokens with a JWKS endpoint. */
 export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig {
   jwksUri: string;
   jwksCacheTtlSeconds: number;
@@ -136,12 +163,17 @@ export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig 
   jwtClockSkewSeconds: number;
 }
 
+/** Resource-server configuration that supports only token introspection. */
 export type OAuthIntrospectionOnlyConfig = OAuthIntrospectionVerifierConfig & {
   jwksUri?: undefined;
 };
+
+/** Resource-server configuration that supports only local JWT verification. */
 export type OAuthJwtOnlyConfig = OAuthJwtVerifierConfig & {
   introspectionEndpoint?: undefined;
 };
+
+/** Resource-server configuration that supports introspection and JWKS. */
 export type OAuthDualVerifierConfig = OAuthIntrospectionVerifierConfig & OAuthJwtVerifierConfig;
 
 type OAuthResourceServerLoadedConfig = OAuthResourceServerCommonConfig &
@@ -154,19 +186,29 @@ type OAuthResourceServerLoadedConfig = OAuthResourceServerCommonConfig &
     jwksUri?: string;
   };
 
+/** Loaded OAuth resource-server configuration for hosted MCP authentication. */
 export type OAuthResourceServerConfig =
   | OAuthIntrospectionOnlyConfig
   | OAuthJwtOnlyConfig
   | OAuthDualVerifierConfig;
 
+/** Constructor options for {@link OAuthIntrospectionVerifier}. */
 export type OAuthIntrospectionVerifierOptions =
   OAuthVerifierOptions<OAuthIntrospectionVerifierConfig>;
+
+/** Constructor options for {@link OAuthJwtVerifier}. */
 export type OAuthJwtVerifierOptions = OAuthVerifierOptions<OAuthJwtVerifierConfig>;
+
+/** Constructor options for {@link OAuthBearerTokenVerifier}. */
 export type OAuthBearerTokenVerifierOptions = OAuthVerifierOptions<OAuthResourceServerConfig>;
 
+/** Options for {@link authenticateOAuthRequest}. */
 export interface AuthenticateOAuthRequestOptions {
+  /** Fetch implementation for verifier construction. */
   fetch?: FetchLike;
+  /** Clock source for verifier construction. */
   nowSeconds?: () => number;
+  /** Explicit verifier override for tests or custom hosting. */
   verifier?: OAuthTokenVerifier;
 }
 
@@ -208,6 +250,28 @@ function ensureFiniteNonNegative(value: number, label: string): void {
   }
 }
 
+/**
+ * Load and validate OAuth resource-server configuration from environment variables.
+ *
+ * @remarks
+ * At least one verification mechanism is required: an introspection endpoint or
+ * a JWKS URI. Issuer, authorization endpoint, token endpoint, resource URL, and
+ * public URL must be HTTPS unless the explicit localhost-only insecure override
+ * is enabled for development.
+ *
+ * @param env - Environment-like object to read configuration from.
+ *
+ * @returns A validated introspection, JWKS, or dual-mode OAuth configuration.
+ *
+ * @throws Error when required values are missing, unsafe, or internally
+ * inconsistent.
+ *
+ * @example
+ * ```ts
+ * const config = loadOAuthResourceServerConfig(process.env);
+ * const verifier = new OAuthBearerTokenVerifier({ config });
+ * ```
+ */
 export function loadOAuthResourceServerConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): OAuthResourceServerConfig {
@@ -626,6 +690,14 @@ function authInfoFromVerifiedClaims(
   };
 }
 
+/**
+ * Error used when an OAuth dependency is unavailable.
+ *
+ * @remarks
+ * Token verification treats authorization-server outages differently from
+ * invalid tokens. This error maps to a 503 response and may carry
+ * `retryAfterSeconds` from the upstream dependency.
+ */
 export class OAuthDependencyError extends Error {
   readonly retryAfterSeconds?: number;
 
@@ -922,6 +994,13 @@ function rememberAuthInfo(
   });
 }
 
+/**
+ * Clear OAuth verifier caches and circuit state.
+ *
+ * @remarks
+ * This is exported for deterministic tests that need to isolate token cache,
+ * JWKS cache, unknown-key cooldown, and dependency-circuit behavior.
+ */
 export function resetOAuthVerifierCacheForTests(): void {
   introspectionCache.clear();
   introspectionCircuits.clear();
@@ -973,6 +1052,21 @@ function requireJwtConfig(config: OAuthResourceServerConfig): OAuthJwtVerifierCo
   return config;
 }
 
+/**
+ * OAuth bearer-token verifier backed by an introspection endpoint.
+ *
+ * @remarks
+ * Verification calls the configured authorization server, validates issuer,
+ * audience/resource binding, token type, algorithm claims, deployment scopes,
+ * required scopes, subject allowlists, and token lifetime, then caches positive
+ * `AuthInfo` results until either the token expiry or configured cache TTL.
+ *
+ * @example
+ * ```ts
+ * const verifier = new OAuthIntrospectionVerifier({ config });
+ * const authInfo = await verifier.verifyAccessToken(token);
+ * ```
+ */
 export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
   private readonly config: OAuthIntrospectionVerifierConfig;
   private readonly fetchImpl: FetchLike;
@@ -988,6 +1082,17 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
     this.circuitKey = configCacheKey(this.config);
   }
 
+  /**
+   * Verify a bearer token by introspection.
+   *
+   * @param token - Raw bearer token value without the `Bearer` prefix.
+   *
+   * @returns MCP auth information for the verified token.
+   *
+   * @throws OAuthError when the token is invalid or lacks required scopes.
+   * @throws OAuthDependencyError when the authorization server cannot be reached
+   * or its circuit is open.
+   */
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     const key = cacheKey(this.config, token, "introspection");
     const now = this.nowSeconds();
@@ -1296,6 +1401,20 @@ async function verifyJwtWithJwk(
   }
 }
 
+/**
+ * OAuth bearer-token verifier for JWT access tokens.
+ *
+ * @remarks
+ * The verifier validates JOSE headers, pins allowed algorithms, resolves and
+ * caches JWKS documents, verifies the compact JWT signature, and applies the
+ * same resource, scope, subject, type, and lifetime checks as introspection.
+ *
+ * @example
+ * ```ts
+ * const verifier = new OAuthJwtVerifier({ config });
+ * const authInfo = await verifier.verifyAccessToken(jwt);
+ * ```
+ */
 export class OAuthJwtVerifier implements OAuthTokenVerifier {
   private readonly config: OAuthJwtVerifierConfig;
   private readonly fetchImpl: FetchLike;
@@ -1312,6 +1431,17 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
     this.cacheKey = jwksCacheKey(this.config);
   }
 
+  /**
+   * Verify a compact JWT access token.
+   *
+   * @param token - Raw compact JWT value without the `Bearer` prefix.
+   *
+   * @returns MCP auth information for the verified token.
+   *
+   * @throws OAuthError when the JWT is malformed, unsigned by a trusted key, or
+   * lacks required claims/scopes.
+   * @throws OAuthDependencyError when JWKS retrieval cannot complete.
+   */
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     const key = cacheKey(this.config, token, "jwt");
     const now = this.nowSeconds();
@@ -1569,6 +1699,13 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   }
 }
 
+/**
+ * Composite bearer-token verifier for hosted MCP requests.
+ *
+ * @remarks
+ * Dual-mode deployments prefer introspection because it can enforce revocation.
+ * JWKS verification is used when no introspection endpoint is configured.
+ */
 export class OAuthBearerTokenVerifier implements OAuthTokenVerifier {
   private readonly config: OAuthResourceServerConfig;
   private readonly jwtVerifier: OAuthJwtVerifier | null;
@@ -1584,6 +1721,17 @@ export class OAuthBearerTokenVerifier implements OAuthTokenVerifier {
       : null;
   }
 
+  /**
+   * Verify a bearer token with the configured mechanism.
+   *
+   * @param token - Raw bearer token value without the `Bearer` prefix.
+   *
+   * @returns MCP auth information for the verified token.
+   *
+   * @throws OAuthError when no verifier is configured or the token is rejected.
+   * @throws OAuthDependencyError when the selected verifier cannot reach its
+   * OAuth dependency.
+   */
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     // Introspection stays authoritative in dual-mode deployments because it can enforce revocation.
     if (this.introspectionVerifier) return this.introspectionVerifier.verifyAccessToken(token);
@@ -1608,6 +1756,18 @@ function serviceUnavailableOAuthResponse(error: OAuthDependencyError): Response 
   });
 }
 
+/**
+ * Build MCP SDK OAuth metadata options from loaded configuration.
+ *
+ * @param config - OAuth resource-server configuration.
+ *
+ * @returns Metadata options accepted by the MCP SDK helpers.
+ *
+ * @example
+ * ```ts
+ * const options = oauthMetadataOptions(config);
+ * ```
+ */
 export function oauthMetadataOptions(
   config = loadOAuthResourceServerConfig(),
 ): AuthMetadataOptions {
@@ -1638,16 +1798,43 @@ export function oauthMetadataOptions(
   };
 }
 
+/**
+ * Build OAuth protected-resource metadata for the MCP endpoint.
+ *
+ * @param config - OAuth resource-server configuration.
+ *
+ * @returns OAuth protected-resource metadata document.
+ */
 export function protectedResourceMetadata(
   config = loadOAuthResourceServerConfig(),
 ): OAuthProtectedResourceMetadata {
   return buildOAuthProtectedResourceMetadata(oauthMetadataOptions(config));
 }
 
+/**
+ * Resolve the protected-resource metadata URL for the public MCP deployment.
+ *
+ * @param config - OAuth resource-server configuration.
+ *
+ * @returns Absolute metadata URL advertised in bearer challenges.
+ */
 export function protectedResourceMetadataUrl(config = loadOAuthResourceServerConfig()): string {
   return getOAuthProtectedResourceMetadataUrl(new URL(config.publicUrl));
 }
 
+/**
+ * Convert token-verification failures into OAuth challenge responses.
+ *
+ * @remarks
+ * OAuth dependency failures become 503 responses so clients can distinguish an
+ * authorization-server outage from an invalid bearer token. Other failures use
+ * the MCP SDK bearer challenge helper with the configured required scopes.
+ *
+ * @param error - Verification error to translate.
+ * @param config - OAuth resource-server configuration.
+ *
+ * @returns HTTP response suitable for the MCP endpoint.
+ */
 export function oauthRejectionResponse(
   error: unknown,
   config = loadOAuthResourceServerConfig(),
@@ -1659,6 +1846,23 @@ export function oauthRejectionResponse(
   });
 }
 
+/**
+ * Validate auth info supplied by trusted middleware before MCP handling.
+ *
+ * @remarks
+ * This path lets a reverse proxy or serverless platform authenticate a bearer
+ * token first while the MCP runtime still enforces this deployment's issuer,
+ * audience/resource, token type, algorithm, scopes, subject allowlist, and
+ * lifetime rules.
+ *
+ * @param authInfo - Preverified MCP auth info to validate.
+ * @param config - OAuth resource-server configuration.
+ * @param nowSeconds - Clock source for deterministic tests.
+ *
+ * @returns The same auth info after validation.
+ *
+ * @throws OAuthError when the auth info does not satisfy this deployment.
+ */
 export function validatePreverifiedOAuthAuthInfo(
   authInfo: AuthInfo,
   config = loadOAuthResourceServerConfig(),
@@ -1683,14 +1887,47 @@ export function validatePreverifiedOAuthAuthInfo(
   return authInfo;
 }
 
+/**
+ * Return OAuth metadata route responses for matching discovery requests.
+ *
+ * @param request - Incoming HTTP request.
+ *
+ * @returns Metadata response when the route matches, otherwise `undefined`.
+ */
 export function oauthMetadataRouteResponse(request: Request): Response | undefined {
   return oauthMetadataResponse(request, oauthMetadataOptions());
 }
 
+/**
+ * Validate OAuth resource-server configuration at startup.
+ *
+ * @throws Error when required OAuth metadata cannot be built safely.
+ */
 export function validateOAuthResourceServerConfiguration(): void {
   protectedResourceMetadata();
 }
 
+/**
+ * Authenticate an MCP HTTP request with OAuth bearer-token verification.
+ *
+ * @remarks
+ * Successful verification returns MCP `AuthInfo`; failed verification returns a
+ * ready-to-send OAuth challenge/error response. This shape lets HTTP pipelines
+ * fail closed without throwing raw verification errors across runtime
+ * boundaries.
+ *
+ * @param request - Incoming MCP HTTP request.
+ * @param config - OAuth resource-server configuration.
+ * @param options - Optional fetch, clock, or verifier injection for tests.
+ *
+ * @returns Verified auth info, or an OAuth rejection response.
+ *
+ * @example
+ * ```ts
+ * const result = await authenticateOAuthRequest(request, config);
+ * if (result instanceof Response) return result;
+ * ```
+ */
 export async function authenticateOAuthRequest(
   request: Request,
   config = loadOAuthResourceServerConfig(),

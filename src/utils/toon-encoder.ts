@@ -1,5 +1,13 @@
 import type { JsonCompatible } from "./result-serializer.js";
 
+/**
+ * TOON encoder used by compact tool result serialization.
+ *
+ * @remarks
+ * The encoder keeps repeated object arrays in tabular form when possible while
+ * preserving JSON-compatible scalar values and rejecting invalid UTF-16 input.
+ */
+
 interface ToonField {
   name: string;
   children?: ToonField[];
@@ -18,6 +26,15 @@ const ENCODER_OPTIONS: EncoderOptions = {
 const NUMERIC_LIKE_PATTERN = /^[+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i;
 const SURROGATE_PATTERN = /[\uD800-\uDFFF]/;
 
+/**
+ * Encode JSON-compatible data into TOON text.
+ *
+ * @param value - JSON-compatible value to encode.
+ *
+ * @returns TOON representation of the value.
+ *
+ * @throws TypeError when a string contains an unpaired surrogate.
+ */
 export function encodeToon(value: JsonCompatible): string {
   return [...encodeJsonValue(value, ENCODER_OPTIONS, 0)].join("\n");
 }
