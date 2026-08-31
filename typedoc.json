@@ -58,6 +58,7 @@
   "excludeInternal": true,
   "excludeExternals": true,
   "requiredToBeDocumented": [
+    "Module",
     "Class",
     "Interface",
     "Function",

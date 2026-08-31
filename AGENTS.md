@@ -14,8 +14,8 @@ pnpm run evals          # build + eval harness; provider cases gate on RUN_LLM_E
 pnpm run test:integration:live  # live tests, requires real B2 credentials in env
 pnpm run start          # stdio transport (local Claude Desktop use)
 pnpm run start:http     # Streamable HTTP transport, add --port 3000
-pnpm run docs           # TypeDoc API reference -> gitignored api-docs/
-pnpm run docs:watch     # TypeDoc watch mode; warnings are allowed in Phase 1
+pnpm run docs           # strict TypeDoc API reference -> gitignored api-docs/
+pnpm run docs:watch     # TypeDoc watch mode with the same strict validation
 ```
 
 > `pnpm run build` uses `tsconfig.json`, which **excludes `tests/`** — so it does
@@ -47,10 +47,13 @@ adapters should gate real LLM-backed eval cases on `RUN_LLM_EVALS=1` plus their
 own provider key env var (for example `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`)
 so normal CI remains key-free.
 
-TypeDoc is intentionally lenient in this first API-docs phase: it documents the
-package root entry point, writes generated HTML to gitignored `api-docs/`, and
-allows warnings. Issue #308 tracks ratcheting strict validation and documentation
-coverage later.
+TypeDoc is strict. `typedoc.json` enumerates the public `src` entry-point
+surface, writes generated HTML to gitignored `api-docs/`, requires module,
+class, interface, function, method, property, enum, type alias, variable,
+accessor, constructor, and signature documentation, and treats warnings as
+errors. Undocumented public API members, undocumented modules, and invalid
+links fail `pnpm run docs` and the docs workflow; issue #308 closed this
+strict-validation ratchet.
 
 Integration tests require env vars. The live suite exercises native, S3, key
 management, event notifications, and the Partner API with no opt-in skips, so it

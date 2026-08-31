@@ -165,6 +165,22 @@ export function mapRow(raw: Record<string, string>): ReportRow | null {
 
 // ── Pure aggregation (portable, from the handoff spec) ──────────────────────
 
+/** Stored-data growth aggregate for one account. */
+export interface AccountGrowth {
+  /** B2 account ID. */
+  accountId: string;
+  /** First stored-bytes snapshot in the selected range. */
+  firstBytes: number;
+  /** Last stored-bytes snapshot in the selected range. */
+  lastBytes: number;
+  /** Difference between last and first stored bytes. */
+  growthBytes: number;
+  /** Percentage growth from the first snapshot, or null when no baseline exists. */
+  growthPct: number | null;
+  /** Total egress bytes across rows for the account. */
+  egressBytes: number;
+}
+
 /**
  * Compute stored-data growth by account across all supplied report rows.
  *
@@ -210,20 +226,16 @@ export function computeAccountGrowth(rows: ReportRow[]): AccountGrowth[] {
   return out.sort((x, y) => y.growthBytes - x.growthBytes);
 }
 
-/** Stored-data growth aggregate for one account. */
-export interface AccountGrowth {
-  /** B2 account ID. */
+/** Egress aggregate for one account or bucket grouping key. */
+export interface EgressLeader {
+  /** Grouping key, either account ID or bucket identifier/name. */
+  key: string;
+  /** B2 account ID associated with the aggregate. */
   accountId: string;
-  /** First stored-bytes snapshot in the selected range. */
-  firstBytes: number;
-  /** Last stored-bytes snapshot in the selected range. */
-  lastBytes: number;
-  /** Difference between last and first stored bytes. */
-  growthBytes: number;
-  /** Percentage growth from the first snapshot, or null when no baseline exists. */
-  growthPct: number | null;
-  /** Total egress bytes across rows for the account. */
-  egressBytes: number;
+  /** B2 bucket name when grouping by bucket and the report includes it. */
+  bucketName?: string;
+  /** Total egress bytes for the grouping key. */
+  egress: number;
 }
 
 /**
@@ -247,18 +259,6 @@ export function computeEgressLeaders(
     g.get(k)!.egress += r.egressBytes || 0;
   }
   return [...g.values()].sort((a, b) => b.egress - a.egress);
-}
-
-/** Egress aggregate for one account or bucket grouping key. */
-export interface EgressLeader {
-  /** Grouping key, either account ID or bucket identifier/name. */
-  key: string;
-  /** B2 account ID associated with the aggregate. */
-  accountId: string;
-  /** B2 bucket name when grouping by bucket and the report includes it. */
-  bucketName?: string;
-  /** Total egress bytes for the grouping key. */
-  egress: number;
 }
 
 // ── Report-bucket access ────────────────────────────────────────────────────

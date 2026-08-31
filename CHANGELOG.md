@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Documented and exported public option/result helper types needed by the
+  strict TypeDoc surface, including auth, OAuth, S3 peer, insight, serializer,
+  and secret-sink contracts.
+
+### Changed
+- Enforce strict TypeDoc validation for public API docs: undocumented modules,
+  exported members, and invalid links now fail `pnpm run docs` and the docs
+  workflow. (#308)
+
 ## [0.1.2] - 2026-08-23
 
 ### Changed

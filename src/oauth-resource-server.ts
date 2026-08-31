@@ -37,83 +37,83 @@ export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
 /** Environment variable names used to configure OAuth resource-server mode. */
 export interface OAuthEnvironmentVariables {
   /** Allowed token algorithms for introspection responses and JWTs. */
-  readonly allowedAlgorithms: string;
+  readonly allowedAlgorithms: "B2_OAUTH_ALLOWED_ALGORITHMS";
   /** Allowed JWT `typ` header values. */
-  readonly allowedJwtTypes: string;
+  readonly allowedJwtTypes: "B2_OAUTH_ALLOWED_JWT_TYPES";
   /** Allowed OAuth subjects or issuer-qualified subjects. */
-  readonly allowedSubjects: string;
+  readonly allowedSubjects: "B2_OAUTH_ALLOWED_SUBJECTS";
   /** Allowed token type values from introspection responses. */
-  readonly allowedTokenTypes: string;
+  readonly allowedTokenTypes: "B2_OAUTH_ALLOWED_TOKEN_TYPES";
   /** Expected OAuth audience value. */
-  readonly audience: string;
+  readonly audience: "B2_OAUTH_AUDIENCE";
   /** Authorization endpoint advertised in OAuth metadata. */
-  readonly authorizationEndpoint: string;
+  readonly authorizationEndpoint: "B2_OAUTH_AUTHORIZATION_ENDPOINT";
   /** Local-development override allowing an insecure localhost issuer URL. */
-  readonly dangerouslyAllowInsecureIssuerUrl: string;
+  readonly dangerouslyAllowInsecureIssuerUrl: "B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL";
   /** Explicit override allowing unauthenticated OAuth introspection requests. */
-  readonly dangerouslyAllowUnauthenticatedIntrospection: string;
+  readonly dangerouslyAllowUnauthenticatedIntrospection: "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION";
   /** Bearer token used to authenticate OAuth introspection requests. */
-  readonly introspectionBearerToken: string;
+  readonly introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN";
   /** Legacy maximum token-cache entries setting for introspection deployments. */
-  readonly introspectionCacheMaxEntries: string;
+  readonly introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES";
   /** Legacy token-cache skew setting for introspection deployments. */
-  readonly introspectionCacheSkewSeconds: string;
+  readonly introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS";
   /** Legacy token-cache TTL setting for introspection deployments. */
-  readonly introspectionCacheTtlSeconds: string;
+  readonly introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS";
   /** Consecutive dependency failures before opening the introspection circuit. */
-  readonly introspectionCircuitFailures: string;
+  readonly introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES";
   /** Introspection circuit open duration in milliseconds. */
-  readonly introspectionCircuitOpenMs: string;
+  readonly introspectionCircuitOpenMs: "B2_OAUTH_INTROSPECTION_CIRCUIT_OPEN_MS";
   /** Client ID used for OAuth introspection basic authentication. */
-  readonly introspectionClientId: string;
+  readonly introspectionClientId: "B2_OAUTH_INTROSPECTION_CLIENT_ID";
   /** Client secret used for OAuth introspection basic authentication. */
-  readonly introspectionClientSecret: string;
+  readonly introspectionClientSecret: "B2_OAUTH_INTROSPECTION_CLIENT_SECRET";
   /** OAuth introspection endpoint URL. */
-  readonly introspectionEndpoint: string;
+  readonly introspectionEndpoint: "B2_OAUTH_INTROSPECTION_ENDPOINT";
   /** Maximum retry attempts for OAuth introspection dependency calls. */
-  readonly introspectionRetries: string;
+  readonly introspectionRetries: "B2_OAUTH_INTROSPECTION_RETRIES";
   /** Retry delay in milliseconds for OAuth introspection dependency calls. */
-  readonly introspectionRetryDelayMs: string;
+  readonly introspectionRetryDelayMs: "B2_OAUTH_INTROSPECTION_RETRY_DELAY_MS";
   /** Request timeout in milliseconds for OAuth introspection calls. */
-  readonly introspectionTimeoutMs: string;
+  readonly introspectionTimeoutMs: "B2_OAUTH_INTROSPECTION_TIMEOUT_MS";
   /** Trusted OAuth issuer URL. */
-  readonly issuer: string;
+  readonly issuer: "B2_OAUTH_ISSUER";
   /** Minimum JWKS cache TTL in seconds. */
-  readonly jwksCacheMinTtlSeconds: string;
+  readonly jwksCacheMinTtlSeconds: "B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS";
   /** Maximum JWKS cache TTL in seconds. */
-  readonly jwksCacheTtlSeconds: string;
+  readonly jwksCacheTtlSeconds: "B2_OAUTH_JWKS_CACHE_TTL_SECONDS";
   /** Consecutive dependency failures before opening the JWKS circuit. */
-  readonly jwksCircuitFailures: string;
+  readonly jwksCircuitFailures: "B2_OAUTH_JWKS_CIRCUIT_FAILURES";
   /** JWKS circuit open duration in milliseconds. */
-  readonly jwksCircuitOpenMs: string;
+  readonly jwksCircuitOpenMs: "B2_OAUTH_JWKS_CIRCUIT_OPEN_MS";
   /** Cooldown in milliseconds before refreshing JWKS for an unknown `kid`. */
-  readonly jwksRefreshCooldownMs: string;
+  readonly jwksRefreshCooldownMs: "B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS";
   /** Maximum retry attempts for JWKS dependency calls. */
-  readonly jwksRetries: string;
+  readonly jwksRetries: "B2_OAUTH_JWKS_RETRIES";
   /** Retry delay in milliseconds for JWKS dependency calls. */
-  readonly jwksRetryDelayMs: string;
+  readonly jwksRetryDelayMs: "B2_OAUTH_JWKS_RETRY_DELAY_MS";
   /** Request timeout in milliseconds for JWKS calls. */
-  readonly jwksTimeoutMs: string;
+  readonly jwksTimeoutMs: "B2_OAUTH_JWKS_TIMEOUT_MS";
   /** JWKS endpoint URL. */
-  readonly jwksUri: string;
+  readonly jwksUri: "B2_OAUTH_JWKS_URI";
   /** Allowed clock skew in seconds for JWT numeric-date claims. */
-  readonly jwtClockSkewSeconds: string;
+  readonly jwtClockSkewSeconds: "B2_OAUTH_JWT_CLOCK_SKEW_SECONDS";
   /** Public MCP deployment URL used in metadata. */
-  readonly publicUrl: string;
+  readonly publicUrl: "B2_MCP_PUBLIC_URL";
   /** Required OAuth scopes beyond the B2 deployment scope. */
-  readonly requiredScopes: string;
+  readonly requiredScopes: "B2_OAUTH_REQUIRED_SCOPES";
   /** OAuth protected resource URL. */
-  readonly resource: string;
+  readonly resource: "B2_OAUTH_RESOURCE";
   /** Optional service documentation URL advertised in metadata. */
-  readonly serviceDocumentationUrl: string;
+  readonly serviceDocumentationUrl: "B2_MCP_SERVICE_DOCUMENTATION_URL";
   /** Maximum cached token entries. */
-  readonly tokenCacheMaxEntries: string;
+  readonly tokenCacheMaxEntries: "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES";
   /** Token-cache expiration skew in seconds. */
-  readonly tokenCacheSkewSeconds: string;
+  readonly tokenCacheSkewSeconds: "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS";
   /** Token-cache TTL in seconds. */
-  readonly tokenCacheTtlSeconds: string;
+  readonly tokenCacheTtlSeconds: "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS";
   /** Token endpoint advertised in OAuth metadata. */
-  readonly tokenEndpoint: string;
+  readonly tokenEndpoint: "B2_OAUTH_TOKEN_ENDPOINT";
 }
 
 /** Environment variable names consumed by {@link loadOAuthResourceServerConfig}. */
