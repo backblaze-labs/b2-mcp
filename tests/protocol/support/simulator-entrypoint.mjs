@@ -46,9 +46,17 @@ function credentialScopedTransport(inner) {
       const response = await inner.send(request);
       if (!request.url.includes("b2_authorize_account")) return response;
       const body = await response.json();
-      const applicationKeyId = applicationKeyIdFromBasicAuth(request.headers?.Authorization);
-      if (applicationKeyId.includes("other")) {
-        body.apiInfo.storageApi.allowed.capabilities = READ_ONLY_CAPABILITIES;
+      const storageApi = body?.apiInfo?.storageApi;
+      if (storageApi) {
+        // The simulator returns the API host as s3ApiUrl; the server now rejects
+        // an authorized S3 endpoint outside the trusted B2 host set instead of
+        // masking it with the configured-region fallback. Hand it a realistic
+        // s3.<region>.backblazeb2.com URL so the S3 client builds as in production.
+        storageApi.s3ApiUrl = "https://s3.us-west-004.backblazeb2.com";
+        const applicationKeyId = applicationKeyIdFromBasicAuth(request.headers?.Authorization);
+        if (applicationKeyId.includes("other")) {
+          storageApi.allowed.capabilities = READ_ONLY_CAPABILITIES;
+        }
       }
       return new JsonResponse(response.status, body, Object.fromEntries(response.headers ?? []));
     },

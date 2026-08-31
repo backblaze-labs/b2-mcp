@@ -21,7 +21,7 @@ import {
 } from "../support/http";
 import { modernBody, modernHeaders } from "./support/clients";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { installSdkTransport } from "../support/sdk-test-helpers";
+import { installSdkTransport, withTrustedS3ApiUrl } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -68,7 +68,7 @@ afterAll(() => {
 
 beforeEach(() => {
   const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-  installSdkTransport(simulator.transport());
+  installSdkTransport(withTrustedS3ApiUrl(simulator.transport()));
   process.env.B2_HTTP_CREDENTIAL_MODE = "headers";
   delete process.env.B2_APPLICATION_KEY_ID;
   delete process.env.B2_APPLICATION_KEY;

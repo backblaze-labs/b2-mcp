@@ -35,7 +35,7 @@ import {
   modernHeaders,
 } from "./support/clients";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
-import { installSdkTransport } from "../support/sdk-test-helpers";
+import { installSdkTransport, withTrustedS3ApiUrl } from "../support/sdk-test-helpers";
 
 let handle: HttpServerHandle;
 let port: number;
@@ -52,7 +52,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   const simulator = new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 });
-  installSdkTransport(simulator.transport());
+  installSdkTransport(withTrustedS3ApiUrl(simulator.transport()));
   vi.spyOn(S3Client.prototype as any, "send").mockResolvedValue({
     Contents: [],
     CommonPrefixes: [],

@@ -50,6 +50,36 @@ export class RecordingTransport implements HttpTransport {
   }
 }
 
+/**
+ * Wrap a transport so authorize responses advertise a trusted B2 S3 endpoint.
+ *
+ * The B2 simulator returns the API host as its `s3ApiUrl`. The server now rejects
+ * an authorized S3 endpoint outside the trusted `s3.<region>.backblazeb2.com` host
+ * set instead of masking it with the configured-region fallback, so simulator-backed
+ * transports need a realistic S3 URL for the S3 client to build as in production.
+ *
+ * @param transport - Underlying transport (typically `simulator.transport()`).
+ * @param s3ApiUrl - Trusted S3 endpoint to advertise.
+ *
+ * @returns A transport that rewrites the authorize response's `s3ApiUrl`.
+ */
+export function withTrustedS3ApiUrl(
+  transport: HttpTransport,
+  s3ApiUrl = "https://s3.us-west-004.backblazeb2.com",
+): HttpTransport {
+  return {
+    async send(request: HttpRequest): Promise<HttpResponse> {
+      const response = await transport.send(request);
+      if (b2EndpointName(request) !== "b2_authorize_account") return response;
+      const body = (await response.json()) as {
+        apiInfo?: { storageApi?: { s3ApiUrl?: string } };
+      };
+      if (body?.apiInfo?.storageApi) body.apiInfo.storageApi.s3ApiUrl = s3ApiUrl;
+      return new StaticHttpResponse(response.status, body, Object.fromEntries(response.headers));
+    },
+  };
+}
+
 export function b2EndpointName(request: HttpRequest): string {
   const parts = new URL(request.url).pathname.split("/");
   return parts[parts.length - 1] ?? "";
