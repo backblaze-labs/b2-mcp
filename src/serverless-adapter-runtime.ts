@@ -99,7 +99,11 @@ export interface ServerlessAdapterRuntime<Context extends ServerlessMcpFetchCont
   protectedResourceMetadataFetch(): Response;
   /** Return OAuth authorization-server metadata. */
   authorizationServerMetadataFetch(): Response;
-  /** Close cached MCP/OAuth runtime state for tests. */
+  /**
+   * Close cached MCP/OAuth runtime state for tests.
+   *
+   * @internal
+   */
   closeForTests(): Promise<void>;
 }
 

@@ -127,7 +127,11 @@ export function _getBucket(key: string): Readonly<Bucket> | undefined {
   return buckets.get(key);
 }
 
-/** Live view of current rate-limiter configuration. */
+/**
+ * Live view of current rate-limiter configuration.
+ *
+ * @internal
+ */
 export const rateLimiterConfig: RateLimiterConfig = {
   get rps() {
     return currentRateLimiterConfig().rps;

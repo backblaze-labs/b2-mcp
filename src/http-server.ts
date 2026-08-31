@@ -118,14 +118,18 @@ export function getPort(
  * Extract B2 credential configuration from HTTP headers.
  *
  * @remarks
- * This compatibility export delegates to the shared credential provider. Hosted
- * deployments should prefer `server` or `principal` credential modes when B2
- * keys must not be supplied directly by MCP clients.
+ * This compatibility export always parses request headers through the shared
+ * header credential provider; it does not consult the selected HTTP credential
+ * mode. Hosted deployments should prefer `server` or `principal` credential
+ * modes in the request pipeline when B2 keys must not be supplied directly by
+ * MCP clients.
  *
  * @param req - Incoming request-like object containing Node headers.
  *
- * @returns Resolved B2 config, or `null` when the selected credential mode does
- * not use request headers.
+ * @returns Resolved B2 config, or `null` only when the primary key header pair
+ * is absent or incomplete.
+ *
+ * @throws CredentialResolutionError when supplied HTTP credentials are malformed.
  */
 export function configFromHeaders(req: { headers: http.IncomingHttpHeaders }): B2Config | null {
   return configFromHttpHeaders(req);

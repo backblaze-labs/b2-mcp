@@ -249,6 +249,8 @@ export function createMcpServer(...args: ConstructorParameters<typeof V2McpServe
  *
  * @returns Registered tools, or `null` if the server was not committed through
  * this adapter.
+ *
+ * @internal
  */
 export function getRegisteredTools(server: McpServer): RegisteredToolMap | null {
   return (server as ServerWithRegistry)[REGISTERED_TOOLS] ?? null;
