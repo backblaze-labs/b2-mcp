@@ -224,7 +224,7 @@ function canonicalJson(value: unknown): string {
  *
  * @param config - B2 runtime configuration.
  *
- * @returns `allow`, `block`, or the default `confirm`.
+ * @returns `allow`, `block`, `elicit`, or the default `confirm`.
  */
 export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   const p = config.destructivePolicy;
