@@ -695,6 +695,7 @@ describe("supply-chain audit policy", () => {
     expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
     expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
     expect(mcpRegistryPreflightJob).toContain("needs: prepare");
+    expect(mcpRegistryPreflightJob).toContain("timeout-minutes: 20");
     expect(mcpRegistryPreflightJob).toContain("actions: read");
     expect(mcpRegistryPreflightJob).toContain("contents: read");
     expect(mcpRegistryPreflightJob).not.toContain("id-token: write");

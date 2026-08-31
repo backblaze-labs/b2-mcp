@@ -354,7 +354,7 @@ jobs:
     needs: prepare
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: read

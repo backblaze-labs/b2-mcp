@@ -522,6 +522,63 @@ describe("release scripts", () => {
     expect(result.stderr).toContain("--attempts must be a positive integer");
   });
 
+  it("reports actual attempts for permanent MCP Registry publisher failures", async () => {
+    const { publishMcpRegistry } = await mcpRegistryPublishModule();
+
+    await withTempManifest(
+      () => undefined,
+      async (manifestPath, manifest) => {
+        const loginCalls: string[][] = [];
+        await expect(
+          publishMcpRegistry({
+            attempts: 3,
+            fetchText: async () => ({ body: "", status: 404 }),
+            log: quietLog(),
+            publisherPath: "/tmp/mcp-publisher",
+            runPublisher: async (args: string[]) => {
+              loginCalls.push(args);
+              return { code: 1, stderr: "", stdout: "" };
+            },
+            serverJsonPath: manifestPath,
+            sleep: async () => undefined,
+            version: manifest.version,
+          }),
+        ).rejects.toThrow("mcp-publisher login github-oidc failed after 1 attempt with exit 1");
+        expect(loginCalls).toEqual([
+          ["login", "github-oidc", "--registry", "https://registry.modelcontextprotocol.io"],
+        ]);
+      },
+    );
+
+    await withTempManifest(
+      () => undefined,
+      async (manifestPath, manifest) => {
+        const publishCalls: string[][] = [];
+        await expect(
+          publishMcpRegistry({
+            attempts: 3,
+            fetchText: async () => ({ body: "", status: 404 }),
+            log: quietLog(),
+            publisherPath: "/tmp/mcp-publisher",
+            runPublisher: async (args: string[]) => {
+              publishCalls.push(args);
+              return args[0] === "login"
+                ? { code: 0, stderr: "", stdout: "" }
+                : { code: 1, stderr: "", stdout: "" };
+            },
+            serverJsonPath: manifestPath,
+            sleep: async () => undefined,
+            version: manifest.version,
+          }),
+        ).rejects.toThrow("mcp-publisher publish failed after 1 attempt with exit 1");
+        expect(publishCalls).toEqual([
+          ["login", "github-oidc", "--registry", "https://registry.modelcontextprotocol.io"],
+          ["publish", manifestPath],
+        ]);
+      },
+    );
+  });
+
   it("fails closed when an existing MCP Registry version mismatches server.json", async () => {
     const { publishMcpRegistry } = await mcpRegistryPublishModule();
 

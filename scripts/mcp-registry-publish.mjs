@@ -129,6 +129,10 @@ function publisherOutput(result) {
   return `${result.stderr ?? ""}\n${result.stdout ?? ""}`;
 }
 
+function attemptCountText(count) {
+  return `${count} attempt${count === 1 ? "" : "s"}`;
+}
+
 function isDuplicateVersionFailure(result) {
   return /already exists|cannot publish duplicate version|duplicate version|version already exists/i.test(
     publisherOutput(result),
@@ -230,7 +234,9 @@ async function defaultRunPublisher(args, { publisherPath, timeoutMs }) {
 
 async function runPublisherWithRetry(label, args, options) {
   let lastResult = null;
+  let attemptsRun = 0;
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    attemptsRun = attempt;
     const result = await options.runPublisher(args, {
       publisherPath: options.publisherPath,
       timeoutMs: options.publisherTimeoutMs,
@@ -248,7 +254,7 @@ async function runPublisherWithRetry(label, args, options) {
   }
 
   throw new Error(
-    `mcp-publisher ${label} failed after ${options.attempts} attempts with exit ${lastResult?.code ?? "unknown"}`,
+    `mcp-publisher ${label} failed after ${attemptCountText(attemptsRun)} with exit ${lastResult?.code ?? "unknown"}`,
   );
 }
 
@@ -268,7 +274,9 @@ async function registryVersionMatches(lookupUrl, manifest, options, context) {
 
 async function publishWithRegistryRecheck(manifest, lookupUrl, options) {
   let lastResult = null;
+  let attemptsRun = 0;
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    attemptsRun = attempt;
     const result = await options.runPublisher(["publish", options.serverJsonPath], {
       publisherPath: options.publisherPath,
       timeoutMs: options.publisherTimeoutMs,
@@ -296,7 +304,7 @@ async function publishWithRegistryRecheck(manifest, lookupUrl, options) {
   }
 
   throw new Error(
-    `mcp-publisher publish failed after ${options.attempts} attempts with exit ${lastResult?.code ?? "unknown"}`,
+    `mcp-publisher publish failed after ${attemptCountText(attemptsRun)} with exit ${lastResult?.code ?? "unknown"}`,
   );
 }
 
