@@ -64,16 +64,34 @@ const SDK_HEADER_ALLOWLIST = new Set([
   "tracestate",
   "baggage",
 ]);
+
+/** Successful in-flight limiter acquisition or rekey result. */
+export interface InFlightAllowedResult {
+  /** Whether capacity was acquired. */
+  ok: true;
+}
+
+/** Refused in-flight limiter acquisition or rekey result. */
+export interface InFlightRejectedResult {
+  /** Whether capacity was acquired. */
+  ok: false;
+  /** HTTP status to return for the refusal. */
+  status: number;
+  /** Human-readable refusal message. */
+  error: string;
+}
+
+/** Result returned by in-flight limiter acquisition or rekeying. */
+export type InFlightLimitResult = InFlightAllowedResult | InFlightRejectedResult;
+
 /** In-flight request limiter shared by Node and serverless HTTP runtimes. */
 export interface InFlightLimiter {
+  /** Total number of currently acquired request slots. */
   readonly active: number;
   /** Attempt to acquire capacity for a credential-scoped request. */
-  acquire(cacheKey: string): { ok: true } | { ok: false; status: number; error: string };
+  acquire(cacheKey: string): InFlightLimitResult;
   /** Move an acquired request from a pre-auth key to its resolved credential key. */
-  rekey(
-    fromCacheKey: string,
-    toCacheKey: string,
-  ): { ok: true } | { ok: false; status: number; error: string };
+  rekey(fromCacheKey: string, toCacheKey: string): InFlightLimitResult;
   /** Release previously acquired capacity. */
   release(cacheKey: string): void;
 }
@@ -118,6 +136,7 @@ export interface HttpFetchContext {
 
 /** Runtime-neutral fetch handler for B2 MCP HTTP requests. */
 export interface B2McpFetchHandler {
+  /** Stateless compatibility sessions exposed for MCP SDK handler shape compatibility. */
   readonly sessions: Map<string, never>;
   /** Handle one HTTP request. */
   fetch(request: Request, context?: HttpFetchContext): Promise<Response>;

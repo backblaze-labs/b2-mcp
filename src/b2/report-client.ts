@@ -21,33 +21,45 @@ import { abortError, timeoutError } from "../utils/named-error.js";
 
 /** Page of report object keys from a reports bucket. */
 export interface ReportObjectPage {
+  /** Report object keys returned on this page. */
   keys: string[];
+  /** Whether more report objects are available. */
   isTruncated: boolean;
+  /** Continuation token for the next page, when present. */
   nextContinuationToken?: string;
 }
 
 /** Downloaded report object text and truncation metadata. */
 export interface ReportObjectText {
+  /** Decoded report object text. */
   text: string;
+  /** Number of bytes read from the report object. */
   bytes: number;
+  /** Whether decoding stopped at the configured byte limit. */
   truncated: boolean;
 }
 
 /** Shared request options for bounded report reads. */
 export interface ReportRequestOptions {
+  /** Request timeout in milliseconds. */
   timeoutMs?: number;
 }
 
 /** Options for listing report object keys. */
 export interface ListReportObjectKeysOptions extends ReportRequestOptions {
+  /** Optional report object-key prefix filter. */
   prefix?: string;
+  /** Start-after key used for bounded report scans. */
   startAfter?: string;
+  /** Continuation token from a previous page. */
   continuationToken?: string;
+  /** Maximum keys requested from S3. */
   maxKeys?: number;
 }
 
 /** Options for downloading report object text. */
 export interface DownloadReportObjectTextOptions extends ReportRequestOptions {
+  /** Maximum bytes to read from the report object. */
   maxBytes?: number;
 }
 

@@ -54,55 +54,109 @@ type S3SendCommand<
 /** AWS S3 client configuration accepted by the B2 peer facade. */
 export type B2S3PeerClientConfig = AwsS3ClientConfig;
 
+/** Prefix filter for a B2 S3 lifecycle rule. */
+export interface B2S3LifecycleFilter {
+  /** Object-key prefix matched by the lifecycle rule. */
+  prefix?: string;
+}
+
+/** Current-version expiration action for a lifecycle rule. */
+export interface B2S3LifecycleExpiration {
+  /** Number of days after creation when current versions expire. */
+  days?: number;
+  /** Whether expired delete markers should be removed automatically. */
+  expiredObjectDeleteMarker?: boolean;
+}
+
+/** Noncurrent-version expiration action for a lifecycle rule. */
+export interface B2S3LifecycleNoncurrentVersionExpiration {
+  /** Number of days after becoming noncurrent when versions expire. */
+  noncurrentDays: number;
+}
+
+/** Incomplete multipart upload cleanup action for a lifecycle rule. */
+export interface B2S3LifecycleAbortIncompleteMultipartUpload {
+  /** Number of days after initiation when incomplete multipart uploads are aborted. */
+  daysAfterInitiation: number;
+}
+
 /** S3 lifecycle rule subset supported by the B2 MCP tool surface. */
 export interface B2S3LifecycleRule {
+  /** Rule identifier supplied to S3 lifecycle APIs. */
   id: string;
+  /** Whether the lifecycle rule is active. */
   status: "Enabled" | "Disabled";
-  filter?: { prefix?: string };
-  expiration?: { days?: number; expiredObjectDeleteMarker?: boolean };
-  noncurrentVersionExpiration?: { noncurrentDays: number };
-  abortIncompleteMultipartUpload?: { daysAfterInitiation: number };
+  /** Optional object-key prefix filter. */
+  filter?: B2S3LifecycleFilter;
+  /** Optional current-version expiration action. */
+  expiration?: B2S3LifecycleExpiration;
+  /** Optional noncurrent-version expiration action. */
+  noncurrentVersionExpiration?: B2S3LifecycleNoncurrentVersionExpiration;
+  /** Optional cleanup action for incomplete multipart uploads. */
+  abortIncompleteMultipartUpload?: B2S3LifecycleAbortIncompleteMultipartUpload;
 }
 
 /** Completed multipart part supplied to S3 CompleteMultipartUpload. */
 export interface B2S3CompletedMultipartPart {
+  /** One-based multipart part number. */
   partNumber: number;
+  /** ETag returned by the corresponding UploadPart request. */
   etag: string;
 }
 
 /** Multipart upload summary returned by S3 list operations. */
 export interface B2S3MultipartUploadSummary {
+  /** Object key being uploaded. */
   Key?: string;
+  /** Provider upload ID. */
   UploadId?: string;
+  /** Upload initiation time. */
   Initiated?: Date;
+  /** Storage class reported by S3. */
   StorageClass?: string;
+  /** Owner metadata returned by S3, when present. */
   Owner?: unknown;
 }
 
 /** Multipart part summary returned by S3 list-parts operations. */
 export interface B2S3PartSummary {
+  /** One-based multipart part number. */
   PartNumber?: number;
+  /** Last modified time for the uploaded part. */
   LastModified?: Date;
+  /** ETag returned for the uploaded part. */
   ETag?: string;
+  /** Uploaded part size in bytes. */
   Size?: number;
 }
 
 /** Options for an inline S3 PutObject call. */
 export interface B2S3PutObjectOptions {
+  /** Destination bucket name. */
   bucket: string;
+  /** Destination object key. */
   key: string;
+  /** Object payload accepted by the AWS SDK. */
   body: StreamingBlobPayloadInputTypes;
+  /** Object content length in bytes. */
   contentLength?: number;
+  /** Object content type. */
   contentType?: string;
+  /** User metadata to store with the object. */
   metadata?: Record<string, string>;
+  /** B2-managed server-side encryption mode. */
   serverSideEncryption?: "AES256";
 }
 
 /** Options for an S3 GetObject call. */
 export interface B2S3GetObjectOptions {
+  /** Source bucket name. */
   bucket: string;
+  /** Source object key. */
   key: string;
+  /** Optional HTTP byte range. */
   range?: string;
+  /** Optional S3 version ID. */
   versionId?: string;
 }
 
@@ -111,166 +165,475 @@ export type B2S3ObjectBody = StreamingBlobPayloadOutputTypes | undefined;
 
 /** Downloaded object metadata and optional body stream. */
 export interface B2S3DownloadedObject {
+  /** Object key requested by the caller. */
   key: string;
+  /** Object content type returned by S3. */
   contentType?: string;
+  /** Object content length in bytes. */
   contentLength?: number;
+  /** Object last-modified timestamp. */
   lastModified?: Date;
+  /** Object ETag. */
   etag?: string;
+  /** S3 version ID returned by the provider. */
   versionId?: string;
+  /** User metadata returned with the object. */
   metadata: Record<string, string>;
+  /** Optional streaming response body. */
   body?: B2S3ObjectBody;
 }
 
 /** Options for an S3 HeadObject call. */
 export interface B2S3HeadObjectOptions {
+  /** Source bucket name. */
   bucket: string;
+  /** Source object key. */
   key: string;
+  /** Optional S3 version ID. */
   versionId?: string;
 }
 
-/** HeadObject metadata without a body stream. */
-export type B2S3HeadObjectResult = Omit<B2S3DownloadedObject, "body"> & {
+/** HeadObject-only metadata fields returned by S3. */
+export interface B2S3HeadObjectMetadata {
+  /** Server-side encryption mode returned by S3, when present. */
   serverSideEncryption?: string;
+  /** Whether the response represents a delete marker. */
   deleteMarker?: boolean;
-};
+}
+
+/** HeadObject metadata without a body stream. */
+export type B2S3HeadObjectResult = Omit<B2S3DownloadedObject, "body"> & B2S3HeadObjectMetadata;
 
 /** Options for deleting one object or version through S3. */
 export interface B2S3DeleteObjectOptions {
+  /** Bucket name containing the object. */
   bucket: string;
+  /** Object key to delete. */
   key: string;
+  /** Optional S3 version ID to delete. */
   versionId?: string;
+  /** Whether governance retention may be bypassed for this delete. */
   bypassGovernance?: boolean;
 }
 
 /** Result metadata from an S3 DeleteObject call. */
 export interface B2S3DeleteObjectResult {
+  /** Version ID returned by the delete operation, when present. */
   versionId?: string;
+  /** Whether the operation created or removed a delete marker. */
   deleteMarker?: boolean;
+}
+
+/** Object target supplied to bounded multi-object delete. */
+export interface B2S3DeleteObjectTarget {
+  /** Object key to delete. */
+  key: string;
+  /** Optional S3 version ID to delete. */
+  versionId?: string;
 }
 
 /** Options for bounded multi-object deletes. */
 export interface B2S3DeleteObjectsOptions {
+  /** Bucket name containing all requested object targets. */
   bucket: string;
-  objects: Array<{ key: string; versionId?: string }>;
+  /** Object targets to delete. */
+  objects: B2S3DeleteObjectTarget[];
+  /** Whether successful deletes should be omitted from the response. */
   quiet?: boolean;
+  /** Whether governance retention may be bypassed for these deletes. */
   bypassGovernance?: boolean;
+}
+
+/** Successful delete entry returned by bounded multi-object delete. */
+export interface B2S3DeletedObjectEntry {
+  /** Deleted object key. */
+  Key?: string;
+  /** Deleted object version ID, when present. */
+  VersionId?: string;
+  /** Whether this entry represents a delete marker. */
+  DeleteMarker?: boolean;
+  /** Version ID of the delete marker, when present. */
+  DeleteMarkerVersionId?: string;
+}
+
+/** Failed delete entry returned by bounded multi-object delete. */
+export interface B2S3DeleteObjectErrorEntry {
+  /** Object key whose delete failed. */
+  Key?: string;
+  /** Object version ID whose delete failed, when present. */
+  VersionId?: string;
+  /** Provider error code. */
+  Code?: string;
+  /** Provider error message. */
+  Message?: string;
+  /** Provider request ID for support correlation. */
+  RequestId?: string;
 }
 
 /** Aggregated result from bounded multi-object deletes. */
 export interface B2S3DeleteObjectsResult {
-  deleted: Array<{
-    Key?: string;
-    VersionId?: string;
-    DeleteMarker?: boolean;
-    DeleteMarkerVersionId?: string;
-  }>;
-  errors: Array<{
-    Key?: string;
-    VersionId?: string;
-    Code?: string;
-    Message?: string;
-    RequestId?: string;
-  }>;
+  /** Successful delete entries unless quiet mode suppressed them. */
+  deleted: B2S3DeletedObjectEntry[];
+  /** Failed delete entries captured without aborting the whole batch. */
+  errors: B2S3DeleteObjectErrorEntry[];
+  /** Number of delete attempts started. */
   attempted: number;
+  /** Whether caller abort stopped the bounded loop early. */
   aborted: boolean;
+  /** Maximum concurrency observed by the bounded delete helper. */
   maxConcurrency: number;
 }
 
 /** Object summary returned by S3 list operations. */
 export interface B2S3ObjectSummary {
+  /** Object key. */
   Key?: string;
+  /** Last modified timestamp. */
   LastModified?: Date;
+  /** Object ETag. */
   ETag?: string;
+  /** Object size in bytes. */
   Size?: number;
+  /** Storage class reported by S3. */
   StorageClass?: string;
 }
 
 /** Common prefix entry returned when S3 list operations use a delimiter. */
 export interface B2S3CommonPrefix {
+  /** Common key prefix. */
   Prefix?: string;
 }
 
 /** Normalized S3 ListObjectsV2 result. */
 export interface B2S3ListObjectsV2Result {
+  /** Current object summaries on this page. */
   objects: B2S3ObjectSummary[];
+  /** Common prefixes returned for delimiter-based listing. */
   commonPrefixes: B2S3CommonPrefix[];
+  /** Whether more keys are available. */
   isTruncated: boolean;
+  /** Continuation token for the next page, when present. */
   nextContinuationToken?: string;
+  /** Number of object summaries returned on this page. */
   keyCount: number;
 }
 
 /** Object version summary returned by S3 version listing. */
 export interface B2S3ObjectVersionSummary extends B2S3ObjectSummary {
+  /** S3 version ID. */
   VersionId?: string;
+  /** Whether this version is the latest version for the key. */
   IsLatest?: boolean;
 }
 
 /** Delete marker summary returned by S3 version listing. */
 export interface B2S3DeleteMarkerSummary {
+  /** Object key. */
   Key?: string;
+  /** Delete marker version ID. */
   VersionId?: string;
+  /** Whether this delete marker is the latest version for the key. */
   IsLatest?: boolean;
+  /** Delete marker last-modified timestamp. */
   LastModified?: Date;
 }
 
 /** Normalized S3 ListObjectVersions result. */
 export interface B2S3ListObjectVersionsResult {
+  /** Object versions returned on this page. */
   versions: B2S3ObjectVersionSummary[];
+  /** Delete markers returned on this page. */
   deleteMarkers: B2S3DeleteMarkerSummary[];
+  /** Common prefixes returned for delimiter-based listing. */
   commonPrefixes: B2S3CommonPrefix[];
+  /** Whether more versions or markers are available. */
   isTruncated: boolean;
+  /** Key marker for the next page, when present. */
   nextKeyMarker?: string;
+  /** Version ID marker for the next page, when present. */
   nextVersionIdMarker?: string;
 }
 
 /** Options for an S3 CopyObject call. */
 export interface B2S3CopyObjectOptions {
+  /** Source bucket name. */
   sourceBucket: string;
+  /** Source object key. */
   sourceKey: string;
+  /** Optional source version ID. */
   sourceVersionId?: string;
+  /** Destination bucket name. */
   destinationBucket: string;
+  /** Destination object key. */
   destinationKey: string;
+  /** Metadata handling mode for the copy operation. */
   metadataDirective?: "COPY" | "REPLACE";
+  /** Replacement content type when metadata is replaced. */
   contentType?: string;
+  /** Replacement user metadata when metadata is replaced. */
   metadata?: Record<string, string>;
 }
 
 /** Options for listing current S3 objects. */
 export interface B2S3ListObjectsV2Options {
+  /** Bucket name to list. */
   bucket: string;
+  /** Optional object-key prefix filter. */
   prefix?: string;
+  /** Optional delimiter for common-prefix grouping. */
   delimiter?: string;
+  /** Maximum keys requested from S3. */
   maxKeys: number;
+  /** Continuation token from a previous page. */
   continuationToken?: string;
+  /** Start-after key used only on the first page. */
   startAfter?: string;
 }
 
 /** Options for listing S3 object versions and delete markers. */
 export interface B2S3ListObjectVersionsOptions {
+  /** Bucket name to list. */
   bucket: string;
+  /** Optional object-key prefix filter. */
   prefix?: string;
+  /** Optional delimiter for common-prefix grouping. */
   delimiter?: string;
+  /** Maximum versions and markers requested from S3. */
   maxKeys: number;
+  /** Key marker from a previous page. */
   keyMarker?: string;
+  /** Version ID marker from a previous page. */
   versionIdMarker?: string;
 }
 
 /** Options for generating a presigned GetObject or PutObject URL. */
 export interface B2S3PresignObjectUrlOptions {
+  /** Bucket name for the presigned request. */
   bucket: string;
+  /** Object key for the presigned request. */
   key: string;
+  /** S3 operation to presign. */
   operation: "GetObject" | "PutObject";
+  /** Expiry duration in seconds. */
   expiresIn: number;
+  /** Optional version ID for GetObject URLs. */
   versionId?: string;
+  /** Required content type for PutObject URLs. */
   contentType?: string;
 }
 
 /** Generated presigned URL metadata. */
 export interface B2S3PresignObjectUrlResult {
+  /** Generated presigned URL. */
   url: string;
+  /** S3 operation the URL authorizes. */
   operation: "GetObject" | "PutObject";
+  /** Expiry duration in seconds. */
   expiresIn: number;
+  /** ISO timestamp when the URL expires. */
   expiresAt: string;
+}
+
+/** Result from reading a bucket's S3 location. */
+export interface B2S3BucketLocationResult {
+  /** S3 location constraint returned by the provider, when present. */
+  locationConstraint?: string;
+}
+
+/** Options for creating a multipart upload. */
+export interface B2S3CreateMultipartUploadOptions {
+  /** Destination bucket name. */
+  bucket: string;
+  /** Destination object key. */
+  key: string;
+  /** Declared object content type. */
+  contentType?: string;
+  /** User metadata to store with the object. */
+  metadata?: Record<string, string>;
+  /** Requested object ACL. */
+  acl?: "private" | "public-read";
+  /** B2-managed server-side encryption mode. */
+  serverSideEncryption?: "AES256";
+}
+
+/** Result metadata from creating a multipart upload. */
+export interface B2S3CreateMultipartUploadResult {
+  /** Provider upload ID. */
+  uploadId?: string;
+  /** Bucket name returned by the provider. */
+  bucket?: string;
+  /** Object key returned by the provider. */
+  key?: string;
+}
+
+/** Options for presigning a multipart upload part. */
+export interface B2S3PresignUploadPartOptions {
+  /** Bucket name containing the multipart upload. */
+  bucket: string;
+  /** Object key being uploaded. */
+  key: string;
+  /** Provider upload ID. */
+  uploadId: string;
+  /** One-based multipart part number. */
+  partNumber: number;
+  /** Expiry duration in seconds. */
+  expiresIn: number;
+}
+
+/** Result from presigning a multipart upload part. */
+export interface B2S3PresignUploadPartResult {
+  /** One-based multipart part number. */
+  partNumber: number;
+  /** Generated presigned part-upload URL. */
+  url: string;
+}
+
+/** Options for completing a multipart upload. */
+export interface B2S3CompleteMultipartUploadOptions {
+  /** Bucket name containing the multipart upload. */
+  bucket: string;
+  /** Object key being uploaded. */
+  key: string;
+  /** Provider upload ID. */
+  uploadId: string;
+  /** Uploaded parts and ETags to commit. */
+  parts: B2S3CompletedMultipartPart[];
+}
+
+/** Result metadata from completing a multipart upload. */
+export interface B2S3CompleteMultipartUploadResult {
+  /** Object location returned by S3, when present. */
+  location?: string;
+  /** Bucket name returned by S3, when present. */
+  bucket?: string;
+  /** Object key returned by S3, when present. */
+  key?: string;
+  /** Final object ETag returned by S3, when present. */
+  etag?: string;
+}
+
+/** Options for aborting a multipart upload. */
+export interface B2S3AbortMultipartUploadOptions {
+  /** Bucket name containing the multipart upload. */
+  bucket: string;
+  /** Object key being uploaded. */
+  key: string;
+  /** Provider upload ID. */
+  uploadId: string;
+}
+
+/** Options for listing in-progress multipart uploads. */
+export interface B2S3ListMultipartUploadsOptions {
+  /** Bucket name to list. */
+  bucket: string;
+  /** Optional object-key prefix filter. */
+  prefix?: string;
+  /** Optional delimiter for common-prefix grouping. */
+  delimiter?: string;
+  /** Maximum uploads requested from S3. */
+  maxUploads: number;
+  /** Key marker from a previous page. */
+  keyMarker?: string;
+  /** Upload ID marker from a previous page. */
+  uploadIdMarker?: string;
+}
+
+/** Result from listing in-progress multipart uploads. */
+export interface B2S3ListMultipartUploadsResult {
+  /** Multipart uploads returned on this page. */
+  uploads: B2S3MultipartUploadSummary[];
+  /** Whether more uploads are available. */
+  isTruncated?: boolean;
+  /** Key marker for the next page, when present. */
+  nextKeyMarker?: string;
+  /** Upload ID marker for the next page, when present. */
+  nextUploadIdMarker?: string;
+}
+
+/** Options for listing uploaded multipart parts. */
+export interface B2S3ListPartsOptions {
+  /** Bucket name containing the multipart upload. */
+  bucket: string;
+  /** Object key being uploaded. */
+  key: string;
+  /** Provider upload ID. */
+  uploadId: string;
+  /** Maximum parts requested from S3. */
+  maxParts: number;
+  /** Part-number marker from a previous page. */
+  partNumberMarker?: number;
+}
+
+/** Result from listing uploaded multipart parts. */
+export interface B2S3ListPartsResult {
+  /** Uploaded parts returned on this page. */
+  parts: B2S3PartSummary[];
+  /** Whether more parts are available. */
+  isTruncated?: boolean;
+  /** Part-number marker for the next page, when present. */
+  nextPartNumberMarker?: string;
+}
+
+/** Options for copying an object range into a multipart part. */
+export interface B2S3UploadPartCopyOptions {
+  /** Bucket name containing the multipart upload. */
+  bucket: string;
+  /** Destination object key. */
+  key: string;
+  /** Provider upload ID. */
+  uploadId: string;
+  /** One-based multipart part number. */
+  partNumber: number;
+  /** Encoded S3 copy source. */
+  copySource: string;
+  /** Optional source byte range to copy. */
+  copySourceRange?: string;
+}
+
+/** Result metadata from copying an object range into a multipart part. */
+export interface B2S3UploadPartCopyResult {
+  /** Copied part ETag returned by S3. */
+  etag?: string;
+  /** Last-modified timestamp returned by S3 for the copied part. */
+  lastModified?: Date;
+}
+
+/** Options for listing report object keys from the reports bucket. */
+export interface B2S3ListReportObjectKeysOptions {
+  /** Reports bucket name. */
+  bucketName: string;
+  /** Optional report object-key prefix filter. */
+  prefix?: string;
+  /** Start-after key used for bounded report scans. */
+  startAfter?: string;
+  /** Continuation token from a previous page. */
+  continuationToken?: string;
+  /** Maximum keys requested from S3. */
+  maxKeys?: number;
+}
+
+/** Result from listing report object keys. */
+export interface B2S3ListReportObjectKeysResult {
+  /** Report object keys returned on this page. */
+  keys: string[];
+  /** Whether more report keys are available. */
+  isTruncated: boolean;
+  /** Continuation token for the next page, when present. */
+  nextContinuationToken?: string;
+}
+
+/** Options for downloading one report object body. */
+export interface B2S3DownloadReportObjectOptions {
+  /** Reports bucket name. */
+  bucketName: string;
+  /** Report object key to download. */
+  key: string;
+}
+
+/** Provider body returned for bounded report text decoding. */
+export interface B2S3DownloadReportObjectResult {
+  /** Provider response body stream or blob-like value. */
+  body: unknown;
 }
 
 function encodeCopySourceSegment(value: string): string {
@@ -331,9 +694,9 @@ function providerErrorMessage(err: unknown): string {
  * @returns Normalized error entry used by `s3_delete_objects`.
  */
 export function b2S3DeleteErrorEntry(
-  object: { key: string; versionId?: string },
+  object: B2S3DeleteObjectTarget,
   err: unknown,
-): B2S3DeleteObjectsResult["errors"][number] {
+): B2S3DeleteObjectErrorEntry {
   return {
     Key: object.key,
     VersionId: object.versionId,
@@ -464,6 +827,11 @@ export class B2S3PeerClient {
   private unsafeMutationClient: S3Client | null = null;
   private readonly peerConfig: B2S3PeerClientConfig;
 
+  /**
+   * Create an S3 peer facade around AWS SDK clients configured for B2.
+   *
+   * @param config - AWS SDK S3 client configuration for a B2 S3 endpoint.
+   */
   constructor(config: B2S3PeerClientConfig) {
     this.peerConfig = config;
     this.readClient = new S3Client(config);
@@ -580,7 +948,7 @@ export class B2S3PeerClient {
    *
    * @returns Bucket location constraint, when the provider returns one.
    */
-  async getBucketLocation(bucket: string): Promise<{ locationConstraint?: string }> {
+  async getBucketLocation(bucket: string): Promise<B2S3BucketLocationResult> {
     const result = await this.sendWithCircuit(new GetBucketLocationCommand({ Bucket: bucket }));
     return { locationConstraint: result.LocationConstraint };
   }
@@ -854,14 +1222,9 @@ export class B2S3PeerClient {
    *
    * @returns Upload ID and provider metadata.
    */
-  async createMultipartUpload(input: {
-    bucket: string;
-    key: string;
-    contentType?: string;
-    metadata?: Record<string, string>;
-    acl?: "private" | "public-read";
-    serverSideEncryption?: "AES256";
-  }): Promise<{ uploadId?: string; bucket?: string; key?: string }> {
+  async createMultipartUpload(
+    input: B2S3CreateMultipartUploadOptions,
+  ): Promise<B2S3CreateMultipartUploadResult> {
     const result = await this.sendUnsafeMutationWithCircuit(
       new CreateMultipartUploadCommand({
         Bucket: input.bucket,
@@ -882,13 +1245,9 @@ export class B2S3PeerClient {
    *
    * @returns Part number and presigned upload URL.
    */
-  async presignUploadPart(input: {
-    bucket: string;
-    key: string;
-    uploadId: string;
-    partNumber: number;
-    expiresIn: number;
-  }): Promise<{ partNumber: number; url: string }> {
+  async presignUploadPart(
+    input: B2S3PresignUploadPartOptions,
+  ): Promise<B2S3PresignUploadPartResult> {
     const url = await getSignedUrl(
       this.readClient,
       new UploadPartCommand({
@@ -909,12 +1268,9 @@ export class B2S3PeerClient {
    *
    * @returns Provider completion metadata.
    */
-  async completeMultipartUpload(input: {
-    bucket: string;
-    key: string;
-    uploadId: string;
-    parts: B2S3CompletedMultipartPart[];
-  }): Promise<{ location?: string; bucket?: string; key?: string; etag?: string }> {
+  async completeMultipartUpload(
+    input: B2S3CompleteMultipartUploadOptions,
+  ): Promise<B2S3CompleteMultipartUploadResult> {
     const result = await this.sendUnsafeMutationWithCircuit(
       new CompleteMultipartUploadCommand({
         Bucket: input.bucket,
@@ -941,11 +1297,7 @@ export class B2S3PeerClient {
    *
    * @param input - Multipart upload target.
    */
-  async abortMultipartUpload(input: {
-    bucket: string;
-    key: string;
-    uploadId: string;
-  }): Promise<void> {
+  async abortMultipartUpload(input: B2S3AbortMultipartUploadOptions): Promise<void> {
     await this.sendWithCircuit(
       new AbortMultipartUploadCommand({
         Bucket: input.bucket,
@@ -962,19 +1314,9 @@ export class B2S3PeerClient {
    *
    * @returns Multipart upload listing page.
    */
-  async listMultipartUploads(input: {
-    bucket: string;
-    prefix?: string;
-    delimiter?: string;
-    maxUploads: number;
-    keyMarker?: string;
-    uploadIdMarker?: string;
-  }): Promise<{
-    uploads: B2S3MultipartUploadSummary[];
-    isTruncated?: boolean;
-    nextKeyMarker?: string;
-    nextUploadIdMarker?: string;
-  }> {
+  async listMultipartUploads(
+    input: B2S3ListMultipartUploadsOptions,
+  ): Promise<B2S3ListMultipartUploadsResult> {
     const result = await this.sendWithCircuit(
       new ListMultipartUploadsCommand({
         Bucket: input.bucket,
@@ -1000,17 +1342,7 @@ export class B2S3PeerClient {
    *
    * @returns Multipart part listing page.
    */
-  async listParts(input: {
-    bucket: string;
-    key: string;
-    uploadId: string;
-    maxParts: number;
-    partNumberMarker?: number;
-  }): Promise<{
-    parts: B2S3PartSummary[];
-    isTruncated?: boolean;
-    nextPartNumberMarker?: string;
-  }> {
+  async listParts(input: B2S3ListPartsOptions): Promise<B2S3ListPartsResult> {
     const result = await this.sendWithCircuit(
       new ListPartsCommand({
         Bucket: input.bucket,
@@ -1035,14 +1367,7 @@ export class B2S3PeerClient {
    *
    * @returns Copied part ETag and last-modified metadata.
    */
-  async uploadPartCopy(input: {
-    bucket: string;
-    key: string;
-    uploadId: string;
-    partNumber: number;
-    copySource: string;
-    copySourceRange?: string;
-  }): Promise<{ etag?: string; lastModified?: Date }> {
+  async uploadPartCopy(input: B2S3UploadPartCopyOptions): Promise<B2S3UploadPartCopyResult> {
     const result = await this.sendWithCircuit(
       new UploadPartCopyCommand({
         Bucket: input.bucket,
@@ -1066,13 +1391,9 @@ export class B2S3PeerClient {
    *
    * @returns Report object key page.
    */
-  async listReportObjectKeys(input: {
-    bucketName: string;
-    prefix?: string;
-    startAfter?: string;
-    continuationToken?: string;
-    maxKeys?: number;
-  }): Promise<{ keys: string[]; isTruncated: boolean; nextContinuationToken?: string }> {
+  async listReportObjectKeys(
+    input: B2S3ListReportObjectKeysOptions,
+  ): Promise<B2S3ListReportObjectKeysResult> {
     const page = await this.sendCommand(
       new ListObjectsV2Command({
         Bucket: input.bucketName,
@@ -1098,10 +1419,9 @@ export class B2S3PeerClient {
    *
    * @returns Provider body stream wrapper.
    */
-  async downloadReportObject(input: {
-    bucketName: string;
-    key: string;
-  }): Promise<{ body: unknown }> {
+  async downloadReportObject(
+    input: B2S3DownloadReportObjectOptions,
+  ): Promise<B2S3DownloadReportObjectResult> {
     const object = await this.sendCommand(
       new GetObjectCommand({ Bucket: input.bucketName, Key: input.key }),
     );

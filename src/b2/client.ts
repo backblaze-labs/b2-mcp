@@ -116,12 +116,20 @@ export interface ServerSideEncryptionInput {
   algorithm?: "AES256";
 }
 
+/** Default Object Lock retention duration accepted by bucket mutation tools. */
+export interface RetentionPeriodInput {
+  /** Retention duration count. */
+  duration: number;
+  /** Retention duration unit. */
+  unit: "days" | "years";
+}
+
 /** Default Object Lock retention policy accepted by bucket mutation tools. */
 export interface BucketRetentionInput {
   /** Default retention mode, or `null` to clear retention. */
   mode: "governance" | "compliance" | null;
   /** Default retention duration, or `null` when no duration applies. */
-  period: { duration: number; unit: "days" | "years" } | null;
+  period: RetentionPeriodInput | null;
 }
 
 /** Normalized server-side encryption setting returned from bucket reads. */
@@ -279,20 +287,31 @@ export interface EventNotificationRuleInput {
   /** Optional object key prefix filter. */
   objectNamePrefix?: string;
   /** Webhook target configuration. */
-  targetConfiguration: {
-    /** B2 target type, currently webhook-style endpoints for public tools. */
-    targetType: string;
-    /** HTTPS endpoint receiving notification events. */
-    url: string;
-    /** Optional HMAC signing secret used by B2 for webhook payloads. */
-    hmacSha256SigningSecret?: string;
-    /** Optional custom headers sent to the notification target. */
-    customHeaders?: Array<{ name: string; value: string }> | Record<string, string>;
-  };
+  targetConfiguration: EventNotificationTargetConfigurationInput;
   /** Whether B2 reports the rule as suspended. */
   isSuspended?: boolean;
   /** B2-provided suspension reason, when available. */
   suspensionReason?: string;
+}
+
+/** Custom HTTP header accepted by B2 event notification tools. */
+export interface EventNotificationCustomHeaderInput {
+  /** Header name sent to the notification target. */
+  name: string;
+  /** Header value sent to the notification target. */
+  value: string;
+}
+
+/** Webhook target configuration accepted by bucket notification tools. */
+export interface EventNotificationTargetConfigurationInput {
+  /** B2 target type, currently webhook-style endpoints for public tools. */
+  targetType: string;
+  /** HTTPS endpoint receiving notification events. */
+  url: string;
+  /** Optional HMAC signing secret used by B2 for webhook payloads. */
+  hmacSha256SigningSecret?: string;
+  /** Optional custom headers sent to the notification target. */
+  customHeaders?: EventNotificationCustomHeaderInput[] | Record<string, string>;
 }
 
 /** Filters accepted by native B2 bucket listing. */

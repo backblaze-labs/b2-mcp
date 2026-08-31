@@ -27,10 +27,23 @@ export const DEFAULT_HTTP_PORT = 3000;
 
 /** CLI/configuration error for invalid HTTP port input. */
 export class PortUsageError extends Error {
+  /**
+   * Create an invalid-port usage error.
+   *
+   * @param message - Human-readable invalid port message.
+   */
   constructor(message: string) {
     super(message);
     this.name = "PortUsageError";
   }
+}
+
+/** Parsed `--port` CLI flag and the last consumed argument index. */
+export interface PortArgResult {
+  /** Parsed TCP port. */
+  port: number;
+  /** Last argument index consumed by the port flag. */
+  nextIndex: number;
 }
 
 /**
@@ -61,10 +74,7 @@ export function parsePort(raw: string): number {
  *
  * @throws PortUsageError when `--port` is missing a value or has an invalid one.
  */
-export function readPortArg(
-  argv: string[],
-  index: number,
-): { port: number; nextIndex: number } | null {
+export function readPortArg(argv: string[], index: number): PortArgResult | null {
   const arg = argv[index];
   if (arg === "--port") {
     const raw = argv[index + 1];

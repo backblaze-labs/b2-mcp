@@ -50,10 +50,22 @@ interface AuthorizedB2S3Endpoint {
   region: string;
 }
 
+/** Validation mode requiring the S3 API URL to match a specific configured region. */
+export interface B2S3ExactRegionValidation {
+  /** Validation mode requiring an exact configured-region match. */
+  mode: "exact-region";
+  /** Expected B2 S3 region. */
+  region: string;
+}
+
+/** Validation mode accepting any authorized B2 S3 region endpoint. */
+export interface B2S3AuthorizedRegionValidation {
+  /** Validation mode accepting a trusted B2 S3 region from authorization. */
+  mode: "authorized-region";
+}
+
 /** Validation mode for authorized B2 S3 endpoint URLs. */
-export type B2S3ApiUrlValidation =
-  | { mode: "exact-region"; region: string }
-  | { mode: "authorized-region" };
+export type B2S3ApiUrlValidation = B2S3ExactRegionValidation | B2S3AuthorizedRegionValidation;
 
 /**
  * Validate a B2 S3 API URL.
@@ -134,10 +146,15 @@ function accountInfoForS3Endpoint(endpoint: string): AccountInfo {
 
 /** Options accepted when constructing a concrete S3 peer client. */
 export interface B2S3ClientOptions {
+  /** Authorized B2 account info used to derive the S3 endpoint. */
   accountInfo?: AccountInfo;
+  /** B2 application key ID used for S3 request signing. */
   applicationKeyId?: string;
+  /** B2 application key secret used for S3 request signing. */
   applicationKey?: string;
+  /** S3 API URL returned by B2 authorization. */
   authorizedS3ApiUrl?: string;
+  /** Optional user-agent surface label for the constructed client. */
   surface?: string;
 }
 

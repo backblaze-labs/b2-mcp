@@ -33,16 +33,17 @@ export type McpOutputFormat = (typeof MCP_OUTPUT_FORMATS)[number];
 export const DEFAULT_MCP_OUTPUT_FORMAT: McpOutputFormat = "json";
 
 /** JSON-compatible value accepted by MCP `structuredContent`. */
-export type JsonCompatible =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonCompatible[]
-  | { [key: string]: JsonCompatible };
+export type JsonCompatible = null | boolean | number | string | JsonCompatible[] | JsonObject;
+
+/** JSON-compatible object accepted by MCP `structuredContent`. */
+export interface JsonObject {
+  /** JSON object property value. */
+  [key: string]: JsonCompatible;
+}
 
 /** Async-local structured-result serialization options. */
 export interface ResultSerializationOptions {
+  /** Text serialization format used for MCP content blocks. */
   outputFormat: McpOutputFormat;
 }
 
@@ -50,9 +51,19 @@ const resultSerializationOptionsStorage = new AsyncLocalStorage<
   ResultSerializationOptions | undefined
 >();
 
+/** Text content block returned alongside structured MCP content. */
+export interface StructuredToolTextContent {
+  /** MCP content block type. */
+  type: "text";
+  /** Serialized text payload. */
+  text: string;
+}
+
 /** Successful MCP tool result with text content and JSON structured content. */
 export interface StructuredToolResult {
-  content: Array<{ type: "text"; text: string }>;
+  /** LLM-facing text content blocks. */
+  content: StructuredToolTextContent[];
+  /** Canonical JSON-compatible structured content. */
   structuredContent: JsonCompatible;
 }
 

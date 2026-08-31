@@ -13,6 +13,11 @@ import { B2Config } from "./types.js";
  * because the path escapes the configured sandbox root.
  */
 export class FileAccessError extends Error {
+  /**
+   * Create a local filesystem policy error.
+   *
+   * @param message - Human-readable policy failure message.
+   */
   constructor(message: string) {
     super(message);
     this.name = "FileAccessError";

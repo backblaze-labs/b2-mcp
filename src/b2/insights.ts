@@ -116,13 +116,21 @@ export function normalizeDate(raw: string): string | null {
 
 /** Normalized row from a Backblaze usage report CSV. */
 export interface ReportRow {
+  /** B2 account ID from the report row. */
   accountId: string;
+  /** Normalized report date in YYYY-MM-DD format. */
   _date: string;
+  /** B2 bucket ID, when the report row is bucket-scoped. */
   bucketId?: string;
+  /** B2 bucket name, when the report row includes it. */
   bucketName?: string;
+  /** Stored bytes snapshot, or null when the report omits storage data. */
   storageBytes: number | null;
+  /** Downloaded bytes reported for the row. */
   egressBytes: number;
+  /** Uploaded bytes reported for the row. */
   uploadBytes: number;
+  /** Class C transaction count reported for the row. */
   classCTxn: number;
 }
 
@@ -169,7 +177,7 @@ export function mapRow(raw: Record<string, string>): ReportRow | null {
  *
  * @returns Growth rows sorted by descending stored-byte growth.
  */
-export function computeAccountGrowth(rows: ReportRow[]) {
+export function computeAccountGrowth(rows: ReportRow[]): AccountGrowth[] {
   const daily = new Map<string, Map<string, number>>();
   const tot = new Map<string, { egress: number }>();
   for (const r of rows || []) {
@@ -184,7 +192,7 @@ export function computeAccountGrowth(rows: ReportRow[]) {
     if (!tot.has(a)) tot.set(a, { egress: 0 });
     tot.get(a)!.egress += r.egressBytes || 0;
   }
-  const out = [];
+  const out: AccountGrowth[] = [];
   for (const [a, m] of daily) {
     const ds = [...m.keys()].sort();
     if (!ds.length) continue;
@@ -202,6 +210,22 @@ export function computeAccountGrowth(rows: ReportRow[]) {
   return out.sort((x, y) => y.growthBytes - x.growthBytes);
 }
 
+/** Stored-data growth aggregate for one account. */
+export interface AccountGrowth {
+  /** B2 account ID. */
+  accountId: string;
+  /** First stored-bytes snapshot in the selected range. */
+  firstBytes: number;
+  /** Last stored-bytes snapshot in the selected range. */
+  lastBytes: number;
+  /** Difference between last and first stored bytes. */
+  growthBytes: number;
+  /** Percentage growth from the first snapshot, or null when no baseline exists. */
+  growthPct: number | null;
+  /** Total egress bytes across rows for the account. */
+  egressBytes: number;
+}
+
 /**
  * Aggregate egress bytes by account or bucket.
  *
@@ -210,11 +234,11 @@ export function computeAccountGrowth(rows: ReportRow[]) {
  *
  * @returns Egress totals sorted descending.
  */
-export function computeEgressLeaders(rows: ReportRow[], by: "account" | "bucket" = "account") {
-  const g = new Map<
-    string,
-    { key: string; accountId: string; bucketName?: string; egress: number }
-  >();
+export function computeEgressLeaders(
+  rows: ReportRow[],
+  by: "account" | "bucket" = "account",
+): EgressLeader[] {
+  const g = new Map<string, EgressLeader>();
   for (const r of rows || []) {
     const k = by === "bucket" ? r.bucketId || r.bucketName : r.accountId;
     if (!k) continue;
@@ -223,6 +247,18 @@ export function computeEgressLeaders(rows: ReportRow[], by: "account" | "bucket"
     g.get(k)!.egress += r.egressBytes || 0;
   }
   return [...g.values()].sort((a, b) => b.egress - a.egress);
+}
+
+/** Egress aggregate for one account or bucket grouping key. */
+export interface EgressLeader {
+  /** Grouping key, either account ID or bucket identifier/name. */
+  key: string;
+  /** B2 account ID associated with the aggregate. */
+  accountId: string;
+  /** B2 bucket name when grouping by bucket and the report includes it. */
+  bucketName?: string;
+  /** Total egress bytes for the grouping key. */
+  egress: number;
 }
 
 // ── Report-bucket access ────────────────────────────────────────────────────
@@ -710,11 +746,17 @@ function storedByAccount(rows: ReportRow[]): Map<string, number> {
 
 /** Stored-data growth for one account between two daily snapshots. */
 export interface SnapshotGrowth {
+  /** B2 account ID. */
   accountId: string;
+  /** Stored bytes in the earlier snapshot. */
   firstBytes: number;
+  /** Stored bytes in the later snapshot. */
   lastBytes: number;
+  /** Difference between later and earlier stored bytes. */
   growthBytes: number;
+  /** Percentage growth from the earlier snapshot, or null when no baseline exists. */
   growthPct: number | null;
+  /** Whether the account appears only in the later snapshot. */
   isNew: boolean;
 }
 
