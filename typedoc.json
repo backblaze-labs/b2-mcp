@@ -57,7 +57,24 @@
   "excludeProtected": true,
   "excludeInternal": true,
   "excludeExternals": true,
-  "requiredToBeDocumented": ["Module", "Variable", "Function", "Class", "Interface", "TypeAlias"],
+  "requiredToBeDocumented": [
+    "Module",
+    "Class",
+    "Interface",
+    "Function",
+    "Method",
+    "Property",
+    "Enum",
+    "EnumMember",
+    "TypeAlias",
+    "Variable",
+    "Accessor",
+    "Constructor",
+    "GetSignature",
+    "SetSignature",
+    "CallSignature",
+    "IndexSignature"
+  ],
   "navigationLinks": {
     "GitHub": "https://github.com/backblaze-labs/b2-mcp",
     "Backblaze": "https://www.backblaze.com/"

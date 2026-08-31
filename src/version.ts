@@ -18,14 +18,19 @@ type JsonRecord = Record<string, unknown>;
 
 /** Resolved package version and channel metadata. */
 export type VersionResolution = {
+  /** Numeric package version from package metadata. */
   version: string;
+  /** Build channel used for outbound product-token construction. */
   releaseChannel: ReleaseChannel;
+  /** Whether the runtime was stamped by the release process. */
   isPublishedRelease: boolean;
 };
 
 /** Inputs used to resolve the runtime build version. */
 export type VersionResolutionOptions = {
+  /** Package root containing package metadata. */
   packageRoot?: string;
+  /** Runtime directory where release marker files may be present. */
   runtimeDir?: string;
 };
 

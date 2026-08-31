@@ -29,16 +29,19 @@ export type HttpCredentialMode = "server" | "principal" | "headers";
 
 /** Node request extended with verified MCP auth info. */
 export interface AuthenticatedIncomingMessage extends http.IncomingMessage {
+  /** Verified MCP auth info attached by OAuth or hosting middleware. */
   auth?: AuthInfo;
 }
 
 /** Context supplied when resolving credentials for a request. */
 export interface CredentialProviderContext {
+  /** HTTP request being resolved, when credentials are request-scoped. */
   req?: AuthenticatedIncomingMessage;
 }
 
 /** Resolved B2 configuration plus non-secret cache keys. */
 export interface CredentialResolution {
+  /** B2 runtime configuration resolved for this process or request. */
   config: B2Config;
   /** Non-secret log/rate-limit key: either a credential fingerprint or verified principal. */
   cacheKey: string;
@@ -47,11 +50,13 @@ export interface CredentialResolution {
    * be logged or returned.
    */
   capabilityCacheKey: string;
+  /** Verified principal identifier, when principal credential mode is active. */
   principal?: string;
 }
 
 /** Interface implemented by stdio and HTTP credential resolvers. */
 export interface CredentialProvider {
+  /** Human-readable provider name used in logs and diagnostics. */
   readonly name: string;
   /** Resolve credentials for a process or request. */
   resolve(context?: CredentialProviderContext): CredentialResolution;
@@ -61,9 +66,18 @@ export interface CredentialProvider {
 
 /** Stable credential-resolution failure surfaced by bootstrap and HTTP paths. */
 export class CredentialResolutionError extends Error {
+  /** HTTP status associated with the credential failure. */
   readonly status: number;
+  /** Stable machine-readable credential failure code. */
   readonly code: string;
 
+  /**
+   * Create a credential-resolution failure.
+   *
+   * @param message - Human-readable failure message.
+   * @param status - HTTP status associated with the failure.
+   * @param code - Stable machine-readable failure code.
+   */
   constructor(message: string, status = 401, code = "credential_resolution_failed") {
     super(message);
     this.name = "CredentialResolutionError";
@@ -74,11 +88,17 @@ export class CredentialResolutionError extends Error {
 
 /** Raw credential material before runtime defaults and validation are applied. */
 export interface CredentialMaterial {
+  /** Primary B2 application key ID. */
   applicationKeyId?: string;
+  /** Primary B2 application key secret. */
   applicationKey?: string;
+  /** Deprecated legacy S3 application key ID override. */
   appKeyId?: string;
+  /** Deprecated legacy S3 application key secret override. */
   appKey?: string;
+  /** Optional B2 master key ID used only for Partner API tools. */
   masterKeyId?: string;
+  /** Optional B2 master key secret used only for Partner API tools. */
   masterKey?: string;
 }
 
@@ -325,6 +345,7 @@ function httpConfigOptions(): ConfigOptions {
 
 /** Credential provider for trusted local stdio deployments. */
 export class StdioEnvCredentialProvider implements CredentialProvider {
+  /** Provider name used in logs and diagnostics. */
   readonly name = "stdio-env";
 
   /**
@@ -358,6 +379,7 @@ export class StdioEnvCredentialProvider implements CredentialProvider {
 
 /** Credential provider for compatibility HTTP mode using per-request headers. */
 export class HttpHeaderCredentialProvider implements CredentialProvider {
+  /** Provider name used in logs and diagnostics. */
   readonly name = "http-headers";
 
   /**
@@ -389,6 +411,7 @@ export class HttpHeaderCredentialProvider implements CredentialProvider {
 
 /** Credential provider for HTTP mode using server-side environment credentials. */
 export class HttpServerCredentialProvider implements CredentialProvider {
+  /** Provider name used in logs and diagnostics. */
   readonly name = "http-server";
 
   /**
@@ -524,6 +547,7 @@ function principalMap(): Record<string, string> {
 
 /** Credential provider for OAuth-authenticated principal-to-credential routing. */
 export class HttpPrincipalCredentialProvider implements CredentialProvider {
+  /** Provider name used in logs and diagnostics. */
   readonly name = "http-principal";
 
   /**

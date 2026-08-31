@@ -66,6 +66,14 @@ interface ManagedSdkClient {
   urlGuard?: UrlGuard;
 }
 
+/** Authorized official B2 SDK client plus flattened MCP auth metadata. */
+export interface AuthorizedSdkClient {
+  /** Official B2 SDK client authorized for the current credential set. */
+  client: SdkB2Client;
+  /** Flattened B2 authorization metadata used by MCP handlers. */
+  auth: B2AuthResponse;
+}
+
 /** Factory hook used by tests to provide a managed B2 SDK client. */
 type SdkClientFactory = (config: B2Config) => ManagedSdkClient;
 let sdkClientFactoryForTests: SdkClientFactory | null = null;
@@ -434,7 +442,7 @@ export class B2AuthManager {
    *
    * @returns Authorized SDK client and flattened auth metadata.
    */
-  async getAuthorizedSdk(): Promise<{ client: SdkB2Client; auth: B2AuthResponse }> {
+  async getAuthorizedSdk(): Promise<AuthorizedSdkClient> {
     const auth = await this.getAuth();
     return { client: this.sdk.client, auth };
   }

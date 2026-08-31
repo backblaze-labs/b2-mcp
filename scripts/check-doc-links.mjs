@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(
   process.env.B2_MCP_DOC_LINK_ROOT ?? path.join(path.dirname(fileURLToPath(import.meta.url)), ".."),
 );
-const skippedDirs = new Set([".git", "coverage", "dist", "node_modules", "reports"]);
+const skippedDirs = new Set([".git", "api-docs", "coverage", "dist", "node_modules", "reports"]);
 const markdownLinkPattern = /!?\[[^\]\n]+\]\(([^)\n]+)\)/g;
 const referenceDefinitionPattern = /^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*(\S+)/gm;
 

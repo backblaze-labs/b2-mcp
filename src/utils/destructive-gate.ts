@@ -224,8 +224,22 @@ export function getDestructivePolicy(config: B2Config): DestructivePolicy {
   return p === "allow" || p === "block" ? p : "confirm";
 }
 
+/** Successful destructive-gate decision. */
+export interface GateAllowedResult {
+  /** Whether the destructive operation may proceed. */
+  ok: true;
+}
+
+/** Refused destructive-gate decision. */
+export interface GateBlockedResult {
+  /** Whether the destructive operation may proceed. */
+  ok: false;
+  /** Normalized error explaining the refusal. */
+  error: B2ApiError;
+}
+
 /** Result returned by {@link checkDestructive}. */
-export type GateResult = { ok: true } | { ok: false; error: B2ApiError };
+export type GateResult = GateAllowedResult | GateBlockedResult;
 
 /**
  * Evaluate whether a tool call may proceed. Call at the top of a destructive

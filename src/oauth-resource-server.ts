@@ -34,8 +34,90 @@ import { logger } from "./utils/logger.js";
 /** Deployment-level OAuth scopes understood by the B2 MCP tool filter. */
 export const B2_OAUTH_SCOPES = ["b2:read", "b2:write", "b2:admin"] as const;
 
+/** Environment variable names used to configure OAuth resource-server mode. */
+export interface OAuthEnvironmentVariables {
+  /** Allowed token algorithms for introspection responses and JWTs. */
+  readonly allowedAlgorithms: "B2_OAUTH_ALLOWED_ALGORITHMS";
+  /** Allowed JWT `typ` header values. */
+  readonly allowedJwtTypes: "B2_OAUTH_ALLOWED_JWT_TYPES";
+  /** Allowed OAuth subjects or issuer-qualified subjects. */
+  readonly allowedSubjects: "B2_OAUTH_ALLOWED_SUBJECTS";
+  /** Allowed token type values from introspection responses. */
+  readonly allowedTokenTypes: "B2_OAUTH_ALLOWED_TOKEN_TYPES";
+  /** Expected OAuth audience value. */
+  readonly audience: "B2_OAUTH_AUDIENCE";
+  /** Authorization endpoint advertised in OAuth metadata. */
+  readonly authorizationEndpoint: "B2_OAUTH_AUTHORIZATION_ENDPOINT";
+  /** Local-development override allowing an insecure localhost issuer URL. */
+  readonly dangerouslyAllowInsecureIssuerUrl: "B2_OAUTH_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL";
+  /** Explicit override allowing unauthenticated OAuth introspection requests. */
+  readonly dangerouslyAllowUnauthenticatedIntrospection: "B2_OAUTH_DANGEROUSLY_ALLOW_UNAUTHENTICATED_INTROSPECTION";
+  /** Bearer token used to authenticate OAuth introspection requests. */
+  readonly introspectionBearerToken: "B2_OAUTH_INTROSPECTION_BEARER_TOKEN";
+  /** Legacy maximum token-cache entries setting for introspection deployments. */
+  readonly introspectionCacheMaxEntries: "B2_OAUTH_INTROSPECTION_CACHE_MAX_ENTRIES";
+  /** Legacy token-cache skew setting for introspection deployments. */
+  readonly introspectionCacheSkewSeconds: "B2_OAUTH_INTROSPECTION_CACHE_SKEW_SECONDS";
+  /** Legacy token-cache TTL setting for introspection deployments. */
+  readonly introspectionCacheTtlSeconds: "B2_OAUTH_INTROSPECTION_CACHE_TTL_SECONDS";
+  /** Consecutive dependency failures before opening the introspection circuit. */
+  readonly introspectionCircuitFailures: "B2_OAUTH_INTROSPECTION_CIRCUIT_FAILURES";
+  /** Introspection circuit open duration in milliseconds. */
+  readonly introspectionCircuitOpenMs: "B2_OAUTH_INTROSPECTION_CIRCUIT_OPEN_MS";
+  /** Client ID used for OAuth introspection basic authentication. */
+  readonly introspectionClientId: "B2_OAUTH_INTROSPECTION_CLIENT_ID";
+  /** Client secret used for OAuth introspection basic authentication. */
+  readonly introspectionClientSecret: "B2_OAUTH_INTROSPECTION_CLIENT_SECRET";
+  /** OAuth introspection endpoint URL. */
+  readonly introspectionEndpoint: "B2_OAUTH_INTROSPECTION_ENDPOINT";
+  /** Maximum retry attempts for OAuth introspection dependency calls. */
+  readonly introspectionRetries: "B2_OAUTH_INTROSPECTION_RETRIES";
+  /** Retry delay in milliseconds for OAuth introspection dependency calls. */
+  readonly introspectionRetryDelayMs: "B2_OAUTH_INTROSPECTION_RETRY_DELAY_MS";
+  /** Request timeout in milliseconds for OAuth introspection calls. */
+  readonly introspectionTimeoutMs: "B2_OAUTH_INTROSPECTION_TIMEOUT_MS";
+  /** Trusted OAuth issuer URL. */
+  readonly issuer: "B2_OAUTH_ISSUER";
+  /** Minimum JWKS cache TTL in seconds. */
+  readonly jwksCacheMinTtlSeconds: "B2_OAUTH_JWKS_CACHE_MIN_TTL_SECONDS";
+  /** Maximum JWKS cache TTL in seconds. */
+  readonly jwksCacheTtlSeconds: "B2_OAUTH_JWKS_CACHE_TTL_SECONDS";
+  /** Consecutive dependency failures before opening the JWKS circuit. */
+  readonly jwksCircuitFailures: "B2_OAUTH_JWKS_CIRCUIT_FAILURES";
+  /** JWKS circuit open duration in milliseconds. */
+  readonly jwksCircuitOpenMs: "B2_OAUTH_JWKS_CIRCUIT_OPEN_MS";
+  /** Cooldown in milliseconds before refreshing JWKS for an unknown `kid`. */
+  readonly jwksRefreshCooldownMs: "B2_OAUTH_JWKS_REFRESH_COOLDOWN_MS";
+  /** Maximum retry attempts for JWKS dependency calls. */
+  readonly jwksRetries: "B2_OAUTH_JWKS_RETRIES";
+  /** Retry delay in milliseconds for JWKS dependency calls. */
+  readonly jwksRetryDelayMs: "B2_OAUTH_JWKS_RETRY_DELAY_MS";
+  /** Request timeout in milliseconds for JWKS calls. */
+  readonly jwksTimeoutMs: "B2_OAUTH_JWKS_TIMEOUT_MS";
+  /** JWKS endpoint URL. */
+  readonly jwksUri: "B2_OAUTH_JWKS_URI";
+  /** Allowed clock skew in seconds for JWT numeric-date claims. */
+  readonly jwtClockSkewSeconds: "B2_OAUTH_JWT_CLOCK_SKEW_SECONDS";
+  /** Public MCP deployment URL used in metadata. */
+  readonly publicUrl: "B2_MCP_PUBLIC_URL";
+  /** Required OAuth scopes beyond the B2 deployment scope. */
+  readonly requiredScopes: "B2_OAUTH_REQUIRED_SCOPES";
+  /** OAuth protected resource URL. */
+  readonly resource: "B2_OAUTH_RESOURCE";
+  /** Optional service documentation URL advertised in metadata. */
+  readonly serviceDocumentationUrl: "B2_MCP_SERVICE_DOCUMENTATION_URL";
+  /** Maximum cached token entries. */
+  readonly tokenCacheMaxEntries: "B2_OAUTH_TOKEN_CACHE_MAX_ENTRIES";
+  /** Token-cache expiration skew in seconds. */
+  readonly tokenCacheSkewSeconds: "B2_OAUTH_TOKEN_CACHE_SKEW_SECONDS";
+  /** Token-cache TTL in seconds. */
+  readonly tokenCacheTtlSeconds: "B2_OAUTH_TOKEN_CACHE_TTL_SECONDS";
+  /** Token endpoint advertised in OAuth metadata. */
+  readonly tokenEndpoint: "B2_OAUTH_TOKEN_ENDPOINT";
+}
+
 /** Environment variable names consumed by {@link loadOAuthResourceServerConfig}. */
-export const OAUTH_ENVIRONMENT_VARIABLES = {
+export const OAUTH_ENVIRONMENT_VARIABLES: OAuthEnvironmentVariables = {
   allowedAlgorithms: "B2_OAUTH_ALLOWED_ALGORITHMS",
   allowedJwtTypes: "B2_OAUTH_ALLOWED_JWT_TYPES",
   allowedSubjects: "B2_OAUTH_ALLOWED_SUBJECTS",
@@ -118,62 +200,108 @@ export interface OAuthVerifierOptions<Config extends OAuthResourceServerConfig> 
 
 /** Common OAuth resource-server settings shared by introspection and JWKS verification. */
 export interface OAuthResourceServerCommonConfig {
+  /** Trusted OAuth issuer URL. */
   issuer: string;
+  /** OAuth protected resource URL for this MCP deployment. */
   resource: string;
+  /** Expected OAuth audience value. */
   audience: string;
+  /** Public MCP deployment URL used when constructing metadata URLs. */
   publicUrl: string;
+  /** Authorization endpoint advertised in OAuth metadata. */
   authorizationEndpoint: string;
+  /** Token endpoint advertised in OAuth metadata. */
   tokenEndpoint: string;
+  /** Optional service documentation URL advertised in metadata. */
   serviceDocumentationUrl?: string;
+  /** Required OAuth scopes beyond the B2 deployment scope. */
   requiredScopes: string[];
+  /** Allowed OAuth subjects or issuer-qualified subjects. */
   allowedSubjects: string[];
+  /** Allowed token type values from introspection responses. */
   allowedTokenTypes: string[];
+  /** Allowed token algorithms for introspection responses and JWTs. */
   allowedAlgorithms: string[];
+  /** Allowed JWT signature algorithms for local verification. */
   allowedJwtAlgorithms: string[];
+  /** Allowed JWT `typ` header values. */
   allowedJwtTypes: string[];
+  /** Whether localhost-only insecure issuer URLs are allowed for development. */
   dangerouslyAllowInsecureIssuerUrl: boolean;
+  /** Whether introspection may run without client or bearer authentication. */
   dangerouslyAllowUnauthenticatedIntrospection: boolean;
+  /** Maximum cached token entries. */
   tokenCacheMaxEntries: number;
+  /** Token-cache TTL in seconds. */
   tokenCacheTtlSeconds: number;
+  /** Token-cache expiration skew in seconds. */
   tokenCacheSkewSeconds: number;
 }
 
 /** Configuration required to verify bearer tokens by OAuth introspection. */
 export interface OAuthIntrospectionVerifierConfig extends OAuthResourceServerCommonConfig {
+  /** OAuth introspection endpoint URL. */
   introspectionEndpoint: string;
+  /** Client ID used for introspection basic authentication. */
   introspectionClientId?: string;
+  /** Client secret used for introspection basic authentication. */
   introspectionClientSecret?: string;
+  /** Bearer token used to authenticate introspection requests. */
   introspectionBearerToken?: string;
+  /** Introspection request timeout in milliseconds. */
   introspectionTimeoutMs: number;
+  /** Maximum retry attempts for introspection dependency calls. */
   introspectionMaxRetries: number;
+  /** Retry delay in milliseconds for introspection dependency calls. */
   introspectionRetryDelayMs: number;
+  /** Consecutive dependency failures before opening the introspection circuit. */
   introspectionCircuitFailures: number;
+  /** Introspection circuit open duration in milliseconds. */
   introspectionCircuitOpenMs: number;
 }
 
 /** Configuration required to verify JWT bearer tokens with a JWKS endpoint. */
 export interface OAuthJwtVerifierConfig extends OAuthResourceServerCommonConfig {
+  /** JWKS endpoint URL. */
   jwksUri: string;
+  /** Maximum JWKS cache TTL in seconds. */
   jwksCacheTtlSeconds: number;
+  /** Minimum JWKS cache TTL in seconds. */
   jwksCacheMinTtlSeconds: number;
+  /** JWKS request timeout in milliseconds. */
   jwksTimeoutMs: number;
+  /** Maximum retry attempts for JWKS dependency calls. */
   jwksMaxRetries: number;
+  /** Retry delay in milliseconds for JWKS dependency calls. */
   jwksRetryDelayMs: number;
+  /** Consecutive dependency failures before opening the JWKS circuit. */
   jwksCircuitFailures: number;
+  /** JWKS circuit open duration in milliseconds. */
   jwksCircuitOpenMs: number;
+  /** Cooldown in milliseconds before refreshing JWKS for an unknown `kid`. */
   jwksRefreshCooldownMs: number;
+  /** Allowed clock skew in seconds for JWT numeric-date claims. */
   jwtClockSkewSeconds: number;
 }
 
-/** Resource-server configuration that supports only token introspection. */
-export type OAuthIntrospectionOnlyConfig = OAuthIntrospectionVerifierConfig & {
+/** Discriminator for configurations that do not enable JWKS verification. */
+export interface OAuthIntrospectionOnlyDiscriminator {
+  /** JWKS URI must be absent for introspection-only deployments. */
   jwksUri?: undefined;
-};
+}
+
+/** Resource-server configuration that supports only token introspection. */
+export type OAuthIntrospectionOnlyConfig = OAuthIntrospectionVerifierConfig &
+  OAuthIntrospectionOnlyDiscriminator;
+
+/** Discriminator for configurations that do not enable introspection. */
+export interface OAuthJwtOnlyDiscriminator {
+  /** Introspection endpoint must be absent for JWT-only deployments. */
+  introspectionEndpoint?: undefined;
+}
 
 /** Resource-server configuration that supports only local JWT verification. */
-export type OAuthJwtOnlyConfig = OAuthJwtVerifierConfig & {
-  introspectionEndpoint?: undefined;
-};
+export type OAuthJwtOnlyConfig = OAuthJwtVerifierConfig & OAuthJwtOnlyDiscriminator;
 
 /** Resource-server configuration that supports introspection and JWKS. */
 export type OAuthDualVerifierConfig = OAuthIntrospectionVerifierConfig & OAuthJwtVerifierConfig;
@@ -701,16 +829,31 @@ function authInfoFromVerifiedClaims(
  * `retryAfterSeconds` from the upstream dependency.
  */
 export class OAuthDependencyError extends Error {
+  /** Retry-after hint in seconds when the dependency circuit is open or rate-limited. */
   readonly retryAfterSeconds?: number;
+  /** Stable dependency failure reason used by logging and response mapping. */
+  readonly reason: string;
+  /** HTTP status returned by the OAuth dependency, when one was received. */
+  readonly dependencyStatus?: number;
 
+  /**
+   * Create an OAuth dependency failure.
+   *
+   * @param message - Error message for the surfaced failure.
+   * @param reason - Stable dependency failure reason.
+   * @param dependencyStatus - HTTP status returned by the dependency, when available.
+   * @param retryAfterSeconds - Retry-after hint in seconds, when available.
+   */
   constructor(
     message: string,
-    readonly reason: string,
-    readonly dependencyStatus?: number,
+    reason: string,
+    dependencyStatus?: number,
     retryAfterSeconds?: number,
   ) {
     super(message);
     this.name = "OAuthDependencyError";
+    this.reason = reason;
+    this.dependencyStatus = dependencyStatus;
     this.retryAfterSeconds = retryAfterSeconds;
   }
 }
@@ -1078,6 +1221,11 @@ export class OAuthIntrospectionVerifier implements OAuthTokenVerifier {
   private readonly signal?: AbortSignal;
   private readonly circuitKey: string;
 
+  /**
+   * Create an OAuth introspection verifier.
+   *
+   * @param options - Verifier configuration and dependency overrides.
+   */
   constructor(options: OAuthIntrospectionVerifierOptions = {}) {
     this.config = requireIntrospectionConfig(options.config ?? loadOAuthResourceServerConfig());
     this.fetchImpl = options.fetch ?? fetch;
@@ -1426,6 +1574,11 @@ export class OAuthJwtVerifier implements OAuthTokenVerifier {
   private readonly signal?: AbortSignal;
   private readonly cacheKey: string;
 
+  /**
+   * Create an OAuth JWT verifier.
+   *
+   * @param options - Verifier configuration and dependency overrides.
+   */
   constructor(options: OAuthJwtVerifierOptions = {}) {
     this.config = requireJwtConfig(options.config ?? loadOAuthResourceServerConfig());
     assertSupportedJwtAlgorithms(this.config.allowedJwtAlgorithms);
@@ -1715,6 +1868,11 @@ export class OAuthBearerTokenVerifier implements OAuthTokenVerifier {
   private readonly jwtVerifier: OAuthJwtVerifier | null;
   private readonly introspectionVerifier: OAuthIntrospectionVerifier | null;
 
+  /**
+   * Create a composite OAuth bearer-token verifier.
+   *
+   * @param options - Verifier configuration and dependency overrides.
+   */
   constructor(options: OAuthBearerTokenVerifierOptions = {}) {
     this.config = options.config ?? loadOAuthResourceServerConfig();
     this.jwtVerifier = hasJwtConfig(this.config)

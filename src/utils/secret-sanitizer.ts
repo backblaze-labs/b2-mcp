@@ -157,16 +157,23 @@ function isSensitiveField(key: string, path: readonly string[], mode: SanitizerM
 
 /** Credential-like object shape accepted by sanitizer config helpers. */
 export interface SanitizerSecretConfig {
+  /** Primary B2 application key secret. */
   applicationKey?: unknown;
+  /** Deprecated legacy B2 application key secret. */
   appKey?: unknown;
+  /** Optional B2 master key secret. */
   masterKey?: unknown;
+  /** S3-compatible secret access key. */
   secretAccessKey?: unknown;
+  /** Native B2 authorization token. */
   authorizationToken?: unknown;
 }
 
 /** Runtime options that influence secret redaction. */
 export interface SanitizerOptions {
+  /** Additional concrete secret values to redact from text and structured data. */
   secrets?: Iterable<unknown>;
+  /** Environment used to discover configured secret values. */
   env?: NodeJS.ProcessEnv;
 }
 

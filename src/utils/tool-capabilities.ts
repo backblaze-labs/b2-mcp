@@ -66,9 +66,13 @@ export const TOOL_CAPABILITIES: Record<string, string[]> = {
 
 /** MCP tool annotations derived from capability and destructive-policy metadata. */
 export interface McpToolAnnotations {
+  /** Whether the tool is expected to avoid state changes. */
   readOnlyHint: boolean;
+  /** Whether the tool is covered by the destructive-operation gate. */
   destructiveHint: boolean;
+  /** Whether repeated identical calls are expected to converge. */
   idempotentHint: boolean;
+  /** Whether the tool can interact with external systems. */
   openWorldHint: boolean;
 }
 

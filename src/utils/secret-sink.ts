@@ -10,7 +10,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { logger } from "./logger.js";
 import { toolJson, toolJsonInlineDurableSecret } from "./errors.js";
 import type { StructuredToolResult } from "./result-serializer.js";
-import type { SecretSinkConfig, SecretSinkMode } from "./types.js";
+import type {
+  SecretSinkConfig,
+  SecretSinkFileConfig,
+  SecretSinkInlineConfig,
+  SecretSinkMode,
+} from "./types.js";
 import {
   GROUP_OR_OTHER_PERMISSIONS,
   openSecureAppendFile,
@@ -82,23 +87,33 @@ let inlineWarningEmitted = false;
 
 /** Options for resolving durable secret sink policy from environment. */
 export interface ResolveSecretSinkOptions {
+  /** Transport whose defaults should be applied. */
   transport: "stdio" | "http";
+  /** Environment used to read sink configuration. */
   env?: NodeJS.ProcessEnv;
+  /** Whether to validate file-mode sink access during resolution. */
   preflight?: boolean;
+  /** Default file path used when file mode has no explicit path. */
   defaultFilePath?: string;
 }
 
 /** Pointer returned when a durable secret was written to a file sink. */
 export interface SecretSinkPointer {
+  /** Sink type that produced this pointer. */
   type: "file";
+  /** Ledger path containing the stored secret record. */
   path: string;
+  /** Stable record ID written with the secret entry. */
   recordId: string;
 }
 
 /** Stable idempotency fingerprints for durable-secret-producing operations. */
 export interface DurableSecretIdempotency {
+  /** Idempotency key supplied or derived for the operation. */
   key: string;
+  /** Fingerprint of the pending claim written before provider creation. */
   claimFingerprint: string;
+  /** Fingerprint of the committed provider result. */
   fingerprint: string;
 }
 
@@ -1138,10 +1153,13 @@ function isSecretSinkCommitAmbiguous(err: unknown): boolean {
   );
 }
 
+/** Secret sink modes that can carry a durable secret result. */
+export type ActiveSecretSinkConfig = SecretSinkFileConfig | SecretSinkInlineConfig;
+
 /** Response projection hooks for durable-secret-producing operations. */
 export interface DurableSecretResponseOptions<T> {
   /** Active sink configuration. */
-  secretSink: Extract<SecretSinkConfig, { mode: "file" | "inline" }>;
+  secretSink: ActiveSecretSinkConfig;
   /** MCP tool name producing the durable secret. */
   toolName: string;
   /** Secret-bearing provider result. */

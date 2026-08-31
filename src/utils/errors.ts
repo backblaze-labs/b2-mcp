@@ -20,8 +20,11 @@ const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
 
 /** Normalized provider error shape used by MCP tool responses and audit logs. */
 export interface B2ApiError {
+  /** HTTP status associated with the provider or local error. */
   status: number;
+  /** Stable provider or local error code. */
   code: string;
+  /** Human-readable error message. */
   message: string;
   /** Provider request id (B2 native header or AWS SDK $metadata) — for support tickets. */
   requestId?: string;
@@ -148,6 +151,16 @@ export function parseB2Error(err: unknown): B2ApiError {
   return { status: 500, code: "internal_error", message: String(err) };
 }
 
+/** Parsed metadata extracted from a formatted B2 error string. */
+export interface ParsedB2ErrorText {
+  /** Stable provider or local error code. */
+  code: string;
+  /** HTTP status associated with the formatted error. */
+  status: number;
+  /** Provider request ID, when present in the formatted error. */
+  requestId?: string;
+}
+
 /**
  * Parse a formatB2Error() string back into its parts. Used by the audit layer
  * to record error code/status/requestId from a tool's error response (the tool
@@ -158,9 +171,7 @@ export function parseB2Error(err: unknown): B2ApiError {
  *
  * @returns Parsed error metadata, or null when the text is not a formatted B2 error.
  */
-export function parseErrorText(
-  text: string | undefined,
-): { code: string; status: number; requestId?: string } | null {
+export function parseErrorText(text: string | undefined): ParsedB2ErrorText | null {
   if (!text) return null;
   const m = text.match(/^B2 Error \[(.+)\] \(HTTP (\d+)\): [\s\S]*?(?: \(requestId: (.+?)\))?$/);
   if (!m) return null;
@@ -229,6 +240,28 @@ function errorHint(parsed: B2ApiError): string {
   return "";
 }
 
+/** Text content block returned by simple MCP tool helpers. */
+export interface ToolTextContent {
+  /** MCP content block type. */
+  type: "text";
+  /** Text payload returned to the MCP client. */
+  text: string;
+}
+
+/** Structured MCP response for a failed tool call. */
+export interface ToolErrorResult {
+  /** Marks the MCP tool result as an error. */
+  isError: true;
+  /** Error text content blocks. */
+  content: ToolTextContent[];
+}
+
+/** Structured MCP response for a successful text-only tool call. */
+export interface ToolSuccessResult {
+  /** Success text content blocks. */
+  content: ToolTextContent[];
+}
+
 /**
  * Return a structured MCP error content block for tool error responses.
  *
@@ -236,10 +269,7 @@ function errorHint(parsed: B2ApiError): string {
  *
  * @returns The structured MCP error response.
  */
-export function toolError(err: unknown): {
-  isError: true;
-  content: Array<{ type: "text"; text: string }>;
-} {
+export function toolError(err: unknown): ToolErrorResult {
   return markSanitizedMcpResponse({
     isError: true,
     content: [{ type: "text", text: formatB2Error(err) }],
@@ -253,7 +283,7 @@ export function toolError(err: unknown): {
  *
  * @returns The structured MCP success response.
  */
-export function toolSuccess(text: string): { content: Array<{ type: "text"; text: string }> } {
+export function toolSuccess(text: string): ToolSuccessResult {
   return markSanitizedMcpResponse({
     content: [{ type: "text", text: sanitizeText(text, currentSanitizerOptions()) }],
   });
