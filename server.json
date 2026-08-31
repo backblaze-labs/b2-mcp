@@ -1,0 +1,61 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.backblaze-labs/b2-mcp",
+  "title": "Backblaze B2 MCP Server",
+  "description": "Operate Backblaze B2 buckets, files, keys, Object Lock, and S3-compatible storage.",
+  "websiteUrl": "https://github.com/backblaze-labs/b2-mcp#readme",
+  "repository": {
+    "url": "https://github.com/backblaze-labs/b2-mcp",
+    "source": "github",
+    "id": "1241092911"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@backblaze-labs/b2-mcp",
+      "version": "0.1.2",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Backblaze B2 application key ID for native B2 and S3-compatible tools.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "B2_APPLICATION_KEY_ID"
+        },
+        {
+          "description": "Backblaze B2 application key secret.",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true,
+          "name": "B2_APPLICATION_KEY"
+        },
+        {
+          "description": "Optional fallback S3-compatible region used before authorization.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false,
+          "placeholder": "us-east-005",
+          "name": "B2_REGION"
+        },
+        {
+          "description": "Optional master key ID for Partner/Groups API tools.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "B2_MASTER_KEY_ID"
+        },
+        {
+          "description": "Optional master key secret for Partner/Groups API tools.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "B2_MASTER_KEY"
+        }
+      ]
+    }
+  ]
+}

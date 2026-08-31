@@ -76,6 +76,7 @@ describe("supply-chain audit policy", () => {
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
+    mcpName?: string;
     scripts: Record<string, string>;
   };
   const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
@@ -621,8 +622,9 @@ describe("supply-chain audit policy", () => {
     );
     expect(packageJson.scripts["release:stamp"]).toBe("node scripts/write-release-version.mjs");
     expect(packageJson.scripts.version).toBe(
-      "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
+      "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json",
     );
+    expect(packageJson.mcpName).toBe("io.github.backblaze-labs/b2-mcp");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
     expect(packageJson.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run release:stamp");
@@ -657,6 +659,10 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("Stage publish helper scripts");
     expect(publishWorkflow).toContain("scripts/npm-publish-metadata.mjs");
     expect(publishWorkflow).toContain("scripts/verify-npm-registry-metadata.mjs");
+    expect(publishWorkflow).toContain("Stage MCP registry manifest");
+    expect(publishWorkflow).toContain("publish-package/server.json");
+    expect(publishWorkflow).toContain("mcp-publisher login github-oidc");
+    expect(publishWorkflow).toContain('mcp-publisher publish "$manifest"');
     expect(publishWorkflow).toContain("publish-package/release-tools/*.mjs");
     expect(publishWorkflow).toContain("Create GitHub release from verified artifact");
     expect(publishWorkflow).toContain("gh release upload");

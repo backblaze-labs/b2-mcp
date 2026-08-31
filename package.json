@@ -1,6 +1,7 @@
 {
   "name": "@backblaze-labs/b2-mcp",
   "version": "0.1.2",
+  "mcpName": "io.github.backblaze-labs/b2-mcp",
   "description": "MCP server for Backblaze B2 with frozen Phase 1 B2 and S3-compatible tool profiles",
   "packageManager": "pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a",
   "main": "dist/index.js",
@@ -82,7 +83,7 @@
     "release:notes": "node scripts/extract-release-notes.mjs",
     "release:stamp": "node scripts/write-release-version.mjs",
     "release:sbom": "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
-    "version": "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
+    "version": "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json",
     "prepublishOnly": "pnpm run build && node scripts/verify-release-input.mjs --tag \"v$(node -p 'require(\"./package.json\").version')\" && pnpm run release:stamp",
     "postpack": "node -e \"require('node:fs').rmSync('dist/release-version.json',{force:true})\"",
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",

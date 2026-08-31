@@ -38,6 +38,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
         {
           name: "@backblaze-labs/b2-mcp",
           version: "0.1.0",
+          mcpName: "io.github.backblaze-labs/b2-mcp",
           license: "MIT",
           repository: {
             type: "git",
@@ -60,6 +61,27 @@ function withFixture(run: (fixtureRoot: string) => void): void {
             "LICENSE",
           ],
           dependencies: { "@backblaze-labs/b2-sdk": "0.2.0" },
+        },
+        null,
+        2,
+      ),
+    );
+    writeFileSync(
+      join(fixtureRoot, "server.json"),
+      JSON.stringify(
+        {
+          $schema: "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+          name: "io.github.backblaze-labs/b2-mcp",
+          description: "Operate Backblaze B2 buckets and S3-compatible storage.",
+          version: "0.1.0",
+          packages: [
+            {
+              registryType: "npm",
+              identifier: "@backblaze-labs/b2-mcp",
+              version: "0.1.0",
+              transport: { type: "stdio" },
+            },
+          ],
         },
         null,
         2,
@@ -139,6 +161,28 @@ describe("release scripts", () => {
     });
   });
 
+  it("syncs server.json versions from package metadata", () => {
+    withFixture((fixtureRoot) => {
+      const packagePath = join(fixtureRoot, "package.json");
+      const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+      writeFileSync(packagePath, JSON.stringify({ ...pkg, version: "0.2.0" }, null, 2));
+
+      const result = spawnSync(process.execPath, ["scripts/update-server-json-version.mjs"], {
+        cwd: root,
+        env: scriptEnv(fixtureRoot),
+        encoding: "utf8",
+      });
+
+      const serverJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain(
+        "server-json-version: updated io.github.backblaze-labs/b2-mcp@0.2.0",
+      );
+      expect(serverJson.version).toBe("0.2.0");
+      expect(serverJson.packages[0].version).toBe("0.2.0");
+    });
+  });
+
   it("runs the pnpm version changelog lifecycle with install scripts disabled", () => {
     withFixture((fixtureRoot) => {
       const packagePath = join(fixtureRoot, "package.json");
@@ -149,7 +193,11 @@ describe("release scripts", () => {
           {
             ...pkg,
             scripts: {
-              version: `node ${join(root, "scripts/cut-changelog.mjs")} && git add CHANGELOG.md`,
+              version: [
+                `node ${join(root, "scripts/cut-changelog.mjs")}`,
+                `node ${join(root, "scripts/update-server-json-version.mjs")}`,
+                "git add CHANGELOG.md server.json",
+              ].join(" && "),
             },
           },
           null,
@@ -170,13 +218,17 @@ describe("release scripts", () => {
       );
       const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
       const bumpedPackage = JSON.parse(readFileSync(packagePath, "utf8"));
+      const bumpedServerJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
       const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
 
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("cut-changelog: promoted [Unreleased] to [0.1.1]");
       expect(bumpedPackage.version).toBe("0.1.1");
+      expect(bumpedServerJson.version).toBe("0.1.1");
+      expect(bumpedServerJson.packages[0].version).toBe("0.1.1");
       expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
       expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
+      expect(stagedFiles.split(/\r?\n/)).toContain("server.json");
     });
   });
 
