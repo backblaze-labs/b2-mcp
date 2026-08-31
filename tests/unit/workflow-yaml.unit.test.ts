@@ -1,14 +1,23 @@
 import { createRequire } from "module";
 
 const nodeRequire = createRequire(__filename);
-const { valuesEqual, workflowJobBlock, workflowJobBlocks, yamlMappingForKey, yamlValuesForKey } =
-  nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
-    valuesEqual: (actual: string[], expected: string[]) => boolean;
-    workflowJobBlock: (text: string, jobName: string) => string | null;
-    workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
-    yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
-    yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
-  };
+const {
+  decodeYamlDoubleQuoted,
+  valuesEqual,
+  workflowJobBlock,
+  workflowJobBlocks,
+  unsupportedWorkflowJobForms,
+  yamlMappingForKey,
+  yamlValuesForKey,
+} = nodeRequire("../../scripts/lib/workflow-yaml.cjs") as {
+  decodeYamlDoubleQuoted: (inner: string) => string;
+  valuesEqual: (actual: string[], expected: string[]) => boolean;
+  workflowJobBlock: (text: string, jobName: string) => string | null;
+  workflowJobBlocks: (text: string) => Array<{ name: string; block: string }>;
+  unsupportedWorkflowJobForms: (text: string) => string[];
+  yamlMappingForKey: (text: string, key: string) => Record<string, string | string[]> | null;
+  yamlValuesForKey: (text: string, key: string) => Array<string | string[]>;
+};
 
 describe("workflow YAML helper", () => {
   const workflow = [
@@ -38,6 +47,102 @@ describe("workflow YAML helper", () => {
     expect(workflowJobBlock(workflow, "runtime-policy")).toContain("node-version:");
     expect(workflowJobBlock(workflow, "runtime-policy")).not.toContain("os:");
     expect(workflowJobBlock(workflow, "missing")).toBeNull();
+  });
+
+  it("extracts workflow job blocks with nonstandard indentation", () => {
+    const indentedWorkflow = [
+      "jobs:",
+      "    build:",
+      "        runs-on: ubuntu-latest",
+      "        steps:",
+      "          - run: pnpm test",
+      "    deploy:",
+      "        runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(indentedWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
+    expect(workflowJobBlock(indentedWorkflow, "build")).toContain("pnpm test");
+    expect(workflowJobBlock(indentedWorkflow, "build")).not.toContain("deploy:");
+  });
+
+  it("extracts workflow job blocks across comment-only lines", () => {
+    const commentedWorkflow = [
+      "jobs:",
+      "# before first job",
+      "  build: # build job",
+      "    runs-on: ubuntu-latest",
+      "# between jobs",
+      "  deploy: # deploy job",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(commentedWorkflow).map((job) => job.name)).toEqual([
+      "build",
+      "deploy",
+    ]);
+    expect(workflowJobBlock(commentedWorkflow, "build")).not.toContain("deploy:");
+  });
+
+  it("extracts root workflow jobs when nested jobs metadata comes first", () => {
+    const reusableWorkflow = [
+      "on:",
+      "  workflow_call:",
+      "    inputs:",
+      "      jobs:",
+      "        type: string",
+      "jobs:",
+      "  build: &docs-build",
+      "    runs-on: ubuntu-latest",
+      "  deploy: &pages-deploy",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(reusableWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
+    expect(workflowJobBlock(reusableWorkflow, "build")).toContain("&docs-build");
+    expect(workflowJobBlock(reusableWorkflow, "build")).not.toContain("workflow_call");
+  });
+
+  it("extracts quoted jobs keys and quoted job ids", () => {
+    const quotedWorkflow = [
+      '"jobs": &all-jobs',
+      '  "build":',
+      "    runs-on: ubuntu-latest",
+      "  'deploy': &pages-deploy",
+      "    runs-on: ubuntu-latest",
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(quotedWorkflow).map((job) => job.name)).toEqual(["build", "deploy"]);
+    expect(workflowJobBlock(quotedWorkflow, "deploy")).toContain("&pages-deploy");
+    expect(workflowJobBlock(quotedWorkflow, "build")).not.toContain("deploy");
+  });
+
+  it("decodes YAML double-quoted escapes JSON rejects", () => {
+    expect(decodeYamlDoubleQuoted("actions/deploy-\\u0070ages@sha")).toBe(
+      "actions/deploy-pages@sha",
+    );
+    expect(decodeYamlDoubleQuoted("u\\x73es")).toBe("uses");
+    expect(decodeYamlDoubleQuoted("\\U00000041")).toBe("A");
+    expect(decodeYamlDoubleQuoted("plain/value@sha")).toBe("plain/value@sha");
+    // Malformed hex escapes stay undecoded so they cannot spell a token.
+    expect(decodeYamlDoubleQuoted("bad\\xZZ")).toBe("bad\\xZZ");
+  });
+
+  it("flags flow-style job mappings as unsupported forms", () => {
+    const flowWorkflow = [
+      "jobs:",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      '  deploy: { runs-on: ubuntu-latest, steps: [{ uses: "actions/deploy-\\u0070ages@sha" }] }',
+      "",
+    ].join("\n");
+
+    expect(workflowJobBlocks(flowWorkflow).map((job) => job.name)).toEqual(["build"]);
+    expect(unsupportedWorkflowJobForms(flowWorkflow)).toEqual(["deploy"]);
+    expect(unsupportedWorkflowJobForms(workflow)).toEqual([]);
   });
 
   it("extracts mapping values independent of key order", () => {

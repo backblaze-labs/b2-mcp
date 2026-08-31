@@ -36,6 +36,7 @@ const workflowPaths = [
   ".github/workflows/smoke.yml",
   ".github/workflows/evals.yml",
   ".github/workflows/publish.yml",
+  ".github/workflows/docs.yml",
 ];
 const requiredJobNames = [
   "format/lint/typecheck",
