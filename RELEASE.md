@@ -56,9 +56,10 @@ Before publishing `v0.1.0`:
    `ghcr.io/backblaze-labs/b2-mcp-signatures` repository so signature tags do
    not become the package page's default pull command. On the first container
    release, if the initial push creates a private image or signature package,
-   set the package visibility to Public in GitHub Packages and rerun the same
-   publish tag. The workflow fails until anonymous image and signature checks
-   succeed.
+   the publish job is expected to fail at the anonymous visibility gate after
+   the push/sign step. Set the package visibility to Public in GitHub Packages
+   and rerun the same publish tag. The workflow fails until anonymous image and
+   signature checks succeed.
 9. Confirm the `ghcr-publish` GitHub environment exists, requires trusted
    release approval, and restricts deployments to protected release refs.
 10. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
@@ -193,8 +194,11 @@ exists. For the first public package only:
    with npm OIDC provenance, verifies registry metadata with bounded retry,
    publishes the idempotent GHCR container image from the same verified ref,
    signs it in the sibling GHCR signature repository, verifies both anonymously,
-   and then creates or updates the GitHub Release. A Docker/GHCR failure can be
-   retried against the same tag; it must not sign an
+   and then creates or updates the GitHub Release. Existing tags signed by the
+   old image-package `.sig` layout are first verified from that legacy location
+   and then re-signed into the sibling repository before the anonymous
+   signature check runs. A Docker/GHCR failure can be retried against the same
+   tag; it must not sign an
    existing digest unless that digest already has this workflow's trusted
    signature plus provenance and SBOM attestations, and it must not overwrite an
    existing versioned image whose recorded revision differs from the verified
