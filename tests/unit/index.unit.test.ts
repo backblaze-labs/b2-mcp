@@ -166,6 +166,52 @@ describe("stdio entry point", () => {
     );
   });
 
+  it("bounds stdio capability lookup before falling back to the full surface", async () => {
+    vi.useFakeTimers();
+    try {
+      const config = testConfig();
+      const server = { close: vi.fn(async () => undefined) };
+      const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+      vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+      vi.spyOn(serverModule, "fetchCapabilities").mockReturnValue(
+        new Promise<string[] | null>(() => undefined),
+      );
+      const info = vi.spyOn(loggerModule.logger, "info").mockImplementation(() => undefined);
+      const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+      const flushLogsSync = vi
+        .spyOn(loggerModule, "flushLogsSync")
+        .mockImplementation(() => undefined);
+      const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+        () =>
+          ({
+            close: vi.fn(async () => undefined),
+          }) as ReturnType<typeof stdioTransport.serveStdio>,
+      );
+
+      const started = startStdio();
+
+      expect(serveStdio).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        { transport: "stdio", timeoutMs: 10_000 },
+        "capability.fetch.stdio_starting",
+      );
+      expect(flushLogsSync).toHaveBeenCalledOnce();
+
+      await vi.runOnlyPendingTimersAsync();
+      await expect(started).resolves.toBeUndefined();
+
+      const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+      expect(factory?.()).toBe(server);
+      expect(createServer).toHaveBeenCalledWith(config, null);
+      expect(warn).toHaveBeenCalledWith(
+        { code: "capability_upstream_unavailable" },
+        "capability.fetch.stdio_degraded",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rethrows unexpected capability lookup failures", async () => {
     const config = testConfig();
     vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);

@@ -52,6 +52,35 @@ type GlobalWithIndexTestSeams = typeof globalThis & {
   __b2McpIndexTestSeams?: IndexTestSeams;
 };
 
+const STDIO_CAPABILITY_FETCH_TIMEOUT_MS = 10_000;
+
+function stdioCapabilityTimeoutError(): CredentialResolutionError {
+  return new CredentialResolutionError(
+    `B2 capability lookup exceeded the ${STDIO_CAPABILITY_FETCH_TIMEOUT_MS} ms stdio bootstrap deadline`,
+    503,
+    "capability_upstream_unavailable",
+  );
+}
+
+async function fetchStdioCapabilities(
+  config: ReturnType<typeof serverModule.loadConfig>,
+): Promise<string[] | null> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(
+      () => reject(stdioCapabilityTimeoutError()),
+      STDIO_CAPABILITY_FETCH_TIMEOUT_MS,
+    );
+    timeout.unref?.();
+  });
+
+  try {
+    return await Promise.race([serverModule.fetchCapabilities(config), timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 /**
  * Start the MCP server over stdio.
  *
@@ -76,8 +105,13 @@ export async function startStdio(): Promise<void> {
   initLogging();
   const config = serverModule.loadConfig();
   let capabilities: string[] | null;
+  logger.info(
+    { transport: "stdio", timeoutMs: STDIO_CAPABILITY_FETCH_TIMEOUT_MS },
+    "capability.fetch.stdio_starting",
+  );
+  flushLogsSync();
   try {
-    capabilities = await serverModule.fetchCapabilities(config);
+    capabilities = await fetchStdioCapabilities(config);
   } catch (err) {
     if (
       !(err instanceof CredentialResolutionError) ||
