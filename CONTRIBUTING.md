@@ -7,8 +7,8 @@ By participating you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.m
 
 ## Development setup
 
-The package engine range is `^22.3.0 || ^24 || ^26`: it preserves the official
-B2 SDK's Node 22.3.0 floor and excludes Node.js lines outside opossum's supported
+The package engine range is `^22.22.2 || ^24 || ^26`: it preserves the official
+B2 SDK's Node 22.3.0 baseline, raised to a 22.22.2 floor, and excludes Node.js lines outside opossum's supported
 range. For local development and deployed 22.x hosts, use the patched Node 22
 LTS release pinned in `.nvmrc` (`22.23.1` at the time of writing) or a later
 patched 22.x release. CI runs the full toolchain on Node.js 22.23.1, 24, and 26.
@@ -59,7 +59,7 @@ opening a PR when practical:
 
 | Layer | Command | What it proves |
 | --- | --- | --- |
-| Typecheck | `pnpm run typecheck` | Source and tests compile against the Node 22.3 engine-floor types. |
+| Typecheck | `pnpm run typecheck` | Source and tests compile against the conservative `@types/node` 22.3.0 baseline (below the 22.22.2 engine floor; see the note near the end of this guide). |
 | Unit | `pnpm run test:unit` | Fast isolated behavior for handlers, config, adapters, sanitizer, CLI, and utilities. |
 | Contract | `pnpm run test:contract` | Public docs, package surface, tool profiles, workflow policy, schema drift, and support claims stay synchronized. |
 | Protocol modern | `pnpm run test:protocol:modern` | MCP `2026-07-28` HTTP and stdio behavior, including stateless POST serving. |
@@ -91,7 +91,7 @@ touches the corresponding contract.
 - `pnpm run verify` must pass before opening a PR. CI runs deterministic
   coverage, slow lifecycle, and production dependency audit evidence on Node.js
   22.23.1, 24, and 26, runs a patched Node 22 LTS cross-platform suite, and
-  exercises the advertised Node.js 22.3.0 engine floor with a packed-package
+  exercises the advertised Node.js 22.22.2 engine floor with a packed-package
   smoke. Package-install evidence is a separate required gate.
 - Add or update unit tests for any behavior change. New tools need a schema entry
   in `tests/contract/tools-schema.contract.test.ts` and at least one handler test.
@@ -165,7 +165,7 @@ contract before review: `pnpm run test:contract`, `pnpm run test:protocol`,
 `pnpm run audit:supply-chain`. The live contract suite must pass before release
 accepts the SDK upgrade.
 
-`@types/node` tracks the Node 22.3.0 engine floor so TypeScript does not allow
+`@types/node` is pinned to a conservative 22.3.0 baseline (below the 22.22.2 engine floor; @types/node has no 22.22.x release) so TypeScript does not allow
 newer Node standard-library APIs that would fail for minimum-supported
 consumers. Node 24 and 26 remain covered by execution tests in CI.
 

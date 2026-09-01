@@ -858,11 +858,38 @@ const lock = readPackageManagerLock(root);
 
 requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineRange);
 requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineRange);
+const backblazeSdkEngine = lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node;
 requireEqual(
-  "Backblaze SDK engine floor",
-  lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
-  policy.engineFloor,
+  "Backblaze SDK declared engine floor",
+  backblazeSdkEngine,
+  policy.backblazeSdkEngineFloor,
 );
+// The declared engineFloor must be exactly the minimum the engineRange
+// advertises, so the floor smoke (which runs at engineFloor) always exercises
+// the lowest Node the package claims to support. Without this tie, engineRange
+// could drop to a lower minor (e.g. ^22.3.0) while engineFloor and the smoke
+// stay at 22.22.2, leaving the advertised floor without evidence.
+const engineRangeMinimum = parseEngineRangeMinimums(policy.engineRange).reduce(
+  (lowest, candidate) => (candidate.major < lowest.major ? candidate : lowest),
+);
+if (engineRangeMinimum.minor === null || engineRangeMinimum.patch === null) {
+  fail(
+    `runtime-policy engineRange minimum ${engineRangeMinimum.raw} must pin a full major.minor.patch floor`,
+  );
+} else {
+  requireEqual("runtime-policy engineFloor", policy.engineFloor, `>=${engineRangeMinimum.raw}`);
+}
+// Our engine floor may sit at or above the Backblaze SDK's floor (we can require
+// a newer Node than the SDK does — e.g. for the doc-lint toolchain) but never
+// below it, so we never claim to support a Node the SDK does not.
+if (
+  backblazeSdkEngine &&
+  comparePatch(policy.engineFloor.replace(/^>=/, ""), backblazeSdkEngine.replace(/^>=/, "")) < 0
+) {
+  fail(
+    `runtime-policy engineFloor ${policy.engineFloor} must be >= the Backblaze SDK engine floor ${backblazeSdkEngine}`,
+  );
+}
 requireEqual("runtime-policy runtime install pin", policy.runtimeInstallNode, policy.node22Pinned);
 requireNode22LtsPatch("runtime-policy runtime install pin", policy.runtimeInstallNode, policy);
 

@@ -246,7 +246,7 @@ describe("CI workflow policy", () => {
     expect(packageJob).toContain("reports/package/floor/*.tgz");
     expect(runtimeFloorJob).toContain("name: runtime engine floor");
     expect(runtimeFloorJob).toContain("needs: package-install-smoke");
-    expect(runtimeFloorJob).toContain("node-version: 22.3.0");
+    expect(runtimeFloorJob).toContain("node-version: 22.22.2");
     expect(runtimeFloorJob).toContain(
       "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     );
@@ -299,7 +299,7 @@ describe("CI workflow policy", () => {
     );
     expect(summaryJob).toContain("Linux deterministic Node matrix | 22.23.1, 24, 26");
     expect(summaryJob).toContain("Deterministic dependency failures | B2/S3/OAuth outage suite");
-    expect(summaryJob).toContain("Runtime engine floor | Node.js 22.3.0 package install smoke");
+    expect(summaryJob).toContain("Runtime engine floor | Node.js 22.22.2 package install smoke");
     expect(summaryJob).toContain("Package budget metrics | Uploaded as package-budget artifact");
     expect(summaryJob).toContain("Vercel adapter budget | Uploaded as vercel-bundle artifact path");
     expect(summaryJob).toContain("Vercel build output | Real Vercel build plus leak scan");

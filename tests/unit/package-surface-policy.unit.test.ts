@@ -409,7 +409,7 @@ describe("package surface policy", () => {
         '      version: "0.1.0",',
         '      main: "dist/index.js",',
         '      bin: { "b2-mcp": "dist/index.js", "b2-mcp-server": "dist/index.js" },',
-        '      engines: { node: "^22.3.0 || ^24 || ^26" }',
+        '      engines: { node: "^22.22.2 || ^24 || ^26" }',
         "    }),",
         "  );",
         '  fs.writeFileSync(path.join(packageRoot, "docs", "CLIENTS.md"), "# Clients\\n");',

@@ -69,7 +69,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
           },
           bugs: { url: "https://github.com/backblaze-labs/b2-mcp/issues" },
           homepage: "https://github.com/backblaze-labs/b2-mcp#readme",
-          engines: { node: "^22.3.0 || ^24 || ^26" },
+          engines: { node: "^22.22.2 || ^24 || ^26" },
           bin: { "b2-mcp": "dist/index.js", "b2-mcp-server": "dist/index.js" },
           files: [
             "dist/**/*",
@@ -176,7 +176,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
     );
     writeFileSync(
       join(fixtureRoot, "runtime-policy.json"),
-      JSON.stringify({ engineRange: "^22.3.0 || ^24 || ^26" }, null, 2),
+      JSON.stringify({ engineRange: "^22.22.2 || ^24 || ^26" }, null, 2),
     );
     run(fixtureRoot);
   } finally {

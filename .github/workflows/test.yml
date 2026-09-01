@@ -360,13 +360,13 @@ jobs:
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 22.3.0
+          node-version: 22.22.2
       # actions/download-artifact v8, reviewed 2026-08-25.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: package-install-smoke
           path: reports/package-install-smoke
-      - name: Run packed consumer smoke on Node.js 22.3.0
+      - name: Run packed consumer smoke on Node.js 22.22.2
         run: |
           set -euo pipefail
           tarball="$(find reports/package-install-smoke -name '*.tgz' -type f -print -quit)"
@@ -375,7 +375,7 @@ jobs:
             exit 1
           fi
           node scripts/packed-consumer-smoke.mjs --tarball "$tarball"
-      - name: Run local runtime smoke on Node.js 22.3.0
+      - name: Run local runtime smoke on Node.js 22.22.2
         run: |
           set -euo pipefail
           tarball="$(find reports/package-install-smoke -name '*.tgz' -type f -print -quit)"
@@ -732,7 +732,7 @@ jobs:
           | Observability logging | Structured lifecycle, warning, failure, redaction, and stream-separation canaries |
           | Linux deterministic Node matrix | 22.23.1, 24, 26 |
           | Deterministic dependency failures | B2/S3/OAuth outage suite |
-          | Runtime engine floor | Node.js 22.3.0 package install smoke |
+          | Runtime engine floor | Node.js 22.22.2 package install smoke |
           | Cross-platform fast suite | Linux, Windows, macOS on Node.js 22.23.1 |
           | Package budget metrics | Uploaded as package-budget artifact |
           | Vercel adapter budget | Uploaded as vercel-bundle artifact path |

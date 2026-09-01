@@ -132,7 +132,7 @@
     "@vitest/coverage-v8": "^4.1.11",
     "cspell": "^10.1.1",
     "eslint": "9.39.1",
-    "eslint-plugin-jsdoc": "50.8.0",
+    "eslint-plugin-jsdoc": "64.2.1",
     "eslint-plugin-tsdoc": "0.5.2",
     "miniflare": "5.20260826.0-alpha",
     "semver": "7.8.5",
@@ -145,7 +145,7 @@
     "wrangler": "4.127.0"
   },
   "engines": {
-    "node": "^22.3.0 || ^24 || ^26"
+    "node": "^22.22.2 || ^24 || ^26"
   },
   "files": [
     ".dockerignore",

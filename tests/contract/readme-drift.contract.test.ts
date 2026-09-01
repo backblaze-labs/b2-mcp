@@ -76,7 +76,7 @@ describe("README project badges", () => {
     const dependencyCount = Object.keys(packageMetadata.dependencies).length;
 
     expect(packageMetadata.name).toBe("@backblaze-labs/b2-mcp");
-    expect(packageMetadata.engines.node).toBe("^22.3.0 || ^24 || ^26");
+    expect(packageMetadata.engines.node).toBe("^22.22.2 || ^24 || ^26");
     // Intentional overlap with typescript-7-migration: this guard owns README
     // badge sync, while the migration test owns the 6.0-line deferral record.
     expect(packageMetadata.devDependencies.typescript).toMatch(/^~6\./);
@@ -85,7 +85,7 @@ describe("README project badges", () => {
     expect(readme).toContain("npm/v/@backblaze-labs/b2-mcp");
     expect(readme).toContain(`license-${packageMetadata.license}-blue.svg`);
     expect(readme).toContain("TypeScript-6.x-3178c6");
-    expect(readme).toContain("Node.js-22.3%2B%20%7C%2024%20%7C%2026-339933");
+    expect(readme).toContain("Node.js-22.22%2B%20%7C%2024%20%7C%2026-339933");
     expect(readme).toContain("MCP-2026--07--28-5b5fc7");
     expect(readme).toContain(`runtime_dependencies-${dependencyCount}-blue`);
   });

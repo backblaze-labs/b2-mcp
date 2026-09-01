@@ -872,7 +872,7 @@ describe("supply-chain audit policy", () => {
     const unsupported = [...docLintPackages]
       .filter((path) => {
         const range = lock.packages[path].engines?.node;
-        return range && !semver.satisfies("22.3.0", range);
+        return range && !semver.satisfies("22.22.2", range);
       })
       .map((path) => {
         const pkg = lock.packages[path];

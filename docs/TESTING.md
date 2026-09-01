@@ -23,7 +23,7 @@ layers. Coverage, slow lifecycle, and packed-package installation evidence stay
 in distinct scripts and CI jobs so their failures do not mask each other.
 Use `pnpm run smoke:local` for deterministic runtime-startup evidence without a
 deployed endpoint or real B2 credentials; CI runs it after the primary
-verification gate and again on the Node.js 22.3.0 runtime floor.
+verification gate and again on the Node.js 22.22.2 runtime floor.
 The individual deterministic layers are:
 
 | Command                 | Layer                                                                                |
@@ -127,7 +127,7 @@ package installs fail independently. The Linux deterministic Node matrix is
 exactly Node.js 22.23.1, 24, and 26. Slow lifecycle tests run in a dedicated
 bounded job with one Vitest worker, and the cross-platform fast suite runs on
 Linux, Windows, and macOS at Node.js 22.23.1. A separate runtime engine floor job
-runs the packed-consumer install smoke on Node.js 22.3.0. A separate container
+runs the packed-consumer install smoke on Node.js 22.22.2. A separate container
 image job runs `scripts/smoke-container-image.mjs`, which builds the Docker
 image and smokes HTTP readiness with and without server-held credentials. The
 release workflow reuses the same smoke script before publishing the signed
@@ -246,7 +246,7 @@ security, runtime floor, slow lifecycle, and cross-platform jobs pass. It is not
 a PR deploy path. Leak diagnostics remain part of `pnpm run verify` and fail on
 `MaxListenersExceededWarning`, EventEmitter leak warnings, or Vitest close-timeout
 open-handle warnings until teardown is clean. Node.js 22.23.1, 24, and 26 are all
-required CI evidence for Phase 1, with Node.js 22.3.0 exercised by the runtime
+required CI evidence for Phase 1, with Node.js 22.22.2 exercised by the runtime
 engine floor package smoke.
 
 Branch protection for `main` must require the stable check names above, require

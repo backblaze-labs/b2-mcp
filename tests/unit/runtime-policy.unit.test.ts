@@ -24,7 +24,7 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
           name: "@backblaze-labs/b2-mcp",
           version: "0.1.0",
           packageManager,
-          engines: { node: "^22.3.0 || ^24 || ^26" },
+          engines: { node: "^22.22.2 || ^24 || ^26" },
           dependencies: { "@backblaze-labs/b2-sdk": "0.3.0" },
           devDependencies: { "@types/node": "22.3.0" },
         },
@@ -37,8 +37,9 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
       "runtime-policy.json",
       JSON.stringify(
         {
-          engineRange: "^22.3.0 || ^24 || ^26",
-          engineFloor: ">=22.3.0",
+          engineRange: "^22.22.2 || ^24 || ^26",
+          engineFloor: ">=22.22.2",
+          backblazeSdkEngineFloor: ">=22.3.0",
           runtimeInstallNode: "22.23.1",
           minimumEvidenceNode: "22.23.1",
           node22LtsMinimum: "22.11.0",
@@ -112,7 +113,7 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
         "  runtime-engine-floor:",
         "    steps:",
         "      - with:",
-        "          node-version: 22.3.0",
+        "          node-version: 22.22.2",
         "  unit-coverage-matrix:",
         "    strategy:",
         "      matrix:",
@@ -160,21 +161,21 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
     writeFixtureFile(
       fixtureRoot,
       "README.md",
-      `^22.3.0 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
+      `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
     writeFixtureFile(
       fixtureRoot,
       "CONTRIBUTING.md",
-      `^22.3.0 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
+      `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
-    writeFixtureFile(fixtureRoot, "docs/V1_SCOPE.md", "^22.3.0 || ^24 || ^26\n>=22.3.0\n");
+    writeFixtureFile(fixtureRoot, "docs/V1_SCOPE.md", "^22.22.2 || ^24 || ^26\n>=22.22.2\n");
     writeFixtureFile(
       fixtureRoot,
       "docs/DEPLOY.md",
-      `^22.3.0 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
+      `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
-    writeFixtureFile(fixtureRoot, "docs/deployment/vercel.md", "^22.3.0 || ^24 || ^26\n");
-    writeFixtureFile(fixtureRoot, "deploy/vercel/README.md", "^22.3.0 || ^24 || ^26\n");
+    writeFixtureFile(fixtureRoot, "docs/deployment/vercel.md", "^22.22.2 || ^24 || ^26\n");
+    writeFixtureFile(fixtureRoot, "deploy/vercel/README.md", "^22.22.2 || ^24 || ^26\n");
     writeFixtureFile(fixtureRoot, "RELEASE.md", "22.23.1\n");
     writeFixtureFile(fixtureRoot, "CHANGELOG.md", "22.23.1\n");
 
@@ -196,7 +197,141 @@ describe("runtime policy", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("unsupported Node 23 is present");
       expect(result.stderr).toContain("unsupported Node 25.9.0 is present");
-      expect(result.stderr).toContain("^22.3.0 || ^24 || ^26");
+      expect(result.stderr).toContain("^22.22.2 || ^24 || ^26");
+    });
+  });
+
+  it("rejects a project engine floor below the Backblaze SDK engine floor", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      // Raise the declared SDK floor above the project floor: the project floor
+      // may sit at or above the SDK floor, never below it. Rewriting only the
+      // SDK-facing fields keeps every other requireEqual pair aligned so this
+      // specific ordering diagnostic is the one under test.
+      writeFixtureFile(
+        fixtureRoot,
+        "runtime-policy.json",
+        JSON.stringify(
+          {
+            engineRange: "^22.22.2 || ^24 || ^26",
+            engineFloor: ">=22.22.2",
+            backblazeSdkEngineFloor: ">=24.15.0",
+            runtimeInstallNode: "22.23.1",
+            minimumEvidenceNode: "22.23.1",
+            node22LtsMinimum: "22.11.0",
+            node22Pinned: "22.23.1",
+            deterministicLinuxMatrix: ["22.23.1", "24", "26"],
+            crossPlatformNode: "22.23.1",
+            liveNodeMatrix: ["22.23.1", "24", "26"],
+            unsupportedMajors: [18, 20],
+            typesNodeVersion: "22.3.0",
+          },
+          null,
+          2,
+        ),
+      );
+      writeFixtureFile(
+        fixtureRoot,
+        "pnpm-lock.yaml",
+        [
+          "lockfileVersion: '9.0'",
+          "",
+          "importers:",
+          "",
+          "  .:",
+          "    dependencies:",
+          "      '@backblaze-labs/b2-sdk':",
+          "        specifier: 0.3.0",
+          "        version: 0.3.0",
+          "    devDependencies:",
+          "      '@types/node':",
+          "        specifier: 22.3.0",
+          "        version: 22.3.0",
+          "",
+          "packages:",
+          "",
+          "  '@backblaze-labs/b2-sdk@0.3.0':",
+          "    resolution: {integrity: sha512-test}",
+          "    engines: {node: '>=24.15.0'}",
+          "",
+          "  '@types/node@22.3.0':",
+          "    resolution: {integrity: sha512-test}",
+          "",
+          "snapshots:",
+          "",
+          "  '@backblaze-labs/b2-sdk@0.3.0': {}",
+          "",
+          "  '@types/node@22.3.0': {}",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "runtime-policy engineFloor >=22.22.2 must be >= the Backblaze SDK engine floor >=24.15.0",
+      );
+    });
+  });
+
+  it("rejects an engine floor that does not equal the engine range minimum", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      // Drop the engineRange 22 branch to a lower minor while leaving engineFloor
+      // (and the floor smoke) at 22.22.2: the floor must always equal the lowest
+      // Node the range advertises, so this mismatch must be rejected.
+      writeFixtureFile(
+        fixtureRoot,
+        "package.json",
+        JSON.stringify(
+          {
+            name: "@backblaze-labs/b2-mcp",
+            version: "0.1.0",
+            packageManager: "pnpm@11.20.0+sha256.test",
+            engines: { node: "^22.3.0 || ^24 || ^26" },
+            dependencies: { "@backblaze-labs/b2-sdk": "0.3.0" },
+            devDependencies: { "@types/node": "22.3.0" },
+          },
+          null,
+          2,
+        ),
+      );
+      writeFixtureFile(
+        fixtureRoot,
+        "runtime-policy.json",
+        JSON.stringify(
+          {
+            engineRange: "^22.3.0 || ^24 || ^26",
+            engineFloor: ">=22.22.2",
+            backblazeSdkEngineFloor: ">=22.3.0",
+            runtimeInstallNode: "22.23.1",
+            minimumEvidenceNode: "22.23.1",
+            node22LtsMinimum: "22.11.0",
+            node22Pinned: "22.23.1",
+            deterministicLinuxMatrix: ["22.23.1", "24", "26"],
+            crossPlatformNode: "22.23.1",
+            liveNodeMatrix: ["22.23.1", "24", "26"],
+            unsupportedMajors: [18, 20],
+            typesNodeVersion: "22.3.0",
+          },
+          null,
+          2,
+        ),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "runtime-policy engineFloor: expected >=22.3.0, got >=22.22.2",
+      );
     });
   });
 
