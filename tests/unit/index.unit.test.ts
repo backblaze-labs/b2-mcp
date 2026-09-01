@@ -272,7 +272,14 @@ describe("stdio entry point", () => {
         );
       });
     });
-    installSdkTransport(transport);
+    installSdkTransport(transport, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+    const authorizeRequests = () =>
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_authorize_account");
 
     const started = startStdio();
     await waitForRecordedRequests(transport, 1);
@@ -283,6 +290,10 @@ describe("stdio entry point", () => {
     expect(abortObserved).toBe(true);
     expect(authorizeSettled).toBe(true);
     expect(transport.requests[0].signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.runOnlyPendingTimersAsync();
+    await Promise.resolve();
+    expect(authorizeRequests()).toHaveLength(1);
     expect(serverModule.capabilityCacheSizeForTests()).toBe(0);
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);

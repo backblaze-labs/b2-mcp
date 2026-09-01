@@ -142,9 +142,9 @@ async function fetchStdioCapabilitiesWithDeadline(config: B2Config): Promise<str
  * @remarks
  * The stdio path reads credentials from the process environment, attempts
  * capability discovery once, and degrades on transient lookup failures. A slow
- * bootstrap lookup fails closed to an empty tool surface before MCP client
- * handshake budgets expire. Fast credential errors remain fatal during
- * bootstrap.
+ * bootstrap lookup fails closed to a capability-empty degraded surface before
+ * MCP client handshake budgets expire. Fast credential errors remain fatal
+ * during bootstrap.
  *
  * @returns A promise that resolves after the stdio transport has been
  * registered with the MCP SDK.
