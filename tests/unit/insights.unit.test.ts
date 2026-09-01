@@ -322,7 +322,7 @@ describe("insights — snapshot selection (fake report client)", () => {
     expect(rows.reduce((s, r) => s + (r.storageBytes ?? 0), 0)).toBe(100 * GB);
   });
 
-  it("latestSnapshotDate stops at the report listing page budget", async () => {
+  it("latestSnapshotDate reports inconclusive when truncated at the page budget", async () => {
     let calls = 0;
     const b2Client = {
       listReportObjectKeys: async () => {
@@ -343,7 +343,11 @@ describe("insights — snapshot selection (fake report client)", () => {
     );
 
     expect(calls).toBe(100);
-    expect(result.date).toBe("2026-06-28");
+    // A truncated scan only saw the older (lexically earlier) keys, so it must not
+    // publish a partial max as an authoritative latest snapshot.
+    expect(result.date).toBeNull();
+    expect(result.bucketMissing).toBe(false);
+    expect(result.searchedSince).toBeUndefined();
   });
 });
 
