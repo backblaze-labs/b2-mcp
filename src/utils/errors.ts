@@ -75,9 +75,9 @@ export function badRequest(message: string): never {
 }
 
 /**
- * Build an error for a native B2 mutation whose final provider state is unknown.
+ * Build an error for a B2 mutation whose final provider state is unknown.
  *
- * @param operation - B2 API endpoint name whose result is ambiguous.
+ * @param operation - B2 or Partner API endpoint name whose result is ambiguous.
  * @param cause - Timeout, abort, or transport error that hid the final response.
  *
  * @returns An Error carrying status 409 and code `operation_status_unknown`.
@@ -88,7 +88,7 @@ export function operationStatusUnknownError(operation: string, cause: unknown): 
   const error = codedError(
     OPERATION_STATUS_UNKNOWN_STATUS,
     OPERATION_STATUS_UNKNOWN_CODE,
-    `B2 native operation ${operation} was interrupted before the MCP server received B2's final response. The operation may have completed at B2; verify the resource state before retrying.${causeMessage}`,
+    `B2 operation ${operation} was interrupted before the MCP server received B2's final response. The operation may have completed at B2; verify the resource state before retrying.${causeMessage}`,
   );
   Object.defineProperty(error, "cause", {
     value: cause,

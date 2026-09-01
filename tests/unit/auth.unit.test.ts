@@ -1,4 +1,5 @@
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
+import type { HttpResponse } from "@backblaze-labs/b2-sdk";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
 import { parseB2Error } from "../../src/utils/errors";
@@ -61,6 +62,13 @@ function domTimeoutError(message: string): unknown {
     }
   ).DOMException;
   return ctor ? new ctor(message, "TimeoutError") : timeoutError(message);
+}
+
+function nativeJsonResponse(status: number, payload: unknown): HttpResponse {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  }) as unknown as HttpResponse;
 }
 
 async function waitForRecordedRequests(transport: RecordingTransport, count: number) {
@@ -521,6 +529,28 @@ describe("B2AuthManager", () => {
     expect(inner.requests).toHaveLength(1);
   });
 
+  it("adapts successful native Response bodies without brand errors", async () => {
+    const inner = new RecordingTransport(() =>
+      nativeJsonResponse(200, { bucketId: "bucket-response-brand" }),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ bucketId: "bucket-response-brand" });
+    expect(inner.requests).toHaveLength(1);
+  });
+
   it("classifies no-replay native body-read timeout as an unknown operation status", async () => {
     const inner = new RecordingTransport(
       () =>
@@ -547,6 +577,31 @@ describe("B2AuthManager", () => {
       status: 409,
       code: "operation_status_unknown",
       message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("adapts non-2xx native Response bodies without brand errors", async () => {
+    const inner = new RecordingTransport(() =>
+      nativeJsonResponse(400, { status: 400, code: "bad_request", message: "bad bucket request" }),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "bad_request",
+      message: "bad bucket request",
     });
     expect(inner.requests).toHaveLength(1);
   });

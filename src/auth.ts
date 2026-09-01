@@ -195,6 +195,20 @@ function isSuccessfulResponse(response: HttpResponse): boolean {
   return response.status >= 200 && response.status < 300;
 }
 
+function adaptHttpResponse(
+  response: HttpResponse,
+  overrides: { headers?: Headers; json?: HttpResponse["json"] } = {},
+): HttpResponse {
+  return {
+    status: response.status,
+    headers: overrides.headers ?? response.headers,
+    body: response.body,
+    json: overrides.json ?? (<T>() => response.json<T>()),
+    text: () => response.text(),
+    arrayBuffer: () => response.arrayBuffer(),
+  };
+}
+
 async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string): Promise<T> {
   try {
     return await response.json<T>();
@@ -205,14 +219,14 @@ async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string
 }
 
 function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): HttpResponse {
-  return Object.assign(Object.create(response), {
+  return adaptHttpResponse(response, {
     json: <T>() => readUnknownStatusJson<T>(response, endpoint),
   });
 }
 
 function withDefinitiveErrorJsonRead(response: HttpResponse): HttpResponse {
   if (isSuccessfulResponse(response)) return response;
-  return Object.assign(Object.create(response), {
+  return adaptHttpResponse(response, {
     json: async <T>() => {
       try {
         return await response.json<T>();
@@ -329,7 +343,7 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   } else {
     headers.delete(h);
   }
-  return Object.assign(Object.create(r), { headers });
+  return adaptHttpResponse(r, { headers });
 }
 
 function retryBudgetExhaustedError(): B2Error {
