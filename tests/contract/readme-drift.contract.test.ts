@@ -87,10 +87,14 @@ describe("README project badges", () => {
     expect(readme).toContain("TypeScript-6.x-3178c6");
     expect(readme).toContain("Node.js-22.3%2B%20%7C%2024%20%7C%2026-339933");
     expect(readme).toContain("MCP-2026--07--28-5b5fc7");
-    expect(readme).toContain("MCP_Registry-io.github.backblaze--labs%2Fb2--mcp-5b5fc7");
-    expect(readme).toContain("Smithery-MCP_directory-2b6cb0");
-    expect(readme).toContain("Glama-MCP_directory-0f766e");
     expect(readme).toContain(`runtime_dependencies-${dependencyCount}-blue`);
+  });
+
+  it("defers discovery badges until stable listing URLs exist", () => {
+    expect(readme).toContain("Directory badges for MCP Registry, Smithery, and Glama are deferred");
+    expect(readme).not.toContain("registry.modelcontextprotocol.io/?search=");
+    expect(readme).not.toContain("smithery.ai/servers?q=");
+    expect(readme).not.toContain("glama.ai/mcp/servers?query=");
   });
 });
 
