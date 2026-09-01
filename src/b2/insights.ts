@@ -759,6 +759,10 @@ export async function latestSnapshotDate(
       if (is404(e)) return { date: null, bucketMissing: true };
       throw e;
     }
+    // A truncated window collected only the older (lexically earlier) keys, so its
+    // max is not the true latest; fall through to the inconclusive path instead of
+    // publishing a stale date.
+    if (budget.stats.stop_reason) break;
     // Apply the row loader's usage-data selection so a bucket holding only
     // non-usage date-prefixed objects is not mistaken for a snapshot.
     let max: string | null = null;
@@ -767,7 +771,6 @@ export async function latestSnapshotDate(
       if (d && (max === null || d > max)) max = d;
     }
     if (max) return { date: max, bucketMissing: false };
-    if (budget.stats.stop_reason) break;
   }
   // Bounded probe finished with no snapshot and budget intact: report the horizon
   // searched so callers do not assert snapshots never existed.

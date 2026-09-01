@@ -425,6 +425,33 @@ describe("insight usage-report read paths", () => {
     expect(result.searched_since).toBe(daysAgo(180));
   });
 
+  it("keeps b2_usage_growth inconclusive when latest-snapshot discovery is truncated", async () => {
+    const report = createPagedReportClient(
+      Object.fromEntries(
+        Array.from({ length: 101 }, (_, index) => {
+          const day = daysAgo(1 + (index % 9));
+          return [
+            `${day}/usage.account-${String(index).padStart(3, "0")}.csv`,
+            csv([`acct-${index},${day},bucket-a,bucket-a,1,4,0,0\n`]),
+          ];
+        }),
+      ),
+      { pageSize: 1 },
+    );
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("inconclusive");
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("comparison");
+    expect(result.truncated).toBe(true);
+    expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
+  });
+
   it("omits latest_snapshot when empty b2_egress_leaders discovery is truncated", async () => {
     const staleDay = daysAgo(2);
     const report = createPagedReportClient(
