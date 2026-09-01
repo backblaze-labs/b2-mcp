@@ -425,7 +425,8 @@ describe("CI workflow policy", () => {
 
     expect(workflowJobBlock(evals, "skipped")).toBeNull();
     expect(evals).not.toContain("LLM evals skipped");
-    expect(evalJob).toContain("needs.guard.result == 'success'");
+    expect(evalJob).not.toContain("needs.guard.result");
+    expect(evalJob).not.toContain("needs.guard.outputs.should-run");
     expect(evalJob).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
     expect(evalJob).toContain("persist-credentials: false");
   });

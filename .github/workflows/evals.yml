@@ -63,7 +63,6 @@ jobs:
   evals:
     name: Claude pass rates
     needs: guard
-    if: needs.guard.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
