@@ -191,8 +191,7 @@ function unknownStatusLogFields(err: unknown): Record<string, string> {
   };
 }
 
-function throwIfUnknownStatusWrite(endpoint: string, err: unknown): void {
-  if (!findInCauseChain(err, unknownStatusInterruption)) return;
+function raiseUnknownStatusWrite(endpoint: string, err: unknown): never {
   const error = operationStatusUnknownError(endpoint, err);
   logger.warn(
     {
@@ -204,6 +203,11 @@ function throwIfUnknownStatusWrite(endpoint: string, err: unknown): void {
     "native.write.outcome_unknown",
   );
   throw error;
+}
+
+function throwIfUnknownStatusWrite(endpoint: string, err: unknown): void {
+  if (!findInCauseChain(err, unknownStatusInterruption)) return;
+  raiseUnknownStatusWrite(endpoint, err);
 }
 
 function isSuccessfulResponse(response: HttpResponse): boolean {
@@ -258,8 +262,10 @@ async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string
   try {
     return await response.json<T>();
   } catch (err) {
-    throwIfUnknownStatusWrite(endpoint, err);
-    throw err;
+    // This reader is installed only after a 2xx response from a no-replay
+    // mutation, so any body-read failure (including a plain SyntaxError from a
+    // truncated body) leaves the write outcome unknown and unsafe to retry.
+    raiseUnknownStatusWrite(endpoint, err);
   }
 }
 

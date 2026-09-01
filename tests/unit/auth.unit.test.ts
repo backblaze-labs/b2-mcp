@@ -656,6 +656,40 @@ describe("B2AuthManager", () => {
     expect(inner.requests).toHaveLength(1);
   });
 
+  it("classifies no-replay native truncated success body as unknown status", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw new SyntaxError("Unexpected end of JSON input");
+          }
+        })(200, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    await expect(response.json()).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(true);
+    expect(inner.requests).toHaveLength(1);
+  });
+
   it("adapts non-2xx native Response bodies without brand errors", async () => {
     const inner = new RecordingTransport(() =>
       nativeJsonResponse(400, { status: 400, code: "bad_request", message: "bad bucket request" }),
