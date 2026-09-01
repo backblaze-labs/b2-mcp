@@ -62,9 +62,11 @@ buildx
 creds
 EOPENBREAKER
 exfiltration
+Fleur
 Glama
 noout
 paginators
+punkpeye
 sessionful
 Smithery
 unallowed

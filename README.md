@@ -615,6 +615,7 @@ committed lockfile and a sanitized temporary environment.
 - [`docs/TESTING.md`](docs/TESTING.md) — deterministic and live-test gate skeleton
 - [`docs/EVALS.md`](docs/EVALS.md) — LLM eval local and CI runbook
 - [`docs/SECURITY_REVIEW.md`](docs/SECURITY_REVIEW.md) — pre-public security and provenance review checklist
+- [`docs/DISCOVERABILITY.md`](docs/DISCOVERABILITY.md) — registry/directory listings runbook (Glama, Smithery, LobeHub, mcp.so) and per-release steps
 - [`RELEASE.md`](RELEASE.md) — release process and `[Unreleased]` discipline
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 - [`SECURITY.md`](SECURITY.md) — reporting vulnerabilities
