@@ -36,7 +36,7 @@ import {
   type HttpPipelineOptions,
   type PreparedMcpRequest,
 } from "./http-fetch-handler.js";
-import { parseIntEnv, resolveHttpPort } from "./utils/config.js";
+import { parseHttpHost, parseIntEnv, resolveHttpHost, resolveHttpPort } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import {
   nodeRequestToWeb,
@@ -89,6 +89,8 @@ export interface HttpServerOptions extends HttpPipelineOptions {
 export interface HttpListenOptions {
   /** Explicit port override; otherwise CLI args and `PORT` are consulted. */
   port?: number;
+  /** Explicit host override; otherwise `--host` and `B2_HTTP_HOST` are consulted. */
+  host?: string;
 }
 
 /**
@@ -112,6 +114,28 @@ export function getPort(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   return resolveHttpPort(argv, env);
+}
+
+/**
+ * Resolve the optional HTTP listen host from CLI arguments and environment.
+ *
+ * @param argv - CLI arguments to inspect for `--host`.
+ * @param env - Environment object to read `B2_HTTP_HOST` from.
+ *
+ * @returns Explicit listen host, or `undefined` for Node's default listen host.
+ *
+ * @throws PortUsageError when the selected host is empty or invalid.
+ *
+ * @example
+ * ```ts
+ * const host = getHost(["--host", "127.0.0.1"], process.env);
+ * ```
+ */
+export function getHost(
+  argv = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  return resolveHttpHost(argv, env);
 }
 
 /**
@@ -240,13 +264,14 @@ export function buildHttpServer(options: HttpServerOptions = {}): HttpServerHand
  *
  * @example
  * ```ts
- * await startHttp({ port: 3000 });
+ * await startHttp({ host: "127.0.0.1", port: 3000 });
  * ```
  */
 export async function startHttp(options: HttpListenOptions = {}): Promise<void> {
   initLogging();
   validateHttpStartupConfiguration();
   const port = options.port ?? getPort();
+  const host = options.host === undefined ? getHost() : parseHttpHost(options.host);
   const handle = buildHttpServer();
   const { server: httpServer, sessions, drain } = handle;
   let shuttingDown = false;
@@ -300,12 +325,17 @@ export async function startHttp(options: HttpListenOptions = {}): Promise<void> 
     const onError = (err: Error) => failStartup(err);
     httpServer.once("error", onError);
     try {
-      httpServer.listen(port, () => {
+      const onListening = () => {
         httpServer.off("error", onError);
         httpServer.on("error", onRuntimeError);
-        logger.info({ transport: "http", port }, "server.started");
+        logger.info({ transport: "http", port, ...(host ? { host } : {}) }, "server.started");
         resolve();
-      });
+      };
+      if (host) {
+        httpServer.listen(port, host, onListening);
+      } else {
+        httpServer.listen(port, onListening);
+      }
     } catch (err) {
       failStartup(err instanceof Error ? err : new Error(String(err)));
     }

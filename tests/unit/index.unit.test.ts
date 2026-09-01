@@ -298,9 +298,9 @@ describe("CLI dispatch", () => {
     const httpServer = await import("../../src/http-server.js");
     const startHttp = vi.mocked(httpServer.startHttp).mockResolvedValue(undefined);
 
-    await indexTestSeams().runCli(["http", "--port", "4321"]);
+    await indexTestSeams().runCli(["http", "--host", "127.0.0.1", "--port", "4321"]);
 
-    expect(startHttp).toHaveBeenCalledWith({ port: 4321 });
+    expect(startHttp).toHaveBeenCalledWith({ host: "127.0.0.1", port: 4321 });
   });
 
   it("dispatches stdio by default", async () => {

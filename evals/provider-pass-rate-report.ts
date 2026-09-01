@@ -10,13 +10,15 @@ import type {
 export const PROVIDER_COMPARISON_CASE_LIMIT_ENV = "LLM_EVAL_CASE_LIMIT";
 export const PROVIDER_COMPARISON_CASE_SET_ENV = "LLM_EVAL_CASE_SET";
 export const PROVIDER_PASS_RATE_REPORT_ENV = "LLM_EVAL_PASS_RATE_REPORT";
+export const PROVIDER_PASS_RATE_REPORT_SCHEMA_VERSION = 2;
 
 export interface ProviderPassRateReport {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: typeof PROVIDER_PASS_RATE_REPORT_SCHEMA_VERSION;
   readonly generatedAt: string;
   readonly caseCount: number;
   readonly providers: readonly {
     readonly provider: string;
+    readonly transport?: string;
     readonly model: string;
     readonly passed: number;
     readonly total: number;
@@ -32,7 +34,7 @@ export interface ProviderPassRateReport {
 
 type SanitizedProviderCaseResult = Pick<
   ProviderCaseResult,
-  "provider" | "caseName" | "status" | "passed"
+  "provider" | "transport" | "caseName" | "status" | "passed"
 > & {
   readonly failure?: string;
   readonly error?: string;
@@ -79,7 +81,7 @@ export function createProviderPassRateReport(args: {
   );
 
   return {
-    schemaVersion: 1,
+    schemaVersion: PROVIDER_PASS_RATE_REPORT_SCHEMA_VERSION,
     generatedAt: (args.now ?? new Date()).toISOString(),
     caseCount: args.cases.length,
     providers: args.comparison.passRates.map((rate) => {
@@ -111,6 +113,7 @@ export function writeProviderPassRateReport(path: string, report: ProviderPassRa
 function sanitizeProviderCaseResult(result: ProviderCaseResult): SanitizedProviderCaseResult {
   const base = {
     provider: result.provider,
+    ...(result.transport ? { transport: result.transport } : {}),
     caseName: result.caseName,
     status: result.status,
     passed: result.passed,

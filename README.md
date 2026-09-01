@@ -220,6 +220,7 @@ the healthcheck probes the same port the server binds.
 | `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Optional operator token appended _after_ the built-in `b2-mcp/<version>` product token on the outbound User-Agent (tag a deployment) |
 | `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
+| `B2_HTTP_HOST`                                                 | HTTP only             | Node listen default   | Standalone Node HTTP listen host; set to `127.0.0.1` when binding behind a same-host reverse proxy                         |
 | `B2_LOG_FILE`                                                 | —                     | stderr                | Optional path for redacted structured JSON logs. When set, the file replaces stderr; stdout is never used for logs          |
 | `B2_SECRET_SINK`                                              | —                     | stdio: `file`; HTTP: `off` | Durable-secret output mode: `file`, `inline`, or `off`. File mode supports `b2_create_key` and `b2_create_group_member`; `b2_reserve_trial_create_account` requires explicit inline mode because it has no file-mode recovery path |
 | `B2_SECRET_SINK_FILE`                                         | `file` override       | `~/.b2-mcp/secrets.jsonl` on stdio | Append-only plaintext JSONL credential ledger for file sink mode. HTTP/serverless file mode requires this explicit absolute path and `B2_ALLOW_LOCAL_FILES=true` |
@@ -323,6 +324,7 @@ Usage: b2-mcp [stdio|http] [options]
 Options:
   --transport <stdio|http>  Transport to serve (default: B2_MCP_TRANSPORT or stdio)
   --port <port>             HTTP listen port (default: PORT or 3000)
+  --host <host>             HTTP listen host (default: Node listen default)
   --version                 Print the package version
   --help                    Show this help
 ```
@@ -331,8 +333,8 @@ Examples:
 
 ```bash
 b2-mcp --transport stdio             # or: npx -y @backblaze-labs/b2-mcp --transport stdio
-b2-mcp http --port 3000
-node dist/index.js http --port 3000  # equivalent from a source checkout
+b2-mcp http --host 127.0.0.1 --port 3000
+node dist/index.js http --host 127.0.0.1 --port 3000  # equivalent from a source checkout
 ```
 
 ---

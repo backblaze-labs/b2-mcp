@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { readPortArg } from "./utils/config.js";
+import { readHostArg, readPortArg } from "./utils/config.js";
 
 /** Transport names accepted by the command-line entry point. */
 export type CliTransport = "stdio" | "http";
@@ -16,6 +16,8 @@ export interface CliOptions {
   transport: CliTransport;
   /** Optional HTTP listen port. */
   port?: number;
+  /** Optional HTTP listen host. */
+  host?: string;
 }
 
 /** Usage error raised when CLI arguments cannot be parsed. */
@@ -43,12 +45,13 @@ export function helpText(): string {
     "Options:",
     "  --transport <stdio|http>  Transport to serve (default: B2_MCP_TRANSPORT or stdio)",
     "  --port <port>             HTTP listen port (default: PORT or 3000)",
+    "  --host <host>             HTTP listen host (default: Node listen default)",
     "  --version                 Print the package version",
     "  --help                    Show this help",
     "",
     "Examples:",
     "  b2-mcp --transport stdio",
-    "  b2-mcp http --port 3000",
+    "  b2-mcp http --host 127.0.0.1 --port 3000",
   ].join("\n");
 }
 
@@ -104,6 +107,12 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       index = portArg.nextIndex;
       continue;
     }
+    const hostArg = readHostArg(argv, index);
+    if (hostArg) {
+      options.host = hostArg.host;
+      index = hostArg.nextIndex;
+      continue;
+    }
     throw new CliUsageError(`Unknown argument: ${arg}`);
   }
 
@@ -113,6 +122,9 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
 
   if (options.port !== undefined && options.transport !== "http") {
     throw new CliUsageError("--port is only valid with the HTTP transport");
+  }
+  if (options.host !== undefined && options.transport !== "http") {
+    throw new CliUsageError("--host is only valid with the HTTP transport");
   }
   return options;
 }

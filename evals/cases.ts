@@ -27,6 +27,36 @@ export interface ExpectedToolEval {
   readonly result: ExpectedEvalResult;
 }
 
+export interface NormalizedExpectedToolCall {
+  readonly name: string | null;
+  readonly assertedArgs: Readonly<Record<string, unknown>>;
+  readonly requiredArgsPresent: Readonly<Record<string, boolean>>;
+  readonly unexpectedArgs: readonly string[];
+  readonly matchesExpected: boolean;
+}
+
+export type NormalizedExpectedToolResult =
+  | {
+      readonly kind: "mcp-error";
+      readonly isError: boolean;
+      readonly code: string | null;
+      readonly status: number | null;
+      readonly textIncludes: readonly boolean[];
+      readonly matchesExpected: boolean;
+    }
+  | {
+      readonly kind: "structured-json";
+      readonly isError: boolean;
+      readonly structuredFields: Readonly<Record<string, unknown>>;
+      readonly textIncludes: readonly boolean[];
+      readonly matchesExpected: boolean;
+    };
+
+export interface NormalizedExpectedToolOutcome {
+  readonly toolCalls: readonly NormalizedExpectedToolCall[];
+  readonly toolResults: readonly NormalizedExpectedToolResult[];
+}
+
 export interface EvalCase {
   readonly name: string;
   readonly category: EvalCaseCategory;
@@ -113,51 +143,129 @@ function textContent(result: EvalRun["toolResults"][number] | undefined): string
   );
 }
 
-function hasExpectedToolCall(run: EvalRun, expected: ExpectedToolEval): boolean {
-  if (run.toolCalls.length !== 1) return false;
-  const call = run.toolCalls[0];
-  if (call?.name !== expected.toolName) return false;
-  for (const requiredArg of expected.requiredArgs) {
-    if (!(requiredArg in call.args)) return false;
-  }
+function structuredObject(
+  result: EvalRun["toolResults"][number] | undefined,
+): Record<string, unknown> {
+  const structured = result?.structuredContent;
+  if (!structured || typeof structured !== "object" || Array.isArray(structured)) return {};
+  return structured as Record<string, unknown>;
+}
+
+function normalizedStatus(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function errorMetadata(result: EvalRun["toolResults"][number]): {
+  code: string | null;
+  status: number | null;
+} {
+  const structured = structuredObject(result);
+  const text = textContent(result);
+  const code =
+    typeof structured.code === "string"
+      ? structured.code
+      : (/\bB2 Error \[([^\]]+)]/.exec(text)?.[1] ?? null);
+  const structuredStatus =
+    normalizedStatus(structured.status) ??
+    normalizedStatus(structured.httpStatus) ??
+    normalizedStatus(structured.statusCode);
+  const status = structuredStatus ?? /\bHTTP\s+(\d{3})\b/.exec(text)?.[1] ?? null;
+  return {
+    code,
+    status: typeof status === "string" ? Number(status) : status,
+  };
+}
+
+function normalizeToolCall(
+  call: EvalRun["toolCalls"][number],
+  expected: ExpectedToolEval,
+): NormalizedExpectedToolCall {
+  const requiredArgsPresent = Object.fromEntries(
+    [...expected.requiredArgs].sort().map((name) => [name, name in call.args]),
+  );
+  const assertedArgs = Object.fromEntries(
+    Object.keys(expected.args)
+      .sort()
+      .map((name) => [name, call.args[name]]),
+  );
   const allowedArgNames = new Set([
     ...Object.keys(expected.args),
     ...(expected.allowedExtraArgs ?? []),
   ]);
-  const unexpectedArgNames = Object.keys(call.args).filter((name) => !allowedArgNames.has(name));
-  if (unexpectedArgNames.length > 0) return false;
-  for (const [key, value] of Object.entries(expected.args)) {
-    if (!sameValue(call.args[key], value)) return false;
-  }
-  return true;
+  const unexpectedArgs = Object.keys(call.args)
+    .filter((name) => !allowedArgNames.has(name))
+    .sort();
+  const expectedArgsMatch = Object.entries(expected.args).every(([key, value]) =>
+    sameValue(call.args[key], value),
+  );
+  return {
+    name: call.name,
+    assertedArgs,
+    requiredArgsPresent,
+    unexpectedArgs,
+    matchesExpected:
+      call.name === expected.toolName &&
+      Object.values(requiredArgsPresent).every(Boolean) &&
+      unexpectedArgs.length === 0 &&
+      expectedArgsMatch,
+  };
 }
 
-function hasTypedResult(run: EvalRun, expected: ExpectedEvalResult): boolean {
-  if (run.toolResults.length !== 1) return false;
-  const result = run.toolResults[0];
-  if (!result) return false;
-
+function normalizeToolResult(
+  result: EvalRun["toolResults"][number],
+  expected: ExpectedEvalResult,
+): NormalizedExpectedToolResult {
+  const text = textContent(result);
   if (expected.kind === "mcp-error") {
-    if (result.isError !== true) return false;
-    const text = textContent(result);
-    if (!text) return false;
-    return expected.textIncludes.every((snippet) => text.includes(snippet));
+    const metadata = errorMetadata(result);
+    const textIncludes = expected.textIncludes.map((snippet) => text.includes(snippet));
+    return {
+      kind: "mcp-error",
+      isError: result.isError === true,
+      code: metadata.code,
+      status: metadata.status,
+      textIncludes,
+      matchesExpected: result.isError === true && text.length > 0 && textIncludes.every(Boolean),
+    };
   }
 
-  if (result.isError === true) return false;
-  const structured = result.structuredContent;
-  if (!structured || typeof structured !== "object" || Array.isArray(structured)) return false;
-  const object = structured as Record<string, unknown>;
+  const object = structuredObject(result);
+  const structuredFields = Object.fromEntries(
+    Object.keys(expected.structuredFields ?? {})
+      .sort()
+      .map((field) => [field, object[field]]),
+  );
   const fieldsMatch = Object.entries(expected.structuredFields ?? {}).every(([key, value]) =>
     sameValue(object[key], value),
   );
-  if (!fieldsMatch) return false;
-  const text = textContent(result);
-  return (expected.textIncludes ?? []).every((snippet) => text.includes(snippet));
+  const textIncludes = (expected.textIncludes ?? []).map((snippet) => text.includes(snippet));
+  return {
+    kind: "structured-json",
+    isError: result.isError === true,
+    structuredFields,
+    textIncludes,
+    matchesExpected: result.isError !== true && fieldsMatch && textIncludes.every(Boolean),
+  };
+}
+
+export function normalizeExpectedToolOutcome(
+  run: EvalRun,
+  expected: ExpectedToolEval,
+): NormalizedExpectedToolOutcome {
+  return {
+    toolCalls: run.toolCalls.map((call) => normalizeToolCall(call, expected)),
+    toolResults: run.toolResults.map((result) => normalizeToolResult(result, expected.result)),
+  };
 }
 
 function toolCasePassed(run: EvalRun, expected: ExpectedToolEval): boolean {
-  return hasExpectedToolCall(run, expected) && hasTypedResult(run, expected.result);
+  const normalized = normalizeExpectedToolOutcome(run, expected);
+  return (
+    normalized.toolCalls.length === 1 &&
+    normalized.toolCalls[0]?.matchesExpected === true &&
+    normalized.toolResults.length === 1 &&
+    normalized.toolResults[0]?.matchesExpected === true
+  );
 }
 
 function toolCaseFailure(run: EvalRun, expected: ExpectedToolEval): string {

@@ -1,14 +1,25 @@
-import { Client, type CallToolResult, type Tool } from "@modelcontextprotocol/client";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  type CallToolResult,
+  type Tool,
+} from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { spawn, type ChildProcess } from "child_process";
+import { createServer as createNetServer } from "net";
+import type { AddressInfo } from "net";
 import { join } from "path";
+import type { Stream } from "stream";
 import { pathToFileURL } from "url";
 import {
+  DIST_HTTP,
   DIST_INDEX,
   ROOT,
   requireBuiltFiles,
   safeSpawnEnv,
   stringifySpawnEnv,
 } from "../test-support/mcp-server-process";
+import evalTransportValues from "./transport-values.json";
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_LIST_TOOLS_TIMEOUT_MS = 10_000;
@@ -17,8 +28,13 @@ const DEFAULT_TOOL_CALL_TIMEOUT_MS = 30_000;
 const DEFAULT_STDERR_TAIL_BYTES = 8_192;
 const DEFAULT_MAX_TOOL_CALLS_PER_STEP = 8;
 const DEFAULT_MAX_TOOL_CALLS_TOTAL = 32;
+const DEFAULT_EVAL_TRANSPORT: EvalTransport = "stdio";
+const EVAL_HTTP_HOST = "127.0.0.1";
+const EVAL_HTTP_ALLOWED_HOSTS = "127.0.0.1,localhost";
+const EVAL_HTTP_BIND_ATTEMPTS = 2;
 
 export const EVAL_SERVER_NETWORK_GUARD_ENV = "LLM_EVAL_BLOCK_SERVER_NETWORK";
+export const EVAL_TRANSPORTS = evalTransportValues as unknown as readonly ["stdio", "http"];
 
 const EVAL_CREDENTIAL_MARKERS: Record<string, string> = {
   B2_APPLICATION_KEY_ID: "eval-application-key-id",
@@ -30,8 +46,10 @@ const EVAL_CREDENTIAL_MARKERS: Record<string, string> = {
 };
 
 const SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
-const activeEvalTransports = new Set<StdioClientTransport>();
+const activeEvalResources = new Set<EvalResource>();
 const signalHandlers = new Map<NodeJS.Signals, () => void>();
+
+export type EvalTransport = (typeof EVAL_TRANSPORTS)[number];
 
 export interface EvalToolCall {
   name: string;
@@ -72,6 +90,14 @@ export interface EvalServerOptions {
   registerAllTools?: boolean;
   destructivePolicy?: "allow" | "block" | "confirm";
   env?: NodeJS.ProcessEnv;
+  onHttpServerListening?: (info: EvalHttpServerInfo) => void | Promise<void>;
+}
+
+export interface EvalHttpServerInfo {
+  host: string;
+  port: number;
+  origin: string;
+  url: string;
 }
 
 export interface EvalTimeouts {
@@ -86,6 +112,7 @@ export interface RunEvalOptions {
   toolNames: string[];
   driver: Driver;
   maxSteps: number;
+  transport?: EvalTransport;
   maxToolCallsPerStep?: number;
   maxToolCallsTotal?: number;
   server?: EvalServerOptions;
@@ -115,6 +142,10 @@ interface EvalServerConnection {
   stderrTail(): string;
 }
 
+interface EvalResource {
+  close(): Promise<void>;
+}
+
 class EvalTimeoutError extends Error {
   constructor(
     readonly phase: string,
@@ -130,7 +161,7 @@ function installSignalHandlers(): void {
   if (signalHandlers.size > 0) return;
   for (const signal of SIGNALS) {
     const handler = () => {
-      void closeActiveEvalTransports().finally(() => {
+      void closeActiveEvalResources().finally(() => {
         uninstallSignalHandlers();
         process.kill(process.pid, signal);
       });
@@ -147,26 +178,30 @@ function uninstallSignalHandlers(): void {
   signalHandlers.clear();
 }
 
-function trackTransport(transport: StdioClientTransport): void {
+function trackResource(resource: EvalResource): void {
   installSignalHandlers();
-  activeEvalTransports.add(transport);
+  activeEvalResources.add(resource);
 }
 
-function untrackTransport(transport: StdioClientTransport): void {
-  activeEvalTransports.delete(transport);
-  if (activeEvalTransports.size === 0) {
+function untrackResource(resource: EvalResource): void {
+  activeEvalResources.delete(resource);
+  if (activeEvalResources.size === 0) {
     uninstallSignalHandlers();
   }
 }
 
-async function closeActiveEvalTransports(): Promise<void> {
-  const transports = [...activeEvalTransports];
-  activeEvalTransports.clear();
-  await Promise.all(transports.map((transport) => transport.close().catch(() => undefined)));
+async function closeActiveEvalResources(): Promise<void> {
+  const resources = [...activeEvalResources];
+  activeEvalResources.clear();
+  await Promise.all(resources.map((resource) => resource.close().catch(() => undefined)));
 }
 
-function requireBuiltServer(): void {
-  requireBuiltFiles([DIST_INDEX], "LLM evals require the built stdio server. Run pnpm run build.");
+function requireBuiltServer(transport: EvalTransport): void {
+  const builtEntrypoint = transport === "stdio" ? DIST_INDEX : DIST_HTTP;
+  requireBuiltFiles(
+    [builtEntrypoint],
+    `LLM evals require the built ${transport} server. Run pnpm run build.`,
+  );
 }
 
 function positiveInteger(value: number | undefined, fallback: number, name: string): number {
@@ -255,12 +290,93 @@ function createClient(): Client {
   return new Client({ name: "b2-mcp-eval-harness", version: "1.0.0" }, { defaultCacheTtlMs: 0 });
 }
 
-function captureStderrTail(transport: StdioClientTransport, maxBytes: number): () => string {
+function evalHttpCredentialHeaders(): Record<string, string> {
+  return {
+    "x-b2-key-id": EVAL_CREDENTIAL_MARKERS.B2_APPLICATION_KEY_ID,
+    "x-b2-key": EVAL_CREDENTIAL_MARKERS.B2_APPLICATION_KEY,
+    "x-b2-app-key-id": EVAL_CREDENTIAL_MARKERS.B2_APP_KEY_ID,
+    "x-b2-app-key": EVAL_CREDENTIAL_MARKERS.B2_APP_KEY,
+    "x-b2-master-key-id": EVAL_CREDENTIAL_MARKERS.B2_MASTER_KEY_ID,
+    "x-b2-master-key": EVAL_CREDENTIAL_MARKERS.B2_MASTER_KEY,
+  };
+}
+
+function captureStderrTail(source: { stderr?: Stream | null }, maxBytes: number): () => string {
   let stderrTail = "";
-  transport.stderr?.on("data", (chunk) => {
+  source.stderr?.on("data", (chunk) => {
     stderrTail = `${stderrTail}${chunk.toString()}`.slice(-maxBytes);
   });
   return () => stderrTail;
+}
+
+function waitForDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("aborted"));
+  return new Promise((resolve, reject) => {
+    let timer: NodeJS.Timeout;
+    const abort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      reject(signal.reason ?? new Error("aborted"));
+    };
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    timer.unref();
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+async function reserveLocalPort(): Promise<number> {
+  const server = createNetServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address() as AddressInfo;
+  await new Promise<void>((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+  });
+  return address.port;
+}
+
+async function waitForHttpHealth(
+  port: number,
+  child: ChildProcess,
+  signal: AbortSignal,
+): Promise<void> {
+  const url = `http://127.0.0.1:${port}/health`;
+  while (!signal.aborted) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `Eval HTTP server exited before becoming healthy (code=${child.exitCode}, signal=${child.signalCode}).`,
+      );
+    }
+    try {
+      const response = await fetch(url, { signal });
+      if (response.status === 200) return;
+    } catch (err) {
+      if (signal.aborted) throw err;
+    }
+    await waitForDelay(50, signal);
+  }
+  throw signal.reason ?? new Error("aborted");
+}
+
+async function closeChildProcess(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve();
+    }, 2_000);
+    timer.unref();
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 async function withTimeout<T>(
@@ -307,11 +423,23 @@ function withServerStderr(err: unknown, stderrTail: string): Error {
 }
 
 async function connectEvalServer(
+  transportKind: EvalTransport,
   server: EvalServerOptions | undefined,
   timeouts: ResolvedEvalTimeouts,
   stderrTailBytes: number,
 ): Promise<EvalServerConnection> {
-  requireBuiltServer();
+  if (transportKind === "http") {
+    return connectEvalHttpServer(server, timeouts, stderrTailBytes);
+  }
+  return connectEvalStdioServer(server, timeouts, stderrTailBytes);
+}
+
+async function connectEvalStdioServer(
+  server: EvalServerOptions | undefined,
+  timeouts: ResolvedEvalTimeouts,
+  stderrTailBytes: number,
+): Promise<EvalServerConnection> {
+  requireBuiltServer("stdio");
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [DIST_INDEX],
@@ -319,7 +447,8 @@ async function connectEvalServer(
     env: createEvalServerEnv(server),
     stderr: "pipe",
   });
-  trackTransport(transport);
+  const resource = { close: () => transport.close() };
+  trackResource(resource);
   const stderrTail = captureStderrTail(transport, stderrTailBytes);
   const client = createClient();
   let closePromise: Promise<void> | undefined;
@@ -328,7 +457,7 @@ async function connectEvalServer(
     stderrTail,
     close: async () => {
       closePromise ??= (async () => {
-        untrackTransport(transport);
+        untrackResource(resource);
         await client.close().catch(() => undefined);
         await transport.close().catch(() => undefined);
       })();
@@ -347,6 +476,112 @@ async function connectEvalServer(
     await connection.close();
     throw withServerStderr(err, stderrTail());
   }
+}
+
+async function connectEvalHttpServer(
+  server: EvalServerOptions | undefined,
+  timeouts: ResolvedEvalTimeouts,
+  stderrTailBytes: number,
+): Promise<EvalServerConnection> {
+  requireBuiltServer("http");
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= EVAL_HTTP_BIND_ATTEMPTS; attempt += 1) {
+    const port = await reserveLocalPort();
+    try {
+      return await connectEvalHttpServerOnPort(server, timeouts, stderrTailBytes, port);
+    } catch (err) {
+      lastError = err;
+      if (!isAddressInUseError(err) || attempt === EVAL_HTTP_BIND_ATTEMPTS) {
+        throw err;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function connectEvalHttpServerOnPort(
+  server: EvalServerOptions | undefined,
+  timeouts: ResolvedEvalTimeouts,
+  stderrTailBytes: number,
+  port: number,
+): Promise<EvalServerConnection> {
+  const origin = `http://${EVAL_HTTP_HOST}:${port}`;
+  const child = spawn(
+    process.execPath,
+    [DIST_HTTP, "--host", EVAL_HTTP_HOST, "--port", String(port)],
+    {
+      cwd: ROOT,
+      env: createEvalServerEnv({
+        ...server,
+        env: {
+          ...server?.env,
+          B2_HTTP_HOST: EVAL_HTTP_HOST,
+          B2_HTTP_CREDENTIAL_MODE: "headers",
+          B2_ALLOWED_HOSTS: EVAL_HTTP_ALLOWED_HOSTS,
+          B2_ALLOWED_ORIGINS: origin,
+          LOG_LEVEL: server?.env?.LOG_LEVEL ?? "error",
+        },
+      }),
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
+  const transport = new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), {
+    requestInit: {
+      headers: {
+        ...evalHttpCredentialHeaders(),
+        origin,
+      },
+    },
+  });
+  const resource = {
+    close: async () => {
+      await transport.close().catch(() => undefined);
+      await closeChildProcess(child);
+    },
+  };
+  trackResource(resource);
+  const stderrTail = captureStderrTail(child, stderrTailBytes);
+  const client = createClient();
+  let closePromise: Promise<void> | undefined;
+  const connection = {
+    client,
+    stderrTail,
+    close: async () => {
+      closePromise ??= (async () => {
+        untrackResource(resource);
+        await client.close().catch(() => undefined);
+        await transport.close().catch(() => undefined);
+        await closeChildProcess(child);
+      })();
+      await closePromise;
+    },
+  };
+  try {
+    await withTimeout(
+      "connect eval http server",
+      timeouts.connectMs,
+      async (signal) => {
+        await waitForHttpHealth(port, child, signal);
+        await server?.onHttpServerListening?.({
+          host: EVAL_HTTP_HOST,
+          port,
+          origin,
+          url: `${origin}/mcp`,
+        });
+        await client.connect(transport, { signal, timeout: timeouts.connectMs });
+      },
+      connection.close,
+    );
+    return connection;
+  } catch (err) {
+    await connection.close();
+    throw withServerStderr(err, stderrTail());
+  }
+}
+
+function isAddressInUseError(err: unknown): boolean {
+  const text = err instanceof Error ? `${err.name}\n${err.message}` : String(err);
+  return /\bEADDRINUSE\b/.test(text);
 }
 
 function selectTools(allTools: Tool[], toolNames: string[]): Tool[] {
@@ -446,7 +681,12 @@ export async function runEval(options: RunEvalOptions): Promise<EvalRun> {
     DEFAULT_STDERR_TAIL_BYTES,
     "stderrTailBytes",
   );
-  const connection = await connectEvalServer(options.server, timeouts, stderrTailBytes);
+  const connection = await connectEvalServer(
+    options.transport ?? DEFAULT_EVAL_TRANSPORT,
+    options.server,
+    timeouts,
+    stderrTailBytes,
+  );
   const { client } = connection;
   const toolCalls: EvalToolCall[] = [];
   const toolResults: CallToolResult[] = [];

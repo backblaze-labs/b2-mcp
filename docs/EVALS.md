@@ -4,13 +4,15 @@ Owner: Sophie / Quality Keeper (QK) (`@sophiecarreras`). Implementation owner: G
 (`@goanpeca`).
 
 Status: active. This runbook covers the deterministic eval harness, the opt-in
-LLM-backed provider evals, and the Claude vs OpenAI pass-rate comparison added
-for issue [#251](https://github.com/backblaze-labs/b2-mcp/issues/251).
+LLM-backed provider evals, and the provider pass-rate plus transport-parity
+coverage added for issues [#251](https://github.com/backblaze-labs/b2-mcp/issues/251)
+and [#270](https://github.com/backblaze-labs/b2-mcp/issues/270).
 
 ## What The Suite Covers
 
 The eval suite lives under [`../evals/`](../evals/) and uses the built stdio
-server from `dist/index.js`. The deterministic tests
+server from `dist/index.js` plus the built Streamable HTTP server from
+`dist/http-server.js`. The deterministic tests
 exercise the harness, provider adapters, prompt-to-tool assertions, provider
 comparison logic, report validation, and full-profile case definitions. They do
 not call Anthropic, OpenAI, or live Backblaze B2.
@@ -21,7 +23,9 @@ through real LLM APIs. The harness starts b2-mcp with marker B2 credentials,
 `B2_DESTRUCTIVE_POLICY=block`. Tool-shape cases that must pass through a
 destructive handler can only opt into `destructivePolicy: "allow"` through typed
 eval case options. The child-process environment is validated before spawn, so
-live provider evidence still avoids real B2 credentials.
+live provider evidence still avoids real B2 credentials. HTTP eval runs bind the
+spawned server to `127.0.0.1`, set matching Host/Origin allowlists, and connect
+through Streamable HTTP on localhost.
 
 ## Local Deterministic Run
 
@@ -70,19 +74,20 @@ failures in this mode.
 
 ## Provider Comparison
 
-The Claude vs OpenAI comparison has a separate gate so ordinary live provider
-runs do not automatically re-run the comparison matrix. To run the CI-shaped
-bounded comparison locally, build first so the harness evaluates the current
-`dist/index.js` output:
+The provider comparison has a separate gate so ordinary live provider runs do
+not automatically re-run the comparison matrix. The pass-rate runner covers
+whichever providers have keys configured, and runs each one over both stdio and
+Streamable HTTP. CI is Anthropic-only while OpenAI billing is unavailable, so it
+asserts Claude stdio/HTTP transport parity. To run the CI-shaped bounded
+comparison locally, build first so the harness evaluates the current `dist/`
+output:
 
 ```bash
 pnpm run build
 RUN_LLM_EVALS=1 \
 RUN_LLM_PROVIDER_COMPARISON=1 \
 ANTHROPIC_API_KEY=your-anthropic-api-key \
-OPENAI_API_KEY=your-openai-api-key \
 ANTHROPIC_EVAL_MODEL=claude-haiku-4-5-20251001 \
-OPENAI_EVAL_MODEL=gpt-5-nano \
 LLM_EVAL_CASE_SET=ci-no-b2 \
 LLM_EVAL_CASE_LIMIT=5 \
 LLM_EVAL_BLOCK_SERVER_NETWORK=1 \
@@ -92,20 +97,23 @@ pnpm run evals:provider-comparison
 
 For a full local comparison, omit `LLM_EVAL_CASE_SET` and
 `LLM_EVAL_CASE_LIMIT`, or set `LLM_EVAL_CASE_SET=full` explicitly. Keep
-`LLM_EVAL_BLOCK_SERVER_NETWORK=1` unless you are debugging the eval server's
-network boundary; it imports [`../scripts/no-network-guard.mjs`](../scripts/no-network-guard.mjs)
-inside the server child process while still allowing provider API calls from the
-test runner. Re-run `pnpm run build` after source changes before collecting
-provider comparison evidence.
+`LLM_EVAL_BLOCK_SERVER_NETWORK=1` for the `ci-no-b2` case set; it imports
+[`../scripts/no-network-guard.mjs`](../scripts/no-network-guard.mjs) inside the
+server child process while still allowing provider API calls from the test
+runner. Omit it for full-profile runs that intentionally exercise the native B2
+and S3 invalid-credential error paths. If `OPENAI_API_KEY` is also configured,
+OpenAI runs over both transports without changing the harness. Re-run
+`pnpm run build` after source changes before collecting provider comparison
+evidence.
 
 ## Required Environment
 
 | Variable | Required for | Notes |
 | --- | --- | --- |
 | `RUN_LLM_EVALS=1` | All live LLM evals | Enables provider-backed cases. Leave unset for deterministic PR work. |
-| `ANTHROPIC_API_KEY` | Anthropic live evals and Claude vs OpenAI comparison | Required by the Anthropic driver. |
-| `OPENAI_API_KEY` | OpenAI live evals and Claude vs OpenAI comparison | Required by the OpenAI driver. |
-| `RUN_LLM_PROVIDER_COMPARISON=1` | Claude vs OpenAI comparison | Required in addition to `RUN_LLM_EVALS=1`. |
+| `ANTHROPIC_API_KEY` | Anthropic live evals and provider comparison | Required by the Anthropic driver. |
+| `OPENAI_API_KEY` | OpenAI live evals and provider comparison | Required by the OpenAI driver. |
+| `RUN_LLM_PROVIDER_COMPARISON=1` | Provider pass rates and transport parity | Required in addition to `RUN_LLM_EVALS=1`. |
 | `ANTHROPIC_EVAL_MODEL` | Anthropic model override | Defaults to `claude-haiku-4-5-20251001`. |
 | `OPENAI_EVAL_MODEL` | OpenAI model override | Defaults to `gpt-5-nano`. |
 | `LLM_EVAL_CASE_SET` | Provider comparison case selection | Defaults to `full`; CI uses `ci-no-b2`. |
@@ -209,18 +217,31 @@ The comparison summary has this shape:
 Pass-rate comparison (Claude vs OpenAI) across 5 shared case(s): Claude: 5/5 (100.0%); OpenAI: 5/5 (100.0%).
 ```
 
-Read it as a same-case-set comparison, not as independent provider samples. The
+Read it as a same-case-set comparison, not as independent provider samples. For
+Anthropic-only CI runs, the shape is:
+
+```text
+Pass-rate comparison (Claude/stdio vs Claude/http) across 5 shared case(s): Claude/stdio: 5/5 (100.0%); Claude/http: 5/5 (100.0%).
+```
+
+Read either shape as a same-case-set comparison, not as independent samples. The
 denominator is the selected eval case count, after `LLM_EVAL_CASE_SET` and
 `LLM_EVAL_CASE_LIMIT` are applied. The pass-rate threshold for the CLI is 100%.
 Any provider error also fails the comparison, even if a relaxed pass-rate
-threshold would otherwise pass.
+threshold would otherwise pass. When multiple transports are present, the CLI
+also asserts equivalent normalized tool-selection, argument, and typed-result
+outcomes across transports.
 
 The JSON report includes:
 
-- `providers[]`: provider name, model, passed count, total count, and decimal
-  `passRate`.
-- `results[]`: sanitized per-provider, per-case status entries with `passed`,
-  `failed`, or `errored`.
+- `schemaVersion`: `2` for transport-aware reports. The validator still accepts
+  legacy schema version `1` reports that do not contain transport fields.
+- `providers[]`: provider name, optional transport, model, passed count, total
+  count, and decimal `passRate`. The optional `transport` field is emitted only
+  when the run includes more than one transport; explicit `["stdio"]` has the
+  same report shape as the default single-stdio run.
+- `results[]`: sanitized per-provider, optional-transport, per-case status
+  entries with `passed`, `failed`, or `errored`.
 - `sensitivity`: the fields intentionally omitted from the artifact.
 
 `failed` means the provider ran the case but the eval assertion did not pass.

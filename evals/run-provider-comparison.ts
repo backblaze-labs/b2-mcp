@@ -1,4 +1,5 @@
 import { CI_PROVIDER_COMPARISON_EVAL_CASES, FULL_PROFILE_EVAL_CASES } from "./cases";
+import { EVAL_TRANSPORTS } from "./harness";
 import {
   providerPassRateEvalGate,
   providersWithConfiguredKeys,
@@ -18,8 +19,9 @@ async function main(): Promise<void> {
     throw new Error(`Provider pass-rate gate disabled: ${gate.reason}`);
   }
 
-  // Run whichever providers have a key configured. OpenAI is currently unconfigured
-  // (no account credits), so this resolves to an Anthropic-only run until it returns.
+  // Run whichever providers have a key configured across both MCP transports.
+  // OpenAI is currently unconfigured (no account credits), so CI resolves to
+  // Claude-over-stdio plus Claude-over-HTTP until OpenAI returns.
   const providers = providersWithConfiguredKeys();
   const cases = selectProviderComparisonCases({
     full: FULL_PROFILE_EVAL_CASES,
@@ -28,6 +30,7 @@ async function main(): Promise<void> {
   const comparison = await runProviderPassRateComparison({
     cases,
     providers,
+    comparison: { transports: EVAL_TRANSPORTS },
   });
   const report = createProviderPassRateReport({
     comparison,
@@ -40,7 +43,7 @@ async function main(): Promise<void> {
   );
 
   console.info(comparison.summary);
-  assertProviderPassRateComparisonForCli(comparison);
+  assertProviderPassRateComparisonForCli(comparison, { transportParityCases: cases });
 }
 
 main().catch((err) => {
