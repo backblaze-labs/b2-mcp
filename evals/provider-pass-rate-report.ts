@@ -17,6 +17,7 @@ export interface ProviderPassRateReport {
   readonly caseCount: number;
   readonly providers: readonly {
     readonly provider: string;
+    readonly transport?: string;
     readonly model: string;
     readonly passed: number;
     readonly total: number;
@@ -32,7 +33,7 @@ export interface ProviderPassRateReport {
 
 type SanitizedProviderCaseResult = Pick<
   ProviderCaseResult,
-  "provider" | "caseName" | "status" | "passed"
+  "provider" | "transport" | "caseName" | "status" | "passed"
 > & {
   readonly failure?: string;
   readonly error?: string;
@@ -111,6 +112,7 @@ export function writeProviderPassRateReport(path: string, report: ProviderPassRa
 function sanitizeProviderCaseResult(result: ProviderCaseResult): SanitizedProviderCaseResult {
   const base = {
     provider: result.provider,
+    ...(result.transport ? { transport: result.transport } : {}),
     caseName: result.caseName,
     status: result.status,
     passed: result.passed,

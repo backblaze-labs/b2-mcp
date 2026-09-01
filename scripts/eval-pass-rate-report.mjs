@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const PROVIDER_SECRET_ENV_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 const ALLOWED_PROVIDER_NAMES = new Set(["Claude", "OpenAI"]);
 const ALLOWED_PROVIDER_LABEL = "Claude or OpenAI";
+const ALLOWED_TRANSPORTS = new Set(["stdio", "http"]);
 const RESULT_STATUSES = new Set(["passed", "failed", "errored"]);
 const PASS_RATE_TOLERANCE = 1e-12;
 const REPORT_KEYS = new Set([
@@ -15,13 +16,13 @@ const REPORT_KEYS = new Set([
   "results",
   "sensitivity",
 ]);
-const PROVIDER_KEYS = new Set(["provider", "model", "passed", "total", "passRate"]);
+const PROVIDER_KEYS = new Set(["provider", "transport", "model", "passed", "total", "passRate"]);
 const FAILED_RESULT_FAILURE = "Case failed validation; raw model and tool payloads omitted.";
 const ERRORED_RESULT_ERROR = "Case errored during evaluation; raw model and tool payloads omitted.";
 const RESULT_KEYS_BY_STATUS = {
-  passed: new Set(["provider", "caseName", "status", "passed"]),
-  failed: new Set(["provider", "caseName", "status", "passed", "failure"]),
-  errored: new Set(["provider", "caseName", "status", "passed", "error"]),
+  passed: new Set(["provider", "transport", "caseName", "status", "passed"]),
+  failed: new Set(["provider", "transport", "caseName", "status", "passed", "failure"]),
+  errored: new Set(["provider", "transport", "caseName", "status", "passed", "error"]),
 };
 const SENSITIVITY_KEYS = new Set(["secretSafe", "omitted"]);
 
@@ -91,10 +92,17 @@ export function validateProviderPassRateReport(report) {
     if (!ALLOWED_PROVIDER_NAMES.has(provider.provider)) {
       fail(`${path}.provider must be ${ALLOWED_PROVIDER_LABEL}`);
     }
-    if (seenProviders.has(provider.provider)) {
-      fail(`${path}.provider is duplicated; each provider may appear once`);
+    if (
+      provider.transport !== undefined &&
+      (typeof provider.transport !== "string" || !ALLOWED_TRANSPORTS.has(provider.transport))
+    ) {
+      fail(`${path}.transport must be stdio or http`);
     }
-    seenProviders.add(provider.provider);
+    const providerKey = providerTransportKey(provider.provider, provider.transport);
+    if (seenProviders.has(providerKey)) {
+      fail(`${path}.provider is duplicated for the same transport`);
+    }
+    seenProviders.add(providerKey);
     assertString(provider.model, `${path}.model`);
     assertNonNegativeInteger(provider.passed, `${path}.passed`);
     assertNonNegativeInteger(provider.total, `${path}.total`);
@@ -108,13 +116,24 @@ export function validateProviderPassRateReport(report) {
   }
   if (!Array.isArray(report.results)) fail("report.results must be an array");
   const resultCountsByProvider = new Map(
-    report.providers.map((provider) => [provider.provider, { passed: 0, total: 0 }]),
+    report.providers.map((provider) => [
+      providerTransportKey(provider.provider, provider.transport),
+      { passed: 0, total: 0 },
+    ]),
   );
   for (const [index, result] of report.results.entries()) {
     const path = `report.results[${index}]`;
     if (!isRecord(result)) fail(`${path} must be an object`);
     assertString(result.provider, `${path}.provider`);
-    const providerResultCounts = resultCountsByProvider.get(result.provider);
+    if (
+      result.transport !== undefined &&
+      (typeof result.transport !== "string" || !ALLOWED_TRANSPORTS.has(result.transport))
+    ) {
+      fail(`${path}.transport must be stdio or http`);
+    }
+    const providerResultCounts = resultCountsByProvider.get(
+      providerTransportKey(result.provider, result.transport),
+    );
     if (!providerResultCounts) {
       fail(`${path}.provider must be a declared provider (${ALLOWED_PROVIDER_LABEL})`);
     }
@@ -141,7 +160,9 @@ export function validateProviderPassRateReport(report) {
     }
   }
   for (const provider of report.providers) {
-    const resultCounts = resultCountsByProvider.get(provider.provider);
+    const resultCounts = resultCountsByProvider.get(
+      providerTransportKey(provider.provider, provider.transport),
+    );
     if (resultCounts.total !== provider.total) {
       fail(`report.results total for ${provider.provider} must equal provider.total`);
     }
@@ -163,6 +184,10 @@ export function validateProviderPassRateReport(report) {
   return report;
 }
 
+function providerTransportKey(provider, transport) {
+  return `${provider}\0${transport ?? ""}`;
+}
+
 export function validateReportFile(path, options = {}) {
   const { raw, report } = readReportFile(path);
   assertNoProviderSecrets(raw, options.secretValues ?? []);
@@ -171,16 +196,26 @@ export function validateReportFile(path, options = {}) {
 
 export function renderPassRateSummaryMarkdown(report) {
   validateProviderPassRateReport(report);
+  const hasTransport = report.providers.some((provider) => provider.transport);
+  const headingLabels = report.providers.map((provider) =>
+    hasTransport ? `${provider.provider}/${provider.transport ?? ""}` : provider.provider,
+  );
   const lines = [
-    `## ${report.providers.map((provider) => provider.provider).join(" vs ")} pass rates`,
+    `## ${headingLabels.join(" vs ")} pass rates`,
     "",
     report.summary,
     "",
-    "| Provider | Model | Passed | Total | Pass rate |",
-    "| --- | --- | ---: | ---: | ---: |",
+    hasTransport
+      ? "| Provider | Transport | Model | Passed | Total | Pass rate |"
+      : "| Provider | Model | Passed | Total | Pass rate |",
+    hasTransport
+      ? "| --- | --- | --- | ---: | ---: | ---: |"
+      : "| --- | --- | ---: | ---: | ---: |",
     ...report.providers.map((provider) => {
       const pct = `${(provider.passRate * 100).toFixed(1)}%`;
-      return `| ${provider.provider} | ${provider.model} | ${provider.passed} | ${provider.total} | ${pct} |`;
+      return hasTransport
+        ? `| ${provider.provider} | ${provider.transport ?? ""} | ${provider.model} | ${provider.passed} | ${provider.total} | ${pct} |`
+        : `| ${provider.provider} | ${provider.model} | ${provider.passed} | ${provider.total} | ${pct} |`;
     }),
     "",
   ];

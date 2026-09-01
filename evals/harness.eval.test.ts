@@ -11,6 +11,7 @@ import {
   type Driver,
   type DriverInput,
   type DriverOutput,
+  type EvalTransport,
   type EvalToolCall,
 } from "./harness";
 
@@ -37,6 +38,7 @@ function oneStepDriver(name: string, toolCalls: EvalToolCall[]): Driver {
 }
 
 const EVAL_SIGNALS = ["SIGINT", "SIGTERM"] as const;
+const EVAL_TEST_TRANSPORTS = ["stdio", "http"] as const satisfies readonly EvalTransport[];
 
 function signalListenerCounts(): Record<(typeof EVAL_SIGNALS)[number], number> {
   return Object.fromEntries(
@@ -45,37 +47,45 @@ function signalListenerCounts(): Record<(typeof EVAL_SIGNALS)[number], number> {
 }
 
 describe("LLM eval harness", () => {
-  it("runs a bounded tool loop against the built stdio server", async () => {
-    const run = await runEval({
-      prompt: "Check whether bucket deletion is guarded.",
-      toolNames: ["b2_delete_bucket"],
-      driver: oneStepDriver("destructive-block", [
+  it.each(EVAL_TEST_TRANSPORTS)(
+    "runs a bounded tool loop against the built %s server",
+    async (transport) => {
+      const run = await runEval({
+        transport,
+        prompt: "Check whether bucket deletion is guarded.",
+        toolNames: ["b2_delete_bucket"],
+        driver: oneStepDriver("destructive-block", [
+          { name: "b2_delete_bucket", args: { bucketId: "bucket-id", confirm: true } },
+        ]),
+        maxSteps: 2,
+      });
+
+      expect(run.toolCalls).toEqual([
         { name: "b2_delete_bucket", args: { bucketId: "bucket-id", confirm: true } },
-      ]),
-      maxSteps: 2,
-    });
+      ]);
+      expect(run.toolResults).toHaveLength(1);
+      expect(run.toolResults[0].isError).toBe(true);
+      expect(JSON.stringify(run.toolResults[0])).toContain("destructive_policy_blocked");
+      expect(run.text).toContain("destructive-block step");
+    },
+  );
 
-    expect(run.toolCalls).toEqual([
-      { name: "b2_delete_bucket", args: { bucketId: "bucket-id", confirm: true } },
-    ]);
-    expect(run.toolResults).toHaveLength(1);
-    expect(run.toolResults[0].isError).toBe(true);
-    expect(JSON.stringify(run.toolResults[0])).toContain("destructive_policy_blocked");
-    expect(run.text).toContain("destructive-block step");
-  });
+  it.each(EVAL_TEST_TRANSPORTS)(
+    "removes process signal handlers after normal %s completion",
+    async (transport) => {
+      const before = signalListenerCounts();
 
-  it("removes process signal handlers after normal completion", async () => {
-    const before = signalListenerCounts();
+      await runEval({
+        transport,
+        prompt: "Finish without tools.",
+        toolNames: ["b2_create_key"],
+        driver: new ScriptedDriver("no-tools", [{ text: "Done." }]),
+        maxSteps: 1,
+      });
 
-    await runEval({
-      prompt: "Finish without tools.",
-      toolNames: ["b2_create_key"],
-      driver: new ScriptedDriver("no-tools", [{ text: "Done." }]),
-      maxSteps: 1,
-    });
-
-    expect(signalListenerCounts()).toEqual(before);
-  });
+      expect(signalListenerCounts()).toEqual(before);
+    },
+  );
 
   it("rejects B2 credential overrides before spawning the eval server", () => {
     expect(() =>
@@ -200,31 +210,35 @@ describe("LLM eval harness", () => {
     ).rejects.toThrow(/exceeded maxToolCallsTotal/);
   });
 
-  it("refuses local filePath tool calls without touching the target path", async () => {
-    const targetPath = join(tmpdir(), `b2-mcp-eval-forbidden-${process.pid}`, "secret.txt");
-    expect(existsSync(targetPath)).toBe(false);
+  it.each(EVAL_TEST_TRANSPORTS)(
+    "refuses local filePath tool calls over %s without touching the target path",
+    async (transport) => {
+      const targetPath = join(tmpdir(), `b2-mcp-eval-forbidden-${process.pid}`, "secret.txt");
+      expect(existsSync(targetPath)).toBe(false);
 
-    const run = await runEval({
-      prompt: "Try a local file upload.",
-      toolNames: ["s3_put_object"],
-      driver: oneStepDriver("local-file", [
-        {
-          name: "s3_put_object",
-          args: {
-            bucket: "bucket",
-            key: "secret.txt",
-            filePath: targetPath,
-            contentType: "application/octet-stream",
+      const run = await runEval({
+        transport,
+        prompt: "Try a local file upload.",
+        toolNames: ["s3_put_object"],
+        driver: oneStepDriver("local-file", [
+          {
+            name: "s3_put_object",
+            args: {
+              bucket: "bucket",
+              key: "secret.txt",
+              filePath: targetPath,
+              contentType: "application/octet-stream",
+            },
           },
-        },
-      ]),
-      maxSteps: 1,
-    });
+        ]),
+        maxSteps: 1,
+      });
 
-    expect(run.toolResults[0].isError).toBe(true);
-    expect(JSON.stringify(run.toolResults[0])).toContain("Local filesystem access is disabled");
-    expect(existsSync(targetPath)).toBe(false);
-  });
+      expect(run.toolResults[0].isError).toBe(true);
+      expect(JSON.stringify(run.toolResults[0])).toContain("Local filesystem access is disabled");
+      expect(existsSync(targetPath)).toBe(false);
+    },
+  );
 
   it("times out stalled driver steps with a phase-specific error", async () => {
     const before = signalListenerCounts();

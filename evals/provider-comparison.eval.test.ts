@@ -18,10 +18,13 @@ import {
 } from "./provider-pass-rate-report";
 import {
   CLAUDE_OPENAI_PROVIDERS,
+  EVAL_TRANSPORTS,
   type EvalProvider,
   PROVIDER_COMPARISON_EVAL_ENV,
   assertProviderPassRateComparison,
+  assertProviderTransportParity,
   claudeOpenAIComparisonEvalGate,
+  claudeTransportParityEvalGate,
   formatPassRateSummary,
   runProviderPassRateComparison,
 } from "./provider-comparison";
@@ -148,6 +151,69 @@ describe("provider pass-rate comparison", () => {
       "comparison case",
     ]);
     expect(comparison.results.map((result) => result.status)).toEqual(["passed", "failed"]);
+  });
+
+  it("runs each requested provider transport and summarizes pass rates", async () => {
+    const observed: Array<{ provider: string; transport: string | undefined }> = [];
+    const comparison = await runProviderPassRateComparison({
+      cases: [comparisonCase],
+      providers: [scriptedProvider("Claude", "anthropic")],
+      comparison: { transports: EVAL_TRANSPORTS },
+      async runEvalImpl(options) {
+        observed.push({ provider: options.driver.name, transport: options.transport });
+        return passingRun();
+      },
+    });
+
+    expect(observed).toEqual([
+      { provider: "anthropic", transport: "stdio" },
+      { provider: "anthropic", transport: "http" },
+    ]);
+    expect(comparison.passRates).toEqual([
+      { provider: "Claude", transport: "stdio", passed: 1, total: 1, passRate: 1 },
+      { provider: "Claude", transport: "http", passed: 1, total: 1, passRate: 1 },
+    ]);
+    expect(comparison.summary).toBe(
+      "Pass-rate comparison (Claude/stdio vs Claude/http) across 1 shared case(s): " +
+        "Claude/stdio: 1/1 (100.0%); Claude/http: 1/1 (100.0%).",
+    );
+    expect(() => assertProviderTransportParity(comparison, [comparisonCase])).not.toThrow();
+  });
+
+  it("detects transport parity drift in normalized tool outcomes", () => {
+    const httpRun = passingRun();
+    httpRun.toolCalls = [
+      { name: "b2_delete_bucket", args: { bucketId: "different-bucket", confirm: true } },
+    ];
+    const comparison = {
+      summary: "summary",
+      passRates: [
+        { provider: "Claude", transport: "stdio" as const, passed: 1, total: 1, passRate: 1 },
+        { provider: "Claude", transport: "http" as const, passed: 1, total: 1, passRate: 1 },
+      ],
+      results: [
+        {
+          provider: "Claude",
+          transport: "stdio" as const,
+          caseName: comparisonCase.name,
+          status: "passed" as const,
+          passed: true as const,
+          run: passingRun(),
+        },
+        {
+          provider: "Claude",
+          transport: "http" as const,
+          caseName: comparisonCase.name,
+          status: "passed" as const,
+          passed: true as const,
+          run: httpRun,
+        },
+      ],
+    };
+
+    expect(() => assertProviderTransportParity(comparison, [comparisonCase])).toThrow(
+      /Transport parity failed/,
+    );
   });
 
   it("fails gating assertions for provider errors even with a relaxed pass rate", async () => {
@@ -314,6 +380,34 @@ describe("provider pass-rate comparison", () => {
         [PROVIDER_COMPARISON_EVAL_ENV]: "1",
         ANTHROPIC_API_KEY: "test-key",
         OPENAI_API_KEY: "test-key",
+      }).enabled,
+    ).toBe(true);
+  });
+
+  it("requires only the Anthropic key for the Claude transport parity gate", () => {
+    expect(
+      claudeTransportParityEvalGate({
+        RUN_LLM_EVALS: "1",
+        ANTHROPIC_API_KEY: "test-key",
+      }),
+    ).toEqual({
+      enabled: false,
+      reason: `${PROVIDER_COMPARISON_EVAL_ENV} is not 1`,
+    });
+    expect(
+      claudeTransportParityEvalGate({
+        RUN_LLM_EVALS: "1",
+        [PROVIDER_COMPARISON_EVAL_ENV]: "1",
+      }),
+    ).toEqual({
+      enabled: false,
+      reason: "missing provider key (ANTHROPIC_API_KEY)",
+    });
+    expect(
+      claudeTransportParityEvalGate({
+        RUN_LLM_EVALS: "1",
+        [PROVIDER_COMPARISON_EVAL_ENV]: "1",
+        ANTHROPIC_API_KEY: "test-key",
       }).enabled,
     ).toBe(true);
   });
@@ -505,7 +599,44 @@ describe("provider pass-rate comparison", () => {
 });
 
 const comparisonGate = claudeOpenAIComparisonEvalGate();
+const transportParityGate = claudeTransportParityEvalGate();
 const LIVE_COMPARISON_TIMEOUT_MS = 600_000;
+
+describe("Claude transport parity live eval comparison", () => {
+  it.skipIf(!transportParityGate.enabled)(
+    "runs shared cases over stdio and Streamable HTTP",
+    async () => {
+      const liveComparisonCases = selectProviderComparisonCases({
+        full: FULL_PROFILE_EVAL_CASES,
+        "ci-no-b2": CI_PROVIDER_COMPARISON_EVAL_CASES,
+      });
+      const comparison = await runProviderPassRateComparison({
+        cases: liveComparisonCases,
+        providers: [CLAUDE_OPENAI_PROVIDERS[0]],
+        comparison: { transports: EVAL_TRANSPORTS },
+      });
+
+      console.info(comparison.summary);
+      const reportPath = process.env[PROVIDER_PASS_RATE_REPORT_ENV];
+      if (reportPath) {
+        writeProviderPassRateReport(
+          reportPath,
+          createProviderPassRateReport({
+            comparison,
+            cases: liveComparisonCases,
+            providers: [CLAUDE_OPENAI_PROVIDERS[0]],
+          }),
+        );
+      }
+      assertProviderPassRateComparison(comparison);
+      assertProviderTransportParity(comparison, liveComparisonCases);
+      expect(comparison.results).toHaveLength(liveComparisonCases.length * EVAL_TRANSPORTS.length);
+      expect(comparison.passRates.map((rate) => rate.transport)).toEqual(EVAL_TRANSPORTS);
+      expect(comparison.summary).toMatch(/Claude\/stdio vs Claude\/http/);
+    },
+    LIVE_COMPARISON_TIMEOUT_MS,
+  );
+});
 
 describe("Claude vs OpenAI live eval comparison", () => {
   it.skipIf(!comparisonGate.enabled)(
