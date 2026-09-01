@@ -102,6 +102,7 @@ describe("stdio entry point", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     for (const key of credentialEnvKeys) {
       const value = savedEnv[key];
       if (value === undefined) delete process.env[key];
@@ -116,7 +117,9 @@ describe("stdio entry point", () => {
     const server = { close: vi.fn(async () => undefined) };
     const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
     vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
-    vi.spyOn(serverModule, "fetchCapabilities").mockResolvedValue(["listBuckets"]);
+    const fetchCapabilities = vi
+      .spyOn(serverModule, "fetchCapabilities")
+      .mockResolvedValue(["listBuckets"]);
     const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
       () =>
         ({
@@ -124,6 +127,7 @@ describe("stdio entry point", () => {
         }) as ReturnType<typeof stdioTransport.serveStdio>,
     );
     const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    const info = vi.spyOn(loggerModule.logger, "info").mockImplementation(() => undefined);
 
     await startStdio();
 
@@ -133,6 +137,11 @@ describe("stdio entry point", () => {
     options?.onerror(new Error("stdio failed"));
     expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
     expect(warn).toHaveBeenCalledWith({ err: "stdio failed" }, "mcp.stdio.error");
+    expect(info).toHaveBeenCalledWith({ transport: "stdio" }, "server.starting");
+    expect(info).toHaveBeenCalledWith({ transport: "stdio" }, "server.started");
+    expect(fetchCapabilities.mock.invocationCallOrder[0]).toBeGreaterThan(
+      info.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 
   it("falls back to the full stdio surface when capability lookup is unavailable", async () => {
@@ -162,6 +171,36 @@ describe("stdio entry point", () => {
     expect(createServer).toHaveBeenCalledWith(config, null);
     expect(warn).toHaveBeenCalledWith(
       { code: "capability_upstream_unavailable" },
+      "capability.fetch.stdio_degraded",
+    );
+  });
+
+  it("bounds stdio capability discovery and degrades before client handshakes time out", async () => {
+    vi.useFakeTimers();
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockReturnValue(
+      new Promise<string[] | null>(() => undefined),
+    );
+    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    const started = startStdio();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(started).resolves.toBeUndefined();
+    const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+    expect(factory?.()).toBe(server);
+    expect(createServer).toHaveBeenCalledWith(config, null);
+    expect(warn).toHaveBeenCalledWith(
+      { code: "capability_bootstrap_timeout", timeoutMs: 10_000 },
       "capability.fetch.stdio_degraded",
     );
   });

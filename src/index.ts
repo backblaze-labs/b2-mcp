@@ -41,6 +41,7 @@ import * as serverModule from "./server.js";
 import { PortUsageError } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import { bootstrapErrorMessage } from "./utils/secret-sanitizer.js";
+import type { B2Config } from "./utils/types.js";
 import { VERSION } from "./version.js";
 
 type IndexTestSeams = {
@@ -52,14 +53,52 @@ type GlobalWithIndexTestSeams = typeof globalThis & {
   __b2McpIndexTestSeams?: IndexTestSeams;
 };
 
+const STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS = 10_000;
+const STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_CODE = "capability_bootstrap_timeout";
+
+class StdioCapabilityBootstrapTimeoutError extends Error {
+  readonly code = STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_CODE;
+
+  constructor(readonly timeoutMs: number) {
+    super(`Timed out after ${timeoutMs}ms while fetching stdio capabilities`);
+  }
+}
+
+function isStdioCapabilityBootstrapTimeout(
+  err: unknown,
+): err is StdioCapabilityBootstrapTimeoutError {
+  return (
+    err instanceof StdioCapabilityBootstrapTimeoutError ||
+    ((err as { code?: unknown })?.code === STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_CODE &&
+      typeof (err as { timeoutMs?: unknown }).timeoutMs === "number")
+  );
+}
+
+async function fetchStdioCapabilitiesWithDeadline(config: B2Config): Promise<string[] | null> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new StdioCapabilityBootstrapTimeoutError(STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS));
+    }, STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS);
+    timeout.unref?.();
+  });
+
+  try {
+    return await Promise.race([serverModule.fetchCapabilities(config), deadline]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 /**
  * Start the MCP server over stdio.
  *
  * @remarks
  * The stdio path reads credentials from the process environment, attempts
  * capability discovery once, and deliberately degrades to the full tool surface
- * only when B2 capability lookup is temporarily unavailable. Other credential
- * errors remain fatal during bootstrap.
+ * when B2 capability lookup is temporarily unavailable or too slow for MCP
+ * client handshake budgets. Fast credential errors remain fatal during
+ * bootstrap.
  *
  * @returns A promise that resolves after the stdio transport has been
  * registered with the MCP SDK.
@@ -75,23 +114,34 @@ type GlobalWithIndexTestSeams = typeof globalThis & {
 export async function startStdio(): Promise<void> {
   initLogging();
   const config = serverModule.loadConfig();
+  logger.info({ transport: "stdio" }, "server.starting");
   let capabilities: string[] | null;
   try {
-    capabilities = await serverModule.fetchCapabilities(config);
+    capabilities = await fetchStdioCapabilitiesWithDeadline(config);
   } catch (err) {
-    if (
-      !(err instanceof CredentialResolutionError) ||
-      err.code !== "capability_upstream_unavailable"
+    if (isStdioCapabilityBootstrapTimeout(err)) {
+      logger.warn(
+        {
+          code: err.code,
+          timeoutMs: err.timeoutMs,
+        },
+        "capability.fetch.stdio_degraded",
+      );
+      capabilities = null;
+    } else if (
+      err instanceof CredentialResolutionError &&
+      err.code === "capability_upstream_unavailable"
     ) {
+      logger.warn(
+        {
+          code: err.code,
+        },
+        "capability.fetch.stdio_degraded",
+      );
+      capabilities = null;
+    } else {
       throw err;
     }
-    logger.warn(
-      {
-        code: err.code,
-      },
-      "capability.fetch.stdio_degraded",
-    );
-    capabilities = null;
   }
   stdioTransport.serveStdio(() => serverModule.createServer(config, capabilities), {
     onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
