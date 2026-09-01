@@ -1220,10 +1220,7 @@ function createErrorHasKnownProviderRejection(err: unknown): boolean {
 function recoveryClearedProviderSideEffect(recovery: unknown): boolean {
   if (!recovery || typeof recovery !== "object" || !("status" in recovery)) return false;
   const status = (recovery as { status?: unknown }).status;
-  if (status === "deleted") return true;
-  if (status !== "ejected_group_members") return false;
-  const accountIds = (recovery as { accountIds?: unknown }).accountIds;
-  return Array.isArray(accountIds) && accountIds.length > 0;
+  return status === "deleted";
 }
 
 function isSecretSinkCommitAmbiguous(err: unknown): boolean {

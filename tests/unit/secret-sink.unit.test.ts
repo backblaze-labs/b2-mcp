@@ -1999,6 +1999,44 @@ describe("secret sink file writer", () => {
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("write_failed_after_provider_create");
   });
 
+  it("keeps the pending claim when recovery only ejects the provider result", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const secret = "B2_MCP_CANARY_SECRET_recovered_eject";
+    const fsync = secretSinkFileOpsForTests.fsyncSync;
+    let recordFsyncFailed = false;
+    vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
+      if (!recordFsyncFailed && existsSync(file) && readFileSync(file, "utf8").includes(secret)) {
+        recordFsyncFailed = true;
+        throw new Error("simulated sink fsync failure");
+      }
+      return fsync(fd);
+    });
+    const recoverSpy = vi.fn().mockReturnValue({
+      status: "ejected_group_members",
+      accountIds: ["account-id"],
+    });
+    const idempotency = testIdempotency("recovered-eject");
+
+    await expect(
+      executeDurableSecretOperation({
+        ...durableSecretTestOptions(file, idempotency, {
+          diagnostics: (created) => ({ applicationKeyId: created.applicationKeyId }),
+          recoverAfterSinkFailure: recoverSpy,
+        }),
+        create: async () => ({
+          applicationKeyId: "key-id",
+          applicationKey: secret,
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "secret_sink_write_failed" });
+
+    expect(recoverSpy).toHaveBeenCalledOnce();
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+  });
+
   it("redacts newly minted exact secrets from projection and recovery fatal logs", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const dir = tempDir();

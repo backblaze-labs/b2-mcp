@@ -2530,6 +2530,7 @@ describe("Partner API tools", () => {
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("K005");
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("member-sink-failure@example.com");
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+    expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
     expect(
       transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toBe(true);
@@ -2609,6 +2610,7 @@ describe("Partner API tools", () => {
       status: "ejected_group_members",
       accountIds: [groupMember.accountId],
     });
+    expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
   });
@@ -2670,6 +2672,89 @@ describe("Partner API tools", () => {
     expect(JSON.stringify(rawResult)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("ejected_group_members");
+  });
+
+  it("ejects later recoverable group members before reporting incomplete recovery", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    const missingSecret = "K005PartnerMixedMissingSecret1234567890";
+    const validSecret = "K005PartnerMixedValidSecret1234567890";
+    const malformedCreated = {
+      applicationKeyId: "key-mixed-missing",
+      applicationKey: missingSecret,
+      groupMember: {
+        email: "mixed-missing@example.com",
+        groupId: "group-mixed",
+        groupName: "Mixed recovery",
+        region: "us-west",
+        s3Endpoint: "s3.us-west-001.backblazeb2.com",
+      },
+    };
+    const validGroupMember = {
+      accountId: "member-account-mixed-valid",
+      email: "mixed-valid@example.com",
+      groupId: "group-mixed",
+      groupName: "Mixed recovery",
+      region: "us-west",
+      s3Endpoint: "s3.us-west-001.backblazeb2.com",
+    };
+    const validCreated = {
+      applicationKeyId: "key-mixed-valid",
+      applicationKey: validSecret,
+      groupMember: validGroupMember,
+    };
+    const postJson = vi.fn(async () => [malformedCreated, validCreated]);
+    const ejectGroupMember = vi.fn(async () => validGroupMember);
+    setB2PartnerClientFactoryForTests(() =>
+      partnerSdkClientWithRaw({
+        postJson,
+        ejectGroupMember,
+      }),
+    );
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId: "test-account-123",
+      groupId: validGroupMember.groupId,
+      memberEmail: "mixed-request@example.com",
+      idempotencyKey: "create-group-member-mixed-recovery",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(parseErrorText(rawResult.content[0].text)).toMatchObject({
+      code: "secret_sink_projection_failed",
+      status: 500,
+    });
+    expect(ejectGroupMember).toHaveBeenCalledOnce();
+    expect(ejectGroupMember).toHaveBeenCalledWith(
+      "http://127.0.0.1/partner",
+      "partner-token-xyz",
+      {
+        adminAccountId: "test-account-123",
+        groupId: validGroupMember.groupId,
+        memberAccountId: validGroupMember.accountId,
+      },
+      expect.any(Object),
+    );
+    expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
+    const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
+      minted?: { accountIds?: string[] };
+      recovery?: { status?: string; reason?: string; accountIds?: string[] };
+    };
+    expect(fatalPayload.minted?.accountIds).toEqual([validGroupMember.accountId]);
+    expect(fatalPayload.recovery).toEqual({
+      status: "recovery_incomplete",
+      reason: "missing_account_id",
+      accountIds: [validGroupMember.accountId],
+    });
+    expect(JSON.stringify(rawResult)).not.toContain(missingSecret);
+    expect(JSON.stringify(rawResult)).not.toContain(validSecret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(missingSecret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(validSecret);
   });
 
   it.each([

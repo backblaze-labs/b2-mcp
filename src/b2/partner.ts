@@ -227,11 +227,7 @@ export function registerPartnerTools(
               for (const result of results) {
                 const accountId = partnerResultAccountId(result);
                 if (accountId === null) {
-                  return {
-                    status: "recovery_incomplete",
-                    reason: "missing_account_id",
-                    accountIds,
-                  };
+                  continue;
                 }
                 accountIds.push(accountId);
                 await client.ejectGroupMember({
@@ -239,6 +235,13 @@ export function registerPartnerTools(
                   groupId: args.groupId,
                   memberAccountId: accountId,
                 });
+              }
+              if (accountIds.length !== results.length) {
+                return {
+                  status: "recovery_incomplete",
+                  reason: "missing_account_id",
+                  accountIds,
+                };
               }
               return { status: "ejected_group_members", accountIds };
             },
