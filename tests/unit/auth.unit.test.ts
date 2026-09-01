@@ -640,6 +640,44 @@ describe("B2AuthManager", () => {
     expect(inner.requests).toHaveLength(1);
   });
 
+  it("keeps no-replay native error status when caller aborts during body read", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const abort = new AbortController();
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            const reason = abortError("caller disconnected during error body read");
+            abort.abort(reason);
+            throw reason;
+          }
+        })(400, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: "HTTP 400 response body could not be read",
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
   it("does not mark already-aborted no-replay native requests as unknown status", async () => {
     const inner = new RecordingTransport(() => new StaticHttpResponse(200, {}));
     const transport = createMcpHttpTransport(inner, {

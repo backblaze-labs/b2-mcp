@@ -18,7 +18,7 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
-import { operationStatusUnknownError } from "./utils/errors.js";
+import { codedError, operationStatusUnknownError } from "./utils/errors.js";
 import { logger } from "./utils/logger.js";
 import {
   abortError,
@@ -68,6 +68,8 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
 ]);
 
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
+const RESPONSE_BODY_UNAVAILABLE_CODE = "response_body_unavailable";
+const definitiveBodyReadErrors = new WeakMap<AbortSignal, Error>();
 
 /** Official B2 SDK client plus optional URL guard owned by the auth manager. */
 interface ManagedSdkClient {
@@ -140,6 +142,8 @@ class RequestSignalTransport implements HttpTransport {
         ? withUnknownStatusJsonRead(response, endpoint)
         : response;
     } catch (err) {
+      const definitiveBodyError = takeDefinitiveBodyReadError(signal);
+      if (definitiveBodyError) throw definitiveBodyError;
       if (classifyUnknownStatus && endpoint) throwIfUnknownStatusWrite(endpoint, err);
       if (isAbortError(err)) {
         throw sdkAbortException(err instanceof Error ? err.message || "Aborted" : "Aborted");
@@ -209,6 +213,20 @@ function adaptHttpResponse(
   };
 }
 
+function responseBodyUnavailableError(status: number): Error {
+  return codedError(
+    status,
+    RESPONSE_BODY_UNAVAILABLE_CODE,
+    `HTTP ${status} response body could not be read`,
+  );
+}
+
+function takeDefinitiveBodyReadError(signal: AbortSignal): Error | undefined {
+  const error = definitiveBodyReadErrors.get(signal);
+  definitiveBodyReadErrors.delete(signal);
+  return error;
+}
+
 async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string): Promise<T> {
   try {
     return await response.json<T>();
@@ -224,7 +242,10 @@ function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): Ht
   });
 }
 
-function withDefinitiveErrorJsonRead(response: HttpResponse): HttpResponse {
+function withDefinitiveErrorJsonRead(
+  response: HttpResponse,
+  signal: AbortSignal | undefined,
+): HttpResponse {
   if (isSuccessfulResponse(response)) return response;
   return adaptHttpResponse(response, {
     json: async <T>() => {
@@ -232,10 +253,12 @@ function withDefinitiveErrorJsonRead(response: HttpResponse): HttpResponse {
         return await response.json<T>();
       } catch (err) {
         if (findInCauseChain(err, unknownStatusInterruption)) {
+          const error = responseBodyUnavailableError(response.status);
+          if (signal?.aborted) definitiveBodyReadErrors.set(signal, error);
           return {
             status: response.status,
-            code: "response_body_unavailable",
-            message: `HTTP ${response.status} response body could not be read`,
+            code: RESPONSE_BODY_UNAVAILABLE_CODE,
+            message: error.message,
           } as T;
         }
         throw err;
@@ -372,7 +395,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withDefinitiveErrorJsonRead(withRetryAfterHeader(response));
+      return withDefinitiveErrorJsonRead(withRetryAfterHeader(response), request.signal);
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;
