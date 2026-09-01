@@ -389,10 +389,59 @@ function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknow
   return reportScanMetadataFromStats(totals);
 }
 
+function hasUsageReportSnapshots<T extends { date: string | null }>(
+  value: T,
+): value is T & { date: string };
+function hasUsageReportSnapshots(value: ReportRowsResult): boolean;
+function hasUsageReportSnapshots(value: { date: string | null } | ReportRowsResult): boolean {
+  if ("date" in value) return value.date !== null;
+  // A selected usage CSV key is the egress path's proof that a report snapshot
+  // was loadable in the requested scan window.
+  return value.stats.selected_keys > 0;
+}
+
+function hasUsageReportRows(load: ReportRowsResult): boolean {
+  return load.rows.length > 0;
+}
+
 function noUsageReportSnapshots(stats: ReportLoadStats): Record<string, unknown> {
   return {
     reports_enabled: true,
-    note: NO_USAGE_REPORT_SNAPSHOTS_NOTE,
+    note: stats.stop_reason
+      ? "No usage-report snapshots were loaded before the scan budget was exhausted; " +
+        "results are inconclusive (see report_scan.stop_reasons)."
+      : NO_USAGE_REPORT_SNAPSHOTS_NOTE,
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
+function noUsageReportSnapshotsInPeriod(
+  stats: ReportLoadStats,
+  sinceDate: string,
+  latestSnapshot: string,
+): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note: stats.stop_reason
+      ? "No usage-report snapshots were loaded in the requested period before the scan budget " +
+        "was exhausted; results are inconclusive (see report_scan.stop_reasons)."
+      : latestSnapshot >= sinceDate
+        ? `Report snapshots exist (latest snapshot is ${latestSnapshot}), but no usage-report ` +
+          "data files were found in the requested period."
+        : `No usage-report snapshots found in the requested period. Latest available snapshot ` +
+          `is ${latestSnapshot}.`,
+    latest_snapshot: latestSnapshot,
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
+function noUsageReportRows(stats: ReportLoadStats): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note: stats.stop_reason
+      ? "Usage-report snapshots were found, but no parseable usage rows were loaded before " +
+        "the scan budget was exhausted; results are inconclusive (see report_scan.stop_reasons)."
+      : "Usage-report snapshots were found, but no parseable usage rows were loaded.",
     ...reportScanMetadataFromStats(stats),
   };
 }
@@ -1042,7 +1091,8 @@ export function registerInsightTools(
 
         const latest = await latestSnapshotDate(reportClient, bucket, today, reportBudget);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
-        if (!latest.date) return toolJson(noUsageReportSnapshots(reportBudget.stats));
+        if (!hasUsageReportSnapshots(latest))
+          return toolJson(noUsageReportSnapshots(reportBudget.stats));
 
         const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
@@ -1111,14 +1161,32 @@ export function registerInsightTools(
     async (args) => {
       try {
         const since = args.days != null ? daysAgo(args.days) : startOfMonthUTC();
-        const loaded = await loadReportRows(reportClient, await reportsBucketName(auth), since);
+        const bucket = await reportsBucketName(auth);
+        const reportBudget = createReportScanBudget();
+        const loaded = await loadReportRows(reportClient, bucket, since, reportBudget);
         if (loaded === null) return toolJson(NOT_ENABLED);
         const period = args.days != null ? `last ${args.days} days` : "current month to date";
-        if (loaded.stats.selected_keys === 0) {
+        if (!hasUsageReportSnapshots(loaded)) {
+          let emptySnapshotMetadata = noUsageReportSnapshots(loaded.stats);
+          if (!loaded.stats.stop_reason) {
+            const latest = await latestSnapshotDate(reportClient, bucket, new Date(), reportBudget);
+            if (latest.bucketMissing) return toolJson(NOT_ENABLED);
+            emptySnapshotMetadata = hasUsageReportSnapshots(latest)
+              ? noUsageReportSnapshotsInPeriod(loaded.stats, since, latest.date)
+              : noUsageReportSnapshots(loaded.stats);
+          }
           return toolJson({
             period,
             rank_by: args.by,
-            ...noUsageReportSnapshots(loaded.stats),
+            ...emptySnapshotMetadata,
+            leaders: [],
+          });
+        }
+        if (!hasUsageReportRows(loaded)) {
+          return toolJson({
+            period,
+            rank_by: args.by,
+            ...noUsageReportRows(loaded.stats),
             leaders: [],
           });
         }

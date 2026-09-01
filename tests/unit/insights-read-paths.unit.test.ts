@@ -312,6 +312,74 @@ describe("insight usage-report read paths", () => {
     expect(result.report_scan.parsed_rows).toBe(0);
   });
 
+  it("keeps empty b2_egress_leaders scans inconclusive when truncated", async () => {
+    const day = daysAgo(1);
+    const report = createPagedReportClient(
+      Object.fromEntries(
+        Array.from({ length: 101 }, (_, index) => [
+          `${day}/notes-${String(index).padStart(3, "0")}.txt`,
+          "ignored",
+        ]),
+      ),
+      { pageSize: 1 },
+    );
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("inconclusive");
+    expect(result.note).toContain("scan budget");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.truncated).toBe(true);
+    expect(result.partial).toBe(true);
+    expect(result.report_scan.selected_keys).toBe(0);
+    expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
+  });
+
+  it("distinguishes an empty b2_egress_leaders window from no snapshots yet", async () => {
+    const staleDay = daysAgo(31);
+    const report = createPagedReportClient({
+      [`${staleDay}/usage.account-stale.csv`]: csv([
+        `stale,${staleDay},bucket-stale,bucket-stale,1,4,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 30, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("requested period");
+    expect(result.note).toContain(staleDay);
+    expect(result.latest_snapshot).toBe(staleDay);
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+  });
+
+  it("does not report measured zero when b2_egress_leaders parses no usage rows", async () => {
+    const day = daysAgo(1);
+    const report = createPagedReportClient({
+      [`${day}/usage.account-empty.csv`]: "",
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("no parseable usage rows");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.report_scan.selected_keys).toBe(1);
+    expect(result.report_scan.parsed_rows).toBe(0);
+  });
+
   it("paginates b2_egress_leaders report keys and skips empty or malformed CSV rows", async () => {
     const oldDay = daysAgo(120);
     const dayOne = daysAgo(3);
