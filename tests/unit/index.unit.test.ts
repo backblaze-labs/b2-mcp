@@ -168,10 +168,14 @@ describe("stdio entry point", () => {
     );
   });
 
-  it("falls back to the full stdio surface when capability lookup is unavailable", async () => {
-    const config = testConfig();
-    const server = { close: vi.fn(async () => undefined) };
-    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+  it("falls back to a reduced stdio surface when capability lookup is unavailable", async () => {
+    const config: B2Config = {
+      ...testConfig(),
+      masterKeyId: "distinct-master-id",
+      masterKey: "distinct-master-secret",
+      secretSink: { mode: "off" },
+    };
+    const createServer = vi.spyOn(serverModule, "createServer");
     vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
     vi.spyOn(serverModule, "fetchCapabilities").mockRejectedValue(
       new CredentialResolutionError(
@@ -191,8 +195,20 @@ describe("stdio entry point", () => {
     await startStdio();
 
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
-    expect(factory?.()).toBe(server);
-    expect(createServer).toHaveBeenCalledWith(config, null, {});
+    const server = factory?.() as Parameters<typeof serverModule.getRegisteredTools>[0];
+    const tools = serverModule.getRegisteredTools(server);
+    expect(createServer).toHaveBeenCalledWith(config, [], {
+      failClosed: true,
+    });
+    expect(tools).not.toHaveProperty("s3_put_object");
+    expect(tools).not.toHaveProperty("s3_delete_objects");
+    expect(tools).not.toHaveProperty("s3_get_presigned_url");
+    expect(tools).not.toHaveProperty("b2_create_key");
+    expect(tools).not.toHaveProperty("b2_list_groups");
+    expect(tools).not.toHaveProperty("b2_create_group_member");
+    expect(tools).not.toHaveProperty("b2_eject_group_member");
+    expect(tools).not.toHaveProperty("b2_list_group_members");
+    expect(tools).not.toHaveProperty("b2_reserve_trial_create_account");
     expect(warn).toHaveBeenCalledWith(
       {
         code: "capability_upstream_unavailable",

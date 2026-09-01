@@ -88,9 +88,9 @@ function stdioCapabilityFallback(err: unknown) {
   }
   if (err.code !== "capability_upstream_unavailable") return null;
   return {
-    capabilities: null,
+    capabilities: [],
     log,
-    serverOptions: {},
+    serverOptions: { failClosed: true },
   };
 }
 
