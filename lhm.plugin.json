@@ -1,0 +1,2133 @@
+{
+  "author": "Backblaze",
+  "description": "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
+  "homepage": "https://github.com/backblaze-labs/b2-mcp#readme",
+  "identifier": "backblaze-labs-b2-mcp",
+  "name": "Backblaze B2 MCP Server",
+  "prompts": [],
+  "resources": [],
+  "tags": [
+    "mcp",
+    "backblaze",
+    "b2",
+    "cloud-storage",
+    "s3",
+    "ai",
+    "object-storage"
+  ],
+  "tools": [
+    {
+      "name": "b2_authorize_account",
+      "description": "Authorize with B2 and return account info including accountId, apiUrl, and downloadUrl. The server handles authorization automatically, but this tool is useful for verifying credentials and retrieving account details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_create_bucket",
+      "description": "Create a new B2 bucket. Bucket names must be globally unique, 6-63 characters, and contain letters, digits, hyphens, and periods (names are not case-sensitive and cannot start with 'b2-').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucketName": {
+            "type": "string",
+            "description": "The name for the new bucket. Must be globally unique."
+          },
+          "bucketType": {
+            "type": "string",
+            "enum": [
+              "allPublic",
+              "allPrivate"
+            ],
+            "description": "allPublic allows unauthenticated downloads; allPrivate requires authorization."
+          },
+          "bucketInfo": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50,
+              "pattern": "^[A-Za-z0-9._`~!#$%^&*'|+-]+$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes."
+          },
+          "corsRules": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "corsRuleName": {
+                  "type": "string",
+                  "minLength": 6,
+                  "maxLength": 63,
+                  "pattern": "^[A-Za-z0-9-]+$",
+                  "description": "Unique name: 6-63 letters, digits, hyphens; no b2- prefix."
+                },
+                "allowedOrigins": {
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "allowedHeaders": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "allowedOperations": {
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "exposeHeaders": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "maxAgeSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "corsRuleName",
+                "allowedOrigins",
+                "allowedHeaders",
+                "allowedOperations",
+                "maxAgeSeconds"
+              ]
+            },
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique."
+          },
+          "lifecycleRules": {
+            "description": "Lifecycle rules for automatic file management.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fileNamePrefix": {
+                  "type": "string"
+                },
+                "daysFromHidingToDeleting": {
+                  "type": "number"
+                },
+                "daysFromUploadingToHiding": {
+                  "type": "number"
+                },
+                "daysFromStartingToCancelingUnfinishedLargeFiles": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "fileNamePrefix"
+              ]
+            }
+          },
+          "defaultServerSideEncryption": {
+            "description": "Default server-side encryption for new files in this bucket.",
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "SSE-B2"
+                ]
+              },
+              "algorithm": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "fileLockEnabled": {
+            "description": "Enable Object Lock (file lock) on the bucket at creation. (Object Lock can also be enabled later on an existing bucket via b2_update_bucket.) Must be true before any retention or legal hold can be applied to files in this bucket.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucketName",
+          "bucketType"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_create_group_member",
+      "description": "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_create_key",
+      "description": "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_delete_bucket",
+      "description": "Delete a B2 bucket. The bucket must be empty — all files and file versions must be deleted first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucketId": {
+            "type": "string",
+            "description": "The ID of the bucket to delete."
+          },
+          "confirm": {
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucketId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_delete_key",
+      "description": "Permanently delete a B2 application key. This action is irreversible. Any system using the deleted key will lose access immediately.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "applicationKeyId": {
+            "type": "string",
+            "description": "The ID of the application key to delete."
+          },
+          "confirm": {
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "applicationKeyId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_egress_leaders",
+      "description": "Rank top egress (downloaded bytes) by account or bucket over a period — default month-to-date. For 'who's downloading the most', 'where is egress concentrated'. Returns leaders with each one's share of total egress, from the daily usage reports. Scope follows the caller's key. Needs Usage Reports enabled.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "by": {
+            "default": "account",
+            "description": "Rank by 'account' (default) or 'bucket'.",
+            "type": "string",
+            "enum": [
+              "account",
+              "bucket"
+            ]
+          },
+          "days": {
+            "description": "Rolling window in days (1–90). Omit for current month to date.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90
+          },
+          "limit": {
+            "default": 15,
+            "description": "Leaders to return (15).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_eject_group_member",
+      "description": "Eject a member from a Group. The account is NOT deleted — just removed (the member resets their password on next login). Optionally change their email on eject. Cannot be re-added via API (only the Group Management page).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adminAccountId": {
+            "type": "string",
+            "description": "The accountId of the Group admin. Must be authorized for the Partner API."
+          },
+          "groupId": {
+            "type": "string",
+            "description": "The Group ID from which to eject the member."
+          },
+          "memberAccountId": {
+            "type": "string",
+            "description": "The accountId of the Group member to eject. Must be a member of the specified Group."
+          },
+          "email": {
+            "description": "New email for the ejected account. If omitted, the existing email is kept. Must not already be a Backblaze account.",
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+          },
+          "confirm": {
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "adminAccountId",
+          "groupId",
+          "memberAccountId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_get_bucket_notification_rules",
+      "description": "Get the event notification rules (webhooks) configured for a B2 bucket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucketId": {
+            "type": "string",
+            "description": "The bucket ID to get notification rules for."
+          }
+        },
+        "required": [
+          "bucketId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_largest_files",
+      "description": "List a bucket's largest objects by size via a live listing. For 'largest files', 'what's taking up space in <bucket>'. Give the bucket by name or bucketId; optional path prefix. Sorting by size requires a full listing, so on very large buckets the scan is bounded by max_scan and a time budget — it then returns the largest among the objects scanned with truncated=true; pass a prefix to focus on a subtree for a complete ranking. Returns name, size, and upload time — never contents.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Bucket name or bucketId to inspect."
+          },
+          "limit": {
+            "default": 10,
+            "description": "How many of the largest files to return (default 10, max 100).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "prefix": {
+            "description": "Optional path prefix, e.g. \"checkpoints/\".",
+            "type": "string"
+          },
+          "max_scan": {
+            "default": 50000,
+            "description": "Safety cap on objects scanned (default 50,000, max 500,000). Buckets with millions of files cannot be fully sorted by size in one live call; the scan stops at this cap (or a time budget) and returns truncated=true. Narrow with prefix for an exhaustive ranking of a subtree.",
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 500000
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_list_buckets",
+      "description": "List B2 buckets for the authorized account. Optionally filter by bucket ID, name, or type. When the key is bucket-scoped and no bucketId/bucketName filter is supplied, requests are automatically narrowed to the authorized bucket IDs. Returns bucket ID, name, type, CORS rules, and lifecycle rules for each bucket. Capped to `limit` buckets (default 100, max 1000) to keep the response small for accounts with many buckets; if more exist the result is truncated with total_bucket_count and a note — raise limit or filter to target specific buckets.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucketId": {
+            "description": "Filter to a specific bucket by its ID",
+            "type": "string"
+          },
+          "bucketName": {
+            "description": "Filter to a specific bucket by its name",
+            "type": "string"
+          },
+          "bucketTypes": {
+            "description": "Filter by bucket types. Defaults to all types.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "allPublic",
+                "allPrivate",
+                "snapshot",
+                "all"
+              ]
+            }
+          },
+          "limit": {
+            "default": 100,
+            "description": "Maximum number of buckets to return (default 100, max 1000). The B2 API returns every bucket in one response; this caps how many are surfaced to keep the payload and token cost bounded. If the account has more buckets than the limit, the result is truncated with total_bucket_count and a note — raise limit (up to 1000) or filter by bucketName / bucketId / bucketTypes.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_list_group_members",
+      "description": "List active (ACCEPTED) Group members for a specific Group. Returns up to 1,000 members per call; use nextEmail for pagination. Includes B2 storage stats per member.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adminAccountId": {
+            "type": "string",
+            "description": "The accountId of the Group admin. Must be authorized for the Partner API."
+          },
+          "groupId": {
+            "type": "string",
+            "description": "The groupId whose members to list."
+          },
+          "startEmail": {
+            "description": "Pagination cursor — the first member email to return. If no exact match, starts from the next email alphabetically.",
+            "type": "string"
+          },
+          "maxMemberCount": {
+            "default": 100,
+            "description": "Maximum number of members to return (1-1000). Defaults to 100.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          }
+        },
+        "required": [
+          "adminAccountId",
+          "groupId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_list_groups",
+      "description": "List active Groups administered by a Group admin account. Returns up to 100 groups per call; use nextGroupId for pagination. Requires the account to be authorized for the Partner API.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "adminAccountId": {
+            "type": "string",
+            "description": "The accountId of the Group admin. Must be authorized for the Partner API."
+          },
+          "groupName": {
+            "description": "Filter by Group name. Returns all Groups with this exact name.",
+            "type": "string"
+          },
+          "startGroupId": {
+            "description": "Pagination cursor — the groupId to begin listing from.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "maxGroupCount": {
+            "default": 100,
+            "description": "Maximum number of Groups to return (1-100). Defaults to 100.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "adminAccountId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_list_keys",
+      "description": "List the application keys associated with the B2 account. Does not return the actual key secrets — only key IDs, names, capabilities, and restrictions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "maxKeyCount": {
+            "default": 100,
+            "description": "Maximum number of keys to return (1-1000).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "startApplicationKeyId": {
+            "description": "Pagination cursor from a previous response's nextApplicationKeyId.",
+            "type": "string"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_reserve_trial_create_account",
+      "description": "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "confirm": {
+            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "type": "boolean"
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_set_bucket_notification_rules",
+      "description": "Set event notification rules (webhooks) for a B2 bucket. Replaces any existing rules.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucketId": {
+            "type": "string",
+            "description": "The bucket ID to set notification rules for."
+          },
+          "eventNotificationRules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "A name for this notification rule."
+                },
+                "objectNamePrefix": {
+                  "default": "",
+                  "description": "Only objects whose names start with this prefix trigger the rule. Empty string ('') matches all objects. Required by B2 on every rule.",
+                  "type": "string"
+                },
+                "eventTypes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Event types to trigger notification, e.g. b2:ObjectCreated:*, b2:ObjectDeleted:*."
+                },
+                "targetConfiguration": {
+                  "type": "object",
+                  "properties": {
+                    "targetType": {
+                      "type": "string",
+                      "const": "webhook"
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The HTTPS URL to deliver notifications to."
+                    },
+                    "hmacSha256SigningSecret": {
+                      "description": "Optional secret for HMAC-SHA256 request signing.",
+                      "type": "string"
+                    },
+                    "customHeaders": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "value"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "targetType",
+                    "url"
+                  ]
+                },
+                "isEnabled": {
+                  "type": "boolean",
+                  "description": "Whether this rule is active."
+                }
+              },
+              "required": [
+                "name",
+                "eventTypes",
+                "targetConfiguration",
+                "isEnabled"
+              ]
+            }
+          },
+          "confirm": {
+            "description": "Confirm replacing persistent outbound webhook notification rules. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucketId",
+          "eventNotificationRules"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_unfinished_uploads",
+      "description": "Find abandoned multipart uploads that silently consume storage in a bucket. For 'bucket bloat', 'stuck/incomplete uploads', 'wasted storage'. Returns count, oldest upload age, and wasted bytes. Give the bucket by name or bucketId. Live listing, bounded by max_uploads and an internal time budget — on a very bloated bucket it returns a truncated result (and wasted_gb may be a lower bound) and recommends a lifecycle rule.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Bucket name or bucketId to inspect."
+          },
+          "older_than_days": {
+            "description": "Only count uploads started more than this many days ago (optional).",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "max_uploads": {
+            "default": 1000,
+            "description": "Safety cap on how many unfinished uploads to scan (default 1000, max 10,000). A bucket bloated with abandoned uploads would otherwise trigger an unbounded walk plus a per-upload parts fan-out that times out. If the cap or an internal time budget is hit, the result is truncated and wasted_gb may be a lower bound — add a lifecycle rule to auto-cancel unfinished large files.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_update_bucket",
+      "description": "Update the settings of an existing B2 bucket, including type, CORS rules, lifecycle rules, encryption, and replication configuration.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucketId": {
+            "type": "string",
+            "description": "The ID of the bucket to update."
+          },
+          "bucketType": {
+            "type": "string",
+            "enum": [
+              "allPublic",
+              "allPrivate"
+            ]
+          },
+          "bucketInfo": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50,
+              "pattern": "^[A-Za-z0-9._`~!#$%^&*'|+-]+$"
+            },
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 10000
+            },
+            "description": "Custom metadata: <=10 pairs. Keys: 1-50 UTF-8 bytes, chars A-Z a-z 0-9 . _ ` ~ ! # $ % ^ & * ' | + -, no b2- prefix. Values total <=10,000 UTF-8 bytes."
+          },
+          "corsRules": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "corsRuleName": {
+                  "type": "string",
+                  "minLength": 6,
+                  "maxLength": 63,
+                  "pattern": "^[A-Za-z0-9-]+$",
+                  "description": "Unique name: 6-63 letters, digits, hyphens; no b2- prefix."
+                },
+                "allowedOrigins": {
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "allowedHeaders": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "allowedOperations": {
+                  "minItems": 1,
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "exposeHeaders": {
+                  "maxItems": 100,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 999
+                  }
+                },
+                "maxAgeSeconds": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "corsRuleName",
+                "allowedOrigins",
+                "allowedHeaders",
+                "allowedOperations",
+                "maxAgeSeconds"
+              ]
+            },
+            "description": "CORS rules: <=100. allowedOrigins/allowedOperations require 1-100 non-empty strings; allowedHeaders/exposeHeaders allow <=100. Strings <=999 chars. Per-rule UTF-8 total <1,000. Names unique."
+          },
+          "lifecycleRules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "fileNamePrefix": {
+                  "type": "string"
+                },
+                "daysFromHidingToDeleting": {
+                  "type": "number"
+                },
+                "daysFromUploadingToHiding": {
+                  "type": "number"
+                },
+                "daysFromStartingToCancelingUnfinishedLargeFiles": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "fileNamePrefix"
+              ]
+            }
+          },
+          "defaultServerSideEncryption": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "SSE-B2"
+                ]
+              },
+              "algorithm": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "replicationConfiguration": {
+            "type": "object",
+            "properties": {
+              "asReplicationSource": {
+                "type": "object",
+                "properties": {
+                  "replicationRules": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "replicationRuleName": {
+                          "type": "string"
+                        },
+                        "destinationBucketId": {
+                          "type": "string"
+                        },
+                        "fileNamePrefix": {
+                          "type": "string"
+                        },
+                        "includeExistingFiles": {
+                          "type": "boolean"
+                        },
+                        "isEnabled": {
+                          "type": "boolean"
+                        },
+                        "priority": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "replicationRuleName",
+                        "destinationBucketId",
+                        "isEnabled",
+                        "priority"
+                      ]
+                    }
+                  },
+                  "sourceApplicationKeyId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "replicationRules",
+                  "sourceApplicationKeyId"
+                ]
+              },
+              "asReplicationDestination": {
+                "type": "object",
+                "properties": {
+                  "sourceToDestinationKeyMapping": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "sourceToDestinationKeyMapping"
+                ]
+              }
+            }
+          },
+          "fileLockEnabled": {
+            "description": "Enable Object Lock on the bucket. Unlike S3's PutObjectLockConfiguration (which only enables lock at bucket creation), the B2 native API allows enabling Object Lock on an existing bucket here. Requires the writeBucketRetentions capability.",
+            "type": "boolean"
+          },
+          "defaultRetention": {
+            "description": "Default Object Lock retention for newly uploaded objects. Requires Object Lock enabled on the bucket. Send { mode: null, period: null } to clear.",
+            "type": "object",
+            "properties": {
+              "mode": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "governance",
+                      "compliance"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Retention mode applied to new objects. null clears the default."
+              },
+              "period": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "duration": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "unit": {
+                        "type": "string",
+                        "enum": [
+                          "days",
+                          "years"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "duration",
+                      "unit"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Retention period, e.g. { duration: 7, unit: 'days' }. null clears the default."
+              }
+            },
+            "required": [
+              "mode",
+              "period"
+            ]
+          },
+          "ifRevisionIs": {
+            "description": "Conditional update — only update if the bucket revision matches this value.",
+            "type": "number"
+          },
+          "confirm": {
+            "description": "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucketId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_update_file_legal_hold",
+      "description": "Set or clear a legal hold on a specific file version in B2. When a legal hold is active, the file cannot be deleted regardless of retention settings. Requires the writeFileLegalHolds capability on the application key.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fileId": {
+            "type": "string",
+            "description": "The B2 file ID of the file to update."
+          },
+          "fileName": {
+            "type": "string",
+            "description": "The name of the file (required by the B2 API alongside fileId)."
+          },
+          "legalHold": {
+            "type": "string",
+            "enum": [
+              "on",
+              "off"
+            ],
+            "description": "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns."
+          },
+          "confirm": {
+            "description": "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fileId",
+          "fileName",
+          "legalHold"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_update_file_retention",
+      "description": "Set or modify the retention policy on a specific file version in B2. Supports governance and compliance retention modes. In compliance mode, the retain-until date can only be extended. Requires the writeFileRetentions capability.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "fileId": {
+            "type": "string",
+            "description": "The B2 file ID of the file to update."
+          },
+          "fileName": {
+            "type": "string",
+            "description": "The name of the file (required by the B2 API alongside fileId)."
+          },
+          "fileRetention": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "governance",
+                      "compliance"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Retention mode. null clears the retention policy (governance mode only, with bypassGovernance)."
+              },
+              "retainUntilTimestamp": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Unix timestamp (ms) until which the file is retained. null when mode is null."
+              }
+            },
+            "required": [
+              "mode",
+              "retainUntilTimestamp"
+            ],
+            "description": "Retention policy to apply, or { mode: null, retainUntilTimestamp: null } to clear. This is the flat shape B2's write API expects — do NOT include the read-only isClientAuthorizedToRead/value wrapper that b2_get_file_info returns."
+          },
+          "bypassGovernance": {
+            "description": "If true, allows overriding governance-mode retention. Requires bypassGovernance capability.",
+            "type": "boolean"
+          },
+          "confirm": {
+            "description": "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "fileId",
+          "fileName",
+          "fileRetention"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "b2_usage_growth",
+      "description": "Rank accounts by how much STORED data grew or shrank between two points in time, from the daily B2 usage reports (uses stored_gb, the end-of-day snapshot). For 'which customers grew the most/least', 'who's moving data off'. Compares the latest snapshot against one month/quarter/year earlier and fetches only those two days, so it stays fast even on large report buckets. Returns the two dates compared and per-account start vs current GB and % growth (new accounts flagged). Scope follows the caller's key (a partner key sees all its sub-accounts). Needs Usage Reports enabled.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "period": {
+            "default": "month",
+            "description": "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
+            "type": "string",
+            "enum": [
+              "month",
+              "quarter",
+              "year"
+            ]
+          },
+          "days": {
+            "description": "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3650
+          },
+          "order": {
+            "default": "most_grown",
+            "description": "Ranking. Default most_grown.",
+            "type": "string",
+            "enum": [
+              "most_grown",
+              "least_grown",
+              "shrinking"
+            ]
+          },
+          "limit": {
+            "default": 50,
+            "description": "Max accounts (default 50).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_abort_multipart_upload",
+      "description": "Abort an in-progress S3-compatible multipart upload and release all associated storage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "uploadId": {
+            "type": "string",
+            "description": "The UploadId to abort."
+          },
+          "confirm": {
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "uploadId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_complete_multipart_upload",
+      "description": "Finalize an S3-compatible multipart upload. Provide the ETags of all uploaded parts in order.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "uploadId": {
+            "type": "string",
+            "description": "The UploadId."
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "partNumber": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The part number."
+                },
+                "etag": {
+                  "type": "string",
+                  "description": "The ETag from this part's direct PUT response (the s3_presign_upload_part flow)."
+                }
+              },
+              "required": [
+                "partNumber",
+                "etag"
+              ]
+            },
+            "description": "All uploaded parts in ascending part number order."
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "uploadId",
+          "parts"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_copy_object",
+      "description": "Copy an object within B2 or between B2 buckets through the official B2 SDK. The acl input is retained as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "sourceBucket": {
+            "type": "string",
+            "description": "The source bucket name."
+          },
+          "sourceKey": {
+            "type": "string",
+            "description": "The source object key."
+          },
+          "destinationBucket": {
+            "type": "string",
+            "description": "The destination bucket name."
+          },
+          "destinationKey": {
+            "type": "string",
+            "description": "The destination object key."
+          },
+          "sourceVersionId": {
+            "description": "Copy a specific version of the source object.",
+            "type": "string"
+          },
+          "metadataDirective": {
+            "default": "COPY",
+            "description": "COPY copies metadata from source; REPLACE uses the provided metadata.",
+            "type": "string",
+            "enum": [
+              "COPY",
+              "REPLACE"
+            ]
+          },
+          "contentType": {
+            "description": "New content type (only used with REPLACE).",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "New metadata (only used with REPLACE).",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "acl": {
+            "description": "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
+            "type": "string",
+            "enum": [
+              "private",
+              "public-read"
+            ]
+          }
+        },
+        "required": [
+          "sourceBucket",
+          "sourceKey",
+          "destinationBucket",
+          "destinationKey"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_create_multipart_upload",
+      "description": "Initiate an S3-compatible multipart upload for a large file in B2. Returns an UploadId to use with s3_presign_upload_part, which mints per-part URLs the client uploads directly to B2.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The destination bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key for the final assembled file."
+          },
+          "contentType": {
+            "description": "MIME type of the object.",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Custom metadata for the object.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "acl": {
+            "type": "string",
+            "enum": [
+              "private",
+              "public-read"
+            ]
+          },
+          "serverSideEncryption": {
+            "description": "Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS.",
+            "type": "string",
+            "enum": [
+              "AES256"
+            ]
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_delete_object",
+      "description": "Delete an object from a B2 bucket. Optionally specify a version ID to delete a specific version.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key to delete."
+          },
+          "versionId": {
+            "description": "Version ID of the specific version to delete.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_delete_objects",
+      "description": "Delete multiple objects from a B2 bucket with bounded SDK concurrency (up to 1000 objects).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "objects": {
+            "maxItems": 1000,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "description": "The object key."
+                },
+                "versionId": {
+                  "description": "Specific version to delete.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            },
+            "description": "Array of objects to delete."
+          },
+          "quiet": {
+            "default": true,
+            "description": "If true, only return errors (not successes) in the response.",
+            "type": "boolean"
+          },
+          "bypassGovernance": {
+            "description": "If true, bypass governance-mode Object Lock retention when deleting specific versions. Requires bypassGovernance capability.",
+            "type": "boolean"
+          },
+          "confirm": {
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucket",
+          "objects"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_get_bucket_location",
+      "description": "Get the region (location constraint) of a B2 bucket via the S3-compatible API. No native b2_* equivalent — used to verify region/endpoint pairing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_get_object",
+      "description": "Read a SMALL object inline (≤1 MiB, returned base64) — for manifests, sidecars, and configs the agent must inspect — or stream any size to a local path with saveToPath. For real object data, generate a GetObject URL with s3_get_presigned_url and download directly from B2 (bytes never pass through the server or the model context).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "range": {
+            "description": "Byte range, e.g. 'bytes=0-1048575'.",
+            "type": "string"
+          },
+          "versionId": {
+            "description": "Specific version of the object to retrieve.",
+            "type": "string"
+          },
+          "saveToPath": {
+            "description": "If provided, save the file to this local path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_get_presigned_url",
+      "description": "Generate a short-lived presigned URL bearer capability for one B2 object — GetObject (download) or PutObject (upload). The response includes the URL, operation, expiresIn, and expiresAt; treat the URL as sensitive until it expires. This is the preferred path for moving real object data: bytes flow directly between the client/worker and B2 and never pass through the MCP server. Note: presigned POST (browser form uploads) is NOT supported by B2; use a PutObject URL instead.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "GetObject",
+              "PutObject"
+            ],
+            "description": "The operation the URL allows: GetObject to download or PutObject to upload."
+          },
+          "expiresIn": {
+            "default": 3600,
+            "description": "URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 604800
+          },
+          "versionId": {
+            "description": "For GetObject: the specific version ID to target.",
+            "type": "string"
+          },
+          "contentType": {
+            "description": "For PutObject: restrict the upload to this content type.",
+            "type": "string"
+          },
+          "confirm": {
+            "description": "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "operation"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_head_bucket",
+      "description": "Check whether a B2 bucket exists and is reachable on the S3-compatible endpoint with the current credentials. Use this to validate S3-surface reachability (the native b2_list_buckets confirms existence but not S3 reachability).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name to check."
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_head_object",
+      "description": "Get metadata for a B2 object without downloading it. Returns content type, size, last modified, ETag, and custom metadata.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "versionId": {
+            "description": "Specific version of the object.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_list_multipart_uploads",
+      "description": "List all in-progress S3-compatible multipart uploads for a bucket.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "prefix": {
+            "description": "Only list uploads for keys with this prefix.",
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "maxUploads": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "keyMarker": {
+            "description": "Pagination cursor.",
+            "type": "string"
+          },
+          "uploadIdMarker": {
+            "description": "Pagination cursor.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_list_object_versions",
+      "description": "List all versions of objects in a versioned B2 bucket, including delete markers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "prefix": {
+            "description": "Only list versions for objects with this prefix.",
+            "type": "string"
+          },
+          "delimiter": {
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "keyMarker": {
+            "description": "Pagination cursor — key from a previous response.",
+            "type": "string"
+          },
+          "versionIdMarker": {
+            "description": "Pagination cursor — version ID from a previous response.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_list_objects_v2",
+      "description": "List objects in a B2 bucket via the S3-compatible ListObjectsV2 API. Supports prefix filtering, delimiter-based folder listings, and pagination.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "prefix": {
+            "description": "Only return objects whose keys start with this prefix.",
+            "type": "string"
+          },
+          "delimiter": {
+            "description": "Use '/' to list like a folder tree.",
+            "type": "string"
+          },
+          "maxKeys": {
+            "default": 1000,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "continuationToken": {
+            "description": "Pagination token from a previous response.",
+            "type": "string"
+          },
+          "startAfter": {
+            "description": "Return objects after this key (exclusive S3 StartAfter semantics).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_list_parts",
+      "description": "List the parts that have been uploaded for an in-progress S3-compatible multipart upload.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "uploadId": {
+            "type": "string",
+            "description": "The UploadId."
+          },
+          "maxParts": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000
+          },
+          "partNumberMarker": {
+            "description": "Pagination cursor.",
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "uploadId"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_presign_upload_part",
+      "description": "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key."
+          },
+          "uploadId": {
+            "type": "string",
+            "description": "The UploadId from s3_create_multipart_upload."
+          },
+          "partNumbers": {
+            "minItems": 1,
+            "maxItems": 10000,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "description": "Part numbers to presign (each 1–10000). Mint all parts at once, or only the missing ones to resume."
+          },
+          "expiresIn": {
+            "default": 3600,
+            "description": "URL expiry in seconds (default: 3600 = 1 hour, max: 604800 = 7 days).",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 604800
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "uploadId",
+          "partNumbers"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_put_bucket_lifecycle",
+      "description": "Set S3 lifecycle rules on a B2 bucket; pass rules: [] to clear the S3 lifecycle configuration. Supports AbortIncompleteMultipartUpload, Expiration, and NoncurrentVersionExpiration. B2 does not support Transition/storage-class rules.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The bucket name."
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "A unique identifier for the rule."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "Enabled",
+                    "Disabled"
+                  ]
+                },
+                "filter": {
+                  "type": "object",
+                  "properties": {
+                    "prefix": {
+                      "description": "Only apply to objects with this prefix.",
+                      "type": "string"
+                    }
+                  }
+                },
+                "expiration": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "description": "Number of days after creation to expire the object.",
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "expiredObjectDeleteMarker": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "noncurrentVersionExpiration": {
+                  "type": "object",
+                  "properties": {
+                    "noncurrentDays": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Days after becoming noncurrent to expire the version."
+                    }
+                  },
+                  "required": [
+                    "noncurrentDays"
+                  ]
+                },
+                "abortIncompleteMultipartUpload": {
+                  "type": "object",
+                  "properties": {
+                    "daysAfterInitiation": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Cancel incomplete multipart uploads after this many days."
+                    }
+                  },
+                  "required": [
+                    "daysAfterInitiation"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "status"
+              ]
+            },
+            "description": "Rules to set; [] clears the configuration."
+          },
+          "confirm": {
+            "description": "Required under 'confirm' when rules is [] or rules expire objects. Not needed for abort-incomplete-upload-only rules.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bucket",
+          "rules"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_put_object",
+      "description": "Upload a SMALL object inline (≤1 MiB) to a B2 bucket — for manifests, sidecars, and tiny configs. Provide base64-encoded content or a local file path. For real object data, generate a PutObject URL with s3_get_presigned_url and upload directly to B2 (bytes never pass through the server), or use the multipart tools for large objects.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The destination bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The object key (file path within the bucket)."
+          },
+          "filePath": {
+            "description": "Absolute local path to the file to upload.",
+            "type": "string"
+          },
+          "content": {
+            "description": "Base64-encoded content to upload.",
+            "type": "string"
+          },
+          "contentType": {
+            "description": "MIME type of the object.",
+            "type": "string"
+          },
+          "metadata": {
+            "description": "Custom metadata key-value pairs.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "acl": {
+            "description": "Accepted as a no-op S3 compatibility hint; B2 bucket policy is unchanged.",
+            "type": "string",
+            "enum": [
+              "private",
+              "public-read"
+            ]
+          },
+          "serverSideEncryption": {
+            "description": "Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS.",
+            "type": "string",
+            "enum": [
+              "AES256"
+            ]
+          },
+          "storageClass": {
+            "description": "Accepted as a no-op S3 compatibility hint; B2 storage class is unchanged.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "s3_upload_part_copy",
+      "description": "Copy a part from an existing B2 object into an in-progress S3-compatible multipart upload. Use this to efficiently assemble large objects from existing parts without re-uploading data.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "description": "The destination bucket name."
+          },
+          "key": {
+            "type": "string",
+            "description": "The destination object key."
+          },
+          "uploadId": {
+            "type": "string",
+            "description": "The UploadId from s3_create_multipart_upload."
+          },
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000,
+            "description": "The part number (1–10000)."
+          },
+          "copySource": {
+            "type": "string",
+            "description": "The source object in 'bucket/key' format, e.g. 'my-bucket/path/to/file.dat'. URL-encode special characters in the key."
+          },
+          "copySourceRange": {
+            "description": "Byte range to copy from the source, e.g. 'bytes=0-104857599' for the first 100MB.",
+            "type": "string"
+          },
+          "copySourceVersionId": {
+            "description": "Version ID of the source object to copy from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bucket",
+          "key",
+          "uploadId",
+          "partNumber",
+          "copySource"
+        ],
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ],
+  "version": "0.2.0"
+}
