@@ -270,6 +270,7 @@ const NOT_ENABLED = {
     "enabled by Backblaze Support / your account representative (Partner, Enterprise, or Groups). " +
     "Once enabled, B2 backfills the previous 7 days.",
 };
+const NO_USAGE_REPORT_SNAPSHOTS_NOTE = "No usage-report snapshots found yet.";
 
 const REPORT_SCAN_LIMITS = {
   maxPages: 100,
@@ -386,6 +387,14 @@ function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknow
     return acc;
   }, newReportStats());
   return reportScanMetadataFromStats(totals);
+}
+
+function noUsageReportSnapshots(stats: ReportLoadStats): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note: NO_USAGE_REPORT_SNAPSHOTS_NOTE,
+    ...reportScanMetadataFromStats(stats),
+  };
 }
 
 /**
@@ -1033,12 +1042,7 @@ export function registerInsightTools(
 
         const latest = await latestSnapshotDate(reportClient, bucket, today, reportBudget);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
-        if (!latest.date)
-          return toolJson({
-            reports_enabled: true,
-            note: "No usage-report snapshots found yet.",
-            ...reportScanMetadataFromStats(reportBudget.stats),
-          });
+        if (!latest.date) return toolJson(noUsageReportSnapshots(reportBudget.stats));
 
         const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
@@ -1109,11 +1113,20 @@ export function registerInsightTools(
         const since = args.days != null ? daysAgo(args.days) : startOfMonthUTC();
         const loaded = await loadReportRows(reportClient, await reportsBucketName(auth), since);
         if (loaded === null) return toolJson(NOT_ENABLED);
+        const period = args.days != null ? `last ${args.days} days` : "current month to date";
+        if (loaded.stats.selected_keys === 0) {
+          return toolJson({
+            period,
+            rank_by: args.by,
+            ...noUsageReportSnapshots(loaded.stats),
+            leaders: [],
+          });
+        }
         const leaders = computeEgressLeaders(loaded.rows, args.by);
         const total = leaders.reduce((s, l) => s + l.egress, 0);
         const top = leaders.slice(0, args.limit);
         return toolJson({
-          period: args.days != null ? `last ${args.days} days` : "current month to date",
+          period,
           rank_by: args.by,
           total_egress_gb: gb(total),
           ...reportScanMetadata(loaded),

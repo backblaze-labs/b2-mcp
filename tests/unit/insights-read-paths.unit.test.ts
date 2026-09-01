@@ -291,6 +291,27 @@ describe("insight usage-report read paths", () => {
     ]);
   });
 
+  it.each([
+    [{ by: "account" as const, days: 30, limit: 5 }, "last 30 days"],
+    [{ by: "bucket" as const, limit: 5 }, "current month to date"],
+  ])("returns a clean empty-snapshot result for b2_egress_leaders", async (args, period) => {
+    const report = createPagedReportClient({});
+    const tools = registerTools(report.client);
+
+    const result = parseResult(await tools.call("b2_egress_leaders", args));
+
+    expect(result.period).toBe(period);
+    expect(result.rank_by).toBe(args.by);
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toBe("No usage-report snapshots found yet.");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.report_scan.pages).toEqual(expect.any(Number));
+    expect(result.report_scan.pages).toBeGreaterThan(0);
+    expect(result.report_scan.listed_keys).toBe(0);
+    expect(result.report_scan.parsed_rows).toBe(0);
+  });
+
   it("paginates b2_egress_leaders report keys and skips empty or malformed CSV rows", async () => {
     const oldDay = daysAgo(120);
     const dayOne = daysAgo(3);
