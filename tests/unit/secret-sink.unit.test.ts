@@ -97,6 +97,31 @@ function appendLockNames(dir: string): string[] {
   return readdirSync(dir).filter((name) => name.endsWith(APPEND_LOCK_SUFFIX));
 }
 
+function inspectLoggedValues(value: unknown): string {
+  const values: string[] = [];
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (node === null || node === undefined) return;
+    if (typeof node === "string") {
+      values.push(node);
+      return;
+    }
+    if (typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (node instanceof Error) {
+      values.push(node.name, node.message);
+      visit((node as { cause?: unknown }).cause);
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(node);
+    for (const descriptor of Object.values(descriptors)) {
+      if ("value" in descriptor) visit(descriptor.value);
+    }
+  };
+  visit(value);
+  return values.join("\n");
+}
+
 function durableSecretTestOptions(
   file: string,
   idempotency: ReturnType<typeof durableSecretIdempotency>,
@@ -2246,18 +2271,18 @@ describe("secret sink file writer", () => {
     const recoverSpy = vi.fn();
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const secret = "B2_MCP_CANARY_SECRET_ambiguous_rollback";
+    const secret = "K005_AMBIGUOUS_COMMIT_SECRET_1234567890";
     const fsync = secretSinkFileOpsForTests.fsyncSync;
     let recordFsyncFailed = false;
     vi.spyOn(secretSinkFileOpsForTests, "fsyncSync").mockImplementation((fd) => {
       if (!recordFsyncFailed && existsSync(file) && readFileSync(file, "utf8").includes(secret)) {
         recordFsyncFailed = true;
-        throw new Error("simulated record fsync failure");
+        throw new Error(`simulated record fsync failure after minting ${secret}`);
       }
       return fsync(fd);
     });
     vi.spyOn(secretSinkFileOpsForTests, "ftruncateSync").mockImplementation(() => {
-      throw new Error("simulated rollback failure");
+      throw new Error(`simulated rollback failure after minting ${secret}`);
     });
     let createCalls = 0;
     const idempotency = durableSecretIdempotency({
@@ -2317,6 +2342,8 @@ describe("secret sink file writer", () => {
     expect(createCalls).toBe(0);
     expect(recoverSpy).not.toHaveBeenCalled();
     expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("pending_reconciliation");
+    const fatalText = inspectLoggedValues(fatalSpy.mock.calls);
+    expect(fatalText).toContain("pending_reconciliation");
+    expect(fatalText).not.toContain(secret);
   });
 });

@@ -509,12 +509,12 @@ export function appendSecretSinkRecord(
             rollbackErr,
           );
           logger.fatal(
-            {
+            durableSecretLogPayload(result, {
               err,
               rollbackErr,
               tool,
               secretSink: { type: "file", path: sink.filePath },
-            },
+            }),
             "secret_sink.rollback_failed_after_write_error",
           );
         }
@@ -1497,13 +1497,13 @@ export async function executeDurableSecretOperation<T>({
   } catch (err) {
     if (isSecretSinkCommitAmbiguous(err)) {
       logger.fatal(
-        {
+        durableSecretLogPayload(result, {
           err,
           tool: toolName,
           secretSink: { type: "file", path: secretSink.filePath },
           minted: durableSecretDiagnostics(diagnostics, result),
           recovery: { status: "pending_reconciliation" },
-        },
+        }),
         "secret_sink.write_failed_with_ambiguous_commit",
       );
       throw {
