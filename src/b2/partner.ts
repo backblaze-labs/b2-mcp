@@ -5,7 +5,7 @@
  */
 import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
-import { toolJson, toolError } from "../utils/errors.js";
+import { codedError, toolJson, toolError } from "../utils/errors.js";
 import type { B2AuthManager } from "../auth.js";
 import type { B2Client } from "./client.js";
 import type { B2Config } from "../utils/types.js";
@@ -21,8 +21,31 @@ const REGION_VALUES = ["us-east", "us-west", "ca-east", "eu-central"] as const;
 
 type SecretBearingPartnerResult = { readonly applicationKey: string };
 
-function redactedPartnerResult<T extends SecretBearingPartnerResult>(response: T): T {
-  return { ...response, applicationKey: APPLICATION_KEY_REDACTED };
+interface PartnerGroupMemberProjection {
+  readonly accountId: string;
+  readonly email: string;
+  readonly groupId: string;
+  readonly groupName: string;
+  readonly region: string;
+  readonly s3Endpoint: string;
+}
+
+interface CreateGroupMemberProjection extends SecretBearingPartnerResult {
+  readonly applicationKeyId: string;
+  readonly applicationKey: string;
+  readonly groupMember: PartnerGroupMemberProjection;
+}
+
+interface ReserveTrialCreateAccountProjection extends SecretBearingPartnerResult {
+  readonly accountId: string;
+  readonly applicationKeyId: string;
+  readonly applicationKey: string;
+  readonly s3Endpoint: string;
+  readonly startDate: string;
+  readonly endDate: string;
+  readonly email: string;
+  readonly bucketName: string;
+  readonly bucketId: string;
 }
 
 function recordValue(record: unknown, key: string): unknown {
@@ -36,12 +59,84 @@ function stringValue(record: unknown, key: string): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function requiredStringValue(record: unknown, key: string, context: string): string {
+  const value = stringValue(record, key);
+  if (value !== null) return value;
+  throw codedError(
+    502,
+    "unexpected_partner_response",
+    `${context} response did not contain a non-empty string ${key}.`,
+  );
+}
+
+function partnerResultEntries(response: unknown): unknown[] {
+  if (Array.isArray(response)) return response;
+  const results = recordValue(response, "results");
+  return Array.isArray(results) ? results : [response];
+}
+
+function uniqueStrings(values: Iterable<string | null>): string[] {
+  return [...new Set([...values].filter((value): value is string => value !== null))];
+}
+
+function partnerGroupMember(result: unknown): unknown {
+  return recordValue(result, "groupMember");
+}
+
 function partnerGroupMemberAccountId(result: unknown): string | null {
-  return stringValue(recordValue(result, "groupMember"), "accountId");
+  return stringValue(partnerGroupMember(result), "accountId");
 }
 
 function partnerDiagnosticAccountId(result: unknown): string | null {
   return partnerGroupMemberAccountId(result) ?? stringValue(result, "accountId");
+}
+
+function partnerGroupMemberProjection(result: unknown): PartnerGroupMemberProjection {
+  const groupMember = partnerGroupMember(result);
+  return {
+    accountId: requiredStringValue(groupMember, "accountId", "b2_create_group_member"),
+    email: requiredStringValue(groupMember, "email", "b2_create_group_member"),
+    groupId: requiredStringValue(groupMember, "groupId", "b2_create_group_member"),
+    groupName: requiredStringValue(groupMember, "groupName", "b2_create_group_member"),
+    region: requiredStringValue(groupMember, "region", "b2_create_group_member"),
+    s3Endpoint: requiredStringValue(groupMember, "s3Endpoint", "b2_create_group_member"),
+  };
+}
+
+function createGroupMemberProjection(
+  result: unknown,
+  { redact }: { redact: boolean },
+): CreateGroupMemberProjection {
+  return {
+    applicationKeyId: requiredStringValue(result, "applicationKeyId", "b2_create_group_member"),
+    applicationKey: redact
+      ? APPLICATION_KEY_REDACTED
+      : requiredStringValue(result, "applicationKey", "b2_create_group_member"),
+    groupMember: partnerGroupMemberProjection(result),
+  };
+}
+
+function reserveTrialCreateAccountProjection(
+  result: unknown,
+  { redact }: { redact: boolean },
+): ReserveTrialCreateAccountProjection {
+  return {
+    accountId: requiredStringValue(result, "accountId", "b2_reserve_trial_create_account"),
+    applicationKeyId: requiredStringValue(
+      result,
+      "applicationKeyId",
+      "b2_reserve_trial_create_account",
+    ),
+    applicationKey: redact
+      ? APPLICATION_KEY_REDACTED
+      : requiredStringValue(result, "applicationKey", "b2_reserve_trial_create_account"),
+    s3Endpoint: requiredStringValue(result, "s3Endpoint", "b2_reserve_trial_create_account"),
+    startDate: requiredStringValue(result, "startDate", "b2_reserve_trial_create_account"),
+    endDate: requiredStringValue(result, "endDate", "b2_reserve_trial_create_account"),
+    email: requiredStringValue(result, "email", "b2_reserve_trial_create_account"),
+    bucketName: requiredStringValue(result, "bucketName", "b2_reserve_trial_create_account"),
+    bucketId: requiredStringValue(result, "bucketId", "b2_reserve_trial_create_account"),
+  };
 }
 
 function recoveryErrorMessage(err: unknown): string {
@@ -55,17 +150,63 @@ function activeSecretSink(
 }
 
 function partnerSecretDiagnostics(response: unknown) {
-  const applicationKeyId = stringValue(response, "applicationKeyId");
-  const accountId = partnerDiagnosticAccountId(response);
+  const entries = partnerResultEntries(response);
   return {
-    resultCount: 1,
-    applicationKeyIds: applicationKeyId === null ? [] : [applicationKeyId],
-    accountIds: accountId === null ? [] : [accountId],
+    resultCount: entries.length,
+    applicationKeyIds: uniqueStrings(
+      entries.map((entry) => stringValue(entry, "applicationKeyId")),
+    ),
+    accountIds: uniqueStrings(entries.map(partnerDiagnosticAccountId)),
   };
 }
 
 function callerFingerprint(config: B2Config): string {
   return config.callerFingerprint ?? config.credentialFingerprint ?? config.applicationKeyId;
+}
+
+function recoverableGroupMemberAccountIds(
+  response: unknown,
+  expected: { groupId: string; memberEmail: string },
+): { accountIds: string[]; rejectedCount: number } {
+  const accountIds: string[] = [];
+  let rejectedCount = 0;
+  for (const entry of partnerResultEntries(response)) {
+    const groupMember = partnerGroupMember(entry);
+    const accountId = stringValue(groupMember, "accountId");
+    const email = stringValue(groupMember, "email");
+    const groupId = stringValue(groupMember, "groupId");
+    if (accountId === null) continue;
+    if (email !== expected.memberEmail || groupId !== expected.groupId) {
+      rejectedCount++;
+      continue;
+    }
+    accountIds.push(accountId);
+  }
+  return { accountIds: uniqueStrings(accountIds), rejectedCount };
+}
+
+function confirmedGroupMemberAccountIds(
+  pages: unknown,
+  expected: { groupId: string; memberEmail: string; accountIds: readonly string[] },
+): string[] {
+  const expectedIds = new Set(expected.accountIds);
+  const confirmed: string[] = [];
+  for (const page of partnerResultEntries(pages)) {
+    const members = recordValue(page, "groupMembers");
+    if (!Array.isArray(members)) continue;
+    for (const member of members) {
+      const accountId = stringValue(member, "accountId");
+      if (
+        accountId !== null &&
+        expectedIds.has(accountId) &&
+        stringValue(member, "email") === expected.memberEmail &&
+        stringValue(member, "groupId") === expected.groupId
+      ) {
+        confirmed.push(accountId);
+      }
+    }
+  }
+  return uniqueStrings(confirmed);
 }
 
 /**
@@ -197,32 +338,79 @@ export function registerPartnerTools(
             }),
             create: () => client.createGroupMember(request),
             projectRedacted: (created, pointer: SecretSinkPointer) => ({
-              results: [redactedPartnerResult(created)],
+              results: [createGroupMemberProjection(created, { redact: true })],
               secretSink: pointer,
             }),
-            projectInline: (created, warning) => ({ results: [created], warning }),
+            projectInline: (created, warning) => ({
+              results: [createGroupMemberProjection(created, { redact: false })],
+              warning,
+            }),
             diagnostics: partnerSecretDiagnostics,
             recoverAfterSinkFailure: async (created) => {
               const accountIds: string[] = [];
               const ejectionFailures: { accountId: string; error: string }[] = [];
-              const accountId = partnerGroupMemberAccountId(created);
-              if (accountId === null) {
+              const recoverable = recoverableGroupMemberAccountIds(created, {
+                groupId: args.groupId,
+                memberEmail: args.memberEmail,
+              });
+              if (recoverable.accountIds.length === 0) {
                 return {
                   status: "recovery_incomplete",
-                  reason: "missing_account_id",
+                  reason:
+                    recoverable.rejectedCount > 0
+                      ? "response_not_tied_to_request"
+                      : "missing_account_id",
                   accountIds,
                 };
               }
+
+              let confirmedAccountIds: string[];
               try {
-                await client.ejectGroupMember({
-                  adminAccountId: args.adminAccountId,
-                  groupId: args.groupId,
-                  memberAccountId: accountId,
-                });
-                accountIds.push(accountId);
+                confirmedAccountIds = confirmedGroupMemberAccountIds(
+                  await client.listGroupMembers({
+                    adminAccountId: args.adminAccountId,
+                    groupId: args.groupId,
+                    startEmail: args.memberEmail,
+                    maxMemberCount: 100,
+                  }),
+                  {
+                    groupId: args.groupId,
+                    memberEmail: args.memberEmail,
+                    accountIds: recoverable.accountIds,
+                  },
+                );
               } catch (err) {
-                ejectionFailures.push({ accountId, error: recoveryErrorMessage(err) });
+                return {
+                  status: "recovery_incomplete",
+                  reason: "confirmation_failed",
+                  accountIds,
+                  candidateAccountIds: recoverable.accountIds,
+                  error: recoveryErrorMessage(err),
+                };
               }
+
+              if (confirmedAccountIds.length === 0) {
+                return {
+                  status: "recovery_incomplete",
+                  reason: "unconfirmed_account_id",
+                  accountIds,
+                  candidateAccountIds: recoverable.accountIds,
+                };
+              }
+
+              for (const accountId of confirmedAccountIds) {
+                try {
+                  await client.ejectGroupMember({
+                    adminAccountId: args.adminAccountId,
+                    groupId: args.groupId,
+                    memberAccountId: accountId,
+                  });
+                  accountIds.push(accountId);
+                } catch (err) {
+                  ejectionFailures.push({ accountId, error: recoveryErrorMessage(err) });
+                }
+              }
+
               if (ejectionFailures.length > 0) {
                 return {
                   status: "recovery_incomplete",
@@ -386,10 +574,13 @@ export function registerPartnerTools(
             }),
             create: () => client.reserveTrialCreateAccount(request),
             projectRedacted: (created, pointer: SecretSinkPointer) => ({
-              results: [redactedPartnerResult(created)],
+              results: [reserveTrialCreateAccountProjection(created, { redact: true })],
               secretSink: pointer,
             }),
-            projectInline: (created, warning) => ({ results: [created], warning }),
+            projectInline: (created, warning) => ({
+              results: [reserveTrialCreateAccountProjection(created, { redact: false })],
+              warning,
+            }),
             diagnostics: partnerSecretDiagnostics,
           });
         } catch (err) {

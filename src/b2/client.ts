@@ -24,6 +24,7 @@ import type {
   BucketId,
   Capability,
   CreateKeyOptions as SdkCreateKeyOptions,
+  EventNotificationCustomHeader,
   EventNotificationRule as SdkEventNotificationRule,
   FileVersion,
   FullApplicationKey,
@@ -625,6 +626,14 @@ export type PartnerReserveTrialCreateAccountOptions = ReserveTrialCreateAccountR
 /** Factory hook for constructing the official Partner SDK client in tests. */
 type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
 
+type PartnerRawPostNonRetryingMutationJson = (
+  groupsApiUrl: string,
+  authToken: string,
+  endpoint: string,
+  body: unknown,
+  options?: PartnerRawRequestOptions,
+) => Promise<unknown>;
+
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const PARTNER_TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
@@ -707,14 +716,14 @@ function partnerNestedRecordField(
 }
 
 function validateSecretBearingPartnerResponse<T extends { readonly applicationKey: string }>(
-  response: T,
+  response: unknown,
   endpoint: string,
   validateResult: (result: Record<string, unknown>, endpoint: string) => void,
 ): T {
   const record = partnerResponseRecord(response, endpoint);
   partnerStringField(record, "applicationKey", endpoint);
   validateResult(record, endpoint);
-  return cloneJsonResponse({ ...response } as T);
+  return cloneJsonResponse({ ...(response as T) });
 }
 
 function validateCreateGroupMemberResult(result: Record<string, unknown>, endpoint: string): void {
@@ -753,6 +762,39 @@ function validateReserveTrialCreateAccountRequest(
     );
   }
   return request;
+}
+
+async function postNonRetryingPartnerMutationJson(
+  client: SdkPartnerClient,
+  groupsApiUrl: string,
+  authToken: string,
+  endpoint: string,
+  body: unknown,
+  options?: PartnerRawRequestOptions,
+): Promise<unknown> {
+  // The public SDK create facades install redaction hooks before returning.
+  // MCP durable-secret handling needs the raw 2xx body first so validation,
+  // sink, and recovery failures all pass through durableSecretPostCreateFailure.
+  const postNonRetryingMutationJson = (
+    client.raw as unknown as {
+      postNonRetryingMutationJson?: PartnerRawPostNonRetryingMutationJson;
+    }
+  ).postNonRetryingMutationJson;
+  if (typeof postNonRetryingMutationJson !== "function") {
+    throw codedError(
+      500,
+      "partner_raw_post_unavailable",
+      "The installed B2 SDK does not expose the non-retrying Partner mutation boundary.",
+    );
+  }
+  return postNonRetryingMutationJson.call(
+    client.raw,
+    groupsApiUrl,
+    authToken,
+    endpoint,
+    body,
+    options,
+  );
 }
 
 function toServerSideEncryptionResult(
@@ -815,6 +857,9 @@ function bucketReadableValue<T>(
     | null
     | undefined,
 ): T | null | undefined {
+  // SDK 0.4's canonical bucket DTO wraps read-protected encryption and
+  // replication fields. The direct-value branch exists only for older
+  // hand-built fixtures and can be removed once those fixtures all use wrappers.
   if (value == null) return value;
   if (typeof value === "object" && "value" in value && "isClientAuthorizedToRead" in value) {
     return value.value;
@@ -898,11 +943,13 @@ function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
 }
 
 function notificationCustomHeadersResult(
-  value: EventNotificationRuleInput["targetConfiguration"]["customHeaders"],
+  value: readonly EventNotificationCustomHeader[] | Readonly<Record<string, string>> | undefined,
 ): Record<string, string> | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) return value;
-  return Object.fromEntries(value.map((header) => [header.name, header.value]));
+  if (Array.isArray(value)) {
+    return Object.fromEntries(value.map((header) => [header.name, header.value]));
+  }
+  return { ...(value as Readonly<Record<string, string>>) };
 }
 
 function toNotificationRulesResult(
@@ -926,8 +973,7 @@ function toNotificationRulesResult(
         ...(rule.targetConfiguration.customHeaders !== undefined
           ? {
               customHeaders: notificationCustomHeadersResult(
-                rule.targetConfiguration
-                  .customHeaders as EventNotificationRuleInput["targetConfiguration"]["customHeaders"],
+                rule.targetConfiguration.customHeaders,
               ),
             }
           : {}),
@@ -977,13 +1023,18 @@ function normalizeCreateKeyOptions(options: CreateKeyOptions): SdkCreateKeyOptio
 
 type FileVersionSummary = Pick<FileVersion, "fileName" | "contentLength" | "uploadTimestamp">;
 
-type S3FileVersionBindingSource = FileVersionSummary & {
+type S3FileVersionBindingSource = Pick<
+  FileVersion,
+  | "bucketId"
+  | "contentLength"
+  | "contentType"
+  | "fileId"
+  | "fileInfo"
+  | "fileName"
+  | "uploadTimestamp"
+> & {
   readonly action: B2S3FileVersionBinding["action"];
-  readonly bucketId: unknown;
-  readonly contentType: string;
-  readonly fileId: unknown;
-  readonly fileInfo: Record<string, string>;
-  readonly serverSideEncryption?: SdkBucketDefaultServerSideEncryption | null;
+  readonly serverSideEncryption?: FileVersion["serverSideEncryption"] | null;
 };
 
 function toFileVersionResult(value: FileVersionSummary): FileVersionResult {
@@ -1869,29 +1920,28 @@ export class B2Client {
    */
   async listGroupMembers(
     options: PartnerListGroupMembersOptions,
-  ): Promise<ListGroupMembersResponse> {
-    return cloneJsonResponse(
-      await this.withPartnerCircuit(
-        { retryOnUnauthorized: true },
-        (client, auth, coordinates, requestOptions) => {
-          validatePartnerAdminAccount(auth, options.adminAccountId);
-          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
-          return client.raw.listGroupMembers(
-            groupsApiUrl,
-            authToken,
-            {
-              adminAccountId,
-              groupId: groupId(options.groupId),
-              ...(options.startEmail !== undefined ? { startEmail: options.startEmail } : {}),
-              ...(options.maxMemberCount !== undefined
-                ? { maxMemberCount: options.maxMemberCount }
-                : {}),
-            },
-            requestOptions,
-          );
-        },
-      ),
+  ): Promise<ListGroupMembersResponse[]> {
+    const response = await this.withPartnerCircuit(
+      { retryOnUnauthorized: true },
+      (client, auth, coordinates, requestOptions) => {
+        validatePartnerAdminAccount(auth, options.adminAccountId);
+        const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+        return client.raw.listGroupMembers(
+          groupsApiUrl,
+          authToken,
+          {
+            adminAccountId,
+            groupId: groupId(options.groupId),
+            ...(options.startEmail !== undefined ? { startEmail: options.startEmail } : {}),
+            ...(options.maxMemberCount !== undefined
+              ? { maxMemberCount: options.maxMemberCount }
+              : {}),
+          },
+          requestOptions,
+        );
+      },
     );
+    return cloneJsonResponse(Array.isArray(response) ? response : [response]);
   }
 
   /**
@@ -1906,14 +1956,22 @@ export class B2Client {
   ): Promise<CreateGroupMemberResponse> {
     const response = await this.withPartnerCircuit(
       { retryOnUnauthorized: false },
-      (client, auth, _coordinates, requestOptions) => {
+      (client, auth, coordinates, requestOptions) => {
         validatePartnerAdminAccount(auth, options.adminAccountId);
-        return client.createGroupMember({
-          groupId: groupId(options.groupId),
-          memberEmail: options.memberEmail,
-          ...(options.region !== undefined ? { region: options.region } : {}),
-          ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}),
-        });
+        const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+        return postNonRetryingPartnerMutationJson(
+          client,
+          groupsApiUrl,
+          authToken,
+          "b2_create_group_member",
+          {
+            adminAccountId,
+            groupId: groupId(options.groupId),
+            memberEmail: options.memberEmail,
+            ...(options.region !== undefined ? { region: options.region } : {}),
+          },
+          requestOptions,
+        );
       },
     );
     try {
@@ -1971,16 +2029,21 @@ export class B2Client {
   ): Promise<ReserveTrialCreateAccountResponse> {
     const response = await this.withPartnerCircuit(
       { retryOnUnauthorized: false },
-      (client, _auth, _coordinates, requestOptions) => {
+      (client, _auth, coordinates, requestOptions) => {
         const entry = validateReserveTrialCreateAccountRequest(request);
-        return client.reserveTrialAccount(
+        const { groupsApiUrl, authToken } = coordinates;
+        return postNonRetryingPartnerMutationJson(
+          client,
+          groupsApiUrl,
+          authToken,
+          "b2_reserve_trial_create_account",
           {
             email: entry.email,
             term: entry.term,
             storage: entry.storage,
             ...(entry.region !== undefined ? { region: entry.region } : {}),
           },
-          requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : undefined,
+          requestOptions,
         );
       },
     );
