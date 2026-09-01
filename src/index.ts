@@ -83,7 +83,8 @@ async function fetchStdioCapabilities(
 
   try {
     // The SDK authorize cannot be cancelled safely outside an MCP request; if
-    // the local deadline wins, Promise.race still observes a late rejection.
+    // the local deadline wins, a late success is intentionally ignored and
+    // Promise.race still observes a late rejection.
     return await Promise.race([capabilityFetch, timeoutPromise]);
   } finally {
     if (timeout) clearTimeout(timeout);
