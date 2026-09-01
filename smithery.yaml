@@ -11,10 +11,12 @@ startCommand:
     properties:
       B2_APPLICATION_KEY_ID:
         type: string
+        format: password
         title: Application Key ID
         description: Backblaze B2 application key ID for native B2 and S3-compatible tools. Use a non-master application key.
       B2_APPLICATION_KEY:
         type: string
+        format: password
         title: Application Key
         description: Backblaze B2 application key secret.
       B2_REGION:
@@ -23,10 +25,12 @@ startCommand:
         description: Optional fallback S3-compatible region used before authorization (for example us-east-005).
       B2_MASTER_KEY_ID:
         type: string
+        format: password
         title: Master Key ID (optional)
         description: Optional master key ID, required only for the Partner/Groups API tools.
       B2_MASTER_KEY:
         type: string
+        format: password
         title: Master Key (optional)
         description: Optional master key secret, required only for the Partner/Groups API tools.
   commandFunction: |-
