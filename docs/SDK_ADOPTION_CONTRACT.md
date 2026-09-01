@@ -2,7 +2,7 @@
 
 Issue: [#71](https://github.com/backblaze-labs/b2-mcp/issues/71)
 Planning ID: `P1-SDK-01`
-Reviewed SDK: `@backblaze-labs/b2-sdk@0.3.0` from npm, verified 2026-08-18
+Reviewed SDK: `@backblaze-labs/b2-sdk@0.4.0` from npm, verified 2026-09-01
 Target MCP revision: `2026-07-28`
 
 This record supersedes the implementation allowance in
@@ -18,7 +18,7 @@ through the SDK `/s3` helper.
 
 - Runtime B2 integration must consume a stable npm release of
   `@backblaze-labs/b2-sdk`, pinned at one reviewed version in `pnpm-lock.yaml`.
-- The reviewed version for this record is `0.3.0`. Release builds may consume
+- The reviewed version for this record is `0.4.0`. Release builds may consume
   npm artifacts only, not unpublished Git branches, local SDK checkouts, SDK
   private files, or package-internal `dist/internal/*` modules.
 - Preferred integration order is the public high-level facade from
@@ -59,16 +59,16 @@ through the SDK `/s3` helper.
 - SDK updates must include evidence for secret custody, abort propagation,
   retries, pagination, response-shape changes, and error translation changes.
 
-### Release-Age Exception For `@backblaze-labs/b2-sdk@0.3.0`
+### Release-Age Exception For `@backblaze-labs/b2-sdk@0.4.0`
 
-Issue [#132](https://github.com/backblaze-labs/b2-mcp/issues/132) requires
-`@backblaze-labs/b2-sdk@0.3.0`, and that exact npm version was published at
-`2026-08-18T08:53:33.741Z`, inside the repository minimum-release-age window at
+Issue [#344](https://github.com/backblaze-labs/b2-mcp/issues/344) requires
+`@backblaze-labs/b2-sdk@0.4.0`, and that exact npm version was published at
+`2026-09-01T18:50:49.255Z`, inside the repository minimum-release-age window at
 the time of adoption. The root and customer-hosted workspaces carry a temporary
 exact-version `minimumReleaseAgeExclude` entry for
-`@backblaze-labs/b2-sdk@0.3.0` so frozen installs can verify the reviewed
+`@backblaze-labs/b2-sdk@0.4.0` so frozen installs can verify the reviewed
 lockfile while the cooldown elapses. The exception expires at
-`2026-09-02T09:00:00.000Z`; after that timestamp, the supply-chain policy test
+`2026-09-16T19:00:00.000Z`; after that timestamp, the supply-chain policy test
 fails until the exclusion is removed from both workspaces. Future SDK bumps must
 either wait out the release-age window or add a new reviewed, time-bounded
 exception.
@@ -76,19 +76,19 @@ exception.
 Exception evidence:
 
 - Npm provenance metadata advertises a SLSA v1 attestation at
-  `https://registry.npmjs.org/-/npm/v1/attestations/@backblaze-labs%2fb2-sdk@0.3.0`.
+  `https://registry.npmjs.org/-/npm/v1/attestations/@backblaze-labs%2fb2-sdk@0.4.0`.
 - The registry tarball is
-  `https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.3.0.tgz`, with
-  shasum `09d57a7062e3dd189e157da7840d3b51abc0dafa`.
+  `https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.4.0.tgz`, with
+  shasum `9ee4ccf69ee641b74c1d19ddab3e49571e9e357e`.
 - The registry integrity is
-  `sha512-ABfrCTV0uN3ADXBgOC6hmMm2n3Mcnz2mnFafC1z1/Hvijv9GKlhaNBmfkY3UiRuVyjgWFCm8f5uiuQyNWFwFAg==`;
+  `sha512-Xs5dHWF2YNDVaZpumgJAAqy1rFYVw1F8l2ZAsKL36AA6lwpxuqjRHPgwQMX92WiowQLCl5O1bZRjD3pVJA7m+Q==`;
   both `pnpm-lock.yaml` and `deploy/customer-hosted/pnpm-lock.yaml` pin this
   exact value.
-- `npm diff --diff=@backblaze-labs/b2-sdk@0.2.0 --diff=@backblaze-labs/b2-sdk@0.3.0 --diff-name-only`
-  was reviewed for the package update. The expected expansion is the generated
-  Partner/Backup SDK surface (`dist/partner/*`, `dist/backup/*`), Partner
-  simulator/types, abort/md5/raw URL helpers, and generated JS/CJS/type/map
-  artifacts from the SDK build.
+- `npm diff --diff=@backblaze-labs/b2-sdk@0.3.0 --diff=@backblaze-labs/b2-sdk@0.4.0 --diff-name-only`
+  was reviewed for the package update. The expected expansion is the Partner
+  single-object create/reserve correction, public `reserveTrialAccount` facade,
+  Partner redaction updates, and generated JS/CJS/type/map artifacts from the
+  SDK build.
 - Published package metadata has no `preinstall`, `install`, `postinstall`, or
   `prepare` lifecycle script, so install-time code execution is not introduced
   by this exception.
@@ -217,10 +217,10 @@ Each retained row has exactly one reviewed implementation class:
 | `b2_update_file_legal_hold`        | `raw`          | `RawClient.updateFileLegalHold` via `B2Client.raw.updateFileLegalHold`                                                                      | Preserve flat MCP input shape and confirmation when clearing protection. Cap: `writeFileLegalHolds`. Pagination: none. Abort: repository transport injects the MCP request signal. Retry/idempotency: setting the same hold value is naturally idempotent after target verification. Secret: none. Error: SDK lock/capability errors to MCP shape.                                                                                                                                                                                                                                      |
 | `b2_update_file_retention`         | `raw`          | `RawClient.updateFileRetention` via `B2Client.raw.updateFileRetention`                                                                      | Preserve flat retention shape and `bypassGovernance`. Cap: `writeFileRetentions` and maybe `bypassGovernance`. Pagination: none. Abort: repository transport injects the MCP request signal. Retry/idempotency: extending retention is naturally idempotent by normalized target/value; shortening requires explicit confirmation and capability. Secret: none. Error: SDK lock/capability errors to MCP shape.                                                                                                                                                                         |
 | `b2_list_groups`                   | `partner`      | `PartnerRawClient.listGroups` via `B2Client.listGroups`                                                                                     | Preserve input schema and response shape. Cap: Partner entitlement plus master key, not standard storage capability. Pagination: `startGroupId`/`nextGroupId`, max 100. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: read with SDK retry. Secret: none. Error: SDK Partner errors to MCP shape.                                                                                                                                         |
-| `b2_create_group_member`           | `partner`      | `PartnerRawClient.postJson` via `B2Client.createGroupMember`                                                                                | Sink-backed handler runs when `B2_SECRET_SINK=file` or `inline`; `off` keeps the non-secret unavailable compatibility stub. Cap: Partner entitlement plus master key. Pagination: none. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: caller supplies `idempotencyKey`; file mode reuses the original sink pointer for identical retries and rejects conflicting reuse. Uses a temporary isolated boundary over the SDK 0.3.0 private runtime `postJson` helper so the repo can send the observed object request and accept singleton-or-array responses while the named SDK helper assumes an array response; unit and adoption-contract tests pin the call order and body shape. Post-create normalization, sink, or projection failure attempts to eject created group members and returns only a sanitized MCP error with secret-free critical telemetry. Secret: returned application key must never go to model output in file/off modes. Error: Partner and sink errors to stable MCP classes. |
+| `b2_create_group_member`           | `partner`      | `PartnerClient.createGroupMember` via `B2Client.createGroupMember`                                                                          | Sink-backed handler runs when `B2_SECRET_SINK=file` or `inline`; `off` keeps the non-secret unavailable compatibility stub. Cap: Partner entitlement plus master key. Pagination: none. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: caller supplies `idempotencyKey`; file mode reuses the original sink pointer for identical retries and rejects conflicting reuse. The SDK facade sends and returns the Partner API's single-object create shape; the MCP wrapper validates one secret-bearing result and rejects array-shaped responses. Post-create normalization, sink, or projection failure attempts to eject the created group member and returns only a sanitized MCP error with secret-free critical telemetry. Secret: returned application key must never go to model output in file/off modes. Error: Partner and sink errors to stable MCP classes. |
 | `b2_eject_group_member`            | `partner`      | `PartnerRawClient.ejectGroupMember` via `B2Client.ejectGroupMember`                                                                         | Preserve destructive confirmation and response shape. Cap: Partner entitlement plus master key. Pagination: none. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: destructive membership mutation requires explicit target confirmation and retry classification. Secret: none. Error: SDK Partner errors to MCP shape.                                                                                                                                                                     |
 | `b2_list_group_members`            | `partner`      | `PartnerRawClient.listGroupMembers` via `B2Client.listGroupMembers`                                                                         | Preserve input schema and response shape. Cap: Partner entitlement plus master key. Pagination: `startEmail`/`nextEmail`, max 1000. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: read with SDK retry. Secret: member emails and storage stats are sensitive account metadata, not durable secrets. Error: SDK Partner errors to MCP shape.                                                                                                                                                  |
-| `b2_reserve_trial_create_account`  | `partner`      | `PartnerRawClient.postJson` via `B2Client.reserveTrialCreateAccount`                                                                        | Handler runs only when `B2_SECRET_SINK=inline`; `file` and `off` keep a non-secret unavailable compatibility stub because Reserve Trial has no provider-side recovery path after a sink write failure. Cap: Partner/Reserve entitlement plus master key. Pagination: none. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: no file-mode replay contract is exposed; inline mode is explicitly unsafe and non-idempotent in annotations. The facade accepts one account request object and rejects arrays before the Partner write; it uses a temporary isolated boundary over the SDK 0.3.0 private runtime `postJson` helper so the repo can send the observed object request and accept singleton-or-array responses while the named SDK helper posts an array body. Secret: returned account credentials must never go to model output in file/off modes. Error: Partner errors to stable MCP classes. |
+| `b2_reserve_trial_create_account`  | `partner`      | `PartnerClient.reserveTrialAccount` via `B2Client.reserveTrialCreateAccount`                                                                | Handler runs only when `B2_SECRET_SINK=inline`; `file` and `off` keep a non-secret unavailable compatibility stub because Reserve Trial has no provider-side recovery path after a sink write failure. Cap: Partner/Reserve entitlement plus master key. Pagination: none. Abort: SDK Partner transport receives the MCP request signal. Retry/idempotency: no file-mode replay contract is exposed; inline mode is explicitly unsafe and non-idempotent in annotations. The wrapper accepts one account request object, rejects arrays before the Partner write, and delegates to the SDK's singular `reserveTrialAccount` facade. Secret: returned account credentials must never go to model output in file/off modes. Error: Partner errors to stable MCP classes. |
 | `s3_put_object`                    | `s3`           | `/s3` `createS3ClientConfig` plus `B2S3PeerClient.putObject`                                              | Compatibility alias over S3 PutObject for small inline control-plane objects. `ACL` and `StorageClass` remain accepted compatibility hints but do not change B2 bucket/object policy. Cap: `writeFiles`. Pagination: none. Abort: peer request receives the MCP request signal. Retry/idempotency: AWS SDK replay is disabled for this mutation because lost-success uploads can create duplicate versions. Secret: object bytes may be user data, not logged. Error: S3/B2 errors to MCP shape.                                                                                              |
 | `s3_get_object`                    | `s3`           | `/s3` `createS3ClientConfig` plus `B2S3PeerClient.getObject`                                              | Preserve inline 1 MiB cap, `saveToPath`, range, base64 output, and S3 `VersionId` targeting. Cap: `readFiles`. Pagination: none. Abort: peer request receives the MCP request signal and body reads cancel/destroy on abort. Retry/idempotency: read with AWS SDK retry for the initial request plus MCP circuit/deadline handling; body streaming is not replayed after headers. Secret: object bytes are caller-scoped data and must not be logged. Error: S3/B2 download/checksum errors to MCP shape.                                                                                                                                                                                                           |
 | `s3_delete_object`                 | `s3`           | `/s3` `createS3ClientConfig` plus `B2S3PeerClient.deleteObject`                                           | Preserve destructive confirmation and S3 delete semantics for latest-object and explicit-version deletes. Cap: `deleteFiles`. Pagination: none. Abort: peer request receives the MCP request signal. Retry/idempotency: exact version delete may be naturally idempotent; delete-marker creation is not safe without reconciliation. Secret: none. Error: S3 not-found/lock errors to MCP shape.                                                                                                                                                                                        |

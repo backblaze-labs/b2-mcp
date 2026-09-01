@@ -13,10 +13,10 @@ import { createServer, getRegisteredTools } from "../../src/server";
 import { DURABLE_SECRET_PRODUCING_TOOLS } from "../../src/utils/tool-capabilities";
 import { readJson, readLock, root as ROOT } from "./support";
 
-const SDK_VERSION = "0.3.0";
-const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.3.0.tgz";
+const SDK_VERSION = "0.4.0";
+const SDK_RESOLVED = "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.4.0.tgz";
 const SDK_INTEGRITY =
-  "sha512-ABfrCTV0uN3ADXBgOC6hmMm2n3Mcnz2mnFafC1z1/Hvijv9GKlhaNBmfkY3UiRuVyjgWFCm8f5uiuQyNWFwFAg==";
+  "sha512-Xs5dHWF2YNDVaZpumgJAAqy1rFYVw1F8l2ZAsKL36AA6lwpxuqjRHPgwQMX92WiowQLCl5O1bZRjD3pVJA7m+Q==";
 
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir)
@@ -177,21 +177,22 @@ describe("SDK adoption contract", () => {
     expect(b2Client).toContain("client.raw.updateBucket");
 
     expectMatrixPath("b2_list_groups", "partner", "PartnerRawClient.listGroups");
-    expectMatrixPath("b2_create_group_member", "partner", "PartnerRawClient.postJson");
+    expectMatrixPath("b2_create_group_member", "partner", "PartnerClient.createGroupMember");
     expectMatrixPath("b2_eject_group_member", "partner", "PartnerRawClient.ejectGroupMember");
     expectMatrixPath("b2_list_group_members", "partner", "PartnerRawClient.listGroupMembers");
-    expectMatrixPath("b2_reserve_trial_create_account", "partner", "PartnerRawClient.postJson");
-    expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
-    expect(b2Client).toContain("Temporary boundary over the SDK 0.3.0 private runtime helper");
-    expect(b2Client).toMatch(
-      /postJson\.call\(\s*client\.raw,\s*groupsApiUrl,\s*authToken,\s*endpoint,\s*body,/,
+    expectMatrixPath(
+      "b2_reserve_trial_create_account",
+      "partner",
+      "PartnerClient.reserveTrialAccount",
     );
+    expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
+    expect(b2Client).not.toContain("postPartnerJson");
+    expect(b2Client).not.toContain("postJson");
     expect(b2Client).toContain("client.raw.listGroups");
-    expect(b2Client).toContain("postPartnerJson");
-    expect(b2Client).toContain('"b2_create_group_member"');
+    expect(b2Client).toContain("client.createGroupMember");
     expect(b2Client).toContain("client.raw.ejectGroupMember");
     expect(b2Client).toContain("client.raw.listGroupMembers");
-    expect(b2Client).toContain('"b2_reserve_trial_create_account"');
+    expect(b2Client).toContain("client.reserveTrialAccount");
     expect(partner).toContain("client.listGroups");
     expect(partner).toContain("client.createGroupMember");
     expect(partner).toContain("client.ejectGroupMember");
