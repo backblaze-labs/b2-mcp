@@ -678,6 +678,67 @@ describe("B2AuthManager", () => {
     expect(inner.requests).toHaveLength(1);
   });
 
+  it("keeps definitive body statuses per request when a shared signal aborts", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const abort = new AbortController();
+    const allReading = deferred<void>();
+    const statuses = [400, 403];
+    let bodyReads = 0;
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            bodyReads++;
+            if (bodyReads === 2) allReading.resolve();
+            await allReading.promise;
+            const reason = abortError("caller disconnected during shared body reads");
+            if (!abort.signal.aborted) abort.abort(reason);
+            throw reason;
+          }
+        })(statuses.shift() ?? 500, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const results = await Promise.allSettled([
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: '{"bucketName":"first"}',
+        signal: abort.signal,
+      }),
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: '{"bucketName":"second"}',
+        signal: abort.signal,
+      }),
+    ]);
+
+    const errors = results.map((result) => {
+      expect(result.status).toBe("rejected");
+      return (result as PromiseRejectedResult).reason;
+    });
+    expect(errors).toEqual([
+      expect.objectContaining({
+        status: 400,
+        code: "response_body_unavailable",
+      }),
+      expect.objectContaining({
+        status: 403,
+        code: "response_body_unavailable",
+      }),
+    ]);
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(2);
+  });
+
   it("does not mark already-aborted no-replay native requests as unknown status", async () => {
     const inner = new RecordingTransport(() => new StaticHttpResponse(200, {}));
     const transport = createMcpHttpTransport(inner, {

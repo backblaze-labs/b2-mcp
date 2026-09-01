@@ -69,7 +69,15 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
 
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 const RESPONSE_BODY_UNAVAILABLE_CODE = "response_body_unavailable";
-const definitiveBodyReadErrors = new WeakMap<AbortSignal, Error>();
+const DEFINITIVE_BODY_READ_CONTEXT = Symbol("b2-mcp.definitive_body_read_context");
+
+interface DefinitiveBodyReadContext {
+  error?: Error;
+}
+
+type ContextualHttpRequest = HttpRequest & {
+  [DEFINITIVE_BODY_READ_CONTEXT]?: DefinitiveBodyReadContext;
+};
 
 /** Official B2 SDK client plus optional URL guard owned by the auth manager. */
 interface ManagedSdkClient {
@@ -134,15 +142,17 @@ class RequestSignalTransport implements HttpTransport {
       endpoint !== undefined &&
       NON_IDEMPOTENT_B2_API_ENDPOINTS.has(endpoint) &&
       !startedWithAbortedSignal;
+    const bodyReadContext: DefinitiveBodyReadContext = {};
+    const requestWithSignal = signal ? { ...replaySafeRequest, signal } : replaySafeRequest;
     try {
       const response = await this.inner.send(
-        signal ? { ...replaySafeRequest, signal } : replaySafeRequest,
+        withDefinitiveBodyReadContext(requestWithSignal, bodyReadContext),
       );
       return classifyUnknownStatus && endpoint && isSuccessfulResponse(response)
         ? withUnknownStatusJsonRead(response, endpoint)
         : response;
     } catch (err) {
-      const definitiveBodyError = takeDefinitiveBodyReadError(signal);
+      const definitiveBodyError = takeDefinitiveBodyReadError(bodyReadContext);
       if (definitiveBodyError) throw definitiveBodyError;
       if (classifyUnknownStatus && endpoint) throwIfUnknownStatusWrite(endpoint, err);
       if (isAbortError(err)) {
@@ -221,9 +231,23 @@ function responseBodyUnavailableError(status: number): Error {
   );
 }
 
-function takeDefinitiveBodyReadError(signal: AbortSignal): Error | undefined {
-  const error = definitiveBodyReadErrors.get(signal);
-  definitiveBodyReadErrors.delete(signal);
+function withDefinitiveBodyReadContext(
+  request: HttpRequest,
+  context: DefinitiveBodyReadContext,
+): HttpRequest {
+  return {
+    ...request,
+    [DEFINITIVE_BODY_READ_CONTEXT]: context,
+  } as ContextualHttpRequest;
+}
+
+function definitiveBodyReadContext(request: HttpRequest): DefinitiveBodyReadContext | undefined {
+  return (request as ContextualHttpRequest)[DEFINITIVE_BODY_READ_CONTEXT];
+}
+
+function takeDefinitiveBodyReadError(context: DefinitiveBodyReadContext): Error | undefined {
+  const error = context.error;
+  delete context.error;
   return error;
 }
 
@@ -245,6 +269,7 @@ function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): Ht
 function withDefinitiveErrorJsonRead(
   response: HttpResponse,
   signal: AbortSignal | undefined,
+  context: DefinitiveBodyReadContext | undefined,
 ): HttpResponse {
   if (isSuccessfulResponse(response)) return response;
   return adaptHttpResponse(response, {
@@ -254,7 +279,7 @@ function withDefinitiveErrorJsonRead(
       } catch (err) {
         if (findInCauseChain(err, unknownStatusInterruption)) {
           const error = responseBodyUnavailableError(response.status);
-          if (signal?.aborted) definitiveBodyReadErrors.set(signal, error);
+          if (signal?.aborted && context) context.error = error;
           return {
             status: response.status,
             code: RESPONSE_BODY_UNAVAILABLE_CODE,
@@ -395,7 +420,11 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withDefinitiveErrorJsonRead(withRetryAfterHeader(response), request.signal);
+      return withDefinitiveErrorJsonRead(
+        withRetryAfterHeader(response),
+        request.signal,
+        definitiveBodyReadContext(request),
+      );
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;
