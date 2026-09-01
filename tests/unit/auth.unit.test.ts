@@ -1,7 +1,7 @@
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
-import { abortError } from "../../src/utils/named-error";
+import { abortError, timeoutError } from "../../src/utils/named-error";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import type { B2Config } from "../../src/utils/types";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
@@ -429,6 +429,32 @@ describe("B2AuthManager", () => {
       client.createBucket({ bucketName: "created-on-retry", bucketType: "allPrivate" }),
     ).rejects.toThrow(/lost response/);
     expect(createCalls).toBe(1);
+  });
+
+  it("classifies no-replay native timeout as an unknown operation status", async () => {
+    const inner = new RecordingTransport(() => {
+      throw timeoutError("HTTP request timed out after 30000 ms");
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(inner.requests).toHaveLength(1);
+    expect(inner.requests[0].retry?.maxRetries).toBe(0);
   });
 
   it("does not replay deleteKey after a response-lost failure", async () => {

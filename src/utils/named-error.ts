@@ -50,3 +50,14 @@ export function timeoutError(message: string): Error {
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
+
+/**
+ * Test whether an unknown value is a standard TimeoutError.
+ *
+ * @param error - Value to inspect.
+ *
+ * @returns True when the value is an Error named `TimeoutError`.
+ */
+export function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && error.name === "TimeoutError";
+}

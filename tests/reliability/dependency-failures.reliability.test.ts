@@ -290,7 +290,7 @@ describe("deterministic dependency failure and recovery suite", () => {
     {
       name: "timeout",
       reply: timeoutFailure(),
-      expected: { status: 500, code: "internal_error" },
+      expected: { status: 504, code: "request_timeout" },
       message: /timed out/i,
     },
     {
@@ -317,6 +317,24 @@ describe("deterministic dependency failure and recovery suite", () => {
     const text = expectMcpError(result, testCase.expected);
     expect(text).toMatch(testCase.message);
     expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1);
+  });
+
+  it("reports no-replay native write timeouts as unknown operation status", async () => {
+    const transport = new DeterministicB2NativeFake({ capabilities: ["writeBuckets"] }).respond(
+      "b2_create_bucket",
+      timeoutFailure(),
+    );
+    const tools = registerB2BucketHarness(transport);
+
+    const result = await tools.call("b2_create_bucket", {
+      bucketName: "ambiguous-create-timeout",
+      bucketType: "allPrivate",
+    });
+
+    const text = expectMcpError(result, { status: 409, code: "operation_status_unknown" });
+    expect(text).toContain("may have completed at B2");
+    expect(text).toContain("verify the resource state before retrying");
+    expect(transport.requestsFor("b2_create_bucket")).toHaveLength(1);
   });
 
   it.each([

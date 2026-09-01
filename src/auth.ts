@@ -17,7 +17,8 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
-import { abortError, isAbortError } from "./utils/named-error.js";
+import { operationStatusUnknownError } from "./utils/errors.js";
+import { abortError, isAbortError, isTimeoutError } from "./utils/named-error.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
@@ -117,9 +118,19 @@ class RequestSignalTransport implements HttpTransport {
   async send(request: HttpRequest): Promise<HttpResponse> {
     const signal = request.signal ?? currentMcpRequestSignal() ?? new AbortController().signal;
     const replaySafeRequest = withOperationRetryPolicy(request);
+    const endpoint = b2ApiEndpointName(replaySafeRequest.url);
+    const startedWithAbortedSignal = signal.aborted;
     try {
       return await this.inner.send(signal ? { ...replaySafeRequest, signal } : replaySafeRequest);
     } catch (err) {
+      if (
+        endpoint &&
+        NON_IDEMPOTENT_B2_API_ENDPOINTS.has(endpoint) &&
+        !startedWithAbortedSignal &&
+        isAmbiguousLocalInterruption(err)
+      ) {
+        throw operationStatusUnknownError(endpoint, err);
+      }
       if (isAbortError(err)) {
         throw sdkAbortException(err instanceof Error ? err.message || "Aborted" : "Aborted");
       }
@@ -131,6 +142,19 @@ class RequestSignalTransport implements HttpTransport {
 function transportUrlGuard(transport: HttpTransport): UrlGuard | undefined {
   const candidate = transport as { urlGuard?: unknown };
   return candidate.urlGuard instanceof UrlGuard ? candidate.urlGuard : undefined;
+}
+
+function errorCause(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  return (value as { cause?: unknown }).cause;
+}
+
+function isAmbiguousLocalInterruption(err: unknown, seen = new Set<unknown>()): boolean {
+  if (isAbortError(err) || isTimeoutError(err)) return true;
+  if (typeof err !== "object" || err === null || seen.has(err)) return false;
+  seen.add(err);
+  const cause = errorCause(err);
+  return cause !== undefined && isAmbiguousLocalInterruption(cause, seen);
 }
 
 /**

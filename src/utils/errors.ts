@@ -15,8 +15,15 @@ import {
   serializeUnsanitizedStructuredToolResult,
   type StructuredToolResult,
 } from "./result-serializer.js";
+import { isAbortError, isTimeoutError } from "./named-error.js";
 
 const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
+const REQUEST_TIMEOUT_STATUS = 504;
+const REQUEST_TIMEOUT_CODE = "request_timeout";
+const REQUEST_ABORTED_STATUS = 499;
+const REQUEST_ABORTED_CODE = "request_aborted";
+const OPERATION_STATUS_UNKNOWN_STATUS = 409;
+const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
 
 /** Normalized provider error shape used by MCP tool responses and audit logs. */
 export interface B2ApiError {
@@ -67,6 +74,30 @@ export function badRequest(message: string): never {
   throw badRequestError(message);
 }
 
+/**
+ * Build an error for a native B2 mutation whose final provider state is unknown.
+ *
+ * @param operation - B2 API endpoint name whose result is ambiguous.
+ * @param cause - Timeout, abort, or transport error that hid the final response.
+ *
+ * @returns An Error carrying status 409 and code `operation_status_unknown`.
+ */
+export function operationStatusUnknownError(operation: string, cause: unknown): Error & B2ApiError {
+  const causeMessage =
+    cause instanceof Error && cause.message ? ` Last local error: ${cause.message}.` : "";
+  const error = codedError(
+    OPERATION_STATUS_UNKNOWN_STATUS,
+    OPERATION_STATUS_UNKNOWN_CODE,
+    `B2 native operation ${operation} was interrupted before the MCP server received B2's final response. The operation may have completed at B2; verify the resource state before retrying.${causeMessage}`,
+  );
+  Object.defineProperty(error, "cause", {
+    value: cause,
+    enumerable: false,
+    configurable: true,
+  });
+  return error;
+}
+
 /** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */
 function headerRequestId(headers: unknown): string | undefined {
   if (typeof headers !== "object" || headers === null) return undefined;
@@ -93,6 +124,40 @@ function messageOrFallback(value: unknown, fallback: string): string {
 
 function numberOrFallback(value: unknown, fallback: number): number {
   return typeof value === "number" ? value : fallback;
+}
+
+function objectCause(value: unknown): unknown {
+  if (typeof value !== "object" || value === null) return undefined;
+  return (value as { cause?: unknown }).cause;
+}
+
+function hasNamedErrorInChain(
+  value: unknown,
+  predicate: (error: unknown) => boolean,
+  seen = new Set<unknown>(),
+): boolean {
+  if (predicate(value)) return true;
+  if (typeof value !== "object" || value === null || seen.has(value)) return false;
+  seen.add(value);
+  const cause = objectCause(value);
+  return cause !== undefined && hasNamedErrorInChain(cause, predicate, seen);
+}
+
+function codedErrorInCauseChain(value: unknown, seen = new Set<unknown>()): B2ApiError | null {
+  if (typeof value !== "object" || value === null || seen.has(value)) return null;
+  seen.add(value);
+  const cause = objectCause(value);
+  if (typeof cause !== "object" || cause === null) return null;
+  const e = cause as Record<string, unknown>;
+  if (typeof e.status === "number" && typeof e.code === "string") {
+    return {
+      status: e.status,
+      code: e.code,
+      message: messageOrFallback(e.message, "An unknown error occurred"),
+      requestId: typeof e.requestId === "string" ? e.requestId : undefined,
+    };
+  }
+  return codedErrorInCauseChain(cause, seen);
 }
 
 /**
@@ -153,6 +218,24 @@ export function parseB2Error(err: unknown): B2ApiError {
         code: stringOrFallback(data.code, "unknown_error"),
         message: messageOrFallback(data.message, "An unknown error occurred"),
         requestId: headerRequestId(resp.headers),
+      };
+    }
+
+    const codedCause = codedErrorInCauseChain(err);
+    if (codedCause) return codedCause;
+
+    if (hasNamedErrorInChain(err, isTimeoutError)) {
+      return {
+        status: REQUEST_TIMEOUT_STATUS,
+        code: REQUEST_TIMEOUT_CODE,
+        message: messageOrFallback(e.message, "The request timed out"),
+      };
+    }
+    if (hasNamedErrorInChain(err, isAbortError)) {
+      return {
+        status: REQUEST_ABORTED_STATUS,
+        code: REQUEST_ABORTED_CODE,
+        message: messageOrFallback(e.message, "The request was aborted"),
       };
     }
     // Already a parsed B2 error.
