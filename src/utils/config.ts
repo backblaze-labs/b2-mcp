@@ -107,7 +107,8 @@ export function readPortArg(argv: string[], index: number): PortArgResult | null
  *
  * @returns Trimmed listen host, or `undefined` when no host was provided.
  *
- * @throws PortUsageError when a host flag is present without a usable value.
+ * @throws PortUsageError when a provided host is empty, whitespace-only, or
+ * contains a CR/LF character.
  */
 export function parseHttpHost(raw: string | undefined): string | undefined {
   if (raw === undefined) return undefined;
