@@ -278,6 +278,63 @@ describe("runtime policy", () => {
     });
   });
 
+  it("rejects an engine floor that does not equal the engine range minimum", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      // Drop the engineRange 22 branch to a lower minor while leaving engineFloor
+      // (and the floor smoke) at 22.22.2: the floor must always equal the lowest
+      // Node the range advertises, so this mismatch must be rejected.
+      writeFixtureFile(
+        fixtureRoot,
+        "package.json",
+        JSON.stringify(
+          {
+            name: "@backblaze-labs/b2-mcp",
+            version: "0.1.0",
+            packageManager: "pnpm@11.20.0+sha256.test",
+            engines: { node: "^22.3.0 || ^24 || ^26" },
+            dependencies: { "@backblaze-labs/b2-sdk": "0.3.0" },
+            devDependencies: { "@types/node": "22.3.0" },
+          },
+          null,
+          2,
+        ),
+      );
+      writeFixtureFile(
+        fixtureRoot,
+        "runtime-policy.json",
+        JSON.stringify(
+          {
+            engineRange: "^22.3.0 || ^24 || ^26",
+            engineFloor: ">=22.22.2",
+            backblazeSdkEngineFloor: ">=22.3.0",
+            runtimeInstallNode: "22.23.1",
+            minimumEvidenceNode: "22.23.1",
+            node22LtsMinimum: "22.11.0",
+            node22Pinned: "22.23.1",
+            deterministicLinuxMatrix: ["22.23.1", "24", "26"],
+            crossPlatformNode: "22.23.1",
+            liveNodeMatrix: ["22.23.1", "24", "26"],
+            unsupportedMajors: [18, 20],
+            typesNodeVersion: "22.3.0",
+          },
+          null,
+          2,
+        ),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "runtime-policy engineFloor: expected >=22.3.0, got >=22.22.2",
+      );
+    });
+  });
+
   it("rejects Pages workflows without deploy and package hardening", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(
