@@ -112,8 +112,38 @@ async function fetchStdioCapabilities(
  * await startStdio();
  * ```
  */
+const DISCOVERY_MODE_CREDENTIAL = "b2-mcp-discovery-mode";
+
+/**
+ * Enter credential-less stdio discovery mode when no B2 application key is set.
+ *
+ * @remarks
+ * `configFromMaterial` throws `missing_credentials` unless both
+ * `B2_APPLICATION_KEY_ID` and `B2_APPLICATION_KEY` are present, which made the
+ * stdio bootstrap exit before answering `tools/list`. Registry/directory
+ * services (mcp.so, Glama, LobeHub) spawn the server with no credentials just to
+ * enumerate tools, so instead of exiting we inject placeholder credentials,
+ * register the full surface (`B2_REGISTER_ALL_TOOLS`), and turn the secret sink
+ * off. The placeholder credentials are never used: `createServer` is told
+ * credentials are missing and short-circuits every tool call with a clear error.
+ *
+ * @param env - Environment record to inspect and mutate; defaults to
+ * `process.env`.
+ *
+ * @returns `true` when discovery mode was entered, otherwise `false`.
+ */
+function enterStdioDiscoveryModeIfNeeded(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.B2_APPLICATION_KEY_ID && env.B2_APPLICATION_KEY) return false;
+  env.B2_APPLICATION_KEY_ID = DISCOVERY_MODE_CREDENTIAL;
+  env.B2_APPLICATION_KEY = DISCOVERY_MODE_CREDENTIAL;
+  if (!env.B2_SECRET_SINK) env.B2_SECRET_SINK = "off";
+  env.B2_REGISTER_ALL_TOOLS = "true";
+  return true;
+}
+
 export async function startStdio(): Promise<void> {
   initLogging();
+  const discoveryMode = enterStdioDiscoveryModeIfNeeded();
   const config = serverModule.loadConfig();
   const capabilityTimeoutMs = stdioCapabilityFetchTimeoutMs();
   let capabilities: string[] | null;
@@ -122,6 +152,12 @@ export async function startStdio(): Promise<void> {
     { transport: "stdio", timeoutMs: capabilityTimeoutMs },
     "capability.fetch.stdio_starting",
   );
+  if (discoveryMode) {
+    logger.warn(
+      { transport: "stdio", reason: "no_credentials" },
+      "server.stdio_discovery_mode",
+    );
+  }
   flushLogsSync();
   try {
     capabilities = await fetchStdioCapabilities(config, capabilityTimeoutMs);
@@ -152,6 +188,9 @@ export async function startStdio(): Promise<void> {
     } else {
       throw err;
     }
+  }
+  if (discoveryMode) {
+    createServerOptions = { ...createServerOptions, credentialsMissing: true };
   }
   stdioTransport.serveStdio(
     () =>

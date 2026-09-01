@@ -183,7 +183,33 @@ export interface CreateServerOptions {
    * @internal
    */
   failClosedUnknownCapabilities?: boolean;
+  /**
+   * Register the full tool surface for discovery while no B2 credentials are
+   * configured, and answer every tool call with a clear `missing_credentials`
+   * error instead of attempting a doomed provider call.
+   *
+   * @remarks
+   * Set by the stdio bootstrap when it starts without
+   * `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` so registry/directory
+   * services (mcp.so, Glama, LobeHub) can still enumerate `tools/list` in a
+   * credential-less sandbox. Tool *calls* fail with an actionable message; the
+   * placeholder credentials the bootstrap injects are never used because this
+   * short-circuits before the handler runs.
+   *
+   * @internal
+   */
+  credentialsMissing?: boolean;
 }
+
+/** Tool-call error returned in credential-less stdio discovery mode. */
+const MISSING_CREDENTIALS_TOOL_ERROR = Object.freeze({
+  status: 401,
+  code: "missing_credentials",
+  message:
+    "B2 credentials are not configured. Set B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY " +
+    "(stdio) or send the credential headers (HTTP) before calling B2 tools. The server is " +
+    "running in discovery mode, so tools are listed but cannot execute.",
+});
 
 /**
  * Build the MCP server and register the B2 tool surface.
@@ -288,11 +314,13 @@ export function createServer(
   const registrar = new ToolRegistrationAdapter(server, {
     shouldRegister: shouldRegisterForResolvedAuthz,
     wrapCallback: (name, callback) =>
-      createAuditedToolCallback(name, callback, config, {
-        getClientCapabilities: () => getMcpClientCapabilities(server),
-        getProtocolVersion: () => getMcpNegotiatedProtocolVersion(server),
-        requestStateCodec,
-      }),
+      options.credentialsMissing === true
+        ? async () => toolError(MISSING_CREDENTIALS_TOOL_ERROR)
+        : createAuditedToolCallback(name, callback, config, {
+            getClientCapabilities: () => getMcpClientCapabilities(server),
+            getProtocolVersion: () => getMcpNegotiatedProtocolVersion(server),
+            requestStateCodec,
+          }),
   });
 
   // Initialize clients. The application (workhorse) key drives the B2 native
