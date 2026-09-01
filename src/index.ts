@@ -94,7 +94,10 @@ function stdioCapabilityFallback(err: unknown): StdioCapabilityFallback | null {
         message: timeout.message,
         timeoutMs: timeout.timeoutMs,
       },
-      serverOptions: { suppressDurableSecretCompatibilityStubs: true },
+      serverOptions: {
+        suppressDurableSecretCompatibilityStubs: true,
+        suppressPartnerTools: true,
+      },
     };
   }
   if (err.code !== "capability_upstream_unavailable") return null;

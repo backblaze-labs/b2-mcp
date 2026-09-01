@@ -175,6 +175,10 @@ export interface CreateServerOptions {
    * wants an empty capability set to expose no write/admin fallback names.
    */
   suppressDurableSecretCompatibilityStubs?: boolean;
+  /**
+   * Suppress Partner API tools even when a distinct master key is configured.
+   */
+  suppressPartnerTools?: boolean;
 }
 
 /**
@@ -319,7 +323,7 @@ export function createServer(
   // capability. Under capability-aware registration, only surface them when a
   // distinct master key is configured; otherwise (and in full-surface mode) keep
   // the prior behavior of always registering them.
-  if (!filterActive || masterIsDistinct) {
+  if (!options.suppressPartnerTools && (!filterActive || masterIsDistinct)) {
     registerPartnerTools(registrar, masterClient, masterAuth, config);
   }
 

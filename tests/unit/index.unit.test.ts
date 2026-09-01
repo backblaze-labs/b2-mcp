@@ -227,6 +227,7 @@ describe("stdio entry point", () => {
     expect(factory?.()).toBe(server);
     expect(createServer).toHaveBeenCalledWith(config, [], {
       suppressDurableSecretCompatibilityStubs: true,
+      suppressPartnerTools: true,
     });
     expect(warn).toHaveBeenCalledWith(
       {
@@ -287,6 +288,7 @@ describe("stdio entry point", () => {
     expect(factory?.()).toBe(server);
     expect(createServer).toHaveBeenCalledWith(config, [], {
       suppressDurableSecretCompatibilityStubs: true,
+      suppressPartnerTools: true,
     });
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -301,7 +303,12 @@ describe("stdio entry point", () => {
 
   it("does not expose write or admin tools after a stdio capability timeout", async () => {
     vi.useFakeTimers();
-    const config: B2Config = { ...testConfig(), secretSink: { mode: "off" } };
+    const config: B2Config = {
+      ...testConfig(),
+      masterKeyId: "distinct-master-id",
+      masterKey: "distinct-master-secret",
+      secretSink: { mode: "off" },
+    };
     vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
     vi.spyOn(serverModule, "fetchCapabilities").mockReturnValue(
       new Promise<string[] | null>(() => undefined),
@@ -326,6 +333,11 @@ describe("stdio entry point", () => {
     expect(tools).not.toHaveProperty("s3_delete_objects");
     expect(tools).not.toHaveProperty("s3_get_presigned_url");
     expect(tools).not.toHaveProperty("b2_create_key");
+    expect(tools).not.toHaveProperty("b2_list_groups");
+    expect(tools).not.toHaveProperty("b2_create_group_member");
+    expect(tools).not.toHaveProperty("b2_eject_group_member");
+    expect(tools).not.toHaveProperty("b2_list_group_members");
+    expect(tools).not.toHaveProperty("b2_reserve_trial_create_account");
   });
 
   it("rethrows unexpected capability lookup failures", async () => {
