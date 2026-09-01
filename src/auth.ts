@@ -285,17 +285,19 @@ function withDefinitiveErrorJsonRead(
     json: async <T>() => {
       try {
         return await response.json<T>();
-      } catch (err) {
-        if (findInCauseChain(err, unknownStatusInterruption)) {
-          const error = responseBodyUnavailableError(response.status);
-          if (signal?.aborted && context) context.error = error;
-          return {
-            status: response.status,
-            code: RESPONSE_BODY_UNAVAILABLE_CODE,
-            message: error.message,
-          } as T;
-        }
-        throw err;
+      } catch {
+        // The non-2xx status is already definitive, so any body-read failure
+        // (including a plain SyntaxError from a truncated or malformed body)
+        // preserves that status as response_body_unavailable rather than
+        // regressing to internal_error. The context marker is retained only
+        // for the concurrent-abort handoff.
+        const error = responseBodyUnavailableError(response.status);
+        if (signal?.aborted && context) context.error = error;
+        return {
+          status: response.status,
+          code: RESPONSE_BODY_UNAVAILABLE_CODE,
+          message: error.message,
+        } as T;
       }
     },
   });
