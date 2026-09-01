@@ -1,0 +1,45 @@
+# Smithery one-click install config for the official Backblaze B2 MCP server.
+# Local stdio deployment via npx; Smithery prompts for the B2 credentials below
+# and injects them as environment variables. See https://smithery.ai/docs.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - B2_APPLICATION_KEY_ID
+      - B2_APPLICATION_KEY
+    properties:
+      B2_APPLICATION_KEY_ID:
+        type: string
+        title: Application Key ID
+        description: Backblaze B2 application key ID for native B2 and S3-compatible tools. Use a non-master application key.
+      B2_APPLICATION_KEY:
+        type: string
+        title: Application Key
+        description: Backblaze B2 application key secret.
+      B2_REGION:
+        type: string
+        title: Region (optional)
+        description: Optional fallback S3-compatible region used before authorization (for example us-east-005).
+      B2_MASTER_KEY_ID:
+        type: string
+        title: Master Key ID (optional)
+        description: Optional master key ID, required only for the Partner/Groups API tools.
+      B2_MASTER_KEY:
+        type: string
+        title: Master Key (optional)
+        description: Optional master key secret, required only for the Partner/Groups API tools.
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', '@backblaze-labs/b2-mcp'],
+      env: Object.fromEntries(
+        Object.entries({
+          B2_APPLICATION_KEY_ID: config.B2_APPLICATION_KEY_ID,
+          B2_APPLICATION_KEY: config.B2_APPLICATION_KEY,
+          B2_REGION: config.B2_REGION,
+          B2_MASTER_KEY_ID: config.B2_MASTER_KEY_ID,
+          B2_MASTER_KEY: config.B2_MASTER_KEY,
+        }).filter(([, value]) => value !== undefined && value !== '')
+      ),
+    })

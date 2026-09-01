@@ -97,7 +97,7 @@ function withFixture(run: (fixtureRoot: string) => void): void {
           name: "io.github.backblaze-labs/b2-mcp",
           title: "Backblaze B2 MCP Server",
           description:
-            "Operate Backblaze B2 buckets, files, keys, Object Lock, and S3-compatible storage.",
+            "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.",
           websiteUrl: "https://github.com/backblaze-labs/b2-mcp#readme",
           repository: {
             url: "https://github.com/backblaze-labs/b2-mcp",

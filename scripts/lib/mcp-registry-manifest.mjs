@@ -14,7 +14,7 @@ export const mcpRegistrySchemaUrl =
   "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json";
 export const mcpRegistryTitle = "Backblaze B2 MCP Server";
 export const mcpRegistryDescription =
-  "Operate Backblaze B2 buckets, files, keys, Object Lock, and S3-compatible storage.";
+  "Official Backblaze B2 MCP server for buckets, files, keys, Object Lock, and S3 storage.";
 
 export const expectedMcpRegistryEnvironmentVariables = Object.freeze([
   Object.freeze({

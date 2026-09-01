@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- The stdio server no longer exits when started without B2 credentials. It now
-  enters a credential-less discovery mode: the full tool surface is registered
-  so registry/directory services (mcp.so, Glama, LobeHub) can read `tools/list`
-  in a sandbox, a `server.stdio_discovery_mode` warning is logged, and every
-  tool call returns a clear `missing_credentials` error until
-  `B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` are set. The HTTP transport is
-  unchanged. (#356)
+### Added
+- `smithery.yaml` so Smithery can offer a one-click stdio install of the
+  official server. (#300)
+- README "official server" note and an `Official …` MCP Registry manifest
+  description to distinguish `backblaze-labs/b2-mcp` from community forks. (#301)
+
+### Fixed
+- Point the README MCP Registry badge at `$.servers[0].server.version` to match
+  the registry API's `2025-12-11` response shape, so it renders the published
+  version again. (#297)
 
 ## [0.2.0] - 2026-09-01
 
