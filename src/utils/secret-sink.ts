@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { logger } from "./logger.js";
-import { codedError, toolJson, toolJsonInlineDurableSecret } from "./errors.js";
+import { codedError, parseB2Error, toolJson, toolJsonInlineDurableSecret } from "./errors.js";
 import type { StructuredToolResult } from "./result-serializer.js";
 import type {
   SecretSinkConfig,
@@ -22,7 +22,13 @@ import {
   SECURE_APPEND_FILE_MODE,
   secureAppendFileErrorDetail,
 } from "./secure-append-file.js";
-import { sanitizeForMcpOutput } from "./secret-sanitizer.js";
+import {
+  currentSanitizerOptions,
+  sanitizeForMcpOutput,
+  sanitizeProviderCode,
+  sanitizeProviderRequestId,
+  sanitizeText,
+} from "./secret-sanitizer.js";
 
 /** Default local ledger path for file-mode durable secret storage. */
 export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.jsonl");
@@ -1137,10 +1143,113 @@ function createErrorHasKnownProviderRejection(err: unknown): boolean {
   return typeof status === "number" && status >= 400 && status < 500 && status !== 408;
 }
 
-function recoveryClearedProviderSideEffect(recovery: unknown): boolean {
-  if (!recovery || typeof recovery !== "object" || !("status" in recovery)) return false;
-  const status = (recovery as { status?: unknown }).status;
-  return status === "deleted" || status === "ejected_group_members";
+/** Disposition for the file-mode idempotency claim after provider-side recovery. */
+export const DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION = {
+  /** Recovery proved the durable provider-side secret no longer exists. */
+  release: "release",
+  /** Recovery did not prove the durable provider-side secret was removed. */
+  keep: "keep",
+} as const;
+
+/** File-mode idempotency claim disposition after provider-side recovery. */
+export type DurableSecretRecoveryClaimDisposition =
+  (typeof DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION)[keyof typeof DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION];
+
+/** Shared status values for durable-secret provider-side recovery. */
+export const DURABLE_SECRET_RECOVERY_STATUS = {
+  /** Provider-side durable key was deleted or revoked. */
+  deleted: "deleted",
+  /** Group members were ejected, but their minted credentials may still exist. */
+  ejectedGroupMembers: "ejected_group_members",
+  /** Recovery could not identify the created group member from the create response. */
+  createdMemberNotFound: "created_member_not_found",
+  /** Recovery threw or a cleanup mutation failed. */
+  failed: "failed",
+  /** No recovery hook was configured for the producer. */
+  notConfigured: "not_configured",
+  /** The outcome is unknown and needs operator reconciliation. */
+  pendingReconciliation: "pending_reconciliation",
+} as const;
+
+/** Durable-secret provider-side recovery status. */
+export type DurableSecretRecoveryStatus =
+  (typeof DURABLE_SECRET_RECOVERY_STATUS)[keyof typeof DURABLE_SECRET_RECOVERY_STATUS];
+
+/** Allowlisted, secret-free error details for durable-secret recovery logs. */
+export interface DurableSecretRecoveryErrorDetails {
+  /** Error class or name, when available. */
+  name?: string;
+  /** HTTP status associated with the error. */
+  status: number;
+  /** Stable provider or local error code. */
+  code: string;
+  /** Sanitized human-readable message. */
+  message: string;
+  /** Provider request ID, when available. */
+  requestId?: string;
+  /** AWS extended request ID, when available. */
+  extendedRequestId?: string;
+}
+
+/** Typed recovery outcome consumed by durable-secret claim handling and logs. */
+export interface DurableSecretRecoveryResult {
+  /** Machine-readable recovery status. */
+  status: DurableSecretRecoveryStatus;
+  /** Whether the pending file-mode idempotency claim can be released. */
+  claimDisposition: DurableSecretRecoveryClaimDisposition;
+  /** Additional non-secret recovery details for critical logs. */
+  readonly [key: string]: unknown;
+}
+
+/**
+ * Build allowlisted, sanitized error details for recovery paths.
+ *
+ * @param err - Error value thrown by a provider create or recovery call.
+ *
+ * @returns Secret-free error fields safe for critical logs.
+ */
+export function durableSecretRecoveryErrorDetails(err: unknown): DurableSecretRecoveryErrorDetails {
+  const options = currentSanitizerOptions();
+  const parsed = parseB2Error(err);
+  const details: DurableSecretRecoveryErrorDetails = {
+    status: parsed.status,
+    code: sanitizeProviderCode(parsed.code, options),
+    message: sanitizeText(parsed.message, options),
+  };
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof (err as { name?: unknown }).name === "string"
+  ) {
+    details.name = sanitizeText((err as { name: string }).name, options);
+  }
+  const requestId = sanitizeProviderRequestId(parsed.requestId, options);
+  if (requestId) details.requestId = requestId;
+  const extendedRequestId = sanitizeProviderRequestId(parsed.extendedRequestId, options);
+  if (extendedRequestId) details.extendedRequestId = extendedRequestId;
+  return details;
+}
+
+function recoveryReleasesFileClaim(recovery: DurableSecretRecoveryResult): boolean {
+  return recovery.claimDisposition === DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.release;
+}
+
+function recoveryFailureResult(err: unknown): DurableSecretRecoveryResult {
+  return {
+    status: DURABLE_SECRET_RECOVERY_STATUS.failed,
+    claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+    error: durableSecretRecoveryErrorDetails(err),
+  };
+}
+
+function createResponseUnusableError(hasClaim: boolean): Error {
+  return codedError(
+    500,
+    "secret_sink_create_response_unusable",
+    hasClaim
+      ? "B2 may have created a durable credential, but the provider response became unusable before the secret could be stored. The secret was not returned in MCP output. The pending idempotency claim remains for operator reconciliation; check the server critical log for recovery status before retrying."
+      : "B2 may have created a durable credential, but the provider response became unusable before the secret could be returned. The secret was not returned in MCP output. Check the server critical log for recovery status before retrying.",
+  );
 }
 
 function isSecretSinkCommitAmbiguous(err: unknown): boolean {
@@ -1178,9 +1287,14 @@ export interface DurableSecretResponseOptions<T> {
    *
    * Return `undefined` when the error is not an ambiguous post-create failure.
    */
-  recoverAfterCreateFailure?: (err: unknown) => Promise<unknown> | unknown;
+  recoverAfterCreateFailure?: (
+    err: unknown,
+  ) => Promise<DurableSecretRecoveryResult | undefined> | DurableSecretRecoveryResult | undefined;
   /** Optional provider-side cleanup when sink storage fails after creation. */
-  recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
+  recoverAfterSinkFailure?: (
+    result: T,
+    err: unknown,
+  ) => Promise<DurableSecretRecoveryResult | undefined> | DurableSecretRecoveryResult | undefined;
 }
 
 /** Full operation contract for safely executing a durable-secret-producing call. */
@@ -1188,6 +1302,68 @@ export interface DurableSecretOperationOptions<T>
   extends Omit<DurableSecretResponseOptions<T>, "result"> {
   /** Provider operation that creates the durable secret. */
   create: () => Promise<T>;
+}
+
+async function handleCreateFailureRecovery(
+  err: unknown,
+  options: Pick<
+    DurableSecretOperationOptions<unknown>,
+    "recoverAfterCreateFailure" | "toolName" | "secretSink"
+  >,
+  claim?: SecretSinkClaim,
+): Promise<boolean> {
+  if (!options.recoverAfterCreateFailure) return false;
+
+  let recovery: DurableSecretRecoveryResult | undefined;
+  try {
+    recovery = await options.recoverAfterCreateFailure(err);
+  } catch (recoveryErr) {
+    recovery = recoveryFailureResult(recoveryErr);
+  }
+  if (recovery === undefined) return false;
+
+  const fileClaim =
+    claim && options.secretSink.mode === "file"
+      ? {
+          claimDisposition: recovery.claimDisposition,
+          lockPath: claim.lockPath,
+        }
+      : undefined;
+  logger.fatal(
+    {
+      createError: durableSecretRecoveryErrorDetails(err),
+      tool: options.toolName,
+      secretSink:
+        options.secretSink.mode === "file"
+          ? { type: "file", path: options.secretSink.filePath }
+          : { type: "inline" },
+      recovery,
+      ...(fileClaim ? { idempotencyClaim: fileClaim } : {}),
+    },
+    "secret_sink.create_failed_after_possible_provider_create",
+  );
+
+  if (claim && options.secretSink.mode === "file") {
+    if (recoveryReleasesFileClaim(recovery)) {
+      releaseSecretSinkClaimBestEffort(claim, {
+        tool: options.toolName,
+        secretSink: { type: "file", path: options.secretSink.filePath },
+        lockPath: claim.lockPath,
+      });
+    } else {
+      logger.fatal(
+        {
+          tool: options.toolName,
+          secretSink: { type: "file", path: options.secretSink.filePath },
+          lockPath: claim.lockPath,
+          recovery,
+        },
+        "secret_sink.idempotency_claim_retained_after_create_failure",
+      );
+    }
+  }
+
+  throw createResponseUnusableError(claim !== undefined);
 }
 
 /**
@@ -1219,7 +1395,17 @@ export async function executeDurableSecretOperation<T>({
   recoverAfterSinkFailure,
 }: DurableSecretOperationOptions<T>): Promise<StructuredToolResult> {
   if (secretSink.mode === "inline") {
-    const result = await create();
+    let result: T;
+    try {
+      result = await create();
+    } catch (err) {
+      await handleCreateFailureRecovery(
+        err,
+        { recoverAfterCreateFailure, toolName, secretSink },
+        undefined,
+      );
+      throw err;
+    }
     return toolJsonInlineDurableSecret(projectInline(result, INLINE_SECRET_WARNING));
   }
 
@@ -1230,40 +1416,11 @@ export async function executeDurableSecretOperation<T>({
   try {
     result = await create();
   } catch (err) {
-    if (recoverAfterCreateFailure) {
-      let recovery: unknown;
-      try {
-        recovery = await recoverAfterCreateFailure(err);
-      } catch (recoveryErr) {
-        recovery = {
-          status: "failed",
-          error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
-        };
-      }
-      if (recovery !== undefined) {
-        logger.fatal(
-          {
-            err,
-            tool: toolName,
-            secretSink: { type: "file", path: secretSink.filePath },
-            recovery,
-          },
-          "secret_sink.create_failed_after_possible_provider_create",
-        );
-        if (recoveryClearedProviderSideEffect(recovery)) {
-          releaseSecretSinkClaimBestEffort(claim, {
-            tool: toolName,
-            secretSink: { type: "file", path: secretSink.filePath },
-            lockPath: claim.lockPath,
-          });
-        }
-        throw codedError(
-          500,
-          "secret_sink_create_response_unusable",
-          "B2 may have created a durable credential, but the provider response became unusable before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for recovery status, then rotate or revoke any remaining resource.",
-        );
-      }
-    }
+    await handleCreateFailureRecovery(
+      err,
+      { recoverAfterCreateFailure, toolName, secretSink },
+      claim,
+    );
     if (createErrorHasKnownProviderRejection(err)) {
       releaseSecretSinkClaimBestEffort(claim, {
         tool: toolName,
@@ -1284,7 +1441,10 @@ export async function executeDurableSecretOperation<T>({
           tool: toolName,
           secretSink: { type: "file", path: secretSink.filePath },
           minted: diagnostics?.(result) ?? {},
-          recovery: { status: "pending_reconciliation" },
+          recovery: {
+            status: DURABLE_SECRET_RECOVERY_STATUS.pendingReconciliation,
+            claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+          },
         },
         "secret_sink.write_failed_with_ambiguous_commit",
       );
@@ -1295,14 +1455,14 @@ export async function executeDurableSecretOperation<T>({
           "B2 created a durable credential, but the configured file secret sink could not confirm whether rollback removed the record. The secret was not returned in MCP output. The idempotency claim remains pending for operator reconciliation.",
       };
     }
-    let recovery: unknown = { status: "not_configured" };
+    let recovery: DurableSecretRecoveryResult = {
+      status: DURABLE_SECRET_RECOVERY_STATUS.notConfigured,
+      claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+    };
     try {
       recovery = (await recoverAfterSinkFailure?.(result, err)) ?? recovery;
     } catch (recoveryErr) {
-      recovery = {
-        status: "failed",
-        error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
-      };
+      recovery = recoveryFailureResult(recoveryErr);
     }
     logger.fatal(
       {
@@ -1314,7 +1474,7 @@ export async function executeDurableSecretOperation<T>({
       },
       "secret_sink.write_failed_after_provider_create",
     );
-    if (recoveryClearedProviderSideEffect(recovery)) {
+    if (recoveryReleasesFileClaim(recovery)) {
       releaseSecretSinkClaimBestEffort(claim, {
         tool: toolName,
         secretSink: { type: "file", path: secretSink.filePath },

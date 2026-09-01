@@ -403,10 +403,12 @@ contract before it can be enabled:
   response must not claim that the sink write succeeded.
 - For `b2_create_key` and `b2_create_group_member`, sink failure after
   provider-side creation returns only a sanitized MCP error. `b2_create_key`
-  attempts to delete the created key, and `b2_create_group_member` attempts to
-  eject the created member from the group. `b2_reserve_trial_create_account`
-  remains unavailable in file mode because Reserve Trial has no provider-side
-  recovery path after account creation.
+  attempts to delete the created key. `b2_create_group_member` ejects only
+  account IDs recovered from the create result; because ejection does not prove
+  the minted application key was revoked, the file-mode idempotency claim remains
+  pending with critical-log recovery identifiers for operator reconciliation.
+  `b2_reserve_trial_create_account` remains unavailable in file mode because
+  Reserve Trial has no provider-side recovery path after account creation.
 - Restart-after-side-effect tests must cover request crash, timeout, duplicate
   retry, sink outage, compensation success, and compensation failure.
 

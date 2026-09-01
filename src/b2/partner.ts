@@ -7,13 +7,21 @@ import type { ToolRegistrar } from "../mcp.js";
 import { z } from "zod";
 import { toolJson, toolError } from "../utils/errors.js";
 import type { B2AuthManager } from "../auth.js";
-import type { B2Client } from "./client.js";
+import {
+  isPartnerCreateGroupMemberResponseUnusableError,
+  type B2Client,
+  type PartnerCreateGroupMemberRecoveryCandidate,
+} from "./client.js";
 import type { B2Config } from "../utils/types.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
+  DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION,
+  DURABLE_SECRET_RECOVERY_STATUS,
+  durableSecretRecoveryErrorDetails,
   durableSecretIdempotency,
   executeDurableSecretOperation,
+  type DurableSecretRecoveryResult,
   type SecretSinkPointer,
 } from "../utils/secret-sink.js";
 
@@ -23,11 +31,7 @@ type SecretBearingPartnerResult = { readonly applicationKey: string };
 type CreateGroupMemberRecoveryInput = {
   readonly adminAccountId: string;
   readonly groupId: string;
-  readonly memberEmail: string;
 };
-
-const CREATE_GROUP_MEMBER_RESPONSE_SHAPE_ERROR =
-  "b2_create_group_member response was not a JSON array";
 
 function redactedPartnerResults<T extends SecretBearingPartnerResult>(response: readonly T[]): T[] {
   return response.map((result) => ({ ...result, applicationKey: APPLICATION_KEY_REDACTED }));
@@ -42,11 +46,18 @@ function activeSecretSink(
 function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[]) {
   return {
     resultCount: response.length,
-    applicationKeyIds: response
+    recoveryApplicationKeyIds: response
       .map((result) => ("applicationKeyId" in result ? result.applicationKeyId : undefined))
       .filter((value): value is string => typeof value === "string"),
     accountIds: response
-      .map((result) => ("accountId" in result ? result.accountId : undefined))
+      .map((result) =>
+        "groupMember" in result &&
+        result.groupMember &&
+        typeof result.groupMember === "object" &&
+        "accountId" in result.groupMember
+          ? result.groupMember.accountId
+          : undefined,
+      )
       .filter((value): value is string => typeof value === "string"),
   };
 }
@@ -55,51 +66,94 @@ function callerFingerprint(config: B2Config): string {
   return config.callerFingerprint ?? config.credentialFingerprint ?? config.applicationKeyId;
 }
 
-function normalizeEmail(email: string): string {
-  return email.trim().toLowerCase();
+function uniqueGroupMemberRecoveryCandidates(
+  candidates: readonly PartnerCreateGroupMemberRecoveryCandidate[],
+): PartnerCreateGroupMemberRecoveryCandidate[] {
+  const unique = new Map<string, PartnerCreateGroupMemberRecoveryCandidate>();
+  for (const candidate of candidates) unique.set(candidate.accountId, candidate);
+  return [...unique.values()];
 }
 
-function isCreateGroupMemberResponseShapeError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const candidate = err as { code?: unknown; message?: unknown; status?: unknown };
-  return (
-    candidate.status === 400 &&
-    candidate.code === "bad_request" &&
-    candidate.message === CREATE_GROUP_MEMBER_RESPONSE_SHAPE_ERROR
+async function ejectGroupMemberRecoveryCandidates(
+  client: B2Client,
+  request: CreateGroupMemberRecoveryInput,
+  candidates: readonly PartnerCreateGroupMemberRecoveryCandidate[],
+): Promise<DurableSecretRecoveryResult> {
+  const uniqueCandidates = uniqueGroupMemberRecoveryCandidates(candidates);
+  const candidateAccountIds = uniqueCandidates.map((candidate) => candidate.accountId);
+  const recoveryApplicationKeyIds = uniqueCandidates.map(
+    (candidate) => candidate.recoveryApplicationKeyId,
   );
+  const ejectedAccountIds: string[] = [];
+  const remainingAccountIds: string[] = [];
+  const failures: Array<{
+    accountId: string;
+    recoveryApplicationKeyId: string;
+    error: ReturnType<typeof durableSecretRecoveryErrorDetails>;
+  }> = [];
+
+  if (uniqueCandidates.length === 0) {
+    return {
+      status: DURABLE_SECRET_RECOVERY_STATUS.createdMemberNotFound,
+      claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+      candidateAccountIds,
+      recoveryApplicationKeyIds,
+      manualReconciliation:
+        "No created-member accountId/applicationKeyId pair was available from the create response. Keep the idempotency claim and reconcile the Partner account before retrying.",
+    };
+  }
+
+  for (const candidate of uniqueCandidates) {
+    try {
+      await client.ejectGroupMember({
+        adminAccountId: request.adminAccountId,
+        groupId: request.groupId,
+        memberAccountId: candidate.accountId,
+      });
+      ejectedAccountIds.push(candidate.accountId);
+    } catch (err) {
+      remainingAccountIds.push(candidate.accountId);
+      failures.push({
+        accountId: candidate.accountId,
+        recoveryApplicationKeyId: candidate.recoveryApplicationKeyId,
+        error: durableSecretRecoveryErrorDetails(err),
+      });
+    }
+  }
+
+  if (failures.length > 0) {
+    return {
+      status: DURABLE_SECRET_RECOVERY_STATUS.failed,
+      claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+      candidateAccountIds,
+      ejectedAccountIds,
+      remainingAccountIds,
+      recoveryApplicationKeyIds,
+      failures,
+      manualReconciliation:
+        "Some group members were not ejected. Created application keys may still be live; revoke the listed recoveryApplicationKeyIds manually before retrying.",
+    };
+  }
+
+  return {
+    status: DURABLE_SECRET_RECOVERY_STATUS.ejectedGroupMembers,
+    claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+    candidateAccountIds,
+    ejectedAccountIds,
+    remainingAccountIds,
+    recoveryApplicationKeyIds,
+    manualReconciliation:
+      "Group membership was ejected, but b2_eject_group_member does not delete the account or prove the created application key was revoked. Revoke the listed recoveryApplicationKeyIds manually before releasing the idempotency claim.",
+  };
 }
 
 async function recoverAfterCreateGroupMemberResponseFailure(
   client: B2Client,
   request: CreateGroupMemberRecoveryInput,
   err: unknown,
-) {
-  if (!isCreateGroupMemberResponseShapeError(err)) return undefined;
-
-  const targetEmail = normalizeEmail(request.memberEmail);
-  const listed = await client.listGroupMembers({
-    adminAccountId: request.adminAccountId,
-    groupId: request.groupId,
-    startEmail: request.memberEmail,
-    maxMemberCount: 1,
-  });
-  const accountIds: string[] = [];
-  for (const page of listed) {
-    for (const member of page.groupMembers) {
-      if (normalizeEmail(member.email) !== targetEmail) continue;
-      accountIds.push(String(member.accountId));
-    }
-  }
-  for (const accountId of accountIds) {
-    await client.ejectGroupMember({
-      adminAccountId: request.adminAccountId,
-      groupId: request.groupId,
-      memberAccountId: accountId,
-    });
-  }
-  return accountIds.length > 0
-    ? { status: "ejected_group_members", accountIds }
-    : { status: "created_member_not_found" };
+): Promise<DurableSecretRecoveryResult | undefined> {
+  if (!isPartnerCreateGroupMemberResponseUnusableError(err)) return undefined;
+  return ejectGroupMemberRecoveryCandidates(client, request, err.candidates);
 }
 
 /**
@@ -238,21 +292,20 @@ export function registerPartnerTools(
             diagnostics: partnerSecretDiagnostics,
             recoverAfterCreateFailure: (err) =>
               recoverAfterCreateGroupMemberResponseFailure(client, request, err),
-            recoverAfterSinkFailure: async (created) => {
-              const accountIds: string[] = [];
-              for (const result of created) {
-                const accountId =
-                  "accountId" in result.groupMember ? String(result.groupMember.accountId) : "";
-                if (!accountId) continue;
-                accountIds.push(accountId);
-                await client.ejectGroupMember({
-                  adminAccountId: args.adminAccountId,
-                  groupId: args.groupId,
-                  memberAccountId: accountId,
-                });
-              }
-              return { status: "ejected_group_members", accountIds };
-            },
+            recoverAfterSinkFailure: (created) =>
+              ejectGroupMemberRecoveryCandidates(
+                client,
+                request,
+                created.flatMap((result) => {
+                  const accountId =
+                    "accountId" in result.groupMember ? String(result.groupMember.accountId) : "";
+                  const recoveryApplicationKeyId =
+                    "applicationKeyId" in result ? String(result.applicationKeyId) : "";
+                  return accountId && recoveryApplicationKeyId
+                    ? [{ accountId, recoveryApplicationKeyId }]
+                    : [];
+                }),
+              ),
           });
         } catch (err) {
           return toolError(err);

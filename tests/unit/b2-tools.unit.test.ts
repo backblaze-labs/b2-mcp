@@ -2,14 +2,16 @@ import {
   B2Client as SdkB2Client,
   BucketType,
   BufferSource,
+  type HttpRequest,
+  type HttpResponse,
   LegalHoldValue,
   RetentionMode,
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { parseErrorText } from "../../src/utils/errors";
@@ -56,6 +58,10 @@ function tempSecretFile(): string {
 function readSecretLedger(file: string): any {
   const lines = readFileSync(file, "utf8").trim().split("\n");
   return JSON.parse(lines[lines.length - 1]);
+}
+
+function pendingSecretClaimNames(file: string): string[] {
+  return readdirSync(dirname(file)).filter((name) => name.endsWith(".pending"));
 }
 
 function failSecretRecordFsyncOnce(): void {
@@ -123,6 +129,47 @@ async function usePartnerSimulator() {
   });
   const partnerAuth = await partnerSeed.authorize();
   return { adminAccountId: String(partnerAuth.accountId), transport, partnerSeed };
+}
+
+async function usePartnerSimulatorWithCreateInterceptor(
+  secretSink: { mode: "file"; filePath: string } | { mode: "inline" },
+  interceptCreate: (
+    request: HttpRequest,
+    sendToSimulator: () => Promise<HttpResponse>,
+  ) => HttpResponse | Promise<HttpResponse>,
+) {
+  invalidateAuthManagerCache();
+  sim = new B2Simulator({
+    minimumPartSize: 1000,
+    recommendedPartSize: 1000,
+    partnerAuthorize: true,
+  });
+  const simulatorTransport = sim.transport();
+  const transport = new RecordingTransport((request) => {
+    if (b2EndpointName(request) === "b2_create_group_member") {
+      return interceptCreate(request, () => simulatorTransport.send(request));
+    }
+    return simulatorTransport.send(request);
+  });
+  installSdkTransport(transport);
+  seed = await seedClient();
+  server = createServer({
+    ...partnerTestConfig,
+    secretSink,
+  });
+  const partnerSeed = new SdkPartnerClient({
+    masterKeyId: "master-key-id",
+    masterKey: "master-key",
+    transport,
+    retry: sdkTestRetry,
+    realm: "http://127.0.0.1",
+    allowCustomAuthorizeRealm: true,
+  });
+  const partnerAuth = await partnerSeed.authorize();
+  const groups = await partnerSeed.listGroups({ pageSize: 1 });
+  const group = groups.groups[0];
+  if (!group) throw new Error("Expected simulator group");
+  return { adminAccountId: String(partnerAuth.accountId), group, transport, partnerSeed };
 }
 
 beforeEach(async () => {
@@ -2399,53 +2446,80 @@ describe("Partner API tools", () => {
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("K005");
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("member-sink-failure@example.com");
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("recoveryApplicationKeyIds");
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("claimDisposition");
+    expect(pendingSecretClaimNames(secretFile).length).toBeGreaterThan(0);
     expect(
       transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toBe(true);
   });
 
-  it("ejects a created group member if SDK redaction rejects the create response", async () => {
+  it("stores singleton group-member create responses in file mode", async () => {
+    const secretFile = tempSecretFile();
+    let createdSecret = "";
+    const { adminAccountId, group, transport } = await usePartnerSimulatorWithCreateInterceptor(
+      { mode: "file", filePath: secretFile },
+      async (_request, sendToSimulator) => {
+        const response = await sendToSimulator();
+        const created = (await response.json()) as Array<{ applicationKey?: unknown }>;
+        createdSecret = String(created[0]?.applicationKey ?? "");
+        return new StaticHttpResponse(
+          200,
+          { result: created[0] },
+          Object.fromEntries(response.headers),
+        );
+      },
+    );
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "Case.Member@example.com",
+      idempotencyKey: "create-group-member-singleton",
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const ledger = readSecretLedger(secretFile);
+
+    expect(rawResult.isError).not.toBe(true);
+    expect(createdSecret).not.toBe("");
+    expect(result.results[0].applicationKey).toBe("[redacted]");
+    expect(result.results[0].groupMember.email).toBe("Case.Member@example.com");
+    expect(result.secretSink.recordId).toBe(ledger.recordId);
+    expect(ledger.result[0].applicationKey).toBe(createdSecret);
+    expect(
+      transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toBe(false);
+  });
+
+  it("ejects a created group member if the create response lacks the application key", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
-    invalidateAuthManagerCache();
-    sim = new B2Simulator({
-      minimumPartSize: 1000,
-      recommendedPartSize: 1000,
-      partnerAuthorize: true,
-    });
-    const simulatorTransport = sim.transport();
     let createdSecret = "";
-    const transport = new RecordingTransport(async (request) => {
-      const response = await simulatorTransport.send(request);
-      if (b2EndpointName(request) !== "b2_create_group_member") return response;
-
-      const created = (await response.json()) as Array<{ applicationKey?: unknown }>;
-      createdSecret = String(created[0]?.applicationKey ?? "");
-      return new StaticHttpResponse(
-        200,
-        { result: created[0] },
-        Object.fromEntries(response.headers),
+    let createdAccountId = "";
+    let createdApplicationKeyId = "";
+    const { adminAccountId, group, transport, partnerSeed } =
+      await usePartnerSimulatorWithCreateInterceptor(
+        { mode: "file", filePath: secretFile },
+        async (_request, sendToSimulator) => {
+          const response = await sendToSimulator();
+          const created = (await response.json()) as Array<{
+            applicationKey?: unknown;
+            applicationKeyId?: unknown;
+            groupMember?: { accountId?: unknown };
+          }>;
+          const [result] = created;
+          createdSecret = String(result?.applicationKey ?? "");
+          createdAccountId = String(result?.groupMember?.accountId ?? "");
+          createdApplicationKeyId = String(result?.applicationKeyId ?? "");
+          const { applicationKey: _applicationKey, ...withoutSecret } = result ?? {};
+          return new StaticHttpResponse(
+            200,
+            { result: withoutSecret },
+            Object.fromEntries(response.headers),
+          );
+        },
       );
-    });
-    installSdkTransport(transport);
-    seed = await seedClient();
-    server = createServer({
-      ...partnerTestConfig,
-      secretSink: { mode: "file", filePath: secretFile },
-    });
-    const partnerSeed = new SdkPartnerClient({
-      masterKeyId: "master-key-id",
-      masterKey: "master-key",
-      transport,
-      retry: sdkTestRetry,
-      realm: "http://127.0.0.1",
-      allowCustomAuthorizeRealm: true,
-    });
-    const partnerAuth = await partnerSeed.authorize();
-    const adminAccountId = String(partnerAuth.accountId);
-    const groups = await partnerSeed.listGroups({ pageSize: 1 });
-    const group = groups.groups[0];
-    if (!group) throw new Error("Expected simulator group");
 
     const rawResult = await callTool(server, "b2_create_group_member", {
       adminAccountId,
@@ -2460,12 +2534,19 @@ describe("Partner API tools", () => {
     expect(rawResult.content[0].text).not.toContain("bad_request");
     expect(createdSecret).toEqual(expect.any(String));
     expect(createdSecret).not.toBe("");
+    expect(createdAccountId).not.toBe("");
+    expect(createdApplicationKeyId).not.toBe("");
     expect(JSON.stringify(rawResult)).not.toContain(createdSecret);
-    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(createdSecret);
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).not.toContain(createdSecret);
+    expect(fatalLogs).not.toContain("member-redaction-failure@example.com");
+    expect(fatalLogs).toContain("ejected_group_members");
+    expect(fatalLogs).toContain("idempotency_claim_retained_after_create_failure");
+    expect(fatalLogs).toContain(createdAccountId);
+    expect(fatalLogs).toContain(createdApplicationKeyId);
     expect(
       transport.requests.some((request) => b2EndpointName(request) === "b2_list_group_members"),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toBe(true);
@@ -2477,6 +2558,229 @@ describe("Partner API tools", () => {
     expect(
       listed[0]?.groupMembers.some(
         (member) => member.email === "member-redaction-failure@example.com",
+      ),
+    ).toBe(false);
+  });
+
+  it("runs create-failure recovery in inline mode", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    let createdSecret = "";
+    let createdAccountId = "";
+    const { adminAccountId, group, transport, partnerSeed } =
+      await usePartnerSimulatorWithCreateInterceptor(
+        { mode: "inline" },
+        async (_request, sendToSimulator) => {
+          const response = await sendToSimulator();
+          const created = (await response.json()) as Array<{
+            applicationKey?: unknown;
+            groupMember?: { accountId?: unknown };
+          }>;
+          const [result] = created;
+          createdSecret = String(result?.applicationKey ?? "");
+          createdAccountId = String(result?.groupMember?.accountId ?? "");
+          const { applicationKey: _applicationKey, ...withoutSecret } = result ?? {};
+          return new StaticHttpResponse(
+            200,
+            { result: withoutSecret },
+            Object.fromEntries(response.headers),
+          );
+        },
+      );
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "inline-redaction-failure@example.com",
+      idempotencyKey: "create-group-member-inline-redaction-failure",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_create_response_unusable");
+    expect(rawResult.content[0].text).not.toContain("bad_request");
+    expect(createdSecret).not.toBe("");
+    expect(createdAccountId).not.toBe("");
+    expect(JSON.stringify(rawResult)).not.toContain(createdSecret);
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("secret_sink.create_failed_after_possible_provider_create");
+    expect(fatalLogs).toContain("ejected_group_members");
+    expect(fatalLogs).toContain(createdAccountId);
+    expect(fatalLogs).not.toContain(createdSecret);
+    expect(
+      transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toBe(true);
+
+    const listed = await partnerSeed.listGroupMembers({
+      groupId: group.groupId,
+      pageSize: 100,
+    });
+    expect(
+      listed[0]?.groupMembers.some(
+        (member) => member.email === "inline-redaction-failure@example.com",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not eject a pre-existing member when unusable create response has no candidate", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    let passThroughCreate = true;
+    const canary = "B2_MCP_CANARY_SECRET_wrong_target_eject";
+    const { adminAccountId, group, transport, partnerSeed } =
+      await usePartnerSimulatorWithCreateInterceptor(
+        { mode: "file", filePath: secretFile },
+        async (_request, sendToSimulator) => {
+          if (passThroughCreate) return sendToSimulator();
+          return new StaticHttpResponse(200, {
+            response: { result: { applicationKey: canary } },
+          });
+        },
+      );
+
+    const preExisting = await partnerSeed.createGroupMember({
+      groupId: group.groupId,
+      memberEmail: "wrong-target@example.com",
+    });
+    const preExistingAccountId = String(preExisting[0]?.groupMember.accountId ?? "");
+    expect(preExistingAccountId).not.toBe("");
+    passThroughCreate = false;
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "wrong-target@example.com",
+      idempotencyKey: "create-group-member-wrong-target",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_create_response_unusable");
+    expect(JSON.stringify(rawResult)).not.toContain(canary);
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("created_member_not_found");
+    expect(fatalLogs).toContain("idempotency_claim_retained_after_create_failure");
+    expect(fatalLogs).not.toContain(canary);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toHaveLength(0);
+
+    const listed = await partnerSeed.listGroupMembers({
+      groupId: group.groupId,
+      pageSize: 100,
+    });
+    expect(
+      listed[0]?.groupMembers.some((member) => String(member.accountId) === preExistingAccountId),
+    ).toBe(true);
+  });
+
+  it("fails closed when a thrown create error carries a raw application key", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    const canary = "B2_MCP_CANARY_SECRET_message_drift";
+    const { adminAccountId, group, transport } = await usePartnerSimulatorWithCreateInterceptor(
+      { mode: "file", filePath: secretFile },
+      async () => {
+        throw {
+          status: 400,
+          code: "bad_request",
+          message: "create response shape changed before redaction completed",
+          response: { result: { applicationKey: canary } },
+        };
+      },
+    );
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "message-drift@example.com",
+      idempotencyKey: "create-group-member-message-drift",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_create_response_unusable");
+    expect(rawResult.content[0].text).not.toContain("bad_request");
+    expect(JSON.stringify(rawResult)).not.toContain(canary);
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("created_member_not_found");
+    expect(fatalLogs).toContain("idempotency_claim_retained_after_create_failure");
+    expect(fatalLogs).not.toContain(canary);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toHaveLength(0);
+  });
+
+  it("logs ejected and remaining account IDs after partial create recovery failure", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    let createdSecret = "";
+    let createdAccountId = "";
+    let createdApplicationKeyId = "";
+    const missingAccountId = "missing-recovery-account-id";
+    const missingApplicationKeyId = "missing-recovery-key-id";
+    const { adminAccountId, group, partnerSeed } = await usePartnerSimulatorWithCreateInterceptor(
+      { mode: "file", filePath: secretFile },
+      async (_request, sendToSimulator) => {
+        const response = await sendToSimulator();
+        const created = (await response.json()) as Array<{
+          applicationKey?: unknown;
+          applicationKeyId?: unknown;
+          groupMember?: Record<string, unknown>;
+        }>;
+        const [result] = created;
+        createdSecret = String(result?.applicationKey ?? "");
+        createdAccountId = String(result?.groupMember?.accountId ?? "");
+        createdApplicationKeyId = String(result?.applicationKeyId ?? "");
+        const { applicationKey: _applicationKey, ...withoutSecret } = result ?? {};
+        return new StaticHttpResponse(
+          200,
+          {
+            result: [
+              withoutSecret,
+              {
+                applicationKeyId: missingApplicationKeyId,
+                groupMember: {
+                  ...(result?.groupMember ?? {}),
+                  accountId: missingAccountId,
+                },
+              },
+            ],
+          },
+          Object.fromEntries(response.headers),
+        );
+      },
+    );
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "member-partial-recovery@example.com",
+      idempotencyKey: "create-group-member-partial-recovery",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_create_response_unusable");
+    expect(createdSecret).not.toBe("");
+    expect(createdAccountId).not.toBe("");
+    expect(createdApplicationKeyId).not.toBe("");
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("failed");
+    expect(fatalLogs).toContain("ejectedAccountIds");
+    expect(fatalLogs).toContain("remainingAccountIds");
+    expect(fatalLogs).toContain(createdAccountId);
+    expect(fatalLogs).toContain(missingAccountId);
+    expect(fatalLogs).toContain(createdApplicationKeyId);
+    expect(fatalLogs).toContain(missingApplicationKeyId);
+    expect(fatalLogs).not.toContain(createdSecret);
+
+    const listed = await partnerSeed.listGroupMembers({
+      groupId: group.groupId,
+      pageSize: 100,
+    });
+    expect(
+      listed[0]?.groupMembers.some(
+        (member) => member.email === "member-partial-recovery@example.com",
       ),
     ).toBe(false);
   });

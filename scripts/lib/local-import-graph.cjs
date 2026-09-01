@@ -4,9 +4,9 @@ const { dirname, extname, resolve } = require("path");
 const WORKER_SOURCE_GRAPH_FILES_BUDGET = 75;
 // Headroom for the documented Worker source graph and dry-run output; emitted
 // budgets still guard the deployed artifact size explicitly.
-const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 800_000;
+const WORKER_SOURCE_GRAPH_BYTES_BUDGET = 815_000;
 const WORKER_EMITTED_FILES_BUDGET = 8;
-const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 9_350_000;
+const WORKER_EMITTED_TOTAL_BYTES_BUDGET = 9_450_000;
 const WORKER_UPLOAD_SCRIPT_BYTES_BUDGET = 3_000_000;
 const WORKER_UPLOAD_SCRIPT_GZIP_BYTES_BUDGET = 600_000;
 const IMPORT_PATTERN =

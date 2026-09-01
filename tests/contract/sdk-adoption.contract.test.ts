@@ -177,7 +177,7 @@ describe("SDK adoption contract", () => {
     expect(b2Client).toContain("client.raw.updateBucket");
 
     expectMatrixPath("b2_list_groups", "partner", "PartnerRawClient.listGroups");
-    expectMatrixPath("b2_create_group_member", "partner", "PartnerRawClient.createGroupMember");
+    expectMatrixPath("b2_create_group_member", "partner", "PartnerRawClient.postJson");
     expectMatrixPath("b2_eject_group_member", "partner", "PartnerRawClient.ejectGroupMember");
     expectMatrixPath("b2_list_group_members", "partner", "PartnerRawClient.listGroupMembers");
     expectMatrixPath(
@@ -187,7 +187,9 @@ describe("SDK adoption contract", () => {
     );
     expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
     expect(b2Client).toContain("client.raw.listGroups");
-    expect(b2Client).toContain("client.raw.createGroupMember");
+    expect(b2Client).toContain("b2_create_group_member");
+    expect(b2Client).toContain("PartnerCreateGroupMemberResponseUnusableError");
+    expect(b2Client).not.toContain("client.raw.createGroupMember");
     expect(b2Client).toContain("client.raw.ejectGroupMember");
     expect(b2Client).toContain("client.raw.listGroupMembers");
     expect(b2Client).toContain("client.raw.reserveTrialCreateAccount");

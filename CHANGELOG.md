@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow. (#308)
 
 ### Fixed
+- `b2_create_group_member` now handles ambiguous post-create response failures
+  with secret-free `secret_sink_create_response_unusable` output and recovery
+  logs for operator reconciliation. (#312)
 - Bound stdio capability discovery with a tunable 10s bootstrap deadline; local
   deadline expiry now starts with a fail-closed tool surface instead of hanging
   the MCP client handshake. (#320)

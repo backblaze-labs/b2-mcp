@@ -18,6 +18,8 @@ import { join } from "node:path";
 import {
   appendSecretSinkRecord,
   DEFAULT_SECRET_SINK_PATH,
+  DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION,
+  DURABLE_SECRET_RECOVERY_STATUS,
   durableSecretIdempotency,
   executeDurableSecretOperation,
   INLINE_SECRET_WARNING,
@@ -25,6 +27,7 @@ import {
   resolveSecretSinkConfig,
   secretSinkFileOpsForTests,
   setSinkWriteForTests,
+  type DurableSecretRecoveryResult,
 } from "../../src/utils/secret-sink";
 import { logger } from "../../src/utils/logger";
 
@@ -101,8 +104,11 @@ function durableSecretTestOptions(
   idempotency: ReturnType<typeof durableSecretIdempotency>,
   extra: {
     diagnostics?: (result: Record<string, unknown>) => Record<string, unknown>;
-    recoverAfterCreateFailure?: (err: unknown) => unknown;
-    recoverAfterSinkFailure?: (result: Record<string, unknown>, err: unknown) => unknown;
+    recoverAfterCreateFailure?: (err: unknown) => DurableSecretRecoveryResult | undefined;
+    recoverAfterSinkFailure?: (
+      result: Record<string, unknown>,
+      err: unknown,
+    ) => DurableSecretRecoveryResult | undefined;
   } = {},
 ) {
   return {
@@ -1127,7 +1133,11 @@ describe("secret sink file writer", () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");
-    const recoverSpy = vi.fn().mockReturnValue({ status: "deleted" });
+    const canary = "B2_MCP_CANARY_SECRET_create_recovery_log";
+    const recoverSpy = vi.fn().mockReturnValue({
+      status: DURABLE_SECRET_RECOVERY_STATUS.deleted,
+      claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.release,
+    });
     const idempotency = durableSecretIdempotency({
       toolName: "b2_create_key",
       idempotencyKey: "ambiguous-create-recovered",
@@ -1141,7 +1151,12 @@ describe("secret sink file writer", () => {
         toolName: "b2_create_key",
         idempotency,
         create: async () => {
-          throw { status: 400, code: "bad_request", message: "response redaction failed" };
+          throw {
+            status: 400,
+            code: "bad_request",
+            message: "response redaction failed",
+            response: { result: { applicationKey: canary } },
+          };
         },
         projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
           ...created,
@@ -1157,9 +1172,9 @@ describe("secret sink file writer", () => {
 
     expect(recoverSpy).toHaveBeenCalledOnce();
     expect(pendingClaimNames(dir)).toHaveLength(0);
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
-      "create_failed_after_possible_provider_create",
-    );
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("create_failed_after_possible_provider_create");
+    expect(fatalLogs).not.toContain(canary);
   });
 
   it("keeps the pending claim after an HTTP 408 provider timeout", async () => {
@@ -1978,7 +1993,10 @@ describe("secret sink file writer", () => {
       }
       return fsync(fd);
     });
-    const recoverSpy = vi.fn().mockReturnValue({ status: "deleted" });
+    const recoverSpy = vi.fn().mockReturnValue({
+      status: DURABLE_SECRET_RECOVERY_STATUS.deleted,
+      claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.release,
+    });
     const idempotency = testIdempotency("recovered-delete");
 
     await expect(
@@ -2018,7 +2036,11 @@ describe("secret sink file writer", () => {
     await expect(
       executeDurableSecretOperation({
         ...durableSecretTestOptions(file, idempotency, {
-          recoverAfterSinkFailure: () => "manual-review",
+          recoverAfterSinkFailure: () => ({
+            status: DURABLE_SECRET_RECOVERY_STATUS.pendingReconciliation,
+            claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.keep,
+            review: "manual-review",
+          }),
         }),
         create: async () => ({
           applicationKeyId: "key-id",

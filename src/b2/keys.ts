@@ -12,6 +12,8 @@ import { toolJson, toolError } from "../utils/errors.js";
 import { checkDestructive } from "../utils/destructive-gate.js";
 import {
   APPLICATION_KEY_REDACTED,
+  DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION,
+  DURABLE_SECRET_RECOVERY_STATUS,
   durableSecretIdempotency,
   executeDurableSecretOperation,
   type SecretSinkPointer,
@@ -231,7 +233,8 @@ export function registerKeyTools(
             recoverAfterSinkFailure: async (created) => {
               await client.deleteKey(created.applicationKeyId);
               return {
-                status: "deleted",
+                status: DURABLE_SECRET_RECOVERY_STATUS.deleted,
+                claimDisposition: DURABLE_SECRET_RECOVERY_CLAIM_DISPOSITION.release,
                 recoveryApplicationKeyId: created.applicationKeyId,
               };
             },

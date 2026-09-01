@@ -45,9 +45,11 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import type {
   EjectGroupMemberResponse,
+  CreateGroupMemberResult,
   CreateGroupMemberResponse,
   ListGroupMembersResponse,
   ListGroupsResponse,
+  PartnerGroupMember,
   PartnerAuthorizeResponse,
   PartnerRawRequestOptions,
   Region,
@@ -622,6 +624,73 @@ export type PartnerReserveTrialCreateAccountOptions =
   | ReserveTrialCreateAccountRequestEntry
   | ReserveTrialCreateAccountRequest;
 
+/** Non-secret account identifiers extracted from an unusable group-member create response. */
+export interface PartnerCreateGroupMemberRecoveryCandidate {
+  /** Account ID for a group member that may have been created by the failed call. */
+  accountId: string;
+  /** Application key ID for operator revocation. */
+  recoveryApplicationKeyId: string;
+}
+
+/** SDK workaround metadata for the Partner create-group-member response path. */
+export interface PartnerCreateGroupMemberSdkWorkaround {
+  /** SDK package containing the response redaction behavior being bypassed. */
+  packageName: string;
+  /** SDK version whose redaction contract is known to reject the live response. */
+  affectedVersion: string;
+  /** Repository issue tracking the local workaround. */
+  issueUrl: string;
+}
+
+/** Error raised when b2_create_group_member returned a success body this server cannot use safely. */
+export class PartnerCreateGroupMemberResponseUnusableError extends Error {
+  /** Local HTTP status for the unusable success response. */
+  readonly status = 500;
+  /** Stable local error code used by recovery hooks. */
+  readonly code = "partner_create_group_member_response_unusable";
+  /** Non-secret identifiers extracted from the unusable create response. */
+  readonly candidates: readonly PartnerCreateGroupMemberRecoveryCandidate[];
+  /** Sanitized shape summary for logs and tests. */
+  readonly responseShape: string;
+  /** SDK workaround context for issue #312. */
+  readonly sdkWorkaround: PartnerCreateGroupMemberSdkWorkaround = {
+    packageName: "@backblaze-labs/b2-sdk",
+    affectedVersion: "0.3.0",
+    issueUrl: "https://github.com/backblaze-labs/b2-mcp/issues/312",
+  };
+
+  /**
+   * Create a typed, secret-free unusable-response error.
+   *
+   * @param responseShape - Sanitized shape summary of the raw response.
+   * @param candidates - Non-secret created-member candidates extracted from the response.
+   */
+  constructor(
+    responseShape: string,
+    candidates: readonly PartnerCreateGroupMemberRecoveryCandidate[],
+  ) {
+    super(
+      "b2_create_group_member returned a success response that could not be normalized into a secret-bearing result.",
+    );
+    this.name = "PartnerCreateGroupMemberResponseUnusableError";
+    this.responseShape = responseShape;
+    this.candidates = candidates;
+  }
+}
+
+/** Return whether an error is the typed unusable create-group-member response signal. */
+export function isPartnerCreateGroupMemberResponseUnusableError(
+  err: unknown,
+): err is PartnerCreateGroupMemberResponseUnusableError {
+  return (
+    err instanceof PartnerCreateGroupMemberResponseUnusableError ||
+    (!!err &&
+      typeof err === "object" &&
+      (err as { code?: unknown }).code === "partner_create_group_member_response_unusable" &&
+      Array.isArray((err as { candidates?: unknown }).candidates))
+  );
+}
+
 /** Factory hook for constructing the official Partner SDK client in tests. */
 type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
 
@@ -667,6 +736,159 @@ function cloneSecretBearingPartnerResponse<T extends { readonly applicationKey: 
   response: readonly T[],
 ): T[] {
   return response.map((result) => cloneJsonResponse({ ...result } as T));
+}
+
+type PartnerRawPostJsonClient = {
+  postJson(
+    groupsApiUrl: string,
+    authToken: string,
+    endpoint: string,
+    body: unknown,
+    options?: PartnerRawRequestOptions,
+  ): Promise<unknown>;
+};
+
+function nonRetryingPartnerMutationRequestOptions(
+  options: PartnerRawRequestOptions | undefined,
+): PartnerRawRequestOptions {
+  return {
+    ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+    retry: { ...(options?.retry ?? {}), maxRetries: 0 },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringField(record: Record<string, unknown>, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function createGroupMemberResultFromRecord(record: unknown): CreateGroupMemberResult | null {
+  if (!isRecord(record)) return null;
+  const applicationKeyIdValue = stringField(record, "applicationKeyId");
+  const applicationKey = stringField(record, "applicationKey");
+  const groupMemberValue = record.groupMember;
+  if (!applicationKeyIdValue || !applicationKey || !isRecord(groupMemberValue)) return null;
+
+  const accountIdValue = stringField(groupMemberValue, "accountId");
+  const email = stringField(groupMemberValue, "email");
+  const groupIdValue = stringField(groupMemberValue, "groupId");
+  const groupName = stringField(groupMemberValue, "groupName");
+  const region = stringField(groupMemberValue, "region");
+  const s3Endpoint = stringField(groupMemberValue, "s3Endpoint");
+  if (!accountIdValue || !email || !groupIdValue || !groupName || !region || !s3Endpoint) {
+    return null;
+  }
+
+  const groupMember: PartnerGroupMember = {
+    accountId: accountId(accountIdValue),
+    email,
+    groupId: groupId(groupIdValue),
+    groupName,
+    region: region as Region,
+    s3Endpoint,
+  };
+  return {
+    applicationKeyId: applicationKeyId(applicationKeyIdValue),
+    applicationKey,
+    groupMember,
+  };
+}
+
+function responseCandidateLists(response: unknown): readonly unknown[][] {
+  if (Array.isArray(response)) return [response];
+  if (!isRecord(response)) return [];
+  const lists: unknown[][] = [];
+  if (Array.isArray(response.results)) lists.push(response.results);
+  if (Array.isArray(response.result)) lists.push(response.result);
+  if (isRecord(response.result)) lists.push([response.result]);
+  lists.push([response]);
+  return lists;
+}
+
+function normalizeCreateGroupMemberResponse(response: unknown): CreateGroupMemberResponse | null {
+  for (const candidateList of responseCandidateLists(response)) {
+    if (candidateList.length === 0) continue;
+    const results = candidateList.map(createGroupMemberResultFromRecord);
+    if (results.every((result): result is CreateGroupMemberResult => result !== null)) {
+      return results;
+    }
+  }
+  return null;
+}
+
+function responseShape(value: unknown): string {
+  if (Array.isArray(value)) return "array";
+  if (!isRecord(value)) return value === null ? "null" : typeof value;
+  const keys = Object.keys(value).sort();
+  return `object:${keys.slice(0, 8).join(",")}${keys.length > 8 ? ",..." : ""}`;
+}
+
+function createGroupMemberRecoveryCandidateFromRecord(
+  record: Record<string, unknown>,
+): PartnerCreateGroupMemberRecoveryCandidate | null {
+  const groupMember = record.groupMember;
+  const accountIdValue = isRecord(groupMember) ? stringField(groupMember, "accountId") : undefined;
+  const recoveryApplicationKeyId = stringField(record, "applicationKeyId");
+  if (!accountIdValue || !recoveryApplicationKeyId) return null;
+
+  return {
+    accountId: accountIdValue,
+    recoveryApplicationKeyId,
+  };
+}
+
+function collectCreateGroupMemberRecoveryCandidates(
+  value: unknown,
+  candidates = new Map<string, PartnerCreateGroupMemberRecoveryCandidate>(),
+  seen = new Set<object>(),
+  depth = 0,
+): readonly PartnerCreateGroupMemberRecoveryCandidate[] {
+  if (depth > 6 || typeof value !== "object" || value === null) return [...candidates.values()];
+  if (seen.has(value)) return [...candidates.values()];
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectCreateGroupMemberRecoveryCandidates(item, candidates, seen, depth + 1);
+    }
+    return [...candidates.values()];
+  }
+
+  const record = value as Record<string, unknown>;
+  const candidate = createGroupMemberRecoveryCandidateFromRecord(record);
+  if (candidate) candidates.set(candidate.accountId, candidate);
+  for (const nested of Object.values(record)) {
+    collectCreateGroupMemberRecoveryCandidates(nested, candidates, seen, depth + 1);
+  }
+  return [...candidates.values()];
+}
+
+function hasApplicationKeyField(value: unknown, seen = new Set<object>(), depth = 0): boolean {
+  if (depth > 6 || typeof value !== "object" || value === null) return false;
+  if (seen.has(value)) return false;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((item) => hasApplicationKeyField(item, seen, depth + 1));
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    if (key === "applicationKey" && typeof nested === "string" && nested) return true;
+    if (hasApplicationKeyField(nested, seen, depth + 1)) return true;
+  }
+  return false;
+}
+
+function createGroupMemberUnusableErrorFromRaw(
+  value: unknown,
+): PartnerCreateGroupMemberResponseUnusableError | null {
+  const candidates = collectCreateGroupMemberRecoveryCandidates(value);
+  if (candidates.length === 0 && !hasApplicationKeyField(value)) return null;
+  return new PartnerCreateGroupMemberResponseUnusableError(responseShape(value), candidates);
 }
 
 function toServerSideEncryptionResult(
@@ -1752,20 +1974,38 @@ export class B2Client {
     return cloneSecretBearingPartnerResponse(
       await this.withPartnerCircuit(
         { retryOnUnauthorized: false },
-        (client, auth, coordinates, requestOptions) => {
+        async (client, auth, coordinates, requestOptions) => {
           validatePartnerAdminAccount(auth, options.adminAccountId);
           const { groupsApiUrl, authToken, adminAccountId } = coordinates;
-          return client.raw.createGroupMember(
-            groupsApiUrl,
-            authToken,
-            {
-              adminAccountId,
-              groupId: groupId(options.groupId),
-              memberEmail: options.memberEmail,
-              ...(options.region !== undefined ? { region: options.region } : {}),
-            },
-            requestOptions,
-          );
+          // Work around @backblaze-labs/b2-sdk 0.3.0 redaction requiring an
+          // array response after the HTTP request has already completed. See
+          // https://github.com/backblaze-labs/b2-mcp/issues/312; remove this
+          // direct raw call after the SDK accepts the Partner API's live shape.
+          try {
+            const response = await (client.raw as unknown as PartnerRawPostJsonClient).postJson(
+              groupsApiUrl,
+              authToken,
+              "b2_create_group_member",
+              {
+                adminAccountId,
+                groupId: groupId(options.groupId),
+                memberEmail: options.memberEmail,
+                ...(options.region !== undefined ? { region: options.region } : {}),
+              },
+              nonRetryingPartnerMutationRequestOptions(requestOptions),
+            );
+            const normalized = normalizeCreateGroupMemberResponse(response);
+            if (normalized) return normalized;
+            throw new PartnerCreateGroupMemberResponseUnusableError(
+              responseShape(response),
+              collectCreateGroupMemberRecoveryCandidates(response),
+            );
+          } catch (err) {
+            if (isPartnerCreateGroupMemberResponseUnusableError(err)) throw err;
+            const unusableError = createGroupMemberUnusableErrorFromRaw(err);
+            if (unusableError) throw unusableError;
+            throw err;
+          }
         },
       ),
     );
