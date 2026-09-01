@@ -252,12 +252,18 @@ describe("observability logging behavior", () => {
       credential: "fallback-fingerprint",
       error: false,
       resultType: "complete",
-      elicitationOutcome: "accepted",
+      elicitationOutcome: "fallback_accepted",
       handlerRan: true,
       destructiveConfirmationSource: "model_confirm_parameter",
       destructiveConfirmationFallbackReason: "client_cannot_elicit",
     });
     expect(call.argKeys).toEqual(["bucketId", "confirm", "nested"]);
+    expect(findLog(logs, "destructive.elicitation")).toMatchObject({
+      decision: "fallback_accepted",
+      outcome: "fallback_accepted",
+      destructiveConfirmationSource: "model_confirm_parameter",
+      destructiveConfirmationFallbackReason: "client_cannot_elicit",
+    });
     expectNoIncidentLogs(logs);
   });
 

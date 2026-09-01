@@ -40,18 +40,6 @@ export type ProtocolVersionProvider = () => string | undefined;
 export type DestructiveElicitationRequestStateCodec =
   RequestStateCodec<DestructiveElicitationState>;
 
-/** Audit payload emitted when destructive elicitation makes a decision. */
-export interface DestructiveElicitationAuditEvent {
-  /** Final decision outcome. */
-  outcome: ElicitationDecision;
-  /** Optional refusal/decline/cancel reason. */
-  reason?: string;
-  /** Source that satisfied destructive confirmation, when any. */
-  confirmationSource?: DestructiveConfirmationSource;
-  /** Why the legacy `confirm` fallback was used, when applicable. */
-  confirmationFallbackReason?: DestructiveConfirmationFallbackReason;
-}
-
 /** Optional context hooks used by tests and protocol adapters. */
 export interface DestructiveElicitationContextProviders {
   /** Returns request-local MCP client capabilities. */
@@ -91,12 +79,52 @@ export interface DestructiveElicitationState {
   issuedAt: number;
 }
 
-/** Decision lifecycle for return-based destructive-operation elicitation. */
-export type ElicitationDecision = "requested" | "accepted" | "declined" | "cancelled" | "refused";
+/** Decision lifecycle for destructive-operation confirmation auditing. */
+export type ElicitationDecision =
+  | "requested"
+  | "accepted"
+  | "fallback_accepted"
+  | "declined"
+  | "cancelled"
+  | "refused";
 /** Source that supplied destructive-operation confirmation. */
 export type DestructiveConfirmationSource = "human_mcp_elicitation" | "model_confirm_parameter";
 /** Reason the server degraded to the legacy model-supplied `confirm` path. */
 export type DestructiveConfirmationFallbackReason = "elicitation_disabled" | "client_cannot_elicit";
+/** Destructive elicitation prompt was returned to the MCP client. */
+export interface DestructiveElicitationRequestedAuditEvent {
+  /** Final decision outcome. */
+  outcome: "requested";
+}
+/** Destructive operation was approved by MCP human elicitation. */
+export interface DestructiveElicitationAcceptedAuditEvent {
+  /** Final decision outcome. */
+  outcome: "accepted";
+  /** Source that satisfied destructive confirmation. */
+  confirmationSource: "human_mcp_elicitation";
+}
+/** Destructive operation was approved by the legacy confirm-parameter fallback. */
+export interface DestructiveConfirmFallbackAuditEvent {
+  /** Final decision outcome. */
+  outcome: "fallback_accepted";
+  /** Source that satisfied destructive confirmation. */
+  confirmationSource: "model_confirm_parameter";
+  /** Why the legacy `confirm` fallback was used. */
+  confirmationFallbackReason: DestructiveConfirmationFallbackReason;
+}
+/** Destructive elicitation was declined, cancelled, or refused. */
+export interface DestructiveElicitationRefusedAuditEvent {
+  /** Final decision outcome. */
+  outcome: "declined" | "cancelled" | "refused";
+  /** Refusal, decline, or cancel reason. */
+  reason: string;
+}
+/** Audit payload emitted when destructive confirmation makes a decision. */
+export type DestructiveElicitationAuditEvent =
+  | DestructiveElicitationRequestedAuditEvent
+  | DestructiveElicitationAcceptedAuditEvent
+  | DestructiveConfirmFallbackAuditEvent
+  | DestructiveElicitationRefusedAuditEvent;
 type StateVerification =
   | { ok: true; state: DestructiveElicitationState }
   | { ok: false; reason: string };
@@ -195,7 +223,14 @@ export async function maybeRequireDestructiveElicitation<T>({
         onDecision,
       );
     }
-    recordLegacyConfirmFallback(args, "elicitation_disabled", onDecision);
+    recordLegacyConfirmFallback(
+      toolName,
+      effect,
+      args,
+      "elicitation_disabled",
+      sanitizerOptions,
+      onDecision,
+    );
     return runOriginal();
   }
   if (!clientCanUseReturnBasedElicitation(requestExtra, contextProviders)) {
@@ -208,7 +243,14 @@ export async function maybeRequireDestructiveElicitation<T>({
         onDecision,
       );
     }
-    recordLegacyConfirmFallback(args, "client_cannot_elicit", onDecision);
+    recordLegacyConfirmFallback(
+      toolName,
+      effect,
+      args,
+      "client_cannot_elicit",
+      sanitizerOptions,
+      onDecision,
+    );
     return runOriginal();
   }
 
@@ -237,7 +279,7 @@ export async function maybeRequireDestructiveElicitation<T>({
     recordDestructiveElicitationDecision(
       toolName,
       effect,
-      "requested",
+      { outcome: "requested" },
       sanitizerOptions,
       onDecision,
     );
@@ -314,9 +356,13 @@ export async function maybeRequireDestructiveElicitation<T>({
     );
   }
 
-  recordDestructiveElicitationDecision(toolName, effect, "accepted", sanitizerOptions, onDecision, {
-    confirmationSource: "human_mcp_elicitation",
-  });
+  recordDestructiveElicitationDecision(
+    toolName,
+    effect,
+    { outcome: "accepted", confirmationSource: "human_mcp_elicitation" },
+    sanitizerOptions,
+    onDecision,
+  );
   return runWithDestructiveElicitationConsent(
     toolName,
     destructiveTargetDigest(config, args),
@@ -426,11 +472,15 @@ function destructiveElicitationRefused(
   reason: string,
   sanitizerOptions: SanitizerOptions = {},
   onDecision?: (event: DestructiveElicitationAuditEvent) => void,
-  outcome: ElicitationDecision = "refused",
+  outcome: DestructiveElicitationRefusedAuditEvent["outcome"] = "refused",
 ): ToolErrorResult {
-  recordDestructiveElicitationDecision(toolName, effect, outcome, sanitizerOptions, onDecision, {
-    reason,
-  });
+  recordDestructiveElicitationDecision(
+    toolName,
+    effect,
+    { outcome, reason },
+    sanitizerOptions,
+    onDecision,
+  );
   return toolError({
     status: 409,
     code: "destructive_confirmation_refused",
@@ -800,43 +850,64 @@ function destructiveElicitationKeyMaterial(config: B2Config): string {
 function recordDestructiveElicitationDecision(
   toolName: string,
   effect: string,
-  decision: ElicitationDecision,
+  event: DestructiveElicitationAuditEvent,
   sanitizerOptions: SanitizerOptions,
   onDecision?: (event: DestructiveElicitationAuditEvent) => void,
-  event: Omit<DestructiveElicitationAuditEvent, "outcome"> = {},
 ): void {
-  logDestructiveElicitation(toolName, effect, decision, sanitizerOptions, event.reason);
-  onDecision?.({ outcome: decision, ...event });
+  logDestructiveElicitation(toolName, effect, event, sanitizerOptions);
+  onDecision?.(event);
 }
 
 function recordLegacyConfirmFallback(
+  toolName: string,
+  effect: string,
   args: Record<string, unknown>,
   reason: DestructiveConfirmationFallbackReason,
+  sanitizerOptions: SanitizerOptions,
   onDecision?: (event: DestructiveElicitationAuditEvent) => void,
 ): void {
   if (args.confirm !== true) return;
-  onDecision?.({
-    outcome: "accepted",
-    confirmationSource: "model_confirm_parameter",
-    confirmationFallbackReason: reason,
-  });
+  recordDestructiveElicitationDecision(
+    toolName,
+    effect,
+    {
+      outcome: "fallback_accepted",
+      confirmationSource: "model_confirm_parameter",
+      confirmationFallbackReason: reason,
+    },
+    sanitizerOptions,
+    onDecision,
+  );
 }
 
 function logDestructiveElicitation(
   toolName: string,
   effect: string,
-  decision: ElicitationDecision,
+  event: DestructiveElicitationAuditEvent,
   sanitizerOptions: SanitizerOptions = {},
-  reason?: string,
 ): void {
   logger.info(
     {
       tool: toolName,
       effect: sanitizeText(effect, sanitizerOptions),
-      decision,
-      outcome: decision,
-      ...(reason && { reason }),
+      decision: event.outcome,
+      outcome: event.outcome,
+      ...destructiveConfirmationLogFields(event),
+      ...("reason" in event && { reason: event.reason }),
     },
     "destructive.elicitation",
   );
+}
+
+function destructiveConfirmationLogFields(
+  event: DestructiveElicitationAuditEvent,
+): Record<string, string> {
+  return "confirmationSource" in event
+    ? {
+        destructiveConfirmationSource: event.confirmationSource,
+        ...("confirmationFallbackReason" in event && {
+          destructiveConfirmationFallbackReason: event.confirmationFallbackReason,
+        }),
+      }
+    : {};
 }

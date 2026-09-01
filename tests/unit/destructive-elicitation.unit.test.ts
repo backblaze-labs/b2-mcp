@@ -536,13 +536,87 @@ describe("destructive elicitation", () => {
       expect(result.content?.[0]?.text).toBe("deleted");
       expect(original).toHaveBeenCalledTimes(1);
       expect(info.mock.calls.find(([, message]) => message === "tool.call")?.[0]).toMatchObject({
-        elicitationOutcome: "accepted",
+        elicitationOutcome: "fallback_accepted",
         handlerRan: true,
+        destructiveConfirmationSource: "model_confirm_parameter",
+        destructiveConfirmationFallbackReason: expectedReason,
+      });
+      expect(
+        info.mock.calls.find(([, message]) => message === "destructive.elicitation")?.[0],
+      ).toMatchObject({
+        decision: "fallback_accepted",
+        outcome: "fallback_accepted",
         destructiveConfirmationSource: "model_confirm_parameter",
         destructiveConfirmationFallbackReason: expectedReason,
       });
     },
   );
+
+  it("keeps human approval attribution when the approved handler throws", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const config = cfg("confirm");
+    const original = vi.fn((args: Record<string, unknown>) => {
+      const gate = checkDestructive("s3_delete_object", args, config);
+      if (!gate.ok) return toolError(gate.error);
+      throw new Error("provider timeout after approval");
+    });
+    const wrapped = createAuditedToolCallback("s3_delete_object", original, config, providers());
+    const args = { bucket: "photos", key: "old.jpg" };
+    const requestState = await requestStateFor(wrapped, args);
+
+    await expect(
+      wrapped(args, extraWithElicitation(acceptedResponse(), requestState)),
+    ).rejects.toThrow("provider timeout after approval");
+
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.find(([, message]) => message === "tool.error")?.[0]).toMatchObject({
+      elicitationOutcome: "accepted",
+      handlerRan: true,
+      destructiveConfirmationSource: "human_mcp_elicitation",
+      err: "provider timeout after approval",
+    });
+  });
+
+  it("keeps model-confirm attribution when the fallback-approved handler throws", async () => {
+    const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    const config = cfg("confirm");
+    const original = vi.fn((args: Record<string, unknown>) => {
+      const gate = checkDestructive("s3_delete_object", args, config);
+      if (!gate.ok) return toolError(gate.error);
+      throw new Error("provider timeout after model confirm");
+    });
+    const wrapped = createAuditedToolCallback(
+      "s3_delete_object",
+      original,
+      config,
+      providers(URL_ONLY_ELICITATION),
+    );
+
+    await expect(
+      wrapped(
+        { bucket: "photos", key: "old.jpg", confirm: true },
+        { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
+      ),
+    ).rejects.toThrow("provider timeout after model confirm");
+
+    expect(original).toHaveBeenCalledTimes(1);
+    expect(
+      info.mock.calls.find(([, message]) => message === "destructive.elicitation")?.[0],
+    ).toMatchObject({
+      decision: "fallback_accepted",
+      outcome: "fallback_accepted",
+      destructiveConfirmationSource: "model_confirm_parameter",
+      destructiveConfirmationFallbackReason: "client_cannot_elicit",
+    });
+    expect(warn.mock.calls.find(([, message]) => message === "tool.error")?.[0]).toMatchObject({
+      elicitationOutcome: "fallback_accepted",
+      handlerRan: true,
+      destructiveConfirmationSource: "model_confirm_parameter",
+      destructiveConfirmationFallbackReason: "client_cannot_elicit",
+      err: "provider timeout after model confirm",
+    });
+  });
 
   it.each([
     [
