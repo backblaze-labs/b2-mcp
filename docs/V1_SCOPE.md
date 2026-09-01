@@ -28,9 +28,10 @@ In scope for Phase 1:
 - Customer-operated MCP OAuth resource-server integration.
 - Deterministic tool-profile contracts for the full, default, and read-only
   profiles.
-- A Node.js package engine range of `^22.22.2 || ^24 || ^26`, preserving the
-  official B2 SDK's `>=22.22.2` floor while matching opossum's supported Node.js
-  lines, with deterministic CI evidence on Node.js 22.23.1, 24, and 26, live B2
+- A Node.js package engine range of `^22.22.2 || ^24 || ^26`, raising the
+  project's own floor above the official B2 SDK's `>=22.3.0` floor for the JSDoc
+  doc-lint toolchain while matching opossum's supported Node.js lines, with
+  deterministic CI evidence on Node.js 22.23.1, 24, and 26, live B2
   evidence on Node.js 22.23.1, 24, and 26, plus packed-package smoke coverage on
   the Node.js 22.22.2 engine floor.
 - Release, package, CI, protocol, security, and reference-deployment work needed
@@ -92,7 +93,8 @@ before `v0.1.0` is released.
 ## Runtime
 
 Node.js `^22.22.2 || ^24 || ^26` is the package engine range for Phase 1. Node.js
-22.22.2 remains the minimum 22.x engine floor.
+`>=22.22.2` remains the project's minimum 22.x engine floor, above the B2 SDK's
+own `>=22.3.0` baseline.
 
 CI must continuously verify production dependency installation and the full
 implementation, tests, and package toolchain on Node.js 22.23.1, 24, and 26.

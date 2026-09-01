@@ -59,7 +59,7 @@ opening a PR when practical:
 
 | Layer | Command | What it proves |
 | --- | --- | --- |
-| Typecheck | `pnpm run typecheck` | Source and tests compile against the Node 22.22.2 engine-floor types. |
+| Typecheck | `pnpm run typecheck` | Source and tests compile against the conservative `@types/node` 22.3.0 baseline (below the 22.22.2 engine floor; see the note near the end of this guide). |
 | Unit | `pnpm run test:unit` | Fast isolated behavior for handlers, config, adapters, sanitizer, CLI, and utilities. |
 | Contract | `pnpm run test:contract` | Public docs, package surface, tool profiles, workflow policy, schema drift, and support claims stay synchronized. |
 | Protocol modern | `pnpm run test:protocol:modern` | MCP `2026-07-28` HTTP and stdio behavior, including stateless POST serving. |
