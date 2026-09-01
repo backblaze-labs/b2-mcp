@@ -219,7 +219,8 @@ describe("insight usage-report read paths", () => {
     );
 
     expect(result.reports_enabled).toBe(true);
-    expect(result.note).toBe("No usage-report snapshots found yet.");
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.searched_since).toBe(daysAgo(180));
     expect(result.report_scan.pages).toEqual(expect.any(Number));
     expect(result.report_scan.pages).toBeGreaterThan(0);
   });
@@ -289,6 +290,211 @@ describe("insight usage-report read paths", () => {
       "shrink",
       "flat",
     ]);
+  });
+
+  it.each([
+    [{ by: "account" as const, days: 30, limit: 5 }, "last 30 days"],
+    [{ by: "bucket" as const, limit: 5 }, "current month to date"],
+  ])("returns a clean empty-snapshot result for b2_egress_leaders", async (args, period) => {
+    const report = createPagedReportClient({});
+    const tools = registerTools(report.client);
+
+    const result = parseResult(await tools.call("b2_egress_leaders", args));
+
+    expect(result.period).toBe(period);
+    expect(result.rank_by).toBe(args.by);
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.searched_since).toBe(daysAgo(180));
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.report_scan.pages).toEqual(expect.any(Number));
+    expect(result.report_scan.pages).toBeGreaterThan(0);
+    expect(result.report_scan.listed_keys).toBe(0);
+    expect(result.report_scan.parsed_rows).toBe(0);
+  });
+
+  it("keeps empty b2_egress_leaders scans inconclusive when truncated", async () => {
+    const day = daysAgo(1);
+    const report = createPagedReportClient(
+      Object.fromEntries(
+        Array.from({ length: 101 }, (_, index) => [
+          `${day}/notes-${String(index).padStart(3, "0")}.txt`,
+          "ignored",
+        ]),
+      ),
+      { pageSize: 1 },
+    );
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("inconclusive");
+    expect(result.note).toContain("scan budget");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.truncated).toBe(true);
+    expect(result.partial).toBe(true);
+    expect(result.report_scan.selected_keys).toBe(0);
+    expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
+  });
+
+  it("distinguishes an empty b2_egress_leaders window from no snapshots yet", async () => {
+    const staleDay = daysAgo(31);
+    const report = createPagedReportClient({
+      [`${staleDay}/usage.account-stale.csv`]: csv([
+        `stale,${staleDay},bucket-stale,bucket-stale,1,4,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 30, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("requested period");
+    expect(result.note).toContain(staleDay);
+    expect(result.latest_snapshot).toBe(staleDay);
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+  });
+
+  it("does not treat non-usage date-prefixed objects as b2_egress_leaders snapshots", async () => {
+    const day = daysAgo(2);
+    const report = createPagedReportClient({
+      [`${day}/notes.txt`]: "not a usage report",
+      [`${day}/usage.audit-account-a.csv`]: csv([`a,${day},bucket-a,bucket-a,1,4,0,0\n`]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.note).not.toContain("Report snapshots exist");
+    expect(result.searched_since).toBe(daysAgo(180));
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+  });
+
+  it("qualifies b2_egress_leaders with the horizon when snapshots predate 180 days", async () => {
+    const ancientDay = daysAgo(200);
+    const report = createPagedReportClient({
+      [`${ancientDay}/usage.account-old.csv`]: csv([
+        `old,${ancientDay},bucket-old,bucket-old,1,4,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 30, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.note).not.toContain("found yet");
+    expect(result.searched_since).toBe(daysAgo(180));
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+  });
+
+  it("qualifies b2_usage_growth with the horizon when snapshots predate 180 days", async () => {
+    const ancientDay = daysAgo(200);
+    const report = createPagedReportClient({
+      [`${ancientDay}/usage.account-old.csv`]: csv([
+        `old,${ancientDay},bucket-old,bucket-old,1,4,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.note).not.toContain("found yet");
+    expect(result.searched_since).toBe(daysAgo(180));
+  });
+
+  it("keeps b2_usage_growth inconclusive when latest-snapshot discovery is truncated", async () => {
+    const report = createPagedReportClient(
+      Object.fromEntries(
+        Array.from({ length: 101 }, (_, index) => {
+          const day = daysAgo(1 + (index % 9));
+          return [
+            `${day}/usage.account-${String(index).padStart(3, "0")}.csv`,
+            csv([`acct-${index},${day},bucket-a,bucket-a,1,4,0,0\n`]),
+          ];
+        }),
+      ),
+      { pageSize: 1 },
+    );
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("inconclusive");
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("comparison");
+    expect(result.truncated).toBe(true);
+    expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
+  });
+
+  it("omits latest_snapshot when empty b2_egress_leaders discovery is truncated", async () => {
+    const staleDay = daysAgo(2);
+    const report = createPagedReportClient(
+      Object.fromEntries(
+        Array.from({ length: 101 }, (_, index) => [
+          `${staleDay}/usage.account-${String(index).padStart(3, "0")}.csv`,
+          csv([`stale-${index},${staleDay},bucket-stale,bucket-stale,1,4,0,0\n`]),
+        ]),
+      ),
+      { pageSize: 1 },
+    );
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 1, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("inconclusive");
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.truncated).toBe(true);
+    expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
+  });
+
+  it("does not report measured zero when b2_egress_leaders parses no usage rows", async () => {
+    const day = daysAgo(1);
+    const report = createPagedReportClient({
+      [`${day}/usage.account-empty.csv`]: "",
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 7, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("no parseable usage rows");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.report_scan.selected_keys).toBe(1);
+    expect(result.report_scan.parsed_rows).toBe(0);
   });
 
   it("paginates b2_egress_leaders report keys and skips empty or malformed CSV rows", async () => {

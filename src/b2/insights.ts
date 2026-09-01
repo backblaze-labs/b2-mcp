@@ -270,6 +270,17 @@ const NOT_ENABLED = {
     "enabled by Backblaze Support / your account representative (Partner, Enterprise, or Groups). " +
     "Once enabled, B2 backfills the previous 7 days.",
 };
+const NO_USAGE_REPORT_SNAPSHOTS_NOTE = "No usage-report snapshots found yet.";
+
+// Widening lookback windows (days) for latest-snapshot discovery. The last entry
+// is the bounded horizon: finding nothing within it means none in that window,
+// not none ever.
+const SNAPSHOT_LOOKBACK_DAYS = [10, 45, 180] as const;
+const SNAPSHOT_DISCOVERY_HORIZON_DAYS = SNAPSHOT_LOOKBACK_DAYS[SNAPSHOT_LOOKBACK_DAYS.length - 1];
+
+// A usage-report snapshot key: date-prefixed CSV. Non-report objects a bucket may
+// also hold (e.g. YYYY-MM-DD/notes.txt) are not snapshots.
+const REPORT_DAY_CSV_RE = /^\d{4}-\d{2}-\d{2}\/.+\.csv$/;
 
 const REPORT_SCAN_LIMITS = {
   maxPages: 100,
@@ -388,6 +399,78 @@ function reportScanMetadata(...loads: ReportRowsResult[]): Record<string, unknow
   return reportScanMetadataFromStats(totals);
 }
 
+function hasUsageReportSnapshots<T extends { date: string | null }>(
+  value: T,
+): value is T & { date: string };
+function hasUsageReportSnapshots(value: ReportRowsResult): boolean;
+function hasUsageReportSnapshots(value: { date: string | null } | ReportRowsResult): boolean {
+  if ("date" in value) return value.date !== null;
+  // A selected usage CSV key is the egress path's proof that a report snapshot
+  // was loadable in the requested scan window.
+  return value.stats.selected_keys > 0;
+}
+
+function hasUsageReportRows(load: ReportRowsResult): boolean {
+  return load.rows.length > 0;
+}
+
+function noUsageReportSnapshots(stats: ReportLoadStats): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note: stats.stop_reason
+      ? "No usage-report snapshots were loaded before the scan budget was exhausted; " +
+        "results are inconclusive (see report_scan.stop_reasons)."
+      : NO_USAGE_REPORT_SNAPSHOTS_NOTE,
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
+function noUsageReportSnapshotsWithinHorizon(
+  stats: ReportLoadStats,
+  searchedSince: string,
+): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note:
+      `No usage-report snapshots found in the last ${SNAPSHOT_DISCOVERY_HORIZON_DAYS} days ` +
+      `(searched back to ${searchedSince}). Older snapshots, if reporting stopped earlier, are ` +
+      "outside this bounded discovery window and were not confirmed absent.",
+    searched_since: searchedSince,
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
+function noUsageReportSnapshotsInPeriod(
+  stats: ReportLoadStats,
+  sinceDate: string,
+  latestSnapshot: string,
+): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note: stats.stop_reason
+      ? "No usage-report snapshots were loaded in the requested period before the scan budget " +
+        "was exhausted; results are inconclusive (see report_scan.stop_reasons)."
+      : latestSnapshot >= sinceDate
+        ? `Report snapshots exist (latest snapshot is ${latestSnapshot}), but no usage-report ` +
+          "data files were found in the requested period."
+        : `No usage-report snapshots found in the requested period. Latest available snapshot ` +
+          `is ${latestSnapshot}.`,
+    ...(stats.stop_reason ? {} : { latest_snapshot: latestSnapshot }),
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
+function noUsageReportRows(stats: ReportLoadStats): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note: stats.stop_reason
+      ? "Usage-report snapshots were found, but no parseable usage rows were loaded before " +
+        "the scan budget was exhausted; results are inconclusive (see report_scan.stop_reasons)."
+      : "Usage-report snapshots were found, but no parseable usage rows were loaded.",
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
 /**
  * The reserved daily-report bucket name for the caller: `b2-reports-<accountId>`.
  * This bucket is "Restricted" and B2 HIDES it from b2_list_buckets even for
@@ -438,7 +521,6 @@ async function loadReportRows(
   sinceDate: string,
   budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<ReportRowsResult | null> {
-  const keyRe = /^\d{4}-\d{2}-\d{2}\/.+\.csv$/;
   const keys: string[] = [];
   let token: string | undefined;
   const { stats } = budget;
@@ -457,7 +539,7 @@ async function loadReportRows(
       stats.pages++;
       stats.listed_keys += page.keys.length;
       for (const k of page.keys) {
-        if (!keyRe.test(k) || k.slice(0, 10) < sinceDate) continue;
+        if (!REPORT_DAY_CSV_RE.test(k) || k.slice(0, 10) < sinceDate) continue;
         if (keys.length >= REPORT_SCAN_LIMITS.maxCandidateKeys) {
           stopReportScan(stats, "max_candidate_keys");
           break;
@@ -641,7 +723,10 @@ async function nearestSnapshotDate(
  * @param today - Date used as the current-day search anchor.
  * @param budget - Optional scan budget for tests and bounded runtime.
  *
- * @returns The latest snapshot date and whether the reports bucket is missing.
+ * @returns The latest snapshot date, whether the reports bucket is missing, and
+ *   `searchedSince` (the oldest date probed) when the bounded horizon completed
+ *   without a snapshot and without exhausting the budget. A null `date` with a
+ *   `searchedSince` means "none in that window", not "none ever".
  *
  * @internal
  */
@@ -650,11 +735,11 @@ export async function latestSnapshotDate(
   bucketName: string,
   today: Date,
   budget: ReportScanBudget = createReportScanBudget(),
-): Promise<{ date: string | null; bucketMissing: boolean }> {
-  for (const lookback of [10, 45, 180]) {
+): Promise<{ date: string | null; bucketMissing: boolean; searchedSince?: string }> {
+  for (const lookback of SNAPSHOT_LOOKBACK_DAYS) {
     const after = new Date(today.getTime() - lookback * 86400_000).toISOString().slice(0, 10);
     let token: string | undefined;
-    let max: string | null = null;
+    const candidates: string[] = [];
     try {
       do {
         if (!ensureReportPageBudget(budget)) break;
@@ -667,8 +752,15 @@ export async function latestSnapshotDate(
         budget.stats.pages++;
         budget.stats.listed_keys += page.keys.length;
         for (const key of page.keys) {
-          const d = snapshotDateOf(key);
-          if (d && (max === null || d > max)) max = d;
+          if (!REPORT_DAY_CSV_RE.test(key)) continue;
+          // Bound transient memory: an audit-heavy bucket could otherwise buffer
+          // up to maxPages * maxKeysPerPage keys. Cap it and fall through to the
+          // inconclusive path rather than holding the whole namespace in memory.
+          if (candidates.length >= REPORT_SCAN_LIMITS.maxCandidateKeys) {
+            stopReportScan(budget.stats, "max_candidate_keys");
+            break;
+          }
+          candidates.push(key);
         }
         token = page.isTruncated ? page.nextContinuationToken : undefined;
         if (budget.stats.stop_reason) break;
@@ -677,10 +769,27 @@ export async function latestSnapshotDate(
       if (is404(e)) return { date: null, bucketMissing: true };
       throw e;
     }
-    if (max) return { date: max, bucketMissing: false };
+    // A truncated window collected only the older (lexically earlier) keys, so its
+    // max is not the true latest; fall through to the inconclusive path instead of
+    // publishing a stale date.
     if (budget.stats.stop_reason) break;
+    // Apply the row loader's usage-data selection so a bucket holding only
+    // non-usage date-prefixed objects is not mistaken for a snapshot.
+    let max: string | null = null;
+    for (const key of selectUsageKeys(candidates)) {
+      const d = snapshotDateOf(key);
+      if (d && (max === null || d > max)) max = d;
+    }
+    if (max) return { date: max, bucketMissing: false };
   }
-  return { date: null, bucketMissing: false };
+  // Bounded probe finished with no snapshot and budget intact: report the horizon
+  // searched so callers do not assert snapshots never existed.
+  const searchedSince = budget.stats.stop_reason
+    ? undefined
+    : new Date(today.getTime() - SNAPSHOT_DISCOVERY_HORIZON_DAYS * 86400_000)
+        .toISOString()
+        .slice(0, 10);
+  return { date: null, bucketMissing: false, searchedSince };
 }
 
 /**
@@ -1033,12 +1142,12 @@ export function registerInsightTools(
 
         const latest = await latestSnapshotDate(reportClient, bucket, today, reportBudget);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
-        if (!latest.date)
-          return toolJson({
-            reports_enabled: true,
-            note: "No usage-report snapshots found yet.",
-            ...reportScanMetadataFromStats(reportBudget.stats),
-          });
+        if (!hasUsageReportSnapshots(latest))
+          return toolJson(
+            latest.searchedSince
+              ? noUsageReportSnapshotsWithinHorizon(reportBudget.stats, latest.searchedSince)
+              : noUsageReportSnapshots(reportBudget.stats),
+          );
 
         const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
@@ -1107,13 +1216,42 @@ export function registerInsightTools(
     async (args) => {
       try {
         const since = args.days != null ? daysAgo(args.days) : startOfMonthUTC();
-        const loaded = await loadReportRows(reportClient, await reportsBucketName(auth), since);
+        const bucket = await reportsBucketName(auth);
+        const reportBudget = createReportScanBudget();
+        const loaded = await loadReportRows(reportClient, bucket, since, reportBudget);
         if (loaded === null) return toolJson(NOT_ENABLED);
+        const period = args.days != null ? `last ${args.days} days` : "current month to date";
+        if (!hasUsageReportSnapshots(loaded)) {
+          let emptySnapshotMetadata = noUsageReportSnapshots(loaded.stats);
+          if (!loaded.stats.stop_reason) {
+            const latest = await latestSnapshotDate(reportClient, bucket, new Date(), reportBudget);
+            if (latest.bucketMissing) return toolJson(NOT_ENABLED);
+            emptySnapshotMetadata = hasUsageReportSnapshots(latest)
+              ? noUsageReportSnapshotsInPeriod(loaded.stats, since, latest.date)
+              : latest.searchedSince
+                ? noUsageReportSnapshotsWithinHorizon(loaded.stats, latest.searchedSince)
+                : noUsageReportSnapshots(loaded.stats);
+          }
+          return toolJson({
+            period,
+            rank_by: args.by,
+            ...emptySnapshotMetadata,
+            leaders: [],
+          });
+        }
+        if (!hasUsageReportRows(loaded)) {
+          return toolJson({
+            period,
+            rank_by: args.by,
+            ...noUsageReportRows(loaded.stats),
+            leaders: [],
+          });
+        }
         const leaders = computeEgressLeaders(loaded.rows, args.by);
         const total = leaders.reduce((s, l) => s + l.egress, 0);
         const top = leaders.slice(0, args.limit);
         return toolJson({
-          period: args.days != null ? `last ${args.days} days` : "current month to date",
+          period,
           rank_by: args.by,
           total_egress_gb: gb(total),
           ...reportScanMetadata(loaded),
