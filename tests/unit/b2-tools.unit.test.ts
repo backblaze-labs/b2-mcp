@@ -25,7 +25,11 @@ import { B2Client, setB2PartnerClientFactoryForTests } from "../../src/b2/client
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { logger } from "../../src/utils/logger";
 import { DEFAULT_BOUNDED_WORKER_CONCURRENCY } from "../../src/utils/concurrency";
-import { secretSinkFileOpsForTests } from "../../src/utils/secret-sink";
+import {
+  appendSecretSinkRecord,
+  durableSecretIdempotency,
+  secretSinkFileOpsForTests,
+} from "../../src/utils/secret-sink";
 import { LOGGER_SECRET_REDACTION_PATHS } from "../../src/utils/secret-sanitizer";
 import type { McpServer } from "../../src/mcp";
 import { callTool, parseResult, testConfig } from "../support/deterministic-fakes";
@@ -2391,6 +2395,74 @@ describe("Partner API tools", () => {
       transport.requests.filter((request) => b2EndpointName(request) === "b2_create_group_member"),
     ).toHaveLength(createRequestsAfterFirst);
     expect(readFileSync(secretFile, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("replays legacy array-shaped group-member sink records", async () => {
+    const secretFile = tempSecretFile();
+    const createGroupMember = vi.fn(async () => {
+      throw new Error("createGroupMember should not run for idempotent replay");
+    });
+    setB2PartnerClientFactoryForTests(() => partnerSdkClientWithOverrides({ createGroupMember }));
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const args = {
+      adminAccountId: "test-account-123",
+      groupId: "legacy-group",
+      memberEmail: "legacy-member@example.com",
+      idempotencyKey: "create-group-member-legacy-array-retry",
+      confirm: true,
+    };
+    const legacyCreated = {
+      applicationKeyId: "legacy-key-id",
+      applicationKey: "K005LegacyArrayGroupMemberSecret1234567890",
+      groupMember: {
+        accountId: "legacy-member-account",
+        email: args.memberEmail,
+        groupId: args.groupId,
+        groupName: "Legacy group",
+        region: "us-west",
+        s3Endpoint: "s3.us-west-001.backblazeb2.com",
+      },
+    };
+    const pointer = appendSecretSinkRecord(
+      { mode: "file", filePath: secretFile },
+      "b2_create_group_member",
+      [legacyCreated],
+      durableSecretIdempotency({
+        toolName: "b2_create_group_member",
+        idempotencyKey: args.idempotencyKey,
+        callerFingerprint: partnerTestConfig.applicationKeyId,
+        normalizedInput: {
+          adminAccountId: args.adminAccountId,
+          groupId: args.groupId,
+          memberEmail: args.memberEmail,
+        },
+      }),
+    );
+
+    const rawResult = await callTool(server, "b2_create_group_member", args);
+    const result = parseResult(rawResult);
+
+    expect(rawResult.isError).not.toBe(true);
+    expect(createGroupMember).not.toHaveBeenCalled();
+    expect(result.secretSink).toMatchObject(pointer);
+    expect(result.results).toEqual([
+      {
+        applicationKeyId: "legacy-key-id",
+        applicationKey: "[redacted]",
+        groupMember: {
+          accountId: "legacy-member-account",
+          email: args.memberEmail,
+          groupId: args.groupId,
+          groupName: "Legacy group",
+          region: "us-west",
+          s3Endpoint: "s3.us-west-001.backblazeb2.com",
+        },
+      },
+    ]);
+    expect(JSON.stringify(rawResult)).not.toContain(legacyCreated.applicationKey);
   });
 
   it("normalizes null group-member regions for file-sink idempotency", async () => {

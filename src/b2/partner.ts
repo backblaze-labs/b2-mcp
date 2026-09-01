@@ -127,6 +127,13 @@ function createGroupMemberProjection(
   };
 }
 
+function createGroupMemberProjections(
+  result: unknown,
+  options: { redact: boolean },
+): CreateGroupMemberProjection[] {
+  return partnerResultEntries(result).map((entry) => createGroupMemberProjection(entry, options));
+}
+
 function reserveTrialCreateAccountProjection(
   result: unknown,
   { redact }: { redact: boolean },
@@ -349,11 +356,11 @@ export function registerPartnerTools(
             }),
             create: () => client.createGroupMember(request),
             projectRedacted: (created, pointer: SecretSinkPointer) => ({
-              results: [createGroupMemberProjection(created, { redact: true })],
+              results: createGroupMemberProjections(created, { redact: true }),
               secretSink: pointer,
             }),
             projectInline: (created, warning) => ({
-              results: [createGroupMemberProjection(created, { redact: false })],
+              results: createGroupMemberProjections(created, { redact: false }),
               warning,
             }),
             diagnostics: partnerSecretDiagnostics,
