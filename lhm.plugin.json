@@ -6,15 +6,7 @@
   "name": "Backblaze B2 MCP Server",
   "prompts": [],
   "resources": [],
-  "tags": [
-    "mcp",
-    "backblaze",
-    "b2",
-    "cloud-storage",
-    "s3",
-    "ai",
-    "object-storage"
-  ],
+  "tags": ["mcp", "backblaze", "b2", "cloud-storage", "s3", "ai", "object-storage"],
   "tools": [
     {
       "name": "b2_authorize_account",
@@ -43,10 +35,7 @@
           },
           "bucketType": {
             "type": "string",
-            "enum": [
-              "allPublic",
-              "allPrivate"
-            ],
+            "enum": ["allPublic", "allPrivate"],
             "description": "allPublic allows unauthenticated downloads; allPrivate requires authorization."
           },
           "bucketInfo": {
@@ -147,9 +136,7 @@
                   "type": "number"
                 }
               },
-              "required": [
-                "fileNamePrefix"
-              ]
+              "required": ["fileNamePrefix"]
             }
           },
           "defaultServerSideEncryption": {
@@ -158,28 +145,20 @@
             "properties": {
               "mode": {
                 "type": "string",
-                "enum": [
-                  "none",
-                  "SSE-B2"
-                ]
+                "enum": ["none", "SSE-B2"]
               },
               "algorithm": {
                 "type": "string"
               }
             },
-            "required": [
-              "mode"
-            ]
+            "required": ["mode"]
           },
           "fileLockEnabled": {
             "description": "Enable Object Lock (file lock) on the bucket at creation. (Object Lock can also be enabled later on an existing bucket via b2_update_bucket.) Must be true before any retention or legal hold can be applied to files in this bucket.",
             "type": "boolean"
           }
         },
-        "required": [
-          "bucketName",
-          "bucketType"
-        ],
+        "required": ["bucketName", "bucketType"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -244,9 +223,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucketId"
-        ],
+        "required": ["bucketId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -271,9 +248,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "applicationKeyId"
-        ],
+        "required": ["applicationKeyId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -293,10 +268,7 @@
             "default": "account",
             "description": "Rank by 'account' (default) or 'bucket'.",
             "type": "string",
-            "enum": [
-              "account",
-              "bucket"
-            ]
+            "enum": ["account", "bucket"]
           },
           "days": {
             "description": "Rolling window in days (1–90). Omit for current month to date.",
@@ -350,11 +322,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "adminAccountId",
-          "groupId",
-          "memberAccountId"
-        ],
+        "required": ["adminAccountId", "groupId", "memberAccountId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -375,9 +343,7 @@
             "description": "The bucket ID to get notification rules for."
           }
         },
-        "required": [
-          "bucketId"
-        ],
+        "required": ["bucketId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -417,9 +383,7 @@
             "maximum": 500000
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -448,12 +412,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "allPublic",
-                "allPrivate",
-                "snapshot",
-                "all"
-              ]
+              "enum": ["allPublic", "allPrivate", "snapshot", "all"]
             }
           },
           "limit": {
@@ -499,10 +458,7 @@
             "maximum": 1000
           }
         },
-        "required": [
-          "adminAccountId",
-          "groupId"
-        ],
+        "required": ["adminAccountId", "groupId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -540,9 +496,7 @@
             "maximum": 100
           }
         },
-        "required": [
-          "adminAccountId"
-        ],
+        "required": ["adminAccountId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -657,29 +611,18 @@
                             "type": "string"
                           }
                         },
-                        "required": [
-                          "name",
-                          "value"
-                        ]
+                        "required": ["name", "value"]
                       }
                     }
                   },
-                  "required": [
-                    "targetType",
-                    "url"
-                  ]
+                  "required": ["targetType", "url"]
                 },
                 "isEnabled": {
                   "type": "boolean",
                   "description": "Whether this rule is active."
                 }
               },
-              "required": [
-                "name",
-                "eventTypes",
-                "targetConfiguration",
-                "isEnabled"
-              ]
+              "required": ["name", "eventTypes", "targetConfiguration", "isEnabled"]
             }
           },
           "confirm": {
@@ -687,10 +630,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucketId",
-          "eventNotificationRules"
-        ],
+        "required": ["bucketId", "eventNotificationRules"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -725,9 +665,7 @@
             "maximum": 10000
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -749,10 +687,7 @@
           },
           "bucketType": {
             "type": "string",
-            "enum": [
-              "allPublic",
-              "allPrivate"
-            ]
+            "enum": ["allPublic", "allPrivate"]
           },
           "bucketInfo": {
             "type": "object",
@@ -851,9 +786,7 @@
                   "type": "number"
                 }
               },
-              "required": [
-                "fileNamePrefix"
-              ]
+              "required": ["fileNamePrefix"]
             }
           },
           "defaultServerSideEncryption": {
@@ -861,18 +794,13 @@
             "properties": {
               "mode": {
                 "type": "string",
-                "enum": [
-                  "none",
-                  "SSE-B2"
-                ]
+                "enum": ["none", "SSE-B2"]
               },
               "algorithm": {
                 "type": "string"
               }
             },
-            "required": [
-              "mode"
-            ]
+            "required": ["mode"]
           },
           "replicationConfiguration": {
             "type": "object",
@@ -916,10 +844,7 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "replicationRules",
-                  "sourceApplicationKeyId"
-                ]
+                "required": ["replicationRules", "sourceApplicationKeyId"]
               },
               "asReplicationDestination": {
                 "type": "object",
@@ -934,9 +859,7 @@
                     }
                   }
                 },
-                "required": [
-                  "sourceToDestinationKeyMapping"
-                ]
+                "required": ["sourceToDestinationKeyMapping"]
               }
             }
           },
@@ -952,10 +875,7 @@
                 "anyOf": [
                   {
                     "type": "string",
-                    "enum": [
-                      "governance",
-                      "compliance"
-                    ]
+                    "enum": ["governance", "compliance"]
                   },
                   {
                     "type": "null"
@@ -975,16 +895,10 @@
                       },
                       "unit": {
                         "type": "string",
-                        "enum": [
-                          "days",
-                          "years"
-                        ]
+                        "enum": ["days", "years"]
                       }
                     },
-                    "required": [
-                      "duration",
-                      "unit"
-                    ]
+                    "required": ["duration", "unit"]
                   },
                   {
                     "type": "null"
@@ -993,10 +907,7 @@
                 "description": "Retention period, e.g. { duration: 7, unit: 'days' }. null clears the default."
               }
             },
-            "required": [
-              "mode",
-              "period"
-            ]
+            "required": ["mode", "period"]
           },
           "ifRevisionIs": {
             "description": "Conditional update — only update if the bucket revision matches this value.",
@@ -1007,9 +918,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucketId"
-        ],
+        "required": ["bucketId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1035,10 +944,7 @@
           },
           "legalHold": {
             "type": "string",
-            "enum": [
-              "on",
-              "off"
-            ],
+            "enum": ["on", "off"],
             "description": "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns."
           },
           "confirm": {
@@ -1046,11 +952,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "fileId",
-          "fileName",
-          "legalHold"
-        ],
+        "required": ["fileId", "fileName", "legalHold"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1081,10 +983,7 @@
                 "anyOf": [
                   {
                     "type": "string",
-                    "enum": [
-                      "governance",
-                      "compliance"
-                    ]
+                    "enum": ["governance", "compliance"]
                   },
                   {
                     "type": "null"
@@ -1104,10 +1003,7 @@
                 "description": "Unix timestamp (ms) until which the file is retained. null when mode is null."
               }
             },
-            "required": [
-              "mode",
-              "retainUntilTimestamp"
-            ],
+            "required": ["mode", "retainUntilTimestamp"],
             "description": "Retention policy to apply, or { mode: null, retainUntilTimestamp: null } to clear. This is the flat shape B2's write API expects — do NOT include the read-only isClientAuthorizedToRead/value wrapper that b2_get_file_info returns."
           },
           "bypassGovernance": {
@@ -1119,11 +1015,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "fileId",
-          "fileName",
-          "fileRetention"
-        ],
+        "required": ["fileId", "fileName", "fileRetention"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1143,11 +1035,7 @@
             "default": "month",
             "description": "Compare the latest snapshot against one month, quarter, or year ago. Default month.",
             "type": "string",
-            "enum": [
-              "month",
-              "quarter",
-              "year"
-            ]
+            "enum": ["month", "quarter", "year"]
           },
           "days": {
             "description": "Custom trailing window in days that overrides `period` (e.g. 7 for week-over-week).",
@@ -1159,11 +1047,7 @@
             "default": "most_grown",
             "description": "Ranking. Default most_grown.",
             "type": "string",
-            "enum": [
-              "most_grown",
-              "least_grown",
-              "shrinking"
-            ]
+            "enum": ["most_grown", "least_grown", "shrinking"]
           },
           "limit": {
             "default": 50,
@@ -1205,11 +1089,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucket",
-          "key",
-          "uploadId"
-        ],
+        "required": ["bucket", "key", "uploadId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1253,20 +1133,12 @@
                   "description": "The ETag from this part's direct PUT response (the s3_presign_upload_part flow)."
                 }
               },
-              "required": [
-                "partNumber",
-                "etag"
-              ]
+              "required": ["partNumber", "etag"]
             },
             "description": "All uploaded parts in ascending part number order."
           }
         },
-        "required": [
-          "bucket",
-          "key",
-          "uploadId",
-          "parts"
-        ],
+        "required": ["bucket", "key", "uploadId", "parts"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1306,10 +1178,7 @@
             "default": "COPY",
             "description": "COPY copies metadata from source; REPLACE uses the provided metadata.",
             "type": "string",
-            "enum": [
-              "COPY",
-              "REPLACE"
-            ]
+            "enum": ["COPY", "REPLACE"]
           },
           "contentType": {
             "description": "New content type (only used with REPLACE).",
@@ -1328,18 +1197,10 @@
           "acl": {
             "description": "Accepted as a no-op S3 compatibility hint; B2 access follows the destination bucket policy.",
             "type": "string",
-            "enum": [
-              "private",
-              "public-read"
-            ]
+            "enum": ["private", "public-read"]
           }
         },
-        "required": [
-          "sourceBucket",
-          "sourceKey",
-          "destinationBucket",
-          "destinationKey"
-        ],
+        "required": ["sourceBucket", "sourceKey", "destinationBucket", "destinationKey"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1379,23 +1240,15 @@
           },
           "acl": {
             "type": "string",
-            "enum": [
-              "private",
-              "public-read"
-            ]
+            "enum": ["private", "public-read"]
           },
           "serverSideEncryption": {
             "description": "Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS.",
             "type": "string",
-            "enum": [
-              "AES256"
-            ]
+            "enum": ["AES256"]
           }
         },
-        "required": [
-          "bucket",
-          "key"
-        ],
+        "required": ["bucket", "key"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1428,10 +1281,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucket",
-          "key"
-        ],
+        "required": ["bucket", "key"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1466,9 +1316,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "key"
-              ]
+              "required": ["key"]
             },
             "description": "Array of objects to delete."
           },
@@ -1486,10 +1334,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucket",
-          "objects"
-        ],
+        "required": ["bucket", "objects"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1510,9 +1355,7 @@
             "description": "The bucket name."
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1549,10 +1392,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "bucket",
-          "key"
-        ],
+        "required": ["bucket", "key"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1578,10 +1418,7 @@
           },
           "operation": {
             "type": "string",
-            "enum": [
-              "GetObject",
-              "PutObject"
-            ],
+            "enum": ["GetObject", "PutObject"],
             "description": "The operation the URL allows: GetObject to download or PutObject to upload."
           },
           "expiresIn": {
@@ -1604,11 +1441,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucket",
-          "key",
-          "operation"
-        ],
+        "required": ["bucket", "key", "operation"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1629,9 +1462,7 @@
             "description": "The bucket name to check."
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1660,10 +1491,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "bucket",
-          "key"
-        ],
+        "required": ["bucket", "key"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1705,9 +1533,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1749,9 +1575,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1794,9 +1618,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "bucket"
-        ],
+        "required": ["bucket"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1837,11 +1659,7 @@
             "maximum": 9007199254740991
           }
         },
-        "required": [
-          "bucket",
-          "key",
-          "uploadId"
-        ],
+        "required": ["bucket", "key", "uploadId"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1888,12 +1706,7 @@
             "maximum": 604800
           }
         },
-        "required": [
-          "bucket",
-          "key",
-          "uploadId",
-          "partNumbers"
-        ],
+        "required": ["bucket", "key", "uploadId", "partNumbers"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -1924,10 +1737,7 @@
                 },
                 "status": {
                   "type": "string",
-                  "enum": [
-                    "Enabled",
-                    "Disabled"
-                  ]
+                  "enum": ["Enabled", "Disabled"]
                 },
                 "filter": {
                   "type": "object",
@@ -1962,9 +1772,7 @@
                       "description": "Days after becoming noncurrent to expire the version."
                     }
                   },
-                  "required": [
-                    "noncurrentDays"
-                  ]
+                  "required": ["noncurrentDays"]
                 },
                 "abortIncompleteMultipartUpload": {
                   "type": "object",
@@ -1976,15 +1784,10 @@
                       "description": "Cancel incomplete multipart uploads after this many days."
                     }
                   },
-                  "required": [
-                    "daysAfterInitiation"
-                  ]
+                  "required": ["daysAfterInitiation"]
                 }
               },
-              "required": [
-                "id",
-                "status"
-              ]
+              "required": ["id", "status"]
             },
             "description": "Rules to set; [] clears the configuration."
           },
@@ -1993,10 +1796,7 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "bucket",
-          "rules"
-        ],
+        "required": ["bucket", "rules"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -2045,27 +1845,19 @@
           "acl": {
             "description": "Accepted as a no-op S3 compatibility hint; B2 bucket policy is unchanged.",
             "type": "string",
-            "enum": [
-              "private",
-              "public-read"
-            ]
+            "enum": ["private", "public-read"]
           },
           "serverSideEncryption": {
             "description": "Server-side encryption. B2 supports SSE-B2 (AES256) only — not SSE-KMS.",
             "type": "string",
-            "enum": [
-              "AES256"
-            ]
+            "enum": ["AES256"]
           },
           "storageClass": {
             "description": "Accepted as a no-op S3 compatibility hint; B2 storage class is unchanged.",
             "type": "string"
           }
         },
-        "required": [
-          "bucket",
-          "key"
-        ],
+        "required": ["bucket", "key"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -2112,13 +1904,7 @@
             "type": "string"
           }
         },
-        "required": [
-          "bucket",
-          "key",
-          "uploadId",
-          "partNumber",
-          "copySource"
-        ],
+        "required": ["bucket", "key", "uploadId", "partNumber", "copySource"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
