@@ -119,6 +119,7 @@ describe("eval pass-rate report script", () => {
       path,
       `${JSON.stringify(
         report({
+          schemaVersion: 2,
           providers: [
             {
               provider: "Claude",
@@ -172,6 +173,42 @@ describe("eval pass-rate report script", () => {
     expect(summary.stdout).toContain(
       "| Claude | http | claude-haiku-4-5-20251001 | 1 | 1 | 100.0% |",
     );
+  });
+
+  it("rejects transport fields on schemaVersion 1 reports", () => {
+    const path = tempReportPath();
+    writeFileSync(
+      path,
+      `${JSON.stringify(
+        report({
+          providers: [
+            {
+              provider: "Claude",
+              transport: "stdio",
+              model: "claude-haiku-4-5-20251001",
+              passed: 1,
+              total: 1,
+              passRate: 1,
+            },
+          ],
+          results: [
+            {
+              provider: "Claude",
+              transport: "stdio",
+              caseName: "blocked delete bucket",
+              status: "passed",
+              passed: true,
+            },
+          ],
+        }),
+      )}\n`,
+      "utf8",
+    );
+
+    const validation = runScript("validate", path);
+
+    expect(validation.status).not.toBe(0);
+    expect(validation.stderr).toContain("is only valid in schemaVersion 2");
   });
 
   it("rejects providers outside the allowed set", () => {

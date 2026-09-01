@@ -4,11 +4,12 @@ import {
   anthropicEvalModel,
   createAnthropicDriver,
 } from "./anthropic-driver";
-import { evalCaseRunOptions, type EvalCase } from "./cases";
+import { evalCaseRunOptions, normalizeExpectedToolOutcome, type EvalCase } from "./cases";
 import { OPENAI_API_KEY_ENV, createOpenAIDriver, openAIEvalModel } from "./openai-driver";
 import { providerSecretValues } from "./provider-secrets";
 import { sanitizeProviderErrorMessage } from "./provider-utils";
 import {
+  EVAL_TRANSPORTS,
   llmEvalGate,
   runEval,
   type Driver,
@@ -76,14 +77,19 @@ export interface PassRateAssertionOptions {
 
 export interface ProviderPassRateComparisonOptions {
   readonly maxProviderErrors?: number;
+  /**
+   * Eval transports to run. The report/result transport field is emitted only
+   * when this resolves to more than one transport; explicit `["stdio"]` keeps
+   * the same output shape as the default single-stdio run.
+   */
   readonly transports?: readonly EvalTransport[];
 }
 
 export type EvalRunner = (options: RunEvalOptions) => Promise<EvalRun>;
 
-export const EVAL_TRANSPORTS: readonly EvalTransport[] = ["stdio", "http"];
+export { EVAL_TRANSPORTS } from "./harness";
 
-const DEFAULT_PROVIDER_COMPARISON_TRANSPORTS: readonly EvalTransport[] = ["stdio"];
+const DEFAULT_PROVIDER_COMPARISON_TRANSPORTS: readonly EvalTransport[] = [EVAL_TRANSPORTS[0]];
 
 export const CLAUDE_OPENAI_PROVIDERS: readonly EvalProvider[] = [
   { name: "Claude", model: anthropicEvalModel, createDriver: createAnthropicDriver },
@@ -171,12 +177,15 @@ export async function runProviderPassRateComparison(options: {
   const results: ProviderCaseResult[] = [];
   const maxProviderErrors = resolveMaxProviderErrors(options.comparison?.maxProviderErrors);
   const transports = resolveComparisonTransports(options.comparison?.transports);
-  const includeTransport = options.comparison?.transports !== undefined;
+  const includeTransport = transports.length > 1;
   const providerErrors = new Map<string, number>(
     options.providers.flatMap((provider) =>
       transports.map(
         (transport) =>
-          [providerTransportKey(provider.name, transport, includeTransport), 0] as const,
+          [
+            providerTransportKey(provider.name, includeTransport ? transport : undefined),
+            0,
+          ] as const,
       ),
     ),
   );
@@ -189,7 +198,10 @@ export async function runProviderPassRateComparison(options: {
           caseName: evalCase.name,
           ...(includeTransport ? { transport } : {}),
         };
-        const errorKey = providerTransportKey(provider.name, transport, includeTransport);
+        const errorKey = providerTransportKey(
+          provider.name,
+          includeTransport ? transport : undefined,
+        );
         const errorsSoFar = providerErrors.get(errorKey) ?? 0;
         if (errorsSoFar >= maxProviderErrors) {
           results.push({
@@ -205,7 +217,7 @@ export async function runProviderPassRateComparison(options: {
         try {
           const run = await runEvalImpl({
             ...evalCaseRunOptions(evalCase, provider.createDriver()),
-            ...(includeTransport ? { transport } : {}),
+            transport,
           });
           const passed = evalCase.passed(run);
           if (passed) {
@@ -285,12 +297,9 @@ function resolveComparisonTransports(
   return resolved;
 }
 
-function providerTransportKey(
-  provider: string,
-  transport: EvalTransport,
-  includeTransport: boolean,
-): string {
-  return includeTransport ? `${provider}\0${transport}` : provider;
+function providerTransportKey(provider: string, transport: EvalTransport | undefined): string {
+  // Empty transport is the canonical single-transport/report-v1 key.
+  return `${provider}\0${transport ?? ""}`;
 }
 
 function resolveMaxProviderErrors(value: number | undefined): number {
@@ -335,10 +344,10 @@ export function assertProviderTransportParity(
       }
       const [baseline, ...candidates] = caseResults;
       if (!baseline || baseline.status !== "passed") continue;
-      const baselineOutcome = normalizeTransportOutcome(baseline.run, evalCase);
+      const baselineOutcome = normalizeExpectedToolOutcome(baseline.run, evalCase.expected);
       for (const candidate of candidates) {
         if (candidate.status !== "passed") continue;
-        const candidateOutcome = normalizeTransportOutcome(candidate.run, evalCase);
+        const candidateOutcome = normalizeExpectedToolOutcome(candidate.run, evalCase.expected);
         if (!isDeepStrictEqual(candidateOutcome, baselineOutcome)) {
           throw new Error(
             `Transport parity failed for ${provider} ${caseName}: ` +
@@ -348,47 +357,6 @@ export function assertProviderTransportParity(
       }
     }
   }
-}
-
-function normalizeTransportOutcome(run: EvalRun, evalCase: EvalCase): unknown {
-  const expectedResult = evalCase.expected.result;
-  return {
-    toolCalls: run.toolCalls,
-    toolResults: run.toolResults.map((result) => {
-      if (expectedResult.kind === "mcp-error") {
-        const text = resultText(result);
-        return {
-          kind: "mcp-error",
-          isError: result.isError === true,
-          textIncludes: expectedResult.textIncludes.map((snippet) => text.includes(snippet)),
-        };
-      }
-
-      const structured = result.structuredContent;
-      const object =
-        structured && typeof structured === "object" && !Array.isArray(structured)
-          ? (structured as Record<string, unknown>)
-          : {};
-      return {
-        kind: "structured-json",
-        isError: result.isError === true,
-        structuredFields: Object.fromEntries(
-          Object.keys(expectedResult.structuredFields ?? {}).map((field) => [field, object[field]]),
-        ),
-        textIncludes: (expectedResult.textIncludes ?? []).map((snippet) =>
-          resultText(result).includes(snippet),
-        ),
-      };
-    }),
-  };
-}
-
-function resultText(result: EvalRun["toolResults"][number]): string {
-  return (
-    result.content
-      ?.map((part) => (part.type === "text" && typeof part.text === "string" ? part.text : ""))
-      .join("\n") ?? ""
-  );
 }
 
 export function assertProviderPassRateComparison(
@@ -447,11 +415,11 @@ function formatPassRateLabel(rate: Pick<ProviderPassRate, "provider" | "transpor
 }
 
 function providerPassRateKey(rate: Pick<ProviderPassRate, "provider" | "transport">): string {
-  return `${rate.provider}\0${rate.transport ?? ""}`;
+  return providerTransportKey(rate.provider, rate.transport);
 }
 
 function providerCaseResultKey(result: Pick<ProviderCaseResult, "provider" | "transport">): string {
-  return `${result.provider}\0${result.transport ?? ""}`;
+  return providerTransportKey(result.provider, result.transport);
 }
 
 function formatProviderCaseFailure(result: ProviderCaseResult): string {

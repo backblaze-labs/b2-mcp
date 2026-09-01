@@ -1,9 +1,11 @@
 import { existsSync } from "fs";
+import { request as httpRequest } from "http";
 import { join } from "path";
-import { tmpdir } from "os";
+import { networkInterfaces, tmpdir } from "os";
 import { spawnSync } from "child_process";
 import { describe, expect, it } from "vitest";
 import {
+  EVAL_TRANSPORTS,
   EVAL_SERVER_NETWORK_GUARD_ENV,
   createEvalServerEnv,
   llmEvalGate,
@@ -11,7 +13,6 @@ import {
   type Driver,
   type DriverInput,
   type DriverOutput,
-  type EvalTransport,
   type EvalToolCall,
 } from "./harness";
 
@@ -38,7 +39,6 @@ function oneStepDriver(name: string, toolCalls: EvalToolCall[]): Driver {
 }
 
 const EVAL_SIGNALS = ["SIGINT", "SIGTERM"] as const;
-const EVAL_TEST_TRANSPORTS = ["stdio", "http"] as const satisfies readonly EvalTransport[];
 
 function signalListenerCounts(): Record<(typeof EVAL_SIGNALS)[number], number> {
   return Object.fromEntries(
@@ -46,8 +46,53 @@ function signalListenerCounts(): Record<(typeof EVAL_SIGNALS)[number], number> {
   ) as Record<(typeof EVAL_SIGNALS)[number], number>;
 }
 
+function localNonLoopbackIpv4(): string | undefined {
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === "IPv4" && !address.internal) return address.address;
+    }
+  }
+  return undefined;
+}
+
+function getHealth(args: {
+  host: string;
+  port: number;
+  headers: Record<string, string>;
+  path?: string;
+  timeoutMs?: number;
+}): Promise<{ statusCode: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: args.host,
+        port: args.port,
+        method: "GET",
+        path: args.path ?? "/health",
+        headers: args.headers,
+        timeout: args.timeoutMs ?? 1_000,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          body += chunk;
+        });
+        res.on("end", () => {
+          resolve({ statusCode: res.statusCode ?? 0, body });
+        });
+      },
+    );
+    req.on("timeout", () => {
+      req.destroy(new Error("HTTP request timed out"));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
 describe("LLM eval harness", () => {
-  it.each(EVAL_TEST_TRANSPORTS)(
+  it.each(EVAL_TRANSPORTS)(
     "runs a bounded tool loop against the built %s server",
     async (transport) => {
       const run = await runEval({
@@ -70,7 +115,7 @@ describe("LLM eval harness", () => {
     },
   );
 
-  it.each(EVAL_TEST_TRANSPORTS)(
+  it.each(EVAL_TRANSPORTS)(
     "removes process signal handlers after normal %s completion",
     async (transport) => {
       const before = signalListenerCounts();
@@ -161,6 +206,45 @@ describe("LLM eval harness", () => {
     }
   });
 
+  it("keeps the HTTP eval server loopback-only and rejects forged Host/Origin", async () => {
+    const nonLoopbackIp = localNonLoopbackIpv4();
+    let inspectedHttpServer = false;
+
+    await runEval({
+      transport: "http",
+      prompt: "Finish without tools.",
+      toolNames: ["b2_create_key"],
+      driver: new ScriptedDriver("no-tools", [{ text: "Done." }]),
+      maxSteps: 1,
+      server: {
+        async onHttpServerListening({ port, origin }) {
+          inspectedHttpServer = true;
+          const rejected = await getHealth({
+            host: "127.0.0.1",
+            port,
+            path: "/mcp",
+            headers: { Host: "evil.example", Origin: "http://evil.example" },
+          });
+          expect(rejected.statusCode).toBe(403);
+          expect(rejected.body).toContain("Host/Origin not allowed");
+
+          if (nonLoopbackIp) {
+            await expect(
+              getHealth({
+                host: nonLoopbackIp,
+                port,
+                headers: { Host: `127.0.0.1:${port}`, Origin: origin },
+                timeoutMs: 500,
+              }),
+            ).rejects.toThrow(/ECONNREFUSED|ETIMEDOUT|timed out|socket hang up/);
+          }
+        },
+      },
+    });
+
+    expect(inspectedHttpServer).toBe(true);
+  });
+
   it("rejects unexposed tool calls before execution", async () => {
     await expect(
       runEval({
@@ -210,7 +294,7 @@ describe("LLM eval harness", () => {
     ).rejects.toThrow(/exceeded maxToolCallsTotal/);
   });
 
-  it.each(EVAL_TEST_TRANSPORTS)(
+  it.each(EVAL_TRANSPORTS)(
     "refuses local filePath tool calls over %s without touching the target path",
     async (transport) => {
       const targetPath = join(tmpdir(), `b2-mcp-eval-forbidden-${process.pid}`, "secret.txt");

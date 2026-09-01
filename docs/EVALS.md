@@ -23,7 +23,9 @@ through real LLM APIs. The harness starts b2-mcp with marker B2 credentials,
 `B2_DESTRUCTIVE_POLICY=block`. Tool-shape cases that must pass through a
 destructive handler can only opt into `destructivePolicy: "allow"` through typed
 eval case options. The child-process environment is validated before spawn, so
-live provider evidence still avoids real B2 credentials.
+live provider evidence still avoids real B2 credentials. HTTP eval runs bind the
+spawned server to `127.0.0.1`, set matching Host/Origin allowlists, and connect
+through Streamable HTTP on localhost.
 
 ## Local Deterministic Run
 
@@ -232,8 +234,12 @@ outcomes across transports.
 
 The JSON report includes:
 
+- `schemaVersion`: `2` for transport-aware reports. The validator still accepts
+  legacy schema version `1` reports that do not contain transport fields.
 - `providers[]`: provider name, optional transport, model, passed count, total
-  count, and decimal `passRate`.
+  count, and decimal `passRate`. The optional `transport` field is emitted only
+  when the run includes more than one transport; explicit `["stdio"]` has the
+  same report shape as the default single-stdio run.
 - `results[]`: sanitized per-provider, optional-transport, per-case status
   entries with `passed`, `failed`, or `errored`.
 - `sensitivity`: the fields intentionally omitted from the artifact.

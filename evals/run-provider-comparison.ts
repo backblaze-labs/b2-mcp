@@ -1,6 +1,6 @@
 import { CI_PROVIDER_COMPARISON_EVAL_CASES, FULL_PROFILE_EVAL_CASES } from "./cases";
+import { EVAL_TRANSPORTS } from "./harness";
 import {
-  EVAL_TRANSPORTS,
   providerPassRateEvalGate,
   providersWithConfiguredKeys,
   runProviderPassRateComparison,

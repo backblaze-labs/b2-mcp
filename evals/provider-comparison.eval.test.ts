@@ -6,7 +6,14 @@ import {
   destructiveDeleteBucketGateFailure,
   destructiveDeleteBucketGatePassed,
 } from "./cases";
-import type { Driver, DriverInput, DriverOutput, EvalRun, RunEvalOptions } from "./harness";
+import {
+  EVAL_TRANSPORTS,
+  type Driver,
+  type DriverInput,
+  type DriverOutput,
+  type EvalRun,
+  type RunEvalOptions,
+} from "./harness";
 import {
   PROVIDER_COMPARISON_CASE_LIMIT_ENV,
   PROVIDER_COMPARISON_CASE_SET_ENV,
@@ -18,7 +25,6 @@ import {
 } from "./provider-pass-rate-report";
 import {
   CLAUDE_OPENAI_PROVIDERS,
-  EVAL_TRANSPORTS,
   type EvalProvider,
   PROVIDER_COMPARISON_EVAL_ENV,
   assertProviderPassRateComparison,
@@ -180,6 +186,24 @@ describe("provider pass-rate comparison", () => {
     expect(() => assertProviderTransportParity(comparison, [comparisonCase])).not.toThrow();
   });
 
+  it("keeps equivalent single-stdio runs on the default report shape", async () => {
+    const args = {
+      cases: [comparisonCase],
+      providers: [scriptedProvider("Claude", "anthropic")],
+      runEvalImpl: async () => passingRun(),
+    };
+
+    const defaultComparison = await runProviderPassRateComparison(args);
+    const explicitStdioComparison = await runProviderPassRateComparison({
+      ...args,
+      comparison: { transports: ["stdio"] },
+    });
+
+    expect(explicitStdioComparison).toEqual(defaultComparison);
+    expect(explicitStdioComparison.passRates[0]).not.toHaveProperty("transport");
+    expect(explicitStdioComparison.results[0]).not.toHaveProperty("transport");
+  });
+
   it("detects transport parity drift in normalized tool outcomes", () => {
     const httpRun = passingRun();
     httpRun.toolCalls = [
@@ -214,6 +238,88 @@ describe("provider pass-rate comparison", () => {
     expect(() => assertProviderTransportParity(comparison, [comparisonCase])).toThrow(
       /Transport parity failed/,
     );
+  });
+
+  it("detects transport parity drift in MCP error metadata", () => {
+    const httpRun = passingRun();
+    httpRun.toolResults = [
+      {
+        isError: true,
+        structuredContent: { code: "destructive_policy_blocked", status: 409 },
+        content: [{ type: "text", text: "Deletion blocked by destructive policy." }],
+      },
+    ];
+    const comparison = {
+      summary: "summary",
+      passRates: [
+        { provider: "Claude", transport: "stdio" as const, passed: 1, total: 1, passRate: 1 },
+        { provider: "Claude", transport: "http" as const, passed: 1, total: 1, passRate: 1 },
+      ],
+      results: [
+        {
+          provider: "Claude",
+          transport: "stdio" as const,
+          caseName: comparisonCase.name,
+          status: "passed" as const,
+          passed: true as const,
+          run: passingRun(),
+        },
+        {
+          provider: "Claude",
+          transport: "http" as const,
+          caseName: comparisonCase.name,
+          status: "passed" as const,
+          passed: true as const,
+          run: httpRun,
+        },
+      ],
+    };
+
+    expect(() => assertProviderTransportParity(comparison, [comparisonCase])).toThrow(
+      /Transport parity failed/,
+    );
+  });
+
+  it("does not fail parity on benign allowed extra argument variation", () => {
+    const allowedExtraArgCase = {
+      ...comparisonCase,
+      expected: {
+        ...comparisonCase.expected,
+        args: { bucketId: "eval-bucket-id" },
+        allowedExtraArgs: ["confirm"],
+      },
+    } satisfies EvalCase;
+    const httpRun = passingRun();
+    httpRun.toolCalls = [
+      { name: "b2_delete_bucket", args: { bucketId: "eval-bucket-id", confirm: false } },
+    ];
+    const comparison = {
+      summary: "summary",
+      passRates: [
+        { provider: "Claude", transport: "stdio" as const, passed: 1, total: 1, passRate: 1 },
+        { provider: "Claude", transport: "http" as const, passed: 1, total: 1, passRate: 1 },
+      ],
+      results: [
+        {
+          provider: "Claude",
+          transport: "stdio" as const,
+          caseName: comparisonCase.name,
+          status: "passed" as const,
+          passed: true as const,
+          run: passingRun(),
+        },
+        {
+          provider: "Claude",
+          transport: "http" as const,
+          caseName: comparisonCase.name,
+          status: "passed" as const,
+          passed: true as const,
+          run: httpRun,
+        },
+      ],
+    };
+
+    expect(() => assertProviderTransportParity(comparison, [allowedExtraArgCase])).not.toThrow();
   });
 
   it("fails gating assertions for provider errors even with a relaxed pass rate", async () => {
@@ -544,6 +650,7 @@ describe("provider pass-rate comparison", () => {
     });
 
     expect(report.caseCount).toBe(1);
+    expect(report.schemaVersion).toBe(2);
     expect("caseLimit" in report).toBe(false);
     expect("issue" in report).toBe(false);
     expect(report.providers).toEqual([

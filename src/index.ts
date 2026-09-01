@@ -166,9 +166,9 @@ export async function startStdio(): Promise<void> {
   logger.info({ transport: "stdio" }, "server.started");
 }
 
-async function startHttpTransport(options: { port?: number }): Promise<void> {
+async function startHttpTransport(options: { host?: string; port?: number }): Promise<void> {
   const { startHttp } = await import("./http-server.js");
-  await startHttp({ port: options.port });
+  await startHttp({ host: options.host, port: options.port });
 }
 
 async function runCli(argv = process.argv.slice(2)): Promise<void> {
@@ -183,7 +183,7 @@ async function runCli(argv = process.argv.slice(2)): Promise<void> {
   }
 
   if (options.transport === "http") {
-    await startHttpTransport({ port: options.port });
+    await startHttpTransport({ host: options.host, port: options.port });
     return;
   }
 

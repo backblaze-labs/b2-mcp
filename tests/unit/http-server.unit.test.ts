@@ -1,6 +1,6 @@
 /**
  * Unit tests for HTTP transport helpers.
- * Covers configFromHeaders parsing and getPort validation.
+ * Covers configFromHeaders parsing and listen-address validation.
  */
 
 import { ReadableStream, type ReadableStreamDefaultController } from "node:stream/web";
@@ -21,6 +21,7 @@ import {
   configFromHeaders,
   createInFlightLimiter,
   deriveRateKey,
+  getHost,
   getPort,
   httpBootstrapFatalMessage,
   startHttp,
@@ -148,7 +149,7 @@ async function withMockedFetchPipeline<T>(
   }
 }
 
-async function startHttpCapturingServer(options: { port?: number } = {}): Promise<{
+async function startHttpCapturingServer(options: { host?: string; port?: number } = {}): Promise<{
   server: http.Server;
   signalSnapshot: Record<ShutdownSignal, Set<NodeJS.SignalsListener>>;
 }> {
@@ -916,6 +917,35 @@ describe("HTTP server lifecycle", () => {
     }
   });
 
+  it("listens on an explicit host when provided", async () => {
+    const signalSnapshot = snapshotSignalListeners();
+    const exitCodes: Array<string | number | null | undefined> = [];
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code) => {
+      exitCodes.push(code);
+      return undefined as never;
+    }) as typeof process.exit);
+    let listener: NodeJS.SignalsListener | undefined;
+
+    try {
+      const { server } = await startHttpCapturingServer({ host: "127.0.0.1", port: 0 });
+      const address = server.address() as AddressInfo;
+      expect(address.address).toBe("127.0.0.1");
+
+      listener = findNewSignalListener("SIGTERM", signalSnapshot);
+      expect(listener).toBeTypeOf("function");
+      listener?.("SIGTERM");
+
+      await vi.waitFor(() => expect(exitCodes).toContain(0));
+    } finally {
+      if (listener && !exitCodes.includes(0)) {
+        listener("SIGTERM");
+        await vi.waitFor(() => expect(exitCodes).toContain(0)).catch(() => undefined);
+      }
+      removeNewSignalListeners(signalSnapshot);
+      exitSpy.mockRestore();
+    }
+  });
+
   it("handles close callbacks that run before a drain timer is assigned", async () => {
     const flushSpy = vi.spyOn(loggerModule, "flushLogsSync").mockImplementation(() => undefined);
     vi.spyOn(process, "exit").mockImplementation(((code) => {
@@ -1327,5 +1357,41 @@ describe("getPort", () => {
   it("throws on port > 65535", () => {
     process.argv.push("--port", "70000");
     expect(() => getPort()).toThrow(/Invalid port/);
+  });
+});
+
+describe("getHost", () => {
+  const baseArgv = process.argv.slice();
+  const baseEnv = { ...process.env };
+  beforeEach(() => {
+    process.argv = baseArgv.slice();
+    delete process.env.B2_HTTP_HOST;
+  });
+  afterAll(() => {
+    process.argv = baseArgv;
+    process.env = baseEnv;
+  });
+
+  it("uses Node's default listen host when no --host or B2_HTTP_HOST is set", () => {
+    expect(getHost()).toBeUndefined();
+  });
+
+  it("uses --host arg", () => {
+    process.argv.push("--host", "127.0.0.1");
+    expect(getHost()).toBe("127.0.0.1");
+  });
+
+  it("uses B2_HTTP_HOST env when --host absent", () => {
+    process.env.B2_HTTP_HOST = "localhost";
+    expect(getHost()).toBe("localhost");
+  });
+
+  it("prefers explicit argv over B2_HTTP_HOST env", () => {
+    expect(getHost(["http", "--host=127.0.0.1"], { B2_HTTP_HOST: "localhost" })).toBe("127.0.0.1");
+  });
+
+  it("throws on empty host flags", () => {
+    process.argv.push("--host=");
+    expect(() => getHost()).toThrow(/--host requires a value/);
   });
 });

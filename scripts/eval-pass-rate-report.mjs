@@ -4,7 +4,9 @@ import { pathToFileURL } from "node:url";
 const PROVIDER_SECRET_ENV_NAMES = ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 const ALLOWED_PROVIDER_NAMES = new Set(["Claude", "OpenAI"]);
 const ALLOWED_PROVIDER_LABEL = "Claude or OpenAI";
-const ALLOWED_TRANSPORTS = new Set(["stdio", "http"]);
+const ALLOWED_TRANSPORTS = new Set(
+  JSON.parse(readFileSync(new URL("../evals/transport-values.json", import.meta.url), "utf8")),
+);
 const RESULT_STATUSES = new Set(["passed", "failed", "errored"]);
 const PASS_RATE_TOLERANCE = 1e-12;
 const REPORT_KEYS = new Set([
@@ -72,7 +74,10 @@ export function assertNoProviderSecrets(raw, secretValues) {
 export function validateProviderPassRateReport(report) {
   if (!isRecord(report)) fail("report must be an object");
   assertAllowedKeys(report, REPORT_KEYS, "report");
-  if (report.schemaVersion !== 1) fail("report.schemaVersion must be 1");
+  if (report.schemaVersion !== 1 && report.schemaVersion !== 2) {
+    fail("report.schemaVersion must be 1 or 2");
+  }
+  const transportAware = report.schemaVersion >= 2;
   assertString(report.generatedAt, "report.generatedAt");
   assertNonNegativeInteger(report.caseCount, "report.caseCount");
   assertString(report.summary, "report.summary");
@@ -92,12 +97,7 @@ export function validateProviderPassRateReport(report) {
     if (!ALLOWED_PROVIDER_NAMES.has(provider.provider)) {
       fail(`${path}.provider must be ${ALLOWED_PROVIDER_LABEL}`);
     }
-    if (
-      provider.transport !== undefined &&
-      (typeof provider.transport !== "string" || !ALLOWED_TRANSPORTS.has(provider.transport))
-    ) {
-      fail(`${path}.transport must be stdio or http`);
-    }
+    assertTransportAllowed(provider.transport, `${path}.transport`, transportAware);
     const providerKey = providerTransportKey(provider.provider, provider.transport);
     if (seenProviders.has(providerKey)) {
       fail(`${path}.provider is duplicated for the same transport`);
@@ -125,12 +125,7 @@ export function validateProviderPassRateReport(report) {
     const path = `report.results[${index}]`;
     if (!isRecord(result)) fail(`${path} must be an object`);
     assertString(result.provider, `${path}.provider`);
-    if (
-      result.transport !== undefined &&
-      (typeof result.transport !== "string" || !ALLOWED_TRANSPORTS.has(result.transport))
-    ) {
-      fail(`${path}.transport must be stdio or http`);
-    }
+    assertTransportAllowed(result.transport, `${path}.transport`, transportAware);
     const providerResultCounts = resultCountsByProvider.get(
       providerTransportKey(result.provider, result.transport),
     );
@@ -184,7 +179,24 @@ export function validateProviderPassRateReport(report) {
   return report;
 }
 
+function allowedTransportLabel() {
+  return [...ALLOWED_TRANSPORTS].join(" or ");
+}
+
+function assertTransportAllowed(transport, path, transportAware) {
+  if (transport !== undefined && !transportAware) {
+    fail(`${path} is only valid in schemaVersion 2`);
+  }
+  if (
+    transport !== undefined &&
+    (typeof transport !== "string" || !ALLOWED_TRANSPORTS.has(transport))
+  ) {
+    fail(`${path} must be ${allowedTransportLabel()}`);
+  }
+}
+
 function providerTransportKey(provider, transport) {
+  // Keep aligned with evals/provider-comparison.ts for sanitized report validation.
   return `${provider}\0${transport ?? ""}`;
 }
 

@@ -6,7 +6,13 @@ describe("CLI argument parsing", () => {
     expect(parseCliArgs([], {})).toEqual({ action: "run", transport: "stdio" });
   });
 
-  it("accepts HTTP transport and port flags", () => {
+  it("accepts HTTP transport, port, and host flags", () => {
+    expect(parseCliArgs(["--transport", "http", "--host", "127.0.0.1", "--port", "3001"])).toEqual({
+      action: "run",
+      transport: "http",
+      host: "127.0.0.1",
+      port: 3001,
+    });
     expect(parseCliArgs(["--transport", "http", "--port", "3001"])).toEqual({
       action: "run",
       transport: "http",
@@ -21,6 +27,11 @@ describe("CLI argument parsing", () => {
       action: "run",
       transport: "http",
       port: 3002,
+    });
+    expect(parseCliArgs(["http", "--host=localhost"])).toEqual({
+      action: "run",
+      transport: "http",
+      host: "localhost",
     });
   });
 
@@ -50,7 +61,9 @@ describe("CLI argument parsing", () => {
     expect(() => parseCliArgs(["http", "--port", "0"])).toThrow(PortUsageError);
     expect(() => parseCliArgs(["http", "--port", "3000abc"])).toThrow("Invalid port: 3000abc");
     expect(() => parseCliArgs(["http", "--port="])).toThrow("--port requires a value");
+    expect(() => parseCliArgs(["http", "--host="])).toThrow("--host requires a value");
     expect(() => parseCliArgs(["--port", "3000"], {})).toThrow(CliUsageError);
+    expect(() => parseCliArgs(["--host", "127.0.0.1"], {})).toThrow(CliUsageError);
     expect(() => parseCliArgs(["--session"])).toThrow(CliUsageError);
   });
 });
