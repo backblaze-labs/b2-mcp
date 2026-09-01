@@ -58,6 +58,7 @@ import {
   StdioEnvCredentialProvider,
   verificationFingerprintConfig,
 } from "./credentials.js";
+import { abortError } from "./utils/named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import {
   createDestructiveElicitationRequestStateCodec,
@@ -169,6 +170,11 @@ function registerDurableSecretCompatibilityStubs(
 export interface CreateServerOptions {
   /** Verified MCP/OAuth scopes for the current caller. */
   oauthScopes?: readonly string[];
+  /**
+   * Suppress durable-secret compatibility stubs when the caller intentionally
+   * wants an empty capability set to expose no write/admin fallback names.
+   */
+  suppressDurableSecretCompatibilityStubs?: boolean;
 }
 
 /**
@@ -348,16 +354,18 @@ export function createServer(
   // a stable non-secret unavailable error. File mode keeps filtered durable
   // secret tool names callable as non-secret unavailable errors; Reserve Trial
   // is always stubbed because the provider has no post-create recovery action.
-  if (config.secretSink?.mode === "file") {
-    registerDurableSecretCompatibilityStubs(
-      registrar,
-      config.secretSink,
-      (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
-    );
-  } else if (config.secretSink?.mode !== "inline") {
-    registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>
-      isToolAllowedByOAuthScopes(name, oauthScopes),
-    );
+  if (!options.suppressDurableSecretCompatibilityStubs) {
+    if (config.secretSink?.mode === "file") {
+      registerDurableSecretCompatibilityStubs(
+        registrar,
+        config.secretSink,
+        (name) => !registrar.hasTool(name) && isToolAllowedByOAuthScopes(name, oauthScopes),
+      );
+    } else if (config.secretSink?.mode !== "inline") {
+      registerDurableSecretCompatibilityStubs(registrar, config.secretSink, (name) =>
+        isToolAllowedByOAuthScopes(name, oauthScopes),
+      );
+    }
   }
 
   const toolCount = registrar.commit();
@@ -641,6 +649,38 @@ function throwCapabilityResolutionError(
   throw new CredentialResolutionError(details.message, details.status, details.code);
 }
 
+/** Options for one-shot B2 capability discovery. */
+export interface FetchCapabilitiesOptions {
+  /**
+   * Abort signal that should cancel this discovery's underlying authorize
+   * request instead of leaving it as shared background work.
+   */
+  signal?: AbortSignal;
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? abortError("Capability fetch aborted");
+}
+
+function throwIfCapabilityFetchAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+async function discoverCapabilities(
+  config: B2Config,
+  resolvedCacheKey: string,
+  now: number,
+  signal: AbortSignal | undefined,
+): Promise<string[]> {
+  throwIfCapabilityFetchAborted(signal);
+  const auth = new B2AuthManager(config);
+  const info = signal ? await auth.getAuthBoundToSignal(signal) : await auth.getAuth();
+  throwIfCapabilityFetchAborted(signal);
+  const capabilities = info.capabilities ?? [];
+  rememberCapabilities(resolvedCacheKey, capabilities, now);
+  return capabilities;
+}
+
 /**
  * Discover the B2 key capabilities used for capability-aware registration.
  *
@@ -651,13 +691,15 @@ function throwCapabilityResolutionError(
  * returns `null`; all other authorization failures are sanitized and thrown so
  * internet-facing servers fail closed.
  *
- * Positive non-empty results are cached briefly by credential fingerprint and
- * concurrent discoveries for the same key share one in-flight authorize call.
+ * Positive non-empty results are cached briefly by credential fingerprint.
+ * Concurrent non-abort-bound discoveries for the same key share one in-flight
+ * authorize call.
  *
  * @param config - B2 credential and runtime configuration.
  * @param capabilityCacheKey - Optional cache key override for tests or
  * caller-specific HTTP routing.
  * @param logKey - Optional non-secret log key override.
+ * @param options - Optional abort controls for deadline-bound callers.
  *
  * @returns A copy of the discovered capabilities, or `null` when registration
  * should expose the full tool surface.
@@ -675,8 +717,11 @@ export async function fetchCapabilities(
   config: B2Config,
   capabilityCacheKey?: string,
   logKey?: string,
+  options: FetchCapabilitiesOptions = {},
 ): Promise<string[] | null> {
   if (process.env.B2_REGISTER_ALL_TOOLS === "true") return null;
+  const { signal } = options;
+  const shareInflight = !signal;
   const resolvedCacheKey =
     capabilityCacheKey ?? `credential:${verificationFingerprintConfig(config)}`;
   const credentialLogKey =
@@ -690,23 +735,22 @@ export async function fetchCapabilities(
     return [...cached.capabilities];
   }
 
-  const existingInflight = capabilityInflight.get(resolvedCacheKey);
-  if (existingInflight) return [...(await existingInflight)];
+  if (shareInflight) {
+    const existingInflight = capabilityInflight.get(resolvedCacheKey);
+    if (existingInflight) return [...(await existingInflight)];
+  }
 
   const discovery = (async () => {
     try {
-      const auth = new B2AuthManager(config);
-      const info = await auth.getAuth();
-      const capabilities = info.capabilities ?? [];
-      rememberCapabilities(resolvedCacheKey, capabilities, now);
-      return capabilities;
+      return await discoverCapabilities(config, resolvedCacheKey, now, signal);
     } catch (err) {
+      if (signal?.aborted) throw abortReason(signal);
       throwCapabilityResolutionError(err, config, credentialLogKey);
     } finally {
-      capabilityInflight.delete(resolvedCacheKey);
+      if (shareInflight) capabilityInflight.delete(resolvedCacheKey);
     }
   })();
-  capabilityInflight.set(resolvedCacheKey, discovery);
+  if (shareInflight) capabilityInflight.set(resolvedCacheKey, discovery);
 
   return [...(await discovery)];
 }

@@ -10,6 +10,13 @@ import * as serverModule from "../../src/server";
 import * as loggerModule from "../../src/utils/logger";
 import type { B2Config } from "../../src/utils/types";
 import { VERSION } from "../../src/version";
+import { restoreB2SdkTransportForTests } from "../support/sdk-factory-hook";
+import {
+  b2EndpointName,
+  installSdkTransport,
+  RecordingTransport,
+  StaticHttpResponse,
+} from "../support/sdk-test-helpers";
 
 vi.mock("@modelcontextprotocol/server/stdio", () => ({
   serveStdio: vi.fn(),
@@ -94,6 +101,13 @@ function runEntrypoint(args: string[], env: NodeJS.ProcessEnv = {}) {
   });
 }
 
+async function waitForRecordedRequests(transport: RecordingTransport, count: number) {
+  for (let i = 0; i < 20 && transport.requests.length < count; i++) {
+    await Promise.resolve();
+  }
+  expect(transport.requests).toHaveLength(count);
+}
+
 describe("stdio entry point", () => {
   let savedEnv: Record<string, string | undefined>;
 
@@ -103,6 +117,9 @@ describe("stdio entry point", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    restoreB2SdkTransportForTests();
+    serverModule.invalidateCapabilityCache();
+    serverModule.invalidateAuthManagerCache();
     for (const key of credentialEnvKeys) {
       const value = savedEnv[key];
       if (value === undefined) delete process.env[key];
@@ -128,6 +145,9 @@ describe("stdio entry point", () => {
     );
     const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
     const info = vi.spyOn(loggerModule.logger, "info").mockImplementation(() => undefined);
+    const flushLogsSync = vi
+      .spyOn(loggerModule, "flushLogsSync")
+      .mockImplementation(() => undefined);
 
     await startStdio();
 
@@ -135,12 +155,16 @@ describe("stdio entry point", () => {
     const options = serveStdio.mock.calls[0]?.[1] as { onerror(error: Error): void } | undefined;
     expect(factory?.()).toBe(server);
     options?.onerror(new Error("stdio failed"));
-    expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"]);
+    expect(createServer).toHaveBeenCalledWith(config, ["listBuckets"], {});
     expect(warn).toHaveBeenCalledWith({ err: "stdio failed" }, "mcp.stdio.error");
     expect(info).toHaveBeenCalledWith({ transport: "stdio" }, "server.starting");
     expect(info).toHaveBeenCalledWith({ transport: "stdio" }, "server.started");
     expect(fetchCapabilities.mock.invocationCallOrder[0]).toBeGreaterThan(
       info.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(flushLogsSync).toHaveBeenCalled();
+    expect(fetchCapabilities.mock.invocationCallOrder[0]).toBeGreaterThan(
+      flushLogsSync.mock.invocationCallOrder[0] ?? 0,
     );
   });
 
@@ -168,9 +192,12 @@ describe("stdio entry point", () => {
 
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
-    expect(createServer).toHaveBeenCalledWith(config, null);
+    expect(createServer).toHaveBeenCalledWith(config, null, {});
     expect(warn).toHaveBeenCalledWith(
-      { code: "capability_upstream_unavailable" },
+      {
+        code: "capability_upstream_unavailable",
+        message: "capability service unavailable",
+      },
       "capability.fetch.stdio_degraded",
     );
   });
@@ -198,11 +225,107 @@ describe("stdio entry point", () => {
     await expect(started).resolves.toBeUndefined();
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
-    expect(createServer).toHaveBeenCalledWith(config, null);
+    expect(createServer).toHaveBeenCalledWith(config, [], {
+      suppressDurableSecretCompatibilityStubs: true,
+    });
     expect(warn).toHaveBeenCalledWith(
-      { code: "capability_bootstrap_timeout", timeoutMs: 10_000 },
+      {
+        code: "capability_bootstrap_timeout",
+        elapsedMs: 10_000,
+        message: "B2 capability lookup exceeded the 10000 ms stdio bootstrap deadline",
+        timeoutMs: 10_000,
+      },
       "capability.fetch.stdio_degraded",
     );
+  });
+
+  it("aborts timed-out stdio capability discovery instead of leaving authorize work", async () => {
+    vi.useFakeTimers();
+    const config = testConfig();
+    const server = { close: vi.fn(async () => undefined) };
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+    const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    vi.spyOn(loggerModule.logger, "info").mockImplementation(() => undefined);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+    let abortObserved = false;
+    let authorizeSettled = false;
+    const transport = new RecordingTransport((request) => {
+      if (b2EndpointName(request) !== "b2_authorize_account") {
+        return new StaticHttpResponse(200, {});
+      }
+      return new Promise<StaticHttpResponse>((_resolve, reject) => {
+        request.signal?.addEventListener(
+          "abort",
+          () => {
+            abortObserved = true;
+            authorizeSettled = true;
+            reject(request.signal?.reason ?? new Error("authorize aborted"));
+          },
+          { once: true },
+        );
+      });
+    });
+    installSdkTransport(transport);
+
+    const started = startStdio();
+    await waitForRecordedRequests(transport, 1);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(started).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(abortObserved).toBe(true);
+    expect(authorizeSettled).toBe(true);
+    expect(transport.requests[0].signal?.aborted).toBe(true);
+    expect(serverModule.capabilityCacheSizeForTests()).toBe(0);
+    const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+    expect(factory?.()).toBe(server);
+    expect(createServer).toHaveBeenCalledWith(config, [], {
+      suppressDurableSecretCompatibilityStubs: true,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "capability_bootstrap_timeout",
+        message: "B2 capability lookup exceeded the 10000 ms stdio bootstrap deadline",
+        timeoutMs: 10_000,
+      }),
+      "capability.fetch.stdio_degraded",
+    );
+    expect(warn).not.toHaveBeenCalledWith(expect.anything(), "capability.fetch.failed");
+  });
+
+  it("does not expose write or admin tools after a stdio capability timeout", async () => {
+    vi.useFakeTimers();
+    const config: B2Config = { ...testConfig(), secretSink: { mode: "off" } };
+    vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+    vi.spyOn(serverModule, "fetchCapabilities").mockReturnValue(
+      new Promise<string[] | null>(() => undefined),
+    );
+    vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+    vi.spyOn(loggerModule.logger, "info").mockImplementation(() => undefined);
+    const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+      () =>
+        ({
+          close: vi.fn(async () => undefined),
+        }) as ReturnType<typeof stdioTransport.serveStdio>,
+    );
+
+    const started = startStdio();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(started).resolves.toBeUndefined();
+    const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+    const server = factory?.() as Parameters<typeof serverModule.getRegisteredTools>[0];
+    const tools = serverModule.getRegisteredTools(server);
+    expect(tools).not.toHaveProperty("s3_put_object");
+    expect(tools).not.toHaveProperty("s3_delete_objects");
+    expect(tools).not.toHaveProperty("s3_get_presigned_url");
+    expect(tools).not.toHaveProperty("b2_create_key");
   });
 
   it("rethrows unexpected capability lookup failures", async () => {
