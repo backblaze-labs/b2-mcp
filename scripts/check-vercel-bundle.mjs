@@ -18,7 +18,9 @@ const sourceFiles = ["package.json", "pnpm-lock.yaml", "vercel.json"];
 const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
 // Headroom for the documented source tree plus production dependencies in the
 // Vercel function estimate; emitted build output is still checked separately.
-const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 32_600_000;
+// Tracks the clean-consumer install footprint, which grew with the reviewed
+// aws-sdk 3.1119.0 bump (Linux CI install is ~157 KB larger than local macOS).
+const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 32_690_000;
 
 function readJson(relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
