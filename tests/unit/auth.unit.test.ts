@@ -540,6 +540,7 @@ describe("B2AuthManager", () => {
       }),
     ],
     ["socket hang up message", new Error("socket hang up")],
+    ["post-dispatch AbortError", abortError("connection aborted mid-flight")],
   ])("classifies no-replay native %s as an unknown operation status", async (_name, failure) => {
     const inner = new RecordingTransport(() => {
       throw failure;
