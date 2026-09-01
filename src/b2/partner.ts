@@ -4,6 +4,7 @@
  * @packageDocumentation
  */
 import type { ToolRegistrar } from "../mcp.js";
+import type { Region } from "@backblaze-labs/b2-sdk/partner";
 import { z } from "zod";
 import { codedError, toolJson, toolError } from "../utils/errors.js";
 import type { B2AuthManager } from "../auth.js";
@@ -20,6 +21,7 @@ import {
 const REGION_VALUES = ["us-east", "us-west", "ca-east", "eu-central"] as const;
 
 type SecretBearingPartnerResult = { readonly applicationKey: string };
+type PartnerRegionInput = Region | null | undefined;
 
 interface PartnerGroupMemberProjection {
   readonly accountId: string;
@@ -77,6 +79,10 @@ function partnerResultEntries(response: unknown): unknown[] {
 
 function uniqueStrings(values: Iterable<string | null>): string[] {
   return [...new Set([...values].filter((value): value is string => value !== null))];
+}
+
+function normalizedPartnerRegion(region: PartnerRegionInput): { readonly region?: Region } {
+  return region == null ? {} : { region };
 }
 
 function partnerGroupMember(result: unknown): unknown {
@@ -324,7 +330,7 @@ export function registerPartnerTools(
             adminAccountId: args.adminAccountId,
             groupId: args.groupId,
             memberEmail: args.memberEmail,
-            ...(args.region !== undefined ? { region: args.region } : {}),
+            ...normalizedPartnerRegion(args.region),
           };
 
           return await executeDurableSecretOperation({
@@ -560,7 +566,7 @@ export function registerPartnerTools(
             email: args.email,
             term: args.term,
             storage: args.storage,
-            ...(args.region !== undefined ? { region: args.region } : {}),
+            ...normalizedPartnerRegion(args.region),
           };
 
           return await executeDurableSecretOperation({

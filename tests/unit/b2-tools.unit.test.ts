@@ -2393,6 +2393,40 @@ describe("Partner API tools", () => {
     expect(readFileSync(secretFile, "utf8").trim().split("\n")).toHaveLength(1);
   });
 
+  it("normalizes null group-member regions for file-sink idempotency", async () => {
+    const secretFile = tempSecretFile();
+    const { adminAccountId, transport, partnerSeed } = await usePartnerSimulator();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
+    const args = {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "member-null-region-retry@example.com",
+      idempotencyKey: "create-group-member-null-region-retry",
+      confirm: true,
+    };
+
+    const first = parseResult(await callTool(server, "b2_create_group_member", args));
+    const createRequestsAfterFirst = transport.requests.filter(
+      (request) => b2EndpointName(request) === "b2_create_group_member",
+    ).length;
+    const second = parseResult(
+      await callTool(server, "b2_create_group_member", { ...args, region: null }),
+    );
+
+    expect(second.secretSink).toEqual(first.secretSink);
+    expect(second.results[0].applicationKey).toBe("[redacted]");
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_create_group_member"),
+    ).toHaveLength(createRequestsAfterFirst);
+    expect(readFileSync(secretFile, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
   it("creates group members in inline mode with the raw secret and warning", async () => {
     const { adminAccountId, partnerSeed } = await usePartnerSimulator();
     server = createServer({
