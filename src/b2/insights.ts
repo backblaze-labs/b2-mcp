@@ -460,6 +460,29 @@ function noUsageReportSnapshotsInPeriod(
   };
 }
 
+type EmptyUsageReportSnapshotDegradation =
+  | { kind: "none" }
+  | { kind: "horizon"; searchedSince: string }
+  | { kind: "period"; sinceDate: string; latestSnapshot: string };
+
+function emptyUsageReportSnapshotDegradation(
+  stats: ReportLoadStats,
+  degradation: EmptyUsageReportSnapshotDegradation = { kind: "none" },
+): Record<string, unknown> {
+  switch (degradation.kind) {
+    case "horizon":
+      return noUsageReportSnapshotsWithinHorizon(stats, degradation.searchedSince);
+    case "period":
+      return noUsageReportSnapshotsInPeriod(
+        stats,
+        degradation.sinceDate,
+        degradation.latestSnapshot,
+      );
+    case "none":
+      return noUsageReportSnapshots(stats);
+  }
+}
+
 function noUsageReportRows(stats: ReportLoadStats): Record<string, unknown> {
   return {
     reports_enabled: true,
@@ -1144,9 +1167,12 @@ export function registerInsightTools(
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
         if (!hasUsageReportSnapshots(latest))
           return toolJson(
-            latest.searchedSince
-              ? noUsageReportSnapshotsWithinHorizon(reportBudget.stats, latest.searchedSince)
-              : noUsageReportSnapshots(reportBudget.stats),
+            emptyUsageReportSnapshotDegradation(
+              reportBudget.stats,
+              latest.searchedSince
+                ? { kind: "horizon", searchedSince: latest.searchedSince }
+                : { kind: "none" },
+            ),
           );
 
         const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
@@ -1222,15 +1248,22 @@ export function registerInsightTools(
         if (loaded === null) return toolJson(NOT_ENABLED);
         const period = args.days != null ? `last ${args.days} days` : "current month to date";
         if (!hasUsageReportSnapshots(loaded)) {
-          let emptySnapshotMetadata = noUsageReportSnapshots(loaded.stats);
+          let emptySnapshotMetadata = emptyUsageReportSnapshotDegradation(loaded.stats);
           if (!loaded.stats.stop_reason) {
             const latest = await latestSnapshotDate(reportClient, bucket, new Date(), reportBudget);
             if (latest.bucketMissing) return toolJson(NOT_ENABLED);
             emptySnapshotMetadata = hasUsageReportSnapshots(latest)
-              ? noUsageReportSnapshotsInPeriod(loaded.stats, since, latest.date)
-              : latest.searchedSince
-                ? noUsageReportSnapshotsWithinHorizon(loaded.stats, latest.searchedSince)
-                : noUsageReportSnapshots(loaded.stats);
+              ? emptyUsageReportSnapshotDegradation(loaded.stats, {
+                  kind: "period",
+                  sinceDate: since,
+                  latestSnapshot: latest.date,
+                })
+              : emptyUsageReportSnapshotDegradation(
+                  loaded.stats,
+                  latest.searchedSince
+                    ? { kind: "horizon", searchedSince: latest.searchedSince }
+                    : { kind: "none" },
+                );
           }
           return toolJson({
             period,

@@ -22,7 +22,43 @@ const REGION_VALUES = ["us-east", "us-west", "ca-east", "eu-central"] as const;
 type SecretBearingPartnerResult = { readonly applicationKey: string };
 
 function redactedPartnerResults<T extends SecretBearingPartnerResult>(response: readonly T[]): T[] {
-  return response.map((result) => ({ ...result, applicationKey: APPLICATION_KEY_REDACTED }));
+  const redacted: T[] = [];
+  for (const result of response) {
+    redacted.push({ ...result, applicationKey: APPLICATION_KEY_REDACTED });
+  }
+  return redacted;
+}
+
+function partnerResultEntries(response: unknown): unknown[] {
+  if (!Array.isArray(response)) return [response];
+  const entries: unknown[] = [];
+  for (let index = 0; index < response.length; index += 1) {
+    entries.push(response[index]);
+  }
+  return entries;
+}
+
+function recordValue(record: unknown, key: string): unknown {
+  return record && typeof record === "object"
+    ? (record as Record<string, unknown>)[key]
+    : undefined;
+}
+
+function stringValue(record: unknown, key: string): string | null {
+  const value = recordValue(record, key);
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function partnerGroupMemberAccountId(result: unknown): string | null {
+  return stringValue(recordValue(result, "groupMember"), "accountId");
+}
+
+function partnerDiagnosticAccountId(result: unknown): string | null {
+  return partnerGroupMemberAccountId(result) ?? stringValue(result, "accountId");
+}
+
+function recoveryErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function activeSecretSink(
@@ -31,15 +67,18 @@ function activeSecretSink(
   return config.secretSink as Extract<B2Config["secretSink"], { mode: "file" | "inline" }>;
 }
 
-function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[]) {
+function partnerSecretDiagnostics(response: unknown) {
+  const results = partnerResultEntries(response);
   return {
-    resultCount: response.length,
-    applicationKeyIds: response
-      .map((result) => ("applicationKeyId" in result ? result.applicationKeyId : undefined))
-      .filter((value): value is string => typeof value === "string"),
-    accountIds: response
-      .map((result) => ("accountId" in result ? result.accountId : undefined))
-      .filter((value): value is string => typeof value === "string"),
+    resultCount: results.length,
+    applicationKeyIds: results.flatMap((result) => {
+      const applicationKeyId = stringValue(result, "applicationKeyId");
+      return applicationKeyId === null ? [] : [applicationKeyId];
+    }),
+    accountIds: results.flatMap((result) => {
+      const accountId = partnerDiagnosticAccountId(result);
+      return accountId === null ? [] : [accountId];
+    }),
   };
 }
 
@@ -182,17 +221,50 @@ export function registerPartnerTools(
             projectInline: (created, warning) => ({ results: created, warning }),
             diagnostics: partnerSecretDiagnostics,
             recoverAfterSinkFailure: async (created) => {
+              const results = partnerResultEntries(created);
               const accountIds: string[] = [];
-              for (const result of created) {
-                const accountId =
-                  "accountId" in result.groupMember ? String(result.groupMember.accountId) : "";
-                if (!accountId) continue;
-                accountIds.push(accountId);
-                await client.ejectGroupMember({
-                  adminAccountId: args.adminAccountId,
-                  groupId: args.groupId,
-                  memberAccountId: accountId,
-                });
+              const ejectionFailures: { accountId: string; error: string }[] = [];
+              if (results.length === 0) {
+                return {
+                  status: "recovery_incomplete",
+                  reason: "no_recoverable_group_members",
+                  accountIds,
+                };
+              }
+              for (const result of results) {
+                const accountId = partnerGroupMemberAccountId(result);
+                if (accountId === null) {
+                  continue;
+                }
+                try {
+                  await client.ejectGroupMember({
+                    adminAccountId: args.adminAccountId,
+                    groupId: args.groupId,
+                    memberAccountId: accountId,
+                  });
+                  accountIds.push(accountId);
+                } catch (err) {
+                  ejectionFailures.push({ accountId, error: recoveryErrorMessage(err) });
+                }
+              }
+              if (accountIds.length !== results.length || ejectionFailures.length > 0) {
+                const missingAccountId =
+                  results.length - accountIds.length - ejectionFailures.length;
+                const reasons = [
+                  ...(missingAccountId > 0 ? ["missing_account_id"] : []),
+                  ...(ejectionFailures.length > 0 ? ["eject_failed"] : []),
+                ];
+                return {
+                  status: "recovery_incomplete",
+                  reason: reasons.join(","),
+                  accountIds,
+                  ...(ejectionFailures.length > 0
+                    ? {
+                        failedAccountIds: ejectionFailures.map((failure) => failure.accountId),
+                        errors: ejectionFailures,
+                      }
+                    : {}),
+                };
               }
               return { status: "ejected_group_members", accountIds };
             },
