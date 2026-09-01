@@ -220,8 +220,8 @@ function withDefinitiveErrorJsonRead(response: HttpResponse): HttpResponse {
         if (findInCauseChain(err, unknownStatusInterruption)) {
           return {
             status: response.status,
-            code: "internal_error",
-            message: `HTTP ${response.status}`,
+            code: "response_body_unavailable",
+            message: `HTTP ${response.status} response body could not be read`,
           } as T;
         }
         throw err;
