@@ -678,7 +678,11 @@ export class PartnerCreateGroupMemberResponseUnusableError extends Error {
   }
 }
 
-/** Return whether an error is the typed unusable create-group-member response signal. */
+/**
+ * Return whether an error is the typed unusable create-group-member response signal.
+ *
+ * @returns `true` when the value is a typed create-group-member unusable-response error.
+ */
 export function isPartnerCreateGroupMemberResponseUnusableError(
   err: unknown,
 ): err is PartnerCreateGroupMemberResponseUnusableError {

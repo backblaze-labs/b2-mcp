@@ -2710,6 +2710,102 @@ describe("Partner API tools", () => {
     ).toHaveLength(0);
   });
 
+  it("passes through non-secret provider create rejections", async () => {
+    const secretFile = tempSecretFile();
+    const { adminAccountId, group, transport } = await usePartnerSimulatorWithCreateInterceptor(
+      { mode: "file", filePath: secretFile },
+      async () => {
+        return new StaticHttpResponse(409, {
+          code: "member_exists",
+          message: "member already exists",
+          status: 409,
+          response: { result: [{ note: "safe provider rejection" }] },
+        });
+      },
+    );
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "member-known-rejection@example.com",
+      idempotencyKey: "create-group-member-known-rejection",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("member_exists");
+    expect(rawResult.content[0].text).not.toContain("secret_sink_create_response_unusable");
+    expect(pendingSecretClaimNames(secretFile)).toHaveLength(0);
+    expect(
+      transport.requests.filter((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toHaveLength(0);
+  });
+
+  it("recovers candidate account IDs from a thrown create error body", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    let createdSecret = "";
+    let createdAccountId = "";
+    let createdApplicationKeyId = "";
+    const { adminAccountId, group, transport, partnerSeed } =
+      await usePartnerSimulatorWithCreateInterceptor(
+        { mode: "file", filePath: secretFile },
+        async (_request, sendToSimulator) => {
+          const response = await sendToSimulator();
+          const created = (await response.json()) as Array<{
+            applicationKey?: unknown;
+            applicationKeyId?: unknown;
+            groupMember?: { accountId?: unknown };
+          }>;
+          const [result] = created;
+          createdSecret = String(result?.applicationKey ?? "");
+          createdAccountId = String(result?.groupMember?.accountId ?? "");
+          createdApplicationKeyId = String(result?.applicationKeyId ?? "");
+          const { applicationKey: _applicationKey, ...withoutSecret } = result ?? {};
+          throw {
+            status: 502,
+            code: "partner_proxy_error",
+            message: "raw create response surfaced after provisioning",
+            response: { result: withoutSecret },
+          };
+        },
+      );
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "member-thrown-candidate@example.com",
+      idempotencyKey: "create-group-member-thrown-candidate",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_create_response_unusable");
+    expect(rawResult.content[0].text).not.toContain("partner_proxy_error");
+    expect(createdSecret).not.toBe("");
+    expect(createdAccountId).not.toBe("");
+    expect(createdApplicationKeyId).not.toBe("");
+    expect(JSON.stringify(rawResult)).not.toContain(createdSecret);
+    const fatalLogs = JSON.stringify(fatalSpy.mock.calls);
+    expect(fatalLogs).toContain("ejected_group_members");
+    expect(fatalLogs).toContain(createdAccountId);
+    expect(fatalLogs).toContain(createdApplicationKeyId);
+    expect(fatalLogs).not.toContain(createdSecret);
+    expect(
+      transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toBe(true);
+
+    const listed = await partnerSeed.listGroupMembers({
+      groupId: group.groupId,
+      pageSize: 100,
+    });
+    expect(
+      listed[0]?.groupMembers.some(
+        (member) => member.email === "member-thrown-candidate@example.com",
+      ),
+    ).toBe(false);
+  });
+
   it("logs ejected and remaining account IDs after partial create recovery failure", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
