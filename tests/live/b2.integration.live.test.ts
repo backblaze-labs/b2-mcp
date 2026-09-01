@@ -68,7 +68,7 @@ beforeAll(async () => {
       },
     ],
   });
-});
+}, 120_000);
 
 afterAll(async () => {
   if (!HAS_CREDS) return;

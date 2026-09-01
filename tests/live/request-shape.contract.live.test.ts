@@ -52,7 +52,7 @@ beforeAll(async () => {
   // destructive-op gate here (it is unit-tested separately).
   server = createServer({ ...loadConfig(), destructivePolicy: "allow" });
   bucketTracker = createContractBucketTracker(server);
-});
+}, 120_000);
 
 afterAll(async () => {
   if (!HAS_CREDS) return;
