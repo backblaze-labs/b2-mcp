@@ -137,7 +137,7 @@ class RequestSignalTransport implements HttpTransport {
         signal ? { ...replaySafeRequest, signal } : replaySafeRequest,
       );
       return classifyUnknownStatus && endpoint && isSuccessfulResponse(response)
-        ? withUnknownStatusBodyRead(response, endpoint)
+        ? withUnknownStatusJsonRead(response, endpoint)
         : response;
     } catch (err) {
       if (classifyUnknownStatus && endpoint) throwIfUnknownStatusWrite(endpoint, err);
@@ -195,70 +195,39 @@ function isSuccessfulResponse(response: HttpResponse): boolean {
   return response.status >= 200 && response.status < 300;
 }
 
-async function wrapUnknownStatusBodyRead<T>(endpoint: string, read: () => Promise<T>): Promise<T> {
+async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string): Promise<T> {
   try {
-    return await read();
+    return await response.json<T>();
   } catch (err) {
     throwIfUnknownStatusWrite(endpoint, err);
     throw err;
   }
 }
 
-function withUnknownStatusBodyRead(response: HttpResponse, endpoint: string): HttpResponse {
-  return {
-    status: response.status,
-    headers: response.headers,
-    get body(): HttpResponse["body"] {
-      return response.body;
-    },
-    json: <T>() => wrapUnknownStatusBodyRead(endpoint, () => response.json<T>()),
-    text: () => wrapUnknownStatusBodyRead(endpoint, () => response.text()),
-    arrayBuffer: () => wrapUnknownStatusBodyRead(endpoint, () => response.arrayBuffer()),
-  };
+function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): HttpResponse {
+  return Object.assign(Object.create(response), {
+    json: <T>() => readUnknownStatusJson<T>(response, endpoint),
+  });
 }
 
-function responseBodyUnavailablePayload(
-  status: number,
-  err: unknown,
-): {
-  status: number;
-  code: string;
-  message: string;
-} {
-  const detail = err instanceof Error && err.message ? `: ${err.message}` : "";
-  return {
-    status,
-    code: "response_body_unavailable",
-    message: `HTTP ${status} response body could not be read${detail}`,
-  };
-}
-
-async function readDefinitiveErrorJson<T>(
-  response: HttpResponse,
-  read: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await read();
-  } catch (err) {
-    if (findInCauseChain(err, unknownStatusInterruption)) {
-      return responseBodyUnavailablePayload(response.status, err) as T;
-    }
-    throw err;
-  }
-}
-
-function withDefinitiveErrorBodyRead(response: HttpResponse): HttpResponse {
+function withDefinitiveErrorJsonRead(response: HttpResponse): HttpResponse {
   if (isSuccessfulResponse(response)) return response;
-  return {
-    status: response.status,
-    headers: response.headers,
-    get body(): HttpResponse["body"] {
-      return response.body;
+  return Object.assign(Object.create(response), {
+    json: async <T>() => {
+      try {
+        return await response.json<T>();
+      } catch (err) {
+        if (findInCauseChain(err, unknownStatusInterruption)) {
+          return {
+            status: response.status,
+            code: "internal_error",
+            message: `HTTP ${response.status}`,
+          } as T;
+        }
+        throw err;
+      }
     },
-    json: <T>() => readDefinitiveErrorJson(response, () => response.json<T>()),
-    text: () => response.text(),
-    arrayBuffer: () => response.arrayBuffer(),
-  };
+  });
 }
 
 /**
@@ -389,7 +358,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withDefinitiveErrorBodyRead(withRetryAfterHeader(response));
+      return withDefinitiveErrorJsonRead(withRetryAfterHeader(response));
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;

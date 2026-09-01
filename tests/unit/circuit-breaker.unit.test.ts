@@ -3,6 +3,7 @@ import {
   withCircuit,
   withPartnerCircuit,
   withReportCircuit,
+  withLongCircuit,
   circuitBreaker,
   partnerCircuitBreaker,
   reportCircuitBreaker,
@@ -35,6 +36,10 @@ describe("circuit-breaker", () => {
   it("passes through results when closed", async () => {
     const result = await withCircuit(async () => 42);
     expect(result).toBe(42);
+  });
+
+  it("passes through long transfer results when closed", async () => {
+    await expect(withLongCircuit(async () => "ok")).resolves.toBe("ok");
   });
 
   it("propagates errors from the wrapped function", async () => {

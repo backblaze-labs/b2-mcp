@@ -576,8 +576,8 @@ describe("B2AuthManager", () => {
       }),
     ).rejects.toMatchObject({
       status: 400,
-      code: "response_body_unavailable",
-      message: expect.stringContaining("HTTP 400 response body could not be read"),
+      code: "internal_error",
+      message: "HTTP 400",
     });
     expect(
       warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),

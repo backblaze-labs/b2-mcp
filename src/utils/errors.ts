@@ -148,8 +148,8 @@ function codedErrorFromValue(value: unknown): B2ApiError | undefined {
  *   - S3 / AWS SDK v3:   `err.$metadata.httpStatusCode` + `err.name`/`err.Code`,
  *     with the trace id in `err.$metadata.requestId`.
  *   - Legacy HTTP-client response errors retained for compatibility in tests.
- *   - Local `TimeoutError` -> `request_timeout` / HTTP 504.
- *   - Local `AbortError` -> `request_aborted` / HTTP 499.
+ *   - Local `TimeoutError` maps to `request_timeout` / HTTP 504.
+ *   - Local `AbortError` maps to `request_aborted` / HTTP 499.
  *   - Coded errors wrapped in `.cause`, including `operation_status_unknown`
  *     / HTTP 409 from interrupted no-replay native B2 writes.
  *
