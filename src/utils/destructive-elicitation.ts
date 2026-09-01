@@ -46,6 +46,10 @@ export interface DestructiveElicitationAuditEvent {
   outcome: ElicitationDecision;
   /** Optional refusal/decline/cancel reason. */
   reason?: string;
+  /** Source that satisfied destructive confirmation, when any. */
+  confirmationSource?: DestructiveConfirmationSource;
+  /** Why the legacy `confirm` fallback was used, when applicable. */
+  confirmationFallbackReason?: DestructiveConfirmationFallbackReason;
 }
 
 /** Optional context hooks used by tests and protocol adapters. */
@@ -89,6 +93,10 @@ export interface DestructiveElicitationState {
 
 /** Decision lifecycle for return-based destructive-operation elicitation. */
 export type ElicitationDecision = "requested" | "accepted" | "declined" | "cancelled" | "refused";
+/** Source that supplied destructive-operation confirmation. */
+export type DestructiveConfirmationSource = "human_mcp_elicitation" | "model_confirm_parameter";
+/** Reason the server degraded to the legacy model-supplied `confirm` path. */
+export type DestructiveConfirmationFallbackReason = "elicitation_disabled" | "client_cannot_elicit";
 type StateVerification =
   | { ok: true; state: DestructiveElicitationState }
   | { ok: false; reason: string };
@@ -187,6 +195,7 @@ export async function maybeRequireDestructiveElicitation<T>({
         onDecision,
       );
     }
+    recordLegacyConfirmFallback(args, "elicitation_disabled", onDecision);
     return runOriginal();
   }
   if (!clientCanUseReturnBasedElicitation(requestExtra, contextProviders)) {
@@ -199,6 +208,7 @@ export async function maybeRequireDestructiveElicitation<T>({
         onDecision,
       );
     }
+    recordLegacyConfirmFallback(args, "client_cannot_elicit", onDecision);
     return runOriginal();
   }
 
@@ -304,7 +314,9 @@ export async function maybeRequireDestructiveElicitation<T>({
     );
   }
 
-  recordDestructiveElicitationDecision(toolName, effect, "accepted", sanitizerOptions, onDecision);
+  recordDestructiveElicitationDecision(toolName, effect, "accepted", sanitizerOptions, onDecision, {
+    confirmationSource: "human_mcp_elicitation",
+  });
   return runWithDestructiveElicitationConsent(
     toolName,
     destructiveTargetDigest(config, args),
@@ -416,14 +428,9 @@ function destructiveElicitationRefused(
   onDecision?: (event: DestructiveElicitationAuditEvent) => void,
   outcome: ElicitationDecision = "refused",
 ): ToolErrorResult {
-  recordDestructiveElicitationDecision(
-    toolName,
-    effect,
-    outcome,
-    sanitizerOptions,
-    onDecision,
+  recordDestructiveElicitationDecision(toolName, effect, outcome, sanitizerOptions, onDecision, {
     reason,
-  );
+  });
   return toolError({
     status: 409,
     code: "destructive_confirmation_refused",
@@ -796,10 +803,23 @@ function recordDestructiveElicitationDecision(
   decision: ElicitationDecision,
   sanitizerOptions: SanitizerOptions,
   onDecision?: (event: DestructiveElicitationAuditEvent) => void,
-  reason?: string,
+  event: Omit<DestructiveElicitationAuditEvent, "outcome"> = {},
 ): void {
-  logDestructiveElicitation(toolName, effect, decision, sanitizerOptions, reason);
-  onDecision?.({ outcome: decision, ...(reason && { reason }) });
+  logDestructiveElicitation(toolName, effect, decision, sanitizerOptions, event.reason);
+  onDecision?.({ outcome: decision, ...event });
+}
+
+function recordLegacyConfirmFallback(
+  args: Record<string, unknown>,
+  reason: DestructiveConfirmationFallbackReason,
+  onDecision?: (event: DestructiveElicitationAuditEvent) => void,
+): void {
+  if (args.confirm !== true) return;
+  onDecision?.({
+    outcome: "accepted",
+    confirmationSource: "model_confirm_parameter",
+    confirmationFallbackReason: reason,
+  });
 }
 
 function logDestructiveElicitation(

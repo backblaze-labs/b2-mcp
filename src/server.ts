@@ -819,6 +819,13 @@ export function createAuditedToolCallback(
           ...(destructiveElicitationAudit && {
             elicitationOutcome: destructiveElicitationAudit.outcome,
             handlerRan,
+            ...(destructiveElicitationAudit.confirmationSource && {
+              destructiveConfirmationSource: destructiveElicitationAudit.confirmationSource,
+            }),
+            ...(destructiveElicitationAudit.confirmationFallbackReason && {
+              destructiveConfirmationFallbackReason:
+                destructiveElicitationAudit.confirmationFallbackReason,
+            }),
             ...(destructiveElicitationAudit.reason && {
               elicitationReason: destructiveElicitationAudit.reason,
             }),

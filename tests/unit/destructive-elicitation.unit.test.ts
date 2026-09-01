@@ -513,6 +513,38 @@ describe("destructive elicitation", () => {
   });
 
   it.each([
+    ["server-disabled elicitation", "elicitation_disabled" as const, providers(), {}],
+    [
+      "unsupported client elicitation",
+      "client_cannot_elicit" as const,
+      providers(URL_ONLY_ELICITATION),
+      { mcpReq: { clientCapabilities: URL_ONLY_ELICITATION, envelope: envelope() } },
+    ],
+  ])(
+    "audits model-supplied confirm attribution for %s",
+    async (_case, expectedReason, context, extra) => {
+      const info = vi.spyOn(logger, "info").mockImplementation(() => undefined);
+      if (expectedReason === "elicitation_disabled") {
+        process.env.B2_DESTRUCTIVE_ELICITATION = "off";
+      }
+      const config = cfg("confirm");
+      const original = destructiveOriginal(config);
+      const wrapped = createAuditedToolCallback("s3_delete_object", original, config, context);
+
+      const result = await wrapped({ bucket: "photos", key: "old.jpg", confirm: true }, extra);
+
+      expect(result.content?.[0]?.text).toBe("deleted");
+      expect(original).toHaveBeenCalledTimes(1);
+      expect(info.mock.calls.find(([, message]) => message === "tool.call")?.[0]).toMatchObject({
+        elicitationOutcome: "accepted",
+        handlerRan: true,
+        destructiveConfirmationSource: "model_confirm_parameter",
+        destructiveConfirmationFallbackReason: expectedReason,
+      });
+    },
+  );
+
+  it.each([
     [
       "missing legacy confirmation",
       cfg("confirm"),
@@ -779,12 +811,18 @@ describe("destructive elicitation", () => {
         resultType: (entry as { resultType: string }).resultType,
         outcome: (entry as { elicitationOutcome?: string }).elicitationOutcome,
         handlerRan: (entry as { handlerRan?: boolean }).handlerRan,
+        source: (entry as { destructiveConfirmationSource?: string }).destructiveConfirmationSource,
       })),
     ).toEqual([
-      { resultType: "input_required", outcome: "requested", handlerRan: false },
-      { resultType: "complete", outcome: "accepted", handlerRan: true },
-      { resultType: "input_required", outcome: "requested", handlerRan: false },
-      { resultType: "complete", outcome: "declined", handlerRan: false },
+      { resultType: "input_required", outcome: "requested", handlerRan: false, source: undefined },
+      {
+        resultType: "complete",
+        outcome: "accepted",
+        handlerRan: true,
+        source: "human_mcp_elicitation",
+      },
+      { resultType: "input_required", outcome: "requested", handlerRan: false, source: undefined },
+      { resultType: "complete", outcome: "declined", handlerRan: false, source: undefined },
     ]);
     expect(toolCallLogs[toolCallLogs.length - 1]?.[0]).toMatchObject({
       code: "destructive_confirmation_refused",

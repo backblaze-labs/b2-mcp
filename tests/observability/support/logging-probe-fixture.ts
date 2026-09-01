@@ -7,6 +7,7 @@ import type { B2Config } from "../../../src/utils/types";
 
 type ProbeName =
   | "accessor-safety"
+  | "policy-confirm-fallback"
   | "environment"
   | "policy-confirmation"
   | "redaction"
@@ -124,6 +125,29 @@ async function policyConfirmationProbe(): Promise<void> {
   flushLogsSync();
 }
 
+async function policyConfirmFallbackProbe(): Promise<void> {
+  initLogging();
+  const config = testConfig("fallback");
+  const wrapped = createAuditedToolCallback(
+    "b2_delete_bucket",
+    async (args) => {
+      const gate = checkDestructive("b2_delete_bucket", args, config);
+      return gate.ok ? toolSuccess("deleted") : toolError(gate.error);
+    },
+    config,
+  );
+  const result = await wrapped(
+    {
+      bucketId: "bucket-with-model-confirm",
+      confirm: true,
+      nested: { applicationKey: "B2_MCP_CANARY_SECRET_FALLBACK_ARG" },
+    },
+    {},
+  );
+  writeJson(result);
+  flushLogsSync();
+}
+
 async function thrownFailureProbe(): Promise<void> {
   initLogging();
   const config = testConfig("failure");
@@ -214,6 +238,7 @@ async function environmentProbe(): Promise<void> {
 const probes: Record<ProbeName, () => Promise<void>> = {
   "accessor-safety": accessorSafetyProbe,
   environment: environmentProbe,
+  "policy-confirm-fallback": policyConfirmFallbackProbe,
   "policy-confirmation": policyConfirmationProbe,
   redaction: redactionProbe,
   "retry-budget": retryBudgetProbe,
