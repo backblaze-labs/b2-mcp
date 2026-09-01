@@ -18,7 +18,14 @@ import {
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
 import { operationStatusUnknownError } from "./utils/errors.js";
-import { abortError, isAbortError, isTimeoutError } from "./utils/named-error.js";
+import { logger } from "./utils/logger.js";
+import {
+  abortError,
+  findInCauseChain,
+  isAbortError,
+  isResponseLostTransportError,
+  isTimeoutError,
+} from "./utils/named-error.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
@@ -120,17 +127,19 @@ class RequestSignalTransport implements HttpTransport {
     const replaySafeRequest = withOperationRetryPolicy(request);
     const endpoint = b2ApiEndpointName(replaySafeRequest.url);
     const startedWithAbortedSignal = signal.aborted;
+    const classifyUnknownStatus =
+      endpoint !== undefined &&
+      NON_IDEMPOTENT_B2_API_ENDPOINTS.has(endpoint) &&
+      !startedWithAbortedSignal;
     try {
-      return await this.inner.send(signal ? { ...replaySafeRequest, signal } : replaySafeRequest);
+      const response = await this.inner.send(
+        signal ? { ...replaySafeRequest, signal } : replaySafeRequest,
+      );
+      return classifyUnknownStatus && endpoint
+        ? withUnknownStatusBodyRead(response, endpoint)
+        : response;
     } catch (err) {
-      if (
-        endpoint &&
-        NON_IDEMPOTENT_B2_API_ENDPOINTS.has(endpoint) &&
-        !startedWithAbortedSignal &&
-        isAmbiguousLocalInterruption(err)
-      ) {
-        throw operationStatusUnknownError(endpoint, err);
-      }
+      if (classifyUnknownStatus && endpoint) throwIfUnknownStatusWrite(endpoint, err);
       if (isAbortError(err)) {
         throw sdkAbortException(err instanceof Error ? err.message || "Aborted" : "Aborted");
       }
@@ -144,17 +153,63 @@ function transportUrlGuard(transport: HttpTransport): UrlGuard | undefined {
   return candidate.urlGuard instanceof UrlGuard ? candidate.urlGuard : undefined;
 }
 
-function errorCause(value: unknown): unknown {
-  if (typeof value !== "object" || value === null) return undefined;
-  return (value as { cause?: unknown }).cause;
+function unknownStatusInterruption(value: unknown): unknown {
+  return isAbortError(value) || isTimeoutError(value) || isResponseLostTransportError(value)
+    ? value
+    : undefined;
 }
 
-function isAmbiguousLocalInterruption(err: unknown, seen = new Set<unknown>()): boolean {
-  if (isAbortError(err) || isTimeoutError(err)) return true;
-  if (typeof err !== "object" || err === null || seen.has(err)) return false;
-  seen.add(err);
-  const cause = errorCause(err);
-  return cause !== undefined && isAmbiguousLocalInterruption(cause, seen);
+function stringField(value: unknown, field: string): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = (value as Record<string, unknown>)[field];
+  return typeof candidate === "string" ? candidate : undefined;
+}
+
+function unknownStatusLogFields(err: unknown): Record<string, string> {
+  const reason = findInCauseChain(err, unknownStatusInterruption);
+  const reasonName = stringField(reason, "name");
+  const reasonCode = stringField(reason, "code");
+  return {
+    ...(reasonName ? { reasonName } : {}),
+    ...(reasonCode ? { reasonCode } : {}),
+  };
+}
+
+function throwIfUnknownStatusWrite(endpoint: string, err: unknown): void {
+  if (!findInCauseChain(err, unknownStatusInterruption)) return;
+  const error = operationStatusUnknownError(endpoint, err);
+  logger.warn(
+    {
+      endpoint,
+      status: error.status,
+      code: error.code,
+      ...unknownStatusLogFields(err),
+    },
+    "native.write.outcome_unknown",
+  );
+  throw error;
+}
+
+async function wrapUnknownStatusBodyRead<T>(endpoint: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    throwIfUnknownStatusWrite(endpoint, err);
+    throw err;
+  }
+}
+
+function withUnknownStatusBodyRead(response: HttpResponse, endpoint: string): HttpResponse {
+  return {
+    status: response.status,
+    headers: response.headers,
+    get body(): HttpResponse["body"] {
+      return response.body;
+    },
+    json: <T>() => wrapUnknownStatusBodyRead(endpoint, () => response.json<T>()),
+    text: () => wrapUnknownStatusBodyRead(endpoint, () => response.text()),
+    arrayBuffer: () => wrapUnknownStatusBodyRead(endpoint, () => response.arrayBuffer()),
+  };
 }
 
 /**

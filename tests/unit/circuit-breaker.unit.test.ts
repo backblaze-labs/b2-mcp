@@ -9,6 +9,8 @@ import {
   isClientError,
 } from "../../src/utils/circuit-breaker";
 import { currentMcpRequestSignal } from "../../src/request-context";
+import { operationStatusUnknownError } from "../../src/utils/errors";
+import { timeoutError } from "../../src/utils/named-error";
 
 function domAbortError(message = "caller aborted"): Error {
   const DomExceptionCtor = (
@@ -55,6 +57,27 @@ describe("circuit-breaker", () => {
     expect(isClientError({ response: { status: 429 } })).toBe(false);
     expect(isClientError({ response: { status: 503 } })).toBe(false);
     expect(isClientError({ response: { status: 500 } })).toBe(false);
+  });
+
+  it("counts unknown-status native writes even though they surface as 409", () => {
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          timeoutError("HTTP request timed out after 30000 ms"),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      isClientError(
+        Object.assign(new Error("SDK transport wrapper"), {
+          cause: operationStatusUnknownError(
+            "b2_create_bucket",
+            timeoutError("HTTP request timed out after 30000 ms"),
+          ),
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("counts non-HTTP errors as failures", () => {

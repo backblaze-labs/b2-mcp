@@ -1,6 +1,7 @@
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
+import { logger } from "../../src/utils/logger";
 import { abortError, timeoutError } from "../../src/utils/named-error";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import type { B2Config } from "../../src/utils/types";
@@ -432,6 +433,7 @@ describe("B2AuthManager", () => {
   });
 
   it("classifies no-replay native timeout as an unknown operation status", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const inner = new RecordingTransport(() => {
       throw timeoutError("HTTP request timed out after 30000 ms");
     });
@@ -453,8 +455,106 @@ describe("B2AuthManager", () => {
       code: "operation_status_unknown",
       message: expect.stringContaining("may have completed at B2"),
     });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "b2_create_bucket",
+        status: 409,
+        code: "operation_status_unknown",
+        reasonName: "TimeoutError",
+      }),
+      "native.write.outcome_unknown",
+    );
     expect(inner.requests).toHaveLength(1);
     expect(inner.requests[0].retry?.maxRetries).toBe(0);
+  });
+
+  it.each([
+    ["ECONNRESET code", Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })],
+    [
+      "UND_ERR_SOCKET cause",
+      Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+      }),
+    ],
+    ["socket hang up message", new Error("socket hang up")],
+  ])("classifies no-replay native %s as an unknown operation status", async (_name, failure) => {
+    const inner = new RecordingTransport(() => {
+      throw failure;
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("verify the resource state before retrying"),
+    });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("classifies no-replay native body-read timeout as an unknown operation status", async () => {
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw timeoutError("HTTP request timed out after 30000 ms");
+          }
+        })(200, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    await expect(response.json()).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("does not mark already-aborted no-replay native requests as unknown status", async () => {
+    const inner = new RecordingTransport(() => new StaticHttpResponse(200, {}));
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+    const abort = new AbortController();
+    abort.abort(abortError("caller aborted before dispatch"));
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({
+      name: "AbortError",
+      message: "caller aborted before dispatch",
+    });
+    expect(inner.requests).toHaveLength(0);
   });
 
   it("does not replay deleteKey after a response-lost failure", async () => {

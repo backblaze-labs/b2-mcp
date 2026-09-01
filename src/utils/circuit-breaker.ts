@@ -5,17 +5,34 @@
  */
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
-import { abortError, timeoutError } from "./named-error.js";
+import { abortError, findInCauseChain, timeoutError } from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { isTestRuntime } from "./runtime.js";
 
 /** Default whole-call deadline for metadata/control-plane circuit execution. */
 export const CIRCUIT_TIMEOUT_MS = 150_000;
+const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
 
 function isAbortLikeError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: unknown; code?: unknown };
   return e.name === "AbortError" || e.code === "ABORT_ERR";
+}
+
+function errorCode(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const e = err as { code?: unknown; response?: { data?: { code?: unknown } } };
+  return typeof e.code === "string"
+    ? e.code
+    : typeof e.response?.data?.code === "string"
+      ? e.response.data.code
+      : undefined;
+}
+
+function isOperationStatusUnknown(err: unknown): boolean {
+  return !!findInCauseChain(err, (value) =>
+    errorCode(value) === OPERATION_STATUS_UNKNOWN_CODE ? value : undefined,
+  );
 }
 
 /**
@@ -29,6 +46,7 @@ function isAbortLikeError(err: unknown): boolean {
  */
 export function isClientError(err: unknown): boolean {
   if (isAbortLikeError(err)) return true;
+  if (isOperationStatusUnknown(err)) return false;
   if (typeof err !== "object" || err === null) return false;
   const e = err as {
     status?: number;

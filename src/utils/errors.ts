@@ -15,7 +15,7 @@ import {
   serializeUnsanitizedStructuredToolResult,
   type StructuredToolResult,
 } from "./result-serializer.js";
-import { isAbortError, isTimeoutError } from "./named-error.js";
+import { findInCauseChain, isAbortError, isTimeoutError } from "./named-error.js";
 
 const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
 const REQUEST_TIMEOUT_STATUS = 504;
@@ -126,29 +126,9 @@ function numberOrFallback(value: unknown, fallback: number): number {
   return typeof value === "number" ? value : fallback;
 }
 
-function objectCause(value: unknown): unknown {
+function codedErrorFromValue(value: unknown): B2ApiError | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  return (value as { cause?: unknown }).cause;
-}
-
-function hasNamedErrorInChain(
-  value: unknown,
-  predicate: (error: unknown) => boolean,
-  seen = new Set<unknown>(),
-): boolean {
-  if (predicate(value)) return true;
-  if (typeof value !== "object" || value === null || seen.has(value)) return false;
-  seen.add(value);
-  const cause = objectCause(value);
-  return cause !== undefined && hasNamedErrorInChain(cause, predicate, seen);
-}
-
-function codedErrorInCauseChain(value: unknown, seen = new Set<unknown>()): B2ApiError | null {
-  if (typeof value !== "object" || value === null || seen.has(value)) return null;
-  seen.add(value);
-  const cause = objectCause(value);
-  if (typeof cause !== "object" || cause === null) return null;
-  const e = cause as Record<string, unknown>;
+  const e = value as Record<string, unknown>;
   if (typeof e.status === "number" && typeof e.code === "string") {
     return {
       status: e.status,
@@ -157,17 +137,21 @@ function codedErrorInCauseChain(value: unknown, seen = new Set<unknown>()): B2Ap
       requestId: typeof e.requestId === "string" ? e.requestId : undefined,
     };
   }
-  return codedErrorInCauseChain(cause, seen);
+  return undefined;
 }
 
 /**
  * Parse an error from a B2 API call and return a structured error object.
  *
- * Handles both error shapes used in this codebase:
+ * Handles the error shapes used in this codebase:
  *   - B2 SDK typed/native errors: `err.status` + `err.code` + `err.requestId`
  *   - S3 / AWS SDK v3:   `err.$metadata.httpStatusCode` + `err.name`/`err.Code`,
  *     with the trace id in `err.$metadata.requestId`.
  *   - Legacy HTTP-client response errors retained for compatibility in tests.
+ *   - Local `TimeoutError` -> `request_timeout` / HTTP 504.
+ *   - Local `AbortError` -> `request_aborted` / HTTP 499.
+ *   - Coded errors wrapped in `.cause`, including `operation_status_unknown`
+ *     / HTTP 409 from interrupted no-replay native B2 writes.
  *
  * Reading the AWS SDK shape is what lets us tell a genuine Backblaze 5xx apart
  * from a 4xx (e.g. NoSuchKey) and surface the requestId support needs.
@@ -221,17 +205,17 @@ export function parseB2Error(err: unknown): B2ApiError {
       };
     }
 
-    const codedCause = codedErrorInCauseChain(err);
+    const codedCause = findInCauseChain(err, codedErrorFromValue);
     if (codedCause) return codedCause;
 
-    if (hasNamedErrorInChain(err, isTimeoutError)) {
+    if (findInCauseChain(err, (value) => (isTimeoutError(value) ? value : undefined))) {
       return {
         status: REQUEST_TIMEOUT_STATUS,
         code: REQUEST_TIMEOUT_CODE,
         message: messageOrFallback(e.message, "The request timed out"),
       };
     }
-    if (hasNamedErrorInChain(err, isAbortError)) {
+    if (findInCauseChain(err, (value) => (isAbortError(value) ? value : undefined))) {
       return {
         status: REQUEST_ABORTED_STATUS,
         code: REQUEST_ABORTED_CODE,
