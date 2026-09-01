@@ -201,6 +201,83 @@ describe("runtime policy", () => {
     });
   });
 
+  it("rejects a project engine floor below the Backblaze SDK engine floor", () => {
+    withRuntimePolicyFixture((fixtureRoot) => {
+      // Raise the declared SDK floor above the project floor: the project floor
+      // may sit at or above the SDK floor, never below it. Rewriting only the
+      // SDK-facing fields keeps every other requireEqual pair aligned so this
+      // specific ordering diagnostic is the one under test.
+      writeFixtureFile(
+        fixtureRoot,
+        "runtime-policy.json",
+        JSON.stringify(
+          {
+            engineRange: "^22.22.2 || ^24 || ^26",
+            engineFloor: ">=22.22.2",
+            backblazeSdkEngineFloor: ">=24.15.0",
+            runtimeInstallNode: "22.23.1",
+            minimumEvidenceNode: "22.23.1",
+            node22LtsMinimum: "22.11.0",
+            node22Pinned: "22.23.1",
+            deterministicLinuxMatrix: ["22.23.1", "24", "26"],
+            crossPlatformNode: "22.23.1",
+            liveNodeMatrix: ["22.23.1", "24", "26"],
+            unsupportedMajors: [18, 20],
+            typesNodeVersion: "22.3.0",
+          },
+          null,
+          2,
+        ),
+      );
+      writeFixtureFile(
+        fixtureRoot,
+        "pnpm-lock.yaml",
+        [
+          "lockfileVersion: '9.0'",
+          "",
+          "importers:",
+          "",
+          "  .:",
+          "    dependencies:",
+          "      '@backblaze-labs/b2-sdk':",
+          "        specifier: 0.3.0",
+          "        version: 0.3.0",
+          "    devDependencies:",
+          "      '@types/node':",
+          "        specifier: 22.3.0",
+          "        version: 22.3.0",
+          "",
+          "packages:",
+          "",
+          "  '@backblaze-labs/b2-sdk@0.3.0':",
+          "    resolution: {integrity: sha512-test}",
+          "    engines: {node: '>=24.15.0'}",
+          "",
+          "  '@types/node@22.3.0':",
+          "    resolution: {integrity: sha512-test}",
+          "",
+          "snapshots:",
+          "",
+          "  '@backblaze-labs/b2-sdk@0.3.0': {}",
+          "",
+          "  '@types/node@22.3.0': {}",
+          "",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, ["scripts/check-runtime-policy.mjs"], {
+        cwd: root,
+        env: { ...process.env, B2_MCP_RUNTIME_POLICY_ROOT: fixtureRoot },
+        encoding: "utf8",
+      });
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain(
+        "runtime-policy engineFloor >=22.22.2 must be >= the Backblaze SDK engine floor >=24.15.0",
+      );
+    });
+  });
+
   it("rejects Pages workflows without deploy and package hardening", () => {
     withRuntimePolicyFixture((fixtureRoot) => {
       writeFixtureFile(
