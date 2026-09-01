@@ -28,11 +28,11 @@ In scope for Phase 1:
 - Customer-operated MCP OAuth resource-server integration.
 - Deterministic tool-profile contracts for the full, default, and read-only
   profiles.
-- A Node.js package engine range of `^22.3.0 || ^24 || ^26`, preserving the
-  official B2 SDK's `>=22.3.0` floor while matching opossum's supported Node.js
+- A Node.js package engine range of `^22.22.2 || ^24 || ^26`, preserving the
+  official B2 SDK's `>=22.22.2` floor while matching opossum's supported Node.js
   lines, with deterministic CI evidence on Node.js 22.23.1, 24, and 26, live B2
   evidence on Node.js 22.23.1, 24, and 26, plus packed-package smoke coverage on
-  the Node.js 22.3.0 engine floor.
+  the Node.js 22.22.2 engine floor.
 - Release, package, CI, protocol, security, and reference-deployment work needed
   to ship `v0.1.0`.
 
@@ -86,17 +86,17 @@ metadata.
 
 Inherited values from the incoming project must be treated as pre-Phase-1
 history. Release work must keep visible metadata aligned with the canonical
-`@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js `^22.3.0 || ^24 || ^26` contract
+`@backblaze-labs/b2-mcp`, `0.1.0`, and Node.js `^22.22.2 || ^24 || ^26` contract
 before `v0.1.0` is released.
 
 ## Runtime
 
-Node.js `^22.3.0 || ^24 || ^26` is the package engine range for Phase 1. Node.js
-22.3.0 remains the minimum 22.x engine floor.
+Node.js `^22.22.2 || ^24 || ^26` is the package engine range for Phase 1. Node.js
+22.22.2 remains the minimum 22.x engine floor.
 
 CI must continuously verify production dependency installation and the full
 implementation, tests, and package toolchain on Node.js 22.23.1, 24, and 26.
-CI must also exercise the packed-package install smoke on Node.js 22.3.0 so the
+CI must also exercise the packed-package install smoke on Node.js 22.22.2 so the
 published engine floor remains backed by evidence, and build the Docker image
 with an HTTP readiness smoke so the container distribution remains deployable.
 Release publishing must verify the pushed GHCR manifest contains both supported

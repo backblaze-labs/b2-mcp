@@ -24,7 +24,7 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
           name: "@backblaze-labs/b2-mcp",
           version: "0.1.0",
           packageManager,
-          engines: { node: "^22.3.0 || ^24 || ^26" },
+          engines: { node: "^22.22.2 || ^24 || ^26" },
           dependencies: { "@backblaze-labs/b2-sdk": "0.3.0" },
           devDependencies: { "@types/node": "22.3.0" },
         },
@@ -37,8 +37,9 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
       "runtime-policy.json",
       JSON.stringify(
         {
-          engineRange: "^22.3.0 || ^24 || ^26",
-          engineFloor: ">=22.3.0",
+          engineRange: "^22.22.2 || ^24 || ^26",
+          engineFloor: ">=22.22.2",
+          backblazeSdkEngineFloor: ">=22.3.0",
           runtimeInstallNode: "22.23.1",
           minimumEvidenceNode: "22.23.1",
           node22LtsMinimum: "22.11.0",
@@ -112,7 +113,7 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
         "  runtime-engine-floor:",
         "    steps:",
         "      - with:",
-        "          node-version: 22.3.0",
+        "          node-version: 22.22.2",
         "  unit-coverage-matrix:",
         "    strategy:",
         "      matrix:",
@@ -160,21 +161,21 @@ function withRuntimePolicyFixture(run: (fixtureRoot: string) => void): void {
     writeFixtureFile(
       fixtureRoot,
       "README.md",
-      `^22.3.0 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
+      `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
     writeFixtureFile(
       fixtureRoot,
       "CONTRIBUTING.md",
-      `^22.3.0 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
+      `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
-    writeFixtureFile(fixtureRoot, "docs/V1_SCOPE.md", "^22.3.0 || ^24 || ^26\n>=22.3.0\n");
+    writeFixtureFile(fixtureRoot, "docs/V1_SCOPE.md", "^22.22.2 || ^24 || ^26\n>=22.22.2\n");
     writeFixtureFile(
       fixtureRoot,
       "docs/DEPLOY.md",
-      `^22.3.0 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
+      `^22.22.2 || ^24 || ^26\n22.23.1\n${packageManager}\n`,
     );
-    writeFixtureFile(fixtureRoot, "docs/deployment/vercel.md", "^22.3.0 || ^24 || ^26\n");
-    writeFixtureFile(fixtureRoot, "deploy/vercel/README.md", "^22.3.0 || ^24 || ^26\n");
+    writeFixtureFile(fixtureRoot, "docs/deployment/vercel.md", "^22.22.2 || ^24 || ^26\n");
+    writeFixtureFile(fixtureRoot, "deploy/vercel/README.md", "^22.22.2 || ^24 || ^26\n");
     writeFixtureFile(fixtureRoot, "RELEASE.md", "22.23.1\n");
     writeFixtureFile(fixtureRoot, "CHANGELOG.md", "22.23.1\n");
 
@@ -196,7 +197,7 @@ describe("runtime policy", () => {
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("unsupported Node 23 is present");
       expect(result.stderr).toContain("unsupported Node 25.9.0 is present");
-      expect(result.stderr).toContain("^22.3.0 || ^24 || ^26");
+      expect(result.stderr).toContain("^22.22.2 || ^24 || ^26");
     });
   });
 

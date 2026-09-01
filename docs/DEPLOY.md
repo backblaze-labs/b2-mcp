@@ -13,7 +13,7 @@ rotation, CI secret, teardown, health-check, and smoke-test policy.
 
 Supported Node.js runtimes are the repository runtimes, not provider defaults:
 Node.js `22.23.1`, Node.js `24`, and Node.js `26`. Do not add Node 18, 20, 23,
-or 25 support. The package engine range is `^22.3.0 || ^24 || ^26`, and
+or 25 support. The package engine range is `^22.22.2 || ^24 || ^26`, and
 release/build examples use
 `pnpm@11.20.0+sha256.34e198cb1e43237517ecedfd31f9ae26a6c0a3e5366ce58a2d05f4b21fb5f19a`.
 

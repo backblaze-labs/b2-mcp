@@ -6,7 +6,7 @@
   },
   "reviewedBaseline": {
     "date": "2026-08-31",
-    "nodeVersions": ["22.3.0", "24", "26"],
+    "nodeVersions": ["22.22.2", "24", "26"],
     "primaryB2Transport": "@backblaze-labs/b2-sdk@0.3.0",
     "sizeBudgetRationale": "Issues #306 and #308 intentionally add TSDoc to the published TypeScript source tree, increasing package source bytes without changing runtime dependencies. Issue #319 adds horizon-qualified empty-snapshot discovery to insights, growing compiled JS/d.ts source bytes with no new runtime dependencies. Issue #314 adds native no-replay write interruption classification, shared cause-chain helpers, and operator logging for operation_status_unknown, including definitive-status preservation for malformed non-2xx and truncated success bodies with no new runtime dependencies.",
     "directProductionDependencyCount": 9,

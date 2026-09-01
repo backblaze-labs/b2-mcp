@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and secret-sink contracts.
 
 ### Changed
+- Raised the declared Node engine floor from `22.3.0` to `22.22.2`
+  (`engines.node` is now `^22.22.2 || ^24 || ^26`). The floor now matches the
+  Node.js version CI already tests and pins (`.nvmrc`/matrix use 22.23.1), and
+  unblocks the `eslint-plugin-jsdoc` 64.x doc-lint toolchain, which requires
+  `^22.22.2 || >=24.15.0`. Node 22 users on an older patch should update within
+  the 22 LTS line; `@types/node` stays pinned to its conservative 22.3.0
+  baseline. (#329)
+- Bumped `eslint-plugin-jsdoc` `50.8.0` → `64.2.1` (doc-lint dev dependency).
 - Enforce strict TypeDoc validation for public API docs: undocumented modules,
   exported members, and invalid links now fail `pnpm run docs` and the docs
   workflow. (#308)

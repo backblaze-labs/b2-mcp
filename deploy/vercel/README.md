@@ -57,7 +57,7 @@ and rewrites `/mcp` to the API function. The checked-in JavaScript API files are
 thin launchers; the `vercel-build` hook runs repository typecheck/build and
 compiles the typed Vercel adapter sources into `.vercel/build-runtime/` before
 `@vercel/node` traces functions. The package engine range is
-`^22.3.0 || ^24 || ^26`, while `vercel.json` explicitly pins the deployed
+`^22.22.2 || ^24 || ^26`, while `vercel.json` explicitly pins the deployed
 Vercel Function runtime to the reviewed `nodejs24.x` line. This intentionally
 moves the Vercel deployment from the older Node 22 function runtime to the
 reviewed Node 24 line; CI fails if generated `.vercel/output` runtime configs do

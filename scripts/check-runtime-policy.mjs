@@ -858,11 +858,23 @@ const lock = readPackageManagerLock(root);
 
 requireEqual("package.json engines.node", packageJson.engines?.node, policy.engineRange);
 requireEqual("pnpm lock root engines.node", lock.packages?.[""]?.engines?.node, policy.engineRange);
+const backblazeSdkEngine = lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node;
 requireEqual(
-  "Backblaze SDK engine floor",
-  lock.packages?.["node_modules/@backblaze-labs/b2-sdk"]?.engines?.node,
-  policy.engineFloor,
+  "Backblaze SDK declared engine floor",
+  backblazeSdkEngine,
+  policy.backblazeSdkEngineFloor,
 );
+// Our engine floor may sit at or above the Backblaze SDK's floor (we can require
+// a newer Node than the SDK does — e.g. for the doc-lint toolchain) but never
+// below it, so we never claim to support a Node the SDK does not.
+if (
+  backblazeSdkEngine &&
+  comparePatch(policy.engineFloor.replace(/^>=/, ""), backblazeSdkEngine.replace(/^>=/, "")) < 0
+) {
+  fail(
+    `runtime-policy engineFloor ${policy.engineFloor} must be >= the Backblaze SDK engine floor ${backblazeSdkEngine}`,
+  );
+}
 requireEqual("runtime-policy runtime install pin", policy.runtimeInstallNode, policy.node22Pinned);
 requireNode22LtsPatch("runtime-policy runtime install pin", policy.runtimeInstallNode, policy);
 
