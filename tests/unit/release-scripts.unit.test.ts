@@ -531,7 +531,7 @@ describe("release scripts", () => {
   it("retries only explicit MCP Registry npm propagation 404s", async () => {
     const { isTransientMcpPublisherFailure, publishMcpRegistry } = await mcpRegistryPublishModule();
     const propagationMessage =
-      "404: A newly published release can take a moment to appear. Wait and retry.";
+      "404: A newly published release can take a moment to appear on the registry. Wait and retry...";
 
     expect(isTransientMcpPublisherFailure({ stderr: propagationMessage, stdout: "" })).toBe(true);
     expect(isTransientMcpPublisherFailure({ stderr: "404: package not found", stdout: "" })).toBe(

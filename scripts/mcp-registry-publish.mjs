@@ -117,7 +117,9 @@ function isTransientHttpStatus(status) {
 function isRegistryNpmPropagationDelay(text) {
   return (
     /\b404\b/.test(text) &&
-    /newly published release can take a moment to appear\.\s*wait and retry/i.test(text)
+    /newly published release can take a moment to appear on the registry\.\s*wait and retry/i.test(
+      text,
+    )
   );
 }
 
