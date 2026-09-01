@@ -16,7 +16,7 @@
      name (io.github.backblaze-labs/b2-mcp) and repo path, so they activate automatically
      once the package is published to the MCP Registry and ingested by Glama/Smithery. -->
 [![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dio.github.backblaze-labs%2Fb2-mcp&query=%24.servers%5B0%5D.server.version&prefix=v&label=MCP%20Registry&color=5b5fc7&logo=modelcontextprotocol&logoColor=white)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp)
-[![Glama](https://glama.ai/mcp/servers/backblaze-labs/b2-mcp/badges/score.svg)](https://glama.ai/mcp/servers/backblaze-labs/b2-mcp)
+[![Glama](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg)](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp)
 [![Smithery](https://img.shields.io/badge/Smithery-b2--mcp-6f4cff?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZiI+PHBhdGggZD0iTTEyIDJMMiA3djEwbDEwIDUgMTAtNVY3eiIvPjwvc3ZnPg==)](https://smithery.ai/server/@backblaze-labs/b2-mcp)
 [![LobeHub](https://lobehub.com/badge/mcp/backblaze-labs-b2-mcp)](https://lobehub.com/mcp/backblaze-labs-b2-mcp)
 [![Coverage floors](https://img.shields.io/badge/coverage-S%2094.3%20%7C%20B%2088%20%7C%20F%2097.2%20%7C%20L%2096.6-brightgreen)](docs/TESTING.md)
