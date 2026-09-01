@@ -392,7 +392,6 @@ describe("CI workflow policy", () => {
 
   it("runs provider evals only from trusted scheduled or manual main refs", () => {
     const guard = workflowJobBlock(evals, "guard") ?? "";
-    const skipped = workflowJobBlock(evals, "skipped") ?? "";
     const evalJob = workflowJobBlock(evals, "evals") ?? "";
 
     expect(evals).toMatch(topLevelMappingEntry("permissions", "contents", "read"));
@@ -408,7 +407,6 @@ describe("CI workflow policy", () => {
 
     expect(guard).toContain("if: github.repository == 'backblaze-labs/b2-mcp'");
     expect(guard).toContain("checkout-sha: ${{ steps.ref.outputs.checkout_sha }}");
-    expect(guard).toContain("skip-reason: ${{ steps.ref.outputs.skip_reason }}");
     expect(guard).toContain("timeout-minutes: 5");
     expect(guard).toContain("workflow_dispatch|schedule");
     expect(guard).toContain('[[ "$GITHUB_REF" != "refs/heads/main" ]]');
@@ -417,16 +415,18 @@ describe("CI workflow policy", () => {
     // Anthropic only and must not reference the OpenAI secret.
     expect(guard).not.toContain("OPENAI_API_KEY");
     expect(guard).toContain("::add-mask::");
-    expect(guard).toContain("should_run=false");
-    expect(guard).toContain("missing provider secret(s)");
+    expect(guard).toContain('[[ -z "${ANTHROPIC_API_KEY:-}" ]]');
+    expect(guard).toContain("::error::ANTHROPIC_API_KEY is required");
+    expect(guard).toContain("gh secret set ANTHROPIC_API_KEY");
+    expect(guard).toContain("exit 1");
+    expect(guard).not.toContain("should_run=false");
+    expect(guard).not.toContain("missing provider secret(s)");
     expect(guard).not.toContain("environment:");
 
-    expect(skipped).toContain("needs.guard.outputs.should-run != 'true'");
-    expect(skipped).toContain("LLM evals skipped");
-    expect(skipped).toContain("SKIP_REASON: ${{ needs.guard.outputs.skip-reason }}");
-    expect(skipped).toContain('echo "LLM evals skipped: ${SKIP_REASON}"');
-    expect(skipped).not.toContain("LLM evals skipped: ${{");
-    expect(evalJob).toContain("needs.guard.outputs.should-run == 'true'");
+    expect(workflowJobBlock(evals, "skipped")).toBeNull();
+    expect(evals).not.toContain("LLM evals skipped");
+    expect(evalJob).not.toContain("needs.guard.result");
+    expect(evalJob).not.toContain("needs.guard.outputs.should-run");
     expect(evalJob).toContain("ref: ${{ needs.guard.outputs.checkout-sha }}");
     expect(evalJob).toContain("persist-credentials: false");
   });

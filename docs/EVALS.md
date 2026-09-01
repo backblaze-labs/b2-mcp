@@ -156,7 +156,10 @@ must not run against unreviewed code. It runs only on:
 
 The guard job checks that the repository is `backblaze-labs/b2-mcp`, the ref is
 `refs/heads/main`, and the `ANTHROPIC_API_KEY` repository secret is present.
-Missing provider secrets produce a skipped summary instead of a failed eval job.
+Because scheduled and manual CI evals are canonical-main only, a missing
+`ANTHROPIC_API_KEY` is treated as repository misconfiguration: the guard emits a
+GitHub Actions error and fails the workflow. `OPENAI_API_KEY` is not required by
+CI while OpenAI evals are disabled.
 
 The eval job installs with the pinned package manager, builds once, then runs:
 

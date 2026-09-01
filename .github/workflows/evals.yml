@@ -25,9 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      should-run: ${{ steps.ref.outputs.should_run }}
       checkout-sha: ${{ steps.ref.outputs.checkout_sha }}
-      skip-reason: ${{ steps.ref.outputs.skip_reason }}
     steps:
       - name: Resolve trusted eval ref and provider secrets
         id: ref
@@ -36,9 +34,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
-          should_run=true
           checkout_sha="${GITHUB_SHA}"
-          skip_reason=""
 
           case "${EVENT_NAME}" in
             workflow_dispatch|schedule)
@@ -57,35 +53,16 @@ jobs:
             if [[ -n "$value" ]]; then echo "::add-mask::$value"; fi
           done
 
-          missing=()
-          if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then missing+=("ANTHROPIC_API_KEY"); fi
-          if [[ "${#missing[@]}" -gt 0 ]]; then
-            should_run=false
-            checkout_sha=""
-            skip_reason="missing provider secret(s): ${missing[*]}"
+          if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+            echo "::error::ANTHROPIC_API_KEY is required for canonical scheduled/dispatch LLM evals; configure it with gh secret set ANTHROPIC_API_KEY"
+            exit 1
           fi
 
-          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
           echo "checkout_sha=${checkout_sha}" >> "$GITHUB_OUTPUT"
-          echo "skip_reason=${skip_reason}" >> "$GITHUB_OUTPUT"
-
-  skipped:
-    name: LLM evals skipped
-    needs: guard
-    if: ${{ always() && needs.guard.result == 'success' && needs.guard.outputs.should-run != 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - name: Report skipped evals
-        env:
-          SKIP_REASON: ${{ needs.guard.outputs.skip-reason }}
-        run: |
-          echo "LLM evals skipped: ${SKIP_REASON}" >> "$GITHUB_STEP_SUMMARY"
 
   evals:
     name: Claude pass rates
     needs: guard
-    if: needs.guard.outputs.should-run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
