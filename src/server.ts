@@ -159,26 +159,12 @@ function registerDurableSecretCompatibilityStubs(
   }
 }
 
-/**
- * Optional server-construction controls.
- *
- * @remarks
- * HTTP deployments pass verified OAuth scopes here after authentication. Stdio
- * callers normally omit this so tool availability is governed only by B2 key
- * capabilities and local destructive policy.
- */
+/** Optional server-construction controls. */
 export interface CreateServerOptions {
   /** Verified MCP/OAuth scopes for the current caller. */
   oauthScopes?: readonly string[];
-  /**
-   * Suppress durable-secret compatibility stubs when the caller intentionally
-   * wants an empty capability set to expose no write/admin fallback names.
-   */
-  suppressDurableSecretCompatibilityStubs?: boolean;
-  /**
-   * Suppress Partner API tools even when a distinct master key is configured.
-   */
-  suppressPartnerTools?: boolean;
+  /** Hide fallback tools when capabilities intentionally fail closed. */
+  failClosed?: boolean;
 }
 
 /**
@@ -261,14 +247,8 @@ export function createServer(
     },
   );
 
-  // Capability-aware registration: when capabilities are supplied, a tool is
-  // only registered if the key can use it. Tools not in the capability map
-  // (b2_authorize_account, Partner tools) are allowed through here; Partner
-  // tools are additionally gated on a master key below. Durable-secret
-  // producers register as real handlers only when a reviewed secret sink is
-  // active; otherwise createServer adds non-secret compatibility stubs. null /
-  // undefined remains the explicit full-surface path, while an empty array is
-  // fail-closed rather than "unknown".
+  // Capability-aware mode filters by B2 capabilities and OAuth scopes.
+  // null/undefined is full surface; [] is fail closed.
   const filterActive = Array.isArray(capabilities);
   const capsSet = filterActive ? new Set(capabilities) : null;
   const oauthAllowsRead = oauthScopesAllowOperation(oauthScopes, "read");
@@ -284,10 +264,8 @@ export function createServer(
       }),
   });
 
-  // Initialize clients. The application (workhorse) key drives the B2 native
-  // API, S3, and key management. The Partner API tools use the master
-  // key; when no distinct master key is configured they fall back to the same
-  // application-key client, so a single non-master key needs no extra wiring.
+  // The application key drives native B2, S3, and key management; Partner tools
+  // use a distinct master key when configured.
   const auth = getCachedAuthManager(`credential:${verificationFingerprintConfig(config)}`, config);
   const b2Client = new B2Client(auth);
   const reportClient = new B2ReportClient(auth);
@@ -319,11 +297,8 @@ export function createServer(
   registerObjectLockTools(registrar, b2Client, config);
 
   // ── Partner API tools (master key) ──────────────────────────────────────
-  // Partner tools need a master key + Partner-API entitlement, not a standard
-  // capability. Under capability-aware registration, only surface them when a
-  // distinct master key is configured; otherwise (and in full-surface mode) keep
-  // the prior behavior of always registering them.
-  if (!options.suppressPartnerTools && (!filterActive || masterIsDistinct)) {
+  // Partner tools need a distinct master key in capability-aware mode.
+  if (!options.failClosed && (!filterActive || masterIsDistinct)) {
     registerPartnerTools(registrar, masterClient, masterAuth, config);
   }
 
@@ -353,12 +328,8 @@ export function createServer(
   // Phase 2 is live per-bucket S3 listing.
   registerInsightTools(registrar, b2Client, auth, reportClient);
 
-  // Rolling deploy compatibility: clients can cache tools/list entries for
-  // durable-secret-producing tools. In off mode keep those names callable with
-  // a stable non-secret unavailable error. File mode keeps filtered durable
-  // secret tool names callable as non-secret unavailable errors; Reserve Trial
-  // is always stubbed because the provider has no post-create recovery action.
-  if (!options.suppressDurableSecretCompatibilityStubs) {
+  // Rolling deploy compatibility for clients with cached tools/list entries.
+  if (!options.failClosed) {
     if (config.secretSink?.mode === "file") {
       registerDurableSecretCompatibilityStubs(
         registrar,
@@ -653,38 +624,6 @@ function throwCapabilityResolutionError(
   throw new CredentialResolutionError(details.message, details.status, details.code);
 }
 
-/** Options for one-shot B2 capability discovery. */
-export interface FetchCapabilitiesOptions {
-  /**
-   * Abort signal that should cancel this discovery's underlying authorize
-   * request instead of leaving it as shared background work.
-   */
-  signal?: AbortSignal;
-}
-
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? abortError("Capability fetch aborted");
-}
-
-function throwIfCapabilityFetchAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted) throw abortReason(signal);
-}
-
-async function discoverCapabilities(
-  config: B2Config,
-  resolvedCacheKey: string,
-  now: number,
-  signal: AbortSignal | undefined,
-): Promise<string[]> {
-  throwIfCapabilityFetchAborted(signal);
-  const auth = new B2AuthManager(config);
-  const info = signal ? await auth.getAuthBoundToSignal(signal) : await auth.getAuth();
-  throwIfCapabilityFetchAborted(signal);
-  const capabilities = info.capabilities ?? [];
-  rememberCapabilities(resolvedCacheKey, capabilities, now);
-  return capabilities;
-}
-
 /**
  * Discover the B2 key capabilities used for capability-aware registration.
  *
@@ -695,15 +634,14 @@ async function discoverCapabilities(
  * returns `null`; all other authorization failures are sanitized and thrown so
  * internet-facing servers fail closed.
  *
- * Positive non-empty results are cached briefly by credential fingerprint.
- * Concurrent non-abort-bound discoveries for the same key share one in-flight
- * authorize call.
+ * Positive non-empty results are cached briefly by credential fingerprint;
+ * concurrent non-abort-bound discoveries share one in-flight authorize call.
  *
  * @param config - B2 credential and runtime configuration.
  * @param capabilityCacheKey - Optional cache key override for tests or
  * caller-specific HTTP routing.
  * @param logKey - Optional non-secret log key override.
- * @param options - Optional abort controls for deadline-bound callers.
+ * @param signal - Optional abort signal for deadline-bound callers.
  *
  * @returns A copy of the discovered capabilities, or `null` when registration
  * should expose the full tool surface.
@@ -721,10 +659,9 @@ export async function fetchCapabilities(
   config: B2Config,
   capabilityCacheKey?: string,
   logKey?: string,
-  options: FetchCapabilitiesOptions = {},
+  signal?: AbortSignal,
 ): Promise<string[] | null> {
   if (process.env.B2_REGISTER_ALL_TOOLS === "true") return null;
-  const { signal } = options;
   const shareInflight = !signal;
   const resolvedCacheKey =
     capabilityCacheKey ?? `credential:${verificationFingerprintConfig(config)}`;
@@ -746,9 +683,15 @@ export async function fetchCapabilities(
 
   const discovery = (async () => {
     try {
-      return await discoverCapabilities(config, resolvedCacheKey, now, signal);
+      if (signal?.aborted) throw signal.reason ?? abortError("Capability fetch aborted");
+      const auth = new B2AuthManager(config);
+      const info = await auth.getAuth(signal);
+      if (signal?.aborted) throw signal.reason ?? abortError("Capability fetch aborted");
+      const capabilities = info.capabilities ?? [];
+      rememberCapabilities(resolvedCacheKey, capabilities, now);
+      return capabilities;
     } catch (err) {
-      if (signal?.aborted) throw abortReason(signal);
+      if (signal?.aborted) throw signal.reason ?? abortError("Capability fetch aborted");
       throwCapabilityResolutionError(err, config, credentialLogKey);
     } finally {
       if (shareInflight) capabilityInflight.delete(resolvedCacheKey);

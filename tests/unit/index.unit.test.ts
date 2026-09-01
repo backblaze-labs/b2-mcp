@@ -226,8 +226,7 @@ describe("stdio entry point", () => {
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
     expect(createServer).toHaveBeenCalledWith(config, [], {
-      suppressDurableSecretCompatibilityStubs: true,
-      suppressPartnerTools: true,
+      failClosed: true,
     });
     expect(warn).toHaveBeenCalledWith(
       {
@@ -298,8 +297,7 @@ describe("stdio entry point", () => {
     const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
     expect(factory?.()).toBe(server);
     expect(createServer).toHaveBeenCalledWith(config, [], {
-      suppressDurableSecretCompatibilityStubs: true,
-      suppressPartnerTools: true,
+      failClosed: true,
     });
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({

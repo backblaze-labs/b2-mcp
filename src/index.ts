@@ -54,59 +54,42 @@ type GlobalWithIndexTestSeams = typeof globalThis & {
   __b2McpIndexTestSeams?: IndexTestSeams;
 };
 
-// Keep this fixed and comfortably below common 60s MCP initialize budgets;
-// making it deployment-tunable can reintroduce the stdio startup deadlock.
-const STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS = 10_000;
-const STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_CODE = "capability_bootstrap_timeout";
+// Fixed below common 60s MCP initialize budgets.
+const STDIO_TIMEOUT_MS = 10_000;
+const STDIO_TIMEOUT_CODE = "capability_bootstrap_timeout";
 
-type StdioCapabilityTimeoutError = CredentialResolutionError & {
-  readonly elapsedMs: number;
-  readonly timeoutMs: number;
-};
-
-interface StdioCapabilityFallback {
-  capabilities: string[] | null;
-  log: Record<string, unknown>;
-  serverOptions: CreateServerOptions;
-}
-
-function stdioCapabilityTimeoutError(startedAt: number): StdioCapabilityTimeoutError {
+function stdioCapabilityTimeoutError(startedAt: number) {
   const elapsedMs = Date.now() - startedAt;
   return Object.assign(
     new CredentialResolutionError(
-      `B2 capability lookup exceeded the ${STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS} ms stdio bootstrap deadline`,
+      `B2 capability lookup exceeded the ${STDIO_TIMEOUT_MS} ms stdio bootstrap deadline`,
       503,
-      STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_CODE,
+      STDIO_TIMEOUT_CODE,
     ),
-    { elapsedMs, timeoutMs: STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS },
+    { elapsedMs, timeoutMs: STDIO_TIMEOUT_MS },
   );
 }
 
-function stdioCapabilityFallback(err: unknown): StdioCapabilityFallback | null {
+function stdioCapabilityFallback(err: unknown) {
   if (!(err instanceof CredentialResolutionError)) return null;
-  if (err.code === STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_CODE) {
-    const timeout = err as StdioCapabilityTimeoutError;
+  const log: Record<string, unknown> = {
+    code: err.code,
+    message: err.message,
+  };
+  if (err.code === STDIO_TIMEOUT_CODE) {
+    const timeout = err as ReturnType<typeof stdioCapabilityTimeoutError>;
+    log.elapsedMs = timeout.elapsedMs;
+    log.timeoutMs = timeout.timeoutMs;
     return {
       capabilities: [],
-      log: {
-        code: timeout.code,
-        elapsedMs: timeout.elapsedMs,
-        message: timeout.message,
-        timeoutMs: timeout.timeoutMs,
-      },
-      serverOptions: {
-        suppressDurableSecretCompatibilityStubs: true,
-        suppressPartnerTools: true,
-      },
+      log,
+      serverOptions: { failClosed: true },
     };
   }
   if (err.code !== "capability_upstream_unavailable") return null;
   return {
     capabilities: null,
-    log: {
-      code: err.code,
-      message: err.message,
-    },
+    log,
     serverOptions: {},
   };
 }
@@ -120,13 +103,15 @@ async function fetchStdioCapabilitiesWithDeadline(config: B2Config): Promise<str
       const err = stdioCapabilityTimeoutError(startedAt);
       abort.abort(err);
       reject(err);
-    }, STDIO_CAPABILITY_BOOTSTRAP_TIMEOUT_MS);
-    // Keep referenced until the race settles; stdio is not attached yet, so
-    // this can be the only handle keeping the degraded startup path alive.
+    }, STDIO_TIMEOUT_MS);
+    // Keep referenced until stdio is attached so degraded startup can run.
   });
-  const capabilityFetch = serverModule.fetchCapabilities(config, undefined, undefined, {
-    signal: abort.signal,
-  });
+  const capabilityFetch = serverModule.fetchCapabilities(
+    config,
+    undefined,
+    undefined,
+    abort.signal,
+  );
 
   try {
     return await Promise.race([capabilityFetch, deadline]);

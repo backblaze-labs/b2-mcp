@@ -415,51 +415,30 @@ export class B2AuthManager {
   /**
    * Return cached auth or share one in-flight authorize call.
    *
+   * @param signal - Optional signal for a one-shot authorize call.
+   *
    * @returns Cached or fresh B2 auth.
    */
-  async getAuth(): Promise<B2AuthResponse> {
+  async getAuth(signal?: AbortSignal): Promise<B2AuthResponse> {
     this.syncCachedAuthFromSdk();
     if (this.isValid()) {
       return this.cachedAuth!;
+    }
+
+    if (signal) {
+      if (signal.aborted) throw abortReason(signal);
+      return runWithMcpRequestSignal(signal, () => this.authorize());
     }
 
     const callerSignal = currentMcpRequestSignal();
-    if (this.inflightAuth) {
-      return raceWithCallerAbort(this.inflightAuth, callerSignal);
+    if (!this.inflightAuth) {
+      this.inflightAuth = runWithMcpRequestSignal(undefined, () =>
+        this.authorize().finally(() => {
+          this.inflightAuth = null;
+        }),
+      );
     }
-
-    this.inflightAuth = runWithMcpRequestSignal(undefined, () =>
-      this.authorize().finally(() => {
-        this.inflightAuth = null;
-      }),
-    );
-
     return raceWithCallerAbort(this.inflightAuth, callerSignal);
-  }
-
-  /**
-   * Return cached auth or perform a fresh authorize bound to an abort signal.
-   *
-   * @remarks
-   * This is for one-shot bootstrap discovery where the underlying B2 request
-   * must be cancelled when the caller's deadline expires. Normal request paths
-   * should use {@link getAuth} so one caller aborting cannot cancel shared
-   * authorization work for other waiters.
-   *
-   * @param signal - Abort signal that should cancel the underlying authorize.
-   *
-   * @returns Cached or fresh B2 auth.
-   */
-  async getAuthBoundToSignal(signal: AbortSignal): Promise<B2AuthResponse> {
-    this.syncCachedAuthFromSdk();
-    if (this.isValid()) {
-      return this.cachedAuth!;
-    }
-    if (signal.aborted) {
-      throw abortReason(signal);
-    }
-
-    return runWithMcpRequestSignal(signal, () => this.authorize());
   }
 
   /**
