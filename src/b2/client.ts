@@ -678,11 +678,11 @@ function partnerStringField(
   endpoint: string,
 ): string {
   const fieldValue = value[field];
-  if (typeof fieldValue !== "string") {
+  if (typeof fieldValue !== "string" || fieldValue.length === 0) {
     throw codedError(
       502,
       "unexpected_partner_response",
-      `${endpoint} response did not contain a string ${field}.`,
+      `${endpoint} response did not contain a non-empty string ${field}.`,
     );
   }
   return fieldValue;

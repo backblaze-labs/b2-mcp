@@ -1307,6 +1307,54 @@ describe("B2Client native edge branches", () => {
       );
     });
 
+    it.each([
+      [
+        "applicationKey",
+        {
+          applicationKeyId: "group-member-key-id",
+          applicationKey: "",
+          groupMember: {
+            accountId: "member-account-id",
+            email: "member@example.com",
+            groupId: "group-1",
+            groupName: "Group 1",
+            region: "us-west",
+            s3Endpoint: "s3.us-west-001.backblazeb2.com",
+          },
+        },
+      ],
+      [
+        "groupMember.accountId",
+        {
+          applicationKeyId: "group-member-key-id",
+          applicationKey: "B2_MCP_CANARY_SECRET_group_member_empty_field",
+          groupMember: {
+            accountId: "",
+            email: "member@example.com",
+            groupId: "group-1",
+            groupName: "Group 1",
+            region: "us-west",
+            s3Endpoint: "s3.us-west-001.backblazeb2.com",
+          },
+        },
+      ],
+    ])("rejects empty Partner create-group-member %s", async (_field, response) => {
+      const postJson = vi.fn(async () => response);
+      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const client = new B2Client(new B2AuthManager(testConfig));
+
+      await expect(
+        client.createGroupMember({
+          adminAccountId: "test-account-123",
+          groupId: "group-1",
+          memberEmail: "member@example.com",
+        }),
+      ).rejects.toMatchObject({
+        status: 502,
+        code: "unexpected_partner_response",
+      });
+    });
+
     it("posts reserve-trial create as an object and accepts singleton SDK responses", async () => {
       const postJson = vi.fn(async () => ({
         accountId: "trial-account-id",
