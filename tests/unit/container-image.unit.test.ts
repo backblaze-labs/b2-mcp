@@ -116,9 +116,16 @@ describe("container image policy", () => {
     expect(publishScript).toContain("DOCKER_CONFIG");
     expect(publishScript).toContain("cosign");
     expect(publishScript).toContain("signDigest");
+    expect(publishScript).toContain('SIGNATURE_REPOSITORY_SUFFIX = "-signatures"');
+    expect(publishScript).toContain("COSIGN_REPOSITORY");
+    expect(publishScript).toContain("verifyAnonymousSignature");
+    expect(publishScript).toContain("signature-repository");
+    expect(publishWorkflow).toContain(
+      "COSIGN_REPOSITORY: ghcr.io/${{ github.repository }}-signatures",
+    );
     expect(publishScript).toContain("refs/heads/main");
     expect(publishScript).not.toContain("refs/tags/v.*|refs/heads/main");
-    expect(publishScript.indexOf("signDigest(registryImage, digest);")).toBeLessThan(
+    expect(publishScript.indexOf("signDigest(registryImage, digest, signatureRepo);")).toBeLessThan(
       publishScript.indexOf("verifyAnonymousManifestPull(versionRef);"),
     );
     expect(publishScript).not.toContain(":latest");

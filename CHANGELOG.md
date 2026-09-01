@@ -26,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflow. (#308)
 
 ### Fixed
+- Publish GHCR cosign signatures to a sibling signature repository so the main
+  package page keeps its default pull command pointed at a runnable image.
+  (#350)
 - Bound stdio capability discovery with a tunable 10s bootstrap deadline; local
   deadline expiry now starts with a fail-closed tool surface instead of hanging
   the MCP client handshake. (#320)

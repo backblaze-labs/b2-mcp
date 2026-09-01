@@ -152,7 +152,9 @@ guardrails enforced by the server.
 
 The published image defaults to the HTTP transport, reads configuration only
 from environment variables, and does not publish a mutable `latest` tag. Choose
-the version tag that matches the package release:
+the version tag that matches the package release. Cosign signatures are published
+to a sibling GHCR repository so the package page's default pull command stays on
+a runnable image tag:
 
 ```bash
 B2_MCP_VERSION=VERSION # replace with the release version you want

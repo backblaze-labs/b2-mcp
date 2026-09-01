@@ -52,10 +52,13 @@ Before publishing `v0.1.0`:
 7. Confirm `@backblaze-labs/b2-mcp` is owned by Backblaze on npm and package
    provenance is enabled before publishing or advertising npm install commands.
 8. Confirm the GHCR package `ghcr.io/backblaze-labs/b2-mcp` is public before
-   advertising Docker run commands. On the first container release, if the
-   initial push creates a private package, set the package visibility to Public
-   in GitHub Packages and rerun the same publish tag. The workflow fails until
-   an anonymous manifest inspection succeeds.
+   advertising Docker run commands. Cosign signatures are stored in the sibling
+   `ghcr.io/backblaze-labs/b2-mcp-signatures` repository so signature tags do
+   not become the package page's default pull command. On the first container
+   release, if the initial push creates a private image or signature package,
+   set the package visibility to Public in GitHub Packages and rerun the same
+   publish tag. The workflow fails until anonymous image and signature checks
+   succeed.
 9. Confirm the `ghcr-publish` GitHub environment exists, requires trusted
    release approval, and restricts deployments to protected release refs.
 10. Confirm `live-b2-contract` has environment secrets `LIVE_B2_KEY_ID` and
@@ -188,9 +191,10 @@ exists. For the first public package only:
    package contents, records checksums and SBOM, repacks the staged package to
    prove it still matches the tarball, publishes the staged package directory
    with npm OIDC provenance, verifies registry metadata with bounded retry,
-   publishes and anonymously verifies the idempotent GHCR container image from
-   the same verified ref, and then creates or updates the GitHub Release. A
-   Docker/GHCR failure can be retried against the same tag; it must not sign an
+   publishes the idempotent GHCR container image from the same verified ref,
+   signs it in the sibling GHCR signature repository, verifies both anonymously,
+   and then creates or updates the GitHub Release. A Docker/GHCR failure can be
+   retried against the same tag; it must not sign an
    existing digest unless that digest already has this workflow's trusted
    signature plus provenance and SBOM attestations, and it must not overwrite an
    existing versioned image whose recorded revision differs from the verified
