@@ -430,7 +430,7 @@ function noUsageReportSnapshotsInPeriod(
           "data files were found in the requested period."
         : `No usage-report snapshots found in the requested period. Latest available snapshot ` +
           `is ${latestSnapshot}.`,
-    latest_snapshot: latestSnapshot,
+    ...(stats.stop_reason ? {} : { latest_snapshot: latestSnapshot }),
     ...reportScanMetadataFromStats(stats),
   };
 }

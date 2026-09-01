@@ -361,6 +361,32 @@ describe("insight usage-report read paths", () => {
     expect(result.leaders).toEqual([]);
   });
 
+  it("omits latest_snapshot when empty b2_egress_leaders discovery is truncated", async () => {
+    const staleDay = daysAgo(2);
+    const report = createPagedReportClient(
+      Object.fromEntries(
+        Array.from({ length: 101 }, (_, index) => [
+          `${staleDay}/usage.account-${String(index).padStart(3, "0")}.csv`,
+          csv([`stale-${index},${staleDay},bucket-stale,bucket-stale,1,4,0,0\n`]),
+        ]),
+      ),
+      { pageSize: 1 },
+    );
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 1, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("inconclusive");
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+    expect(result.truncated).toBe(true);
+    expect(result.report_scan.stop_reasons).toEqual(["max_pages"]);
+  });
+
   it("does not report measured zero when b2_egress_leaders parses no usage rows", async () => {
     const day = daysAgo(1);
     const report = createPagedReportClient({
