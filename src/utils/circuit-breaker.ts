@@ -5,7 +5,15 @@
  */
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
-import { abortError, findInCauseChain, timeoutError } from "./named-error.js";
+import {
+  abortError,
+  errorCause,
+  findInCauseChain,
+  isAbortError,
+  isResponseLostTransportError,
+  isTimeoutError,
+  timeoutError,
+} from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { isTestRuntime } from "./runtime.js";
 
@@ -29,10 +37,29 @@ function errorCode(err: unknown): string | undefined {
       : undefined;
 }
 
-function isOperationStatusUnknown(err: unknown): boolean {
-  return !!findInCauseChain(err, (value) =>
+function operationStatusUnknownNode(err: unknown): unknown {
+  return findInCauseChain(err, (value) =>
     errorCode(value) === OPERATION_STATUS_UNKNOWN_CODE ? value : undefined,
   );
+}
+
+/**
+ * Whether an `operation_status_unknown` outcome originated from a caller abort
+ * rather than provider timeout or socket loss.
+ *
+ * The unknown-status wrapper carries the originating interruption as its cause.
+ * A timeout or socket loss beneath the wrapper is provider trouble and must
+ * count toward the breaker; only a caller-triggered abort with no timeout or
+ * socket-loss provenance is filtered, so client disconnects during no-replay
+ * writes cannot open the shared circuit.
+ */
+function isCallerAbortAmbiguity(node: unknown): boolean {
+  const cause = errorCause(node);
+  const hasProviderInterruption = findInCauseChain(cause, (value) =>
+    isTimeoutError(value) || isResponseLostTransportError(value) ? value : undefined,
+  );
+  if (hasProviderInterruption) return false;
+  return !!findInCauseChain(cause, (value) => (isAbortError(value) ? value : undefined));
 }
 
 /**
@@ -45,7 +72,12 @@ function isOperationStatusUnknown(err: unknown): boolean {
  * @returns True when the error should be filtered out of breaker failures.
  */
 export function isClientError(err: unknown): boolean {
-  if (isOperationStatusUnknown(err)) return false;
+  const unknownStatusNode = operationStatusUnknownNode(err);
+  if (unknownStatusNode !== undefined) {
+    // Timeout/socket-loss ambiguity counts as B2 trouble; a caller-triggered
+    // abort behind the ambiguity stays filtered.
+    return isCallerAbortAmbiguity(unknownStatusNode);
+  }
   if (isAbortLikeError(err)) return true;
   if (typeof err !== "object" || err === null) return false;
   const e = err as {

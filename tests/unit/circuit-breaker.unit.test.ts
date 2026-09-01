@@ -11,7 +11,7 @@ import {
 } from "../../src/utils/circuit-breaker";
 import { currentMcpRequestSignal } from "../../src/request-context";
 import { operationStatusUnknownError } from "../../src/utils/errors";
-import { timeoutError } from "../../src/utils/named-error";
+import { abortError, timeoutError } from "../../src/utils/named-error";
 
 function domAbortError(message = "caller aborted"): Error {
   const DomExceptionCtor = (
@@ -94,6 +94,31 @@ describe("circuit-breaker", () => {
       ),
     ).toBe(false);
     expect(isClientError(abortWrapper)).toBe(false);
+  });
+
+  it("filters caller-abort ambiguity but counts socket-loss ambiguity", () => {
+    // A no-replay write cancelled in flight by the caller surfaces as
+    // operation_status_unknown wrapping an AbortError; it must stay filtered so
+    // client disconnects cannot open the shared circuit.
+    expect(
+      isClientError(operationStatusUnknownError("b2_create_bucket", abortError("caller left"))),
+    ).toBe(true);
+    expect(
+      isClientError(
+        Object.assign(new Error("SDK transport wrapper"), {
+          cause: operationStatusUnknownError("b2_create_bucket", abortError("caller left")),
+        }),
+      ),
+    ).toBe(true);
+    // Socket-loss ambiguity is provider trouble and still counts.
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("counts non-HTTP errors as failures", () => {
