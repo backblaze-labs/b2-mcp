@@ -277,26 +277,36 @@ function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): Ht
 
 function withDefinitiveErrorJsonRead(
   response: HttpResponse,
-  signal: AbortSignal | undefined,
   context: DefinitiveBodyReadContext | undefined,
 ): HttpResponse {
-  if (isSuccessfulResponse(response)) return response;
+  if (isSuccessfulResponse(response)) {
+    if (context) delete context.error;
+    return response;
+  }
+  const fallback = responseBodyUnavailableError(response.status);
+  // Record the definitive non-2xx status before returning the wrapper. The SDK
+  // RetryTransport checks the request signal immediately after inner.send()
+  // resolves and before it reads the body, so a cancellation that wins between
+  // transport resolution and that check would otherwise leave this marker empty
+  // and the outer transport would report operation_status_unknown instead of
+  // the observed status. Cleared once the body is successfully classified.
+  if (context) context.error = fallback;
   return adaptHttpResponse(response, {
     json: async <T>() => {
       try {
-        return await response.json<T>();
+        const body = await response.json<T>();
+        if (context) delete context.error;
+        return body;
       } catch {
         // The non-2xx status is already definitive, so any body-read failure
         // (including a plain SyntaxError from a truncated or malformed body)
         // preserves that status as response_body_unavailable rather than
-        // regressing to internal_error. The context marker is retained only
-        // for the concurrent-abort handoff.
-        const error = responseBodyUnavailableError(response.status);
-        if (signal?.aborted && context) context.error = error;
+        // regressing to internal_error.
+        if (context) context.error = fallback;
         return {
           status: response.status,
           code: RESPONSE_BODY_UNAVAILABLE_CODE,
-          message: error.message,
+          message: fallback.message,
         } as T;
       }
     },
@@ -425,6 +435,10 @@ class SharedRetryBudgetTransport implements HttpTransport {
   }
 
   async send(request: HttpRequest): Promise<HttpResponse> {
+    // Reset the per-attempt definitive-status marker so a stale value from an
+    // earlier attempt can never mask this attempt's abort or transport error.
+    const bodyContext = definitiveBodyReadContext(request);
+    if (bodyContext) delete bodyContext.error;
     const next = this.nextAttempt(request);
     if (!next) return this.inner.send(request);
     const { attempts, attempt, key } = next;
@@ -434,11 +448,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withDefinitiveErrorJsonRead(
-        withRetryAfterHeader(response),
-        request.signal,
-        definitiveBodyReadContext(request),
-      );
+      return withDefinitiveErrorJsonRead(withRetryAfterHeader(response), bodyContext);
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;

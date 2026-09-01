@@ -855,6 +855,47 @@ describe("B2AuthManager", () => {
     expect(inner.requests).toHaveLength(1);
   });
 
+  it("keeps no-replay native error status when caller aborts before body read", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const abort = new AbortController();
+    let bodyReads = 0;
+    const inner = new RecordingTransport(() => {
+      // Cancel after the transport resolves a definitive 4xx but before the SDK
+      // reads the body, mirroring RetryTransport's post-send signal check.
+      abort.abort(abortError("caller disconnected before body read"));
+      return new (class extends StaticHttpResponse {
+        async json<T>(): Promise<T> {
+          bodyReads++;
+          return {} as T;
+        }
+      })(400, {});
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: "HTTP 400 response body could not be read",
+    });
+    expect(bodyReads).toBe(0);
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
   it("keeps definitive body statuses per request when a shared signal aborts", async () => {
     const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
     const abort = new AbortController();
