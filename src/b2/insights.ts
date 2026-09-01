@@ -278,6 +278,10 @@ const NO_USAGE_REPORT_SNAPSHOTS_NOTE = "No usage-report snapshots found yet.";
 const SNAPSHOT_LOOKBACK_DAYS = [10, 45, 180] as const;
 const SNAPSHOT_DISCOVERY_HORIZON_DAYS = SNAPSHOT_LOOKBACK_DAYS[SNAPSHOT_LOOKBACK_DAYS.length - 1];
 
+// A usage-report snapshot key: date-prefixed CSV. Non-report objects a bucket may
+// also hold (e.g. YYYY-MM-DD/notes.txt) are not snapshots.
+const REPORT_DAY_CSV_RE = /^\d{4}-\d{2}-\d{2}\/.+\.csv$/;
+
 const REPORT_SCAN_LIMITS = {
   maxPages: 100,
   maxCandidateKeys: 5_000,
@@ -517,7 +521,6 @@ async function loadReportRows(
   sinceDate: string,
   budget: ReportScanBudget = createReportScanBudget(),
 ): Promise<ReportRowsResult | null> {
-  const keyRe = /^\d{4}-\d{2}-\d{2}\/.+\.csv$/;
   const keys: string[] = [];
   let token: string | undefined;
   const { stats } = budget;
@@ -536,7 +539,7 @@ async function loadReportRows(
       stats.pages++;
       stats.listed_keys += page.keys.length;
       for (const k of page.keys) {
-        if (!keyRe.test(k) || k.slice(0, 10) < sinceDate) continue;
+        if (!REPORT_DAY_CSV_RE.test(k) || k.slice(0, 10) < sinceDate) continue;
         if (keys.length >= REPORT_SCAN_LIMITS.maxCandidateKeys) {
           stopReportScan(stats, "max_candidate_keys");
           break;
@@ -736,7 +739,7 @@ export async function latestSnapshotDate(
   for (const lookback of SNAPSHOT_LOOKBACK_DAYS) {
     const after = new Date(today.getTime() - lookback * 86400_000).toISOString().slice(0, 10);
     let token: string | undefined;
-    let max: string | null = null;
+    const candidates: string[] = [];
     try {
       do {
         if (!ensureReportPageBudget(budget)) break;
@@ -748,16 +751,20 @@ export async function latestSnapshotDate(
         });
         budget.stats.pages++;
         budget.stats.listed_keys += page.keys.length;
-        for (const key of page.keys) {
-          const d = snapshotDateOf(key);
-          if (d && (max === null || d > max)) max = d;
-        }
+        for (const key of page.keys) if (REPORT_DAY_CSV_RE.test(key)) candidates.push(key);
         token = page.isTruncated ? page.nextContinuationToken : undefined;
         if (budget.stats.stop_reason) break;
       } while (token);
     } catch (e) {
       if (is404(e)) return { date: null, bucketMissing: true };
       throw e;
+    }
+    // Apply the row loader's usage-data selection so a bucket holding only
+    // non-usage date-prefixed objects is not mistaken for a snapshot.
+    let max: string | null = null;
+    for (const key of selectUsageKeys(candidates)) {
+      const d = snapshotDateOf(key);
+      if (d && (max === null || d > max)) max = d;
     }
     if (max) return { date: max, bucketMissing: false };
     if (budget.stats.stop_reason) break;
