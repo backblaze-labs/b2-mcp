@@ -1,6 +1,7 @@
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
+import { parseB2Error } from "../../src/utils/errors";
 import { logger } from "../../src/utils/logger";
 import { abortError, timeoutError } from "../../src/utils/named-error";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
@@ -384,12 +385,21 @@ describe("B2AuthManager", () => {
       );
     });
     const manager = new B2AuthManager(mockConfig);
-    const pending = manager.getAuth();
-    const assertion = expect(pending).rejects.toThrow(/retry budget/i);
+    const result = manager.getAuth().then(
+      () => {
+        throw new Error("Expected getAuth to fail");
+      },
+      (err: unknown) => err,
+    );
 
     await vi.runAllTimersAsync();
 
-    await assertion;
+    const error = await result;
+    expect(parseB2Error(error)).toMatchObject({
+      status: 503,
+      code: "retry_budget_exhausted",
+      message: "B2 retry budget exhausted",
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });

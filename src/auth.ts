@@ -4,6 +4,7 @@
  * @packageDocumentation
  */
 import {
+  B2Error,
   type AuthorizeAccountResponse,
   deriveAllowedSuffixes,
   FetchTransport,
@@ -314,6 +315,14 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   return Object.assign(Object.create(r), { headers });
 }
 
+function retryBudgetExhaustedError(): B2Error {
+  return new B2Error({
+    status: 503,
+    code: "retry_budget_exhausted",
+    message: "B2 retry budget exhausted",
+  });
+}
+
 class SharedRetryBudgetTransport implements HttpTransport {
   readonly urlGuard: UrlGuard | undefined;
   private readonly attemptsBySignal = new WeakMap<AbortSignal, Map<string, number>>();
@@ -327,7 +336,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     if (!next) return this.inner.send(request);
     const { attempts, attempt, key } = next;
     if (attempt > 0 && !consumeRetryBudgetToken()) {
-      throw abortError("B2 retry budget exhausted");
+      throw retryBudgetExhaustedError();
     }
     try {
       const response = await this.inner.send(request);
