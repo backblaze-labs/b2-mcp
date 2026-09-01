@@ -495,6 +495,42 @@ describe("B2AuthManager", () => {
     expect(inner.requests[0].retry?.maxRetries).toBe(0);
   });
 
+  it("classifies prefixed Partner timeouts as an unknown operation status", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(() => {
+      throw timeoutError("HTTP request timed out after 30000 ms");
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "http://127.0.0.1/partner/b2api/v4/b2_create_group_member",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("verify the resource state before retrying"),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "b2_create_group_member",
+        status: 409,
+        code: "operation_status_unknown",
+        reasonName: "TimeoutError",
+      }),
+      "native.write.outcome_unknown",
+    );
+    expect(inner.requests).toHaveLength(1);
+    expect(inner.requests[0].retry?.maxRetries).toBe(0);
+  });
+
   it.each([
     ["ECONNRESET code", Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })],
     [

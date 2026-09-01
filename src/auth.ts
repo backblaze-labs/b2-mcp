@@ -319,8 +319,11 @@ export function createMcpHttpTransport(
 
 function b2ApiEndpointName(rawUrl: string): string | undefined {
   try {
-    const [, root, , endpoint] = new URL(rawUrl).pathname.split("/");
-    return root === "b2api" ? endpoint : undefined;
+    const segments = new URL(rawUrl).pathname.split("/").filter(Boolean);
+    const apiIndex = segments.indexOf("b2api");
+    const version = apiIndex === -1 ? undefined : segments[apiIndex + 1];
+    const endpoint = apiIndex === -1 ? undefined : segments[apiIndex + 2];
+    return version?.startsWith("v") && endpoint ? endpoint : undefined;
   } catch {
     return undefined;
   }
