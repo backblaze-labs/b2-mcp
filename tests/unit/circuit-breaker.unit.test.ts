@@ -110,12 +110,32 @@ describe("circuit-breaker", () => {
         }),
       ),
     ).toBe(true);
+    // A caller abort whose message carries socket-like wording still filters.
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          abortError("connection aborted mid-flight"),
+        ),
+      ),
+    ).toBe(true);
     // Socket-loss ambiguity is provider trouble and still counts.
     expect(
       isClientError(
         operationStatusUnknownError(
           "b2_create_bucket",
           Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+        ),
+      ),
+    ).toBe(false);
+    // A caller abort triggered by a genuine nested socket failure still counts.
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          Object.assign(abortError("aborted after socket drop"), {
+            cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+          }),
         ),
       ),
     ).toBe(false);

@@ -55,8 +55,14 @@ function operationStatusUnknownNode(err: unknown): unknown {
  */
 function isCallerAbortAmbiguity(node: unknown): boolean {
   const cause = errorCause(node);
+  // An AbortError node is never itself a provider interruption, even when its
+  // message happens to match socket-loss wording. Skip response-loss/timeout
+  // matching on the abort node while still traversing its nested cause for a
+  // genuine timeout or socket failure underneath.
   const hasProviderInterruption = findInCauseChain(cause, (value) =>
-    isTimeoutError(value) || isResponseLostTransportError(value) ? value : undefined,
+    !isAbortError(value) && (isTimeoutError(value) || isResponseLostTransportError(value))
+      ? value
+      : undefined,
   );
   if (hasProviderInterruption) return false;
   return !!findInCauseChain(cause, (value) => (isAbortError(value) ? value : undefined));
