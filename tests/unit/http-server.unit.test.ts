@@ -1186,11 +1186,21 @@ describe("health and readiness endpoints", () => {
   });
 
   it("does not rate-limit health probes with the data-plane MCP bucket", async () => {
-    const sourceRateKey = deriveRateKey("http:127.0.0.1");
-    for (let index = 0; index < rateLimiterConfig.burst; index += 1) {
-      expect(allowRequest(sourceRateKey)).toBe(true);
+    // Freeze time while draining the bucket: the token-bucket refills against
+    // Date.now(), so on a slow runner real wall-clock elapsed during the loop
+    // would replenish a token and the post-burst request would be allowed,
+    // flaking this assertion. Fake timers keep elapsed at 0 so the drain is
+    // deterministic; real timers are restored before the async server probe.
+    vi.useFakeTimers();
+    try {
+      const sourceRateKey = deriveRateKey("http:127.0.0.1");
+      for (let index = 0; index < rateLimiterConfig.burst; index += 1) {
+        expect(allowRequest(sourceRateKey)).toBe(true);
+      }
+      expect(allowRequest(sourceRateKey)).toBe(false);
+    } finally {
+      vi.useRealTimers();
     }
-    expect(allowRequest(sourceRateKey)).toBe(false);
 
     const handle = buildHttpServer({
       credentialProvider: {
