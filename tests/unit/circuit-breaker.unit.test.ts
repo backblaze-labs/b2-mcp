@@ -65,6 +65,16 @@ describe("circuit-breaker", () => {
   });
 
   it("counts unknown-status native writes even though they surface as 409", () => {
+    const abortWrapper = new Error("SDK AbortError wrapper");
+    abortWrapper.name = "AbortError";
+    Object.defineProperty(abortWrapper, "cause", {
+      value: operationStatusUnknownError(
+        "b2_create_bucket",
+        timeoutError("HTTP request timed out after 30000 ms"),
+      ),
+      configurable: true,
+    });
+
     expect(
       isClientError(
         operationStatusUnknownError(
@@ -83,6 +93,7 @@ describe("circuit-breaker", () => {
         }),
       ),
     ).toBe(false);
+    expect(isClientError(abortWrapper)).toBe(false);
   });
 
   it("counts non-HTTP errors as failures", () => {

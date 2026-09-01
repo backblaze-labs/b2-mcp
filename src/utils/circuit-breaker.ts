@@ -45,8 +45,8 @@ function isOperationStatusUnknown(err: unknown): boolean {
  * @returns True when the error should be filtered out of breaker failures.
  */
 export function isClientError(err: unknown): boolean {
-  if (isAbortLikeError(err)) return true;
   if (isOperationStatusUnknown(err)) return false;
+  if (isAbortLikeError(err)) return true;
   if (typeof err !== "object" || err === null) return false;
   const e = err as {
     status?: number;
