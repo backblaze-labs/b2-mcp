@@ -177,22 +177,21 @@ describe("SDK adoption contract", () => {
     expect(b2Client).toContain("client.raw.updateBucket");
 
     expectMatrixPath("b2_list_groups", "partner", "PartnerRawClient.listGroups");
-    expectMatrixPath(
-      "b2_create_group_member",
-      "partner",
-      "PartnerRawClient.postNonRetryingMutationJson",
-    );
+    expectMatrixPath("b2_create_group_member", "partner", "PartnerClient.createGroupMember");
     expectMatrixPath("b2_eject_group_member", "partner", "PartnerRawClient.ejectGroupMember");
     expectMatrixPath("b2_list_group_members", "partner", "PartnerRawClient.listGroupMembers");
     expectMatrixPath(
       "b2_reserve_trial_create_account",
       "partner",
-      "PartnerRawClient.postNonRetryingMutationJson",
+      "PartnerClient.reserveTrialAccount",
     );
     expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
     expect(b2Client).not.toContain("postPartnerJson");
     expect(b2Client).not.toContain("postJson");
-    expect(b2Client).toContain("postNonRetryingPartnerMutationJson");
+    expect(b2Client).not.toContain("postNonRetryingMutationJson");
+    expect(b2Client).toContain("runWithSuccessfulResponseCapture");
+    expect(b2Client).toContain("client.createGroupMember");
+    expect(b2Client).toContain("client.reserveTrialAccount");
     expect(b2Client).toContain("client.raw.listGroups");
     expect(b2Client).toContain("client.raw.ejectGroupMember");
     expect(b2Client).toContain("client.raw.listGroupMembers");

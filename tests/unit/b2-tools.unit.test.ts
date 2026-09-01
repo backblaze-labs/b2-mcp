@@ -89,30 +89,6 @@ function partnerSdkClientWithOverrides(options: {
   reserveTrialAccount?: ReturnType<typeof vi.fn>;
   raw?: Record<string, unknown>;
 }): SdkPartnerClient {
-  const postNonRetryingMutationJson =
-    (options.raw?.postNonRetryingMutationJson as ReturnType<typeof vi.fn> | undefined) ??
-    vi.fn(async (_groupsApiUrl: string, _authToken: string, endpoint: string, body: unknown) => {
-      if (endpoint === "b2_create_group_member" && options.createGroupMember) {
-        const request = body as { groupId: string; memberEmail: string; region?: string | null };
-        return (
-          options.createGroupMember as (request: {
-            groupId: string;
-            memberEmail: string;
-            region?: string | null;
-          }) => Promise<unknown> | unknown
-        )({
-          groupId: request.groupId,
-          memberEmail: request.memberEmail,
-          ...(request.region !== undefined ? { region: request.region } : {}),
-        });
-      }
-      if (endpoint === "b2_reserve_trial_create_account" && options.reserveTrialAccount) {
-        return (options.reserveTrialAccount as (request: unknown) => Promise<unknown> | unknown)(
-          body,
-        );
-      }
-      return {};
-    });
   return {
     authorize: vi.fn(async () => ({
       accountId: "test-account-123",
@@ -133,10 +109,7 @@ function partnerSdkClientWithOverrides(options: {
     },
     createGroupMember: options.createGroupMember ?? vi.fn(),
     reserveTrialAccount: options.reserveTrialAccount ?? vi.fn(),
-    raw: {
-      postNonRetryingMutationJson,
-      ...(options.raw ?? {}),
-    },
+    raw: options.raw ?? {},
   } as unknown as SdkPartnerClient;
 }
 
@@ -3160,7 +3133,7 @@ describe("Partner API tools", () => {
       { groupId: "123", memberAccountId: "member-account-xyz", confirm: true },
     ],
   ])(
-    "rejects mismatched adminAccountId for %s before the Partner raw request",
+    "rejects mismatched adminAccountId for %s before the Partner request",
     async (tool, endpoint, args) => {
       const { adminAccountId, transport } = await usePartnerSimulator();
       const before = transport.requests.filter(

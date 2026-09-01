@@ -58,7 +58,12 @@ import type {
   ReserveTrialCreateAccountResponse,
 } from "@backblaze-labs/b2-sdk/partner";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
-import { B2AuthManager, createDefaultPartnerClient } from "../auth.js";
+import {
+  B2AuthManager,
+  createDefaultPartnerClient,
+  runWithSuccessfulResponseCapture,
+  type SuccessfulResponseCapture,
+} from "../auth.js";
 import {
   withCircuit,
   withPartnerCircuit as withPartnerApiCircuit,
@@ -626,14 +631,6 @@ export type PartnerReserveTrialCreateAccountOptions = ReserveTrialCreateAccountR
 /** Factory hook for constructing the official Partner SDK client in tests. */
 type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
 
-type PartnerRawPostNonRetryingMutationJson = (
-  groupsApiUrl: string,
-  authToken: string,
-  endpoint: string,
-  body: unknown,
-  options?: PartnerRawRequestOptions,
-) => Promise<unknown>;
-
 // Token lifetime is 24h but we refresh after 23h to be safe.
 const PARTNER_TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
 
@@ -751,6 +748,31 @@ function validateReserveTrialCreateAccountResult(
   partnerStringField(result, "bucketId", endpoint);
 }
 
+async function runSecretBearingPartnerCreate<T extends { readonly applicationKey: string }>(
+  endpoint: string,
+  operation: () => Promise<unknown>,
+  validateResult: (result: Record<string, unknown>, endpoint: string) => void,
+): Promise<T> {
+  // SDK Partner facades validate/redact after reading the 2xx body. Capture
+  // that body before the facade returns so durable-secret recovery can still
+  // reconcile created resources if facade validation throws.
+  const capture: SuccessfulResponseCapture = { endpoint };
+  let response: unknown;
+  try {
+    response = await runWithSuccessfulResponseCapture(capture, operation);
+  } catch (err) {
+    if (capture.response !== undefined) {
+      throw durableSecretPostCreateFailure(capture.response, err);
+    }
+    throw err;
+  }
+  try {
+    return validateSecretBearingPartnerResponse<T>(response, endpoint, validateResult);
+  } catch (err) {
+    throw durableSecretPostCreateFailure(response, err);
+  }
+}
+
 function validateReserveTrialCreateAccountRequest(
   request: PartnerReserveTrialCreateAccountOptions,
 ): PartnerReserveTrialCreateAccountOptions {
@@ -762,39 +784,6 @@ function validateReserveTrialCreateAccountRequest(
     );
   }
   return request;
-}
-
-async function postNonRetryingPartnerMutationJson(
-  client: SdkPartnerClient,
-  groupsApiUrl: string,
-  authToken: string,
-  endpoint: string,
-  body: unknown,
-  options?: PartnerRawRequestOptions,
-): Promise<unknown> {
-  // The public SDK create facades install redaction hooks before returning.
-  // MCP durable-secret handling needs the raw 2xx body first so validation,
-  // sink, and recovery failures all pass through durableSecretPostCreateFailure.
-  const postNonRetryingMutationJson = (
-    client.raw as unknown as {
-      postNonRetryingMutationJson?: PartnerRawPostNonRetryingMutationJson;
-    }
-  ).postNonRetryingMutationJson;
-  if (typeof postNonRetryingMutationJson !== "function") {
-    throw codedError(
-      500,
-      "partner_raw_post_unavailable",
-      "The installed B2 SDK does not expose the non-retrying Partner mutation boundary.",
-    );
-  }
-  return postNonRetryingMutationJson.call(
-    client.raw,
-    groupsApiUrl,
-    authToken,
-    endpoint,
-    body,
-    options,
-  );
 }
 
 function toServerSideEncryptionResult(
@@ -1954,35 +1943,23 @@ export class B2Client {
   async createGroupMember(
     options: PartnerCreateGroupMemberOptions,
   ): Promise<CreateGroupMemberResponse> {
-    const response = await this.withPartnerCircuit(
-      { retryOnUnauthorized: false },
-      (client, auth, coordinates, requestOptions) => {
-        validatePartnerAdminAccount(auth, options.adminAccountId);
-        const { groupsApiUrl, authToken, adminAccountId } = coordinates;
-        return postNonRetryingPartnerMutationJson(
-          client,
-          groupsApiUrl,
-          authToken,
-          "b2_create_group_member",
-          {
-            adminAccountId,
-            groupId: groupId(options.groupId),
-            memberEmail: options.memberEmail,
-            ...(options.region !== undefined ? { region: options.region } : {}),
+    return runSecretBearingPartnerCreate<CreateGroupMemberResponse>(
+      "b2_create_group_member",
+      () =>
+        this.withPartnerCircuit(
+          { retryOnUnauthorized: false },
+          (client, auth, _coordinates, requestOptions) => {
+            validatePartnerAdminAccount(auth, options.adminAccountId);
+            return client.createGroupMember({
+              groupId: groupId(options.groupId),
+              memberEmail: options.memberEmail,
+              ...(options.region !== undefined ? { region: options.region } : {}),
+              ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}),
+            });
           },
-          requestOptions,
-        );
-      },
+        ),
+      validateCreateGroupMemberResult,
     );
-    try {
-      return validateSecretBearingPartnerResponse<CreateGroupMemberResponse>(
-        response,
-        "b2_create_group_member",
-        validateCreateGroupMemberResult,
-      );
-    } catch (err) {
-      throw durableSecretPostCreateFailure(response, err);
-    }
   }
 
   /**
@@ -2027,35 +2004,25 @@ export class B2Client {
   async reserveTrialCreateAccount(
     request: PartnerReserveTrialCreateAccountOptions,
   ): Promise<ReserveTrialCreateAccountResponse> {
-    const response = await this.withPartnerCircuit(
-      { retryOnUnauthorized: false },
-      (client, _auth, coordinates, requestOptions) => {
-        const entry = validateReserveTrialCreateAccountRequest(request);
-        const { groupsApiUrl, authToken } = coordinates;
-        return postNonRetryingPartnerMutationJson(
-          client,
-          groupsApiUrl,
-          authToken,
-          "b2_reserve_trial_create_account",
-          {
-            email: entry.email,
-            term: entry.term,
-            storage: entry.storage,
-            ...(entry.region !== undefined ? { region: entry.region } : {}),
-          },
-          requestOptions,
-        );
-      },
+    const entry = validateReserveTrialCreateAccountRequest(request);
+    return runSecretBearingPartnerCreate<ReserveTrialCreateAccountResponse>(
+      "b2_reserve_trial_create_account",
+      () =>
+        this.withPartnerCircuit(
+          { retryOnUnauthorized: false },
+          (client, _auth, _coordinates, requestOptions) =>
+            client.reserveTrialAccount(
+              {
+                email: entry.email,
+                term: entry.term,
+                storage: entry.storage,
+                ...(entry.region !== undefined ? { region: entry.region } : {}),
+              },
+              requestOptions,
+            ),
+        ),
+      validateReserveTrialCreateAccountResult,
     );
-    try {
-      return validateSecretBearingPartnerResponse<ReserveTrialCreateAccountResponse>(
-        response,
-        "b2_reserve_trial_create_account",
-        validateReserveTrialCreateAccountResult,
-      );
-    } catch (err) {
-      throw durableSecretPostCreateFailure(response, err);
-    }
   }
 
   private getPartnerClient(): SdkPartnerClient {

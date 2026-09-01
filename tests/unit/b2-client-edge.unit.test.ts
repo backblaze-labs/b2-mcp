@@ -234,8 +234,9 @@ function clientWithTransport(transport: RecordingTransport): B2Client {
   return new B2Client(new B2AuthManager(testConfig));
 }
 
-function partnerClientWithRawWrites(options: {
-  postNonRetryingMutationJson?: ReturnType<typeof vi.fn>;
+function partnerClientWithCreateFacades(options: {
+  createGroupMember?: ReturnType<typeof vi.fn>;
+  reserveTrialAccount?: ReturnType<typeof vi.fn>;
   raw?: Record<string, unknown>;
 }): SdkPartnerClient {
   const partnerAuth = partnerAuthorizeResponse();
@@ -245,10 +246,9 @@ function partnerClientWithRawWrites(options: {
       clear: vi.fn(),
       getAuth: vi.fn(() => null),
     },
-    raw: {
-      postNonRetryingMutationJson: options.postNonRetryingMutationJson ?? vi.fn(),
-      ...(options.raw ?? {}),
-    },
+    createGroupMember: options.createGroupMember ?? vi.fn(),
+    reserveTrialAccount: options.reserveTrialAccount ?? vi.fn(),
+    raw: options.raw ?? {},
   } as unknown as SdkPartnerClient;
 }
 
@@ -1314,7 +1314,7 @@ describe("B2Client native edge branches", () => {
     });
 
     it("posts create-group-member as an object and accepts singleton SDK responses", async () => {
-      const postNonRetryingMutationJson = vi.fn(async () => ({
+      const createGroupMember = vi.fn(async () => ({
         applicationKeyId: "group-member-key-id",
         applicationKey: "B2_MCP_CANARY_SECRET_group_member_singleton",
         groupMember: {
@@ -1327,7 +1327,7 @@ describe("B2Client native edge branches", () => {
         },
       }));
       setB2PartnerClientFactoryForTests(() =>
-        partnerClientWithRawWrites({ postNonRetryingMutationJson }),
+        partnerClientWithCreateFacades({ createGroupMember }),
       );
       const client = new B2Client(new B2AuthManager(testConfig));
 
@@ -1345,18 +1345,12 @@ describe("B2Client native edge branches", () => {
         }),
       );
 
-      expect(postNonRetryingMutationJson).toHaveBeenCalledWith(
-        "http://127.0.0.1/partner",
-        "partner-token-xyz",
-        "b2_create_group_member",
-        {
-          adminAccountId: "test-account-123",
-          groupId: "group-1",
-          memberEmail: "member@example.com",
-          region: "us-west",
-        },
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
+      expect(createGroupMember).toHaveBeenCalledWith({
+        groupId: "group-1",
+        memberEmail: "member@example.com",
+        region: "us-west",
+        signal: expect.any(AbortSignal),
+      });
     });
 
     it.each([
@@ -1391,9 +1385,9 @@ describe("B2Client native edge branches", () => {
         },
       ],
     ])("rejects empty Partner create-group-member %s", async (_field, response) => {
-      const postNonRetryingMutationJson = vi.fn(async () => response);
+      const createGroupMember = vi.fn(async () => response);
       setB2PartnerClientFactoryForTests(() =>
-        partnerClientWithRawWrites({ postNonRetryingMutationJson }),
+        partnerClientWithCreateFacades({ createGroupMember }),
       );
       const client = new B2Client(new B2AuthManager(testConfig));
 
@@ -1410,7 +1404,7 @@ describe("B2Client native edge branches", () => {
     });
 
     it("posts reserve-trial create as an object and accepts singleton SDK responses", async () => {
-      const postNonRetryingMutationJson = vi.fn(async () => ({
+      const reserveTrialAccount = vi.fn(async () => ({
         accountId: "trial-account-id",
         applicationKeyId: "trial-key-id",
         applicationKey: "B2_MCP_CANARY_SECRET_trial_singleton",
@@ -1422,7 +1416,7 @@ describe("B2Client native edge branches", () => {
         bucketId: "trial-bucket-id",
       }));
       setB2PartnerClientFactoryForTests(() =>
-        partnerClientWithRawWrites({ postNonRetryingMutationJson }),
+        partnerClientWithCreateFacades({ reserveTrialAccount }),
       );
       const client = new B2Client(new B2AuthManager(testConfig));
 
@@ -1440,10 +1434,7 @@ describe("B2Client native edge branches", () => {
         }),
       );
 
-      expect(postNonRetryingMutationJson).toHaveBeenCalledWith(
-        "http://127.0.0.1/partner",
-        "partner-token-xyz",
-        "b2_reserve_trial_create_account",
+      expect(reserveTrialAccount).toHaveBeenCalledWith(
         {
           email: "trial@example.com",
           term: 7,
@@ -1454,7 +1445,7 @@ describe("B2Client native edge branches", () => {
       );
     });
 
-    it("sends null regions and no-replay options through the SDK raw transport", async () => {
+    it("treats null Partner regions as SDK default-region omission", async () => {
       const transport = new RecordingTransport((request) => {
         const endpoint = b2EndpointName(request);
         if (endpoint === "b2_authorize_account") {
@@ -1511,8 +1502,8 @@ describe("B2Client native edge branches", () => {
         (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
       );
 
-      expect(requestJson(createRequest!)).toMatchObject({ region: null });
-      expect(requestJson(reserveRequest!)).toMatchObject({ region: null });
+      expect(requestJson(createRequest!)).not.toHaveProperty("region");
+      expect(requestJson(reserveRequest!)).not.toHaveProperty("region");
       expect(createRequest?.retry?.maxRetries).toBe(0);
       expect(reserveRequest?.retry?.maxRetries).toBe(0);
       expect(createRequest?.idempotent).toBe(false);
@@ -1567,9 +1558,9 @@ describe("B2Client native edge branches", () => {
     });
 
     it("rejects reserve-trial account arrays before the Partner POST", async () => {
-      const postNonRetryingMutationJson = vi.fn();
+      const reserveTrialAccount = vi.fn();
       setB2PartnerClientFactoryForTests(() =>
-        partnerClientWithRawWrites({ postNonRetryingMutationJson }),
+        partnerClientWithCreateFacades({ reserveTrialAccount }),
       );
       const client = new B2Client(new B2AuthManager(testConfig));
 
@@ -1582,7 +1573,7 @@ describe("B2Client native edge branches", () => {
         status: 400,
         code: "bad_request",
       });
-      expect(postNonRetryingMutationJson).not.toHaveBeenCalled();
+      expect(reserveTrialAccount).not.toHaveBeenCalled();
     });
 
     it("keeps a successful Partner authorization after the starting caller aborts", async () => {
