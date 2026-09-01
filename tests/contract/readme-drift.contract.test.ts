@@ -90,8 +90,15 @@ describe("README project badges", () => {
     expect(readme).toContain(`runtime_dependencies-${dependencyCount}-blue`);
   });
 
-  it("defers discovery badges until stable listing URLs exist", () => {
-    expect(readme).toContain("Directory badges for MCP Registry, Smithery, and Glama are deferred");
+  it("links discovery badges to deterministic per-server listing URLs", () => {
+    // Directory badges use the locked server name / repo path, so they activate
+    // on release without a second version bump. See docs and the badge block.
+    expect(readme).toContain(
+      "registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp",
+    );
+    expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp");
+    expect(readme).toContain("smithery.ai/server/@backblaze-labs/b2-mcp");
+    // Never link badges to fragile search-result URLs.
     expect(readme).not.toContain("registry.modelcontextprotocol.io/?search=");
     expect(readme).not.toContain("smithery.ai/servers?q=");
     expect(readme).not.toContain("glama.ai/mcp/servers?query=");

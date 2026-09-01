@@ -39,3 +39,6 @@ probe-output/
 # Internal-only docs — never ship in a public/open-sourced repo
 docs/STRATEGY-*.md
 docs/internal/
+
+# Playwright MCP screenshot scratch
+.playwright-mcp/

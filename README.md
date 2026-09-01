@@ -1,5 +1,9 @@
 # Backblaze B2 MCP Server
 
+<p align="center">
+  <img src=".github/social-preview.png" alt="Backblaze B2 MCP Server — safe Model Context Protocol access to Backblaze B2 buckets, files, keys, Object Lock, and S3-compatible storage" width="820">
+</p>
+
 [![CI](https://github.com/backblaze-labs/b2-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/backblaze-labs/b2-mcp/actions/workflows/test.yml)
 [![CodeQL](https://img.shields.io/badge/CodeQL-enabled-brightgreen?logo=github)](https://github.com/backblaze-labs/b2-mcp/security/code-scanning)
 [![npm](https://img.shields.io/npm/v/@backblaze-labs/b2-mcp?color=cb3837)](https://www.npmjs.com/package/@backblaze-labs/b2-mcp)
@@ -7,7 +11,12 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-6.x-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-22.3%2B%20%7C%2024%20%7C%2026-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-2026--07--28-5b5fc7)](https://modelcontextprotocol.io/specification/2026-07-28)
-<!-- Directory badges for MCP Registry, Smithery, and Glama are deferred until stable per-server listing URLs exist. Do not link badges to search-result URLs. -->
+<!-- Directory badges point at deterministic per-server URLs derived from the locked
+     name (io.github.backblaze-labs/b2-mcp) and repo path, so they activate automatically
+     once the package is published to the MCP Registry and ingested by Glama/Smithery. -->
+[![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0%2Fservers%3Fsearch%3Dio.github.backblaze-labs%2Fb2-mcp&query=%24.servers%5B0%5D.version&prefix=v&label=MCP%20Registry&color=5b5fc7&logo=modelcontextprotocol&logoColor=white)](https://registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp)
+[![Glama](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badge)](https://glama.ai/mcp/servers/@backblaze-labs/b2-mcp)
+[![Smithery](https://img.shields.io/badge/Smithery-b2--mcp-6f4cff?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2ZmZiI+PHBhdGggZD0iTTEyIDJMMiA3djEwbDEwIDUgMTAtNVY3eiIvPjwvc3ZnPg==)](https://smithery.ai/server/@backblaze-labs/b2-mcp)
 [![Coverage floors](https://img.shields.io/badge/coverage-S%2094.3%20%7C%20B%2088%20%7C%20F%2097.2%20%7C%20L%2096.6-brightgreen)](docs/TESTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-9-blue)](package-budget.json)
 
