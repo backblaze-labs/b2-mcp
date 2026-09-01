@@ -439,7 +439,7 @@ describe("deterministic dependency failure and recovery suite", () => {
       reply: () => {
         throw timeoutFailure();
       },
-      expected: { status: 500, code: "TimeoutError" },
+      expected: { status: 504, code: "request_timeout" },
       message: /timed out/i,
       retryDelaysMs: [50, 100],
     },

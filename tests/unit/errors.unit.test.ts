@@ -142,6 +142,38 @@ describe("parseB2Error", () => {
     expect(parsed.requestId).toBe("req-500-1");
   });
 
+  it("classifies an AWS SDK TimeoutError without a status as a request timeout", () => {
+    const err = Object.assign(new Error("connection lost after provider processing"), {
+      name: "TimeoutError",
+      $metadata: { requestId: "req-timeout-1" },
+    });
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(504);
+    expect(parsed.code).toBe("request_timeout");
+  });
+
+  it("classifies an AWS SDK AbortError without a status as a request abort", () => {
+    const err = Object.assign(new Error("caller disconnected"), {
+      name: "AbortError",
+      $metadata: { requestId: "req-abort-1" },
+    });
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(499);
+    expect(parsed.code).toBe("request_aborted");
+  });
+
+  it("keeps an incomplete AWS shape's code and requestId at 500", () => {
+    const err = {
+      name: "ServiceUnavailable",
+      message: "temporary failure",
+      $metadata: { requestId: "req-incomplete-1" },
+    };
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(500);
+    expect(parsed.code).toBe("ServiceUnavailable");
+    expect(parsed.requestId).toBe("req-incomplete-1");
+  });
+
   it("prefers err.Code over err.name when both are present", () => {
     const err = {
       Code: "NoSuchBucket",

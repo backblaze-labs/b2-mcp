@@ -126,6 +126,18 @@ function numberOrFallback(value: unknown, fallback: number): number {
   return typeof value === "number" ? value : fallback;
 }
 
+function awsErrorCode(e: Record<string, unknown>): string {
+  return (
+    (typeof e.Code === "string" && e.Code) ||
+    (typeof e.name === "string" && e.name) ||
+    "unknown_error"
+  );
+}
+
+function legacyResponseData(resp: Record<string, unknown>): Record<string, unknown> {
+  return resp.data && typeof resp.data === "object" ? (resp.data as Record<string, unknown>) : {};
+}
+
 function codedErrorFromValue(value: unknown): B2ApiError | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const e = value as Record<string, unknown>;
@@ -174,34 +186,41 @@ export function parseB2Error(err: unknown): B2ApiError {
       };
     }
 
-    // AWS SDK v3 error (S3 tools) — has a $metadata object.
-    if (e.$metadata && typeof e.$metadata === "object") {
-      const meta = e.$metadata as Record<string, unknown>;
-      const status = typeof meta.httpStatusCode === "number" ? meta.httpStatusCode : 500;
-      const code =
-        (typeof e.Code === "string" && e.Code) ||
-        (typeof e.name === "string" && e.name) ||
-        "unknown_error";
+    // AWS SDK v3 error (S3 tools) — has a $metadata object. Treat it as
+    // definitive only when it carries a numeric provider status; an incomplete
+    // shape (for example a local TimeoutError decorated with $metadata.requestId
+    // but no httpStatusCode) must fall through to cause classification below so
+    // it is not mislabeled as HTTP 500.
+    const awsMeta =
+      e.$metadata && typeof e.$metadata === "object"
+        ? (e.$metadata as Record<string, unknown>)
+        : undefined;
+    if (awsMeta && typeof awsMeta.httpStatusCode === "number") {
       return {
-        status,
-        code,
+        status: awsMeta.httpStatusCode,
+        code: awsErrorCode(e),
         message: messageOrFallback(e.message, "An unknown error occurred"),
-        requestId: typeof meta.requestId === "string" ? meta.requestId : undefined,
+        requestId: typeof awsMeta.requestId === "string" ? awsMeta.requestId : undefined,
         extendedRequestId:
-          typeof meta.extendedRequestId === "string" ? meta.extendedRequestId : undefined,
+          typeof awsMeta.extendedRequestId === "string" ? awsMeta.extendedRequestId : undefined,
       };
     }
 
-    // Legacy response-style error with a response body.
-    if (e.response && typeof e.response === "object") {
-      const resp = e.response as Record<string, unknown>;
-      const data =
-        resp.data && typeof resp.data === "object" ? (resp.data as Record<string, unknown>) : {};
+    // Legacy response-style error with a response body — definitive only with a
+    // numeric status, otherwise it also falls through to cause classification.
+    const legacyResp =
+      e.response && typeof e.response === "object"
+        ? (e.response as Record<string, unknown>)
+        : undefined;
+    if (legacyResp && typeof legacyResp.status === "number") {
       return {
-        status: numberOrFallback(resp.status, 500),
-        code: stringOrFallback(data.code, "unknown_error"),
-        message: messageOrFallback(data.message, "An unknown error occurred"),
-        requestId: headerRequestId(resp.headers),
+        status: legacyResp.status,
+        code: stringOrFallback(legacyResponseData(legacyResp).code, "unknown_error"),
+        message: messageOrFallback(
+          legacyResponseData(legacyResp).message,
+          "An unknown error occurred",
+        ),
+        requestId: headerRequestId(legacyResp.headers),
       };
     }
 
@@ -220,6 +239,30 @@ export function parseB2Error(err: unknown): B2ApiError {
         status: REQUEST_ABORTED_STATUS,
         code: REQUEST_ABORTED_CODE,
         message: messageOrFallback(e.message, "The request was aborted"),
+      };
+    }
+
+    // Incomplete AWS/legacy shapes without a numeric status still surface their
+    // provider code and requestId rather than collapsing to internal_error.
+    if (awsMeta) {
+      return {
+        status: 500,
+        code: awsErrorCode(e),
+        message: messageOrFallback(e.message, "An unknown error occurred"),
+        requestId: typeof awsMeta.requestId === "string" ? awsMeta.requestId : undefined,
+        extendedRequestId:
+          typeof awsMeta.extendedRequestId === "string" ? awsMeta.extendedRequestId : undefined,
+      };
+    }
+    if (legacyResp) {
+      return {
+        status: numberOrFallback(legacyResp.status, 500),
+        code: stringOrFallback(legacyResponseData(legacyResp).code, "unknown_error"),
+        message: messageOrFallback(
+          legacyResponseData(legacyResp).message,
+          "An unknown error occurred",
+        ),
+        requestId: headerRequestId(legacyResp.headers),
       };
     }
     // Already a parsed B2 error.
