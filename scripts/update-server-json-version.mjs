@@ -14,6 +14,19 @@ function readJson(root, relativePath) {
   return JSON.parse(readFileSync(path.join(root, relativePath), "utf8"));
 }
 
+function updateLhmPluginVersion(root, version) {
+  const lhmPath = path.join(root, "lhm.plugin.json");
+  const source = readFileSync(lhmPath, "utf8");
+  const lhm = JSON.parse(source);
+  assert(typeof lhm.version === "string", "lhm.plugin.json is missing a top-level version string");
+  // Rewrite the version value in place so the Biome-formatted manifest keeps its
+  // exact shape (key order, spacing) and only the version string changes.
+  const updated = source.replace(/("version"\s*:\s*)"[^"]*"/, `$1${JSON.stringify(version)}`);
+  assert(updated !== source || lhm.version === version, "failed to stamp lhm.plugin.json version");
+  writeFileSync(lhmPath, updated);
+  return version;
+}
+
 export function updateServerJsonVersion(root) {
   const packageJson = readJson(root, "package.json");
   const serverJsonPath = path.join(root, "server.json");
@@ -35,12 +48,14 @@ export function updateServerJsonVersion(root) {
   assertMcpRegistryManifestContract(serverJson, { expectedVersion: packageJson.version });
 
   writeFileSync(serverJsonPath, `${JSON.stringify(serverJson, null, 2)}\n`);
-  return { name: serverJson.name, version: serverJson.version };
+  const lhmVersion = updateLhmPluginVersion(root, packageJson.version);
+  return { name: serverJson.name, version: serverJson.version, lhmVersion };
 }
 
 function main() {
   const result = updateServerJsonVersion(releaseRoot());
   console.log(`server-json-version: updated ${result.name}@${result.version}`);
+  console.log(`lhm-plugin-version: updated backblaze-labs-b2-mcp@${result.lhmVersion}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -179,6 +179,21 @@ function withFixture(run: (fixtureRoot: string) => void): void {
       join(fixtureRoot, "runtime-policy.json"),
       JSON.stringify({ engineRange: "^22.22.2 || ^24 || ^26" }, null, 2),
     );
+    writeFileSync(
+      join(fixtureRoot, "lhm.plugin.json"),
+      `${JSON.stringify(
+        {
+          author: "Backblaze",
+          description: "Official Backblaze B2 MCP server.",
+          identifier: "backblaze-labs-b2-mcp",
+          name: "Backblaze B2 MCP Server",
+          tools: [],
+          version: "0.1.0",
+        },
+        null,
+        2,
+      )}\n`,
+    );
     run(fixtureRoot);
   } finally {
     rmSync(fixtureRoot, { recursive: true, force: true });
@@ -273,12 +288,15 @@ describe("release scripts", () => {
       });
 
       const serverJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
+      const lhm = JSON.parse(readFileSync(join(fixtureRoot, "lhm.plugin.json"), "utf8"));
       expect(result.status).toBe(0);
       expect(result.stdout).toContain(
         "server-json-version: updated io.github.backblaze-labs/b2-mcp@0.2.0",
       );
+      expect(result.stdout).toContain("lhm-plugin-version: updated backblaze-labs-b2-mcp@0.2.0");
       expect(serverJson.version).toBe("0.2.0");
       expect(serverJson.packages[0].version).toBe("0.2.0");
+      expect(lhm.version).toBe("0.2.0");
     });
   });
 
@@ -302,6 +320,12 @@ describe("release scripts", () => {
     expect(result.stdout).toContain(
       `mcp-registry-manifest: verified io.github.backblaze-labs/b2-mcp@${packageJson.version}`,
     );
+  });
+
+  it("keeps the checked-in lhm.plugin.json version in sync with package metadata", () => {
+    const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const lhm = JSON.parse(readFileSync(join(root, "lhm.plugin.json"), "utf8"));
+    expect(lhm.version).toBe(packageJson.version);
   });
 
   it("keeps smithery.yaml in sync with the server.json env contract", () => {
@@ -938,7 +962,7 @@ describe("release scripts", () => {
               version: [
                 `node ${join(root, "scripts/cut-changelog.mjs")}`,
                 `node ${join(root, "scripts/update-server-json-version.mjs")}`,
-                "git add CHANGELOG.md server.json",
+                "git add CHANGELOG.md server.json lhm.plugin.json",
               ].join(" && "),
             },
           },
@@ -961,6 +985,7 @@ describe("release scripts", () => {
       const changelog = readFileSync(join(fixtureRoot, "CHANGELOG.md"), "utf8");
       const bumpedPackage = JSON.parse(readFileSync(packagePath, "utf8"));
       const bumpedServerJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
+      const bumpedLhm = JSON.parse(readFileSync(join(fixtureRoot, "lhm.plugin.json"), "utf8"));
       const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
 
       expect(result.status).toBe(0);
@@ -968,9 +993,11 @@ describe("release scripts", () => {
       expect(bumpedPackage.version).toBe("0.1.1");
       expect(bumpedServerJson.version).toBe("0.1.1");
       expect(bumpedServerJson.packages[0].version).toBe("0.1.1");
+      expect(bumpedLhm.version).toBe("0.1.1");
       expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
       expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
       expect(stagedFiles.split(/\r?\n/)).toContain("server.json");
+      expect(stagedFiles.split(/\r?\n/)).toContain("lhm.plugin.json");
     });
   });
 
