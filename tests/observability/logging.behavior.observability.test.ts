@@ -26,6 +26,7 @@ const SAFE_ENV_NAMES = [
 type ProbeName =
   | "accessor-safety"
   | "environment"
+  | "policy-confirm-fallback"
   | "policy-confirmation"
   | "redaction"
   | "retry-budget"
@@ -233,6 +234,36 @@ describe("observability logging behavior", () => {
       status: 409,
     });
     expect(call.argKeys).toEqual(["bucketId", "confirm", "nested"]);
+    expectNoIncidentLogs(logs);
+  });
+
+  it("attributes legacy confirm fallback in the tool audit record", () => {
+    const result = runProbe("policy-confirm-fallback");
+    expectProbeSucceeded(result);
+    const response = JSON.parse(result.stdout) as { isError?: boolean; content?: unknown[] };
+    expect(response.isError).not.toBe(true);
+    expect(JSON.stringify(response.content)).toContain("deleted");
+
+    const logs = parseLogLines(result.stderr);
+    const call = findLog(logs, "tool.call");
+    expect(call).toMatchObject({
+      level: "info",
+      tool: "b2_delete_bucket",
+      credential: "fallback-fingerprint",
+      error: false,
+      resultType: "complete",
+      elicitationOutcome: "fallback_accepted",
+      handlerRan: true,
+      destructiveConfirmationSource: "model_confirm_parameter",
+      destructiveConfirmationFallbackReason: "client_cannot_elicit",
+    });
+    expect(call.argKeys).toEqual(["bucketId", "confirm", "nested"]);
+    expect(findLog(logs, "destructive.elicitation")).toMatchObject({
+      decision: "fallback_accepted",
+      outcome: "fallback_accepted",
+      destructiveConfirmationSource: "model_confirm_parameter",
+      destructiveConfirmationFallbackReason: "client_cannot_elicit",
+    });
     expectNoIncidentLogs(logs);
   });
 

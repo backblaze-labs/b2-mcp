@@ -766,18 +766,19 @@ export function createAuditedToolCallback(
     const start = Date.now();
     const argKeys =
       args && typeof args === "object" && !Array.isArray(args) ? Object.keys(args) : [];
+    const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
+    let destructiveElicitationAudit: DestructiveElicitationAuditEvent | undefined;
+    let handlerRan = false;
     try {
       const sanitizerOptions = sanitizerOptionsFromConfig(config);
-      const outputFormat = config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT;
       const signal = extra?.mcpReq?.signal ?? currentMcpRequestSignal();
-      let destructiveElicitationAudit: DestructiveElicitationAuditEvent | undefined;
-      let handlerRan = false;
       const callOriginal = () =>
-        runWithMcpRequestSignal(signal, () =>
-          runWithSanitizerOptions(sanitizerOptions, () =>
+        runWithMcpRequestSignal(signal, () => {
+          handlerRan = true;
+          return runWithSanitizerOptions(sanitizerOptions, () =>
             runWithResultSerializationOptions({ outputFormat }, () => original(args, extra)),
-          ),
-        );
+          );
+        });
       const rawResult = await maybeRequireDestructiveElicitation({
         toolName: name,
         args: args ?? {},
@@ -790,7 +791,6 @@ export function createAuditedToolCallback(
         },
         runOriginal: callOriginal,
       });
-      handlerRan = destructiveElicitationAudit?.outcome === "accepted";
       const result = isSanitizedMcpResponse(rawResult)
         ? rawResult
         : sanitizeMcpResponse(rawResult, sanitizerOptions);
@@ -817,11 +817,7 @@ export function createAuditedToolCallback(
           error: isError,
           resultType,
           ...(destructiveElicitationAudit && {
-            elicitationOutcome: destructiveElicitationAudit.outcome,
-            handlerRan,
-            ...(destructiveElicitationAudit.reason && {
-              elicitationReason: destructiveElicitationAudit.reason,
-            }),
+            ...destructiveAuditLogFields(destructiveElicitationAudit, handlerRan),
           }),
           ...(safeErrInfo && {
             code: safeErrInfo.code,
@@ -840,14 +836,36 @@ export function createAuditedToolCallback(
         {
           tool: name,
           credential: keyFingerprint,
-          outputFormat: config.outputFormat ?? DEFAULT_MCP_OUTPUT_FORMAT,
+          outputFormat,
           argKeys,
           durationMs,
+          ...(destructiveElicitationAudit && {
+            ...destructiveAuditLogFields(destructiveElicitationAudit, handlerRan),
+          }),
           err: safeErr.message,
         },
         "tool.error",
       );
       throw safeErr;
     }
+  };
+}
+
+function destructiveAuditLogFields(
+  event: DestructiveElicitationAuditEvent,
+  handlerRan: boolean,
+): Record<string, unknown> {
+  return {
+    elicitationOutcome: event.outcome,
+    handlerRan,
+    ...("confirmationSource" in event && {
+      destructiveConfirmationSource: event.confirmationSource,
+    }),
+    ...("confirmationFallbackReason" in event && {
+      destructiveConfirmationFallbackReason: event.confirmationFallbackReason,
+    }),
+    ...("reason" in event && {
+      elicitationReason: event.reason,
+    }),
   };
 }
