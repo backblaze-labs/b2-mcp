@@ -160,12 +160,18 @@ exists. For the first public package only:
    ```bash
    npm version patch --no-git-tag-version   # or: minor, major
    node scripts/cut-changelog.mjs
+   node scripts/update-server-json-version.mjs
    ```
 
    `npm version ... --no-git-tag-version` updates only `package.json` (no commit,
    no tag). `scripts/cut-changelog.mjs` reads that bumped version, rewrites
    `## [Unreleased]` into a dated `## [x.y.z] - YYYY-MM-DD` section, leaves a fresh
    empty `[Unreleased]`, and updates the changelog compare links.
+   `scripts/update-server-json-version.mjs` then syncs the MCP Registry manifest
+   (`server.json` top-level `version` and the npm package entry) to the bumped
+   `package.json` version — required, or the `verify-mcp-registry-manifest`
+   contract test and `Publish Package` fail on `server.json version … does not
+   match`.
 3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
    should report `true`, or pass `-s` to `git tag`):
 
