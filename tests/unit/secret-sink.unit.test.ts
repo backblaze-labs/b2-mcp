@@ -101,6 +101,7 @@ function durableSecretTestOptions(
   idempotency: ReturnType<typeof durableSecretIdempotency>,
   extra: {
     diagnostics?: (result: Record<string, unknown>) => Record<string, unknown>;
+    recoverAfterCreateFailure?: (err: unknown) => unknown;
     recoverAfterSinkFailure?: (result: Record<string, unknown>, err: unknown) => unknown;
   } = {},
 ) {
@@ -1120,6 +1121,45 @@ describe("secret sink file writer", () => {
     ).rejects.toMatchObject({ status: 403 });
 
     expect(pendingClaimNames(dir)).toHaveLength(0);
+  });
+
+  it("recovers and releases the pending claim after an ambiguous create failure", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const recoverSpy = vi.fn().mockReturnValue({ status: "deleted" });
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "ambiguous-create-recovered",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "ambiguous-create-recovered", capabilities: ["listBuckets"] },
+    });
+
+    await expect(
+      executeDurableSecretOperation({
+        secretSink: { mode: "file", filePath: file },
+        toolName: "b2_create_key",
+        idempotency,
+        create: async () => {
+          throw { status: 400, code: "bad_request", message: "response redaction failed" };
+        },
+        projectRedacted: (created: Record<string, unknown>, sinkPointer) => ({
+          ...created,
+          secretSink: sinkPointer,
+        }),
+        projectInline: (created: Record<string, unknown>, warning: string) => ({
+          ...created,
+          warning,
+        }),
+        recoverAfterCreateFailure: recoverSpy,
+      }),
+    ).rejects.toMatchObject({ code: "secret_sink_create_response_unusable" });
+
+    expect(recoverSpy).toHaveBeenCalledOnce();
+    expect(pendingClaimNames(dir)).toHaveLength(0);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
+      "create_failed_after_possible_provider_create",
+    );
   });
 
   it("keeps the pending claim after an HTTP 408 provider timeout", async () => {

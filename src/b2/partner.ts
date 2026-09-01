@@ -20,6 +20,14 @@ import {
 const REGION_VALUES = ["us-east", "us-west", "ca-east", "eu-central"] as const;
 
 type SecretBearingPartnerResult = { readonly applicationKey: string };
+type CreateGroupMemberRecoveryInput = {
+  readonly adminAccountId: string;
+  readonly groupId: string;
+  readonly memberEmail: string;
+};
+
+const CREATE_GROUP_MEMBER_RESPONSE_SHAPE_ERROR =
+  "b2_create_group_member response was not a JSON array";
 
 function redactedPartnerResults<T extends SecretBearingPartnerResult>(response: readonly T[]): T[] {
   return response.map((result) => ({ ...result, applicationKey: APPLICATION_KEY_REDACTED }));
@@ -45,6 +53,53 @@ function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[
 
 function callerFingerprint(config: B2Config): string {
   return config.callerFingerprint ?? config.credentialFingerprint ?? config.applicationKeyId;
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+function isCreateGroupMemberResponseShapeError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const candidate = err as { code?: unknown; message?: unknown; status?: unknown };
+  return (
+    candidate.status === 400 &&
+    candidate.code === "bad_request" &&
+    candidate.message === CREATE_GROUP_MEMBER_RESPONSE_SHAPE_ERROR
+  );
+}
+
+async function recoverAfterCreateGroupMemberResponseFailure(
+  client: B2Client,
+  request: CreateGroupMemberRecoveryInput,
+  err: unknown,
+) {
+  if (!isCreateGroupMemberResponseShapeError(err)) return undefined;
+
+  const targetEmail = normalizeEmail(request.memberEmail);
+  const listed = await client.listGroupMembers({
+    adminAccountId: request.adminAccountId,
+    groupId: request.groupId,
+    startEmail: request.memberEmail,
+    maxMemberCount: 1,
+  });
+  const accountIds: string[] = [];
+  for (const page of listed) {
+    for (const member of page.groupMembers) {
+      if (normalizeEmail(member.email) !== targetEmail) continue;
+      accountIds.push(String(member.accountId));
+    }
+  }
+  for (const accountId of accountIds) {
+    await client.ejectGroupMember({
+      adminAccountId: request.adminAccountId,
+      groupId: request.groupId,
+      memberAccountId: accountId,
+    });
+  }
+  return accountIds.length > 0
+    ? { status: "ejected_group_members", accountIds }
+    : { status: "created_member_not_found" };
 }
 
 /**
@@ -181,6 +236,8 @@ export function registerPartnerTools(
             }),
             projectInline: (created, warning) => ({ results: created, warning }),
             diagnostics: partnerSecretDiagnostics,
+            recoverAfterCreateFailure: (err) =>
+              recoverAfterCreateGroupMemberResponseFailure(client, request, err),
             recoverAfterSinkFailure: async (created) => {
               const accountIds: string[] = [];
               for (const result of created) {

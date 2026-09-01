@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { logger } from "./logger.js";
-import { toolJson, toolJsonInlineDurableSecret } from "./errors.js";
+import { codedError, toolJson, toolJsonInlineDurableSecret } from "./errors.js";
 import type { StructuredToolResult } from "./result-serializer.js";
 import type {
   SecretSinkConfig,
@@ -1172,6 +1172,13 @@ export interface DurableSecretResponseOptions<T> {
   projectInline: (result: T, warning: string) => unknown;
   /** Non-secret diagnostics for critical logs after sink failures. */
   diagnostics?: (result: T) => Record<string, unknown>;
+  /**
+   * Optional provider-side cleanup when provider creation failed after a
+   * possible durable-secret side effect.
+   *
+   * Return `undefined` when the error is not an ambiguous post-create failure.
+   */
+  recoverAfterCreateFailure?: (err: unknown) => Promise<unknown> | unknown;
   /** Optional provider-side cleanup when sink storage fails after creation. */
   recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
 }
@@ -1208,6 +1215,7 @@ export async function executeDurableSecretOperation<T>({
   projectRedacted,
   projectInline,
   diagnostics,
+  recoverAfterCreateFailure,
   recoverAfterSinkFailure,
 }: DurableSecretOperationOptions<T>): Promise<StructuredToolResult> {
   if (secretSink.mode === "inline") {
@@ -1222,6 +1230,40 @@ export async function executeDurableSecretOperation<T>({
   try {
     result = await create();
   } catch (err) {
+    if (recoverAfterCreateFailure) {
+      let recovery: unknown;
+      try {
+        recovery = await recoverAfterCreateFailure(err);
+      } catch (recoveryErr) {
+        recovery = {
+          status: "failed",
+          error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+        };
+      }
+      if (recovery !== undefined) {
+        logger.fatal(
+          {
+            err,
+            tool: toolName,
+            secretSink: { type: "file", path: secretSink.filePath },
+            recovery,
+          },
+          "secret_sink.create_failed_after_possible_provider_create",
+        );
+        if (recoveryClearedProviderSideEffect(recovery)) {
+          releaseSecretSinkClaimBestEffort(claim, {
+            tool: toolName,
+            secretSink: { type: "file", path: secretSink.filePath },
+            lockPath: claim.lockPath,
+          });
+        }
+        throw codedError(
+          500,
+          "secret_sink_create_response_unusable",
+          "B2 may have created a durable credential, but the provider response became unusable before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for recovery status, then rotate or revoke any remaining resource.",
+        );
+      }
+    }
     if (createErrorHasKnownProviderRejection(err)) {
       releaseSecretSinkClaimBestEffort(claim, {
         tool: toolName,

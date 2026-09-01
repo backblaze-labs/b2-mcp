@@ -2404,6 +2404,83 @@ describe("Partner API tools", () => {
     ).toBe(true);
   });
 
+  it("ejects a created group member if SDK redaction rejects the create response", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    invalidateAuthManagerCache();
+    sim = new B2Simulator({
+      minimumPartSize: 1000,
+      recommendedPartSize: 1000,
+      partnerAuthorize: true,
+    });
+    const simulatorTransport = sim.transport();
+    let createdSecret = "";
+    const transport = new RecordingTransport(async (request) => {
+      const response = await simulatorTransport.send(request);
+      if (b2EndpointName(request) !== "b2_create_group_member") return response;
+
+      const created = (await response.json()) as Array<{ applicationKey?: unknown }>;
+      createdSecret = String(created[0]?.applicationKey ?? "");
+      return new StaticHttpResponse(
+        200,
+        { result: created[0] },
+        Object.fromEntries(response.headers),
+      );
+    });
+    installSdkTransport(transport);
+    seed = await seedClient();
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+    const partnerSeed = new SdkPartnerClient({
+      masterKeyId: "master-key-id",
+      masterKey: "master-key",
+      transport,
+      retry: sdkTestRetry,
+      realm: "http://127.0.0.1",
+      allowCustomAuthorizeRealm: true,
+    });
+    const partnerAuth = await partnerSeed.authorize();
+    const adminAccountId = String(partnerAuth.accountId);
+    const groups = await partnerSeed.listGroups({ pageSize: 1 });
+    const group = groups.groups[0];
+    if (!group) throw new Error("Expected simulator group");
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId,
+      groupId: group.groupId,
+      memberEmail: "member-redaction-failure@example.com",
+      idempotencyKey: "create-group-member-redaction-failure",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(rawResult.content[0].text).toContain("secret_sink_create_response_unusable");
+    expect(rawResult.content[0].text).not.toContain("bad_request");
+    expect(createdSecret).toEqual(expect.any(String));
+    expect(createdSecret).not.toBe("");
+    expect(JSON.stringify(rawResult)).not.toContain(createdSecret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(createdSecret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+    expect(
+      transport.requests.some((request) => b2EndpointName(request) === "b2_list_group_members"),
+    ).toBe(true);
+    expect(
+      transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
+    ).toBe(true);
+
+    const listed = await partnerSeed.listGroupMembers({
+      groupId: group.groupId,
+      pageSize: 100,
+    });
+    expect(
+      listed[0]?.groupMembers.some(
+        (member) => member.email === "member-redaction-failure@example.com",
+      ),
+    ).toBe(false);
+  });
+
   it.each([
     ["b2_list_groups", "b2_list_groups", {}],
     ["b2_list_group_members", "b2_list_group_members", { groupId: "123" }],
