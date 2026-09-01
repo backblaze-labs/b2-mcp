@@ -89,6 +89,13 @@ describe("README project badges", () => {
     expect(readme).toContain("MCP-2026--07--28-5b5fc7");
     expect(readme).toContain(`runtime_dependencies-${dependencyCount}-blue`);
   });
+
+  it("defers discovery badges until stable listing URLs exist", () => {
+    expect(readme).toContain("Directory badges for MCP Registry, Smithery, and Glama are deferred");
+    expect(readme).not.toContain("registry.modelcontextprotocol.io/?search=");
+    expect(readme).not.toContain("smithery.ai/servers?q=");
+    expect(readme).not.toContain("glama.ai/mcp/servers?query=");
+  });
 });
 
 describe("V1 scope profile drift", () => {

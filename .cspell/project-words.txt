@@ -62,9 +62,11 @@ buildx
 creds
 EOPENBREAKER
 exfiltration
+Glama
 noout
 paginators
 sessionful
+Smithery
 unallowed
 unparseable
 unreviewed
