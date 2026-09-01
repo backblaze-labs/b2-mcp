@@ -39,7 +39,7 @@ Destructive actions are gated, durable B2 secrets stay out of the model's contex
 
 ## Quick start
 
-**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime (22.23.1+, or 24 / 26) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys). A non-master key is all you need. The package engine range is `^22.22.2 || ^24 || ^26`; CI runs on Node.js 22.23.1, 24, and 26.
+**Prerequisites:** A supported [Node.js](https://nodejs.org) runtime (22.22.2+, or 24 / 26) and a Backblaze B2 [application key](https://www.backblaze.com/docs/cloud-storage-application-keys). A non-master key is all you need. The package engine range is `^22.22.2 || ^24 || ^26`; CI runs on Node.js 22.23.1, 24, and 26.
 
 The canonical package name is `@backblaze-labs/b2-mcp` and the canonical binary is `b2-mcp` (`b2-mcp-server` is a transition alias). The fastest setup runs it with `npx`, no clone or build.
 
