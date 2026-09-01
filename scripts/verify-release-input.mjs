@@ -3,11 +3,16 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { extractReleaseNotesFromRoot } from "./extract-release-notes.mjs";
-import { assert, releaseRoot } from "./lib/release-utils.mjs";
+import { verifyMcpRegistryManifestFiles } from "./lib/mcp-registry-manifest.mjs";
+import {
+  assert,
+  canonicalHomepage,
+  canonicalIssues,
+  canonicalPackageName,
+  canonicalPackageRepository,
+  releaseRoot,
+} from "./lib/release-utils.mjs";
 
-const canonicalRepository = "git+https://github.com/backblaze-labs/b2-mcp.git";
-const canonicalIssues = "https://github.com/backblaze-labs/b2-mcp/issues";
-const canonicalHomepage = "https://github.com/backblaze-labs/b2-mcp#readme";
 const forbiddenDependencies = new Set(["axios", "@modelcontextprotocol/sdk"]);
 const requiredFiles = new Set([
   "dist/**/*",
@@ -61,11 +66,19 @@ export function verifyReleaseInput(root, tag) {
 
   assert(tag === expectedTag, `release tag ${tag} does not match package version ${pkg.version}`);
   extractReleaseNotesFromRoot(root, pkg.version);
-  assert(pkg.name === "@backblaze-labs/b2-mcp", `unexpected package name ${pkg.name}`);
+  assert(pkg.name === canonicalPackageName, `unexpected package name ${pkg.name}`);
   assert(pkg.license === "MIT", "package license must be MIT");
-  assert(pkg.repository?.url === canonicalRepository, "package repository URL is not canonical");
+  assert(
+    pkg.repository?.url === canonicalPackageRepository,
+    "package repository URL is not canonical",
+  );
   assert(pkg.bugs?.url === canonicalIssues, "package bugs URL is not canonical");
   assert(pkg.homepage === canonicalHomepage, "package homepage is not canonical");
+  verifyMcpRegistryManifestFiles({
+    serverJsonPath: path.join(root, "server.json"),
+    packageJsonPath: path.join(root, "package.json"),
+    expectedVersion: pkg.version,
+  });
   assert(
     pkg.engines?.node === runtimePolicy.engineRange,
     `package engine range must be ${runtimePolicy.engineRange}`,

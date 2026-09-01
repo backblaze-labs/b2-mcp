@@ -76,6 +76,7 @@ describe("supply-chain audit policy", () => {
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
     dependencies: Record<string, string>;
     devDependencies: Record<string, string>;
+    mcpName?: string;
     scripts: Record<string, string>;
   };
   const auditPolicy = JSON.parse(readFileSync(join(root, "audit-policy.json"), "utf8")) as {
@@ -605,6 +606,12 @@ describe("supply-chain audit policy", () => {
     const githubReleaseJob = publishJobBlock("github-release");
     const containerImageJob = publishJobBlock("container-image");
     const publishJob = publishJobBlock("publish");
+    const mcpRegistryPreflightJob = publishJobBlock("mcp-registry-preflight");
+    const mcpPublisherInstallStep = workflowStepBlock(
+      mcpRegistryPreflightJob,
+      "Download and verify mcp-publisher",
+    );
+    const mcpRegistryPublishStep = workflowStepBlock(publishJob, "Publish MCP registry entry");
 
     expect(npmrc).toMatch(/^ignore-scripts=true$/m);
     expect(packageJson.scripts["audit:supply-chain"]).toContain(
@@ -621,8 +628,9 @@ describe("supply-chain audit policy", () => {
     );
     expect(packageJson.scripts["release:stamp"]).toBe("node scripts/write-release-version.mjs");
     expect(packageJson.scripts.version).toBe(
-      "node scripts/cut-changelog.mjs && git add CHANGELOG.md",
+      "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json",
     );
+    expect(packageJson.mcpName).toBe("io.github.backblaze-labs/b2-mcp");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run build");
     expect(packageJson.scripts.prepublishOnly).toContain("scripts/verify-release-input.mjs");
     expect(packageJson.scripts.prepublishOnly).toContain("pnpm run release:stamp");
@@ -657,6 +665,11 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain("Stage publish helper scripts");
     expect(publishWorkflow).toContain("scripts/npm-publish-metadata.mjs");
     expect(publishWorkflow).toContain("scripts/verify-npm-registry-metadata.mjs");
+    expect(publishWorkflow).toContain("Stage MCP registry manifest");
+    expect(publishWorkflow).toContain("publish-package/server.json");
+    expect(publishWorkflow).toContain("scripts/mcp-registry-publish.mjs");
+    expect(publishWorkflow).toContain("scripts/verify-mcp-registry-manifest.mjs");
+    expect(publishWorkflow).toContain("scripts/lib/mcp-registry-manifest.mjs");
     expect(publishWorkflow).toContain("publish-package/release-tools/*.mjs");
     expect(publishWorkflow).toContain("Create GitHub release from verified artifact");
     expect(publishWorkflow).toContain("gh release upload");
@@ -681,11 +694,47 @@ describe("supply-chain audit policy", () => {
     expect(containerImageJob).toContain("sigstore/cosign-installer");
     expect(containerImageJob).toContain("node scripts/smoke-container-image.mjs");
     expect(containerImageJob).toContain("node scripts/publish-container-image.mjs");
-    expect(publishJob).toContain("needs: [prepare, live-contract]");
+    expect(mcpRegistryPreflightJob).toContain("needs: prepare");
+    expect(mcpRegistryPreflightJob).toContain("timeout-minutes: 20");
+    expect(mcpRegistryPreflightJob).toContain("actions: read");
+    expect(mcpRegistryPreflightJob).toContain("contents: read");
+    expect(mcpRegistryPreflightJob).not.toContain("id-token: write");
+    expect(mcpRegistryPreflightJob).toContain("Verify MCP registry manifest metadata");
+    expect(mcpRegistryPreflightJob).not.toContain("mcp-publisher validate");
+    expect(mcpRegistryPreflightJob).toContain("sigstore/cosign-installer");
+    expect(mcpRegistryPreflightJob).toContain("cosign verify-blob");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-identity");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-oidc-issuer");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-github-workflow-repository");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-github-workflow-ref");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-github-workflow-sha");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-github-workflow-name");
+    expect(mcpRegistryPreflightJob).toContain("--certificate-github-workflow-trigger");
+    expect(mcpRegistryPreflightJob).toContain("name: mcp-publisher");
+    expect(mcpRegistryPreflightJob).toContain("path: mcp-publisher-bin/mcp-publisher");
+    expect(publishWorkflow).toContain("MCP_PUBLISHER_SHA256:");
+    expect(publishWorkflow).toContain("MCP_PUBLISHER_BINARY_SHA256:");
+    expect(mcpPublisherInstallStep).toContain(
+      "printf '%s  mcp-publisher.tar.gz\\n' \"${MCP_PUBLISHER_SHA256}\" | sha256sum -c -",
+    );
+    expect(mcpPublisherInstallStep).toContain("curl --retry 3 --retry-all-errors");
+    expect(mcpPublisherInstallStep).toContain("--connect-timeout 10 --max-time 60");
+    expect(mcpPublisherInstallStep.indexOf("sha256sum -c -")).toBeLessThan(
+      mcpPublisherInstallStep.indexOf("tar -xzf mcp-publisher.tar.gz"),
+    );
+    expect(mcpPublisherInstallStep.indexOf("cosign verify-blob")).toBeLessThan(
+      mcpPublisherInstallStep.indexOf("tar -xzf mcp-publisher.tar.gz"),
+    );
+    expect(publishJob).toContain("needs: [prepare, live-contract, mcp-registry-preflight]");
+    expect(publishJob).toContain("timeout-minutes: 30");
     expect(publishJob).toContain("actions: read");
     expect(publishJob).toContain("contents: read");
+    expect(publishJob).toContain("id-token: write");
     expect(publishJob).not.toContain("contents: write");
     expect(publishJob).toContain("node-version: 24.19.0");
+    expect(
+      publishJob.indexOf("Publish staged package directory with trusted provenance"),
+    ).toBeLessThan(publishJob.indexOf("Publish MCP registry entry"));
     expect(publishJob).toContain("bundles npm >=11.5.1");
     expect(publishJob).toContain("npm view");
     expect(publishJob).toContain("already exists on npm with matching integrity");
@@ -696,6 +745,13 @@ describe("supply-chain audit policy", () => {
     expect(publishWorkflow).toContain('--tag "$npm_tag"');
     expect(publishWorkflow).not.toContain("--ignore-scripts=false");
     expect(publishWorkflow).toContain('tar -xzf "$tarball" -C publish-package/staged');
+    expect(mcpRegistryPublishStep).toContain("mcp-registry-publish.mjs");
+    expect(mcpRegistryPublishStep).toContain("--skip-prerelease");
+    expect(mcpRegistryPublishStep).toContain("MCP_PUBLISHER_BINARY_SHA256");
+    expect(mcpRegistryPublishStep).not.toContain("curl");
+    expect(mcpRegistryPublishStep).not.toContain("mcp-publisher validate");
+    expect(mcpRegistryPublishStep).not.toContain("node -e");
+    expect(mcpRegistryPublishStep).not.toContain("encodeURIComponent");
   });
 
   it("keeps tsx dev-only and denies esbuild install builds", () => {

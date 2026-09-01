@@ -22,6 +22,18 @@ concurrency:
   group: npm-publish-${{ github.repository }}
   cancel-in-progress: false
 
+env:
+  MCP_PUBLISHER_BINARY_SHA256: 5e39fe8b6fc3c8b01bed6f1de364b88e9dd10ccbef6d3d3b1a0caa46115bf869
+  MCP_PUBLISHER_CERTIFICATE_IDENTITY: https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/v1.8.1
+  MCP_PUBLISHER_GITHUB_REF: refs/tags/v1.8.1
+  MCP_PUBLISHER_GITHUB_REPOSITORY: modelcontextprotocol/registry
+  MCP_PUBLISHER_GITHUB_SHA: f52dc8525a441a3abf5fedc9912152d95af5aab1
+  MCP_PUBLISHER_GITHUB_WORKFLOW_NAME: Release
+  MCP_PUBLISHER_GITHUB_WORKFLOW_TRIGGER: release
+  MCP_PUBLISHER_OIDC_ISSUER: https://token.actions.githubusercontent.com
+  MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+  MCP_PUBLISHER_VERSION: v1.8.1
+
 jobs:
   prepare:
     if: github.repository == 'backblaze-labs/b2-mcp' && github.event.workflow_run.conclusion == 'success'
@@ -290,10 +302,24 @@ jobs:
           set -euo pipefail
           mkdir -p publish-package/release-tools/lib
           cp \
+            scripts/mcp-registry-publish.mjs \
             scripts/npm-publish-metadata.mjs \
+            scripts/verify-mcp-registry-manifest.mjs \
             scripts/verify-npm-registry-metadata.mjs \
             publish-package/release-tools/
-          cp scripts/lib/release-utils.mjs publish-package/release-tools/lib/
+          cp \
+            scripts/lib/mcp-registry-manifest.mjs \
+            scripts/lib/release-utils.mjs \
+            publish-package/release-tools/lib/
+      - name: Stage MCP registry manifest
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: |
+          set -euo pipefail
+          cp server.json publish-package/server.json
       # actions/upload-artifact v7, reviewed 2026-08-25.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
@@ -304,6 +330,7 @@ jobs:
             publish-package/SHA256SUMS
             publish-package/release-notes.md
             publish-package/npm-pack.json
+            publish-package/server.json
             publish-package/release-tools/*.mjs
             publish-package/release-tools/lib/*.mjs
           if-no-files-found: error
@@ -322,11 +349,110 @@ jobs:
       LIVE_B2_MASTER_KEY_ID: ${{ secrets.LIVE_B2_MASTER_KEY_ID }}
       LIVE_B2_MASTER_KEY: ${{ secrets.LIVE_B2_MASTER_KEY }}
 
-  publish:
-    needs: [prepare, live-contract]
+  mcp-registry-preflight:
+    name: MCP registry preflight
+    needs: prepare
     if: github.repository == 'backblaze-labs/b2-mcp'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: npm-package
+          path: publish-package
+      # Node 24.19.0 bundles the fetch/AbortController runtime used by release helpers.
+      # actions/setup-node v7, reviewed 2026-08-06.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.19.0
+          package-manager-cache: false
+      - name: Extract staged package for registry preflight
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+          EXPECTED_TARBALL_NAME: ${{ needs.prepare.outputs.tarball-name }}
+          EXPECTED_TARBALL_SHA256: ${{ needs.prepare.outputs.tarball-sha256 }}
+        run: |
+          set -euo pipefail
+          tarball="./publish-package/${EXPECTED_TARBALL_NAME}"
+          if [[ ! -f "$tarball" ]]; then
+            echo "::error::Expected publish tarball ${tarball} is missing"
+            exit 1
+          fi
+          actual_sha="$(sha256sum "$tarball" | awk '{print $1}')"
+          if [[ "$actual_sha" != "$EXPECTED_TARBALL_SHA256" ]]; then
+            echo "::error::Publish tarball SHA-256 mismatch"
+            exit 1
+          fi
+          rm -rf publish-package/staged
+          mkdir -p publish-package/staged
+          tar -xzf "$tarball" -C publish-package/staged
+      - name: Verify MCP registry manifest metadata
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+          PUBLISH_TAG: ${{ needs.prepare.outputs.publish-tag }}
+        run: |
+          set -euo pipefail
+          version="${PUBLISH_TAG#refs/tags/}"
+          version="${version#v}"
+          node publish-package/release-tools/verify-mcp-registry-manifest.mjs \
+            --server-json publish-package/server.json \
+            --package-json publish-package/staged/package/package.json \
+            --version "${version}"
+      # sigstore/cosign-installer v4.1.2, reviewed 2026-08-27.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      # mcp-publisher v1.8.1, reviewed 2026-08-31.
+      - name: Download and verify mcp-publisher
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+        run: |
+          set -euo pipefail
+          curl --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 10 --max-time 60 \
+            -fsSLo mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          curl --retry 3 --retry-all-errors --retry-delay 5 --connect-timeout 10 --max-time 60 \
+            -fsSLo mcp-publisher.tar.gz.sigstore.json \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz.sigstore.json"
+          printf '%s  mcp-publisher.tar.gz\n' "${MCP_PUBLISHER_SHA256}" | sha256sum -c -
+          cosign verify-blob \
+            --bundle mcp-publisher.tar.gz.sigstore.json \
+            --certificate-identity "${MCP_PUBLISHER_CERTIFICATE_IDENTITY}" \
+            --certificate-oidc-issuer "${MCP_PUBLISHER_OIDC_ISSUER}" \
+            --certificate-github-workflow-repository "${MCP_PUBLISHER_GITHUB_REPOSITORY}" \
+            --certificate-github-workflow-ref "${MCP_PUBLISHER_GITHUB_REF}" \
+            --certificate-github-workflow-sha "${MCP_PUBLISHER_GITHUB_SHA}" \
+            --certificate-github-workflow-name "${MCP_PUBLISHER_GITHUB_WORKFLOW_NAME}" \
+            --certificate-github-workflow-trigger "${MCP_PUBLISHER_GITHUB_WORKFLOW_TRIGGER}" \
+            mcp-publisher.tar.gz
+          mkdir -p mcp-publisher-bin
+          tar -xzf mcp-publisher.tar.gz -C mcp-publisher-bin mcp-publisher
+          printf '%s  mcp-publisher-bin/mcp-publisher\n' "${MCP_PUBLISHER_BINARY_SHA256}" | sha256sum -c -
+          chmod +x mcp-publisher-bin/mcp-publisher
+      # actions/upload-artifact v7, reviewed 2026-08-25.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-publisher
+          path: mcp-publisher-bin/mcp-publisher
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [prepare, live-contract, mcp-registry-preflight]
+    if: github.repository == 'backblaze-labs/b2-mcp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -337,6 +463,11 @@ jobs:
         with:
           name: npm-package
           path: publish-package
+      # actions/download-artifact v8, reviewed 2026-08-25.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: mcp-publisher
+          path: mcp-publisher-bin
       # Node 24.19.0 bundles npm >=11.5.1, required for npm trusted publishing.
       # actions/setup-node v7, reviewed 2026-08-06.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -473,6 +604,24 @@ jobs:
             --tag "$npm_tag"
           node publish-package/release-tools/verify-npm-registry-metadata.mjs \
             "${metadata_verify_args[@]}"
+      - name: Publish MCP registry entry
+        env:
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_RUNTIME_URL: ""
+          PUBLISH_TAG: ${{ needs.prepare.outputs.publish-tag }}
+        run: |
+          set -euo pipefail
+          printf '%s  mcp-publisher-bin/mcp-publisher\n' "${MCP_PUBLISHER_BINARY_SHA256}" | sha256sum -c -
+          chmod +x mcp-publisher-bin/mcp-publisher
+          version="${PUBLISH_TAG#refs/tags/}"
+          version="${version#v}"
+          node publish-package/release-tools/mcp-registry-publish.mjs \
+            --server-json publish-package/server.json \
+            --publisher ./mcp-publisher-bin/mcp-publisher \
+            --version "${version}" \
+            --skip-prerelease
 
   container-image:
     needs: [prepare, publish]
