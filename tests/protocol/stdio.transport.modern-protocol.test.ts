@@ -1,8 +1,10 @@
-import { spawnSync } from "child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "child_process";
+import { once } from "events";
 import {
   MODERN_META,
   MODERN_PROTOCOL_VERSION,
   RawStdioSession,
+  ROOT,
   protocolEnv,
 } from "../support/protocol";
 import { closeClient, connectModernStdioClient } from "./support/clients";
@@ -17,6 +19,12 @@ function errorOf(frame: any): any {
   expect(frame.result).toBeUndefined();
   expect(frame.error).toBeDefined();
   return frame.error;
+}
+
+function send(child: ChildProcessWithoutNullStreams, id: number, method: string): void {
+  child.stdin.write(
+    `${JSON.stringify({ jsonrpc: "2.0", id, method, params: { _meta: MODERN_META } })}\n`,
+  );
 }
 
 describe("stdio transport (MCP 2026-07-28)", () => {
@@ -57,6 +65,109 @@ describe("stdio transport (MCP 2026-07-28)", () => {
       for (const [name, value] of Object.entries(previous)) {
         if (value === undefined) delete process.env[name];
         else process.env[name] = value;
+      }
+    }
+  });
+
+  it("keeps a never-settling capability bootstrap alive until the fail-closed deadline", async () => {
+    const script = [
+      'const server = require("./dist/server.js");',
+      "server.fetchCapabilities = () => new Promise(() => undefined);",
+      'require("./dist/index.js").startStdio().catch((err) => {',
+      "  console.error(err && err.stack ? err.stack : err);",
+      "  process.exit(1);",
+      "});",
+    ].join("\n");
+    const child = spawn(process.execPath, ["-e", script], {
+      cwd: ROOT,
+      env: protocolEnv({
+        B2_REGISTER_ALL_TOOLS: "false",
+        B2_SECRET_SINK: "off",
+        B2_STDIO_CAPABILITY_TIMEOUT_MS: "50",
+        LOG_LEVEL: "info",
+      }),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const frames: any[] = [];
+    let stdoutBuffer = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString();
+      for (;;) {
+        const newline = stdoutBuffer.indexOf("\n");
+        if (newline === -1) return;
+        const line = stdoutBuffer.slice(0, newline).trim();
+        stdoutBuffer = stdoutBuffer.slice(newline + 1);
+        if (line) frames.push(JSON.parse(line));
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    let childExited = false;
+    const childExit = once(child, "exit")
+      .then(() => {
+        childExited = true;
+      })
+      .catch(() => {
+        childExited = true;
+      });
+
+    const waitForFrame = (id: number) =>
+      new Promise<any>((resolve, reject) => {
+        const cleanup = () => {
+          clearInterval(interval);
+          clearTimeout(timer);
+          child.off("exit", onExit);
+        };
+        const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+          childExited = true;
+          cleanup();
+          reject(
+            new Error(`stdio child exited before response ${id}: ${code ?? signal}\n${stderr}`),
+          );
+        };
+        const interval = setInterval(() => {
+          const frame = frames.find((candidate) => candidate.id === id);
+          if (!frame) return;
+          cleanup();
+          resolve(frame);
+        }, 10);
+        const timer = setTimeout(() => {
+          cleanup();
+          reject(new Error(`timed out waiting for response ${id}\n${stderr}`));
+        }, 2_000);
+        child.on("exit", onExit);
+      });
+
+    try {
+      send(child, 1, "server/discover");
+      const discover = resultOf(await waitForFrame(1));
+      expect(discover.supportedVersions).toEqual([MODERN_PROTOCOL_VERSION]);
+
+      send(child, 2, "tools/list");
+      const listed = resultOf(await waitForFrame(2));
+      const toolNames = listed.tools.map((tool: { name: string }) => tool.name);
+      expect(toolNames).toContain("b2_authorize_account");
+      expect(toolNames).not.toContain("b2_create_bucket");
+      expect(toolNames).not.toContain("b2_create_key");
+      expect(toolNames).not.toContain("s3_put_object");
+      expect(toolNames).not.toContain("s3_delete_object");
+      expect(toolNames).not.toContain("b2_list_groups");
+      expect(stderr).toContain("capability.fetch.stdio_degraded");
+      expect(stderr).toContain("stdio_capability_deadline_exceeded");
+    } finally {
+      child.stdin.end();
+      const timer = setTimeout(() => {
+        if (!childExited) child.kill("SIGKILL");
+      }, 2_000);
+      try {
+        if (!childExited) {
+          child.kill("SIGTERM");
+          await childExit;
+        }
+      } finally {
+        clearTimeout(timer);
       }
     }
   });

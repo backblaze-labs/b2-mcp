@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exported members, and invalid links now fail `pnpm run docs` and the docs
   workflow. (#308)
 
+### Fixed
+- Bound stdio capability discovery with a tunable 10s bootstrap deadline; local
+  deadline expiry now starts with a fail-closed tool surface instead of hanging
+  the MCP client handshake. (#320)
+
 ## [0.1.2] - 2026-08-23
 
 ### Changed

@@ -42,6 +42,8 @@ import {
   isToolAllowedByOAuthScopes,
   isToolEnabled,
   oauthScopesAllowOperation,
+  PARTNER_TOOLS,
+  TOOL_CAPABILITIES,
 } from "./utils/tool-capabilities.js";
 import {
   sanitizeError,
@@ -169,6 +171,18 @@ function registerDurableSecretCompatibilityStubs(
 export interface CreateServerOptions {
   /** Verified MCP/OAuth scopes for the current caller. */
   oauthScopes?: readonly string[];
+  /**
+   * Register only capability-mapped tools plus the bootstrap authorization tool.
+   *
+   * @remarks
+   * Used when stdio capability discovery times out locally before B2 verifies
+   * the key's allowed capabilities. This keeps the server responsive to the MCP
+   * handshake without widening the surface to unmapped Partner tools or
+   * durable-secret compatibility stubs.
+   *
+   * @internal
+   */
+  failClosedUnknownCapabilities?: boolean;
 }
 
 /**
@@ -263,9 +277,16 @@ export function createServer(
   const capsSet = filterActive ? new Set(capabilities) : null;
   const oauthAllowsRead = oauthScopesAllowOperation(oauthScopes, "read");
   const oauthAllowsWrite = oauthScopesAllowOperation(oauthScopes, "write");
+  const failClosedUnknownCapabilities = options.failClosedUnknownCapabilities === true;
+  const shouldRegisterForResolvedAuthz = (name: string) =>
+    (!failClosedUnknownCapabilities ||
+      name === "b2_authorize_account" ||
+      (TOOL_CAPABILITIES[name] !== undefined && !PARTNER_TOOLS.has(name))) &&
+    isToolEnabled(name, capsSet) &&
+    isToolAllowedByOAuthScopes(name, oauthScopes);
+
   const registrar = new ToolRegistrationAdapter(server, {
-    shouldRegister: (name) =>
-      isToolEnabled(name, capsSet) && isToolAllowedByOAuthScopes(name, oauthScopes),
+    shouldRegister: shouldRegisterForResolvedAuthz,
     wrapCallback: (name, callback) =>
       createAuditedToolCallback(name, callback, config, {
         getClientCapabilities: () => getMcpClientCapabilities(server),
@@ -348,7 +369,10 @@ export function createServer(
   // a stable non-secret unavailable error. File mode keeps filtered durable
   // secret tool names callable as non-secret unavailable errors; Reserve Trial
   // is always stubbed because the provider has no post-create recovery action.
-  if (config.secretSink?.mode === "file") {
+  if (failClosedUnknownCapabilities) {
+    // Do not reintroduce privileged names after a local stdio capability
+    // deadline. The caller has not verified the credential's real surface yet.
+  } else if (config.secretSink?.mode === "file") {
     registerDurableSecretCompatibilityStubs(
       registrar,
       config.secretSink,

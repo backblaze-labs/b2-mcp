@@ -29,7 +29,8 @@ const credentialEnvKeys = [
 ] as const;
 
 const transportEnvKeys = ["B2_MCP_TRANSPORT"] as const;
-const executableEnvKeys = [...credentialEnvKeys, ...transportEnvKeys] as const;
+const bootstrapEnvKeys = ["B2_STDIO_CAPABILITY_TIMEOUT_MS"] as const;
+const executableEnvKeys = [...credentialEnvKeys, ...transportEnvKeys, ...bootstrapEnvKeys] as const;
 const { startStdio } = packageRoot;
 
 type IndexTestSeams = {
@@ -98,11 +99,13 @@ describe("stdio entry point", () => {
   let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
-    savedEnv = Object.fromEntries(credentialEnvKeys.map((key) => [key, process.env[key]]));
+    savedEnv = Object.fromEntries(
+      [...credentialEnvKeys, ...bootstrapEnvKeys].map((key) => [key, process.env[key]]),
+    );
   });
 
   afterEach(() => {
-    for (const key of credentialEnvKeys) {
+    for (const key of [...credentialEnvKeys, ...bootstrapEnvKeys]) {
       const value = savedEnv[key];
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -161,9 +164,65 @@ describe("stdio entry point", () => {
     expect(factory?.()).toBe(server);
     expect(createServer).toHaveBeenCalledWith(config, null);
     expect(warn).toHaveBeenCalledWith(
-      { code: "capability_upstream_unavailable" },
+      { code: "capability_upstream_unavailable", reason: "upstream_unavailable" },
       "capability.fetch.stdio_degraded",
     );
+  });
+
+  it("bounds stdio capability lookup before starting with a fail-closed surface", async () => {
+    vi.useFakeTimers();
+    try {
+      process.env.B2_STDIO_CAPABILITY_TIMEOUT_MS = "25";
+      const config = testConfig();
+      const server = { close: vi.fn(async () => undefined) };
+      const createServer = vi.spyOn(serverModule, "createServer").mockReturnValue(server as never);
+      vi.spyOn(serverModule, "loadConfig").mockReturnValue(config);
+      vi.spyOn(serverModule, "fetchCapabilities").mockReturnValue(
+        new Promise<string[] | null>(() => undefined),
+      );
+      const info = vi.spyOn(loggerModule.logger, "info").mockImplementation(() => undefined);
+      const warn = vi.spyOn(loggerModule.logger, "warn").mockImplementation(() => undefined);
+      const flushLogsSync = vi
+        .spyOn(loggerModule, "flushLogsSync")
+        .mockImplementation(() => undefined);
+      const serveStdio = vi.mocked(stdioTransport.serveStdio).mockImplementation(
+        () =>
+          ({
+            close: vi.fn(async () => undefined),
+          }) as ReturnType<typeof stdioTransport.serveStdio>,
+      );
+
+      const started = startStdio();
+
+      expect(serveStdio).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        { transport: "stdio", timeoutMs: 25 },
+        "capability.fetch.stdio_starting",
+      );
+      expect(flushLogsSync).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(24);
+      expect(serveStdio).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(started).resolves.toBeUndefined();
+
+      const factory = serveStdio.mock.calls[0]?.[0] as (() => unknown) | undefined;
+      expect(factory?.()).toBe(server);
+      expect(createServer).toHaveBeenCalledWith(config, [], {
+        failClosedUnknownCapabilities: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        {
+          code: "stdio_capability_deadline_exceeded",
+          reason: "stdio_bootstrap_deadline",
+          deadlineMs: 25,
+        },
+        "capability.fetch.stdio_degraded",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rethrows unexpected capability lookup failures", async () => {
