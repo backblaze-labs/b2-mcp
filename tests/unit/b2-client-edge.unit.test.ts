@@ -234,6 +234,20 @@ function clientWithTransport(transport: RecordingTransport): B2Client {
   return new B2Client(new B2AuthManager(testConfig));
 }
 
+function partnerClientWithPostJson(postJson: ReturnType<typeof vi.fn>): SdkPartnerClient {
+  const partnerAuth = partnerAuthorizeResponse();
+  return {
+    authorize: vi.fn(async () => partnerAuth),
+    partnerAccountInfo: {
+      clear: vi.fn(),
+      getAuth: vi.fn(() => null),
+    },
+    raw: {
+      postJson,
+    },
+  } as unknown as SdkPartnerClient;
+}
+
 describe("B2Client native edge branches", () => {
   afterEach(() => {
     circuitBreaker.close();
@@ -1132,8 +1146,8 @@ describe("B2Client native edge branches", () => {
 
   describe("Partner authorization", () => {
     it("refreshes stale cached Partner authorization before sending another read", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      const now = Date.parse("2026-01-01T00:00:00.000Z");
+      const dateNow = vi.spyOn(Date, "now").mockReturnValue(now);
       let authorizeCount = 0;
       const listTokens: string[] = [];
       const transport = new RecordingTransport((request) => {
@@ -1162,7 +1176,7 @@ describe("B2Client native edge branches", () => {
       ).resolves.toMatchObject({
         groups: [],
       });
-      await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000 + 1);
+      dateNow.mockReturnValue(now + 23 * 60 * 60 * 1000 + 1);
       await expect(
         client.listGroups({ adminAccountId: "test-account-123" }),
       ).resolves.toMatchObject({
@@ -1174,8 +1188,8 @@ describe("B2Client native edge branches", () => {
     });
 
     it("refreshes stale cached Partner authorization before sending a mutation", async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+      const now = Date.parse("2026-01-01T00:00:00.000Z");
+      const dateNow = vi.spyOn(Date, "now").mockReturnValue(now);
       let authorizeCount = 0;
       const ejectTokens: string[] = [];
       const transport = new RecordingTransport((request) => {
@@ -1210,7 +1224,7 @@ describe("B2Client native edge branches", () => {
       ).resolves.toMatchObject({
         groups: [],
       });
-      await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000 + 1);
+      dateNow.mockReturnValue(now + 23 * 60 * 60 * 1000 + 1);
       await expect(
         client.ejectGroupMember({
           adminAccountId: "test-account-123",
@@ -1247,6 +1261,93 @@ describe("B2Client native edge branches", () => {
         /Partner API is not available/,
       );
       expect(raw.listGroups).not.toHaveBeenCalled();
+    });
+
+    it("posts create-group-member as an object and accepts singleton SDK responses", async () => {
+      const postJson = vi.fn(async () => ({
+        applicationKeyId: "group-member-key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_group_member_singleton",
+        groupMember: {
+          accountId: "member-account-id",
+          email: "member@example.com",
+          groupId: "group-1",
+          groupName: "Group 1",
+          region: "us-west",
+          s3Endpoint: "s3.us-west-001.backblazeb2.com",
+        },
+      }));
+      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const client = new B2Client(new B2AuthManager(testConfig));
+
+      await expect(
+        client.createGroupMember({
+          adminAccountId: "test-account-123",
+          groupId: "group-1",
+          memberEmail: "member@example.com",
+          region: "us-west",
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          applicationKeyId: "group-member-key-id",
+          applicationKey: "B2_MCP_CANARY_SECRET_group_member_singleton",
+        }),
+      ]);
+
+      expect(postJson).toHaveBeenCalledWith(
+        "http://127.0.0.1/partner",
+        "partner-token-xyz",
+        "b2_create_group_member",
+        {
+          adminAccountId: "test-account-123",
+          groupId: "group-1",
+          memberEmail: "member@example.com",
+          region: "us-west",
+        },
+        expect.objectContaining({ retry: expect.objectContaining({ maxRetries: 0 }) }),
+      );
+    });
+
+    it("posts reserve-trial create as an object and accepts singleton SDK responses", async () => {
+      const postJson = vi.fn(async () => ({
+        accountId: "trial-account-id",
+        applicationKeyId: "trial-key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_trial_singleton",
+        s3Endpoint: "s3.us-west-001.backblazeb2.com",
+        startDate: "2026-01-01",
+        endDate: "2026-01-08",
+        email: "trial@example.com",
+        bucketName: "trial-bucket",
+        bucketId: "trial-bucket-id",
+      }));
+      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const client = new B2Client(new B2AuthManager(testConfig));
+
+      await expect(
+        client.reserveTrialCreateAccount({
+          email: "trial@example.com",
+          term: 7,
+          storage: 1,
+          region: "us-west",
+        }),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          accountId: "trial-account-id",
+          applicationKey: "B2_MCP_CANARY_SECRET_trial_singleton",
+        }),
+      ]);
+
+      expect(postJson).toHaveBeenCalledWith(
+        "http://127.0.0.1/partner",
+        "partner-token-xyz",
+        "b2_reserve_trial_create_account",
+        {
+          email: "trial@example.com",
+          term: 7,
+          storage: 1,
+          region: "us-west",
+        },
+        expect.objectContaining({ retry: expect.objectContaining({ maxRetries: 0 }) }),
+      );
     });
 
     it("keeps a successful Partner authorization after the starting caller aborts", async () => {

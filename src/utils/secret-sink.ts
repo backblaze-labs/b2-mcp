@@ -1155,6 +1155,23 @@ function isSecretSinkCommitAmbiguous(err: unknown): boolean {
   );
 }
 
+function projectionPreflightPointer(
+  sink: Extract<SecretSinkConfig, { mode: "file" }>,
+): SecretSinkPointer {
+  return { type: "file", path: sink.filePath, recordId: "projection-preflight" };
+}
+
+function durableSecretDiagnostics<T>(
+  diagnostics: ((result: T) => Record<string, unknown>) | undefined,
+  result: T,
+): Record<string, unknown> {
+  try {
+    return diagnostics?.(result) ?? {};
+  } catch {
+    return { diagnostics_unavailable: true };
+  }
+}
+
 /** Secret sink modes that can carry a durable secret result. */
 export type ActiveSecretSinkConfig = SecretSinkFileConfig | SecretSinkInlineConfig;
 
@@ -1233,6 +1250,42 @@ export async function executeDurableSecretOperation<T>({
     }
     throw err;
   }
+  try {
+    projectRedacted(result, projectionPreflightPointer(secretSink));
+  } catch (err) {
+    let recovery: unknown = { status: "not_configured" };
+    try {
+      recovery = (await recoverAfterSinkFailure?.(result, err)) ?? recovery;
+    } catch (recoveryErr) {
+      recovery = {
+        status: "failed",
+        error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+      };
+    }
+    logger.fatal(
+      {
+        err,
+        tool: toolName,
+        secretSink: { type: "file", path: secretSink.filePath },
+        minted: durableSecretDiagnostics(diagnostics, result),
+        recovery,
+      },
+      "secret_sink.projection_failed_after_provider_create",
+    );
+    if (recoveryClearedProviderSideEffect(recovery)) {
+      releaseSecretSinkClaimBestEffort(claim, {
+        tool: toolName,
+        secretSink: { type: "file", path: secretSink.filePath },
+        lockPath: claim.lockPath,
+      });
+    }
+    throw {
+      status: 500,
+      code: "secret_sink_projection_failed",
+      message:
+        "B2 created a durable credential, but the MCP server could not build a redacted response before storing the secret. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
+    };
+  }
   let pointer: SecretSinkPointer;
   try {
     pointer = appendSecretSinkRecord(secretSink, toolName, result, idempotency);
@@ -1243,7 +1296,7 @@ export async function executeDurableSecretOperation<T>({
           err,
           tool: toolName,
           secretSink: { type: "file", path: secretSink.filePath },
-          minted: diagnostics?.(result) ?? {},
+          minted: durableSecretDiagnostics(diagnostics, result),
           recovery: { status: "pending_reconciliation" },
         },
         "secret_sink.write_failed_with_ambiguous_commit",
@@ -1269,7 +1322,7 @@ export async function executeDurableSecretOperation<T>({
         err,
         tool: toolName,
         secretSink: { type: "file", path: secretSink.filePath },
-        minted: diagnostics?.(result) ?? {},
+        minted: durableSecretDiagnostics(diagnostics, result),
         recovery,
       },
       "secret_sink.write_failed_after_provider_create",

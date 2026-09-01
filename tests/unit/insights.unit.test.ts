@@ -292,6 +292,20 @@ function fakeReportClient(
   } as any;
 }
 
+function insightToolHarness(reportClient: ReturnType<typeof fakeReportClient>) {
+  const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+  const server = {
+    registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+      tools[name] = { execute };
+    },
+  };
+  const auth = {
+    getAuth: async () => ({ accountId: "acct" }),
+  };
+  registerInsightTools(server as any, {} as any, auth as any, reportClient);
+  return tools;
+}
+
 describe("insights — snapshot selection (fake report client)", () => {
   it("latestSnapshotDate returns the most recent day present", async () => {
     const b2Client = fakeReportClient({
@@ -375,14 +389,54 @@ describe("insights — snapshot selection (fake report client)", () => {
   });
 });
 
+describe("insights — empty report scan invariant", () => {
+  it("keeps usage growth and egress leaders aligned when no snapshots exist", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-28T12:00:00.000Z"));
+    try {
+      const tools = insightToolHarness(fakeReportClient({}));
+
+      const usage = JSON.parse(
+        (
+          await tools.b2_usage_growth.execute({
+            period: "month",
+            order: "most_grown",
+            limit: 50,
+          })
+        ).content[0].text,
+      );
+      const egress = JSON.parse(
+        (
+          await tools.b2_egress_leaders.execute({
+            by: "account",
+            days: 30,
+            limit: 15,
+          })
+        ).content[0].text,
+      );
+
+      expect(usage).toMatchObject({
+        reports_enabled: true,
+        note:
+          "No usage-report snapshots found in the last 180 days " +
+          "(searched back to 2025-12-30). Older snapshots, if reporting stopped earlier, are " +
+          "outside this bounded discovery window and were not confirmed absent.",
+      });
+      expect(egress).toMatchObject({
+        reports_enabled: true,
+        note: usage.note,
+        leaders: [],
+      });
+      expect(egress).not.toHaveProperty("total_egress_gb");
+      expect(usage).not.toHaveProperty("accounts");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("insights — report scan bounds", () => {
   it("returns partial metadata when report CSV selection is capped", async () => {
-    const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
-    const server = {
-      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
-        tools[name] = { execute };
-      },
-    };
     const today = new Date().toISOString().slice(0, 10);
     const keys = Array.from(
       { length: 1005 },
@@ -400,10 +454,7 @@ describe("insights — report scan bounds", () => {
         truncated: false,
       }),
     };
-    const auth = {
-      getAuth: async () => ({ accountId: "acct" }),
-    };
-    registerInsightTools(server as any, b2Client as any, auth as any, b2Client as any);
+    const tools = insightToolHarness(b2Client as any);
 
     const result = await tools.b2_egress_leaders.execute({
       by: "account",

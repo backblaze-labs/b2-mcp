@@ -664,9 +664,86 @@ function cloneJsonField<T>(value: T): T {
 }
 
 function cloneSecretBearingPartnerResponse<T extends { readonly applicationKey: string }>(
-  response: readonly T[],
+  response: readonly T[] | T,
+  endpoint: string,
 ): T[] {
-  return response.map((result) => cloneJsonResponse({ ...result } as T));
+  const results = Array.isArray(response) ? response : [response];
+  return results.map((result) => {
+    if (
+      !result ||
+      typeof result !== "object" ||
+      typeof (result as { applicationKey?: unknown }).applicationKey !== "string"
+    ) {
+      throw codedError(
+        502,
+        "unexpected_partner_response",
+        `${endpoint} response did not contain a secret-bearing result.`,
+      );
+    }
+    return cloneJsonResponse({ ...result } as T);
+  });
+}
+
+type PartnerRawPostJson = (
+  groupsApiUrl: string,
+  authToken: string,
+  endpoint: string,
+  body: unknown,
+  options?: PartnerRawRequestOptions,
+) => Promise<unknown>;
+
+function nonRetryingPartnerMutationOptions(
+  options: PartnerRawRequestOptions | undefined,
+): PartnerRawRequestOptions {
+  return {
+    ...(options?.signal !== undefined ? { signal: options.signal } : {}),
+    retry: {
+      ...(options?.retry ?? {}),
+      maxRetries: 0,
+    },
+  };
+}
+
+async function postPartnerJson(
+  client: SdkPartnerClient,
+  groupsApiUrl: string,
+  authToken: string,
+  endpoint: string,
+  body: unknown,
+  options?: PartnerRawRequestOptions,
+): Promise<unknown> {
+  const postJson = (client.raw as unknown as { postJson?: PartnerRawPostJson }).postJson;
+  if (typeof postJson !== "function") {
+    throw codedError(
+      500,
+      "partner_raw_post_unavailable",
+      "The installed B2 SDK does not expose the raw Partner JSON request boundary.",
+    );
+  }
+  return postJson.call(
+    client.raw,
+    groupsApiUrl,
+    authToken,
+    endpoint,
+    body,
+    nonRetryingPartnerMutationOptions(options),
+  );
+}
+
+function reserveTrialCreateAccountRequestEntry(
+  request: PartnerReserveTrialCreateAccountOptions,
+): ReserveTrialCreateAccountRequestEntry {
+  if (Array.isArray(request)) {
+    if (request.length !== 1) {
+      throw codedError(
+        400,
+        "bad_request",
+        "b2_reserve_trial_create_account accepts exactly one account request.",
+      );
+    }
+    return request[0] as ReserveTrialCreateAccountRequestEntry;
+  }
+  return request as ReserveTrialCreateAccountRequestEntry;
 }
 
 function toServerSideEncryptionResult(
@@ -1749,25 +1826,29 @@ export class B2Client {
   async createGroupMember(
     options: PartnerCreateGroupMemberOptions,
   ): Promise<CreateGroupMemberResponse> {
-    return cloneSecretBearingPartnerResponse(
-      await this.withPartnerCircuit(
-        { retryOnUnauthorized: false },
-        (client, auth, coordinates, requestOptions) => {
-          validatePartnerAdminAccount(auth, options.adminAccountId);
-          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
-          return client.raw.createGroupMember(
-            groupsApiUrl,
-            authToken,
-            {
-              adminAccountId,
-              groupId: groupId(options.groupId),
-              memberEmail: options.memberEmail,
-              ...(options.region !== undefined ? { region: options.region } : {}),
-            },
-            requestOptions,
-          );
-        },
-      ),
+    const response = await this.withPartnerCircuit(
+      { retryOnUnauthorized: false },
+      (client, auth, coordinates, requestOptions) => {
+        validatePartnerAdminAccount(auth, options.adminAccountId);
+        const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+        return postPartnerJson(
+          client,
+          groupsApiUrl,
+          authToken,
+          "b2_create_group_member",
+          {
+            adminAccountId,
+            groupId: groupId(options.groupId),
+            memberEmail: options.memberEmail,
+            ...(options.region != null ? { region: options.region } : {}),
+          },
+          requestOptions,
+        );
+      },
+    );
+    return cloneSecretBearingPartnerResponse<CreateGroupMemberResponse[number]>(
+      response as CreateGroupMemberResponse | CreateGroupMemberResponse[number],
+      "b2_create_group_member",
     );
   }
 
@@ -1813,19 +1894,29 @@ export class B2Client {
   async reserveTrialCreateAccount(
     request: PartnerReserveTrialCreateAccountOptions,
   ): Promise<ReserveTrialCreateAccountResponse> {
-    return cloneSecretBearingPartnerResponse(
-      await this.withPartnerCircuit(
-        { retryOnUnauthorized: false },
-        (client, _auth, coordinates, requestOptions) => {
-          const { groupsApiUrl, authToken } = coordinates;
-          return client.raw.reserveTrialCreateAccount(
-            groupsApiUrl,
-            authToken,
-            request,
-            requestOptions,
-          );
-        },
-      ),
+    const response = await this.withPartnerCircuit(
+      { retryOnUnauthorized: false },
+      (client, _auth, coordinates, requestOptions) => {
+        const { groupsApiUrl, authToken } = coordinates;
+        const entry = reserveTrialCreateAccountRequestEntry(request);
+        return postPartnerJson(
+          client,
+          groupsApiUrl,
+          authToken,
+          "b2_reserve_trial_create_account",
+          {
+            email: entry.email,
+            term: entry.term,
+            storage: entry.storage,
+            ...(entry.region != null ? { region: entry.region } : {}),
+          },
+          requestOptions,
+        );
+      },
+    );
+    return cloneSecretBearingPartnerResponse<ReserveTrialCreateAccountResponse[number]>(
+      response as ReserveTrialCreateAccountResponse | ReserveTrialCreateAccountResponse[number],
+      "b2_reserve_trial_create_account",
     );
   }
 

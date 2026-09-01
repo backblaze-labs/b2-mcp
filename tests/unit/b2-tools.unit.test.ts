@@ -7,10 +7,11 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
+import { registerPartnerTools } from "../../src/b2/partner";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { parseErrorText } from "../../src/utils/errors";
 import { B2AuthManager } from "../../src/auth";
@@ -68,6 +69,21 @@ function failSecretRecordFsyncOnce(): void {
   });
 }
 
+function registrarHarness() {
+  const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+  return {
+    tools,
+    registrar: {
+      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
+        tools[name] = { execute };
+      },
+      hasTool(name: string) {
+        return name in tools;
+      },
+    },
+  };
+}
+
 async function seedClient(): Promise<SdkB2Client> {
   const client = new SdkB2Client({
     applicationKeyId: testConfig.applicationKeyId,
@@ -109,7 +125,30 @@ async function usePartnerSimulator() {
     partnerAuthorize: true,
   });
   const simulatorTransport = sim.transport();
-  const transport = new RecordingTransport((request) => simulatorTransport.send(request));
+  const transport = new RecordingTransport((request) => {
+    if (b2EndpointName(request) === "b2_reserve_trial_create_account") {
+      const body = requestJson(request);
+      if (Array.isArray(body)) {
+        return new StaticHttpResponse(400, {
+          status: 400,
+          code: "bad_request",
+          message: "object should start with brace but found: [",
+        });
+      }
+      return new StaticHttpResponse(200, {
+        accountId: "trial-account-id",
+        applicationKeyId: "trial-key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_trial_account",
+        s3Endpoint: "s3.us-west-001.backblazeb2.com",
+        startDate: "2026-01-01",
+        endDate: "2026-01-08",
+        email: body.email,
+        bucketName: "trial-bucket",
+        bucketId: "trial-bucket-id",
+      });
+    }
+    return simulatorTransport.send(request);
+  });
   installSdkTransport(transport);
   seed = await seedClient();
   server = createServer(partnerTestConfig);
@@ -2349,7 +2388,7 @@ describe("Partner API tools", () => {
   });
 
   it("reserves trial accounts in inline mode with the raw secret and warning", async () => {
-    await usePartnerSimulator();
+    const { transport } = await usePartnerSimulator();
     server = createServer({
       ...partnerTestConfig,
       secretSink: { mode: "inline" },
@@ -2364,7 +2403,16 @@ describe("Partner API tools", () => {
     });
     const result = parseResult(rawResult);
     const secret = result.results[0].applicationKey;
+    const request = transport.requests.find(
+      (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+    );
 
+    expect(request?.method).toBe("POST");
+    expect(requestJson(request!)).toEqual({
+      email: "trial-inline@example.com",
+      term: 7,
+      storage: 1,
+    });
     expect(secret).toEqual(expect.any(String));
     expect(secret).not.toBe("[redacted]");
     expect(result.warning).toContain("B2_SECRET_SINK=inline");
@@ -2402,6 +2450,68 @@ describe("Partner API tools", () => {
     expect(
       transport.requests.some((request) => b2EndpointName(request) === "b2_eject_group_member"),
     ).toBe(true);
+  });
+
+  it("ejects a created group member if redacted projection fails after account creation", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    const { tools, registrar } = registrarHarness();
+    const groupMember = {
+      accountId: "member-account-projection",
+      email: "projection-failure@example.com",
+      groupId: "group-projection",
+      groupName: "Projection failure",
+      region: "us-west",
+      s3Endpoint: "s3.us-west-001.backblazeb2.com",
+    };
+    const created = [
+      {
+        applicationKeyId: "projection-key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_partner_projection",
+        groupMember,
+      },
+    ];
+    Object.defineProperty(created, "map", {
+      value: () => {
+        throw new Error("redaction projection failed");
+      },
+    });
+    const client = {
+      createGroupMember: vi.fn(async () => created),
+      ejectGroupMember: vi.fn(async () => groupMember),
+    };
+
+    registerPartnerTools(registrar as never, client as never, {} as never, {
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    const rawResult = await tools.b2_create_group_member.execute({
+      adminAccountId: "test-account-123",
+      groupId: groupMember.groupId,
+      memberEmail: groupMember.email,
+      idempotencyKey: "create-group-member-projection-failure",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(parseErrorText(rawResult.content[0].text)).toMatchObject({
+      code: "secret_sink_projection_failed",
+      status: 500,
+    });
+    expect(client.ejectGroupMember).toHaveBeenCalledWith({
+      adminAccountId: "test-account-123",
+      groupId: groupMember.groupId,
+      memberAccountId: groupMember.accountId,
+    });
+    expect(JSON.stringify(rawResult)).not.toContain("B2_MCP_CANARY_SECRET_partner_projection");
+    expect(existsSync(secretFile) ? readFileSync(secretFile, "utf8") : "").not.toContain(
+      "B2_MCP_CANARY_SECRET_partner_projection",
+    );
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
+      "secret_sink.projection_failed_after_provider_create",
+    );
   });
 
   it.each([
