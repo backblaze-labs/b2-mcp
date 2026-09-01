@@ -751,7 +751,17 @@ export async function latestSnapshotDate(
         });
         budget.stats.pages++;
         budget.stats.listed_keys += page.keys.length;
-        for (const key of page.keys) if (REPORT_DAY_CSV_RE.test(key)) candidates.push(key);
+        for (const key of page.keys) {
+          if (!REPORT_DAY_CSV_RE.test(key)) continue;
+          // Bound transient memory: an audit-heavy bucket could otherwise buffer
+          // up to maxPages * maxKeysPerPage keys. Cap it and fall through to the
+          // inconclusive path rather than holding the whole namespace in memory.
+          if (candidates.length >= REPORT_SCAN_LIMITS.maxCandidateKeys) {
+            stopReportScan(budget.stats, "max_candidate_keys");
+            break;
+          }
+          candidates.push(key);
+        }
         token = page.isTruncated ? page.nextContinuationToken : undefined;
         if (budget.stats.stop_reason) break;
       } while (token);

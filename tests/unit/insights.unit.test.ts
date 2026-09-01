@@ -349,6 +349,30 @@ describe("insights — snapshot selection (fake report client)", () => {
     expect(result.bucketMissing).toBe(false);
     expect(result.searchedSince).toBeUndefined();
   });
+
+  it("latestSnapshotDate caps candidate collection and reports inconclusive", async () => {
+    // A single page with more matching keys than maxCandidateKeys (5000) must not
+    // be buffered whole; discovery caps the collection and falls through as
+    // inconclusive rather than holding the entire namespace in memory.
+    const keys = Array.from(
+      { length: 6000 },
+      (_, i) => `2026-06-01/usage.account.${String(i).padStart(5, "0")}.csv`,
+    );
+    const b2Client = {
+      listReportObjectKeys: async () => ({ keys, isTruncated: false }),
+      downloadReportObjectText: async () => ({ text: "", bytes: 0, truncated: false }),
+    };
+
+    const result = await latestSnapshotDate(
+      b2Client as any,
+      "b2-reports-x",
+      new Date(Date.UTC(2026, 5, 28)),
+    );
+
+    expect(result.date).toBeNull();
+    expect(result.bucketMissing).toBe(false);
+    expect(result.searchedSince).toBeUndefined();
+  });
 });
 
 describe("insights — report scan bounds", () => {
