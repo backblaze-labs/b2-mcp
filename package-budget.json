@@ -5,25 +5,25 @@
     "planningId": "P1-RUNTIME-02"
   },
   "reviewedBaseline": {
-    "date": "2026-08-31",
-    "nodeVersions": ["22.22.2", "24", "26"],
+    "date": "2026-09-01",
+    "nodeVersions": ["22.3.0", "24", "26"],
     "primaryB2Transport": "@backblaze-labs/b2-sdk@0.3.0",
-    "sizeBudgetRationale": "Issues #306 and #308 intentionally add TSDoc to the published TypeScript source tree, increasing package source bytes without changing runtime dependencies. Issue #319 adds horizon-qualified empty-snapshot discovery to insights, growing compiled JS/d.ts source bytes with no new runtime dependencies. Issue #314 adds native no-replay write interruption classification, shared cause-chain helpers, and operator logging for operation_status_unknown, including definitive-status preservation for malformed non-2xx and truncated success bodies with no new runtime dependencies.",
+    "sizeBudgetRationale": "Issues #306 and #308 intentionally add TSDoc to the published TypeScript source tree, increasing package source bytes without changing runtime dependencies. Issue #319 adds horizon-qualified empty-snapshot discovery to insights, growing compiled JS/d.ts source bytes with no new runtime dependencies. Issue #314 adds native no-replay write interruption classification, shared cause-chain helpers, and operator logging for operation_status_unknown, including definitive-status preservation for malformed non-2xx and truncated success bodies with no new runtime dependencies. Issue #332 adds durable-secret fail-safe recovery, Partner response-shape validation, and exact-secret log redaction for newly minted application keys with no new runtime dependencies.",
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 579387,
-    "unpackedPackageBytes": 2623413,
+    "packedTarballBytes": 584679,
+    "unpackedPackageBytes": 2650049,
     "packedEntryCount": 250,
-    "cleanConsumerInstallFootprintBytes": 31351955
+    "cleanConsumerInstallFootprintBytes": 31378592
   },
   "limits": {
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
-    "packedTarballBytes": 582000,
-    "unpackedPackageBytes": 2627000,
+    "packedTarballBytes": 588000,
+    "unpackedPackageBytes": 2655000,
     "packedEntryCount": 251,
-    "cleanConsumerInstallFootprintBytes": 31360000
+    "cleanConsumerInstallFootprintBytes": 31400000
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {
