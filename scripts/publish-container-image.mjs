@@ -315,6 +315,7 @@ function verifyTrustedSignature({
   const args = trustArgs(githubServerUrl, githubRepository);
   run("cosign", ["verify", ...args, ref], {
     attempts: 3,
+    capture: true,
     env: cosignEnv({ signatureRepo, sourceEnv }),
   });
 }

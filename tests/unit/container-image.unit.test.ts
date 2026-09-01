@@ -23,6 +23,8 @@ type FakeState = {
   legacyOnly?: boolean;
   migrated?: boolean;
   signed?: boolean;
+  transientAnonymousSignatureFailures?: number;
+  transientSiblingVerifyFailures?: number;
   cosignCalls?: FakeCall[];
   dockerCalls?: FakeCall[];
 };
@@ -202,6 +204,26 @@ if (args[0] === "sign") {
   process.exit(0);
 }
 if (args[0] === "verify") {
+  if (
+    state.transientAnonymousSignatureFailures > 0 &&
+    isAnonymous &&
+    process.env.COSIGN_REPOSITORY === signatureRepo
+  ) {
+    state.transientAnonymousSignatureFailures -= 1;
+    saveState(state);
+    console.error("429 Too Many Requests");
+    process.exit(1);
+  }
+  if (
+    state.transientSiblingVerifyFailures > 0 &&
+    !isAnonymous &&
+    process.env.COSIGN_REPOSITORY === signatureRepo
+  ) {
+    state.transientSiblingVerifyFailures -= 1;
+    saveState(state);
+    console.error("429 Too Many Requests");
+    process.exit(1);
+  }
   if (state.failAnonymousSignature && isAnonymous) {
     saveState(state);
     console.error("denied: requested access to the resource is denied");
@@ -453,6 +475,38 @@ describe("container image policy", () => {
       ),
     ).toBe(true);
     expect(state.signed).toBe(true);
+  });
+
+  it("retries transient trusted sibling signature verification failures", () => {
+    const { result, state } = runPublishWithFakes({
+      existing: true,
+      transientSiblingVerifyFailures: 1,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("retrying cosign verify");
+    expect(state.transientSiblingVerifyFailures).toBe(0);
+    expect(
+      (state.cosignCalls ?? []).filter(
+        (call) =>
+          call.args[0] === "verify" &&
+          !call.env.DOCKER_CONFIG &&
+          call.env.COSIGN_REPOSITORY === signatureRepo,
+      ),
+    ).toHaveLength(2);
+  });
+
+  it("retries transient anonymous signature verification failures", () => {
+    const { result, state } = runPublishWithFakes({ transientAnonymousSignatureFailures: 1 });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain("retrying cosign verify");
+    expect(state.transientAnonymousSignatureFailures).toBe(0);
+    expect(
+      anonymousCalls(state.cosignCalls).filter(
+        (call) => call.args[0] === "verify" && call.env.COSIGN_REPOSITORY === signatureRepo,
+      ),
+    ).toHaveLength(2);
   });
 
   it("fails when sibling signatures are not anonymously readable", () => {
