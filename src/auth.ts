@@ -169,6 +169,7 @@ function transportUrlGuard(transport: HttpTransport): UrlGuard | undefined {
 }
 
 function unknownStatusInterruption(value: unknown): unknown {
+  if (value instanceof B2Error) return undefined;
   return isAbortError(value) || isTimeoutError(value) || isResponseLostTransportError(value)
     ? value
     : undefined;
