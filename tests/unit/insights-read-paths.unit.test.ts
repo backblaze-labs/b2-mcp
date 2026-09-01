@@ -219,7 +219,8 @@ describe("insight usage-report read paths", () => {
     );
 
     expect(result.reports_enabled).toBe(true);
-    expect(result.note).toBe("No usage-report snapshots found yet.");
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.searched_since).toBe(daysAgo(180));
     expect(result.report_scan.pages).toEqual(expect.any(Number));
     expect(result.report_scan.pages).toBeGreaterThan(0);
   });
@@ -303,7 +304,8 @@ describe("insight usage-report read paths", () => {
     expect(result.period).toBe(period);
     expect(result.rank_by).toBe(args.by);
     expect(result.reports_enabled).toBe(true);
-    expect(result.note).toBe("No usage-report snapshots found yet.");
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.searched_since).toBe(daysAgo(180));
     expect(result).not.toHaveProperty("total_egress_gb");
     expect(result.leaders).toEqual([]);
     expect(result.report_scan.pages).toEqual(expect.any(Number));
@@ -359,6 +361,47 @@ describe("insight usage-report read paths", () => {
     expect(result.latest_snapshot).toBe(staleDay);
     expect(result).not.toHaveProperty("total_egress_gb");
     expect(result.leaders).toEqual([]);
+  });
+
+  it("qualifies b2_egress_leaders with the horizon when snapshots predate 180 days", async () => {
+    const ancientDay = daysAgo(200);
+    const report = createPagedReportClient({
+      [`${ancientDay}/usage.account-old.csv`]: csv([
+        `old,${ancientDay},bucket-old,bucket-old,1,4,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_egress_leaders", { by: "account", days: 30, limit: 5 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.note).not.toContain("found yet");
+    expect(result.searched_since).toBe(daysAgo(180));
+    expect(result).not.toHaveProperty("latest_snapshot");
+    expect(result).not.toHaveProperty("total_egress_gb");
+    expect(result.leaders).toEqual([]);
+  });
+
+  it("qualifies b2_usage_growth with the horizon when snapshots predate 180 days", async () => {
+    const ancientDay = daysAgo(200);
+    const report = createPagedReportClient({
+      [`${ancientDay}/usage.account-old.csv`]: csv([
+        `old,${ancientDay},bucket-old,bucket-old,1,4,0,0\n`,
+      ]),
+    });
+    const tools = registerTools(report.client);
+
+    const result = parseResult(
+      await tools.call("b2_usage_growth", { period: "month", order: "most_grown", limit: 10 }),
+    );
+
+    expect(result.reports_enabled).toBe(true);
+    expect(result.note).toContain("No usage-report snapshots found in the last 180 days");
+    expect(result.note).not.toContain("found yet");
+    expect(result.searched_since).toBe(daysAgo(180));
   });
 
   it("omits latest_snapshot when empty b2_egress_leaders discovery is truncated", async () => {

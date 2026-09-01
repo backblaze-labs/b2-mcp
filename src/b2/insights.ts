@@ -272,6 +272,13 @@ const NOT_ENABLED = {
 };
 const NO_USAGE_REPORT_SNAPSHOTS_NOTE = "No usage-report snapshots found yet.";
 
+// Widening lookback windows (in days) for latest-snapshot discovery. The last
+// entry is the bounded discovery horizon: finding nothing within it does not
+// prove snapshots never existed, only that none fall inside the searched window.
+const SNAPSHOT_LOOKBACK_DAYS = [10, 45, 180] as const;
+const SNAPSHOT_DISCOVERY_HORIZON_DAYS =
+  SNAPSHOT_LOOKBACK_DAYS[SNAPSHOT_LOOKBACK_DAYS.length - 1];
+
 const REPORT_SCAN_LIMITS = {
   maxPages: 100,
   maxCandidateKeys: 5_000,
@@ -411,6 +418,21 @@ function noUsageReportSnapshots(stats: ReportLoadStats): Record<string, unknown>
       ? "No usage-report snapshots were loaded before the scan budget was exhausted; " +
         "results are inconclusive (see report_scan.stop_reasons)."
       : NO_USAGE_REPORT_SNAPSHOTS_NOTE,
+    ...reportScanMetadataFromStats(stats),
+  };
+}
+
+function noUsageReportSnapshotsWithinHorizon(
+  stats: ReportLoadStats,
+  searchedSince: string,
+): Record<string, unknown> {
+  return {
+    reports_enabled: true,
+    note:
+      `No usage-report snapshots found in the last ${SNAPSHOT_DISCOVERY_HORIZON_DAYS} days ` +
+      `(searched back to ${searchedSince}). Older snapshots, if reporting stopped earlier, are ` +
+      "outside this bounded discovery window and were not confirmed absent.",
+    searched_since: searchedSince,
     ...reportScanMetadataFromStats(stats),
   };
 }
@@ -699,7 +721,12 @@ async function nearestSnapshotDate(
  * @param today - Date used as the current-day search anchor.
  * @param budget - Optional scan budget for tests and bounded runtime.
  *
- * @returns The latest snapshot date and whether the reports bucket is missing.
+ * @returns The latest snapshot date, whether the reports bucket is missing, and
+ *   `searchedSince` — the oldest date probed when the bounded discovery finished
+ *   without finding a snapshot. It is only set when the search completed the full
+ *   {@link SNAPSHOT_DISCOVERY_HORIZON_DAYS} horizon without hitting the scan
+ *   budget, so a null `date` with a `searchedSince` means "none in that window",
+ *   not "none ever".
  *
  * @internal
  */
@@ -708,8 +735,8 @@ export async function latestSnapshotDate(
   bucketName: string,
   today: Date,
   budget: ReportScanBudget = createReportScanBudget(),
-): Promise<{ date: string | null; bucketMissing: boolean }> {
-  for (const lookback of [10, 45, 180]) {
+): Promise<{ date: string | null; bucketMissing: boolean; searchedSince?: string }> {
+  for (const lookback of SNAPSHOT_LOOKBACK_DAYS) {
     const after = new Date(today.getTime() - lookback * 86400_000).toISOString().slice(0, 10);
     let token: string | undefined;
     let max: string | null = null;
@@ -738,7 +765,15 @@ export async function latestSnapshotDate(
     if (max) return { date: max, bucketMissing: false };
     if (budget.stats.stop_reason) break;
   }
-  return { date: null, bucketMissing: false };
+  // Completed the bounded probe without a snapshot and without exhausting the
+  // budget: report the horizon we actually searched so callers do not assert
+  // that snapshots never existed when reporting simply stopped long ago.
+  const searchedSince = budget.stats.stop_reason
+    ? undefined
+    : new Date(today.getTime() - SNAPSHOT_DISCOVERY_HORIZON_DAYS * 86400_000)
+        .toISOString()
+        .slice(0, 10);
+  return { date: null, bucketMissing: false, searchedSince };
 }
 
 /**
@@ -1092,7 +1127,11 @@ export function registerInsightTools(
         const latest = await latestSnapshotDate(reportClient, bucket, today, reportBudget);
         if (latest.bucketMissing) return toolJson(NOT_ENABLED);
         if (!hasUsageReportSnapshots(latest))
-          return toolJson(noUsageReportSnapshots(reportBudget.stats));
+          return toolJson(
+            latest.searchedSince
+              ? noUsageReportSnapshotsWithinHorizon(reportBudget.stats, latest.searchedSince)
+              : noUsageReportSnapshots(reportBudget.stats),
+          );
 
         const then = await nearestSnapshotDate(reportClient, bucket, targetThen, reportBudget);
         if (then.bucketMissing) return toolJson(NOT_ENABLED);
@@ -1173,7 +1212,9 @@ export function registerInsightTools(
             if (latest.bucketMissing) return toolJson(NOT_ENABLED);
             emptySnapshotMetadata = hasUsageReportSnapshots(latest)
               ? noUsageReportSnapshotsInPeriod(loaded.stats, since, latest.date)
-              : noUsageReportSnapshots(loaded.stats);
+              : latest.searchedSince
+                ? noUsageReportSnapshotsWithinHorizon(loaded.stats, latest.searchedSince)
+                : noUsageReportSnapshots(loaded.stats);
           }
           return toolJson({
             period,
