@@ -9,6 +9,7 @@ import {
   getRegisteredTools,
   fetchCapabilities,
   invalidateCapabilityCache,
+  type CreateServerOptions,
 } from "../../src/server";
 import { CredentialResolutionError, verificationFingerprintConfig } from "../../src/credentials";
 import { logger } from "../../src/utils/logger";
@@ -40,8 +41,12 @@ const baseConfig = {
   fileRoot: null,
 } as unknown as B2Config;
 
-function toolNames(caps: string[] | null, cfg: B2Config = baseConfig): string[] {
-  const server = createServer(cfg, caps);
+function toolNames(
+  caps: string[] | null,
+  cfg: B2Config = baseConfig,
+  options: CreateServerOptions = {},
+): string[] {
+  const server = createServer(cfg, caps, options);
   return Object.keys(getRegisteredTools(server) ?? {});
 }
 
@@ -81,6 +86,11 @@ describe("capability-aware registration", () => {
     expect(names).toContain("b2_authorize_account");
     expect(names).toContain("b2_create_key");
     expect(names).not.toContain("b2_usage_growth");
+  });
+
+  it("suppresses privileged stubs for fail-closed unknown capabilities", () => {
+    const names = toolNames([], baseConfig, { failClosedUnknownCapabilities: true });
+    expect(names).toEqual(["b2_authorize_account"]);
   });
 
   it("read-only key drops every write/delete/admin tool", () => {

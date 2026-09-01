@@ -38,7 +38,7 @@ import * as stdioTransport from "@modelcontextprotocol/server/stdio";
 import { CliUsageError, helpText, parseCliArgs } from "./cli.js";
 import { CredentialResolutionError } from "./credentials.js";
 import * as serverModule from "./server.js";
-import { PortUsageError } from "./utils/config.js";
+import { parseIntEnv, PortUsageError } from "./utils/config.js";
 import { flushLogsSync, initLogging, logger } from "./utils/logger.js";
 import { bootstrapErrorMessage } from "./utils/secret-sanitizer.js";
 import { VERSION } from "./version.js";
@@ -52,30 +52,39 @@ type GlobalWithIndexTestSeams = typeof globalThis & {
   __b2McpIndexTestSeams?: IndexTestSeams;
 };
 
-const STDIO_CAPABILITY_FETCH_TIMEOUT_MS = 10_000;
+const DEFAULT_STDIO_CAPABILITY_FETCH_TIMEOUT_MS = 10_000;
+const STDIO_CAPABILITY_DEADLINE_CODE = "stdio_capability_deadline_exceeded";
 
-function stdioCapabilityTimeoutError(): CredentialResolutionError {
-  return new CredentialResolutionError(
-    `B2 capability lookup exceeded the ${STDIO_CAPABILITY_FETCH_TIMEOUT_MS} ms stdio bootstrap deadline`,
-    503,
-    "capability_upstream_unavailable",
+class StdioCapabilityDeadlineError extends Error {
+  readonly code = STDIO_CAPABILITY_DEADLINE_CODE;
+
+  constructor(readonly deadlineMs: number) {
+    super(`B2 capability lookup exceeded the ${deadlineMs} ms stdio bootstrap deadline`);
+    this.name = "StdioCapabilityDeadlineError";
+  }
+}
+
+function stdioCapabilityFetchTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.max(
+    1,
+    parseIntEnv(env.B2_STDIO_CAPABILITY_TIMEOUT_MS, DEFAULT_STDIO_CAPABILITY_FETCH_TIMEOUT_MS),
   );
 }
 
 async function fetchStdioCapabilities(
   config: ReturnType<typeof serverModule.loadConfig>,
+  timeoutMs: number,
 ): Promise<string[] | null> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(
-      () => reject(stdioCapabilityTimeoutError()),
-      STDIO_CAPABILITY_FETCH_TIMEOUT_MS,
-    );
-    timeout.unref?.();
+    timeout = setTimeout(() => reject(new StdioCapabilityDeadlineError(timeoutMs)), timeoutMs);
   });
+  const capabilityFetch = serverModule.fetchCapabilities(config);
 
   try {
-    return await Promise.race([serverModule.fetchCapabilities(config), timeoutPromise]);
+    // The SDK authorize cannot be cancelled safely outside an MCP request; if
+    // the local deadline wins, Promise.race still observes a late rejection.
+    return await Promise.race([capabilityFetch, timeoutPromise]);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -86,9 +95,10 @@ async function fetchStdioCapabilities(
  *
  * @remarks
  * The stdio path reads credentials from the process environment, attempts
- * capability discovery once, and deliberately degrades to the full tool surface
- * only when B2 capability lookup is temporarily unavailable. Other credential
- * errors remain fatal during bootstrap.
+ * capability discovery once with a `B2_STDIO_CAPABILITY_TIMEOUT_MS` bootstrap
+ * deadline (10s by default). A local deadline expiry starts with an empty
+ * fail-closed capability set; a returned transient upstream outage degrades to
+ * the full tool surface. Other credential errors remain fatal during bootstrap.
  *
  * @returns A promise that resolves after the stdio transport has been
  * registered with the MCP SDK.
@@ -104,32 +114,53 @@ async function fetchStdioCapabilities(
 export async function startStdio(): Promise<void> {
   initLogging();
   const config = serverModule.loadConfig();
+  const capabilityTimeoutMs = stdioCapabilityFetchTimeoutMs();
   let capabilities: string[] | null;
+  let createServerOptions: serverModule.CreateServerOptions | undefined;
   logger.info(
-    { transport: "stdio", timeoutMs: STDIO_CAPABILITY_FETCH_TIMEOUT_MS },
+    { transport: "stdio", timeoutMs: capabilityTimeoutMs },
     "capability.fetch.stdio_starting",
   );
   flushLogsSync();
   try {
-    capabilities = await fetchStdioCapabilities(config);
+    capabilities = await fetchStdioCapabilities(config, capabilityTimeoutMs);
   } catch (err) {
-    if (
-      !(err instanceof CredentialResolutionError) ||
-      err.code !== "capability_upstream_unavailable"
+    if (err instanceof StdioCapabilityDeadlineError) {
+      logger.warn(
+        {
+          code: err.code,
+          reason: "stdio_bootstrap_deadline",
+          deadlineMs: err.deadlineMs,
+        },
+        "capability.fetch.stdio_degraded",
+      );
+      capabilities = [];
+      createServerOptions = { failClosedUnknownCapabilities: true };
+    } else if (
+      err instanceof CredentialResolutionError &&
+      err.code === "capability_upstream_unavailable"
     ) {
+      logger.warn(
+        {
+          code: err.code,
+          reason: "upstream_unavailable",
+        },
+        "capability.fetch.stdio_degraded",
+      );
+      capabilities = null;
+    } else {
       throw err;
     }
-    logger.warn(
-      {
-        code: err.code,
-      },
-      "capability.fetch.stdio_degraded",
-    );
-    capabilities = null;
   }
-  stdioTransport.serveStdio(() => serverModule.createServer(config, capabilities), {
-    onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
-  });
+  stdioTransport.serveStdio(
+    () =>
+      createServerOptions
+        ? serverModule.createServer(config, capabilities, createServerOptions)
+        : serverModule.createServer(config, capabilities),
+    {
+      onerror: (error) => logger.warn({ err: error.message }, "mcp.stdio.error"),
+    },
+  );
 
   logger.info({ transport: "stdio" }, "server.started");
 }
