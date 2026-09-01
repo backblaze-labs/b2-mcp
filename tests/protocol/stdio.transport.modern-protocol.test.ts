@@ -104,6 +104,14 @@ describe("stdio transport (MCP 2026-07-28)", () => {
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
+    let childExited = false;
+    const childExit = once(child, "exit")
+      .then(() => {
+        childExited = true;
+      })
+      .catch(() => {
+        childExited = true;
+      });
 
     const waitForFrame = (id: number) =>
       new Promise<any>((resolve, reject) => {
@@ -113,6 +121,7 @@ describe("stdio transport (MCP 2026-07-28)", () => {
           child.off("exit", onExit);
         };
         const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+          childExited = true;
           cleanup();
           reject(
             new Error(`stdio child exited before response ${id}: ${code ?? signal}\n${stderr}`),
@@ -149,11 +158,17 @@ describe("stdio transport (MCP 2026-07-28)", () => {
       expect(stderr).toContain("stdio_capability_deadline_exceeded");
     } finally {
       child.stdin.end();
-      child.kill("SIGTERM");
-      const timer = setTimeout(() => child.kill("SIGKILL"), 2_000);
-      timer.unref();
-      await once(child, "exit").catch(() => undefined);
-      clearTimeout(timer);
+      const timer = setTimeout(() => {
+        if (!childExited) child.kill("SIGKILL");
+      }, 2_000);
+      try {
+        if (!childExited) {
+          child.kill("SIGTERM");
+          await childExit;
+        }
+      } finally {
+        clearTimeout(timer);
+      }
     }
   });
 
