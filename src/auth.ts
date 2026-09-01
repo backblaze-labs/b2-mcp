@@ -3,6 +3,7 @@
  *
  * @packageDocumentation
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   B2Error,
   type AuthorizeAccountResponse,
@@ -75,9 +76,19 @@ interface DefinitiveBodyReadContext {
   error?: Error;
 }
 
+/** Captured successful SDK response body for post-create recovery. */
+export interface SuccessfulResponseCapture {
+  /** B2 API endpoint whose successful JSON response should be captured. */
+  readonly endpoint: string;
+  /** JSON response body captured before SDK facade validation/redaction continues. */
+  response?: unknown;
+}
+
 type ContextualHttpRequest = HttpRequest & {
   [DEFINITIVE_BODY_READ_CONTEXT]?: DefinitiveBodyReadContext;
 };
+
+const SUCCESSFUL_RESPONSE_CAPTURE = new AsyncLocalStorage<SuccessfulResponseCapture>();
 
 /** Official B2 SDK client plus optional URL guard owned by the auth manager. */
 interface ManagedSdkClient {
@@ -126,6 +137,21 @@ function configuredSdkClientFactoryForTests(): SdkClientFactory | null {
   return sdkClientFactoryForTests;
 }
 
+/**
+ * Runs an SDK operation while capturing a matching successful JSON response.
+ *
+ * @param capture - Mutable capture scope populated by the MCP HTTP transport.
+ * @param operation - SDK operation to execute.
+ *
+ * @returns The SDK operation result.
+ */
+export function runWithSuccessfulResponseCapture<T>(
+  capture: SuccessfulResponseCapture,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return SUCCESSFUL_RESPONSE_CAPTURE.run(capture, operation);
+}
+
 class RequestSignalTransport implements HttpTransport {
   readonly urlGuard: UrlGuard | undefined;
 
@@ -148,9 +174,13 @@ class RequestSignalTransport implements HttpTransport {
       const response = await this.inner.send(
         withDefinitiveBodyReadContext(requestWithSignal, bodyReadContext),
       );
-      return classifyUnknownStatus && endpoint && isSuccessfulResponse(response)
-        ? withUnknownStatusJsonRead(response, endpoint)
-        : response;
+      const classifiedResponse =
+        classifyUnknownStatus && endpoint && isSuccessfulResponse(response)
+          ? withUnknownStatusJsonRead(response, endpoint)
+          : response;
+      return endpoint
+        ? withCapturedSuccessfulJsonRead(classifiedResponse, endpoint)
+        : classifiedResponse;
     } catch (err) {
       const definitiveBodyError = takeDefinitiveBodyReadError(bodyReadContext);
       if (definitiveBodyError) throw definitiveBodyError;
@@ -214,6 +244,15 @@ function isSuccessfulResponse(response: HttpResponse): boolean {
   return response.status >= 200 && response.status < 300;
 }
 
+function cloneJsonPayload<T>(value: T): T {
+  if (value === undefined || value === null) return value;
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+}
+
 function adaptHttpResponse(
   response: HttpResponse,
   overrides: { headers?: Headers; json?: HttpResponse["json"] } = {},
@@ -272,6 +311,20 @@ async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string
 function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): HttpResponse {
   return adaptHttpResponse(response, {
     json: <T>() => readUnknownStatusJson<T>(response, endpoint),
+  });
+}
+
+function withCapturedSuccessfulJsonRead(response: HttpResponse, endpoint: string): HttpResponse {
+  const capture = SUCCESSFUL_RESPONSE_CAPTURE.getStore();
+  if (!capture || capture.endpoint !== endpoint || !isSuccessfulResponse(response)) {
+    return response;
+  }
+  return adaptHttpResponse(response, {
+    json: async <T>() => {
+      const payload = await response.json<T>();
+      capture.response = cloneJsonPayload(payload);
+      return payload;
+    },
   });
 }
 

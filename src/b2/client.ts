@@ -15,13 +15,16 @@ import type {
   ApplicationKey,
   ApplicationKeyId,
   B2Client as SdkB2Client,
+  BucketDefaultRetention as SdkBucketDefaultRetention,
+  BucketDefaultServerSideEncryption as SdkBucketDefaultServerSideEncryption,
+  BucketDefaultServerSideEncryptionSetting as SdkBucketDefaultServerSideEncryptionSetting,
   BucketRetentionPolicy as SdkBucketRetentionPolicy,
   CorsRule as SdkCorsRule,
-  EncryptionSetting as SdkEncryptionSetting,
   BucketInfo,
   BucketId,
   Capability,
   CreateKeyOptions as SdkCreateKeyOptions,
+  EventNotificationCustomHeader,
   EventNotificationRule as SdkEventNotificationRule,
   FileVersion,
   FullApplicationKey,
@@ -51,11 +54,16 @@ import type {
   PartnerAuthorizeResponse,
   PartnerRawRequestOptions,
   Region,
-  ReserveTrialCreateAccountRequestEntry,
+  ReserveTrialCreateAccountRequest,
   ReserveTrialCreateAccountResponse,
 } from "@backblaze-labs/b2-sdk/partner";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
-import { B2AuthManager, createDefaultPartnerClient } from "../auth.js";
+import {
+  B2AuthManager,
+  createDefaultPartnerClient,
+  runWithSuccessfulResponseCapture,
+  type SuccessfulResponseCapture,
+} from "../auth.js";
 import {
   withCircuit,
   withPartnerCircuit as withPartnerApiCircuit,
@@ -618,7 +626,7 @@ export interface PartnerCreateGroupMemberOptions {
 }
 
 /** Single-object request shape accepted by Partner reserve-trial account creation. */
-export type PartnerReserveTrialCreateAccountOptions = ReserveTrialCreateAccountRequestEntry;
+export type PartnerReserveTrialCreateAccountOptions = ReserveTrialCreateAccountRequest;
 
 /** Factory hook for constructing the official Partner SDK client in tests. */
 type PartnerClientFactory = (config: B2Config) => SdkPartnerClient;
@@ -705,24 +713,14 @@ function partnerNestedRecordField(
 }
 
 function validateSecretBearingPartnerResponse<T extends { readonly applicationKey: string }>(
-  response: readonly T[] | T,
+  response: unknown,
   endpoint: string,
   validateResult: (result: Record<string, unknown>, endpoint: string) => void,
-): T[] {
-  const results = Array.isArray(response) ? response : [response];
-  if (results.length === 0) {
-    throw codedError(
-      502,
-      "unexpected_partner_response",
-      `${endpoint} response did not contain any created results.`,
-    );
-  }
-  return results.map((result) => {
-    const record = partnerResponseRecord(result, endpoint);
-    partnerStringField(record, "applicationKey", endpoint);
-    validateResult(record, endpoint);
-    return cloneJsonResponse({ ...result } as T);
-  });
+): T {
+  const record = partnerResponseRecord(response, endpoint);
+  partnerStringField(record, "applicationKey", endpoint);
+  validateResult(record, endpoint);
+  return cloneJsonResponse({ ...(response as T) });
 }
 
 function validateCreateGroupMemberResult(result: Record<string, unknown>, endpoint: string): void {
@@ -740,68 +738,37 @@ function validateReserveTrialCreateAccountResult(
   result: Record<string, unknown>,
   endpoint: string,
 ): void {
-  partnerStringField(result, "accountId", endpoint);
   partnerStringField(result, "applicationKeyId", endpoint);
-  partnerStringField(result, "s3Endpoint", endpoint);
-  partnerStringField(result, "startDate", endpoint);
-  partnerStringField(result, "endDate", endpoint);
-  partnerStringField(result, "email", endpoint);
-  partnerStringField(result, "bucketName", endpoint);
-  partnerStringField(result, "bucketId", endpoint);
 }
 
-type PartnerRawPostJson = (
-  groupsApiUrl: string,
-  authToken: string,
+async function runSecretBearingPartnerCreate<T extends { readonly applicationKey: string }>(
   endpoint: string,
-  body: unknown,
-  options?: PartnerRawRequestOptions,
-) => Promise<unknown>;
-
-function nonRetryingPartnerMutationOptions(
-  options: PartnerRawRequestOptions | undefined,
-): PartnerRawRequestOptions {
-  return {
-    ...(options?.signal !== undefined ? { signal: options.signal } : {}),
-    retry: {
-      ...(options?.retry ?? {}),
-      maxRetries: 0,
-    },
-  };
-}
-
-async function postPartnerJson(
-  client: SdkPartnerClient,
-  groupsApiUrl: string,
-  authToken: string,
-  endpoint: string,
-  body: unknown,
-  options?: PartnerRawRequestOptions,
-): Promise<unknown> {
-  // Temporary boundary over the SDK 0.3.0 private runtime helper. The named
-  // SDK helpers currently encode Partner create/reserve shapes incorrectly; the
-  // unit and SDK-adoption contracts pin this argument order and request body.
-  const postJson = (client.raw as unknown as { postJson?: PartnerRawPostJson }).postJson;
-  if (typeof postJson !== "function") {
-    throw codedError(
-      500,
-      "partner_raw_post_unavailable",
-      "The installed B2 SDK does not expose the raw Partner JSON request boundary.",
-    );
+  operation: () => Promise<unknown>,
+  validateResult: (result: Record<string, unknown>, endpoint: string) => void,
+): Promise<T> {
+  // SDK Partner facades validate/redact after reading the 2xx body. Capture
+  // that body before the facade returns so durable-secret recovery can still
+  // reconcile created resources if facade validation throws.
+  const capture: SuccessfulResponseCapture = { endpoint };
+  let response: unknown;
+  try {
+    response = await runWithSuccessfulResponseCapture(capture, operation);
+  } catch (err) {
+    if (capture.response !== undefined) {
+      throw durableSecretPostCreateFailure(capture.response, err);
+    }
+    throw err;
   }
-  return postJson.call(
-    client.raw,
-    groupsApiUrl,
-    authToken,
-    endpoint,
-    body,
-    nonRetryingPartnerMutationOptions(options),
-  );
+  try {
+    return validateSecretBearingPartnerResponse<T>(response, endpoint, validateResult);
+  } catch (err) {
+    throw durableSecretPostCreateFailure(response, err);
+  }
 }
 
-function reserveTrialCreateAccountRequestEntry(
+function validateReserveTrialCreateAccountRequest(
   request: PartnerReserveTrialCreateAccountOptions,
-): ReserveTrialCreateAccountRequestEntry {
+): PartnerReserveTrialCreateAccountOptions {
   if (Array.isArray(request as unknown)) {
     throw codedError(
       400,
@@ -813,7 +780,7 @@ function reserveTrialCreateAccountRequestEntry(
 }
 
 function toServerSideEncryptionResult(
-  value: BucketInfo["defaultServerSideEncryption"] | null | undefined,
+  value: SdkBucketDefaultServerSideEncryption | null | undefined,
 ): ServerSideEncryptionResult | undefined {
   if (value == null) return undefined;
   const cloned = cloneJsonField(value) as { mode?: unknown; algorithm?: unknown };
@@ -830,7 +797,7 @@ function toServerSideEncryptionResult(
 }
 
 function toBucketRetentionPolicyResult(
-  value: BucketInfo["defaultRetention"] | null | undefined,
+  value: SdkBucketDefaultRetention | null | undefined,
 ): BucketRetentionPolicyResult | undefined {
   if (value == null) return undefined;
   return {
@@ -862,8 +829,28 @@ function toBucketFileLockConfigurationResult(
   };
 }
 
+function bucketReadableValue<T>(
+  value:
+    | T
+    | {
+        readonly isClientAuthorizedToRead?: boolean;
+        readonly value: T | null;
+      }
+    | null
+    | undefined,
+): T | null | undefined {
+  // SDK 0.4's canonical bucket DTO wraps read-protected encryption and
+  // replication fields. The direct-value branch exists only for older
+  // hand-built fixtures and can be removed once those fixtures all use wrappers.
+  if (value == null) return value;
+  if (typeof value === "object" && "value" in value && "isClientAuthorizedToRead" in value) {
+    return value.value;
+  }
+  return value as T;
+}
+
 function toReplicationConfigurationResult(
-  value: BucketInfo["replicationConfiguration"] | null | undefined,
+  value: SdkReplicationConfiguration | null | undefined,
 ): ReplicationConfigurationResult | undefined {
   if (value == null) return undefined;
   return {
@@ -893,6 +880,33 @@ function toReplicationConfigurationResult(
 }
 
 function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
+  const compatibilityValue = value as BucketInfo & {
+    defaultRetention?: SdkBucketDefaultRetention | null;
+    defaultServerSideEncryption?:
+      | SdkBucketDefaultServerSideEncryption
+      | {
+          readonly isClientAuthorizedToRead?: boolean;
+          readonly value: SdkBucketDefaultServerSideEncryption | null;
+        }
+      | null;
+    replicationConfiguration?:
+      | SdkReplicationConfiguration
+      | {
+          readonly isClientAuthorizedToRead?: boolean;
+          readonly value: SdkReplicationConfiguration | null;
+        }
+      | null;
+  };
+  const defaultServerSideEncryption = bucketReadableValue<SdkBucketDefaultServerSideEncryption>(
+    compatibilityValue.defaultServerSideEncryption,
+  );
+  const defaultRetention =
+    compatibilityValue.defaultRetention !== undefined
+      ? compatibilityValue.defaultRetention
+      : value.fileLockConfiguration?.value?.defaultRetention;
+  const replicationConfiguration = bucketReadableValue<SdkReplicationConfiguration>(
+    compatibilityValue.replicationConfiguration,
+  );
   return {
     accountId: String(value.accountId),
     bucketId: String(value.bucketId),
@@ -900,14 +914,24 @@ function toBucketInfoResult(value: BucketInfo): BucketInfoResult {
     bucketType: value.bucketType,
     bucketInfo: cloneJsonField(value.bucketInfo),
     corsRules: cloneJsonField(value.corsRules) as CorsRuleInput[],
-    defaultServerSideEncryption: toServerSideEncryptionResult(value.defaultServerSideEncryption),
+    defaultServerSideEncryption: toServerSideEncryptionResult(defaultServerSideEncryption),
     fileLockConfiguration: toBucketFileLockConfigurationResult(value.fileLockConfiguration),
     lifecycleRules: cloneJsonField(value.lifecycleRules) as LifecycleRuleInput[],
     options: value.options ? [...value.options] : [],
     revision: value.revision,
-    defaultRetention: toBucketRetentionPolicyResult(value.defaultRetention),
-    replicationConfiguration: toReplicationConfigurationResult(value.replicationConfiguration),
+    defaultRetention: toBucketRetentionPolicyResult(defaultRetention),
+    replicationConfiguration: toReplicationConfigurationResult(replicationConfiguration),
   };
+}
+
+function notificationCustomHeadersResult(
+  value: readonly EventNotificationCustomHeader[] | Readonly<Record<string, string>> | undefined,
+): Record<string, string> | undefined {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) {
+    return Object.fromEntries(value.map((header) => [header.name, header.value]));
+  }
+  return { ...(value as Readonly<Record<string, string>>) };
 }
 
 function toNotificationRulesResult(
@@ -929,7 +953,11 @@ function toNotificationRulesResult(
           ? { hmacSha256SigningSecret: rule.targetConfiguration.hmacSha256SigningSecret }
           : {}),
         ...(rule.targetConfiguration.customHeaders !== undefined
-          ? { customHeaders: cloneJsonField(rule.targetConfiguration.customHeaders) }
+          ? {
+              customHeaders: notificationCustomHeadersResult(
+                rule.targetConfiguration.customHeaders,
+              ),
+            }
           : {}),
       },
     })),
@@ -975,7 +1003,23 @@ function normalizeCreateKeyOptions(options: CreateKeyOptions): SdkCreateKeyOptio
   return base;
 }
 
-function toFileVersionResult(value: FileVersion): FileVersionResult {
+type FileVersionSummary = Pick<FileVersion, "fileName" | "contentLength" | "uploadTimestamp">;
+
+type S3FileVersionBindingSource = Pick<
+  FileVersion,
+  | "bucketId"
+  | "contentLength"
+  | "contentType"
+  | "fileId"
+  | "fileInfo"
+  | "fileName"
+  | "uploadTimestamp"
+> & {
+  readonly action: B2S3FileVersionBinding["action"];
+  readonly serverSideEncryption?: FileVersion["serverSideEncryption"] | null;
+};
+
+function toFileVersionResult(value: FileVersionSummary): FileVersionResult {
   return {
     fileName: value.fileName,
     contentLength: value.contentLength,
@@ -983,7 +1027,7 @@ function toFileVersionResult(value: FileVersion): FileVersionResult {
   };
 }
 
-function toS3FileVersionBinding(value: FileVersion): B2S3FileVersionBinding {
+function toS3FileVersionBinding(value: S3FileVersionBindingSource): B2S3FileVersionBinding {
   return {
     fileName: value.fileName,
     fileId: String(value.fileId),
@@ -1189,7 +1233,7 @@ function normalizeLifecycleRule(rule: LifecycleRuleInput): SdkLifecycleRule {
 
 function normalizeSse(
   value: ServerSideEncryptionInput | undefined,
-): SdkEncryptionSetting | undefined {
+): SdkBucketDefaultServerSideEncryptionSetting | undefined {
   if (!value) return undefined;
   if (value.mode === "none") return { mode: "none" };
   return { mode: "SSE-B2", algorithm: value.algorithm ?? "AES256" };
@@ -1292,10 +1336,11 @@ function normalizeUpdateBucketRequest(
 
 function normalizeCustomHeaders(
   value: EventNotificationRuleInput["targetConfiguration"]["customHeaders"],
-): Record<string, string> | undefined {
+): SdkEventNotificationRule["targetConfiguration"]["customHeaders"] {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) return value;
-  return Object.fromEntries(value.map((header) => [header.name, header.value]));
+  if (Array.isArray(value))
+    return value.map((header) => ({ name: header.name, value: header.value }));
+  return Object.entries(value).map(([name, headerValue]) => ({ name, value: headerValue }));
 }
 
 function normalizeEventNotificationRule(
@@ -1857,29 +1902,28 @@ export class B2Client {
    */
   async listGroupMembers(
     options: PartnerListGroupMembersOptions,
-  ): Promise<ListGroupMembersResponse> {
-    return cloneJsonResponse(
-      await this.withPartnerCircuit(
-        { retryOnUnauthorized: true },
-        (client, auth, coordinates, requestOptions) => {
-          validatePartnerAdminAccount(auth, options.adminAccountId);
-          const { groupsApiUrl, authToken, adminAccountId } = coordinates;
-          return client.raw.listGroupMembers(
-            groupsApiUrl,
-            authToken,
-            {
-              adminAccountId,
-              groupId: groupId(options.groupId),
-              ...(options.startEmail !== undefined ? { startEmail: options.startEmail } : {}),
-              ...(options.maxMemberCount !== undefined
-                ? { maxMemberCount: options.maxMemberCount }
-                : {}),
-            },
-            requestOptions,
-          );
-        },
-      ),
+  ): Promise<ListGroupMembersResponse[]> {
+    const response = await this.withPartnerCircuit(
+      { retryOnUnauthorized: true },
+      (client, auth, coordinates, requestOptions) => {
+        validatePartnerAdminAccount(auth, options.adminAccountId);
+        const { groupsApiUrl, authToken, adminAccountId } = coordinates;
+        return client.raw.listGroupMembers(
+          groupsApiUrl,
+          authToken,
+          {
+            adminAccountId,
+            groupId: groupId(options.groupId),
+            ...(options.startEmail !== undefined ? { startEmail: options.startEmail } : {}),
+            ...(options.maxMemberCount !== undefined
+              ? { maxMemberCount: options.maxMemberCount }
+              : {}),
+          },
+          requestOptions,
+        );
+      },
     );
+    return cloneJsonResponse(Array.isArray(response) ? response : [response]);
   }
 
   /**
@@ -1892,35 +1936,23 @@ export class B2Client {
   async createGroupMember(
     options: PartnerCreateGroupMemberOptions,
   ): Promise<CreateGroupMemberResponse> {
-    const response = await this.withPartnerCircuit(
-      { retryOnUnauthorized: false },
-      (client, auth, coordinates, requestOptions) => {
-        validatePartnerAdminAccount(auth, options.adminAccountId);
-        const { groupsApiUrl, authToken, adminAccountId } = coordinates;
-        return postPartnerJson(
-          client,
-          groupsApiUrl,
-          authToken,
-          "b2_create_group_member",
-          {
-            adminAccountId,
-            groupId: groupId(options.groupId),
-            memberEmail: options.memberEmail,
-            ...(options.region !== undefined ? { region: options.region } : {}),
+    return runSecretBearingPartnerCreate<CreateGroupMemberResponse>(
+      "b2_create_group_member",
+      () =>
+        this.withPartnerCircuit(
+          { retryOnUnauthorized: false },
+          (client, auth, _coordinates, requestOptions) => {
+            validatePartnerAdminAccount(auth, options.adminAccountId);
+            return client.createGroupMember({
+              groupId: groupId(options.groupId),
+              memberEmail: options.memberEmail,
+              ...(options.region !== undefined ? { region: options.region } : {}),
+              ...(requestOptions?.signal !== undefined ? { signal: requestOptions.signal } : {}),
+            });
           },
-          requestOptions,
-        );
-      },
+        ),
+      validateCreateGroupMemberResult,
     );
-    try {
-      return validateSecretBearingPartnerResponse<CreateGroupMemberResponse[number]>(
-        response as CreateGroupMemberResponse | CreateGroupMemberResponse[number],
-        "b2_create_group_member",
-        validateCreateGroupMemberResult,
-      );
-    } catch (err) {
-      throw durableSecretPostCreateFailure(response, err);
-    }
   }
 
   /**
@@ -1965,35 +1997,25 @@ export class B2Client {
   async reserveTrialCreateAccount(
     request: PartnerReserveTrialCreateAccountOptions,
   ): Promise<ReserveTrialCreateAccountResponse> {
-    const response = await this.withPartnerCircuit(
-      { retryOnUnauthorized: false },
-      (client, _auth, coordinates, requestOptions) => {
-        const { groupsApiUrl, authToken } = coordinates;
-        const entry = reserveTrialCreateAccountRequestEntry(request);
-        return postPartnerJson(
-          client,
-          groupsApiUrl,
-          authToken,
-          "b2_reserve_trial_create_account",
-          {
-            email: entry.email,
-            term: entry.term,
-            storage: entry.storage,
-            ...(entry.region !== undefined ? { region: entry.region } : {}),
-          },
-          requestOptions,
-        );
-      },
+    const entry = validateReserveTrialCreateAccountRequest(request);
+    return runSecretBearingPartnerCreate<ReserveTrialCreateAccountResponse>(
+      "b2_reserve_trial_create_account",
+      () =>
+        this.withPartnerCircuit(
+          { retryOnUnauthorized: false },
+          (client, _auth, _coordinates, requestOptions) =>
+            client.reserveTrialAccount(
+              {
+                email: entry.email,
+                term: entry.term,
+                storage: entry.storage,
+                ...(entry.region !== undefined ? { region: entry.region } : {}),
+              },
+              requestOptions,
+            ),
+        ),
+      validateReserveTrialCreateAccountResult,
     );
-    try {
-      return validateSecretBearingPartnerResponse<ReserveTrialCreateAccountResponse[number]>(
-        response as ReserveTrialCreateAccountResponse | ReserveTrialCreateAccountResponse[number],
-        "b2_reserve_trial_create_account",
-        validateReserveTrialCreateAccountResult,
-      );
-    } catch (err) {
-      throw durableSecretPostCreateFailure(response, err);
-    }
   }
 
   private getPartnerClient(): SdkPartnerClient {

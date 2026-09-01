@@ -27,7 +27,7 @@ minimumReleaseAgeExclude:
   - '@vercel/vc-native-linux-x64@59.3.0'
   - vercel@59.3.0
   # Time-bounded SDK release-age exception documented in docs/SDK_ADOPTION_CONTRACT.md.
-  - '@backblaze-labs/b2-sdk@0.3.0'
+  - '@backblaze-labs/b2-sdk@0.4.0'
 overrides:
   '@istanbuljs/load-nyc-config>js-yaml': 3.15.1
   '@typescript-eslint/visitor-keys>eslint-visitor-keys': 4.2.1

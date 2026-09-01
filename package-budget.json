@@ -7,23 +7,23 @@
   "reviewedBaseline": {
     "date": "2026-09-01",
     "nodeVersions": ["22.3.0", "24", "26"],
-    "primaryB2Transport": "@backblaze-labs/b2-sdk@0.3.0",
-    "sizeBudgetRationale": "Issues #306 and #308 intentionally add TSDoc to the published TypeScript source tree, increasing package source bytes without changing runtime dependencies. Issue #319 adds horizon-qualified empty-snapshot discovery to insights, growing compiled JS/d.ts source bytes with no new runtime dependencies. Issue #314 adds native no-replay write interruption classification, shared cause-chain helpers, and operator logging for operation_status_unknown, including definitive-status preservation for malformed non-2xx and truncated success bodies with no new runtime dependencies. Issue #332 adds durable-secret fail-safe recovery, Partner response-shape validation, and exact-secret log redaction for newly minted application keys with no new runtime dependencies. Issue #270 adds Streamable HTTP eval coverage plus a standalone HTTP listen-host option so evals can bind loopback-only, increasing CLI/config source and public docs with no new runtime dependencies. The aws-sdk group bump (@aws-sdk/client-s3 and @aws-sdk/s3-request-presigner 3.1103.0 -> 3.1119.0, with @smithy/types realigned 4.16.1 -> 4.17.2 to keep the reviewed command/type boundary on a single version) grows the reviewed AWS transitive graph slightly with no new direct dependencies.",
+    "primaryB2Transport": "@backblaze-labs/b2-sdk@0.4.0",
+    "sizeBudgetRationale": "Issues #306 and #308 intentionally add TSDoc to the published TypeScript source tree, increasing package source bytes without changing runtime dependencies. Issue #319 adds horizon-qualified empty-snapshot discovery to insights, growing compiled JS/d.ts source bytes with no new runtime dependencies. Issue #314 adds native no-replay write interruption classification, shared cause-chain helpers, and operator logging for operation_status_unknown, including definitive-status preservation for malformed non-2xx and truncated success bodies with no new runtime dependencies. Issue #332 adds durable-secret fail-safe recovery, Partner response-shape validation, and exact-secret log redaction for newly minted application keys with no new runtime dependencies. Issue #270 adds Streamable HTTP eval coverage plus a standalone HTTP listen-host option so evals can bind loopback-only, increasing CLI/config source and public docs with no new runtime dependencies. The aws-sdk group bump (@aws-sdk/client-s3 and @aws-sdk/s3-request-presigner 3.1103.0 -> 3.1119.0, with @smithy/types realigned 4.16.1 -> 4.17.2 to keep the reviewed command/type boundary on a single version) grows the reviewed AWS transitive graph slightly with no new direct dependencies. Issue #344 upgrades @backblaze-labs/b2-sdk 0.3.0 -> 0.4.0 so Partner create/reserve tools consume the SDK's single-object durable-secret responses without adding runtime dependencies; review hardening adds Partner successful-response recovery capture, allow-list projections, legacy sink replay, and documented release-age/no-replay evidence.",
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
     "transitiveProductionPackageCount": 38,
-    "packedTarballBytes": 586887,
-    "unpackedPackageBytes": 2661656,
+    "packedTarballBytes": 589942,
+    "unpackedPackageBytes": 2675575,
     "packedEntryCount": 250,
-    "cleanConsumerInstallFootprintBytes": 31478301
+    "cleanConsumerInstallFootprintBytes": 32112001
   },
   "limits": {
     "directProductionDependencyCount": 9,
     "totalProductionPackageCount": 48,
-    "packedTarballBytes": 588000,
-    "unpackedPackageBytes": 2665000,
+    "packedTarballBytes": 589942,
+    "unpackedPackageBytes": 2675575,
     "packedEntryCount": 251,
-    "cleanConsumerInstallFootprintBytes": 31490000
+    "cleanConsumerInstallFootprintBytes": 32112001
   },
   "directProductionDependencies": {
     "@aws-sdk/client-s3": {
@@ -45,9 +45,9 @@
     "@backblaze-labs/b2-sdk": {
       "purpose": "Primary Backblaze B2 transport and public SDK boundary for native B2, Partner/Groups, raw, S3 helper, and simulator-backed tests.",
       "policy": "Must remain a stable npm release pinned exactly in package.json and pnpm-lock.yaml.",
-      "version": "0.3.0",
-      "resolved": "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.3.0.tgz",
-      "integrity": "sha512-ABfrCTV0uN3ADXBgOC6hmMm2n3Mcnz2mnFafC1z1/Hvijv9GKlhaNBmfkY3UiRuVyjgWFCm8f5uiuQyNWFwFAg=="
+      "version": "0.4.0",
+      "resolved": "https://registry.npmjs.org/@backblaze-labs/b2-sdk/-/b2-sdk-0.4.0.tgz",
+      "integrity": "sha512-Xs5dHWF2YNDVaZpumgJAAqy1rFYVw1F8l2ZAsKL36AA6lwpxuqjRHPgwQMX92WiowQLCl5O1bZRjD3pVJA7m+Q=="
     },
     "@smithy/types": {
       "purpose": "Public AWS/Smithy command and streaming-body type boundary for the permanent S3 peer adapter.",

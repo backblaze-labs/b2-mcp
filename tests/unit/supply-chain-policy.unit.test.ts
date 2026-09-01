@@ -107,7 +107,7 @@ describe("supply-chain audit policy", () => {
     const excludedPackage = `@backblaze-labs/b2-sdk@${sdkVersion}`;
     const rootExcludes = pnpmWorkspace.minimumReleaseAgeExclude ?? [];
     const customerHostedExcludes = customerHostedPnpmWorkspace.minimumReleaseAgeExclude ?? [];
-    const exceptionExpiresAt = "2026-09-02T09:00:00.000Z";
+    const exceptionExpiresAt = "2026-09-16T19:00:00.000Z";
 
     expect(rootExcludes).toContain(excludedPackage);
     expect(customerHostedExcludes).toContain(excludedPackage);
@@ -128,7 +128,7 @@ describe("supply-chain audit policy", () => {
     expect(sdkAdoptionContract).toContain("SLSA v1 attestation");
     expect(sdkAdoptionContract).toContain(String(integrity));
     expect(sdkAdoptionContract).toContain(
-      "npm diff --diff=@backblaze-labs/b2-sdk@0.2.0 --diff=@backblaze-labs/b2-sdk@0.3.0 --diff-name-only",
+      "npm diff --diff=@backblaze-labs/b2-sdk@0.3.0 --diff=@backblaze-labs/b2-sdk@0.4.0 --diff-name-only",
     );
     expect(sdkAdoptionContract).toContain("lifecycle script");
   });

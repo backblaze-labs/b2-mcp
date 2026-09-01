@@ -234,7 +234,11 @@ function clientWithTransport(transport: RecordingTransport): B2Client {
   return new B2Client(new B2AuthManager(testConfig));
 }
 
-function partnerClientWithPostJson(postJson: ReturnType<typeof vi.fn>): SdkPartnerClient {
+function partnerClientWithCreateFacades(options: {
+  createGroupMember?: ReturnType<typeof vi.fn>;
+  reserveTrialAccount?: ReturnType<typeof vi.fn>;
+  raw?: Record<string, unknown>;
+}): SdkPartnerClient {
   const partnerAuth = partnerAuthorizeResponse();
   return {
     authorize: vi.fn(async () => partnerAuth),
@@ -242,9 +246,9 @@ function partnerClientWithPostJson(postJson: ReturnType<typeof vi.fn>): SdkPartn
       clear: vi.fn(),
       getAuth: vi.fn(() => null),
     },
-    raw: {
-      postJson,
-    },
+    createGroupMember: options.createGroupMember ?? vi.fn(),
+    reserveTrialAccount: options.reserveTrialAccount ?? vi.fn(),
+    raw: options.raw ?? {},
   } as unknown as SdkPartnerClient;
 }
 
@@ -572,6 +576,52 @@ describe("B2Client native edge branches", () => {
       ]);
     });
 
+    it("unwraps SDK 0.4 bucket read-authorization wrappers", async () => {
+      const replicationConfiguration = {
+        asReplicationSource: {
+          sourceApplicationKeyId: "source-key-id",
+          replicationRules: [
+            {
+              replicationRuleName: "copy-all",
+              destinationBucketId: "dest-bucket-id",
+              fileNamePrefix: "",
+              includeExistingFiles: false,
+              isEnabled: true,
+              priority: 1,
+            },
+          ],
+        },
+        asReplicationDestination: null,
+      };
+      const sdk = {
+        raw: {
+          listBuckets: vi.fn(async () => ({
+            buckets: [
+              bucketInfo({
+                defaultServerSideEncryption: {
+                  isClientAuthorizedToRead: true,
+                  value: { mode: "SSE-B2", algorithm: "AES256" },
+                },
+                replicationConfiguration: {
+                  isClientAuthorizedToRead: true,
+                  value: replicationConfiguration,
+                },
+              }),
+            ],
+          })),
+        },
+      };
+      const { client } = clientWithMockedNativeSdk(sdk);
+
+      const result = await client.listBuckets();
+
+      expect(result.buckets[0]?.defaultServerSideEncryption).toStrictEqual({
+        mode: "SSE-B2",
+        algorithm: "AES256",
+      });
+      expect(result.buckets[0]?.replicationConfiguration).toStrictEqual(replicationConfiguration);
+    });
+
     it("normalizes optional native create and update bucket payload fields", async () => {
       const createBucket = vi.fn(async () => ({
         info: bucketInfo({ bucketName: "created-bucket" }),
@@ -821,7 +871,7 @@ describe("B2Client native edge branches", () => {
               objectNamePrefix: "",
               suspensionReason: "",
               targetConfiguration: expect.objectContaining({
-                customHeaders: { "X-Trace": "trace-id" },
+                customHeaders: [{ name: "X-Trace", value: "trace-id" }],
               }),
             }),
           ],
@@ -1264,7 +1314,7 @@ describe("B2Client native edge branches", () => {
     });
 
     it("posts create-group-member as an object and accepts singleton SDK responses", async () => {
-      const postJson = vi.fn(async () => ({
+      const createGroupMember = vi.fn(async () => ({
         applicationKeyId: "group-member-key-id",
         applicationKey: "B2_MCP_CANARY_SECRET_group_member_singleton",
         groupMember: {
@@ -1276,7 +1326,9 @@ describe("B2Client native edge branches", () => {
           s3Endpoint: "s3.us-west-001.backblazeb2.com",
         },
       }));
-      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      setB2PartnerClientFactoryForTests(() =>
+        partnerClientWithCreateFacades({ createGroupMember }),
+      );
       const client = new B2Client(new B2AuthManager(testConfig));
 
       await expect(
@@ -1286,25 +1338,19 @@ describe("B2Client native edge branches", () => {
           memberEmail: "member@example.com",
           region: "us-west",
         }),
-      ).resolves.toEqual([
+      ).resolves.toEqual(
         expect.objectContaining({
           applicationKeyId: "group-member-key-id",
           applicationKey: "B2_MCP_CANARY_SECRET_group_member_singleton",
         }),
-      ]);
-
-      expect(postJson).toHaveBeenCalledWith(
-        "http://127.0.0.1/partner",
-        "partner-token-xyz",
-        "b2_create_group_member",
-        {
-          adminAccountId: "test-account-123",
-          groupId: "group-1",
-          memberEmail: "member@example.com",
-          region: "us-west",
-        },
-        expect.objectContaining({ retry: expect.objectContaining({ maxRetries: 0 }) }),
       );
+
+      expect(createGroupMember).toHaveBeenCalledWith({
+        groupId: "group-1",
+        memberEmail: "member@example.com",
+        region: "us-west",
+        signal: expect.any(AbortSignal),
+      });
     });
 
     it.each([
@@ -1339,8 +1385,10 @@ describe("B2Client native edge branches", () => {
         },
       ],
     ])("rejects empty Partner create-group-member %s", async (_field, response) => {
-      const postJson = vi.fn(async () => response);
-      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const createGroupMember = vi.fn(async () => response);
+      setB2PartnerClientFactoryForTests(() =>
+        partnerClientWithCreateFacades({ createGroupMember }),
+      );
       const client = new B2Client(new B2AuthManager(testConfig));
 
       await expect(
@@ -1356,7 +1404,7 @@ describe("B2Client native edge branches", () => {
     });
 
     it("posts reserve-trial create as an object and accepts singleton SDK responses", async () => {
-      const postJson = vi.fn(async () => ({
+      const reserveTrialAccount = vi.fn(async () => ({
         accountId: "trial-account-id",
         applicationKeyId: "trial-key-id",
         applicationKey: "B2_MCP_CANARY_SECRET_trial_singleton",
@@ -1367,7 +1415,9 @@ describe("B2Client native edge branches", () => {
         bucketName: "trial-bucket",
         bucketId: "trial-bucket-id",
       }));
-      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      setB2PartnerClientFactoryForTests(() =>
+        partnerClientWithCreateFacades({ reserveTrialAccount }),
+      );
       const client = new B2Client(new B2AuthManager(testConfig));
 
       await expect(
@@ -1377,45 +1427,79 @@ describe("B2Client native edge branches", () => {
           storage: 1,
           region: "us-west",
         }),
-      ).resolves.toEqual([
+      ).resolves.toEqual(
         expect.objectContaining({
           accountId: "trial-account-id",
           applicationKey: "B2_MCP_CANARY_SECRET_trial_singleton",
         }),
-      ]);
+      );
 
-      expect(postJson).toHaveBeenCalledWith(
-        "http://127.0.0.1/partner",
-        "partner-token-xyz",
-        "b2_reserve_trial_create_account",
+      expect(reserveTrialAccount).toHaveBeenCalledWith(
         {
           email: "trial@example.com",
           term: 7,
           storage: 1,
           region: "us-west",
         },
-        expect.objectContaining({ retry: expect.objectContaining({ maxRetries: 0 }) }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
 
-    it("preserves explicit null Partner regions on write request bodies", async () => {
-      const postJson = vi.fn(
-        async (_url: string, _token: string, endpoint: string, _body: unknown) => {
-          if (endpoint === "b2_create_group_member") {
-            return {
-              applicationKeyId: "group-member-key-id",
-              applicationKey: "B2_MCP_CANARY_SECRET_group_member_null_region",
-              groupMember: {
-                accountId: "member-account-id",
-                email: "member@example.com",
-                groupId: "group-1",
-                groupName: "Group 1",
-                region: "us-west",
-                s3Endpoint: "s3.us-west-001.backblazeb2.com",
-              },
-            };
-          }
-          return {
+    it("accepts transport-backed reserve-trial credentials without ancillary metadata", async () => {
+      const transport = new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(200, partnerAuthorizeResponse());
+        }
+        if (endpoint === "b2_reserve_trial_create_account") {
+          return new StaticHttpResponse(200, {
+            applicationKeyId: "trial-key-id",
+            applicationKey: "B2_MCP_CANARY_SECRET_trial_metadata_fallback",
+          });
+        }
+        return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+      });
+      const client = clientWithTransport(transport);
+
+      await expect(
+        client.reserveTrialCreateAccount({
+          email: "trial@example.com",
+          term: 7,
+          storage: 1,
+        }),
+      ).resolves.toEqual({
+        applicationKeyId: "trial-key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_trial_metadata_fallback",
+      });
+      expect(
+        transport.requests.filter(
+          (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+        ),
+      ).toHaveLength(1);
+    });
+
+    it("treats null Partner regions as SDK default-region omission", async () => {
+      const transport = new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(200, partnerAuthorizeResponse());
+        }
+        if (endpoint === "b2_create_group_member") {
+          return new StaticHttpResponse(200, {
+            applicationKeyId: "group-member-key-id",
+            applicationKey: "B2_MCP_CANARY_SECRET_group_member_null_region",
+            groupMember: {
+              accountId: "member-account-id",
+              email: "member@example.com",
+              groupId: "group-1",
+              groupName: "Group 1",
+              region: "us-west",
+              s3Endpoint: "s3.us-west-001.backblazeb2.com",
+            },
+          });
+        }
+        if (endpoint === "b2_reserve_trial_create_account") {
+          return new StaticHttpResponse(200, {
             accountId: "trial-account-id",
             applicationKeyId: "trial-key-id",
             applicationKey: "B2_MCP_CANARY_SECRET_trial_null_region",
@@ -1425,11 +1509,11 @@ describe("B2Client native edge branches", () => {
             email: "trial@example.com",
             bucketName: "trial-bucket",
             bucketId: "trial-bucket-id",
-          };
-        },
-      );
-      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
-      const client = new B2Client(new B2AuthManager(testConfig));
+          });
+        }
+        return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+      });
+      const client = clientWithTransport(transport);
 
       await client.createGroupMember({
         adminAccountId: "test-account-123",
@@ -1444,13 +1528,73 @@ describe("B2Client native edge branches", () => {
         region: null,
       });
 
-      expect(postJson.mock.calls[0]?.[3]).toMatchObject({ region: null });
-      expect(postJson.mock.calls[1]?.[3]).toMatchObject({ region: null });
+      const createRequest = transport.requests.find(
+        (request) => b2EndpointName(request) === "b2_create_group_member",
+      );
+      const reserveRequest = transport.requests.find(
+        (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+      );
+
+      expect(requestJson(createRequest!)).not.toHaveProperty("region");
+      expect(requestJson(reserveRequest!)).not.toHaveProperty("region");
+      expect(createRequest?.retry?.maxRetries).toBe(0);
+      expect(reserveRequest?.retry?.maxRetries).toBe(0);
+      expect(createRequest?.idempotent).toBe(false);
+      expect(reserveRequest?.idempotent).toBe(false);
+    });
+
+    it("does not replay non-idempotent Partner writes after retryable failures", async () => {
+      const transport = new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(200, partnerAuthorizeResponse());
+        }
+        if (
+          endpoint === "b2_create_group_member" ||
+          endpoint === "b2_reserve_trial_create_account"
+        ) {
+          return new StaticHttpResponse(503, {
+            status: 503,
+            code: "service_unavailable",
+            message: "retryable but not replay-safe",
+          });
+        }
+        return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+      });
+      const client = clientWithTransport(transport);
+
+      await expect(
+        client.createGroupMember({
+          adminAccountId: "test-account-123",
+          groupId: "group-1",
+          memberEmail: "member@example.com",
+        }),
+      ).rejects.toBeTruthy();
+      await expect(
+        client.reserveTrialCreateAccount({
+          email: "trial@example.com",
+          term: 7,
+          storage: 1,
+        }),
+      ).rejects.toBeTruthy();
+
+      expect(
+        transport.requests.filter(
+          (request) => b2EndpointName(request) === "b2_create_group_member",
+        ),
+      ).toHaveLength(1);
+      expect(
+        transport.requests.filter(
+          (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+        ),
+      ).toHaveLength(1);
     });
 
     it("rejects reserve-trial account arrays before the Partner POST", async () => {
-      const postJson = vi.fn();
-      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const reserveTrialAccount = vi.fn();
+      setB2PartnerClientFactoryForTests(() =>
+        partnerClientWithCreateFacades({ reserveTrialAccount }),
+      );
       const client = new B2Client(new B2AuthManager(testConfig));
 
       await expect(
@@ -1462,7 +1606,7 @@ describe("B2Client native edge branches", () => {
         status: 400,
         code: "bad_request",
       });
-      expect(postJson).not.toHaveBeenCalled();
+      expect(reserveTrialAccount).not.toHaveBeenCalled();
     });
 
     it("keeps a successful Partner authorization after the starting caller aborts", async () => {

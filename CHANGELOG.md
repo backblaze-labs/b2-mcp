@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and secret-sink contracts.
 
 ### Changed
+- Adopted `@backblaze-labs/b2-sdk@0.4.0`; the Partner durable-secret create and
+  reserve tools now consume the SDK's single-object create/response shape
+  (`reserveTrialAccount` facade), closing the F17 credential-loss and F18
+  array-body defects at the source and removing the array-based repo-side
+  workarounds. (#344)
 - Raised the declared Node engine floor from `22.3.0` to `22.22.2`
   (`engines.node` is now `^22.22.2 || ^24 || ^26`). The floor now matches the
   Node.js version CI already tests and pins (`.nvmrc`/matrix use 22.23.1), and
