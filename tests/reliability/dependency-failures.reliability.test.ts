@@ -13,6 +13,7 @@ import type { OAuthJwtVerifierConfig } from "../../src/oauth-resource-server";
 import { B2S3PeerClient } from "../../src/s3/aws-sdk-adapter";
 import { registerS3BucketTools } from "../../src/s3/buckets";
 import { registerS3ObjectTools } from "../../src/s3/objects";
+import { logger } from "../../src/utils/logger";
 import {
   circuitBreaker,
   resetCircuitBreakersForTests,
@@ -93,6 +94,12 @@ function connectionResetFailure(): Error {
 class MalformedJsonResponse extends StaticHttpResponse {
   async json<T>(): Promise<T> {
     throw new SyntaxError("Malformed JSON from B2 dependency");
+  }
+}
+
+class TimeoutJsonResponse extends StaticHttpResponse {
+  async json<T>(): Promise<T> {
+    throw timeoutFailure();
   }
 }
 
@@ -290,7 +297,7 @@ describe("deterministic dependency failure and recovery suite", () => {
     {
       name: "timeout",
       reply: timeoutFailure(),
-      expected: { status: 500, code: "internal_error" },
+      expected: { status: 504, code: "request_timeout" },
       message: /timed out/i,
     },
     {
@@ -319,6 +326,99 @@ describe("deterministic dependency failure and recovery suite", () => {
     expect(transport.requestsFor("b2_list_buckets")).toHaveLength(1);
   });
 
+  it("reports no-replay native write timeouts as unknown operation status", async () => {
+    const transport = new DeterministicB2NativeFake({ capabilities: ["writeBuckets"] }).respond(
+      "b2_create_bucket",
+      timeoutFailure(),
+    );
+    const tools = registerB2BucketHarness(transport);
+
+    const result = await tools.call("b2_create_bucket", {
+      bucketName: "ambiguous-create-timeout",
+      bucketType: "allPrivate",
+    });
+
+    const text = expectMcpError(result, { status: 409, code: "operation_status_unknown" });
+    expect(text).toContain("may have completed at B2");
+    expect(text).toContain("verify the resource state before retrying");
+    expect(transport.requestsFor("b2_create_bucket")).toHaveLength(1);
+  });
+
+  it("reports no-replay native write socket resets as unknown operation status", async () => {
+    const transport = new DeterministicB2NativeFake({ capabilities: ["writeBuckets"] }).respond(
+      "b2_create_bucket",
+      connectionResetFailure(),
+    );
+    const tools = registerB2BucketHarness(transport);
+
+    const result = await tools.call("b2_create_bucket", {
+      bucketName: "ambiguous-create-reset",
+      bucketType: "allPrivate",
+    });
+
+    const text = expectMcpError(result, { status: 409, code: "operation_status_unknown" });
+    expect(text).toContain("may have completed at B2");
+    expect(text).toContain("verify the resource state before retrying");
+    expect(transport.requestsFor("b2_create_bucket")).toHaveLength(1);
+  });
+
+  it("reports no-replay native write body-read timeouts as unknown operation status", async () => {
+    const transport = new DeterministicB2NativeFake({ capabilities: ["writeBuckets"] }).respond(
+      "b2_create_bucket",
+      new TimeoutJsonResponse(200, {}),
+    );
+    const tools = registerB2BucketHarness(transport);
+
+    const result = await tools.call("b2_create_bucket", {
+      bucketName: "ambiguous-create-body-timeout",
+      bucketType: "allPrivate",
+    });
+
+    const text = expectMcpError(result, { status: 409, code: "operation_status_unknown" });
+    expect(text).toContain("may have completed at B2");
+    expect(text).toContain("verify the resource state before retrying");
+    expect(transport.requestsFor("b2_create_bucket")).toHaveLength(1);
+  });
+
+  it("counts unknown-status native write timeouts toward circuit opening", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const transport = new DeterministicB2NativeFake({ capabilities: ["writeBuckets"] });
+    for (let i = 0; i < 10; i++) {
+      transport.respond("b2_create_bucket", timeoutFailure());
+    }
+    const tools = registerB2BucketHarness(transport);
+
+    try {
+      for (let i = 0; i < 10; i++) {
+        const result = await tools.call("b2_create_bucket", {
+          bucketName: `ambiguous-create-${i}`,
+          bucketType: "allPrivate",
+        });
+        expectMcpError(result, { status: 409, code: "operation_status_unknown" });
+      }
+
+      expect(circuitBreaker.opened).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          endpoint: "b2_create_bucket",
+          status: 409,
+          code: "operation_status_unknown",
+        }),
+        "native.write.outcome_unknown",
+      );
+      expect(warnSpy.mock.calls.some((call) => call[0] === "circuit.open")).toBe(true);
+
+      const shortCircuited = await tools.call("b2_create_bucket", {
+        bucketName: "ambiguous-create-short-circuit",
+        bucketType: "allPrivate",
+      });
+      expectMcpError(shortCircuited, { status: 500, code: "EOPENBREAKER" });
+      expect(transport.requestsFor("b2_create_bucket")).toHaveLength(10);
+    } finally {
+      circuitBreaker.close();
+    }
+  });
+
   it.each([
     {
       name: "429",
@@ -339,7 +439,7 @@ describe("deterministic dependency failure and recovery suite", () => {
       reply: () => {
         throw timeoutFailure();
       },
-      expected: { status: 500, code: "TimeoutError" },
+      expected: { status: 504, code: "request_timeout" },
       message: /timed out/i,
       retryDelaysMs: [50, 100],
     },

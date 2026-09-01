@@ -15,8 +15,15 @@ import {
   serializeUnsanitizedStructuredToolResult,
   type StructuredToolResult,
 } from "./result-serializer.js";
+import { findInCauseChain, isAbortError, isTimeoutError } from "./named-error.js";
 
 const SANITIZED_MCP_RESPONSE = Symbol("b2-mcp.sanitizedMcpResponse");
+const REQUEST_TIMEOUT_STATUS = 504;
+const REQUEST_TIMEOUT_CODE = "request_timeout";
+const REQUEST_ABORTED_STATUS = 499;
+const REQUEST_ABORTED_CODE = "request_aborted";
+const OPERATION_STATUS_UNKNOWN_STATUS = 409;
+const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
 
 /** Normalized provider error shape used by MCP tool responses and audit logs. */
 export interface B2ApiError {
@@ -67,6 +74,30 @@ export function badRequest(message: string): never {
   throw badRequestError(message);
 }
 
+/**
+ * Build an error for a B2 mutation whose final provider state is unknown.
+ *
+ * @param operation - B2 or Partner API endpoint name whose result is ambiguous.
+ * @param cause - Timeout, abort, or transport error that hid the final response.
+ *
+ * @returns An Error carrying status 409 and code `operation_status_unknown`.
+ */
+export function operationStatusUnknownError(operation: string, cause: unknown): Error & B2ApiError {
+  const causeMessage =
+    cause instanceof Error && cause.message ? ` Last local error: ${cause.message}.` : "";
+  const error = codedError(
+    OPERATION_STATUS_UNKNOWN_STATUS,
+    OPERATION_STATUS_UNKNOWN_CODE,
+    `B2 operation ${operation} was interrupted before the MCP server received B2's final response. The operation may have completed at B2; verify the resource state before retrying.${causeMessage}`,
+  );
+  Object.defineProperty(error, "cause", {
+    value: cause,
+    enumerable: false,
+    configurable: true,
+  });
+  return error;
+}
+
 /** Pull a request id out of HTTP response headers (B2 native / S3 proxy variants). */
 function headerRequestId(headers: unknown): string | undefined {
   if (typeof headers !== "object" || headers === null) return undefined;
@@ -95,14 +126,44 @@ function numberOrFallback(value: unknown, fallback: number): number {
   return typeof value === "number" ? value : fallback;
 }
 
+function awsErrorCode(e: Record<string, unknown>): string {
+  return (
+    (typeof e.Code === "string" && e.Code) ||
+    (typeof e.name === "string" && e.name) ||
+    "unknown_error"
+  );
+}
+
+function legacyResponseData(resp: Record<string, unknown>): Record<string, unknown> {
+  return resp.data && typeof resp.data === "object" ? (resp.data as Record<string, unknown>) : {};
+}
+
+function codedErrorFromValue(value: unknown): B2ApiError | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const e = value as Record<string, unknown>;
+  if (typeof e.status === "number" && typeof e.code === "string") {
+    return {
+      status: e.status,
+      code: e.code,
+      message: messageOrFallback(e.message, "An unknown error occurred"),
+      requestId: typeof e.requestId === "string" ? e.requestId : undefined,
+    };
+  }
+  return undefined;
+}
+
 /**
  * Parse an error from a B2 API call and return a structured error object.
  *
- * Handles both error shapes used in this codebase:
+ * Handles the error shapes used in this codebase:
  *   - B2 SDK typed/native errors: `err.status` + `err.code` + `err.requestId`
  *   - S3 / AWS SDK v3:   `err.$metadata.httpStatusCode` + `err.name`/`err.Code`,
  *     with the trace id in `err.$metadata.requestId`.
  *   - Legacy HTTP-client response errors retained for compatibility in tests.
+ *   - Local `TimeoutError` maps to `request_timeout` / HTTP 504.
+ *   - Local `AbortError` maps to `request_aborted` / HTTP 499.
+ *   - Coded errors wrapped in `.cause`, including `operation_status_unknown`
+ *     / HTTP 409 from interrupted no-replay native B2 writes.
  *
  * Reading the AWS SDK shape is what lets us tell a genuine Backblaze 5xx apart
  * from a 4xx (e.g. NoSuchKey) and surface the requestId support needs.
@@ -125,34 +186,83 @@ export function parseB2Error(err: unknown): B2ApiError {
       };
     }
 
-    // AWS SDK v3 error (S3 tools) — has a $metadata object.
-    if (e.$metadata && typeof e.$metadata === "object") {
-      const meta = e.$metadata as Record<string, unknown>;
-      const status = typeof meta.httpStatusCode === "number" ? meta.httpStatusCode : 500;
-      const code =
-        (typeof e.Code === "string" && e.Code) ||
-        (typeof e.name === "string" && e.name) ||
-        "unknown_error";
+    // AWS SDK v3 error (S3 tools) — has a $metadata object. Treat it as
+    // definitive only when it carries a numeric provider status; an incomplete
+    // shape (for example a local TimeoutError decorated with $metadata.requestId
+    // but no httpStatusCode) must fall through to cause classification below so
+    // it is not mislabeled as HTTP 500.
+    const awsMeta =
+      e.$metadata && typeof e.$metadata === "object"
+        ? (e.$metadata as Record<string, unknown>)
+        : undefined;
+    if (awsMeta && typeof awsMeta.httpStatusCode === "number") {
       return {
-        status,
-        code,
+        status: awsMeta.httpStatusCode,
+        code: awsErrorCode(e),
         message: messageOrFallback(e.message, "An unknown error occurred"),
-        requestId: typeof meta.requestId === "string" ? meta.requestId : undefined,
+        requestId: typeof awsMeta.requestId === "string" ? awsMeta.requestId : undefined,
         extendedRequestId:
-          typeof meta.extendedRequestId === "string" ? meta.extendedRequestId : undefined,
+          typeof awsMeta.extendedRequestId === "string" ? awsMeta.extendedRequestId : undefined,
       };
     }
 
-    // Legacy response-style error with a response body.
-    if (e.response && typeof e.response === "object") {
-      const resp = e.response as Record<string, unknown>;
-      const data =
-        resp.data && typeof resp.data === "object" ? (resp.data as Record<string, unknown>) : {};
+    // Legacy response-style error with a response body — definitive only with a
+    // numeric status, otherwise it also falls through to cause classification.
+    const legacyResp =
+      e.response && typeof e.response === "object"
+        ? (e.response as Record<string, unknown>)
+        : undefined;
+    if (legacyResp && typeof legacyResp.status === "number") {
       return {
-        status: numberOrFallback(resp.status, 500),
-        code: stringOrFallback(data.code, "unknown_error"),
-        message: messageOrFallback(data.message, "An unknown error occurred"),
-        requestId: headerRequestId(resp.headers),
+        status: legacyResp.status,
+        code: stringOrFallback(legacyResponseData(legacyResp).code, "unknown_error"),
+        message: messageOrFallback(
+          legacyResponseData(legacyResp).message,
+          "An unknown error occurred",
+        ),
+        requestId: headerRequestId(legacyResp.headers),
+      };
+    }
+
+    const codedCause = findInCauseChain(err, codedErrorFromValue);
+    if (codedCause) return codedCause;
+
+    if (findInCauseChain(err, (value) => (isTimeoutError(value) ? value : undefined))) {
+      return {
+        status: REQUEST_TIMEOUT_STATUS,
+        code: REQUEST_TIMEOUT_CODE,
+        message: messageOrFallback(e.message, "The request timed out"),
+      };
+    }
+    if (findInCauseChain(err, (value) => (isAbortError(value) ? value : undefined))) {
+      return {
+        status: REQUEST_ABORTED_STATUS,
+        code: REQUEST_ABORTED_CODE,
+        message: messageOrFallback(e.message, "The request was aborted"),
+      };
+    }
+
+    // Incomplete AWS/legacy shapes without a numeric status still surface their
+    // provider code and requestId rather than collapsing to internal_error.
+    if (awsMeta) {
+      return {
+        status: 500,
+        code: awsErrorCode(e),
+        message: messageOrFallback(e.message, "An unknown error occurred"),
+        requestId: typeof awsMeta.requestId === "string" ? awsMeta.requestId : undefined,
+        extendedRequestId:
+          typeof awsMeta.extendedRequestId === "string" ? awsMeta.extendedRequestId : undefined,
+      };
+    }
+    if (legacyResp) {
+      return {
+        status: numberOrFallback(legacyResp.status, 500),
+        code: stringOrFallback(legacyResponseData(legacyResp).code, "unknown_error"),
+        message: messageOrFallback(
+          legacyResponseData(legacyResp).message,
+          "An unknown error occurred",
+        ),
+        requestId: headerRequestId(legacyResp.headers),
       };
     }
     // Already a parsed B2 error.

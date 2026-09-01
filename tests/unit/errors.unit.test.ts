@@ -2,11 +2,13 @@ import {
   badRequest,
   parseB2Error,
   formatB2Error,
+  operationStatusUnknownError,
   parseErrorText,
   toolError,
   toolSuccess,
   toolJson,
 } from "../../src/utils/errors";
+import { abortError, timeoutError } from "../../src/utils/named-error";
 import { SECRET_SANITIZER_REDACTION } from "../../src/utils/secret-sanitizer";
 import { runWithResultSerializationOptions } from "../../src/utils/result-serializer";
 import { decodeToon } from "./toon-decoder-helper";
@@ -32,6 +34,73 @@ describe("parseB2Error", () => {
     const parsed = parseB2Error(err);
     expect(parsed.code).toBe("internal_error");
     expect(parsed.message).toBe("Network error");
+  });
+
+  it("classifies local TimeoutError values as request timeouts", () => {
+    const parsed = parseB2Error(timeoutError("HTTP request timed out after 30000 ms"));
+
+    expect(parsed).toMatchObject({
+      status: 504,
+      code: "request_timeout",
+      message: "HTTP request timed out after 30000 ms",
+    });
+  });
+
+  it("classifies local AbortError values as aborted requests", () => {
+    const parsed = parseB2Error(abortError("caller disconnected"));
+
+    expect(parsed).toMatchObject({
+      status: 499,
+      code: "request_aborted",
+      message: "caller disconnected",
+    });
+  });
+
+  it("classifies local timeout causes without reporting an internal fault", () => {
+    const parsed = parseB2Error(
+      Object.assign(new Error("transport failed"), {
+        name: "NetworkError",
+        cause: timeoutError("request deadline expired"),
+      }),
+    );
+
+    expect(parsed).toMatchObject({
+      status: 504,
+      code: "request_timeout",
+      message: "transport failed",
+    });
+  });
+
+  it("builds operation-status-unknown guidance for interrupted native writes", () => {
+    const parsed = parseB2Error(
+      operationStatusUnknownError(
+        "b2_create_bucket",
+        timeoutError("HTTP request timed out after 30000 ms"),
+      ),
+    );
+
+    expect(parsed).toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+    });
+    expect(parsed.message).toContain("may have completed at B2");
+    expect(parsed.message).toContain("verify the resource state before retrying");
+  });
+
+  it("preserves operation-status-unknown errors wrapped by SDK transport errors", () => {
+    const ambiguous = operationStatusUnknownError(
+      "b2_create_bucket",
+      timeoutError("HTTP request timed out after 30000 ms"),
+    );
+    const parsed = parseB2Error(
+      Object.assign(new Error("SDK transport wrapper"), { name: "NetworkError", cause: ambiguous }),
+    );
+
+    expect(parsed).toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+    });
+    expect(parsed.message).toContain("verify the resource state before retrying");
   });
 
   it("should handle unknown error types", () => {
@@ -71,6 +140,38 @@ describe("parseB2Error", () => {
     expect(parsed.status).toBe(500);
     expect(parsed.code).toBe("UnknownError");
     expect(parsed.requestId).toBe("req-500-1");
+  });
+
+  it("classifies an AWS SDK TimeoutError without a status as a request timeout", () => {
+    const err = Object.assign(new Error("connection lost after provider processing"), {
+      name: "TimeoutError",
+      $metadata: { requestId: "req-timeout-1" },
+    });
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(504);
+    expect(parsed.code).toBe("request_timeout");
+  });
+
+  it("classifies an AWS SDK AbortError without a status as a request abort", () => {
+    const err = Object.assign(new Error("caller disconnected"), {
+      name: "AbortError",
+      $metadata: { requestId: "req-abort-1" },
+    });
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(499);
+    expect(parsed.code).toBe("request_aborted");
+  });
+
+  it("keeps an incomplete AWS shape's code and requestId at 500", () => {
+    const err = {
+      name: "ServiceUnavailable",
+      message: "temporary failure",
+      $metadata: { requestId: "req-incomplete-1" },
+    };
+    const parsed = parseB2Error(err);
+    expect(parsed.status).toBe(500);
+    expect(parsed.code).toBe("ServiceUnavailable");
+    expect(parsed.requestId).toBe("req-incomplete-1");
   });
 
   it("prefers err.Code over err.name when both are present", () => {

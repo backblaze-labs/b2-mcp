@@ -1,7 +1,10 @@
 import { B2AuthManager, createMcpHttpTransport } from "../../src/auth";
+import type { HttpResponse } from "@backblaze-labs/b2-sdk";
 import { B2Client } from "../../src/b2/client";
 import { runWithMcpRequestSignal } from "../../src/request-context";
-import { abortError } from "../../src/utils/named-error";
+import { parseB2Error } from "../../src/utils/errors";
+import { logger } from "../../src/utils/logger";
+import { abortError, timeoutError } from "../../src/utils/named-error";
 import { _consumeRetryToken, _resetRetryBudget } from "../../src/utils/retry";
 import type { B2Config } from "../../src/utils/types";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
@@ -50,6 +53,22 @@ function deferred<T>() {
     reject = rej;
   });
   return { promise, resolve, reject };
+}
+
+function domTimeoutError(message: string): unknown {
+  const ctor = (
+    globalThis as typeof globalThis & {
+      DOMException?: new (message?: string, name?: string) => unknown;
+    }
+  ).DOMException;
+  return ctor ? new ctor(message, "TimeoutError") : timeoutError(message);
+}
+
+function nativeJsonResponse(status: number, payload: unknown): HttpResponse {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" },
+  }) as unknown as HttpResponse;
 }
 
 async function waitForRecordedRequests(transport: RecordingTransport, count: number) {
@@ -383,12 +402,21 @@ describe("B2AuthManager", () => {
       );
     });
     const manager = new B2AuthManager(mockConfig);
-    const pending = manager.getAuth();
-    const assertion = expect(pending).rejects.toThrow(/retry budget/i);
+    const result = manager.getAuth().then(
+      () => {
+        throw new Error("Expected getAuth to fail");
+      },
+      (err: unknown) => err,
+    );
 
     await vi.runAllTimersAsync();
 
-    await assertion;
+    const error = await result;
+    expect(parseB2Error(error)).toMatchObject({
+      status: 503,
+      code: "retry_budget_exhausted",
+      message: "B2 retry budget exhausted",
+    });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
@@ -429,6 +457,529 @@ describe("B2AuthManager", () => {
       client.createBucket({ bucketName: "created-on-retry", bucketType: "allPrivate" }),
     ).rejects.toThrow(/lost response/);
     expect(createCalls).toBe(1);
+  });
+
+  it("classifies no-replay native timeout as an unknown operation status", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(() => {
+      throw timeoutError("HTTP request timed out after 30000 ms");
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "b2_create_bucket",
+        status: 409,
+        code: "operation_status_unknown",
+        reasonName: "TimeoutError",
+      }),
+      "native.write.outcome_unknown",
+    );
+    expect(inner.requests).toHaveLength(1);
+    expect(inner.requests[0].retry?.maxRetries).toBe(0);
+  });
+
+  it("classifies prefixed Partner timeouts as an unknown operation status", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(() => {
+      throw timeoutError("HTTP request timed out after 30000 ms");
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "http://127.0.0.1/partner/b2api/v4/b2_create_group_member",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("verify the resource state before retrying"),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        endpoint: "b2_create_group_member",
+        status: 409,
+        code: "operation_status_unknown",
+        reasonName: "TimeoutError",
+      }),
+      "native.write.outcome_unknown",
+    );
+    expect(inner.requests).toHaveLength(1);
+    expect(inner.requests[0].retry?.maxRetries).toBe(0);
+  });
+
+  it.each([
+    ["ECONNRESET code", Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" })],
+    [
+      "UND_ERR_SOCKET cause",
+      Object.assign(new TypeError("fetch failed"), {
+        cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+      }),
+    ],
+    ["socket hang up message", new Error("socket hang up")],
+    ["post-dispatch AbortError", abortError("connection aborted mid-flight")],
+  ])("classifies no-replay native %s as an unknown operation status", async (_name, failure) => {
+    const inner = new RecordingTransport(() => {
+      throw failure;
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("verify the resource state before retrying"),
+    });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("adapts successful native Response bodies without brand errors", async () => {
+    const inner = new RecordingTransport(() =>
+      nativeJsonResponse(200, { bucketId: "bucket-response-brand" }),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ bucketId: "bucket-response-brand" });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("does not read lazy SDK response bodies while adapting JSON wrappers", async () => {
+    let bodyAccesses = 0;
+    const lazyBodyResponse: HttpResponse = {
+      status: 200,
+      headers: new Headers(),
+      get body(): HttpResponse["body"] {
+        bodyAccesses++;
+        throw new Error("body getter accessed before stream use");
+      },
+      async json<T>(): Promise<T> {
+        return { bucketId: "lazy-body" } as T;
+      },
+      async text(): Promise<string> {
+        return JSON.stringify({ bucketId: "lazy-body" });
+      },
+      async arrayBuffer(): Promise<ArrayBuffer> {
+        return new TextEncoder().encode(await this.text()).buffer as ArrayBuffer;
+      },
+    };
+    const inner = new RecordingTransport(() => lazyBodyResponse);
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(bodyAccesses).toBe(0);
+    await expect(response.json()).resolves.toEqual({ bucketId: "lazy-body" });
+    expect(bodyAccesses).toBe(0);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("classifies no-replay native body-read timeout as an unknown operation status", async () => {
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw timeoutError("HTTP request timed out after 30000 ms");
+          }
+        })(200, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    await expect(response.json()).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("classifies no-replay native truncated success body as unknown status", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw new SyntaxError("Unexpected end of JSON input");
+          }
+        })(200, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    await expect(response.json()).rejects.toMatchObject({
+      status: 409,
+      code: "operation_status_unknown",
+      message: expect.stringContaining("may have completed at B2"),
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(true);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("adapts non-2xx native Response bodies without brand errors", async () => {
+    const inner = new RecordingTransport(() =>
+      nativeJsonResponse(400, { status: 400, code: "bad_request", message: "bad bucket request" }),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "bad_request",
+      message: "bad bucket request",
+    });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("does not reclassify provider errors with closed-connection text", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(() =>
+      nativeJsonResponse(400, {
+        status: 400,
+        code: "bad_request",
+        message: "provider says connection closed is invalid here",
+      }),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "bad_request",
+      message: "provider says connection closed is invalid here",
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("keeps no-replay native error-response body timeouts definitive", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw domTimeoutError("HTTP request timed out after 30000 ms");
+          }
+        })(400, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: "HTTP 400 response body could not be read",
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("keeps no-replay native malformed error bodies definitive", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw new SyntaxError("Unexpected end of JSON input");
+          }
+        })(400, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: "HTTP 400 response body could not be read",
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("keeps no-replay native error status when caller aborts during body read", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const abort = new AbortController();
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            const reason = abortError("caller disconnected during error body read");
+            abort.abort(reason);
+            throw reason;
+          }
+        })(400, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: "HTTP 400 response body could not be read",
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("keeps no-replay native error status when caller aborts before body read", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const abort = new AbortController();
+    let bodyReads = 0;
+    const inner = new RecordingTransport(() => {
+      // Cancel after the transport resolves a definitive 4xx but before the SDK
+      // reads the body, mirroring RetryTransport's post-send signal check.
+      abort.abort(abortError("caller disconnected before body read"));
+      return new (class extends StaticHttpResponse {
+        async json<T>(): Promise<T> {
+          bodyReads++;
+          return {} as T;
+        }
+      })(400, {});
+    });
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: "HTTP 400 response body could not be read",
+    });
+    expect(bodyReads).toBe(0);
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("keeps definitive body statuses per request when a shared signal aborts", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const abort = new AbortController();
+    const allReading = deferred<void>();
+    const statuses = [400, 403];
+    let bodyReads = 0;
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            bodyReads++;
+            if (bodyReads === 2) allReading.resolve();
+            await allReading.promise;
+            const reason = abortError("caller disconnected during shared body reads");
+            if (!abort.signal.aborted) abort.abort(reason);
+            throw reason;
+          }
+        })(statuses.shift() ?? 500, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const results = await Promise.allSettled([
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: '{"bucketName":"first"}',
+        signal: abort.signal,
+      }),
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: '{"bucketName":"second"}',
+        signal: abort.signal,
+      }),
+    ]);
+
+    const errors = results.map((result) => {
+      expect(result.status).toBe("rejected");
+      return (result as PromiseRejectedResult).reason;
+    });
+    expect(errors).toEqual([
+      expect.objectContaining({
+        status: 400,
+        code: "response_body_unavailable",
+      }),
+      expect.objectContaining({
+        status: 403,
+        code: "response_body_unavailable",
+      }),
+    ]);
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
+    expect(inner.requests).toHaveLength(2);
+  });
+
+  it("does not mark already-aborted no-replay native requests as unknown status", async () => {
+    const inner = new RecordingTransport(() => new StaticHttpResponse(200, {}));
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+    const abort = new AbortController();
+    abort.abort(abortError("caller aborted before dispatch"));
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+        signal: abort.signal,
+      }),
+    ).rejects.toMatchObject({
+      name: "AbortError",
+      message: "caller aborted before dispatch",
+    });
+    expect(inner.requests).toHaveLength(0);
   });
 
   it("does not replay deleteKey after a response-lost failure", async () => {

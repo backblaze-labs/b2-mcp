@@ -3,12 +3,15 @@ import {
   withCircuit,
   withPartnerCircuit,
   withReportCircuit,
+  withLongCircuit,
   circuitBreaker,
   partnerCircuitBreaker,
   reportCircuitBreaker,
   isClientError,
 } from "../../src/utils/circuit-breaker";
 import { currentMcpRequestSignal } from "../../src/request-context";
+import { operationStatusUnknownError } from "../../src/utils/errors";
+import { abortError, timeoutError } from "../../src/utils/named-error";
 
 function domAbortError(message = "caller aborted"): Error {
   const DomExceptionCtor = (
@@ -35,6 +38,10 @@ describe("circuit-breaker", () => {
     expect(result).toBe(42);
   });
 
+  it("passes through long transfer results when closed", async () => {
+    await expect(withLongCircuit(async () => "ok")).resolves.toBe("ok");
+  });
+
   it("propagates errors from the wrapped function", async () => {
     await expect(
       withCircuit(async () => {
@@ -55,6 +62,83 @@ describe("circuit-breaker", () => {
     expect(isClientError({ response: { status: 429 } })).toBe(false);
     expect(isClientError({ response: { status: 503 } })).toBe(false);
     expect(isClientError({ response: { status: 500 } })).toBe(false);
+  });
+
+  it("counts unknown-status native writes even though they surface as 409", () => {
+    const abortWrapper = new Error("SDK AbortError wrapper");
+    abortWrapper.name = "AbortError";
+    Object.defineProperty(abortWrapper, "cause", {
+      value: operationStatusUnknownError(
+        "b2_create_bucket",
+        timeoutError("HTTP request timed out after 30000 ms"),
+      ),
+      configurable: true,
+    });
+
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          timeoutError("HTTP request timed out after 30000 ms"),
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      isClientError(
+        Object.assign(new Error("SDK transport wrapper"), {
+          cause: operationStatusUnknownError(
+            "b2_create_bucket",
+            timeoutError("HTTP request timed out after 30000 ms"),
+          ),
+        }),
+      ),
+    ).toBe(false);
+    expect(isClientError(abortWrapper)).toBe(false);
+  });
+
+  it("filters caller-abort ambiguity but counts socket-loss ambiguity", () => {
+    // A no-replay write cancelled in flight by the caller surfaces as
+    // operation_status_unknown wrapping an AbortError; it must stay filtered so
+    // client disconnects cannot open the shared circuit.
+    expect(
+      isClientError(operationStatusUnknownError("b2_create_bucket", abortError("caller left"))),
+    ).toBe(true);
+    expect(
+      isClientError(
+        Object.assign(new Error("SDK transport wrapper"), {
+          cause: operationStatusUnknownError("b2_create_bucket", abortError("caller left")),
+        }),
+      ),
+    ).toBe(true);
+    // A caller abort whose message carries socket-like wording still filters.
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          abortError("connection aborted mid-flight"),
+        ),
+      ),
+    ).toBe(true);
+    // Socket-loss ambiguity is provider trouble and still counts.
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+        ),
+      ),
+    ).toBe(false);
+    // A caller abort triggered by a genuine nested socket failure still counts.
+    expect(
+      isClientError(
+        operationStatusUnknownError(
+          "b2_create_bucket",
+          Object.assign(abortError("aborted after socket drop"), {
+            cause: Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+          }),
+        ),
+      ),
+    ).toBe(false);
   });
 
   it("counts non-HTTP errors as failures", () => {

@@ -39,6 +39,7 @@ const SECRET_SINK_PARENT_MODE = 0o700;
 const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 const SECRET_SINK_TAIL_READ_BYTES = 1024 * 1024;
+const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
 
 /**
  * File operations that tests may override indirectly when simulating sink failures.
@@ -1133,6 +1134,7 @@ function releaseSecretSinkClaimBestEffort(
 
 function createErrorHasKnownProviderRejection(err: unknown): boolean {
   if (!err || typeof err !== "object" || !("status" in err)) return false;
+  if ((err as { code?: unknown }).code === OPERATION_STATUS_UNKNOWN_CODE) return false;
   const status = (err as { status?: unknown }).status;
   return typeof status === "number" && status >= 400 && status < 500 && status !== 408;
 }

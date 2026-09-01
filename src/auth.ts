@@ -4,6 +4,7 @@
  * @packageDocumentation
  */
 import {
+  B2Error,
   type AuthorizeAccountResponse,
   deriveAllowedSuffixes,
   FetchTransport,
@@ -17,7 +18,15 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "./request-context.js";
-import { abortError, isAbortError } from "./utils/named-error.js";
+import { codedError, operationStatusUnknownError } from "./utils/errors.js";
+import { logger } from "./utils/logger.js";
+import {
+  abortError,
+  findInCauseChain,
+  isAbortError,
+  isResponseLostTransportError,
+  isTimeoutError,
+} from "./utils/named-error.js";
 import { consumeRetryBudgetToken } from "./utils/retry.js";
 import { isTestRuntime } from "./utils/runtime.js";
 import { B2AuthResponse, B2Config } from "./utils/types.js";
@@ -59,6 +68,16 @@ const NON_IDEMPOTENT_B2_API_ENDPOINTS = new Set([
 ]);
 
 const TOKEN_TTL_MS = 23 * 60 * 60 * 1000;
+const RESPONSE_BODY_UNAVAILABLE_CODE = "response_body_unavailable";
+const DEFINITIVE_BODY_READ_CONTEXT = Symbol("b2-mcp.definitive_body_read_context");
+
+interface DefinitiveBodyReadContext {
+  error?: Error;
+}
+
+type ContextualHttpRequest = HttpRequest & {
+  [DEFINITIVE_BODY_READ_CONTEXT]?: DefinitiveBodyReadContext;
+};
 
 /** Official B2 SDK client plus optional URL guard owned by the auth manager. */
 interface ManagedSdkClient {
@@ -117,9 +136,25 @@ class RequestSignalTransport implements HttpTransport {
   async send(request: HttpRequest): Promise<HttpResponse> {
     const signal = request.signal ?? currentMcpRequestSignal() ?? new AbortController().signal;
     const replaySafeRequest = withOperationRetryPolicy(request);
+    const endpoint = b2ApiEndpointName(replaySafeRequest.url);
+    const startedWithAbortedSignal = signal.aborted;
+    const classifyUnknownStatus =
+      endpoint !== undefined &&
+      NON_IDEMPOTENT_B2_API_ENDPOINTS.has(endpoint) &&
+      !startedWithAbortedSignal;
+    const bodyReadContext: DefinitiveBodyReadContext = {};
+    const requestWithSignal = signal ? { ...replaySafeRequest, signal } : replaySafeRequest;
     try {
-      return await this.inner.send(signal ? { ...replaySafeRequest, signal } : replaySafeRequest);
+      const response = await this.inner.send(
+        withDefinitiveBodyReadContext(requestWithSignal, bodyReadContext),
+      );
+      return classifyUnknownStatus && endpoint && isSuccessfulResponse(response)
+        ? withUnknownStatusJsonRead(response, endpoint)
+        : response;
     } catch (err) {
+      const definitiveBodyError = takeDefinitiveBodyReadError(bodyReadContext);
+      if (definitiveBodyError) throw definitiveBodyError;
+      if (classifyUnknownStatus && endpoint) throwIfUnknownStatusWrite(endpoint, err);
       if (isAbortError(err)) {
         throw sdkAbortException(err instanceof Error ? err.message || "Aborted" : "Aborted");
       }
@@ -131,6 +166,151 @@ class RequestSignalTransport implements HttpTransport {
 function transportUrlGuard(transport: HttpTransport): UrlGuard | undefined {
   const candidate = transport as { urlGuard?: unknown };
   return candidate.urlGuard instanceof UrlGuard ? candidate.urlGuard : undefined;
+}
+
+function unknownStatusInterruption(value: unknown): unknown {
+  if (value instanceof B2Error) return undefined;
+  return isAbortError(value) || isTimeoutError(value) || isResponseLostTransportError(value)
+    ? value
+    : undefined;
+}
+
+function stringField(value: unknown, field: string): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = (value as Record<string, unknown>)[field];
+  return typeof candidate === "string" ? candidate : undefined;
+}
+
+function unknownStatusLogFields(err: unknown): Record<string, string> {
+  const reason = findInCauseChain(err, unknownStatusInterruption);
+  const reasonName = stringField(reason, "name");
+  const reasonCode = stringField(reason, "code");
+  return {
+    ...(reasonName ? { reasonName } : {}),
+    ...(reasonCode ? { reasonCode } : {}),
+  };
+}
+
+function raiseUnknownStatusWrite(endpoint: string, err: unknown): never {
+  const error = operationStatusUnknownError(endpoint, err);
+  logger.warn(
+    {
+      endpoint,
+      status: error.status,
+      code: error.code,
+      ...unknownStatusLogFields(err),
+    },
+    "native.write.outcome_unknown",
+  );
+  throw error;
+}
+
+function throwIfUnknownStatusWrite(endpoint: string, err: unknown): void {
+  if (!findInCauseChain(err, unknownStatusInterruption)) return;
+  raiseUnknownStatusWrite(endpoint, err);
+}
+
+function isSuccessfulResponse(response: HttpResponse): boolean {
+  return response.status >= 200 && response.status < 300;
+}
+
+function adaptHttpResponse(
+  response: HttpResponse,
+  overrides: { headers?: Headers; json?: HttpResponse["json"] } = {},
+): HttpResponse {
+  return {
+    status: response.status,
+    headers: overrides.headers ?? response.headers,
+    get body() {
+      return response.body;
+    },
+    json: overrides.json ?? (<T>() => response.json<T>()),
+    text: () => response.text(),
+    arrayBuffer: () => response.arrayBuffer(),
+  };
+}
+
+function responseBodyUnavailableError(status: number): Error {
+  return codedError(
+    status,
+    RESPONSE_BODY_UNAVAILABLE_CODE,
+    `HTTP ${status} response body could not be read`,
+  );
+}
+
+function withDefinitiveBodyReadContext(
+  request: HttpRequest,
+  context: DefinitiveBodyReadContext,
+): HttpRequest {
+  return {
+    ...request,
+    [DEFINITIVE_BODY_READ_CONTEXT]: context,
+  } as ContextualHttpRequest;
+}
+
+function definitiveBodyReadContext(request: HttpRequest): DefinitiveBodyReadContext | undefined {
+  return (request as ContextualHttpRequest)[DEFINITIVE_BODY_READ_CONTEXT];
+}
+
+function takeDefinitiveBodyReadError(context: DefinitiveBodyReadContext): Error | undefined {
+  const error = context.error;
+  delete context.error;
+  return error;
+}
+
+async function readUnknownStatusJson<T>(response: HttpResponse, endpoint: string): Promise<T> {
+  try {
+    return await response.json<T>();
+  } catch (err) {
+    // This reader is installed only after a 2xx response from a no-replay
+    // mutation, so any body-read failure (including a plain SyntaxError from a
+    // truncated body) leaves the write outcome unknown and unsafe to retry.
+    raiseUnknownStatusWrite(endpoint, err);
+  }
+}
+
+function withUnknownStatusJsonRead(response: HttpResponse, endpoint: string): HttpResponse {
+  return adaptHttpResponse(response, {
+    json: <T>() => readUnknownStatusJson<T>(response, endpoint),
+  });
+}
+
+function withDefinitiveErrorJsonRead(
+  response: HttpResponse,
+  context: DefinitiveBodyReadContext | undefined,
+): HttpResponse {
+  if (isSuccessfulResponse(response)) {
+    if (context) delete context.error;
+    return response;
+  }
+  const fallback = responseBodyUnavailableError(response.status);
+  // Record the definitive non-2xx status before returning the wrapper. The SDK
+  // RetryTransport checks the request signal immediately after inner.send()
+  // resolves and before it reads the body, so a cancellation that wins between
+  // transport resolution and that check would otherwise leave this marker empty
+  // and the outer transport would report operation_status_unknown instead of
+  // the observed status. Cleared once the body is successfully classified.
+  if (context) context.error = fallback;
+  return adaptHttpResponse(response, {
+    json: async <T>() => {
+      try {
+        const body = await response.json<T>();
+        if (context) delete context.error;
+        return body;
+      } catch {
+        // The non-2xx status is already definitive, so any body-read failure
+        // (including a plain SyntaxError from a truncated or malformed body)
+        // preserves that status as response_body_unavailable rather than
+        // regressing to internal_error.
+        if (context) context.error = fallback;
+        return {
+          status: response.status,
+          code: RESPONSE_BODY_UNAVAILABLE_CODE,
+          message: fallback.message,
+        } as T;
+      }
+    },
+  });
 }
 
 /**
@@ -160,8 +340,11 @@ export function createMcpHttpTransport(
 
 function b2ApiEndpointName(rawUrl: string): string | undefined {
   try {
-    const [, root, , endpoint] = new URL(rawUrl).pathname.split("/");
-    return root === "b2api" ? endpoint : undefined;
+    const segments = new URL(rawUrl).pathname.split("/").filter(Boolean);
+    const apiIndex = segments.indexOf("b2api");
+    const version = apiIndex === -1 ? undefined : segments[apiIndex + 1];
+    const endpoint = apiIndex === -1 ? undefined : segments[apiIndex + 2];
+    return version?.startsWith("v") && endpoint ? endpoint : undefined;
   } catch {
     return undefined;
   }
@@ -232,7 +415,15 @@ function withRetryAfterHeader(r: HttpResponse): HttpResponse {
   } else {
     headers.delete(h);
   }
-  return Object.assign(Object.create(r), { headers });
+  return adaptHttpResponse(r, { headers });
+}
+
+function retryBudgetExhaustedError(): B2Error {
+  return new B2Error({
+    status: 503,
+    code: "retry_budget_exhausted",
+    message: "B2 retry budget exhausted",
+  });
 }
 
 class SharedRetryBudgetTransport implements HttpTransport {
@@ -244,16 +435,20 @@ class SharedRetryBudgetTransport implements HttpTransport {
   }
 
   async send(request: HttpRequest): Promise<HttpResponse> {
+    // Reset the per-attempt definitive-status marker so a stale value from an
+    // earlier attempt can never mask this attempt's abort or transport error.
+    const bodyContext = definitiveBodyReadContext(request);
+    if (bodyContext) delete bodyContext.error;
     const next = this.nextAttempt(request);
     if (!next) return this.inner.send(request);
     const { attempts, attempt, key } = next;
     if (attempt > 0 && !consumeRetryBudgetToken()) {
-      throw abortError("B2 retry budget exhausted");
+      throw retryBudgetExhaustedError();
     }
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withRetryAfterHeader(response);
+      return withDefinitiveErrorJsonRead(withRetryAfterHeader(response), bodyContext);
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;

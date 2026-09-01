@@ -1090,6 +1090,45 @@ describe("secret sink file writer", () => {
     expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
   });
 
+  it("keeps the pending claim after operation_status_unknown", async () => {
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const idempotency = durableSecretIdempotency({
+      toolName: "b2_create_key",
+      idempotencyKey: "provider-status-unknown",
+      callerFingerprint: "credential-fingerprint",
+      normalizedInput: { keyName: "provider-status-unknown", capabilities: ["listBuckets"] },
+    });
+    let createCalls = 0;
+
+    await expect(
+      executeDurableSecretOperation({
+        ...durableSecretTestOptions(file, idempotency),
+        create: async () => {
+          createCalls++;
+          throw {
+            status: 409,
+            code: "operation_status_unknown",
+            message: "B2 operation b2_create_key may have completed at B2",
+          };
+        },
+      }),
+    ).rejects.toMatchObject({ status: 409, code: "operation_status_unknown" });
+
+    await expect(
+      executeDurableSecretOperation({
+        ...durableSecretTestOptions(file, idempotency),
+        create: async () => {
+          createCalls++;
+          return { applicationKey: "B2_MCP_CANARY_SECRET_duplicate" };
+        },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_key_pending" });
+
+    expect(createCalls).toBe(1);
+    expect(pendingClaimNames(dir).length).toBeGreaterThan(0);
+  });
+
   it("releases the pending claim after a known provider rejection", async () => {
     const dir = tempDir();
     const file = join(dir, "secrets.jsonl");

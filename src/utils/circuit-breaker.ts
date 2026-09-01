@@ -5,17 +5,67 @@
  */
 import CircuitBreaker from "opossum";
 import { logger } from "./logger.js";
-import { abortError, timeoutError } from "./named-error.js";
+import {
+  abortError,
+  errorCause,
+  findInCauseChain,
+  isAbortError,
+  isResponseLostTransportError,
+  isTimeoutError,
+  timeoutError,
+} from "./named-error.js";
 import { currentMcpRequestSignal, runWithMcpRequestSignal } from "../request-context.js";
 import { isTestRuntime } from "./runtime.js";
 
 /** Default whole-call deadline for metadata/control-plane circuit execution. */
 export const CIRCUIT_TIMEOUT_MS = 150_000;
+const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
 
 function isAbortLikeError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   const e = err as { name?: unknown; code?: unknown };
   return e.name === "AbortError" || e.code === "ABORT_ERR";
+}
+
+function errorCode(err: unknown): string | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const e = err as { code?: unknown; response?: { data?: { code?: unknown } } };
+  return typeof e.code === "string"
+    ? e.code
+    : typeof e.response?.data?.code === "string"
+      ? e.response.data.code
+      : undefined;
+}
+
+function operationStatusUnknownNode(err: unknown): unknown {
+  return findInCauseChain(err, (value) =>
+    errorCode(value) === OPERATION_STATUS_UNKNOWN_CODE ? value : undefined,
+  );
+}
+
+/**
+ * Whether an `operation_status_unknown` outcome originated from a caller abort
+ * rather than provider timeout or socket loss.
+ *
+ * The unknown-status wrapper carries the originating interruption as its cause.
+ * A timeout or socket loss beneath the wrapper is provider trouble and must
+ * count toward the breaker; only a caller-triggered abort with no timeout or
+ * socket-loss provenance is filtered, so client disconnects during no-replay
+ * writes cannot open the shared circuit.
+ */
+function isCallerAbortAmbiguity(node: unknown): boolean {
+  const cause = errorCause(node);
+  // An AbortError node is never itself a provider interruption, even when its
+  // message happens to match socket-loss wording. Skip response-loss/timeout
+  // matching on the abort node while still traversing its nested cause for a
+  // genuine timeout or socket failure underneath.
+  const hasProviderInterruption = findInCauseChain(cause, (value) =>
+    !isAbortError(value) && (isTimeoutError(value) || isResponseLostTransportError(value))
+      ? value
+      : undefined,
+  );
+  if (hasProviderInterruption) return false;
+  return !!findInCauseChain(cause, (value) => (isAbortError(value) ? value : undefined));
 }
 
 /**
@@ -28,6 +78,12 @@ function isAbortLikeError(err: unknown): boolean {
  * @returns True when the error should be filtered out of breaker failures.
  */
 export function isClientError(err: unknown): boolean {
+  const unknownStatusNode = operationStatusUnknownNode(err);
+  if (unknownStatusNode !== undefined) {
+    // Timeout/socket-loss ambiguity counts as B2 trouble; a caller-triggered
+    // abort behind the ambiguity stays filtered.
+    return isCallerAbortAmbiguity(unknownStatusNode);
+  }
   if (isAbortLikeError(err)) return true;
   if (typeof err !== "object" || err === null) return false;
   const e = err as {
