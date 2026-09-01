@@ -20,7 +20,7 @@
 [![Coverage floors](https://img.shields.io/badge/coverage-S%2094.3%20%7C%20B%2088%20%7C%20F%2097.2%20%7C%20L%2096.6-brightgreen)](docs/TESTING.md)
 [![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-9-blue)](package-budget.json)
 
-A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools.
+A [Model Context Protocol](https://modelcontextprotocol.io) server for [Backblaze B2 Cloud Storage](https://www.backblaze.com/cloud-storage). It lets any MCP-compatible AI client (Claude, and others) operate B2 through a focused, safe set of tools, currently incubating in Backblaze-Labs.
 
 **40 tools, assigned by backing category:**
 
