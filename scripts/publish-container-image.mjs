@@ -1,13 +1,28 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const REQUIRED_PLATFORMS = ["linux/amd64", "linux/arm64"];
 const BUILDKIT_ATTESTATION_TYPE = "attestation-manifest";
+const SIGNATURE_REPOSITORY_SUFFIX = "-signatures";
 const SPDX_PREDICATE_TYPE = "https://spdx.dev/Document";
 const SLSA_PREDICATE_PREFIX = "https://slsa.dev/provenance/";
+const ANONYMOUS_ENV_PASSTHROUGH = [
+  "PATH",
+  "Path",
+  "PATHEXT",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "WINDIR",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+];
 const RETRYABLE_OUTPUT =
   /(?:429|500|502|503|504|denied: retry|EOF|ECONNRESET|ETIMEDOUT|rate limit|timeout|temporary|temporarily|unavailable)/i;
 
@@ -197,7 +212,7 @@ function readDockerBaseImage() {
   return { name, digest, ref: `${name}@${digest}` };
 }
 
-function writeOutputs({ digest, imageRef, summaryRef }) {
+function writeOutputs({ digest, imageRef, summaryRef, signatureRepo }) {
   const outputPath = process.env.GITHUB_OUTPUT;
   if (outputPath) {
     appendFileSync(outputPath, `image-digest=${digest}\n`);
@@ -208,6 +223,7 @@ function writeOutputs({ digest, imageRef, summaryRef }) {
     appendFileSync(summaryPath, "\n## Container image\n\n");
     appendFileSync(summaryPath, `- Image: \`${summaryRef}\`\n`);
     appendFileSync(summaryPath, `- Digest: \`${digest}\`\n`);
+    appendFileSync(summaryPath, `- Signature repository: \`${signatureRepo}\`\n`);
     appendFileSync(summaryPath, `- Platforms: \`${REQUIRED_PLATFORMS.join("`, `")}\`\n`);
   }
 }
@@ -217,9 +233,58 @@ function createTagIfMissing(tagRef, sourceDigestRef) {
   run("docker", ["buildx", "imagetools", "create", "--tag", tagRef, sourceDigestRef]);
 }
 
-function signDigest(registryImage, digest) {
+function resolveSignatureRepository(registryImage) {
+  const expected = `${registryImage}${SIGNATURE_REPOSITORY_SUFFIX}`;
+  const configured = process.env.COSIGN_REPOSITORY?.toLowerCase();
+  if (configured && configured !== expected) {
+    throw new Error(
+      `COSIGN_REPOSITORY must be ${expected} so cosign signature tags do not land in ${registryImage}`,
+    );
+  }
+  return expected;
+}
+
+function cosignEnv({ signatureRepo, sourceEnv = process.env }) {
+  const childEnv = { ...sourceEnv };
+  if (signatureRepo) {
+    childEnv.COSIGN_REPOSITORY = signatureRepo;
+  } else {
+    delete childEnv.COSIGN_REPOSITORY;
+  }
+  return childEnv;
+}
+
+function anonymousEnv(env = {}) {
+  const childEnv = {};
+  for (const name of ANONYMOUS_ENV_PASSTHROUGH) {
+    if (process.env[name]) childEnv[name] = process.env[name];
+  }
+  return { ...childEnv, ...env };
+}
+
+function anonymousRegistryEnv({ signatureRepo }) {
+  const root = mkdtempSync(join(tmpdir(), "b2-mcp-ghcr-anonymous-"));
+  const dockerConfig = join(root, "docker");
+  const home = join(root, "home");
+  const xdgCache = join(root, "xdg-cache");
+  mkdirSync(dockerConfig, { recursive: true });
+  mkdirSync(home, { recursive: true });
+  mkdirSync(xdgCache, { recursive: true });
+  return {
+    root,
+    env: anonymousEnv({
+      DOCKER_CONFIG: dockerConfig,
+      HOME: home,
+      XDG_CACHE_HOME: xdgCache,
+      ...(signatureRepo ? { COSIGN_REPOSITORY: signatureRepo } : {}),
+    }),
+  };
+}
+
+function signDigest({ registryImage, digest, signatureRepo }) {
   run("cosign", ["sign", "--yes", `${registryImage}@${digest}`], {
     attempts: 3,
+    env: cosignEnv({ signatureRepo }),
   });
 }
 
@@ -238,26 +303,103 @@ function trustArgs(githubServerUrl, githubRepository) {
   ];
 }
 
-function verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, githubRepository) {
+function verifyTrustedSignature({
+  registryImage,
+  digest,
+  githubServerUrl,
+  githubRepository,
+  signatureRepo,
+  sourceEnv = process.env,
+}) {
   const ref = `${registryImage}@${digest}`;
   const args = trustArgs(githubServerUrl, githubRepository);
   run("cosign", ["verify", ...args, ref], {
     attempts: 3,
+    capture: true,
+    env: cosignEnv({ signatureRepo, sourceEnv }),
   });
 }
 
+function verifyTrustedExistingDigest({
+  registryImage,
+  digest,
+  githubServerUrl,
+  githubRepository,
+  signatureRepo,
+  sourceEnv = process.env,
+}) {
+  try {
+    verifyTrustedSignature({
+      registryImage,
+      digest,
+      githubServerUrl,
+      githubRepository,
+      signatureRepo,
+      sourceEnv,
+    });
+    return "sibling";
+  } catch (primaryErr) {
+    try {
+      verifyTrustedSignature({
+        registryImage,
+        digest,
+        githubServerUrl,
+        githubRepository,
+        signatureRepo: null,
+        sourceEnv,
+      });
+      console.warn(
+        `container-publish: verified ${registryImage}@${digest} through the legacy image-package cosign signature; migrating signature to ${signatureRepo}`,
+      );
+      return "legacy";
+    } catch (legacyErr) {
+      const primaryMessage = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+      const legacyMessage = legacyErr instanceof Error ? legacyErr.message : String(legacyErr);
+      throw new Error(
+        `trusted cosign verification failed in both ${signatureRepo} and the legacy image package. sibling: ${primaryMessage}; legacy: ${legacyMessage}`,
+      );
+    }
+  }
+}
+
+function verifyAnonymousSignature({
+  registryImage,
+  digest,
+  githubServerUrl,
+  githubRepository,
+  signatureRepo,
+}) {
+  const anonymous = anonymousRegistryEnv({ signatureRepo });
+  try {
+    verifyTrustedSignature({
+      registryImage,
+      digest,
+      githubServerUrl,
+      githubRepository,
+      signatureRepo,
+      sourceEnv: anonymous.env,
+    });
+  } catch (err) {
+    throw new Error(
+      `Anonymous GHCR signature verification failed for ${registryImage}@${digest} with COSIGN_REPOSITORY=${signatureRepo}. Make the ghcr.io signature package public in GitHub Packages, then rerun the publish workflow. ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    rmSync(anonymous.root, { recursive: true, force: true });
+  }
+}
+
 function verifyAnonymousManifestPull(ref) {
-  const dockerConfig = mkdtempSync(join(tmpdir(), "b2-mcp-ghcr-anonymous-"));
+  const anonymous = anonymousRegistryEnv({});
   try {
     inspectImage(ref, {
-      env: { ...process.env, DOCKER_CONFIG: dockerConfig },
+      env: anonymous.env,
     });
   } catch (err) {
     throw new Error(
       `Anonymous GHCR manifest pull failed for ${ref}. Make the ghcr.io package public in GitHub Packages, then rerun the publish workflow. ${err instanceof Error ? err.message : String(err)}`,
     );
   } finally {
-    rmSync(dockerConfig, { recursive: true, force: true });
+    rmSync(anonymous.root, { recursive: true, force: true });
   }
 }
 
@@ -270,6 +412,7 @@ function finishExistingImage({
   registryImage,
   githubServerUrl,
   githubRepository,
+  signatureRepo,
   summaryRef,
   message,
 }) {
@@ -279,11 +422,32 @@ function finishExistingImage({
   if (secondaryInfo && manifestDigest(secondaryInfo) !== digest) {
     throw new Error(`${secondaryRef} already exists with a different digest`);
   }
-  verifyTrustedExistingDigest(registryImage, digest, githubServerUrl, githubRepository);
+  const signatureLocation = verifyTrustedExistingDigest({
+    registryImage,
+    digest,
+    githubServerUrl,
+    githubRepository,
+    signatureRepo,
+  });
   requireBuildKitAttestations(primaryInfo, primaryRef, registryImage);
+  if (signatureLocation === "legacy") {
+    signDigest({ registryImage, digest, signatureRepo });
+  }
   createTagIfMissing(secondaryRef, `${registryImage}@${digest}`);
   verifyAnonymousManifestPull(summaryRef);
-  writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef });
+  verifyAnonymousSignature({
+    registryImage,
+    digest,
+    githubServerUrl,
+    githubRepository,
+    signatureRepo,
+  });
+  writeOutputs({
+    digest,
+    imageRef: `${registryImage}@${digest}`,
+    summaryRef,
+    signatureRepo,
+  });
   console.log(message);
   return true;
 }
@@ -299,6 +463,7 @@ function publish() {
   const version = publishTag.replace(/^v/, "");
   const versionRef = `${registryImage}:${version}`;
   const releaseRef = `${registryImage}:${publishTag}`;
+  const signatureRepo = resolveSignatureRepository(registryImage);
   const baseImage = readDockerBaseImage();
   // Stable releases stamp the runtime channel marker into the image; prereleases
   // stay on the `dev` channel by omitting the build arg.
@@ -324,6 +489,7 @@ function publish() {
       registryImage,
       githubServerUrl,
       githubRepository,
+      signatureRepo,
       summaryRef: versionRef,
       message: `${versionRef} already exists for ${checkoutSha}; treated as idempotent`,
     })
@@ -340,6 +506,7 @@ function publish() {
       registryImage,
       githubServerUrl,
       githubRepository,
+      signatureRepo,
       summaryRef: versionRef,
       message: `${releaseRef} already exists for ${checkoutSha}; restored missing version tag`,
     })
@@ -395,9 +562,21 @@ function publish() {
     throw new Error(`${versionRef} and ${releaseRef} resolved to different digests`);
   }
   requireBuildKitAttestations(publishedVersion, versionRef, registryImage);
-  signDigest(registryImage, digest);
+  signDigest({ registryImage, digest, signatureRepo });
   verifyAnonymousManifestPull(versionRef);
-  writeOutputs({ digest, imageRef: `${registryImage}@${digest}`, summaryRef: versionRef });
+  verifyAnonymousSignature({
+    registryImage,
+    digest,
+    githubServerUrl,
+    githubRepository,
+    signatureRepo,
+  });
+  writeOutputs({
+    digest,
+    imageRef: `${registryImage}@${digest}`,
+    summaryRef: versionRef,
+    signatureRepo,
+  });
 }
 
 try {

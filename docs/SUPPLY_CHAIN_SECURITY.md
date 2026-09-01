@@ -232,9 +232,10 @@ The only repository workflow allowed to publish npm packages is
   keyless signing, behind the protected `ghcr-publish` environment;
 - publishes a multi-platform GHCR manifest for `linux/amd64` and `linux/arm64`,
   attaches BuildKit provenance and SBOM attestation manifests, signs the image
-  index digest that contains those manifests with cosign keyless signing, records
-  the image digest and pinned Node base digest in release metadata, and refuses
-  to overwrite an existing version tag whose manifest revision differs from the
+  index digest that contains those manifests with cosign keyless signing in the
+  sibling `ghcr.io/backblaze-labs/b2-mcp-signatures` repository, records the
+  image digest and pinned Node base digest in release metadata, and refuses to
+  overwrite an existing version tag whose manifest revision differs from the
   verified checkout SHA;
 - treats an already-published version tag as idempotent only after verifying the
   existing digest's prior cosign signature from this release workflow and
@@ -242,13 +243,16 @@ The only repository workflow allowed to publish npm packages is
   manifests for each required platform; tag-push and manual rerun paths both use
   the protected `main` workflow identity after the same tag-to-`ci-green`
   validation, so the workflow does not sign a digest based only on
-  caller-controlled OCI annotations; if a first publish dies after pushing tags
-  but before signing, delete the unsigned GHCR package version documented in
-  `RELEASE.md` and rerun the same tag;
-- verifies the pushed version tag through an anonymous manifest inspection before
-  the GitHub Release job can run, so a private first-publish GHCR package fails
-  the workflow until an owner sets the package visibility to Public and reruns
-  the same tag;
+  caller-controlled OCI annotations; existing tags signed before the sibling
+  signature repository existed can still be verified through the legacy
+  image-package signature and are then re-signed into the sibling repository; if
+  a first publish dies after pushing tags but before signing, delete the
+  unsigned GHCR package version documented in `RELEASE.md` and rerun the same
+  tag;
+- verifies the pushed version tag and sibling cosign signature repository
+  anonymously before the GitHub Release job can run, so a private first-publish
+  GHCR package fails the workflow at the visibility gate until an owner sets the
+  relevant package visibility to Public and reruns the same tag;
 - publishes only immutable container tags: the package version without a leading
   `v` and the matching signed release tag; no mutable `latest` tag is produced;
 - uses npm trusted publishing with `id-token: write` and an OIDC preflight;
