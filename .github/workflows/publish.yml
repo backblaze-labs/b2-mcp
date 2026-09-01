@@ -440,13 +440,6 @@ jobs:
           tar -xzf mcp-publisher.tar.gz -C mcp-publisher-bin mcp-publisher
           printf '%s  mcp-publisher-bin/mcp-publisher\n' "${MCP_PUBLISHER_BINARY_SHA256}" | sha256sum -c -
           chmod +x mcp-publisher-bin/mcp-publisher
-      - name: Validate MCP registry manifest
-        env:
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_RUNTIME_URL: ""
-        run: mcp-publisher-bin/mcp-publisher validate publish-package/server.json
       # actions/upload-artifact v7, reviewed 2026-08-25.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

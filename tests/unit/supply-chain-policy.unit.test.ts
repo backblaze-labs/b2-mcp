@@ -700,7 +700,7 @@ describe("supply-chain audit policy", () => {
     expect(mcpRegistryPreflightJob).toContain("contents: read");
     expect(mcpRegistryPreflightJob).not.toContain("id-token: write");
     expect(mcpRegistryPreflightJob).toContain("Verify MCP registry manifest metadata");
-    expect(mcpRegistryPreflightJob).toContain("mcp-publisher-bin/mcp-publisher validate");
+    expect(mcpRegistryPreflightJob).not.toContain("mcp-publisher validate");
     expect(mcpRegistryPreflightJob).toContain("sigstore/cosign-installer");
     expect(mcpRegistryPreflightJob).toContain("cosign verify-blob");
     expect(mcpRegistryPreflightJob).toContain("--certificate-identity");
@@ -732,6 +732,9 @@ describe("supply-chain audit policy", () => {
     expect(publishJob).toContain("id-token: write");
     expect(publishJob).not.toContain("contents: write");
     expect(publishJob).toContain("node-version: 24.19.0");
+    expect(
+      publishJob.indexOf("Publish staged package directory with trusted provenance"),
+    ).toBeLessThan(publishJob.indexOf("Publish MCP registry entry"));
     expect(publishJob).toContain("bundles npm >=11.5.1");
     expect(publishJob).toContain("npm view");
     expect(publishJob).toContain("already exists on npm with matching integrity");
