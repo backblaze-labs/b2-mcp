@@ -142,7 +142,8 @@
     "typescript-eslint": "8.68.0",
     "vercel": "59.7.0",
     "vitest": "^4.1.11",
-    "wrangler": "4.127.0"
+    "wrangler": "4.127.0",
+    "yaml": "^2.9.0"
   },
   "engines": {
     "node": "^22.22.2 || ^24 || ^26"

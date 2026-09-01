@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os";
 import { join } from "path";
 import { spawnSync } from "child_process";
+import { parse as parseYaml } from "yaml";
 
 const root = join(__dirname, "../..");
 
@@ -301,6 +302,66 @@ describe("release scripts", () => {
     expect(result.stdout).toContain(
       `mcp-registry-manifest: verified io.github.backblaze-labs/b2-mcp@${packageJson.version}`,
     );
+  });
+
+  it("keeps smithery.yaml in sync with the server.json env contract", () => {
+    const serverJson = JSON.parse(readFileSync(join(root, "server.json"), "utf8"));
+    const envVars = serverJson.packages[0].environmentVariables as Array<{
+      name: string;
+      isRequired: boolean;
+      isSecret: boolean;
+    }>;
+    const smithery = parseYaml(readFileSync(join(root, "smithery.yaml"), "utf8"));
+
+    // stdio transport, matching the published npm package.
+    expect(smithery.startCommand.type).toBe("stdio");
+
+    const schema = smithery.startCommand.configSchema;
+    const properties = schema.properties as Record<string, { type: string; format?: string }>;
+
+    // Five-variable allowlist: exactly the server.json env contract, no extras.
+    const expectedNames = envVars.map((v) => v.name).sort();
+    expect(Object.keys(properties).sort()).toEqual(expectedNames);
+
+    // Required flags mirror server.json's isRequired.
+    const expectedRequired = envVars
+      .filter((v) => v.isRequired)
+      .map((v) => v.name)
+      .sort();
+    expect([...(schema.required as string[])].sort()).toEqual(expectedRequired);
+
+    // Every secret credential is masked (format: password); non-secrets are not.
+    for (const envVar of envVars) {
+      const property = properties[envVar.name];
+      expect(property).toBeDefined();
+      expect(property.type).toBe("string");
+      if (envVar.isSecret) {
+        expect(property.format).toBe("password");
+      } else {
+        expect(property.format).toBeUndefined();
+      }
+    }
+
+    // The generated command/env mapping launches the npm package and only
+    // forwards the allowlisted, non-empty credentials. The commandFunction is a
+    // trusted, checked-in arrow-expression string from smithery.yaml; wrap it in
+    // `new Function` (not eval) to materialize it for assertion.
+    const commandFunction = new Function(
+      `return (${smithery.startCommand.commandFunction});`,
+    )() as (config: Record<string, string | undefined>) => {
+      command: string;
+      args: string[];
+      env: Record<string, string>;
+    };
+    const launched = commandFunction({
+      B2_APPLICATION_KEY_ID: "id",
+      B2_APPLICATION_KEY: "secret",
+      B2_REGION: "",
+      B2_MASTER_KEY_ID: undefined,
+    });
+    expect(launched.command).toBe("npx");
+    expect(launched.args).toEqual(["-y", "@backblaze-labs/b2-mcp"]);
+    expect(launched.env).toEqual({ B2_APPLICATION_KEY_ID: "id", B2_APPLICATION_KEY: "secret" });
   });
 
   for (const testCase of [
