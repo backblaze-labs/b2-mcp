@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Publish the generated TypeDoc API reference to GitHub Pages from `main`
+  (<https://backblaze-labs.github.io/b2-mcp/>) and link it from the README badge
+  row and Documentation section. (#305)
+- `--host` CLI flag and `B2_HTTP_HOST` environment variable to bind the
+  Streamable HTTP transport to a chosen interface; the eval harness now
+  exercises Claude over both stdio and Streamable HTTP with a transport-parity
+  check. (#348)
 - Documented and exported public option/result helper types needed by the
   strict TypeDoc surface, including auth, OAuth, S3 peer, insight, serializer,
   and secret-sink contracts.
@@ -24,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforce strict TypeDoc validation for public API docs: undocumented modules,
   exported members, and invalid links now fail `pnpm run docs` and the docs
   workflow. (#308)
+- Bumped the AWS SDK group (`@aws-sdk/client-s3`,
+  `@aws-sdk/s3-request-presigner`) `3.1103.0` → `3.1119.0` and realigned
+  `@smithy/types` `4.16.1` → `4.17.2` so the S3 peer adapter's command/type
+  boundary stays on a single version. (#349)
+- The scheduled/dispatch LLM eval workflow now fails loudly when
+  `ANTHROPIC_API_KEY` is missing instead of skipping, since it runs only on the
+  canonical `main` branch. (#347)
 
 ### Fixed
 - Publish GHCR cosign signatures to a sibling signature repository so the main
@@ -32,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bound stdio capability discovery with a tunable 10s bootstrap deadline; local
   deadline expiry now starts with a fail-closed tool surface instead of hanging
   the MCP client handshake. (#320)
+- Hardened Partner group-member creation recovery so a post-create
+  normalization or secret-sink failure ejects the created member instead of
+  leaking it, and aligned the empty-report degradation shape between
+  `b2_usage_growth` and `b2_egress_leaders`; added regression coverage closing
+  the QA F12–F20 error-classification and fault-injection detection gaps. (#345)
 
 ## [0.1.2] - 2026-08-23
 
