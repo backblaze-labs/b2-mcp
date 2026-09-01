@@ -217,7 +217,9 @@ function adaptHttpResponse(
   return {
     status: response.status,
     headers: overrides.headers ?? response.headers,
-    body: response.body,
+    get body() {
+      return response.body;
+    },
     json: overrides.json ?? (<T>() => response.json<T>()),
     text: () => response.text(),
     arrayBuffer: () => response.arrayBuffer(),

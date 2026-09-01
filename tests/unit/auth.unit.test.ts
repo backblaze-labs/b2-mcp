@@ -587,6 +587,45 @@ describe("B2AuthManager", () => {
     expect(inner.requests).toHaveLength(1);
   });
 
+  it("does not read lazy SDK response bodies while adapting JSON wrappers", async () => {
+    let bodyAccesses = 0;
+    const lazyBodyResponse: HttpResponse = {
+      status: 200,
+      headers: new Headers(),
+      get body(): HttpResponse["body"] {
+        bodyAccesses++;
+        throw new Error("body getter accessed before stream use");
+      },
+      async json<T>(): Promise<T> {
+        return { bucketId: "lazy-body" } as T;
+      },
+      async text(): Promise<string> {
+        return JSON.stringify({ bucketId: "lazy-body" });
+      },
+      async arrayBuffer(): Promise<ArrayBuffer> {
+        return new TextEncoder().encode(await this.text()).buffer as ArrayBuffer;
+      },
+    };
+    const inner = new RecordingTransport(() => lazyBodyResponse);
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    const response = await transport.send({
+      url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(bodyAccesses).toBe(0);
+    await expect(response.json()).resolves.toEqual({ bucketId: "lazy-body" });
+    expect(bodyAccesses).toBe(0);
+    expect(inner.requests).toHaveLength(1);
+  });
+
   it("classifies no-replay native body-read timeout as an unknown operation status", async () => {
     const inner = new RecordingTransport(
       () =>
