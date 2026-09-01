@@ -136,7 +136,7 @@ class RequestSignalTransport implements HttpTransport {
       const response = await this.inner.send(
         signal ? { ...replaySafeRequest, signal } : replaySafeRequest,
       );
-      return classifyUnknownStatus && endpoint
+      return classifyUnknownStatus && endpoint && isSuccessfulResponse(response)
         ? withUnknownStatusBodyRead(response, endpoint)
         : response;
     } catch (err) {
@@ -191,6 +191,10 @@ function throwIfUnknownStatusWrite(endpoint: string, err: unknown): void {
   throw error;
 }
 
+function isSuccessfulResponse(response: HttpResponse): boolean {
+  return response.status >= 200 && response.status < 300;
+}
+
 async function wrapUnknownStatusBodyRead<T>(endpoint: string, read: () => Promise<T>): Promise<T> {
   try {
     return await read();
@@ -210,6 +214,50 @@ function withUnknownStatusBodyRead(response: HttpResponse, endpoint: string): Ht
     json: <T>() => wrapUnknownStatusBodyRead(endpoint, () => response.json<T>()),
     text: () => wrapUnknownStatusBodyRead(endpoint, () => response.text()),
     arrayBuffer: () => wrapUnknownStatusBodyRead(endpoint, () => response.arrayBuffer()),
+  };
+}
+
+function responseBodyUnavailablePayload(
+  status: number,
+  err: unknown,
+): {
+  status: number;
+  code: string;
+  message: string;
+} {
+  const detail = err instanceof Error && err.message ? `: ${err.message}` : "";
+  return {
+    status,
+    code: "response_body_unavailable",
+    message: `HTTP ${status} response body could not be read${detail}`,
+  };
+}
+
+async function readDefinitiveErrorJson<T>(
+  response: HttpResponse,
+  read: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    if (findInCauseChain(err, unknownStatusInterruption)) {
+      return responseBodyUnavailablePayload(response.status, err) as T;
+    }
+    throw err;
+  }
+}
+
+function withDefinitiveErrorBodyRead(response: HttpResponse): HttpResponse {
+  if (isSuccessfulResponse(response)) return response;
+  return {
+    status: response.status,
+    headers: response.headers,
+    get body(): HttpResponse["body"] {
+      return response.body;
+    },
+    json: <T>() => readDefinitiveErrorJson(response, () => response.json<T>()),
+    text: () => response.text(),
+    arrayBuffer: () => response.arrayBuffer(),
   };
 }
 
@@ -341,7 +389,7 @@ class SharedRetryBudgetTransport implements HttpTransport {
     try {
       const response = await this.inner.send(request);
       if (!RETRYABLE_BUDGET_STATUS_CODES.has(response.status)) attempts.delete(key);
-      return withRetryAfterHeader(response);
+      return withDefinitiveErrorBodyRead(withRetryAfterHeader(response));
     } catch (err) {
       if (isAbortError(err)) attempts.delete(key);
       throw err;

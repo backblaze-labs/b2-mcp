@@ -54,6 +54,15 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function domTimeoutError(message: string): unknown {
+  const ctor = (
+    globalThis as typeof globalThis & {
+      DOMException?: new (message?: string, name?: string) => unknown;
+    }
+  ).DOMException;
+  return ctor ? new ctor(message, "TimeoutError") : timeoutError(message);
+}
+
 async function waitForRecordedRequests(transport: RecordingTransport, count: number) {
   for (let i = 0; i < 20 && transport.requests.length < count; i++) {
     await Promise.resolve();
@@ -539,6 +548,40 @@ describe("B2AuthManager", () => {
       code: "operation_status_unknown",
       message: expect.stringContaining("may have completed at B2"),
     });
+    expect(inner.requests).toHaveLength(1);
+  });
+
+  it("keeps no-replay native error-response body timeouts definitive", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => undefined as never);
+    const inner = new RecordingTransport(
+      () =>
+        new (class extends StaticHttpResponse {
+          async json<T>(): Promise<T> {
+            throw domTimeoutError("HTTP request timed out after 30000 ms");
+          }
+        })(400, {}),
+    );
+    const transport = createMcpHttpTransport(inner, {
+      maxRetries: 3,
+      initialRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      requestTimeoutMs: 30_000,
+    });
+
+    await expect(
+      transport.send({
+        url: "https://api005.backblazeb2.com/b2api/v3/b2_create_bucket",
+        method: "POST",
+        body: "{}",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "response_body_unavailable",
+      message: expect.stringContaining("HTTP 400 response body could not be read"),
+    });
+    expect(
+      warnSpy.mock.calls.some(([, message]) => message === "native.write.outcome_unknown"),
+    ).toBe(false);
     expect(inner.requests).toHaveLength(1);
   });
 

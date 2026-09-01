@@ -80,6 +80,12 @@ function findInCauseChainInner<T>(
   return cause === undefined ? undefined : findInCauseChainInner(cause, predicate, seen);
 }
 
+function stringProperty(value: unknown, property: string): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const field = (value as Record<string, unknown>)[property];
+  return typeof field === "string" ? field : undefined;
+}
+
 /**
  * Test whether an unknown value is a standard AbortError.
  *
@@ -88,7 +94,7 @@ function findInCauseChainInner<T>(
  * @returns True when the value is an Error named `AbortError`.
  */
 export function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+  return stringProperty(error, "name") === "AbortError";
 }
 
 /**
@@ -99,18 +105,12 @@ export function isAbortError(error: unknown): boolean {
  * @returns True when the value is an Error named `TimeoutError`.
  */
 export function isTimeoutError(error: unknown): boolean {
-  return error instanceof Error && error.name === "TimeoutError";
+  return stringProperty(error, "name") === "TimeoutError";
 }
 
 const RESPONSE_LOST_ERROR_CODES = new Set(["ECONNRESET", "ECONNABORTED", "UND_ERR_SOCKET"]);
 const RESPONSE_LOST_MESSAGE_PATTERN =
   /\b(?:ECONNRESET|ECONNABORTED|UND_ERR_SOCKET)\b|socket hang up|connection (?:reset|aborted|closed)|other side closed|premature close/i;
-
-function stringProperty(value: unknown, property: string): string | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const field = (value as Record<string, unknown>)[property];
-  return typeof field === "string" ? field : undefined;
-}
 
 /**
  * Test whether an unknown value is a response-lost socket interruption.
