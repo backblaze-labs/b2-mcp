@@ -22,7 +22,37 @@ const REGION_VALUES = ["us-east", "us-west", "ca-east", "eu-central"] as const;
 type SecretBearingPartnerResult = { readonly applicationKey: string };
 
 function redactedPartnerResults<T extends SecretBearingPartnerResult>(response: readonly T[]): T[] {
-  return response.map((result) => ({ ...result, applicationKey: APPLICATION_KEY_REDACTED }));
+  const redacted: T[] = [];
+  for (const result of response) {
+    redacted.push({ ...result, applicationKey: APPLICATION_KEY_REDACTED });
+  }
+  return redacted;
+}
+
+function partnerResultEntries(response: unknown): unknown[] {
+  if (!Array.isArray(response)) return [response];
+  const entries: unknown[] = [];
+  for (let index = 0; index < response.length; index += 1) {
+    entries.push(response[index]);
+  }
+  return entries;
+}
+
+function recordValue(record: unknown, key: string): unknown {
+  return record && typeof record === "object"
+    ? (record as Record<string, unknown>)[key]
+    : undefined;
+}
+
+function stringValue(record: unknown, key: string): string | null {
+  const value = recordValue(record, key);
+  return typeof value === "string" ? value : null;
+}
+
+function partnerResultAccountId(result: unknown): string | null {
+  return (
+    stringValue(result, "accountId") ?? stringValue(recordValue(result, "groupMember"), "accountId")
+  );
 }
 
 function activeSecretSink(
@@ -31,15 +61,18 @@ function activeSecretSink(
   return config.secretSink as Extract<B2Config["secretSink"], { mode: "file" | "inline" }>;
 }
 
-function partnerSecretDiagnostics(response: readonly SecretBearingPartnerResult[]) {
+function partnerSecretDiagnostics(response: unknown) {
+  const results = partnerResultEntries(response);
   return {
-    resultCount: response.length,
-    applicationKeyIds: response
-      .map((result) => ("applicationKeyId" in result ? result.applicationKeyId : undefined))
-      .filter((value): value is string => typeof value === "string"),
-    accountIds: response
-      .map((result) => ("accountId" in result ? result.accountId : undefined))
-      .filter((value): value is string => typeof value === "string"),
+    resultCount: results.length,
+    applicationKeyIds: results.flatMap((result) => {
+      const applicationKeyId = stringValue(result, "applicationKeyId");
+      return applicationKeyId === null ? [] : [applicationKeyId];
+    }),
+    accountIds: results.flatMap((result) => {
+      const accountId = partnerResultAccountId(result);
+      return accountId === null ? [] : [accountId];
+    }),
   };
 }
 
@@ -183,10 +216,9 @@ export function registerPartnerTools(
             diagnostics: partnerSecretDiagnostics,
             recoverAfterSinkFailure: async (created) => {
               const accountIds: string[] = [];
-              for (const result of created) {
-                const accountId =
-                  "accountId" in result.groupMember ? String(result.groupMember.accountId) : "";
-                if (!accountId) continue;
+              for (const result of partnerResultEntries(created)) {
+                const accountId = partnerResultAccountId(result);
+                if (accountId === null) continue;
                 accountIds.push(accountId);
                 await client.ejectGroupMember({
                   adminAccountId: args.adminAccountId,

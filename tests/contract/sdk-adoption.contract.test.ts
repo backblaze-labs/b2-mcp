@@ -182,6 +182,10 @@ describe("SDK adoption contract", () => {
     expectMatrixPath("b2_list_group_members", "partner", "PartnerRawClient.listGroupMembers");
     expectMatrixPath("b2_reserve_trial_create_account", "partner", "PartnerRawClient.postJson");
     expect(b2Client).toContain('@backblaze-labs/b2-sdk/partner"');
+    expect(b2Client).toContain("Temporary boundary over the SDK 0.3.0 private runtime helper");
+    expect(b2Client).toMatch(
+      /postJson\.call\(\s*client\.raw,\s*groupsApiUrl,\s*authToken,\s*endpoint,\s*body,/,
+    );
     expect(b2Client).toContain("client.raw.listGroups");
     expect(b2Client).toContain("postPartnerJson");
     expect(b2Client).toContain('"b2_create_group_member"');

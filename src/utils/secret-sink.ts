@@ -22,7 +22,13 @@ import {
   SECURE_APPEND_FILE_MODE,
   secureAppendFileErrorDetail,
 } from "./secure-append-file.js";
-import { sanitizeForMcpOutput } from "./secret-sanitizer.js";
+import {
+  LOG_SANITIZER_FAILURE,
+  currentSanitizerOptions,
+  sanitizeForMcpOutput,
+  sanitizeStructuredLogValue,
+} from "./secret-sanitizer.js";
+import type { SanitizerOptions } from "./secret-sanitizer.js";
 
 /** Default local ledger path for file-mode durable secret storage. */
 export const DEFAULT_SECRET_SINK_PATH = join(homedir(), ".b2-mcp", "secrets.jsonl");
@@ -40,6 +46,13 @@ const HTTP_INLINE_OPT_IN_ENV = "B2_ALLOW_INLINE_SECRETS";
 const STALE_APPEND_LOCK_MS = 5 * 60 * 1000;
 const SECRET_SINK_TAIL_READ_BYTES = 1024 * 1024;
 const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
+const DURABLE_SECRET_VALUE_FIELD_NAMES = new Set([
+  "applicationKey",
+  "appKey",
+  "masterKey",
+  "secretAccessKey",
+]);
+const DURABLE_SECRET_POST_CREATE_RESULT = Symbol("b2-mcp.durableSecretPostCreateResult");
 
 /**
  * File operations that tests may override indirectly when simulating sink failures.
@@ -171,6 +184,71 @@ class SecretSinkCommitAmbiguousError extends Error {
     super(message);
     this.name = "SecretSinkCommitAmbiguousError";
   }
+}
+
+class DurableSecretPostCreateFailure extends Error {
+  readonly [DURABLE_SECRET_POST_CREATE_RESULT]!: true;
+  readonly result!: unknown;
+  readonly cause!: unknown;
+  readonly status!: unknown;
+  readonly code!: unknown;
+
+  constructor(result: unknown, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "DurableSecretPostCreateFailure";
+    const causeRecord =
+      cause && typeof cause === "object" ? (cause as Record<string, unknown>) : {};
+    Object.defineProperties(this, {
+      [DURABLE_SECRET_POST_CREATE_RESULT]: {
+        value: true,
+      },
+      result: {
+        value: result,
+      },
+      cause: {
+        value: cause,
+      },
+      status: {
+        value: causeRecord.status,
+      },
+      code: {
+        value: causeRecord.code,
+      },
+    });
+  }
+}
+
+/**
+ * Wrap a post-2xx provider response failure with the raw created result.
+ *
+ * @remarks
+ * Durable-secret producers use this when the provider already accepted a
+ * non-idempotent create, but local response normalization failed before the
+ * secret-sink layer received a usable result. The sink layer must then run the
+ * same recovery path it would use after projection or ledger-write failure.
+ *
+ * @param result - Raw provider response observed after the create completed.
+ * @param cause - Local normalization or validation failure.
+ *
+ * @returns Error carrying the raw result for fail-safe recovery.
+ */
+export function durableSecretPostCreateFailure(result: unknown, cause: unknown): Error {
+  return new DurableSecretPostCreateFailure(result, cause);
+}
+
+function durableSecretPostCreateResult(err: unknown): { result: unknown; cause: unknown } | null {
+  if (
+    err instanceof DurableSecretPostCreateFailure ||
+    (typeof err === "object" &&
+      err !== null &&
+      (err as { [DURABLE_SECRET_POST_CREATE_RESULT]?: unknown })[
+        DURABLE_SECRET_POST_CREATE_RESULT
+      ] === true)
+  ) {
+    const failure = err as DurableSecretPostCreateFailure;
+    return { result: failure.result, cause: failure.cause };
+  }
+  return null;
 }
 
 function parseSecretSinkMode(raw: string | undefined, transport: "stdio" | "http"): SecretSinkMode {
@@ -1172,6 +1250,115 @@ function durableSecretDiagnostics<T>(
   }
 }
 
+function durableSecretExactValues(value: unknown): string[] {
+  const secrets = new Set<string>();
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (node === null || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    let descriptors: Array<[string, PropertyDescriptor]>;
+    try {
+      descriptors = Object.entries(Object.getOwnPropertyDescriptors(node));
+    } catch {
+      return;
+    }
+    for (const [key, descriptor] of descriptors) {
+      if (!("value" in descriptor)) continue;
+      const fieldValue = descriptor.value;
+      if (DURABLE_SECRET_VALUE_FIELD_NAMES.has(key) && typeof fieldValue === "string") {
+        secrets.add(fieldValue);
+      }
+      visit(fieldValue);
+    }
+  };
+  visit(value);
+  return [...secrets];
+}
+
+function durableSecretSanitizerOptions(result: unknown): SanitizerOptions {
+  const current = currentSanitizerOptions();
+  return {
+    ...current,
+    secrets: [...(current.secrets ?? []), ...durableSecretExactValues(result)],
+  };
+}
+
+function durableSecretLogPayload(result: unknown, payload: Record<string, unknown>) {
+  try {
+    return sanitizeStructuredLogValue(payload, durableSecretSanitizerOptions(result)) as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    return {
+      logSanitizer: LOG_SANITIZER_FAILURE,
+      tool: payload.tool,
+      secretSink: payload.secretSink,
+    };
+  }
+}
+
+async function recoverDurableSecretAfterCreate<T>(
+  result: T,
+  err: unknown,
+  recoverAfterSinkFailure: ((result: T, err: unknown) => Promise<unknown> | unknown) | undefined,
+): Promise<unknown> {
+  const defaultRecovery = { status: "not_configured" };
+  try {
+    return (await recoverAfterSinkFailure?.(result, err)) ?? defaultRecovery;
+  } catch (recoveryErr) {
+    return {
+      status: "failed",
+      error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+    };
+  }
+}
+
+async function failDurableSecretAfterCreate<T>({
+  claim,
+  secretSink,
+  toolName,
+  result,
+  err,
+  diagnostics,
+  recoverAfterSinkFailure,
+  logEvent,
+  code,
+  message,
+}: {
+  claim: SecretSinkClaim;
+  secretSink: Extract<SecretSinkConfig, { mode: "file" }>;
+  toolName: string;
+  result: T;
+  err: unknown;
+  diagnostics?: (result: T) => Record<string, unknown>;
+  recoverAfterSinkFailure?: (result: T, err: unknown) => Promise<unknown> | unknown;
+  logEvent: string;
+  code: string;
+  message: string;
+}): Promise<never> {
+  const recovery = await recoverDurableSecretAfterCreate(result, err, recoverAfterSinkFailure);
+  logger.fatal(
+    durableSecretLogPayload(result, {
+      err,
+      tool: toolName,
+      secretSink: { type: "file", path: secretSink.filePath },
+      minted: durableSecretDiagnostics(diagnostics, result),
+      recovery,
+    }),
+    logEvent,
+  );
+  if (recoveryClearedProviderSideEffect(recovery)) {
+    releaseSecretSinkClaimBestEffort(claim, {
+      tool: toolName,
+      secretSink: { type: "file", path: secretSink.filePath },
+      lockPath: claim.lockPath,
+    });
+  }
+  throw { status: 500, code, message };
+}
+
 /** Secret sink modes that can carry a durable secret result. */
 export type ActiveSecretSinkConfig = SecretSinkFileConfig | SecretSinkInlineConfig;
 
@@ -1185,7 +1372,15 @@ export interface DurableSecretResponseOptions<T> {
   result: T;
   /** Idempotency metadata for replay protection. */
   idempotency: DurableSecretIdempotency;
-  /** Projection used when a file sink stores the secret out of band. */
+  /**
+   * Pure projection used when a file sink stores the secret out of band.
+   *
+   * @remarks
+   * File mode may invoke this once with a synthetic preflight pointer before
+   * the ledger write and again with the committed pointer after the write.
+   * Implementations must not perform side effects and must tolerate pointer
+   * records that are not durable sink entries.
+   */
   projectRedacted: (result: T, pointer: SecretSinkPointer) => unknown;
   /** Projection used when inline mode deliberately returns the secret. */
   projectInline: (result: T, warning: string) => unknown;
@@ -1241,6 +1436,22 @@ export async function executeDurableSecretOperation<T>({
   try {
     result = await create();
   } catch (err) {
+    const postCreate = durableSecretPostCreateResult(err);
+    if (postCreate) {
+      return failDurableSecretAfterCreate({
+        claim,
+        secretSink,
+        toolName,
+        result: postCreate.result as T,
+        err: postCreate.cause,
+        diagnostics,
+        recoverAfterSinkFailure,
+        logEvent: "secret_sink.projection_failed_after_provider_create",
+        code: "secret_sink_projection_failed",
+        message:
+          "B2 created a durable credential, but the MCP server could not build a redacted response before storing the secret. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
+      });
+    }
     if (createErrorHasKnownProviderRejection(err)) {
       releaseSecretSinkClaimBestEffort(claim, {
         tool: toolName,
@@ -1253,38 +1464,19 @@ export async function executeDurableSecretOperation<T>({
   try {
     projectRedacted(result, projectionPreflightPointer(secretSink));
   } catch (err) {
-    let recovery: unknown = { status: "not_configured" };
-    try {
-      recovery = (await recoverAfterSinkFailure?.(result, err)) ?? recovery;
-    } catch (recoveryErr) {
-      recovery = {
-        status: "failed",
-        error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
-      };
-    }
-    logger.fatal(
-      {
-        err,
-        tool: toolName,
-        secretSink: { type: "file", path: secretSink.filePath },
-        minted: durableSecretDiagnostics(diagnostics, result),
-        recovery,
-      },
-      "secret_sink.projection_failed_after_provider_create",
-    );
-    if (recoveryClearedProviderSideEffect(recovery)) {
-      releaseSecretSinkClaimBestEffort(claim, {
-        tool: toolName,
-        secretSink: { type: "file", path: secretSink.filePath },
-        lockPath: claim.lockPath,
-      });
-    }
-    throw {
-      status: 500,
+    return failDurableSecretAfterCreate({
+      claim,
+      secretSink,
+      toolName,
+      result,
+      err,
+      diagnostics,
+      recoverAfterSinkFailure,
+      logEvent: "secret_sink.projection_failed_after_provider_create",
       code: "secret_sink_projection_failed",
       message:
         "B2 created a durable credential, but the MCP server could not build a redacted response before storing the secret. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
-    };
+    });
   }
   let pointer: SecretSinkPointer;
   try {
@@ -1308,38 +1500,19 @@ export async function executeDurableSecretOperation<T>({
           "B2 created a durable credential, but the configured file secret sink could not confirm whether rollback removed the record. The secret was not returned in MCP output. The idempotency claim remains pending for operator reconciliation.",
       };
     }
-    let recovery: unknown = { status: "not_configured" };
-    try {
-      recovery = (await recoverAfterSinkFailure?.(result, err)) ?? recovery;
-    } catch (recoveryErr) {
-      recovery = {
-        status: "failed",
-        error: recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
-      };
-    }
-    logger.fatal(
-      {
-        err,
-        tool: toolName,
-        secretSink: { type: "file", path: secretSink.filePath },
-        minted: durableSecretDiagnostics(diagnostics, result),
-        recovery,
-      },
-      "secret_sink.write_failed_after_provider_create",
-    );
-    if (recoveryClearedProviderSideEffect(recovery)) {
-      releaseSecretSinkClaimBestEffort(claim, {
-        tool: toolName,
-        secretSink: { type: "file", path: secretSink.filePath },
-        lockPath: claim.lockPath,
-      });
-    }
-    throw {
-      status: 500,
+    return failDurableSecretAfterCreate({
+      claim,
+      secretSink,
+      toolName,
+      result,
+      err,
+      diagnostics,
+      recoverAfterSinkFailure,
+      logEvent: "secret_sink.write_failed_after_provider_create",
       code: "secret_sink_write_failed",
       message:
         "B2 created a durable credential, but the configured file secret sink failed before the secret could be stored. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status, then rotate or revoke the created resource.",
-    };
+    });
   }
   try {
     appendSecretSinkIdempotencyIndex(secretSink, toolName, pointer, result, idempotency);

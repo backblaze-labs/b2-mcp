@@ -1350,6 +1350,73 @@ describe("B2Client native edge branches", () => {
       );
     });
 
+    it("preserves explicit null Partner regions on write request bodies", async () => {
+      const postJson = vi.fn(
+        async (_url: string, _token: string, endpoint: string, _body: unknown) => {
+          if (endpoint === "b2_create_group_member") {
+            return {
+              applicationKeyId: "group-member-key-id",
+              applicationKey: "B2_MCP_CANARY_SECRET_group_member_null_region",
+              groupMember: {
+                accountId: "member-account-id",
+                email: "member@example.com",
+                groupId: "group-1",
+                groupName: "Group 1",
+                region: "us-west",
+                s3Endpoint: "s3.us-west-001.backblazeb2.com",
+              },
+            };
+          }
+          return {
+            accountId: "trial-account-id",
+            applicationKeyId: "trial-key-id",
+            applicationKey: "B2_MCP_CANARY_SECRET_trial_null_region",
+            s3Endpoint: "s3.us-west-001.backblazeb2.com",
+            startDate: "2026-01-01",
+            endDate: "2026-01-08",
+            email: "trial@example.com",
+            bucketName: "trial-bucket",
+            bucketId: "trial-bucket-id",
+          };
+        },
+      );
+      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const client = new B2Client(new B2AuthManager(testConfig));
+
+      await client.createGroupMember({
+        adminAccountId: "test-account-123",
+        groupId: "group-1",
+        memberEmail: "member@example.com",
+        region: null,
+      });
+      await client.reserveTrialCreateAccount({
+        email: "trial@example.com",
+        term: 7,
+        storage: 1,
+        region: null,
+      });
+
+      expect(postJson.mock.calls[0]?.[3]).toMatchObject({ region: null });
+      expect(postJson.mock.calls[1]?.[3]).toMatchObject({ region: null });
+    });
+
+    it("rejects reserve-trial account arrays before the Partner POST", async () => {
+      const postJson = vi.fn();
+      setB2PartnerClientFactoryForTests(() => partnerClientWithPostJson(postJson));
+      const client = new B2Client(new B2AuthManager(testConfig));
+
+      await expect(
+        client.reserveTrialCreateAccount([
+          { email: "first@example.com", term: 7, storage: 1 },
+          { email: "second@example.com", term: 7, storage: 1 },
+        ] as never),
+      ).rejects.toMatchObject({
+        status: 400,
+        code: "bad_request",
+      });
+      expect(postJson).not.toHaveBeenCalled();
+    });
+
     it("keeps a successful Partner authorization after the starting caller aborts", async () => {
       const controller = new AbortController();
       controller.abort(new Error("caller stopped"));

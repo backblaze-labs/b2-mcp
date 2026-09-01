@@ -11,11 +11,10 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
-import { registerPartnerTools } from "../../src/b2/partner";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { parseErrorText } from "../../src/utils/errors";
 import { B2AuthManager } from "../../src/auth";
-import { B2Client } from "../../src/b2/client";
+import { B2Client, setB2PartnerClientFactoryForTests } from "../../src/b2/client";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import { logger } from "../../src/utils/logger";
 import { DEFAULT_BOUNDED_WORKER_CONCURRENCY } from "../../src/utils/concurrency";
@@ -69,19 +68,27 @@ function failSecretRecordFsyncOnce(): void {
   });
 }
 
-function registrarHarness() {
-  const tools: Record<string, { execute: (args: any) => Promise<any> }> = {};
+function partnerSdkClientWithRaw(raw: Record<string, unknown>): SdkPartnerClient {
   return {
-    tools,
-    registrar: {
-      registerTool(name: string, _definition: unknown, execute: (args: any) => Promise<any>) {
-        tools[name] = { execute };
+    authorize: vi.fn(async () => ({
+      accountId: "test-account-123",
+      authorizationToken: "partner-token-xyz",
+      apiInfo: {
+        groupsApi: {
+          groupsApiUrl: "http://127.0.0.1/partner",
+          capabilities: ["all"],
+          infoType: "groupsApi",
+        },
       },
-      hasTool(name: string) {
-        return name in tools;
-      },
+      groupsApiUrl: "http://127.0.0.1/partner",
+      groupsCapabilities: ["all"],
+    })),
+    partnerAccountInfo: {
+      clear: vi.fn(),
+      getAuth: vi.fn(() => null),
     },
-  };
+    raw,
+  } as unknown as SdkPartnerClient;
 }
 
 async function seedClient(): Promise<SdkB2Client> {
@@ -176,6 +183,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   setWebhookDnsLookupForTests(null);
   setB2SdkClientFactoryForTests(null);
+  setB2PartnerClientFactoryForTests(null);
   invalidateAuthManagerCache();
   delete process.env.B2_ALLOW_KEY_MGMT_GRANTS;
   delete process.env.B2_ALLOW_UNSCOPED_KEYS;
@@ -2452,10 +2460,10 @@ describe("Partner API tools", () => {
     ).toBe(true);
   });
 
-  it("ejects a created group member if redacted projection fails after account creation", async () => {
+  it("ejects a created group member if post-create response normalization fails", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();
-    const { tools, registrar } = registrarHarness();
+    const secret = "K005PartnerMalformedResponseSecret1234567890";
     const groupMember = {
       accountId: "member-account-projection",
       email: "projection-failure@example.com",
@@ -2464,29 +2472,24 @@ describe("Partner API tools", () => {
       region: "us-west",
       s3Endpoint: "s3.us-west-001.backblazeb2.com",
     };
-    const created = [
-      {
-        applicationKeyId: "projection-key-id",
-        applicationKey: "B2_MCP_CANARY_SECRET_partner_projection",
-        groupMember,
-      },
-    ];
-    Object.defineProperty(created, "map", {
-      value: () => {
-        throw new Error("redaction projection failed");
-      },
-    });
-    const client = {
-      createGroupMember: vi.fn(async () => created),
-      ejectGroupMember: vi.fn(async () => groupMember),
+    const malformedCreated = {
+      applicationKey: secret,
+      groupMember,
     };
-
-    registerPartnerTools(registrar as never, client as never, {} as never, {
+    const postJson = vi.fn(async () => malformedCreated);
+    const ejectGroupMember = vi.fn(async () => groupMember);
+    setB2PartnerClientFactoryForTests(() =>
+      partnerSdkClientWithRaw({
+        postJson,
+        ejectGroupMember,
+      }),
+    );
+    server = createServer({
       ...partnerTestConfig,
       secretSink: { mode: "file", filePath: secretFile },
     });
 
-    const rawResult = await tools.b2_create_group_member.execute({
+    const rawResult = await callTool(server, "b2_create_group_member", {
       adminAccountId: "test-account-123",
       groupId: groupMember.groupId,
       memberEmail: groupMember.email,
@@ -2499,19 +2502,40 @@ describe("Partner API tools", () => {
       code: "secret_sink_projection_failed",
       status: 500,
     });
-    expect(client.ejectGroupMember).toHaveBeenCalledWith({
-      adminAccountId: "test-account-123",
-      groupId: groupMember.groupId,
-      memberAccountId: groupMember.accountId,
+    expect(postJson).toHaveBeenCalledWith(
+      "http://127.0.0.1/partner",
+      "partner-token-xyz",
+      "b2_create_group_member",
+      {
+        adminAccountId: "test-account-123",
+        groupId: groupMember.groupId,
+        memberEmail: groupMember.email,
+      },
+      expect.objectContaining({ retry: expect.objectContaining({ maxRetries: 0 }) }),
+    );
+    expect(ejectGroupMember).toHaveBeenCalledWith(
+      "http://127.0.0.1/partner",
+      "partner-token-xyz",
+      {
+        adminAccountId: "test-account-123",
+        groupId: groupMember.groupId,
+        memberAccountId: groupMember.accountId,
+      },
+      expect.any(Object),
+    );
+    expect(JSON.stringify(rawResult)).not.toContain(secret);
+    expect(existsSync(secretFile) ? readFileSync(secretFile, "utf8") : "").not.toContain(secret);
+    const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
+      minted?: { accountIds?: string[] };
+      recovery?: { status?: string; accountIds?: string[] };
+    };
+    expect(fatalPayload.minted?.accountIds).toEqual([groupMember.accountId]);
+    expect(fatalPayload.recovery).toMatchObject({
+      status: "ejected_group_members",
+      accountIds: [groupMember.accountId],
     });
-    expect(JSON.stringify(rawResult)).not.toContain("B2_MCP_CANARY_SECRET_partner_projection");
-    expect(existsSync(secretFile) ? readFileSync(secretFile, "utf8") : "").not.toContain(
-      "B2_MCP_CANARY_SECRET_partner_projection",
-    );
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
-    expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
-      "secret_sink.projection_failed_after_provider_create",
-    );
   });
 
   it.each([

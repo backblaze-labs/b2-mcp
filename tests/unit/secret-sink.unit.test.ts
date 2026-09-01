@@ -19,6 +19,7 @@ import {
   appendSecretSinkRecord,
   DEFAULT_SECRET_SINK_PATH,
   durableSecretIdempotency,
+  durableSecretPostCreateFailure,
   executeDurableSecretOperation,
   INLINE_SECRET_WARNING,
   resetSecretSinkWarningForTests,
@@ -1996,6 +1997,78 @@ describe("secret sink file writer", () => {
     expect(recoverSpy).toHaveBeenCalledOnce();
     expect(pendingClaimNames(dir)).toHaveLength(0);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("write_failed_after_provider_create");
+  });
+
+  it("redacts newly minted exact secrets from projection and recovery fatal logs", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const secret = "K005_REVIEW_REALISTIC_SECRET_VALUE_1234567890";
+    const idempotency = testIdempotency("projection-recovery-redaction");
+
+    await expect(
+      executeDurableSecretOperation({
+        ...durableSecretTestOptions(file, idempotency, {
+          recoverAfterSinkFailure: () => {
+            throw new Error(`cleanup failed after minting ${secret}`);
+          },
+        }),
+        projectRedacted: () => {
+          throw new Error(`projection failed after minting ${secret}`);
+        },
+        create: async () => ({
+          applicationKeyId: "key-id",
+          applicationKey: secret,
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "secret_sink_projection_failed" });
+
+    const payload = fatalSpy.mock.calls[0]?.[0] as {
+      err?: Error;
+      recovery?: { error?: string };
+    };
+    expect(payload.err?.message).toContain("[redacted]");
+    expect(payload.recovery?.error).toContain("[redacted]");
+    expect(payload.err?.message).not.toContain(secret);
+    expect(payload.recovery?.error).not.toContain(secret);
+  });
+
+  it("runs recovery when create reports post-create normalization failure", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const dir = tempDir();
+    const file = join(dir, "secrets.jsonl");
+    const secret = "K005_POST_CREATE_NORMALIZATION_SECRET_1234567890";
+    const created = {
+      applicationKeyId: "key-id",
+      applicationKey: secret,
+      accountId: "created-account-id",
+    };
+    const recoverSpy = vi.fn().mockReturnValue({ status: "deleted" });
+    const idempotency = testIdempotency("post-create-normalization");
+
+    await expect(
+      executeDurableSecretOperation({
+        ...durableSecretTestOptions(file, idempotency, {
+          diagnostics: (result) => ({ accountId: result.accountId }),
+          recoverAfterSinkFailure: recoverSpy,
+        }),
+        create: async () => {
+          throw durableSecretPostCreateFailure(
+            created,
+            new Error(`normalization failed after minting ${secret}`),
+          );
+        },
+      }),
+    ).rejects.toMatchObject({ code: "secret_sink_projection_failed" });
+
+    const payload = fatalSpy.mock.calls[0]?.[0] as { err?: Error };
+    expect(recoverSpy).toHaveBeenCalledWith(created, expect.any(Error));
+    expect(pendingClaimNames(dir)).toHaveLength(0);
+    expect(payload.err?.message).toContain("[redacted]");
+    expect(payload.err?.message).not.toContain(secret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).toContain(
+      "projection_failed_after_provider_create",
+    );
   });
 
   it("keeps the pending claim when sink failure recovery is inconclusive", async () => {
