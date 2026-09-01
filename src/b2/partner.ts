@@ -215,10 +215,24 @@ export function registerPartnerTools(
             projectInline: (created, warning) => ({ results: created, warning }),
             diagnostics: partnerSecretDiagnostics,
             recoverAfterSinkFailure: async (created) => {
+              const results = partnerResultEntries(created);
               const accountIds: string[] = [];
-              for (const result of partnerResultEntries(created)) {
+              if (results.length === 0) {
+                return {
+                  status: "recovery_incomplete",
+                  reason: "no_recoverable_group_members",
+                  accountIds,
+                };
+              }
+              for (const result of results) {
                 const accountId = partnerResultAccountId(result);
-                if (accountId === null) continue;
+                if (accountId === null) {
+                  return {
+                    status: "recovery_incomplete",
+                    reason: "missing_account_id",
+                    accountIds,
+                  };
+                }
                 accountIds.push(accountId);
                 await client.ejectGroupMember({
                   adminAccountId: args.adminAccountId,

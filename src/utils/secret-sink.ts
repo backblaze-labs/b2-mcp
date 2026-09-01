@@ -1220,7 +1220,10 @@ function createErrorHasKnownProviderRejection(err: unknown): boolean {
 function recoveryClearedProviderSideEffect(recovery: unknown): boolean {
   if (!recovery || typeof recovery !== "object" || !("status" in recovery)) return false;
   const status = (recovery as { status?: unknown }).status;
-  return status === "deleted" || status === "ejected_group_members";
+  if (status === "deleted") return true;
+  if (status !== "ejected_group_members") return false;
+  const accountIds = (recovery as { accountIds?: unknown }).accountIds;
+  return Array.isArray(accountIds) && accountIds.length > 0;
 }
 
 function isSecretSinkCommitAmbiguous(err: unknown): boolean {
@@ -1327,8 +1330,8 @@ async function failDurableSecretAfterCreate<T>({
   code,
   message,
 }: {
-  claim: SecretSinkClaim;
-  secretSink: Extract<SecretSinkConfig, { mode: "file" }>;
+  claim?: SecretSinkClaim;
+  secretSink: ActiveSecretSinkConfig;
   toolName: string;
   result: T;
   err: unknown;
@@ -1339,17 +1342,21 @@ async function failDurableSecretAfterCreate<T>({
   message: string;
 }): Promise<never> {
   const recovery = await recoverDurableSecretAfterCreate(result, err, recoverAfterSinkFailure);
+  const secretSinkLog =
+    secretSink.mode === "file"
+      ? { type: "file" as const, path: secretSink.filePath }
+      : { type: "inline" as const };
   logger.fatal(
     durableSecretLogPayload(result, {
       err,
       tool: toolName,
-      secretSink: { type: "file", path: secretSink.filePath },
+      secretSink: secretSinkLog,
       minted: durableSecretDiagnostics(diagnostics, result),
       recovery,
     }),
     logEvent,
   );
-  if (recoveryClearedProviderSideEffect(recovery)) {
+  if (claim && secretSink.mode === "file" && recoveryClearedProviderSideEffect(recovery)) {
     releaseSecretSinkClaimBestEffort(claim, {
       tool: toolName,
       secretSink: { type: "file", path: secretSink.filePath },
@@ -1424,13 +1431,13 @@ export async function executeDurableSecretOperation<T>({
   diagnostics,
   recoverAfterSinkFailure,
 }: DurableSecretOperationOptions<T>): Promise<StructuredToolResult> {
-  if (secretSink.mode === "inline") {
-    const result = await create();
-    return toolJsonInlineDurableSecret(projectInline(result, INLINE_SECRET_WARNING));
+  let claim: SecretSinkClaim | undefined;
+  if (secretSink.mode === "file") {
+    const acquiredClaim = acquireSecretSinkClaim(secretSink, toolName, idempotency);
+    if ("pointer" in acquiredClaim)
+      return toolJson(projectRedacted(acquiredClaim.result as T, acquiredClaim.pointer));
+    claim = acquiredClaim;
   }
-
-  const claim = acquireSecretSinkClaim(secretSink, toolName, idempotency);
-  if ("pointer" in claim) return toolJson(projectRedacted(claim.result as T, claim.pointer));
 
   let result: T;
   try {
@@ -1449,10 +1456,10 @@ export async function executeDurableSecretOperation<T>({
         logEvent: "secret_sink.projection_failed_after_provider_create",
         code: "secret_sink_projection_failed",
         message:
-          "B2 created a durable credential, but the MCP server could not build a redacted response before storing the secret. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
+          "B2 created a durable credential, but the MCP server could not validate the secret-bearing response. The secret was not returned in MCP output. Check the server critical log for the created resource identifiers and recovery status.",
       });
     }
-    if (createErrorHasKnownProviderRejection(err)) {
+    if (claim && secretSink.mode === "file" && createErrorHasKnownProviderRejection(err)) {
       releaseSecretSinkClaimBestEffort(claim, {
         tool: toolName,
         secretSink: { type: "file", path: secretSink.filePath },
@@ -1461,6 +1468,15 @@ export async function executeDurableSecretOperation<T>({
     }
     throw err;
   }
+
+  if (secretSink.mode === "inline") {
+    return toolJsonInlineDurableSecret(projectInline(result, INLINE_SECRET_WARNING));
+  }
+
+  if (!claim) {
+    throw new Error("file secret sink claim missing");
+  }
+
   try {
     projectRedacted(result, projectionPreflightPointer(secretSink));
   } catch (err) {

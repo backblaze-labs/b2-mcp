@@ -7,9 +7,16 @@ import {
 } from "@backblaze-labs/b2-sdk";
 import { PartnerClient as SdkPartnerClient } from "@backblaze-labs/b2-sdk/partner";
 import { B2Simulator } from "@backblaze-labs/b2-sdk/simulator";
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createServer, getRegisteredTools, invalidateAuthManagerCache } from "../../src/server";
 import { setWebhookDnsLookupForTests } from "../../src/b2/buckets";
 import { parseErrorText } from "../../src/utils/errors";
@@ -51,6 +58,10 @@ const sdkTestRetry = {
 
 function tempSecretFile(): string {
   return join(mkdtempSync(join(tmpdir(), "b2-mcp-tool-secret-sink-")), "secrets.jsonl");
+}
+
+function pendingSecretClaimNames(file: string): string[] {
+  return readdirSync(dirname(file)).filter((name) => name.endsWith(".pending"));
 }
 
 function readSecretLedger(file: string): any {
@@ -2395,6 +2406,70 @@ describe("Partner API tools", () => {
     expect(rawResult.content[0].text).toContain(secret);
   });
 
+  it("ejects malformed inline group-member responses after creation", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secret = "K005PartnerInlineMalformedSecret1234567890";
+    const groupMember = {
+      accountId: "member-account-inline-malformed",
+      email: "inline-malformed@example.com",
+      groupId: "group-inline-malformed",
+      region: "us-west",
+      s3Endpoint: "s3.us-west-001.backblazeb2.com",
+    };
+    const malformedCreated = {
+      applicationKeyId: "key-inline-malformed",
+      applicationKey: secret,
+      groupMember,
+    };
+    const postJson = vi.fn(async () => malformedCreated);
+    const ejectGroupMember = vi.fn(async () => groupMember);
+    setB2PartnerClientFactoryForTests(() =>
+      partnerSdkClientWithRaw({
+        postJson,
+        ejectGroupMember,
+      }),
+    );
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "inline" },
+    });
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId: "test-account-123",
+      groupId: groupMember.groupId,
+      memberEmail: groupMember.email,
+      idempotencyKey: "create-group-member-inline-malformed",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(parseErrorText(rawResult.content[0].text)).toMatchObject({
+      code: "secret_sink_projection_failed",
+      status: 500,
+    });
+    expect(ejectGroupMember).toHaveBeenCalledWith(
+      "http://127.0.0.1/partner",
+      "partner-token-xyz",
+      {
+        adminAccountId: "test-account-123",
+        groupId: groupMember.groupId,
+        memberAccountId: groupMember.accountId,
+      },
+      expect.any(Object),
+    );
+    const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
+      secretSink?: { type?: string };
+      recovery?: { status?: string; accountIds?: string[] };
+    };
+    expect(fatalPayload.secretSink).toEqual({ type: "inline" });
+    expect(fatalPayload.recovery).toMatchObject({
+      status: "ejected_group_members",
+      accountIds: [groupMember.accountId],
+    });
+    expect(JSON.stringify(rawResult)).not.toContain(secret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
+  });
+
   it("reserves trial accounts in inline mode with the raw secret and warning", async () => {
     const { transport } = await usePartnerSimulator();
     server = createServer({
@@ -2536,6 +2611,65 @@ describe("Partner API tools", () => {
     });
     expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
     expect(JSON.stringify(fatalSpy.mock.calls)).toContain("ejected_group_members");
+  });
+
+  it("keeps the group-member claim when recovery lacks an account id", async () => {
+    const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
+    const secretFile = tempSecretFile();
+    const secret = "K005PartnerMissingAccountIdSecret1234567890";
+    const groupMember = {
+      email: "missing-account-id@example.com",
+      groupId: "group-missing-account-id",
+      groupName: "Missing account ID",
+      region: "us-west",
+      s3Endpoint: "s3.us-west-001.backblazeb2.com",
+    };
+    const malformedCreated = {
+      applicationKeyId: "key-missing-account-id",
+      applicationKey: secret,
+      groupMember,
+    };
+    const postJson = vi.fn(async () => malformedCreated);
+    const ejectGroupMember = vi.fn();
+    setB2PartnerClientFactoryForTests(() =>
+      partnerSdkClientWithRaw({
+        postJson,
+        ejectGroupMember,
+      }),
+    );
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "file", filePath: secretFile },
+    });
+
+    const rawResult = await callTool(server, "b2_create_group_member", {
+      adminAccountId: "test-account-123",
+      groupId: groupMember.groupId,
+      memberEmail: groupMember.email,
+      idempotencyKey: "create-group-member-missing-account-id",
+      confirm: true,
+    });
+
+    expect(rawResult.isError).toBe(true);
+    expect(parseErrorText(rawResult.content[0].text)).toMatchObject({
+      code: "secret_sink_projection_failed",
+      status: 500,
+    });
+    expect(ejectGroupMember).not.toHaveBeenCalled();
+    expect(pendingSecretClaimNames(secretFile)).toHaveLength(1);
+    const fatalPayload = fatalSpy.mock.calls[0]?.[0] as {
+      minted?: { accountIds?: string[] };
+      recovery?: { status?: string; reason?: string; accountIds?: string[] };
+    };
+    expect(fatalPayload.minted?.accountIds).toEqual([]);
+    expect(fatalPayload.recovery).toEqual({
+      status: "recovery_incomplete",
+      reason: "missing_account_id",
+      accountIds: [],
+    });
+    expect(JSON.stringify(rawResult)).not.toContain(secret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain(secret);
+    expect(JSON.stringify(fatalSpy.mock.calls)).not.toContain("ejected_group_members");
   });
 
   it.each([
