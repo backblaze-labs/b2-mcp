@@ -2629,6 +2629,37 @@ describe("Partner API tools", () => {
     expect(result.results[0].applicationKey).toBe(secret);
   });
 
+  it("returns reserve-trial credentials when metadata fields are absent", async () => {
+    const secret = "K005PartnerReserveMetadataFallbackSecret1234567890";
+    const reserveTrialAccount = vi.fn(async () => ({
+      applicationKeyId: "trial-metadata-fallback-key",
+      applicationKey: secret,
+      debugCopy: secret,
+    }));
+    setB2PartnerClientFactoryForTests(() => partnerSdkClientWithOverrides({ reserveTrialAccount }));
+    server = createServer({
+      ...partnerTestConfig,
+      secretSink: { mode: "inline" },
+    });
+
+    const rawResult = await callTool(server, "b2_reserve_trial_create_account", {
+      email: "trial-metadata-fallback@example.com",
+      term: 7,
+      storage: 1,
+      idempotencyKey: "reserve-trial-metadata-fallback",
+      confirm: true,
+    });
+    const result = parseResult(rawResult);
+    const output = JSON.stringify(rawResult);
+
+    expect(rawResult.isError).not.toBe(true);
+    expect(result.results[0]).toEqual({
+      applicationKeyId: "trial-metadata-fallback-key",
+      applicationKey: secret,
+    });
+    expect(output).not.toContain("debugCopy");
+  });
+
   it("ejects a created group member if the file sink fails after account creation", async () => {
     const fatalSpy = vi.spyOn(logger, "fatal").mockImplementation(() => undefined as never);
     const secretFile = tempSecretFile();

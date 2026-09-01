@@ -738,14 +738,7 @@ function validateReserveTrialCreateAccountResult(
   result: Record<string, unknown>,
   endpoint: string,
 ): void {
-  partnerStringField(result, "accountId", endpoint);
   partnerStringField(result, "applicationKeyId", endpoint);
-  partnerStringField(result, "s3Endpoint", endpoint);
-  partnerStringField(result, "startDate", endpoint);
-  partnerStringField(result, "endDate", endpoint);
-  partnerStringField(result, "email", endpoint);
-  partnerStringField(result, "bucketName", endpoint);
-  partnerStringField(result, "bucketId", endpoint);
 }
 
 async function runSecretBearingPartnerCreate<T extends { readonly applicationKey: string }>(

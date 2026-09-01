@@ -1445,6 +1445,39 @@ describe("B2Client native edge branches", () => {
       );
     });
 
+    it("accepts transport-backed reserve-trial credentials without ancillary metadata", async () => {
+      const transport = new RecordingTransport((request) => {
+        const endpoint = b2EndpointName(request);
+        if (endpoint === "b2_authorize_account") {
+          return new StaticHttpResponse(200, partnerAuthorizeResponse());
+        }
+        if (endpoint === "b2_reserve_trial_create_account") {
+          return new StaticHttpResponse(200, {
+            applicationKeyId: "trial-key-id",
+            applicationKey: "B2_MCP_CANARY_SECRET_trial_metadata_fallback",
+          });
+        }
+        return new StaticHttpResponse(500, { status: 500, code: "unexpected", message: endpoint });
+      });
+      const client = clientWithTransport(transport);
+
+      await expect(
+        client.reserveTrialCreateAccount({
+          email: "trial@example.com",
+          term: 7,
+          storage: 1,
+        }),
+      ).resolves.toEqual({
+        applicationKeyId: "trial-key-id",
+        applicationKey: "B2_MCP_CANARY_SECRET_trial_metadata_fallback",
+      });
+      expect(
+        transport.requests.filter(
+          (request) => b2EndpointName(request) === "b2_reserve_trial_create_account",
+        ),
+      ).toHaveLength(1);
+    });
+
     it("treats null Partner regions as SDK default-region omission", async () => {
       const transport = new RecordingTransport((request) => {
         const endpoint = b2EndpointName(request);

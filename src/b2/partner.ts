@@ -39,15 +39,15 @@ interface CreateGroupMemberProjection extends SecretBearingPartnerResult {
 }
 
 interface ReserveTrialCreateAccountProjection extends SecretBearingPartnerResult {
-  readonly accountId: string;
+  readonly accountId?: string;
   readonly applicationKeyId: string;
   readonly applicationKey: string;
-  readonly s3Endpoint: string;
-  readonly startDate: string;
-  readonly endDate: string;
-  readonly email: string;
-  readonly bucketName: string;
-  readonly bucketId: string;
+  readonly s3Endpoint?: string;
+  readonly startDate?: string;
+  readonly endDate?: string;
+  readonly email?: string;
+  readonly bucketName?: string;
+  readonly bucketId?: string;
 }
 
 function recordValue(record: unknown, key: string): unknown {
@@ -69,6 +69,11 @@ function requiredStringValue(record: unknown, key: string, context: string): str
     "unexpected_partner_response",
     `${context} response did not contain a non-empty string ${key}.`,
   );
+}
+
+function optionalStringProjection(record: unknown, key: string): Record<string, string> {
+  const value = stringValue(record, key);
+  return value === null ? {} : { [key]: value };
 }
 
 function partnerResultEntries(response: unknown): unknown[] {
@@ -127,7 +132,6 @@ function reserveTrialCreateAccountProjection(
   { redact }: { redact: boolean },
 ): ReserveTrialCreateAccountProjection {
   return {
-    accountId: requiredStringValue(result, "accountId", "b2_reserve_trial_create_account"),
     applicationKeyId: requiredStringValue(
       result,
       "applicationKeyId",
@@ -136,12 +140,13 @@ function reserveTrialCreateAccountProjection(
     applicationKey: redact
       ? APPLICATION_KEY_REDACTED
       : requiredStringValue(result, "applicationKey", "b2_reserve_trial_create_account"),
-    s3Endpoint: requiredStringValue(result, "s3Endpoint", "b2_reserve_trial_create_account"),
-    startDate: requiredStringValue(result, "startDate", "b2_reserve_trial_create_account"),
-    endDate: requiredStringValue(result, "endDate", "b2_reserve_trial_create_account"),
-    email: requiredStringValue(result, "email", "b2_reserve_trial_create_account"),
-    bucketName: requiredStringValue(result, "bucketName", "b2_reserve_trial_create_account"),
-    bucketId: requiredStringValue(result, "bucketId", "b2_reserve_trial_create_account"),
+    ...optionalStringProjection(result, "accountId"),
+    ...optionalStringProjection(result, "s3Endpoint"),
+    ...optionalStringProjection(result, "startDate"),
+    ...optionalStringProjection(result, "endDate"),
+    ...optionalStringProjection(result, "email"),
+    ...optionalStringProjection(result, "bucketName"),
+    ...optionalStringProjection(result, "bucketId"),
   };
 }
 
