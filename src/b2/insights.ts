@@ -272,12 +272,11 @@ const NOT_ENABLED = {
 };
 const NO_USAGE_REPORT_SNAPSHOTS_NOTE = "No usage-report snapshots found yet.";
 
-// Widening lookback windows (in days) for latest-snapshot discovery. The last
-// entry is the bounded discovery horizon: finding nothing within it does not
-// prove snapshots never existed, only that none fall inside the searched window.
+// Widening lookback windows (days) for latest-snapshot discovery. The last entry
+// is the bounded horizon: finding nothing within it means none in that window,
+// not none ever.
 const SNAPSHOT_LOOKBACK_DAYS = [10, 45, 180] as const;
-const SNAPSHOT_DISCOVERY_HORIZON_DAYS =
-  SNAPSHOT_LOOKBACK_DAYS[SNAPSHOT_LOOKBACK_DAYS.length - 1];
+const SNAPSHOT_DISCOVERY_HORIZON_DAYS = SNAPSHOT_LOOKBACK_DAYS[SNAPSHOT_LOOKBACK_DAYS.length - 1];
 
 const REPORT_SCAN_LIMITS = {
   maxPages: 100,
@@ -722,11 +721,9 @@ async function nearestSnapshotDate(
  * @param budget - Optional scan budget for tests and bounded runtime.
  *
  * @returns The latest snapshot date, whether the reports bucket is missing, and
- *   `searchedSince` — the oldest date probed when the bounded discovery finished
- *   without finding a snapshot. It is only set when the search completed the full
- *   {@link SNAPSHOT_DISCOVERY_HORIZON_DAYS} horizon without hitting the scan
- *   budget, so a null `date` with a `searchedSince` means "none in that window",
- *   not "none ever".
+ *   `searchedSince` (the oldest date probed) when the bounded horizon completed
+ *   without a snapshot and without exhausting the budget. A null `date` with a
+ *   `searchedSince` means "none in that window", not "none ever".
  *
  * @internal
  */
@@ -765,9 +762,8 @@ export async function latestSnapshotDate(
     if (max) return { date: max, bucketMissing: false };
     if (budget.stats.stop_reason) break;
   }
-  // Completed the bounded probe without a snapshot and without exhausting the
-  // budget: report the horizon we actually searched so callers do not assert
-  // that snapshots never existed when reporting simply stopped long ago.
+  // Bounded probe finished with no snapshot and budget intact: report the horizon
+  // searched so callers do not assert snapshots never existed.
   const searchedSince = budget.stats.stop_reason
     ? undefined
     : new Date(today.getTime() - SNAPSHOT_DISCOVERY_HORIZON_DAYS * 86400_000)
