@@ -34,10 +34,11 @@ describe("documentation example validator policy", () => {
       '"args": ["-y", "@backblaze-labs/b2-mcp"],',
       '"args": ["-y", "@attacker/b2-mcp"],',
     );
+    const expectedLine = lineOf(readme, '```json\n{\n  "mcpServers"');
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:44");
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
     expect(result.stderr).toContain("@attacker/b2-mcp");
   });
 
@@ -67,19 +68,21 @@ describe("documentation example validator policy", () => {
       "-e B2_HTTP_CREDENTIAL_MODE=server",
       "-e B2_HTTP_CREDENTIAL_MODE=headers",
     );
+    const expectedLine = lineOf(readme, "-e B2_HTTP_CREDENTIAL_MODE=headers");
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:153");
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
     expect(result.stderr).toContain("B2_HTTP_CREDENTIAL_MODE must be server");
   });
 
   it("rejects closing Markdown fences that carry an info string", () => {
     const readme = replaceLast(read("README.md"), "\n```\n", "\n```bash\n");
+    const expectedLine = lineOf(readme, "```bash\npnpm run build");
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:500");
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
     expect(result.stderr).toContain("has an unclosed Markdown code fence");
   });
 
@@ -94,13 +97,20 @@ describe("documentation example validator policy", () => {
 
   it("rejects missing pnpm shorthand scripts in documented commands", () => {
     const readme = read("README.md").replace("pnpm test", "pnpm missing-script");
+    const expectedLine = lineOf(readme, "pnpm missing-script");
     const result = runDocExamplesWithOverrides({ "README.md": readme });
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("README.md:503");
+    expect(result.stderr).toContain(`README.md:${expectedLine}`);
     expect(result.stderr).toContain("references missing package script missing-script");
   });
 });
+
+function lineOf(input: string, search: string): number {
+  const index = input.indexOf(search);
+  expect(index).toBeGreaterThanOrEqual(0);
+  return input.slice(0, index).split(/\r?\n/).length;
+}
 
 function replaceLast(input: string, search: string, replacement: string): string {
   const index = input.lastIndexOf(search);
