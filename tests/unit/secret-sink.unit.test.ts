@@ -1168,7 +1168,10 @@ describe("secret sink file writer", () => {
         }),
         recoverAfterCreateFailure: recoverSpy,
       }),
-    ).rejects.toMatchObject({ code: "secret_sink_create_response_unusable" });
+    ).rejects.toMatchObject({
+      code: "secret_sink_create_response_unusable",
+      message: expect.stringContaining("claim state is recorded"),
+    });
 
     expect(recoverSpy).toHaveBeenCalledOnce();
     expect(pendingClaimNames(dir)).toHaveLength(0);

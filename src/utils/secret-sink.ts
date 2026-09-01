@@ -1247,7 +1247,7 @@ function createResponseUnusableError(hasClaim: boolean): Error {
     500,
     "secret_sink_create_response_unusable",
     hasClaim
-      ? "B2 may have created a durable credential, but the provider response became unusable before the secret could be stored. The secret was not returned in MCP output. The pending idempotency claim remains for operator reconciliation; check the server critical log for recovery status before retrying."
+      ? "B2 may have created a durable credential, but the provider response became unusable before the secret could be stored. The secret was not returned in MCP output. The pending idempotency claim state is recorded in the server critical log; check the recovery status before retrying."
       : "B2 may have created a durable credential, but the provider response became unusable before the secret could be returned. The secret was not returned in MCP output. Check the server critical log for recovery status before retrying.",
   );
 }
