@@ -46,13 +46,13 @@ server-owned or principal-mode credentials stay as HTTP credential errors so
 operator misconfiguration remains visible.
 
 Discovery mode advertises the full 40-tool surface for schema scanners. It
-registers ordinary tool input schemas, but every `tools/call` returns a
-structured `missing_credentials` error until the caller supplies valid B2
-credentials. In the no-credential stdio and HTTP scanner flows, the secret sink
-is off, so `b2_create_key`, `b2_create_group_member`, and
-`b2_reserve_trial_create_account` advertise confirm-only compatibility stubs.
-Credentialed deployments without an enabled secret sink use the same non-secret
-unavailable stubs, as documented in the README.
+registers the durable-secret input schemas for `b2_create_key`,
+`b2_create_group_member`, and `b2_reserve_trial_create_account` so registries
+can see the real arguments, but every `tools/call` returns a structured
+`missing_credentials` error until the caller supplies valid B2 credentials.
+Credentialed deployments without an enabled secret sink still advertise the
+durable-secret tools as non-secret unavailable stubs, as documented in the
+README.
 
 Do not force `B2_REGISTER_ALL_TOOLS` for scanner compatibility. It remains an
 operator/test escape hatch that bypasses capability-aware registration for real
