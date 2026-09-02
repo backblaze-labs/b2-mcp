@@ -204,6 +204,14 @@ describe("HTTP legacy protocol fallback (2025 era)", () => {
       headers: JSON_HEADERS,
       body: legacyInit("2025-06-18"),
     });
+    const initialized = await request(port, "POST", "/mcp", {
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "notifications/initialized",
+        params: {},
+      }),
+    });
     const listed = await request(port, "POST", "/mcp", {
       headers: JSON_HEADERS,
       body: legacyRequest("tools/list", {}, 2),
@@ -215,6 +223,8 @@ describe("HTTP legacy protocol fallback (2025 era)", () => {
 
     expect(init.status).toBe(200);
     expect(parseMcpBody(init.body).result.protocolVersion).toBe("2025-06-18");
+    expect(initialized.status).not.toBe(401);
+    expect(initialized.body).not.toContain("B2 application credentials");
 
     expect(listed.status).toBe(200);
     const toolNames = parseMcpBody(listed.body).result.tools.map(

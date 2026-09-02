@@ -81,12 +81,14 @@ Env schema for the Glama deploy form:
 | `B2_REGION` | no | no | `us-east-005` |
 | `B2_MASTER_KEY_ID` | no | yes | (Partner tools only) |
 | `B2_MASTER_KEY` | no | yes | (Partner tools only) |
-| `B2_HTTP_CREDENTIAL_MODE` | yes | no | `server` |
+| `B2_HTTP_CREDENTIAL_MODE` | yes | no | `headers` for scanner, `server` for real deploy |
 
 `B2_HTTP_CREDENTIAL_MODE=server` is still the right one-click deployment shape:
-real user tool calls use the env-supplied application key. Glama's build-time
-scanner can initialize and run `tools/list` even when those env values are absent
-or placeholders, but actual `tools/call` requests stay credential-gated.
+real user tool calls use the env-supplied application key, and those env values
+must be valid. For Glama's build-time scanner, omit the B2 key env values if the
+form allows it, or set `B2_HTTP_CREDENTIAL_MODE=headers` so any placeholder env
+values are ignored and the scanner can initialize and run `tools/list` without
+credential headers. Actual `tools/call` requests stay credential-gated.
 
 ## LobeHub
 
