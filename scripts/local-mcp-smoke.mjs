@@ -411,37 +411,15 @@ async function stopChild(child) {
   }
 }
 
-async function listToolsWithoutCredentials(endpoint) {
+async function requestWithoutCredentials(endpoint, method, params, id) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   timeout.unref?.();
   try {
     const response = await localFetch(endpoint, {
       method: "POST",
-      headers: modernHeaders("tools/list"),
-      body: modernBody("tools/list", {}, MISSING_CREDENTIAL_LIST_REQUEST_ID),
-      signal: controller.signal,
-    });
-    const body = await response.json();
-    return { status: response.status, body };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function callToolWithoutCredentials(endpoint) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  timeout.unref?.();
-  try {
-    const response = await localFetch(endpoint, {
-      method: "POST",
-      headers: modernHeaders("tools/call", "b2_list_buckets"),
-      body: modernBody(
-        "tools/call",
-        { name: "b2_list_buckets", arguments: {} },
-        MISSING_CREDENTIAL_CALL_REQUEST_ID,
-      ),
+      headers: modernHeaders(method, params?.name),
+      body: modernBody(method, params, id),
       signal: controller.signal,
     });
     const body = await response.json();
@@ -627,7 +605,12 @@ async function runRunner() {
       snapshot.names.includes("b2_list_buckets") && snapshot.names.includes("s3_list_objects_v2"),
     );
 
-    const missingDiscovery = await listToolsWithoutCredentials(endpoint);
+    const missingDiscovery = await requestWithoutCredentials(
+      endpoint,
+      "tools/list",
+      {},
+      MISSING_CREDENTIAL_LIST_REQUEST_ID,
+    );
     const missingDiscoveryBody = missingDiscovery.body;
     const missingDiscoveryText = JSON.stringify(missingDiscoveryBody);
     recordCheck(
@@ -653,7 +636,12 @@ async function runRunner() {
         !missingDiscoveryText.includes("process.env"),
     );
 
-    const missingCall = await callToolWithoutCredentials(endpoint);
+    const missingCall = await requestWithoutCredentials(
+      endpoint,
+      "tools/call",
+      { name: "b2_list_buckets", arguments: {} },
+      MISSING_CREDENTIAL_CALL_REQUEST_ID,
+    );
     const missingCallBody = missingCall.body;
     const missingCallText = JSON.stringify(missingCallBody);
     recordCheck(
