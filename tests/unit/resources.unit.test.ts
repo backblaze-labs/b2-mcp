@@ -644,12 +644,18 @@ describe("MCP control-plane resources", () => {
         code: ProtocolErrorCode.InvalidParams,
         data: { uri },
       });
+      // The audit log must classify a routine missing-bucket read as a
+      // resource-not-found (404), not collapse the JSON-RPC protocol error
+      // through the provider parser into internal_error/500, which would skew
+      // resource error-rate alerting.
       expect(warnSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           resource: "b2_bucket",
           uri,
           operation: "resources/read",
           error: true,
+          code: "resource_not_found",
+          status: 404,
         }),
         "resource.error",
       );

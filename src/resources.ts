@@ -6,6 +6,7 @@
 
 import {
   ProtocolError,
+  ProtocolErrorCode,
   ResourceNotFoundError,
   ResourceTemplate,
   type ListResourcesResult,
@@ -210,6 +211,39 @@ function isRequestAborted(err: unknown): boolean {
   return parseB2Error(err).code === "request_aborted";
 }
 
+/**
+ * Classify a JSON-RPC {@link ProtocolError} for the resource audit log.
+ *
+ * @remarks
+ * Protocol errors cross the wire with a numeric JSON-RPC code, so routing them
+ * through {@link parseB2Error} (which only understands provider/HTTP shapes)
+ * collapses them to `internal_error`/500. That would record routine outcomes —
+ * a missing-bucket `resources/read`, which surfaces as {@link
+ * ResourceNotFoundError} (`-32602` with `data.uri`) — as server failures and
+ * skew resource error-rate alerting. Classify them here instead.
+ */
+function protocolErrorAuditFields(err: ProtocolError): { code: string; status: number } {
+  // A resources/read miss is a routine not-found, not a bad request; classify
+  // it distinctly even though its wire code is Invalid Params (`-32602`).
+  if (err instanceof ResourceNotFoundError) return { code: "resource_not_found", status: 404 };
+  switch (err.code) {
+    case ProtocolErrorCode.ParseError:
+      return { code: "parse_error", status: 400 };
+    case ProtocolErrorCode.InvalidRequest:
+      return { code: "invalid_request", status: 400 };
+    case ProtocolErrorCode.MethodNotFound:
+      return { code: "method_not_found", status: 404 };
+    case ProtocolErrorCode.InvalidParams:
+      return { code: "invalid_params", status: 400 };
+    case ProtocolErrorCode.ResourceNotFound:
+      return { code: "resource_not_found", status: 404 };
+    case ProtocolErrorCode.InternalError:
+      return { code: "internal_error", status: 500 };
+    default:
+      return { code: "protocol_error", status: 400 };
+  }
+}
+
 async function withResourceGuards<T>(
   config: B2Config,
   ctx: ServerContext,
@@ -247,7 +281,9 @@ async function withResourceGuards<T>(
         credential: credentialFingerprint(config),
         durationMs: Date.now() - start,
         error: true,
-        ...providerErrorFields(err, sanitizerOptions),
+        ...(err instanceof ProtocolError
+          ? protocolErrorAuditFields(err)
+          : providerErrorFields(err, sanitizerOptions)),
         err: safeErr.message,
       },
       "resource.error",
