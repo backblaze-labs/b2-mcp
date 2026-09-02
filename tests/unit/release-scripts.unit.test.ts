@@ -469,6 +469,60 @@ describe("release scripts", () => {
     expect(launched.env).toEqual({ B2_APPLICATION_KEY_ID: "id", B2_APPLICATION_KEY: "secret" });
   });
 
+  it("keeps mcpb/manifest.json in sync with the server.json env contract", () => {
+    const serverJson = JSON.parse(readFileSync(join(root, "server.json"), "utf8"));
+    const envVars = serverJson.packages[0].environmentVariables as Array<{
+      name: string;
+      isRequired: boolean;
+      isSecret: boolean;
+    }>;
+    const mcpb = JSON.parse(readFileSync(join(root, "mcpb", "manifest.json"), "utf8"));
+
+    // Node/npx launch of the published package, matching server.json + smithery.
+    // Unlike smithery, the MCPB launcher pins the exact published version so the
+    // bundle is reproducible; assert the package name, allowing the @<version> pin.
+    expect(mcpb.server.type).toBe("node");
+    expect(mcpb.server.mcp_config.command).toBe("npx");
+    const args = mcpb.server.mcp_config.args as string[];
+    expect(args[0]).toBe("-y");
+    expect(args[1]).toMatch(/^@backblaze-labs\/b2-mcp(@.+)?$/);
+
+    const env = mcpb.server.mcp_config.env as Record<string, string>;
+    const userConfig = mcpb.user_config as Record<
+      string,
+      { type: string; required?: boolean; sensitive?: boolean; default?: unknown }
+    >;
+
+    // user_config carries exactly one key per server.json env var (lowercased),
+    // and env forwards exactly those variables — no extras, no missing.
+    const expectedKeys = envVars.map((v) => v.name.toLowerCase()).sort();
+    expect(Object.keys(userConfig).sort()).toEqual(expectedKeys);
+    expect(Object.keys(env).sort()).toEqual(envVars.map((v) => v.name).sort());
+
+    for (const envVar of envVars) {
+      const key = envVar.name.toLowerCase();
+      // env forwards only the ${user_config.<key>} template, never a literal
+      // credential value or placeholder.
+      expect(env[envVar.name]).toBe(`\${user_config.${key}}`);
+
+      const field = userConfig[key];
+      expect(field).toBeDefined();
+      expect(field.type).toBe("string");
+      // Required flag mirrors server.json isRequired.
+      expect(field.required === true).toBe(envVar.isRequired);
+      // Every secret credential is marked sensitive so hosts mask it.
+      if (envVar.isSecret) {
+        expect(field.sensitive).toBe(true);
+      }
+      // Optional fields retain an empty-string default so an unset value is
+      // forwarded as "" (which the server treats as absent) rather than leaking
+      // a literal placeholder credential.
+      if (!envVar.isRequired) {
+        expect(field.default).toBe("");
+      }
+    }
+  });
+
   for (const testCase of [
     {
       name: "extra packages",

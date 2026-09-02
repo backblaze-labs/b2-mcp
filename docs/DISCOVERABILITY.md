@@ -134,7 +134,8 @@ automatically; the rest need a submission or claim. Full status lives in
 - Smithery — submit repo (`smithery.yaml` / MCPB bundle).
 - LobeHub — claim + `lhm plugin update` (above).
 - PulseMCP — crawls the registry; verify, submit if absent.
-- Cline MCP Marketplace, Docker MCP Catalog, mcp-get, OpenTools, Fleur — submit.
+- Cline MCP Marketplace, Docker MCP Catalog, OpenTools, Fleur — submit.
+  (`mcp-get` is retired — its repository is archived and unmaintained.)
 - Awesome-list PRs — only `punkpeye/awesome-mcp-servers` is a viable target
   (PR [#13422](https://github.com/punkpeye/awesome-mcp-servers/pull/13422)). The
   others were dropped: `wong2/awesome-mcp-servers` disabled pull requests and is
