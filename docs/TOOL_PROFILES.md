@@ -8,16 +8,16 @@ Approved modern cache hint: `ttlMs=30000`, `cacheScope=private`
 
 | Profile | Total | `b2_*` | `s3_*` | `bz_*` | Hash prefix |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `full` | 41 | 21 | 20 | 0 | `f315bd824c73` |
-| `live-b2-contract` | 40 | 20 | 20 | 0 | `1495adfb11c0` |
-| `phase1-default` | 38 | 18 | 20 | 0 | `bdbd323ca634` |
-| `read-only` | 21 | 11 | 10 | 0 | `7f5966ed012d` |
+| `full` | 41 | 21 | 20 | 0 | `93849e6a5d2e` |
+| `live-b2-contract` | 40 | 20 | 20 | 0 | `d486bd0d88d1` |
+| `phase1-default` | 38 | 18 | 20 | 0 | `eebce35d5d7c` |
+| `read-only` | 21 | 11 | 10 | 0 | `259c253ca0d5` |
 
 ## `full`
 
 Complete tool superset for contract review and regression detection across all backing categories; durable-secret producers are sink-backed when a secret sink is active and otherwise remain availability-annotated stubs.
 
-Profile hash: `f315bd824c73c6b4b6cabcbc5a1ec7cc367eb60e211f41dcd4642d76c14d24f0`
+Profile hash: `93849e6a5d2e5167e0877590b699b350da89d422b01f51ba4b8059cd096c15c4`
 
 ### Capability Input
 
@@ -80,7 +80,7 @@ Profile hash: `f315bd824c73c6b4b6cabcbc5a1ec7cc367eb60e211f41dcd4642d76c14d24f0`
 
 Protected live B2 contract profile: non-master application key with release-evidence capabilities, no key-management grants, and a distinct master key only for Partner/Groups API surface discovery.
 
-Profile hash: `1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc`
+Profile hash: `d486bd0d88d189b6a3b234535eb91b08f427f85e6a15c5457cb59c94370a7eec`
 
 ### Capability Input
 
@@ -90,6 +90,7 @@ Profile hash: `1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc`
 - `listBuckets`
 - `listFiles`
 - `listKeys`
+- `readBucketLifecycleRules`
 - `readBucketEncryption`
 - `readBucketRetentions`
 - `readBuckets`
@@ -97,6 +98,7 @@ Profile hash: `1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc`
 - `readFileRetentions`
 - `readFiles`
 - `writeBucketEncryption`
+- `writeBucketLifecycleRules`
 - `writeBucketNotifications`
 - `writeBucketRetentions`
 - `writeBuckets`
@@ -160,7 +162,7 @@ Profile hash: `1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc`
 
 Default customer-hosted Phase 1 profile: standard B2 application key, no distinct Partner/master credential, and durable-secret producers exposed as sink-backed tools on local stdio or unavailable stubs when the sink is off.
 
-Profile hash: `bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23`
+Profile hash: `eebce35d5d7cc62265a4c2802cc6334f28caa7b24de513e039a30bc65f07f9be`
 
 ### Capability Input
 
@@ -170,8 +172,10 @@ Profile hash: `bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23`
 - `listBuckets`
 - `listFiles`
 - `listKeys`
+- `readBucketLifecycleRules`
 - `readBucketNotifications`
 - `readFiles`
+- `writeBucketLifecycleRules`
 - `writeBucketNotifications`
 - `writeBuckets`
 - `writeFileLegalHolds`
@@ -232,13 +236,14 @@ Profile hash: `bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23`
 
 Deterministic read/list profile for safe production use and contract tests; write/delete/admin handlers are omitted while durable-secret producer names remain unavailable stubs unless a sink-backed admin profile is configured.
 
-Profile hash: `7f5966ed012deb4f9dfe8f9dfe4c26989b87a9537cbdedbf3dc9e07feb55cbfa`
+Profile hash: `259c253ca0d56bcaf2d1fdc80d28295c851847f8fd439552d64eddf4ccfd0468`
 
 ### Capability Input
 
 - `listBuckets`
 - `listFiles`
 - `listKeys`
+- `readBucketLifecycleRules`
 - `readBucketNotifications`
 - `readFiles`
 
@@ -285,7 +290,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 | Profile | Prompts | Hash prefix |
 | --- | ---: | --- |
-| `full` | 5 | `c52599d06cda` |
+| `full` | 5 | `0d46848756d7` |
 | `live-b2-contract` | 4 | `7378ab9a0c3e` |
 | `phase1-default` | 3 | `0257b2a65d29` |
 | `read-only` | 2 | `686610d7c5bf` |
@@ -294,7 +299,7 @@ The `full` prompt profile enables an inline dummy secret sink so sink-dependent 
 
 Complete guided-workflow prompt surface: every B2 workflow launcher is advertised, including the write- and admin-capable prompts, for contract review and regression detection.
 
-Prompt profile hash: `c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20`
+Prompt profile hash: `0d46848756d7be75deea3b6e44d67aa6eeb5dec55166c5959805cdd6e545fc71`
 
 ### MCP Prompts
 

@@ -207,7 +207,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "f315bd824c73c6b4b6cabcbc5a1ec7cc367eb60e211f41dcd4642d76c14d24f0",
+      "hash": "93849e6a5d2e5167e0877590b699b350da89d422b01f51ba4b8059cd096c15c4",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/full.modern.json",
         "legacy": "tests/fixtures/tool-contract/full.legacy.json"
@@ -222,6 +222,7 @@
         "listBuckets",
         "listFiles",
         "listKeys",
+        "readBucketLifecycleRules",
         "readBucketEncryption",
         "readBucketRetentions",
         "readBuckets",
@@ -229,6 +230,7 @@
         "readFileRetentions",
         "readFiles",
         "writeBucketEncryption",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBucketRetentions",
         "writeBuckets",
@@ -363,7 +365,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc",
+      "hash": "d486bd0d88d189b6a3b234535eb91b08f427f85e6a15c5457cb59c94370a7eec",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/live-b2-contract.modern.json",
         "legacy": "tests/fixtures/tool-contract/live-b2-contract.legacy.json"
@@ -378,8 +380,10 @@
         "listBuckets",
         "listFiles",
         "listKeys",
+        "readBucketLifecycleRules",
         "readBucketNotifications",
         "readFiles",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBuckets",
         "writeFileLegalHolds",
@@ -509,7 +513,7 @@
         "s3_get_presigned_url",
         "s3_put_bucket_lifecycle"
       ],
-      "hash": "bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23",
+      "hash": "eebce35d5d7cc62265a4c2802cc6334f28caa7b24de513e039a30bc65f07f9be",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/phase1-default.modern.json",
         "legacy": "tests/fixtures/tool-contract/phase1-default.legacy.json"
@@ -521,6 +525,7 @@
         "listBuckets",
         "listFiles",
         "listKeys",
+        "readBucketLifecycleRules",
         "readBucketNotifications",
         "readFiles"
       ],
@@ -591,7 +596,7 @@
         "b2_create_key",
         "b2_reserve_trial_create_account"
       ],
-      "hash": "7f5966ed012deb4f9dfe8f9dfe4c26989b87a9537cbdedbf3dc9e07feb55cbfa",
+      "hash": "259c253ca0d56bcaf2d1fdc80d28295c851847f8fd439552d64eddf4ccfd0468",
       "fixtures": {
         "modern": "tests/fixtures/tool-contract/read-only.modern.json",
         "legacy": "tests/fixtures/tool-contract/read-only.legacy.json"
@@ -628,7 +633,7 @@
         "b2_review_bucket_notifications": [],
         "b2_rotate_application_key": []
       },
-      "hash": "c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20",
+      "hash": "0d46848756d7be75deea3b6e44d67aa6eeb5dec55166c5959805cdd6e545fc71",
       "fixture": "tests/fixtures/prompt-contract/full.json"
     },
     "live-b2-contract": {
@@ -640,6 +645,7 @@
         "listBuckets",
         "listFiles",
         "listKeys",
+        "readBucketLifecycleRules",
         "readBucketEncryption",
         "readBucketRetentions",
         "readBuckets",
@@ -647,6 +653,7 @@
         "readFileRetentions",
         "readFiles",
         "writeBucketEncryption",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBucketRetentions",
         "writeBuckets",
@@ -687,8 +694,10 @@
         "listBuckets",
         "listFiles",
         "listKeys",
+        "readBucketLifecycleRules",
         "readBucketNotifications",
         "readFiles",
+        "writeBucketLifecycleRules",
         "writeBucketNotifications",
         "writeBuckets",
         "writeFileLegalHolds",
@@ -722,6 +731,7 @@
         "listBuckets",
         "listFiles",
         "listKeys",
+        "readBucketLifecycleRules",
         "readBucketNotifications",
         "readFiles"
       ],

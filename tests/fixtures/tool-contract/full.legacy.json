@@ -1460,7 +1460,7 @@
     },
     {
       "name": "s3_get_bucket_lifecycle",
-      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
+      "descriptionSha256": "05d14c385dc16238f4e93e1b58f111ad2a8a729437fcfdab071cacb4430ebca5",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2054,5 +2054,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "f315bd824c73c6b4b6cabcbc5a1ec7cc367eb60e211f41dcd4642d76c14d24f0"
+  "hash": "93849e6a5d2e5167e0877590b699b350da89d422b01f51ba4b8059cd096c15c4"
 }

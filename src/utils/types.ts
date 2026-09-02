@@ -421,6 +421,8 @@ export type B2Capability =
   | "readBuckets"
   | "writeBuckets"
   | "deleteBuckets"
+  | "readBucketLifecycleRules"
+  | "writeBucketLifecycleRules"
   | "listFiles"
   | "readFiles"
   | "shareFiles"
@@ -447,6 +449,8 @@ export const ALL_CAPABILITIES: B2Capability[] = [
   "readBuckets",
   "writeBuckets",
   "deleteBuckets",
+  "readBucketLifecycleRules",
+  "writeBucketLifecycleRules",
   "listFiles",
   "readFiles",
   "shareFiles",

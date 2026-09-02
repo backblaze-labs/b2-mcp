@@ -11,7 +11,14 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0"
   },
-  "capabilities": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
+  "capabilities": [
+    "listBuckets",
+    "listFiles",
+    "listKeys",
+    "readBucketLifecycleRules",
+    "readBucketNotifications",
+    "readFiles"
+  ],
   "counts": {
     "total": 21,
     "b2": 11,
@@ -381,7 +388,7 @@
     },
     {
       "name": "s3_get_bucket_lifecycle",
-      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
+      "descriptionSha256": "05d14c385dc16238f4e93e1b58f111ad2a8a729437fcfdab071cacb4430ebca5",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -741,5 +748,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "7f5966ed012deb4f9dfe8f9dfe4c26989b87a9537cbdedbf3dc9e07feb55cbfa"
+  "hash": "259c253ca0d56bcaf2d1fdc80d28295c851847f8fd439552d64eddf4ccfd0468"
 }

@@ -168,6 +168,12 @@ describe("circuit-breaker", () => {
     expect(isClientError({ $metadata: { httpStatusCode: 429 } })).toBe(false);
   });
 
+  it("filters absent S3 lifecycle configuration by error code without HTTP status", () => {
+    expect(isClientError({ name: "NoSuchLifecycleConfiguration" })).toBe(true);
+    expect(isClientError({ code: "NoSuchLifecycleConfiguration" })).toBe(true);
+    expect(isClientError({ Code: "NoSuchLifecycleConfiguration" })).toBe(true);
+  });
+
   it("fails fast when open", async () => {
     circuitBreaker.open();
     await expect(withCircuit(async () => 1)).rejects.toThrow(/breaker/i);

@@ -442,7 +442,7 @@ The server exposes **41 tools** (registration is capability-aware, so a given ke
 - `b2_create_group_member` — Create a Partner group member (Partner API credential)
 - `b2_reserve_trial_create_account` — Reserve a trial account (Partner API credential)
 
-**AWS S3 SDK — data plane (19):**
+**AWS S3 SDK — data plane (20):**
 
 - `s3_put_object` — Inline upload of a small (≤1 MiB) control-plane object
 - `s3_get_object` — Inline download of a small (≤1 MiB) control-plane object
@@ -556,7 +556,7 @@ configured and the account is authorized for the Partner API.
 | `s3_get_presigned_url`                                                                   | Available    | Short-lived presigned PUT/GET bearer URL (browser/CORS handoff)                                  |
 | `s3_head_bucket`                                                                         | Available    | Check bucket exists/reachable on the S3 endpoint                                                 |
 | `s3_get_bucket_location`                                                                 | Available    | Bucket region / location constraint                                                              |
-| `s3_get_bucket_lifecycle`                                                                | Available    | Read lifecycle rules in the normalized `s3_put_bucket_lifecycle` shape                           |
+| `s3_get_bucket_lifecycle`                                                                | Available    | Read lifecycle rules in normalized MCP casing; ID-less provider rules omit `id`                  |
 | `s3_put_bucket_lifecycle`                                                                | Available    | Lifecycle rules incl. `AbortIncompleteMultipartUpload`                                           |
 
 </details>

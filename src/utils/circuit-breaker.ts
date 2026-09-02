@@ -20,6 +20,7 @@ import { isTestRuntime } from "./runtime.js";
 /** Default whole-call deadline for metadata/control-plane circuit execution. */
 export const CIRCUIT_TIMEOUT_MS = 150_000;
 const OPERATION_STATUS_UNKNOWN_CODE = "operation_status_unknown";
+const NO_SUCH_LIFECYCLE_CONFIGURATION_CODE = "NoSuchLifecycleConfiguration";
 
 function isAbortLikeError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
@@ -41,6 +42,18 @@ function operationStatusUnknownNode(err: unknown): unknown {
   return findInCauseChain(err, (value) =>
     errorCode(value) === OPERATION_STATUS_UNKNOWN_CODE ? value : undefined,
   );
+}
+
+function noSuchLifecycleConfigurationNode(err: unknown): unknown {
+  return findInCauseChain(err, (value) => {
+    if (typeof value !== "object" || value === null) return undefined;
+    const e = value as { name?: unknown; code?: unknown; Code?: unknown };
+    return e.name === NO_SUCH_LIFECYCLE_CONFIGURATION_CODE ||
+      e.code === NO_SUCH_LIFECYCLE_CONFIGURATION_CODE ||
+      e.Code === NO_SUCH_LIFECYCLE_CONFIGURATION_CODE
+      ? value
+      : undefined;
+  });
 }
 
 /**
@@ -84,6 +97,7 @@ export function isClientError(err: unknown): boolean {
     // abort behind the ambiguity stays filtered.
     return isCallerAbortAmbiguity(unknownStatusNode);
   }
+  if (noSuchLifecycleConfigurationNode(err) !== undefined) return true;
   if (isAbortLikeError(err)) return true;
   if (typeof err !== "object" || err === null) return false;
   const e = err as {

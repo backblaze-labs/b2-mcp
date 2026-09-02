@@ -73,6 +73,13 @@ describe("isToolEnabled", () => {
     expect(isToolEnabled("s3_get_presigned_url", new Set(["writeFiles"]))).toBe(true);
     expect(isToolEnabled("s3_get_presigned_url", new Set(["listKeys"]))).toBe(false);
   });
+
+  it("gates S3 lifecycle read on the lifecycle-read capability", () => {
+    expect(isToolEnabled("s3_get_bucket_lifecycle", new Set(["readBucketLifecycleRules"]))).toBe(
+      true,
+    );
+    expect(isToolEnabled("s3_get_bucket_lifecycle", new Set(["listBuckets"]))).toBe(false);
+  });
 });
 
 describe("capability-aware registration", () => {
@@ -145,8 +152,10 @@ describe("capability-aware registration", () => {
       "listBuckets",
       "listFiles",
       "readFiles",
+      "readBucketLifecycleRules",
       "writeFiles",
       "writeBuckets",
+      "writeBucketLifecycleRules",
     ]);
     expect(names).toContain("s3_put_object");
     expect(names).toContain("s3_create_multipart_upload");
@@ -154,6 +163,11 @@ describe("capability-aware registration", () => {
     expect(names).toContain("s3_get_bucket_lifecycle");
     expect(names).not.toContain("s3_delete_object");
     expect(names).not.toContain("b2_delete_bucket");
+  });
+
+  it("registers S3 lifecycle read for lifecycle-read keys, not list-only keys", () => {
+    expect(toolNames(["readBucketLifecycleRules"])).toContain("s3_get_bucket_lifecycle");
+    expect(toolNames(["listBuckets"])).not.toContain("s3_get_bucket_lifecycle");
   });
 
   it("every mapped tool registers for a key holding all capabilities", () => {

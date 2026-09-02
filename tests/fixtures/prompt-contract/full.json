@@ -172,7 +172,7 @@
             "type": "string"
           },
           "capabilities": {
-            "description": "Optional comma-separated replacement capabilities. Allowed values: listKeys, writeKeys, deleteKeys, listBuckets, readBuckets, writeBuckets, deleteBuckets, listFiles, readFiles, shareFiles, writeFiles, deleteFiles, readBucketEncryption, writeBucketEncryption, readBucketRetentions, writeBucketRetentions, readFileRetentions, writeFileRetentions, bypassGovernance, readBucketReplications, writeBucketReplications, readBucketNotifications, writeBucketNotifications. Omit to copy or reduce old scope.",
+            "description": "Optional comma-separated replacement capabilities. Allowed values: listKeys, writeKeys, deleteKeys, listBuckets, readBuckets, writeBuckets, deleteBuckets, readBucketLifecycleRules, writeBucketLifecycleRules, listFiles, readFiles, shareFiles, writeFiles, deleteFiles, readBucketEncryption, writeBucketEncryption, readBucketRetentions, writeBucketRetentions, readFileRetentions, writeFileRetentions, bypassGovernance, readBucketReplications, writeBucketReplications, readBucketNotifications, writeBucketNotifications. Omit to copy or reduce old scope.",
             "type": "string"
           },
           "namePrefix": {
@@ -203,5 +203,5 @@
       "title": "Rotate application key"
     }
   ],
-  "hash": "c52599d06cdabc7017a82ac69bd71a0ae920984c652ab0517b29b6cd215c5e20"
+  "hash": "0d46848756d7be75deea3b6e44d67aa6eeb5dec55166c5959805cdd6e545fc71"
 }

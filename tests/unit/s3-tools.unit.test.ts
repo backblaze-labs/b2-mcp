@@ -1062,7 +1062,7 @@ describe("s3_put_bucket_lifecycle", () => {
 });
 
 describe("s3_get_bucket_lifecycle", () => {
-  it("returns normalized lifecycle rules", async () => {
+  it("returns normalized lifecycle rules including ID-less and combined filters", async () => {
     sendSpy.mockResolvedValueOnce({
       Rules: [
         {
@@ -1082,6 +1082,11 @@ describe("s3_get_bucket_lifecycle", () => {
           Status: "Enabled",
           Prefix: "",
           AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
+        },
+        {
+          Status: "Enabled",
+          Filter: { And: { Prefix: "archive/" } },
+          Expiration: { Days: 365 },
         },
       ],
     });
@@ -1112,6 +1117,11 @@ describe("s3_get_bucket_lifecycle", () => {
           filter: { prefix: "" },
           abortIncompleteMultipartUpload: { daysAfterInitiation: 7 },
         },
+        {
+          status: "Enabled",
+          filter: { prefix: "archive/" },
+          expiration: { days: 365 },
+        },
       ],
     });
     expect(sendSpy.mock.calls[0][0].constructor.name).toBe(
@@ -1124,7 +1134,6 @@ describe("s3_get_bucket_lifecycle", () => {
     sendSpy.mockRejectedValueOnce({
       name: "NoSuchLifecycleConfiguration",
       message: "The lifecycle configuration does not exist.",
-      $metadata: { httpStatusCode: 404, requestId: "rq-lifecycle" },
     });
 
     const result = await callTool(server, "s3_get_bucket_lifecycle", { bucket: "empty-bucket" });
@@ -1135,6 +1144,24 @@ describe("s3_get_bucket_lifecycle", () => {
       configured: false,
       rules: [],
     });
+  });
+
+  it("keeps absent lifecycle configuration out of S3 circuit failure stats", async () => {
+    const absent = Object.assign(new Error("The lifecycle configuration does not exist."), {
+      name: "NoSuchLifecycleConfiguration",
+    });
+    sendSpy.mockRejectedValue(absent);
+    const failuresBefore = s3CircuitBreaker.status.stats.failures;
+
+    for (let i = 0; i < 12; i++) {
+      const result = await callTool(server, "s3_get_bucket_lifecycle", {
+        bucket: "empty-bucket",
+      });
+      expect(result.isError).toBeFalsy();
+    }
+
+    expect(s3CircuitBreaker.status.stats.failures).toBe(failuresBefore);
+    expect(s3CircuitBreaker.opened).toBe(false);
   });
 });
 

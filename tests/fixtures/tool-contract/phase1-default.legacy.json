@@ -18,8 +18,10 @@
     "listBuckets",
     "listFiles",
     "listKeys",
+    "readBucketLifecycleRules",
     "readBucketNotifications",
     "readFiles",
+    "writeBucketLifecycleRules",
     "writeBucketNotifications",
     "writeBuckets",
     "writeFileLegalHolds",
@@ -1354,7 +1356,7 @@
     },
     {
       "name": "s3_get_bucket_lifecycle",
-      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
+      "descriptionSha256": "05d14c385dc16238f4e93e1b58f111ad2a8a729437fcfdab071cacb4430ebca5",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1948,5 +1950,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "bdbd323ca6340c2e290e51bf0f14e73790eeb1889b2e9f030391197b490bbf23"
+  "hash": "eebce35d5d7cc62265a4c2802cc6334f28caa7b24de513e039a30bc65f07f9be"
 }

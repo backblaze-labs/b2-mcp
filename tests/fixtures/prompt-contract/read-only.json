@@ -9,7 +9,14 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0"
   },
-  "capabilities": ["listBuckets", "listFiles", "listKeys", "readBucketNotifications", "readFiles"],
+  "capabilities": [
+    "listBuckets",
+    "listFiles",
+    "listKeys",
+    "readBucketLifecycleRules",
+    "readBucketNotifications",
+    "readFiles"
+  ],
   "counts": {
     "total": 2
   },

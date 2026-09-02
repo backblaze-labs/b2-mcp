@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability/tool profile, and a capability-gated `b2://bucket/{bucketName}`
   template with notification webhook secrets redacted. The server now advertises
   the MCP `resources` capability. (#165)
+- `s3_get_bucket_lifecycle` for reading S3-compatible bucket lifecycle rules in
+  the same normalized MCP casing used by `s3_put_bucket_lifecycle`. (#366)
 
 ### Changed
 - The stdio server no longer exits when started without B2 credentials. It now

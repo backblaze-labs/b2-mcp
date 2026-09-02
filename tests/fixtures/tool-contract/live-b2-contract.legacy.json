@@ -18,6 +18,7 @@
     "listBuckets",
     "listFiles",
     "listKeys",
+    "readBucketLifecycleRules",
     "readBucketEncryption",
     "readBucketRetentions",
     "readBuckets",
@@ -25,6 +26,7 @@
     "readFileRetentions",
     "readFiles",
     "writeBucketEncryption",
+    "writeBucketLifecycleRules",
     "writeBucketNotifications",
     "writeBucketRetentions",
     "writeBuckets",
@@ -1452,7 +1454,7 @@
     },
     {
       "name": "s3_get_bucket_lifecycle",
-      "descriptionSha256": "1332684e386564decb3d7e976bdcef5e7fc84c4a19330bc59f405864ded596f3",
+      "descriptionSha256": "05d14c385dc16238f4e93e1b58f111ad2a8a729437fcfdab071cacb4430ebca5",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2046,5 +2048,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "1495adfb11c0ad592b1312de720b530b84612789929675d567104dea0e5ae4cc"
+  "hash": "d486bd0d88d189b6a3b234535eb91b08f427f85e6a15c5457cb59c94370a7eec"
 }

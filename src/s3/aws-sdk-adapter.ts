@@ -83,8 +83,14 @@ export interface B2S3LifecycleAbortIncompleteMultipartUpload {
 }
 
 /** S3 lifecycle rule subset returned by the B2 MCP read tool. */
-export interface B2S3LifecycleRuleResult {
-  /** Rule identifier supplied to S3 lifecycle APIs. */
+export interface B2S3ReadableLifecycleRule {
+  /**
+   * Rule identifier supplied by S3 lifecycle APIs.
+   *
+   * @remarks
+   * Provider responses can omit an ID. Such rules are returned without `id`
+   * and need a caller-supplied ID before reuse with `s3_put_bucket_lifecycle`.
+   */
   id?: string;
   /** Whether the lifecycle rule is active. */
   status: "Enabled" | "Disabled";
@@ -99,7 +105,7 @@ export interface B2S3LifecycleRuleResult {
 }
 
 /** S3 lifecycle rule subset accepted by the B2 MCP write tool. */
-export interface B2S3LifecycleRule extends B2S3LifecycleRuleResult {
+export interface B2S3LifecycleRule extends B2S3ReadableLifecycleRule {
   /** Rule identifier supplied to S3 lifecycle APIs. */
   id: string;
 }
@@ -454,8 +460,8 @@ export interface B2S3BucketLifecycleResult {
   bucket: string;
   /** Whether the provider currently has a lifecycle configuration document. */
   configured: boolean;
-  /** Normalized lifecycle rules in the field casing accepted by the write tool. */
-  rules: B2S3LifecycleRuleResult[];
+  /** Normalized lifecycle rules in MCP field casing; provider ID-less rules omit `id`. */
+  rules: B2S3ReadableLifecycleRule[];
 }
 
 /** Options for creating a multipart upload. */
@@ -806,14 +812,14 @@ function badRequest(message: string): never {
   throw Object.assign(new Error(message), { status: 400, code: "bad_request" });
 }
 
-function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3LifecycleRuleResult {
+function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3ReadableLifecycleRule {
   const expiration: B2S3LifecycleExpiration = {};
   if (rule.Expiration?.Days !== undefined) expiration.days = rule.Expiration.Days;
   if (rule.Expiration?.ExpiredObjectDeleteMarker !== undefined) {
     expiration.expiredObjectDeleteMarker = rule.Expiration.ExpiredObjectDeleteMarker;
   }
 
-  const prefix = rule.Filter?.Prefix ?? rule.Prefix;
+  const prefix = rule.Filter?.Prefix ?? rule.Filter?.And?.Prefix ?? rule.Prefix;
   return {
     ...(rule.ID !== undefined ? { id: rule.ID } : {}),
     status: rule.Status === "Enabled" ? "Enabled" : "Disabled",
@@ -833,6 +839,30 @@ function normalizeS3LifecycleRule(rule: LifecycleRule): B2S3LifecycleRuleResult 
           },
         }
       : {}),
+  };
+}
+
+function toAwsS3LifecycleRule(rule: B2S3LifecycleRule): LifecycleRule {
+  return {
+    ID: rule.id,
+    Status: rule.status,
+    Filter: rule.filter ? { Prefix: rule.filter.prefix ?? "" } : { Prefix: "" },
+    Expiration: rule.expiration
+      ? {
+          Days: rule.expiration.days,
+          ExpiredObjectDeleteMarker: rule.expiration.expiredObjectDeleteMarker,
+        }
+      : undefined,
+    NoncurrentVersionExpiration: rule.noncurrentVersionExpiration
+      ? {
+          NoncurrentDays: rule.noncurrentVersionExpiration.noncurrentDays,
+        }
+      : undefined,
+    AbortIncompleteMultipartUpload: rule.abortIncompleteMultipartUpload
+      ? {
+          DaysAfterInitiation: rule.abortIncompleteMultipartUpload.daysAfterInitiation,
+        }
+      : undefined,
   };
 }
 
@@ -999,27 +1029,7 @@ export class B2S3PeerClient {
       new PutBucketLifecycleConfigurationCommand({
         Bucket: input.bucket,
         LifecycleConfiguration: {
-          Rules: input.rules.map((rule) => ({
-            ID: rule.id,
-            Status: rule.status,
-            Filter: rule.filter ? { Prefix: rule.filter.prefix ?? "" } : { Prefix: "" },
-            Expiration: rule.expiration
-              ? {
-                  Days: rule.expiration.days,
-                  ExpiredObjectDeleteMarker: rule.expiration.expiredObjectDeleteMarker,
-                }
-              : undefined,
-            NoncurrentVersionExpiration: rule.noncurrentVersionExpiration
-              ? {
-                  NoncurrentDays: rule.noncurrentVersionExpiration.noncurrentDays,
-                }
-              : undefined,
-            AbortIncompleteMultipartUpload: rule.abortIncompleteMultipartUpload
-              ? {
-                  DaysAfterInitiation: rule.abortIncompleteMultipartUpload.daysAfterInitiation,
-                }
-              : undefined,
-          })),
+          Rules: input.rules.map(toAwsS3LifecycleRule),
         },
       }),
     );
