@@ -8,6 +8,7 @@ import { getRegisteredTools } from "../../src/server";
 import type { McpServer, ToolCallback, ToolRegistrar } from "../../src/mcp";
 import type {
   B2S3CompletedMultipartPart,
+  B2S3CommonPrefix,
   B2S3CopyObjectOptions,
   B2S3DeleteObjectOptions,
   B2S3DeleteObjectResult,
@@ -425,12 +426,14 @@ export class DeterministicS3ClientFake implements DeterministicS3PeerClient {
     uploadIdMarker?: string;
   }): Promise<{
     uploads: B2S3MultipartUploadSummary[];
+    commonPrefixes: B2S3CommonPrefix[];
     isTruncated?: boolean;
     nextKeyMarker?: string;
     nextUploadIdMarker?: string;
   }> {
     return this.next("listMultipartUploads", input, {
       uploads: [],
+      commonPrefixes: [],
       isTruncated: false,
     });
   }

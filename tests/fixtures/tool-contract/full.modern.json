@@ -1547,7 +1547,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "68d1e083d929ab5b54041f468d3849735db21f80337d52c736c1e2c26d6bf862",
+      "descriptionSha256": "f385469942f35f28175cdae3265c12b0e226aa7394b9751ef094bde66a1f15ee",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1818,7 +1818,7 @@
     },
     {
       "name": "s3_presign_upload_part",
-      "descriptionSha256": "fff9882a0922e19d0c6028c299144926da5b83488ddd7046a34ddca9d0ad9e94",
+      "descriptionSha256": "1c71eda3d7bf682285e9ee338ae26c74230b6502803802b242bd2bd23829871a",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2085,5 +2085,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "40b093eae92d0831b0b6b1b7a97425146da4d1194190fa2979643de34c464070"
+  "hash": "42e0552817705abefb18838798be6ec33743dac58a79a9fa6f2e00a08b1acd32"
 }

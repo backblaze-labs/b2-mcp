@@ -1539,7 +1539,7 @@
     },
     {
       "name": "s3_get_presigned_url",
-      "descriptionSha256": "68d1e083d929ab5b54041f468d3849735db21f80337d52c736c1e2c26d6bf862",
+      "descriptionSha256": "f385469942f35f28175cdae3265c12b0e226aa7394b9751ef094bde66a1f15ee",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -1810,7 +1810,7 @@
     },
     {
       "name": "s3_presign_upload_part",
-      "descriptionSha256": "fff9882a0922e19d0c6028c299144926da5b83488ddd7046a34ddca9d0ad9e94",
+      "descriptionSha256": "1c71eda3d7bf682285e9ee338ae26c74230b6502803802b242bd2bd23829871a",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -2058,5 +2058,5 @@
     "toolsListCacheHint": null,
     "discover": null
   },
-  "hash": "1f6c9829e7607fba5a06fddfafc155138c7c84d8b6425b80ea7b45b643ead0f1"
+  "hash": "e1e32132fc5173016036635e5f8e75e00486cc5fe812ccbbbc9059ce619a99eb"
 }

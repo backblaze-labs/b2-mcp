@@ -88,7 +88,7 @@ export function registerS3MultipartTools(
     "s3_presign_upload_part",
     {
       description:
-        "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
+        "Generate short-lived presigned PUT URL bearer capabilities for parts of an S3-compatible multipart upload, so the client/worker uploads each part DIRECTLY to B2. Prefer this over s3_get_presigned_url for multipart uploads; use s3_get_presigned_url for single-object PUT/GET transfers. The response includes expiresIn/expiresAt; treat each URL as sensitive until it expires. Flow: s3_create_multipart_upload → s3_presign_upload_part → PUT each part to its URL (capture the ETag from each response header) → s3_complete_multipart_upload with those ETags. Parts except the last must be ≥5 MiB.",
       inputSchema: {
         bucket: z.string().describe("The bucket name."),
         key: z.string().describe("The object key."),
@@ -268,6 +268,7 @@ export function registerS3MultipartTools(
         });
         return toolJson({
           uploads: result.uploads,
+          commonPrefixes: result.commonPrefixes,
           isTruncated: result.isTruncated,
           nextKeyMarker: result.nextKeyMarker,
           nextUploadIdMarker: result.nextUploadIdMarker,
