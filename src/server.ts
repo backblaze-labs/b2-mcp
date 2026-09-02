@@ -440,6 +440,11 @@ export function createServer(
     credentialsMissing: options.credentialsMissing,
     failClosedUnknownCapabilities,
   });
+  // This flag gates both prompt-handler registration and prompts/list
+  // advertisement together, so flipping it on a live HTTP fleet is not a
+  // decoupled two-phase rollout: flip it atomically across every replica (or
+  // use sticky routing) so no replica advertises prompts while a sibling
+  // replica still lacks a prompts/get handler.
   let promptCount = 0;
   if (config.enableMcpPrompts === true) {
     const tools = getRegisteredTools(server) ?? {};

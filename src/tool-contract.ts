@@ -937,7 +937,7 @@ export function renderProfileReference(contract: ContractArtifact): string {
     "",
     `Prompt contract issue: [#${contract.promptIssue}](${contract.promptIssueUrl})`,
     "",
-    "MCP workflow prompts are off by default. Set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica can serve `prompts/get` — keeping them off during a rolling HTTP upgrade so replicas do not advertise `prompts/list` before every replica can back it. These generated fixtures pin the prompt surface when enabled.",
+    "MCP workflow prompts are off by default. Set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica runs prompt-capable code. The flag gates handler registration and `prompts/list` advertisement together, so flip it atomically across the fleet (or use sticky routing) rather than as a decoupled two-phase rollout: a mixed flag state could advertise prompts on one replica while a sibling still lacks a `prompts/get` handler. These generated fixtures pin the prompt surface when enabled.",
     "",
     "The `full` prompt profile enables an inline dummy secret sink so sink-dependent key-rotation prompts are included in the external contract.",
     "",

@@ -235,7 +235,7 @@ the healthcheck probes the same port the server binds.
 | `B2_REGION`                                                   | —                     | `us-west-004`         | Fallback/default S3-compatible endpoint region; authorized B2 responses override this for S3/report tools                    |
 | `B2_MCP_UA_SUFFIX`                                            | —                     | —                     | Optional operator token appended _after_ the built-in `b2-mcp/<version>` product token on the outbound User-Agent (tag a deployment) |
 | `B2_MCP_OUTPUT_FORMAT`                                        | —                     | `json`                | LLM-facing `TextContent.text` format for structured successes: compact `json` or opt-in `toon`                             |
-| `B2_ENABLE_MCP_PROMPTS`                                       | —                     | `false`               | MCP workflow prompts (`prompts/list`, `prompts/get`) are off by default; set `true` to enable once every replica can serve them (avoids rolling-upgrade gaps) |
+| `B2_ENABLE_MCP_PROMPTS`                                       | —                     | `false`               | MCP workflow prompts (`prompts/list`, `prompts/get`) are off by default; set `true` once every replica runs prompt-capable code. Gates registration and advertisement together, so flip it atomically across the fleet (or use sticky routing) |
 | `B2_MCP_TRANSPORT`                                            | —                     | `stdio`               | CLI default transport when no `stdio` / `http` argument or `--transport` flag is passed; Docker images set this to `http`  |
 | `B2_HTTP_HOST`                                                 | HTTP only             | Node listen default   | Standalone Node HTTP listen host; set to `127.0.0.1` when binding behind a same-host reverse proxy                         |
 | `B2_LOG_FILE`                                                 | —                     | stderr                | Optional path for redacted structured JSON logs. When set, the file replaces stderr; stdout is never used for logs          |
@@ -476,9 +476,11 @@ For availability nuances, the destructive-gate list, and durable-secret handling
 **MCP workflow prompts (opt-in):**
 
 Guided workflow prompts are off by default; set `B2_ENABLE_MCP_PROMPTS=true` to
-advertise them through `prompts/list` and `prompts/get`. Keeping them off during
-a rolling HTTP upgrade means replicas do not advertise `prompts/list` before
-every replica can serve `prompts/get`. Prompts are parameterized message templates;
+advertise them through `prompts/list` and `prompts/get` once every replica runs
+prompt-capable code. The flag gates handler registration and advertisement
+together, so flip it atomically across the fleet (or use sticky routing): a
+mixed flag state could advertise `prompts/list` on one replica while a sibling
+replica still lacks a `prompts/get` handler. Prompts are parameterized message templates;
 they do not execute tools or approve destructive actions. Prompt availability is
 filtered against the same committed tool surface and B2 capability map as tools,
 so workflows disappear when a required handler is unavailable or only present as

@@ -270,8 +270,10 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
       preflight: options.transport === "stdio",
     }),
     // MCP workflow prompts are off by default. Set B2_ENABLE_MCP_PROMPTS=true to
-    // enable them once every replica can serve prompts/get, so a rolling HTTP
-    // upgrade never advertises prompts/list before every replica can back it.
+    // enable them once every replica runs prompt-capable code. This flag gates
+    // both handler registration and prompts/list advertisement, so flip it
+    // atomically across the fleet (or use sticky routing): a mixed flag state
+    // could advertise prompts on one replica while a sibling has no prompts/get.
     enableMcpPrompts: process.env.B2_ENABLE_MCP_PROMPTS === "true",
   };
   config.credentialFingerprint = fingerprintConfig(config);
