@@ -18,10 +18,12 @@ const sourceFiles = ["package.json", "pnpm-lock.yaml", "vercel.json"];
 const VERCEL_SOURCE_BUDGET_BYTES = 1_500_000;
 // Headroom for the documented source tree plus production dependencies in the
 // Vercel function estimate; emitted build output is still checked separately.
-// Tracks the clean-consumer install footprint, which grew with the reviewed
-// aws-sdk 3.1119.0 and b2-sdk 0.4.0 bumps and the stdio discovery-mode source;
-// the b2-sdk 0.4.0 Linux footprint lands near 33.32 MB, so the budget carries
-// modest headroom above it.
+// The estimate is all source bytes + the full clean-consumer production install
+// (see below), which grew with the reviewed aws-sdk 3.1119.0 and b2-sdk 0.4.0
+// bumps and the stdio discovery-mode source. The whole function estimate lands
+// near 33.32 MB on Linux — of which the dependency install itself is ~32.11 MB
+// (reports/package-budget/metrics.json), not b2-sdk alone — so the budget
+// carries modest headroom above the full estimate.
 const VERCEL_FUNCTION_BUNDLE_BUDGET_BYTES = 33_400_000;
 
 function readJson(relativePath) {

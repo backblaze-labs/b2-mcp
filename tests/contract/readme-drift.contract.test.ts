@@ -113,7 +113,16 @@ describe("README project badges", () => {
       "registry.modelcontextprotocol.io/v0/servers?search=io.github.backblaze-labs/b2-mcp",
     );
     expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp");
+    // The Glama badge must render the live score image, not just link the base
+    // server path (which both the image and the link URL share). Guard the exact
+    // score-image target so reverting it away from /badges/score.svg fails CI.
+    expect(readme).toContain("glama.ai/mcp/servers/@backblaze-labs/b2-mcp/badges/score.svg");
     expect(readme).toContain("smithery.ai/server/@backblaze-labs/b2-mcp");
+    // The LobeHub badge must keep both its shields image and its deterministic
+    // per-server listing URL, so dropping either fails CI rather than silently
+    // shipping a broken/absent badge.
+    expect(readme).toContain("img.shields.io/badge/LobeHub-b2--mcp");
+    expect(readme).toContain("lobehub.com/mcp/backblaze-labs-b2-mcp");
     // The MCP Registry badge must query the nested `$.servers[0].server.version`
     // path (encoded), matching the 2025-12-11 registry response shape. Guard
     // against a regression back to the flat `$.servers[0].version` query.

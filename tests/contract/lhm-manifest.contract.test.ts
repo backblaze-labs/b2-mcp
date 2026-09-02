@@ -7,47 +7,79 @@
  * description, changed schema or annotation) could leave the LobeHub listing
  * stale while every other fixture still passes. This test rebuilds the full
  * inline-sink surface in-process and asserts the manifest still matches the live
- * tool names, descriptions, input-schema shape, and annotations.
+ * tool names, descriptions, annotations, and the **complete** input JSON Schema
+ * emitted by `tools/list` — every property's type, enum, bounds, default,
+ * description, and nested object shape — not merely its top-level property names.
  */
 
+import { z } from "zod";
 import { createServer, getRegisteredTools } from "../../src/server";
 import { readJson } from "./support";
 
 interface LhmTool {
   name: string;
   description: string;
-  inputSchema?: {
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
+  inputSchema?: Record<string, unknown>;
   annotations?: Record<string, boolean>;
 }
 
 const lhm = readJson<{ tools: LhmTool[] }>("lhm.plugin.json");
 const lhmByName = Object.fromEntries(lhm.tools.map((tool) => [tool.name, tool]));
 
-// ── Zod-mini schema helpers (mirrors tools-schema.contract.test.ts) ───────────
-
-function getShape(schema: any): Record<string, any> {
-  return schema?.def?.shape ?? {};
+/**
+ * Normalize a JSON Schema for cross-generator comparison. Two facts differ only
+ * as generated metadata between `z.toJSONSchema` (the live SDK path) and the
+ * `lhm plugin init` capture, so they are the only things stripped:
+ *
+ * - the `$schema` dialect URL, which `lhm` drops;
+ * - the closed-object `additionalProperties: false` marker that zod emits for
+ *   every object but `lhm` omits (record value schemas, where
+ *   `additionalProperties` is itself a schema object, are preserved);
+ * - `required` membership for fields carrying a `default`, which the two
+ *   generators disagree on — a defaulted field is optional, so it is dropped
+ *   from `required` on both sides.
+ *
+ * Everything else — types, enums, `minimum`/`maximum`/`minLength`/`maxLength`,
+ * patterns, descriptions, `items`, and nested `properties` — is compared exactly.
+ */
+function normalizeSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeSchema);
+  if (value && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(source)) {
+      if (key === "$schema") continue;
+      if (key === "additionalProperties" && val === false) continue;
+      out[key] = normalizeSchema(val);
+    }
+    const properties = out.properties as Record<string, { default?: unknown }> | undefined;
+    if (Array.isArray(out.required) && properties) {
+      const required = (out.required as string[]).filter(
+        (name) => !(properties[name] && "default" in properties[name]),
+      );
+      if (required.length === 0) delete out.required;
+      else out.required = required;
+    }
+    return out;
+  }
+  return value;
 }
 
-function isRequired(fieldSchema: any): boolean {
-  const t = fieldSchema?.def?.type;
-  return t !== "optional" && t !== "default";
+/** Deterministic deep sort so object key order never causes false drift. */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, canonical((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
 }
 
-function propertyNames(schema: any): string[] {
-  return Object.keys(getShape(schema)).sort();
-}
-
-function requiredKeys(schema: any): string[] {
-  return Object.entries(getShape(schema))
-    .filter(([, value]) => isRequired(value))
-    .map(([key]) => key)
-    .sort();
-}
-
+// Mirrors the zod-schema access in tools-schema.contract.test.ts; the inline
+// sink registers every tool with a concrete input schema.
 let tools: Record<string, any>;
 
 beforeAll(() => {
@@ -73,20 +105,19 @@ describe("lhm.plugin.json manifest drift", () => {
     expect(lhm.tools.map((tool) => tool.name).sort()).toEqual(Object.keys(tools).sort());
   });
 
-  it("matches every live tool's description, schema shape, and annotations", () => {
+  it("matches every live tool's description, annotations, and full input JSON Schema", () => {
     for (const [name, tool] of Object.entries(tools)) {
       const manifestTool = lhmByName[name];
       expect(manifestTool, `tool ${name} missing from lhm.plugin.json`).toBeDefined();
       expect(manifestTool.description, `description drift for ${name}`).toBe(tool.description);
       expect(manifestTool.annotations, `annotation drift for ${name}`).toEqual(tool.annotations);
-      expect(
-        Object.keys(manifestTool.inputSchema?.properties ?? {}).sort(),
-        `schema property drift for ${name}`,
-      ).toEqual(propertyNames(tool.inputSchema));
-      expect(
-        (manifestTool.inputSchema?.required ?? []).slice().sort(),
-        `required-field drift for ${name}`,
-      ).toEqual(requiredKeys(tool.inputSchema));
+
+      // Compare the complete JSON Schema `tools/list` would emit, not just its
+      // property names — a changed type, enum, bound, default, or nested shape
+      // must fail here even when the property set is unchanged.
+      const liveSchema = canonical(normalizeSchema(z.toJSONSchema(tool.inputSchema)));
+      const manifestSchema = canonical(normalizeSchema(manifestTool.inputSchema ?? {}));
+      expect(manifestSchema, `input schema drift for ${name}`).toEqual(liveSchema);
     }
   });
 });
