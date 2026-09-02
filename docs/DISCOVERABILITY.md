@@ -35,12 +35,22 @@ The canonical registry description lives in
 `scripts/lib/mcp-registry-manifest.mjs` (`mcpRegistryDescription`) and is
 contract-checked against `server.json`; keep it ≤100 characters.
 
-## The tool-scan credential trick
+## Credential-less tool scans
 
-Directories that enumerate tools by launching the server (mcp.so, Glama build
-tests, LobeHub `plugin init`) fail because startup requires B2 credentials.
-Start it with placeholder credentials plus `B2_REGISTER_ALL_TOOLS=true`, which
-skips the authorize call and registers all 40 tools without a real account:
+Directories that enumerate tools by launching the stdio server (mcp.so, Glama
+build tests, LobeHub `plugin init`) need `tools/list` to work without a real B2
+account. Since #356 this is the **default** — no env required. Launching with no
+`B2_APPLICATION_KEY_ID` / `B2_APPLICATION_KEY` enters credential-less discovery
+mode automatically: the full 40-tool surface (including the real durable-secret
+schemas) registers, a `server.stdio_discovery_mode` warning is logged, and every
+tool *call* returns a clear `missing_credentials` error. So most scanners work
+against `npx -y @backblaze-labs/b2-mcp` with no configuration at all.
+
+**Fallback** — only for a scanner that refuses to launch without explicit
+credential values. Set placeholders plus `B2_REGISTER_ALL_TOOLS=true`, and
+`B2_SECRET_SINK=inline` so the durable-secret tools (`b2_create_key`,
+`b2_create_group_member`, `b2_reserve_trial_create_account`) advertise their real
+inputs rather than `confirm`-only compatibility stubs:
 
 ```
 B2_APPLICATION_KEY_ID=placeholder
@@ -49,13 +59,8 @@ B2_REGISTER_ALL_TOOLS=true
 B2_SECRET_SINK=inline
 ```
 
-Tool *calls* fail without real credentials, but `tools/list` succeeds — which is
-all a scan needs. Use `B2_SECRET_SINK=inline`, not `off`: in `off` mode the
-durable-secret tools (`b2_create_key`, `b2_create_group_member`,
-`b2_reserve_trial_create_account`) register as `confirm`-only compatibility
-stubs, so a scan would advertise a truncated contract instead of their real
-inputs. Do not force `B2_REGISTER_ALL_TOOLS` on real user deployments; it
-bypasses capability-aware registration.
+Do not force `B2_REGISTER_ALL_TOOLS` on real user deployments; it bypasses
+capability-aware registration.
 
 ## Glama
 

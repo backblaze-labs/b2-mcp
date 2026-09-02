@@ -11,11 +11,13 @@ startCommand:
     properties:
       B2_APPLICATION_KEY_ID:
         type: string
+        minLength: 1
         format: password
         title: Application Key ID
         description: Backblaze B2 application key ID for native B2 and S3-compatible tools. Use a non-master application key.
       B2_APPLICATION_KEY:
         type: string
+        minLength: 1
         format: password
         title: Application Key
         description: Backblaze B2 application key secret.

@@ -69,6 +69,22 @@ describe("README tool-surface drift", () => {
       `Prefix counts remain ${native} native \`b2_*\` names + ${s3} data-plane \`s3_*\` names.`,
     );
   });
+
+  it("keeps the flat `## Tools` list in exact sync with the full contract", () => {
+    // The flat list under `## Tools` (before `### Tool details and availability`)
+    // is what registry/directory auto-extractors read. Isolate it so a deleted or
+    // mistyped bullet is caught here even though the name also appears in the
+    // detailed tables below.
+    const start = readme.indexOf("\n## Tools\n");
+    const end = readme.indexOf("### Tool details and availability");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const section = readme.slice(start, end);
+    const listed = [...section.matchAll(/^- `((?:b2|s3)_[a-z0-9_]+)`/gm)].map((m) => m[1]);
+    // No duplicate bullets, and the set/count matches the full tool contract.
+    expect([...listed].sort()).toEqual([...new Set(listed)].sort());
+    expect([...listed].sort()).toEqual([...toolNames].sort());
+  });
 });
 
 describe("README project badges", () => {
