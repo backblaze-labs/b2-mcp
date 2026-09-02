@@ -275,7 +275,7 @@ Profile hash: `9873510da79d6862df6aa9b9d0bb55d4646f09b6daf6d89646f197b3845411c0`
 
 Prompt contract issue: [#166](https://github.com/backblaze-labs/b2-mcp/issues/166)
 
-MCP workflow prompts are on by default. Set `B2_ENABLE_MCP_PROMPTS=false` to disable them — for example during a rolling HTTP upgrade so replicas do not advertise `prompts/list` before every replica can serve `prompts/get`. These generated fixtures pin the prompt surface.
+MCP workflow prompts are off by default. Set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica can serve `prompts/get` — keeping them off during a rolling HTTP upgrade so replicas do not advertise `prompts/list` before every replica can back it. These generated fixtures pin the prompt surface when enabled.
 
 The `full` prompt profile enables an inline dummy secret sink so sink-dependent key-rotation prompts are included in the external contract.
 

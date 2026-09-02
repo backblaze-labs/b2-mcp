@@ -82,7 +82,7 @@ Set these in Vercel Project Settings, not in source:
 | `B2_REGISTER_ALL_TOOLS` | `false` |
 | `B2_ALLOW_LOCAL_FILES` | `false` |
 | `B2_MCP_OUTPUT_FORMAT` | `json` until every client validates `toon` |
-| `B2_ENABLE_MCP_PROMPTS` | `true` (on by default); set `false` during a rolling upgrade so replicas do not advertise prompts before all serve them |
+| `B2_ENABLE_MCP_PROMPTS` | `false` (off by default); set `true` once every replica can serve prompts so a rolling upgrade never advertises prompts before all serve them |
 | `B2_MCP_PUBLIC_URL` | Final public `https://.../mcp` URL |
 | OAuth issuer/resource/audience | Exact operator values, no wildcard audience |
 | `B2_OAUTH_ALLOWED_SUBJECTS` | Exactly one subject for the supported single-tenant `server` mode |

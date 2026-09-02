@@ -373,8 +373,8 @@ export const CONTRACT_TEST_CONFIG: B2Config = {
   region: "us-west-004",
   allowLocalFiles: true,
   fileRoot: null,
-  // Prompts are on by default; the frozen tool contract advertises the prompts
-  // capability accordingly.
+  // Prompts are off by default; the frozen tool contract explicitly enables
+  // them so it always advertises the full prompts capability surface.
   enableMcpPrompts: true,
 };
 
@@ -937,7 +937,7 @@ export function renderProfileReference(contract: ContractArtifact): string {
     "",
     `Prompt contract issue: [#${contract.promptIssue}](${contract.promptIssueUrl})`,
     "",
-    "MCP workflow prompts are on by default. Set `B2_ENABLE_MCP_PROMPTS=false` to disable them — for example during a rolling HTTP upgrade so replicas do not advertise `prompts/list` before every replica can serve `prompts/get`. These generated fixtures pin the prompt surface.",
+    "MCP workflow prompts are off by default. Set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica can serve `prompts/get` — keeping them off during a rolling HTTP upgrade so replicas do not advertise `prompts/list` before every replica can back it. These generated fixtures pin the prompt surface when enabled.",
     "",
     "The `full` prompt profile enables an inline dummy secret sink so sink-dependent key-rotation prompts are included in the external contract.",
     "",

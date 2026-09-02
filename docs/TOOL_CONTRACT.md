@@ -15,7 +15,7 @@ The frozen machine-readable contract is
 human-readable reference is [`TOOL_PROFILES.md`](TOOL_PROFILES.md). The
 deterministic `tools/list` fixtures are checked in under
 [`../tests/fixtures/tool-contract`](../tests/fixtures/tool-contract).
-The prompt fixtures (prompts are on by default; set `B2_ENABLE_MCP_PROMPTS=false` to disable) are checked in under
+The prompt fixtures (prompts are off by default; set `B2_ENABLE_MCP_PROMPTS=true` to enable) are checked in under
 [`../tests/fixtures/prompt-contract`](../tests/fixtures/prompt-contract).
 Each profile entry records the capability input that generated it; each fixture
 hash covers the sorted tool names and normalized tool definitions, including

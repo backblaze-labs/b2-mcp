@@ -101,7 +101,7 @@ pnpm run test:integration:live
 
 - `loadConfig()` — reads env vars, validates required keys, returns `B2Config`
 - `fetchCapabilities(config)` — one-shot authorize that returns the key's `allowed.capabilities`; returns `null` only for `B2_REGISTER_ALL_TOOLS=true`. Lookup failures throw so HTTP fails closed.
-- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the AWS S3 data-plane client (configured through `@backblaze-labs/b2-sdk/s3`), then calls all `register*Tools()` functions and, unless `B2_ENABLE_MCP_PROMPTS=false`, `registerB2WorkflowPrompts()`
+- `createServer(config, capabilities?)` — instantiates `B2AuthManager`, the SDK-backed `B2Client`, and the AWS S3 data-plane client (configured through `@backblaze-labs/b2-sdk/s3`), then calls all `register*Tools()` functions and, when `B2_ENABLE_MCP_PROMPTS=true`, `registerB2WorkflowPrompts()`
 
 Each register function receives the server + client(s) and calls `server.tool(name, description, zodSchema, handler)` for each tool. Adding a new tool means adding it to the appropriate register file — no changes to `server.ts` needed unless it's a new register file. **New tools should also be added to the capability map** (`src/utils/tool-capabilities.ts`).
 
@@ -138,7 +138,7 @@ security-relevant after writes.
 
 ### Prompt registration flow
 
-MCP workflow prompts are on by default; set `B2_ENABLE_MCP_PROMPTS=false` to disable them — for example during a rolling HTTP upgrade so mixed replicas do not advertise `prompts/list` before every replica supports `prompts/get`. Prompt definitions live in `src/prompts.ts` and register through `PromptRegistrationAdapter`, which shares the deferred registration machinery used by `ToolRegistrationAdapter`. Prompt availability is derived from the committed tool registry: every `requiredTools` entry must be a registered, available (non-stub) handler, and any `requiredCapabilities` entry must be present in the resolved B2 capability set. This keeps prompts aligned with durable-secret sink stubs, OAuth/transport gates, and future tool-registration policy.
+MCP workflow prompts are off by default; set `B2_ENABLE_MCP_PROMPTS=true` to enable them once every replica can serve `prompts/get` — keeping them off during a rolling HTTP upgrade so mixed replicas do not advertise `prompts/list` before every replica supports it. Prompt definitions live in `src/prompts.ts` and register through `PromptRegistrationAdapter`, which shares the deferred registration machinery used by `ToolRegistrationAdapter`. Prompt availability is derived from the committed tool registry: every `requiredTools` entry must be a registered, available (non-stub) handler, and any `requiredCapabilities` entry must be present in the resolved B2 capability set. This keeps prompts aligned with durable-secret sink stubs, OAuth/transport gates, and future tool-registration policy.
 
 Prompts return structured message templates only; they never execute B2 tools. Destructive or credential-producing steps still happen later through `tools/call`, so the existing destructive gate and MCP elicitation remain authoritative. Four workflow prompts intentionally launch the shipped companion skills (`b2-object-lock`, `b2-incident-response`, `b2-lifecycle-cost-hygiene`, `b2-least-privilege-keys`) instead of restating those playbooks; `b2_review_bucket_notifications` is the net-new prompt workflow.
 

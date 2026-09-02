@@ -68,18 +68,18 @@ describe("credential providers", () => {
     expect(resolved.config.outputFormat).toBe("json");
   });
 
-  it("enables MCP workflow prompts by default and only disables them on an explicit false", () => {
+  it("disables MCP workflow prompts by default and only enables them on an explicit true", () => {
     process.env.B2_APPLICATION_KEY_ID = "stdio-id";
     process.env.B2_APPLICATION_KEY = "stdio-secret";
 
     delete process.env.B2_ENABLE_MCP_PROMPTS;
-    expect(new StdioEnvCredentialProvider().resolve().config.enableMcpPrompts).toBe(true);
-
-    process.env.B2_ENABLE_MCP_PROMPTS = "true";
-    expect(new StdioEnvCredentialProvider().resolve().config.enableMcpPrompts).toBe(true);
+    expect(new StdioEnvCredentialProvider().resolve().config.enableMcpPrompts).toBe(false);
 
     process.env.B2_ENABLE_MCP_PROMPTS = "false";
     expect(new StdioEnvCredentialProvider().resolve().config.enableMcpPrompts).toBe(false);
+
+    process.env.B2_ENABLE_MCP_PROMPTS = "true";
+    expect(new StdioEnvCredentialProvider().resolve().config.enableMcpPrompts).toBe(true);
   });
 
   it("honors TOON output mode", () => {

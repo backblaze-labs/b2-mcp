@@ -98,6 +98,9 @@ function expectStatelessModernRequests(requests: VercelRequests): void {
 
 beforeEach(async () => {
   setVercelProtocolEnv(savedEnv);
+  // The full frozen profile advertises the prompt surface, so enable prompts to
+  // exercise parity; afterEach restores process.env from savedEnv.
+  process.env.B2_ENABLE_MCP_PROMPTS = "true";
   installSdkTransport(
     withTrustedS3ApiUrl(
       new B2Simulator({ minimumPartSize: 1024, recommendedPartSize: 1024 }).transport(),
