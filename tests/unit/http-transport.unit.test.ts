@@ -24,6 +24,7 @@ import {
   invalidateAuthManagerCache,
   invalidateCapabilityCache,
 } from "../../src/server";
+import { _resetRateLimiter } from "../../src/utils/rate-limiter";
 import { setB2SdkClientFactoryForTests } from "../support/sdk-factory-hook";
 import {
   CredentialProvider,
@@ -174,9 +175,12 @@ const savedHttpEnv = saveEnv();
 const savedMutableEnv = saveEnv([
   "B2_MAX_SESSIONS",
   "B2_MAX_SESSIONS_PER_KEY",
+  "B2_MCP_RATE_LIMIT_BURST",
+  "B2_MCP_RATE_LIMIT_RPS",
   "B2_ALLOWED_HOSTS",
   "B2_ALLOWED_ORIGINS",
   "B2_MCP_OUTPUT_FORMAT",
+  "B2_TRUST_PROXY_HEADERS",
 ]);
 
 beforeAll(() => {
@@ -197,6 +201,7 @@ beforeEach(async () => {
   delete process.env.B2_CREDENTIAL_TENANT_A_APPLICATION_KEY;
   restoreEnv(savedMutableEnv);
   invalidateCapabilityCache();
+  _resetRateLimiter();
   installSdkTransport(
     new RecordingTransport((request) => {
       if (b2EndpointName(request) === "b2_authorize_account") {
@@ -217,6 +222,7 @@ afterEach(async () => {
   vi.clearAllMocks();
   setB2SdkClientFactoryForTests(null);
   invalidateAuthManagerCache();
+  _resetRateLimiter();
   await closeHttpServer(handle);
 });
 
@@ -552,6 +558,88 @@ describe("HTTP transport handler", () => {
 
     expect(fetchCapabilities).toHaveBeenCalledTimes(3);
     expect(new Set(seenKeyIds)).toEqual(new Set([DISCOVERY_MODE_CREDENTIAL]));
+  });
+
+  it("holds invalid header verification behind a shared in-flight key", async () => {
+    process.env.B2_TRUST_PROXY_HEADERS = "true";
+    process.env.B2_MAX_SESSIONS_PER_KEY = "1";
+    let releaseCapabilities!: () => void;
+    const capabilitiesBlocked = new Promise<void>((resolve) => {
+      releaseCapabilities = resolve;
+    });
+    const fetchCapabilities = vi.fn(async () => {
+      await capabilitiesBlocked;
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const first = request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-a",
+        "x-b2-key": "invalid-secret-a",
+        "x-forwarded-for": "198.51.100.10",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    await vi.waitFor(() => expect(fetchCapabilities).toHaveBeenCalledTimes(1));
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-b",
+        "x-b2-key": "invalid-secret-b",
+        "x-forwarded-for": "198.51.100.11",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(second.status).toBe(429);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
+
+    releaseCapabilities();
+    await expect(first).resolves.toMatchObject({ status: 200 });
+  });
+
+  it("rate-limits invalid header verification before upstream auth", async () => {
+    process.env.B2_TRUST_PROXY_HEADERS = "true";
+    process.env.B2_MCP_RATE_LIMIT_BURST = "1";
+    process.env.B2_MCP_RATE_LIMIT_RPS = "1";
+    _resetRateLimiter();
+    const fetchCapabilities = vi.fn(async () => {
+      throw new CredentialResolutionError(
+        "Credential or capability resolution failed",
+        401,
+        "capability_auth_failed",
+      );
+    });
+    await replaceHandle(undefined, { fetchCapabilities });
+
+    const first = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-a",
+        "x-b2-key": "invalid-secret-a",
+        "x-forwarded-for": "198.51.100.20",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(first.status).toBe(200);
+
+    const second = await request(port, "POST", "/mcp", {
+      headers: {
+        "x-b2-key-id": "invalid-b",
+        "x-b2-key": "invalid-secret-b",
+        "x-forwarded-for": "198.51.100.21",
+        ...modernHeaders("tools/list"),
+      },
+      body: LIST_TOOLS,
+    });
+    expect(second.status).toBe(429);
+    expect(fetchCapabilities).toHaveBeenCalledTimes(1);
   });
 
   it("keeps concurrent header credentials isolated through the shared handler", async () => {
