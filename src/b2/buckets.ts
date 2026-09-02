@@ -786,7 +786,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },
@@ -898,7 +898,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a gated bucket update: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Required only when the effective server destructive policy is 'confirm'; non-gated updates do not need it.",
+            "Fallback confirmation for a gated bucket update when the effective server destructive policy is 'confirm' and MCP elicitation cannot run. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Non-gated updates do not need it.",
           ),
       },
     },
@@ -1017,7 +1017,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm replacing persistent outbound webhook notification rules. Required only when the effective server destructive policy is 'confirm'.",
+            "Fallback confirmation for replacing persistent outbound webhook notification rules when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },

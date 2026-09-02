@@ -344,7 +344,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -369,7 +369,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -576,7 +576,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm replacing persistent outbound webhook notification rules. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for replacing persistent outbound webhook notification rules when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "eventNotificationRules": {
@@ -722,7 +722,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm a gated bucket update: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Required only when the effective server destructive policy is 'confirm'; non-gated updates do not need it.",
+            "description": "Fallback confirmation for a gated bucket update when the effective server destructive policy is 'confirm' and MCP elicitation cannot run. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Non-gated updates do not need it.",
             "type": "boolean"
           },
           "corsRules": {
@@ -972,7 +972,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this irreversible/protection-removing operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this irreversible/protection-removing operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "fileId": {
@@ -1010,7 +1010,7 @@
             "type": "boolean"
           },
           "confirm": {
-            "description": "Confirm this irreversible/protection-removing operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this irreversible/protection-removing operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "fileId": {
@@ -1114,7 +1114,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "key": {
@@ -1306,7 +1306,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "key": {
@@ -1343,7 +1343,7 @@
             "type": "boolean"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "objects": {
@@ -1450,7 +1450,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required only for PutObject when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for minting a PutObject presigned URL bearer capability when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           },
           "contentType": {
@@ -1768,7 +1768,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Required under 'confirm' when rules is [] or rules expire objects. Not needed for abort-incomplete-upload-only rules.",
+            "description": "Fallback confirmation under 'confirm' when rules is [] or rules expire objects and MCP elicitation cannot run. Not needed for abort-incomplete-upload-only rules.",
             "type": "boolean"
           },
           "rules": {
@@ -1979,5 +1979,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "ba92b0c96aec14cbb2b468d0abb07f6af79be8add16565e77e8163e46f7dab7a"
+  "hash": "ad6076d86e65d1c20bb2c22fc08c794371461b192e138c1d6cc69c075feaed40"
 }

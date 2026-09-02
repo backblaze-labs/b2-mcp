@@ -202,7 +202,7 @@ export function registerKeyTools(
             .boolean()
             .optional()
             .describe(
-              "Confirm this durable credential creation. Required only when the effective server destructive policy is 'confirm'.",
+              "Fallback confirmation for this durable credential creation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             ),
         },
       },
@@ -312,7 +312,7 @@ export function registerKeyTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },

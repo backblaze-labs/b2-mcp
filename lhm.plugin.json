@@ -213,7 +213,7 @@
             "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical group-member creation request."
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -298,7 +298,7 @@
             "description": "Caller-generated idempotency key. Reuse the same value only for an identical retry by the same caller; conflicting reuse is rejected."
           },
           "confirm": {
-            "description": "Confirm this durable credential creation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this durable credential creation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -323,7 +323,7 @@
             "description": "The ID of the bucket to delete."
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -348,7 +348,7 @@
             "description": "Exact application key ID to delete; use b2_list_keys to look it up."
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -422,7 +422,7 @@
             "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -679,7 +679,7 @@
             "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical reserve-trial account creation request."
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -771,7 +771,7 @@
             "description": "Complete replacement rule set for the bucket. Include every rule that should remain; omitted existing rules are removed."
           },
           "confirm": {
-            "description": "Confirm replacing persistent outbound webhook notification rules. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for replacing persistent outbound webhook notification rules when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1079,7 +1079,7 @@
             "type": "number"
           },
           "confirm": {
-            "description": "Confirm a gated bucket update: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Required only when the effective server destructive policy is 'confirm'; non-gated updates do not need it.",
+            "description": "Fallback confirmation for a gated bucket update when the effective server destructive policy is 'confirm' and MCP elicitation cannot run. Gated cases: bucketType allPublic, fileLockEnabled false, defaultRetention.mode null, lifecycleRules with daysFromHidingToDeleting, or any replicationConfiguration. Non-gated updates do not need it.",
             "type": "boolean"
           }
         },
@@ -1113,7 +1113,7 @@
             "description": "'on' to apply a legal hold; 'off' to remove it. B2's write API expects this bare string — not the isClientAuthorizedToRead/value object that b2_get_file_info returns."
           },
           "confirm": {
-            "description": "Confirm this irreversible/protection-removing operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this irreversible/protection-removing operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1176,7 +1176,7 @@
             "type": "boolean"
           },
           "confirm": {
-            "description": "Confirm this irreversible/protection-removing operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this irreversible/protection-removing operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1250,7 +1250,7 @@
             "description": "The UploadId to abort."
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1442,7 +1442,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1495,7 +1495,7 @@
             "type": "boolean"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1602,7 +1602,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required only for PutObject when the effective server destructive policy is 'confirm'.",
+            "description": "Fallback confirmation for minting a PutObject presigned URL bearer capability when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             "type": "boolean"
           }
         },
@@ -1961,7 +1961,7 @@
             "description": "Rules to set; [] clears the configuration."
           },
           "confirm": {
-            "description": "Required under 'confirm' when rules is [] or rules expire objects. Not needed for abort-incomplete-upload-only rules.",
+            "description": "Fallback confirmation under 'confirm' when rules is [] or rules expire objects and MCP elicitation cannot run. Not needed for abort-incomplete-upload-only rules.",
             "type": "boolean"
           }
         },

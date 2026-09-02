@@ -28,7 +28,7 @@ import { assertSafeObjectContentType, b2S3DeleteErrorEntry } from "./aws-sdk-ada
 import { timeoutError } from "../utils/named-error.js";
 
 const CONFIRM_DESC =
-  "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.";
+  "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.";
 
 interface DeleteObjectEntry {
   key: string;

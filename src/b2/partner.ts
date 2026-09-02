@@ -338,7 +338,7 @@ export function registerPartnerTools(
             .boolean()
             .optional()
             .describe(
-              "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+              "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             ),
         },
       },
@@ -484,7 +484,7 @@ export function registerPartnerTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+            "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
           ),
       },
     },
@@ -574,7 +574,7 @@ export function registerPartnerTools(
             .boolean()
             .optional()
             .describe(
-              "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
+              "Fallback confirmation for this destructive/irreversible operation when the effective server destructive policy is 'confirm' and MCP elicitation cannot run.",
             ),
         },
       },
