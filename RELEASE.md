@@ -167,11 +167,14 @@ exists. For the first public package only:
    no tag). `scripts/cut-changelog.mjs` reads that bumped version, rewrites
    `## [Unreleased]` into a dated `## [x.y.z] - YYYY-MM-DD` section, leaves a fresh
    empty `[Unreleased]`, and updates the changelog compare links.
-   `scripts/update-server-json-version.mjs` then syncs the MCP Registry manifest
-   (`server.json` top-level `version` and the npm package entry) to the bumped
-   `package.json` version — required, or the `verify-mcp-registry-manifest`
-   contract test and `Publish Package` fail on `server.json version … does not
-   match`.
+   `scripts/update-server-json-version.mjs` then syncs the bumped
+   `package.json` version into every checked-in distribution manifest: the MCP
+   Registry manifest (`server.json` top-level `version` and the npm package
+   entry), the LobeHub manifest (`lhm.plugin.json`), and the MCPB manifest
+   (`mcpb/manifest.json` `version` plus the pinned `@backblaze-labs/b2-mcp@<version>`
+   npx launcher) — required, or the `verify-mcp-registry-manifest` contract test,
+   the manifest version contracts, and `Publish Package` fail on a version
+   mismatch. The `version` lifecycle command stages all of these together.
 3. Commit the bump and create the signed tag (`git config --get tag.gpgSign`
    should report `true`, or pass `-s` to `git tag`):
 
@@ -233,6 +236,12 @@ exists. For the first public package only:
    )"
    gh api --method DELETE "orgs/backblaze-labs/packages/container/b2-mcp/versions/${version_id}"
    ```
+7. After npm/GHCR/GitHub Release succeed, run the per-release directory actions
+   in [`docs/DISCOVERABILITY.md`](docs/DISCOVERABILITY.md) ("On every release"):
+   build and upload the `.mcpb` bundle (`pnpm run build:mcpb`) through Smithery's
+   Local publish tab, refresh the LobeHub listing (`lhm plugin update`), and cut
+   a new Glama release. These are manual and are not part of `Publish Package`,
+   so skipping them leaves the directory listings advertising the prior version.
 
 ## Build Version and Release Channel
 
