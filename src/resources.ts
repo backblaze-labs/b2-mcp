@@ -221,6 +221,10 @@ function isRequestAborted(err: unknown): boolean {
  * a missing-bucket `resources/read`, which surfaces as {@link
  * ResourceNotFoundError} (`-32602` with `data.uri`) — as server failures and
  * skew resource error-rate alerting. Classify them here instead.
+ *
+ * @param err - JSON-RPC protocol error raised while serving a resource.
+ *
+ * @returns Stable audit `code` and HTTP-equivalent `status` for the error.
  */
 export function protocolErrorAuditFields(err: ProtocolError): { code: string; status: number } {
   // A resources/read miss is a routine not-found, not a bad request; classify
