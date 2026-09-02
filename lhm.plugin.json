@@ -170,15 +170,47 @@
     },
     {
       "name": "b2_create_group_member",
-      "description": "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+      "description": "Create a Backblaze account for a new Partner group member. In file sink mode, the one-time application key secret is written to the configured out-of-band secret sink and the MCP response contains only redacted metadata plus a secretSink pointer. In inline mode, the secret is returned with an explicit warning.",
       "inputSchema": {
         "type": "object",
         "properties": {
+          "adminAccountId": {
+            "type": "string",
+            "description": "The accountId of the Group admin. Must be authorized for the Partner API."
+          },
+          "groupId": {
+            "type": "string",
+            "description": "The Group ID that the new member will join."
+          },
+          "memberEmail": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Email address for the new group member account."
+          },
+          "region": {
+            "description": "Optional data region for the new account.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["us-east", "us-west", "ca-east", "eu-central"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical group-member creation request."
+          },
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
             "type": "boolean"
           }
         },
+        "required": ["adminAccountId", "groupId", "memberEmail", "idempotencyKey"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -190,15 +222,80 @@
     },
     {
       "name": "b2_create_key",
-      "description": "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+      "description": "Create a B2 application key. In file sink mode, the one-time key secret is written to the configured out-of-band secret sink and the MCP response contains only redacted metadata plus a secretSink pointer. In inline mode, the secret is returned with an explicit warning.",
       "inputSchema": {
         "type": "object",
         "properties": {
+          "keyName": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable name for the new key."
+          },
+          "capabilities": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "listKeys",
+                "writeKeys",
+                "deleteKeys",
+                "listBuckets",
+                "readBuckets",
+                "writeBuckets",
+                "deleteBuckets",
+                "listFiles",
+                "readFiles",
+                "shareFiles",
+                "writeFiles",
+                "deleteFiles",
+                "readBucketEncryption",
+                "writeBucketEncryption",
+                "readBucketRetentions",
+                "writeBucketRetentions",
+                "readFileRetentions",
+                "writeFileRetentions",
+                "bypassGovernance",
+                "readBucketReplications",
+                "writeBucketReplications",
+                "readBucketNotifications",
+                "writeBucketNotifications"
+              ]
+            },
+            "description": "B2 capabilities to grant to the new key."
+          },
+          "bucketIds": {
+            "description": "Optional bucket restrictions. Omit for account-wide access.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bucketId": {
+            "description": "Deprecated single-bucket restriction. Use bucketIds for new integrations; do not provide both.",
+            "type": "string"
+          },
+          "validDurationInSeconds": {
+            "description": "Optional key lifetime in seconds. Omit for no expiration.",
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "namePrefix": {
+            "description": "Optional file-name prefix restriction for file capabilities.",
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical durable-key creation request."
+          },
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "description": "Confirm this durable credential creation. Required when the server destructive policy is 'confirm' (the default).",
             "type": "boolean"
           }
         },
+        "required": ["keyName", "capabilities", "idempotencyKey"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {
@@ -535,15 +632,51 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "description": "Compatibility stub for a durable-secret-producing B2 operation that is unavailable because the secret sink is off.",
+      "description": "Reserve a B2 trial account through the Partner API. Available only in explicit inline mode because Reserve Trial has no provider-side recovery path if a file sink write fails after account creation.",
       "inputSchema": {
         "type": "object",
         "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "description": "Email address for the new B2 Reserve trial account."
+          },
+          "region": {
+            "description": "Optional data region for the new account.",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["us-east", "us-west", "ca-east", "eu-central"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "term": {
+            "type": "integer",
+            "minimum": 7,
+            "maximum": 30,
+            "description": "Trial duration in days (7-30)."
+          },
+          "storage": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Trial storage amount in TB (1-50)."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Caller-generated idempotency key. Reuse the same value only when retrying the identical reserve-trial account creation request."
+          },
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. Required if this tool is re-enabled with a real handler under the default destructive policy.",
+            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
             "type": "boolean"
           }
         },
+        "required": ["email", "term", "storage", "idempotencyKey"],
         "$schema": "https://json-schema.org/draft/2020-12/schema"
       },
       "annotations": {

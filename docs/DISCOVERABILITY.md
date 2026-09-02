@@ -46,12 +46,16 @@ skips the authorize call and registers all 40 tools without a real account:
 B2_APPLICATION_KEY_ID=placeholder
 B2_APPLICATION_KEY=placeholder
 B2_REGISTER_ALL_TOOLS=true
-B2_SECRET_SINK=off
+B2_SECRET_SINK=inline
 ```
 
 Tool *calls* fail without real credentials, but `tools/list` succeeds — which is
-all a scan needs. Do not force `B2_REGISTER_ALL_TOOLS` on real user deployments;
-it bypasses capability-aware registration.
+all a scan needs. Use `B2_SECRET_SINK=inline`, not `off`: in `off` mode the
+durable-secret tools (`b2_create_key`, `b2_create_group_member`,
+`b2_reserve_trial_create_account`) register as `confirm`-only compatibility
+stubs, so a scan would advertise a truncated contract instead of their real
+inputs. Do not force `B2_REGISTER_ALL_TOOLS` on real user deployments; it
+bypasses capability-aware registration.
 
 ## Glama
 
@@ -100,7 +104,7 @@ npx -y @lobehub/market-cli github connect
 
 # Regenerate the manifest (no auth; placeholder creds so the server starts)
 npx -y @lobehub/market-cli plugin init \
-  --stdio "env B2_APPLICATION_KEY_ID=placeholder B2_APPLICATION_KEY=placeholder B2_REGISTER_ALL_TOOLS=true B2_SECRET_SINK=off node dist/index.js" \
+  --stdio "env B2_APPLICATION_KEY_ID=placeholder B2_APPLICATION_KEY=placeholder B2_REGISTER_ALL_TOOLS=true B2_SECRET_SINK=inline node dist/index.js" \
   --dir "$(pwd)" --force
 # then restore the official name/description/identifier in lhm.plugin.json
 
@@ -144,9 +148,11 @@ tabs. The **URL** tab is for a remote server you host at a public HTTPS endpoint
 user's own B2 keys. Use the **Local (MCPB Bundle)** tab instead.
 
 1. Build the bundle: `pnpm run build:mcpb` → `dist-mcpb/b2-mcp.mcpb` (packs
-   `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp` and prompts
-   for the B2 credentials). The manifest version is kept in lockstep with
-   `package.json` by `scripts/update-server-json-version.mjs`.
+   `mcpb/manifest.json`, which runs `npx -y @backblaze-labs/b2-mcp@<version>`
+   and prompts for the B2 credentials). Both the manifest version and the pinned
+   npx launcher version are kept in lockstep with `package.json` by
+   `scripts/update-server-json-version.mjs`, so the advertised bundle is
+   reproducible.
 2. On [smithery.ai/new](https://smithery.ai/new), pick the **Local (MCPB
    Bundle)** tab, namespace `backblaze-labs`, server id `b2-mcp`, and upload the
    `.mcpb`. (The legacy `smithery.yaml` is retained for older tooling.)
