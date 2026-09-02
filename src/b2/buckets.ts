@@ -228,7 +228,7 @@ const updateLifecycleRulesSchema = z
   .array(lifecycleRuleSchema)
   .optional()
   .describe(
-    "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and require confirmation under the default policy.",
+    "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and are governed by the configured destructive policy.",
   );
 
 function defaultServerSideEncryptionSchema(description: string, modeDescription: string) {
@@ -786,7 +786,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
           ),
       },
     },
@@ -814,7 +814,7 @@ export function registerBucketTools(
           .enum(["allPublic", "allPrivate"])
           .optional()
           .describe(
-            "Optional visibility change. allPublic makes objects world-readable by URL and requires confirmation under the default policy; omit to leave unchanged.",
+            "Optional visibility change. allPublic makes objects world-readable by URL and is governed by the configured destructive policy; omit to leave unchanged.",
           ),
         bucketInfo: updateBucketInfoSchema.optional(),
         corsRules: updateCorsRulesSchema.optional(),
@@ -898,7 +898,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+            "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required only when the effective server destructive policy is 'confirm'; non-destructive updates do not need it.",
           ),
       },
     },
@@ -1017,7 +1017,7 @@ export function registerBucketTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm replacing persistent outbound webhook notification rules. Required when the server destructive policy is 'confirm' (the default).",
+            "Confirm replacing persistent outbound webhook notification rules. Required only when the effective server destructive policy is 'confirm'.",
           ),
       },
     },

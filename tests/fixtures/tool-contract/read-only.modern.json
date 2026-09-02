@@ -86,7 +86,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.",
             "type": "boolean"
           }
         },
@@ -106,7 +106,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.",
             "type": "boolean"
           }
         },
@@ -288,7 +288,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.",
             "type": "boolean"
           }
         },
@@ -722,5 +722,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "22d8a0ab10f66cb423dabe64cd1936b186b666273e845f486c62af9f13918e76"
+  "hash": "e8586adba4063ad3c7d4044e112337093bc6834209e65af1170a41e7df6538ef"
 }

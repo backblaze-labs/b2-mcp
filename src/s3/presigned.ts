@@ -19,7 +19,7 @@ import type { B2S3PeerClient } from "./aws-sdk-adapter.js";
  * omitted for this reason.
  */
 const PUT_OBJECT_CONFIRM_DESC =
-  "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).";
+  "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required only for PutObject when the effective server destructive policy is 'confirm'.";
 
 function operationDescription(allowGetObjectUrl: boolean, allowPutObjectUrl: boolean): string {
   if (allowGetObjectUrl && allowPutObjectUrl) {

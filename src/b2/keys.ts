@@ -202,7 +202,7 @@ export function registerKeyTools(
             .boolean()
             .optional()
             .describe(
-              "Confirm this durable credential creation. Required when the server destructive policy is 'confirm' (the default).",
+              "Confirm this durable credential creation. Required only when the effective server destructive policy is 'confirm'.",
             ),
         },
       },
@@ -312,7 +312,7 @@ export function registerKeyTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
           ),
       },
     },

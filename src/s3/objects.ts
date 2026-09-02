@@ -28,7 +28,7 @@ import { assertSafeObjectContentType, b2S3DeleteErrorEntry } from "./aws-sdk-ada
 import { timeoutError } from "../utils/named-error.js";
 
 const CONFIRM_DESC =
-  "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).";
+  "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.";
 
 interface DeleteObjectEntry {
   key: string;

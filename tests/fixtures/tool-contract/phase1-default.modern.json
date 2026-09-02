@@ -300,7 +300,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.",
             "type": "boolean"
           }
         },
@@ -320,7 +320,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.",
             "type": "boolean"
           }
         },
@@ -344,7 +344,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           }
         },
@@ -369,7 +369,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           }
         },
@@ -552,7 +552,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.",
+            "description": "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.",
             "type": "boolean"
           }
         },
@@ -576,7 +576,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm replacing persistent outbound webhook notification rules. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm replacing persistent outbound webhook notification rules. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "eventNotificationRules": {
@@ -717,12 +717,12 @@
             "type": "object"
           },
           "bucketType": {
-            "description": "Optional visibility change. allPublic makes objects world-readable by URL and requires confirmation under the default policy; omit to leave unchanged.",
+            "description": "Optional visibility change. allPublic makes objects world-readable by URL and is governed by the configured destructive policy; omit to leave unchanged.",
             "enum": ["allPublic", "allPrivate"],
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required when the server destructive policy is 'confirm' (the default); non-destructive updates do not need it.",
+            "description": "Confirm a destructive change (making the bucket public, weakening Object Lock/lifecycle, or changing replication). Required only when the effective server destructive policy is 'confirm'; non-destructive updates do not need it.",
             "type": "boolean"
           },
           "corsRules": {
@@ -857,7 +857,7 @@
             "type": "number"
           },
           "lifecycleRules": {
-            "description": "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and require confirmation under the default policy.",
+            "description": "When provided, replaces the bucket's B2 lifecycle rule set; omit to leave unchanged. Rules that delete hidden versions are destructive in effect and are governed by the configured destructive policy.",
             "items": {
               "properties": {
                 "daysFromHidingToDeleting": {
@@ -972,7 +972,7 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
           "confirm": {
-            "description": "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this irreversible/protection-removing operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "fileId": {
@@ -1010,7 +1010,7 @@
             "type": "boolean"
           },
           "confirm": {
-            "description": "Confirm this irreversible/protection-removing operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this irreversible/protection-removing operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "fileId": {
@@ -1114,7 +1114,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "key": {
@@ -1306,7 +1306,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "key": {
@@ -1343,7 +1343,7 @@
             "type": "boolean"
           },
           "confirm": {
-            "description": "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "objects": {
@@ -1450,7 +1450,7 @@
             "type": "string"
           },
           "confirm": {
-            "description": "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required when operation is PutObject and the server destructive policy is 'confirm' (the default).",
+            "description": "Confirm minting a PutObject presigned URL bearer capability that can create or overwrite object data. Required only for PutObject when the effective server destructive policy is 'confirm'.",
             "type": "boolean"
           },
           "contentType": {
@@ -1979,5 +1979,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "16274d824e7e2f7a0b6e9861d811dbddbe906b76cd1d48bd76643199c7478e9f"
+  "hash": "d7e0099a614fd4952775c7addbacebed1d83f67d590c4ec20ae0b4248d66d2cf"
 }

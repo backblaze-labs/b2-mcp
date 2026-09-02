@@ -89,7 +89,7 @@ import { isDestructiveTool } from "./utils/destructive-gate.js";
 import { registerB2WorkflowPrompts } from "./prompts.js";
 
 const COMPATIBILITY_STUB_CONFIRM_DESC =
-  "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler would still require destructive confirmation under the default policy.";
+  "Confirm this destructive/irreversible compatibility stub. It performs no B2 call while unavailable; a real handler is still governed by the configured destructive policy.";
 /** Opening instruction shown to MCP clients during server discovery. */
 export const SERVER_INSTRUCTION_OPENING = "Backblaze B2 operational flow.";
 /** Credential-safety instruction embedded in the MCP server instructions. */

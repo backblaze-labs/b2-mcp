@@ -198,7 +198,7 @@ export function registerS3MultipartTools(
           .boolean()
           .optional()
           .describe(
-            "Confirm this destructive/irreversible operation. Required when the server destructive policy is 'confirm' (the default).",
+            "Confirm this destructive/irreversible operation. Required only when the effective server destructive policy is 'confirm'.",
           ),
       },
     },
