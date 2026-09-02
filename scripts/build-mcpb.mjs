@@ -4,8 +4,9 @@
  *
  * The bundle is a versioned release artifact — its `version` must match
  * `package.json` (kept in lockstep by `scripts/update-server-json-version.mjs`).
- * The output `.mcpb` is not committed; it is built on release and uploaded to
- * Smithery / attached to the GitHub Release. See docs/DISCOVERABILITY.md.
+ * The output `.mcpb` is not committed and is not produced by `publish.yml`; a
+ * maintainer runs this on release and uploads the bundle by hand through
+ * Smithery's Local (MCPB Bundle) publish tab. See docs/DISCOVERABILITY.md.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
