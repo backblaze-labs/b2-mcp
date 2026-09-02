@@ -153,7 +153,7 @@ function registerDurableSecretCompatibilityStubs(
       name,
       {
         description:
-          "Unavailable compatibility stub for a durable-secret-producing B2 operation such as b2_create_key. It performs no B2 call and returns tool_unavailable until B2_SECRET_SINK is configured for file output or explicit inline use.",
+          "Unavailable compatibility stub for a durable-secret-producing B2 operation such as b2_create_key. It performs no B2 call and returns tool_unavailable until an operation-supported secret sink mode is configured.",
         inputSchema,
         availability: "unavailable",
         force: true,

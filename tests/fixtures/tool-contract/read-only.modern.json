@@ -81,7 +81,7 @@
     },
     {
       "name": "b2_create_group_member",
-      "descriptionSha256": "6d5c4dfd77683ad51b9c586f5b5760e1018ca6e3d01e9cb7d51014f55faf6e65",
+      "descriptionSha256": "bea54a281ce97dab8b8eecdb4827993ff29bf1cc1179eb52f68bdfd0ec3b3219",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -101,7 +101,7 @@
     },
     {
       "name": "b2_create_key",
-      "descriptionSha256": "6d5c4dfd77683ad51b9c586f5b5760e1018ca6e3d01e9cb7d51014f55faf6e65",
+      "descriptionSha256": "bea54a281ce97dab8b8eecdb4827993ff29bf1cc1179eb52f68bdfd0ec3b3219",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -283,7 +283,7 @@
     },
     {
       "name": "b2_reserve_trial_create_account",
-      "descriptionSha256": "6d5c4dfd77683ad51b9c586f5b5760e1018ca6e3d01e9cb7d51014f55faf6e65",
+      "descriptionSha256": "bea54a281ce97dab8b8eecdb4827993ff29bf1cc1179eb52f68bdfd0ec3b3219",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "properties": {
@@ -722,5 +722,5 @@
       "resultType": "complete"
     }
   },
-  "hash": "e8586adba4063ad3c7d4044e112337093bc6834209e65af1170a41e7df6538ef"
+  "hash": "655b6e182b4c18b1752116292ca108df66ea08f6e23395bcc37827aeecf85ad7"
 }
