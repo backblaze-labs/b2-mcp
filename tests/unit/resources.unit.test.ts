@@ -529,6 +529,60 @@ describe("MCP control-plane resources", () => {
     }
   });
 
+  it("does not turn caller-aborted notification reads into successful bucket reads", async () => {
+    const bucket = bucketInfoFixture("bucket-id-4", "bucket-with-aborted-notification-read");
+    const fake = new DeterministicB2NativeFake({
+      capabilities: ["listBuckets", "readBucketNotifications"],
+    })
+      .respond("b2_list_buckets", new StaticHttpResponse(200, { buckets: [bucket] }))
+      .respond(
+        "b2_get_bucket_notification_rules",
+        b2ErrorResponse(499, "request_aborted", `caller ${testConfig.applicationKey}`, {
+          "x-bz-request-id": "notify-abort-1",
+        }),
+      );
+    const { client, close } = await connectResourceClient({
+      capabilities: ["listBuckets", "readBucketNotifications"],
+      fake,
+    });
+
+    try {
+      const uri = "b2://bucket/bucket-with-aborted-notification-read";
+      await expect(client.readResource({ uri }, { cacheMode: "refresh" })).rejects.toThrow(
+        /caller \[redacted\]/,
+      );
+      expect(
+        warnSpy.mock.calls.some(([, message]) => message === "resource.dependency_error"),
+      ).toBe(false);
+      expect(infoSpy).not.toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource: "b2_bucket",
+          uri,
+          operation: "resources/read",
+          error: false,
+        }),
+        "resource.call",
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          resource: "b2_bucket",
+          uri,
+          operation: "resources/read",
+          credential: expect.any(String),
+          durationMs: expect.any(Number),
+          error: true,
+          code: "request_aborted",
+          status: 499,
+          requestId: "notify-abort-1",
+          err: expect.stringContaining("[redacted]"),
+        }),
+        "resource.error",
+      );
+    } finally {
+      await close();
+    }
+  });
+
   it("logs provider metadata when a bucket resource read fails", async () => {
     const fake = new DeterministicB2NativeFake({ capabilities: ["listBuckets"] }).respond(
       "b2_list_buckets",

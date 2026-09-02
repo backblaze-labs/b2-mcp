@@ -193,6 +193,20 @@ function providerErrorFields(
   };
 }
 
+function sanitizeProtocolErrorForRethrow(
+  err: ProtocolError,
+  sanitizerOptions: SanitizerOptions,
+): ProtocolError {
+  const safeErr = sanitizeError(err, sanitizerOptions);
+  const safeData =
+    err.data === undefined ? undefined : sanitizeForMcpOutput(err.data, sanitizerOptions);
+  return ProtocolError.fromError(err.code, safeErr.message, safeData);
+}
+
+function isRequestAborted(err: unknown): boolean {
+  return parseB2Error(err).code === "request_aborted";
+}
+
 async function withResourceGuards<T>(
   config: B2Config,
   ctx: ServerContext,
@@ -234,7 +248,7 @@ async function withResourceGuards<T>(
       },
       "resource.error",
     );
-    if (err instanceof ProtocolError) throw err;
+    if (err instanceof ProtocolError) throw sanitizeProtocolErrorForRethrow(err, sanitizerOptions);
     throw safeErr;
   }
 }
@@ -367,8 +381,9 @@ async function bucketEventNotifications(
     );
     return { isClientAuthorizedToRead: true, value };
   } catch (err) {
-    const safeErr = sanitizeError(err, sanitizerOptions);
     const error = providerErrorFields(err, sanitizerOptions);
+    if (isRequestAborted(err)) throw err;
+    const safeErr = sanitizeError(err, sanitizerOptions);
     logger.warn(
       {
         resource: "b2_bucket",
