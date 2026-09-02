@@ -358,6 +358,16 @@ describe("HTTP transport handler", () => {
     expect(prompts.status).toBe(200);
     expect(JSON.parse(prompts.body).result.prompts.length).toBeGreaterThan(0);
 
+    const prompt = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("prompts/get", "b2_audit_public_exposure"),
+      body: modernBody("prompts/get", {
+        name: "b2_audit_public_exposure",
+        arguments: { limit: "25" },
+      }),
+    });
+    expect(prompt.status).toBe(200);
+    expect(JSON.stringify(JSON.parse(prompt.body).result.messages)).toContain("b2_list_buckets");
+
     const resources = await request(port, "POST", "/mcp", {
       headers: modernHeaders("resources/list"),
       body: modernBody("resources/list"),
@@ -366,6 +376,20 @@ describe("HTTP transport handler", () => {
     expect(
       JSON.parse(resources.body).result.resources.map((resource: { uri: string }) => resource.uri),
     ).toContain("b2://server-config");
+
+    const serverConfig = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("resources/read", "b2://server-config"),
+      body: modernBody("resources/read", { uri: "b2://server-config" }),
+    });
+    expect(serverConfig.status).toBe(200);
+    expect(JSON.parse(serverConfig.body).result.contents[0].uri).toBe("b2://server-config");
+
+    const templates = await request(port, "POST", "/mcp", {
+      headers: modernHeaders("resources/templates/list"),
+      body: modernBody("resources/templates/list"),
+    });
+    expect(templates.status).toBe(200);
+    expect(templates.body).not.toContain("B2 application credentials");
 
     const ping = await request(port, "POST", "/mcp", {
       headers: modernHeaders("ping"),
