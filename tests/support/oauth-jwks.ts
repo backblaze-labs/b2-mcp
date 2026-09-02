@@ -1,12 +1,13 @@
 /* cspell:disable */
 import {
   createPrivateKey,
-  createSign,
   generateKeyPairSync,
-  sign as nodeSign,
   type JsonWebKey,
+  sign as nodeSign,
 } from "node:crypto";
 import { introspectionClaims } from "./oauth-introspection";
+
+const textEncoder = new TextEncoder();
 
 const rsaPrivateJwk = {
   kty: "RSA",
@@ -78,7 +79,7 @@ export function signedJwt(
   };
   const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
   const privateKey = createPrivateKey({ key: rsaPrivateJwk, format: "jwk" });
-  const signature = createSign("RSA-SHA256").update(signingInput).end().sign(privateKey);
+  const signature = nodeSign("RSA-SHA256", textEncoder.encode(signingInput), privateKey);
   return `${signingInput}.${base64Url(signature)}`;
 }
 
@@ -88,10 +89,10 @@ export function signedEs256Jwt(
 ): string {
   const header = { alg: "ES256", typ: "at+jwt", kid: ecPublicJwk.kid, ...headerOverrides };
   const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
-  const signature = createSign("SHA256")
-    .update(signingInput)
-    .end()
-    .sign({ key: ecKeyPair.privateKey, dsaEncoding: "ieee-p1363" });
+  const signature = nodeSign("SHA256", textEncoder.encode(signingInput), {
+    key: ecKeyPair.privateKey,
+    dsaEncoding: "ieee-p1363",
+  });
   return `${signingInput}.${base64Url(signature)}`;
 }
 
@@ -101,11 +102,7 @@ export function signedEdDsaJwt(
 ): string {
   const header = { alg: "EdDSA", typ: "at+jwt", kid: ed25519PublicJwk.kid, ...headerOverrides };
   const signingInput = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claims))}`;
-  const signature = nodeSign(
-    null,
-    new TextEncoder().encode(signingInput),
-    ed25519KeyPair.privateKey,
-  );
+  const signature = nodeSign(null, textEncoder.encode(signingInput), ed25519KeyPair.privateKey);
   return `${signingInput}.${base64Url(signature)}`;
 }
 
