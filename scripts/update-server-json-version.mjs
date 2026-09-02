@@ -37,8 +37,15 @@ function updateMcpbManifestVersion(root, version) {
   );
   // Rewrite the top-level `version` in place; the leading `manifest_version`
   // key is untouched because the regex matches the quoted `"version"` key only.
-  const updated = source.replace(/("version"\s*:\s*)"[^"]*"/, `$1${JSON.stringify(version)}`);
-  assert(updated !== source || mcpb.version === version, "failed to stamp mcpb/manifest.json version");
+  let updated = source.replace(/("version"\s*:\s*)"[^"]*"/, `$1${JSON.stringify(version)}`);
+  assert(
+    updated !== source || mcpb.version === version,
+    "failed to stamp mcpb/manifest.json version",
+  );
+  // Pin the npx launcher to the exact release so the advertised bundle is
+  // reproducible: `@backblaze-labs/b2-mcp@<version>` stays in lockstep with the
+  // manifest version. The identifier may be unpinned or already pinned.
+  updated = updated.replace(/(@backblaze-labs\/b2-mcp)(@[^"\\]*)?/g, `$1@${version}`);
   writeFileSync(mcpbPath, updated);
   return version;
 }

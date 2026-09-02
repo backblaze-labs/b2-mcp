@@ -84,7 +84,7 @@
     "release:notes": "node scripts/extract-release-notes.mjs",
     "release:stamp": "node scripts/write-release-version.mjs",
     "release:sbom": "node scripts/production-security-gate.mjs --sbom publish-package/b2-mcp-production.cdx.json",
-    "version": "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json lhm.plugin.json",
+    "version": "node scripts/cut-changelog.mjs && node scripts/update-server-json-version.mjs && git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
     "prepublishOnly": "pnpm run build && node scripts/verify-release-input.mjs --tag \"v$(node -p 'require(\"./package.json\").version')\" && pnpm run release:stamp",
     "postpack": "node -e \"require('node:fs').rmSync('dist/release-version.json',{force:true})\"",
     "probe:500": "pnpm run build && node scripts/probe-b2-500s.mjs",

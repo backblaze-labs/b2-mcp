@@ -198,7 +198,16 @@ function withFixture(run: (fixtureRoot: string) => void): void {
     writeFileSync(
       join(fixtureRoot, "mcpb", "manifest.json"),
       `${JSON.stringify(
-        { manifest_version: "0.3", name: "b2-mcp", version: "0.1.0" },
+        {
+          manifest_version: "0.3",
+          name: "b2-mcp",
+          version: "0.1.0",
+          server: {
+            type: "node",
+            entry_point: "npx",
+            mcp_config: { command: "npx", args: ["-y", "@backblaze-labs/b2-mcp"] },
+          },
+        },
         null,
         2,
       )}\n`,
@@ -310,6 +319,8 @@ describe("release scripts", () => {
       expect(lhm.version).toBe("0.2.0");
       expect(mcpb.version).toBe("0.2.0");
       expect(mcpb.manifest_version).toBe("0.3");
+      // The npx launcher is pinned to the exact release for a reproducible bundle.
+      expect(mcpb.server.mcp_config.args).toContain("@backblaze-labs/b2-mcp@0.2.0");
     });
   });
 
@@ -345,6 +356,9 @@ describe("release scripts", () => {
     const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
     const mcpb = JSON.parse(readFileSync(join(root, "mcpb", "manifest.json"), "utf8"));
     expect(mcpb.version).toBe(packageJson.version);
+    // The npx launcher must stay pinned to the exact release so the advertised
+    // MCPB bundle runs reproducible code, not whatever npm publishes later.
+    expect(mcpb.server.mcp_config.args).toContain(`@backblaze-labs/b2-mcp@${packageJson.version}`);
   });
 
   it("keeps smithery.yaml in sync with the server.json env contract", () => {
@@ -981,7 +995,7 @@ describe("release scripts", () => {
               version: [
                 `node ${join(root, "scripts/cut-changelog.mjs")}`,
                 `node ${join(root, "scripts/update-server-json-version.mjs")}`,
-                "git add CHANGELOG.md server.json lhm.plugin.json",
+                "git add CHANGELOG.md server.json lhm.plugin.json mcpb/manifest.json",
               ].join(" && "),
             },
           },
@@ -1005,6 +1019,9 @@ describe("release scripts", () => {
       const bumpedPackage = JSON.parse(readFileSync(packagePath, "utf8"));
       const bumpedServerJson = JSON.parse(readFileSync(join(fixtureRoot, "server.json"), "utf8"));
       const bumpedLhm = JSON.parse(readFileSync(join(fixtureRoot, "lhm.plugin.json"), "utf8"));
+      const bumpedMcpb = JSON.parse(
+        readFileSync(join(fixtureRoot, "mcpb", "manifest.json"), "utf8"),
+      );
       const stagedFiles = runGit(fixtureRoot, ["diff", "--cached", "--name-only"]);
 
       expect(result.status).toBe(0);
@@ -1013,10 +1030,12 @@ describe("release scripts", () => {
       expect(bumpedServerJson.version).toBe("0.1.1");
       expect(bumpedServerJson.packages[0].version).toBe("0.1.1");
       expect(bumpedLhm.version).toBe("0.1.1");
+      expect(bumpedMcpb.version).toBe("0.1.1");
       expect(changelog).toMatch(/^## \[Unreleased\]\n\n## \[0\.1\.1\] - \d{4}-\d{2}-\d{2}/m);
       expect(stagedFiles.split(/\r?\n/)).toContain("CHANGELOG.md");
       expect(stagedFiles.split(/\r?\n/)).toContain("server.json");
       expect(stagedFiles.split(/\r?\n/)).toContain("lhm.plugin.json");
+      expect(stagedFiles.split(/\r?\n/)).toContain("mcpb/manifest.json");
     });
   });
 

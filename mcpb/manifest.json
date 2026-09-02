@@ -16,7 +16,7 @@
     "entry_point": "npx",
     "mcp_config": {
       "command": "npx",
-      "args": ["-y", "@backblaze-labs/b2-mcp"],
+      "args": ["-y", "@backblaze-labs/b2-mcp@0.2.0"],
       "env": {
         "B2_APPLICATION_KEY_ID": "${user_config.b2_application_key_id}",
         "B2_APPLICATION_KEY": "${user_config.b2_application_key}",
@@ -45,21 +45,24 @@
       "type": "string",
       "title": "Region (optional)",
       "description": "Optional fallback S3-compatible region used before authorization (for example us-east-005).",
-      "required": false
+      "required": false,
+      "default": ""
     },
     "b2_master_key_id": {
       "type": "string",
       "title": "Master Key ID (optional)",
       "description": "Optional master key ID, required only for the Partner/Groups API tools.",
       "sensitive": true,
-      "required": false
+      "required": false,
+      "default": ""
     },
     "b2_master_key": {
       "type": "string",
       "title": "Master Key (optional)",
       "description": "Optional master key secret, required only for the Partner/Groups API tools.",
       "sensitive": true,
-      "required": false
+      "required": false,
+      "default": ""
     }
   }
 }

@@ -256,7 +256,10 @@ function configFromMaterial(material: CredentialMaterial, options: ConfigOptions
     appKey: app.key,
     masterKeyId: master.id,
     masterKey: master.key,
-    region: process.env.B2_REGION ?? DEFAULT_REGION,
+    // Treat a blank/whitespace B2_REGION as unset so a launcher that forwards an
+    // empty value (for example an MCPB user_config default) still gets the
+    // runtime default region instead of consuming an empty string verbatim.
+    region: process.env.B2_REGION?.trim() || DEFAULT_REGION,
     allowLocalFiles: options.allowLocalFiles,
     fileRoot: options.fileRoot,
     destructivePolicy: resolveDestructivePolicy(options.transport),
