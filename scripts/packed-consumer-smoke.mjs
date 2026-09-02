@@ -763,12 +763,21 @@ try {
       },
       timeout: 10_000,
     });
-    if (withoutCreds.status !== 1) {
-      throw new Error(`expected missing-credential startup to exit 1, got ${withoutCreds.status}`);
+    // Discovery mode: missing credentials no longer exit(1). The stdio server
+    // starts, logs the discovery warning, registers the full surface so
+    // registries can enumerate tools, and exits cleanly when stdin closes (EOF).
+    if (withoutCreds.status !== 0) {
+      throw new Error(
+        `expected credential-less discovery startup to exit 0, got ${withoutCreds.status}`,
+      );
     }
     assert(
-      withoutCreds.stderr.includes("B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"),
-      "missing credential error did not name required stdio variables",
+      !withoutCreds.stderr.includes("B2_APPLICATION_KEY_ID and B2_APPLICATION_KEY are required"),
+      "discovery-mode startup should not emit the missing-credential fatal",
+    );
+    assert(
+      withoutCreds.stderr.includes("server.stdio_discovery_mode"),
+      "discovery-mode startup should log the stdio discovery warning",
     );
 
     console.log(
