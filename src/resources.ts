@@ -222,7 +222,7 @@ function isRequestAborted(err: unknown): boolean {
  * ResourceNotFoundError} (`-32602` with `data.uri`) — as server failures and
  * skew resource error-rate alerting. Classify them here instead.
  */
-function protocolErrorAuditFields(err: ProtocolError): { code: string; status: number } {
+export function protocolErrorAuditFields(err: ProtocolError): { code: string; status: number } {
   // A resources/read miss is a routine not-found, not a bad request; classify
   // it distinctly even though its wire code is Invalid Params (`-32602`).
   if (err instanceof ResourceNotFoundError) return { code: "resource_not_found", status: 404 };

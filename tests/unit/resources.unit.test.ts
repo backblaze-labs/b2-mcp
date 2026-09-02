@@ -1,5 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import {
+  ProtocolError,
   ProtocolErrorCode,
   ResourceNotFoundError,
   type ReadResourceResult,
@@ -10,6 +11,7 @@ import {
   CAPABILITIES_RESOURCE_URI,
   type BucketResourcePayload,
   type CapabilitiesResourcePayload,
+  protocolErrorAuditFields,
   SERVER_CONFIG_RESOURCE_URI,
   type ServerConfigResourcePayload,
 } from "../../src/resources";
@@ -843,5 +845,35 @@ describe("MCP control-plane resources", () => {
     } finally {
       await close();
     }
+  });
+});
+
+describe("protocolErrorAuditFields", () => {
+  it("classifies a resources/read miss as resource_not_found (404), not internal_error/500", () => {
+    expect(protocolErrorAuditFields(new ResourceNotFoundError("b2://bucket/missing"))).toEqual({
+      code: "resource_not_found",
+      status: 404,
+    });
+  });
+
+  it.each([
+    [ProtocolErrorCode.ParseError, "parse_error", 400],
+    [ProtocolErrorCode.InvalidRequest, "invalid_request", 400],
+    [ProtocolErrorCode.MethodNotFound, "method_not_found", 404],
+    [ProtocolErrorCode.InvalidParams, "invalid_params", 400],
+    [ProtocolErrorCode.ResourceNotFound, "resource_not_found", 404],
+    [ProtocolErrorCode.InternalError, "internal_error", 500],
+  ] as const)("maps protocol code %d to %s/%d", (code, expectedCode, expectedStatus) => {
+    expect(protocolErrorAuditFields(new ProtocolError(code, "boom"))).toEqual({
+      code: expectedCode,
+      status: expectedStatus,
+    });
+  });
+
+  it("maps an unrecognized protocol code to a generic protocol_error (400)", () => {
+    expect(protocolErrorAuditFields(new ProtocolError(-31999, "unknown"))).toEqual({
+      code: "protocol_error",
+      status: 400,
+    });
   });
 });
